@@ -1,0 +1,25 @@
+name: ranked pinning
+
+# Yukon dispatches this file with no inputs. The job is the reusable
+# ranked shape; this wrapper exists so the pinning track has its own
+# workflow filename for runner.workflow.
+on:
+  workflow_dispatch:
+
+# Neither the wrapper nor the reusable job needs to modify contents.
+permissions:
+  contents: read
+
+# Keep at most one ranked pinning run active for a given ref.
+concurrency:
+  group: qsb-pinning-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/benchmark.yml
+    with:
+      bench: pinning
+      runner-label: starkware-pinning-rtx4090
