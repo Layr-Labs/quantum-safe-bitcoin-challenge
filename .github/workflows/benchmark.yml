@@ -1,0 +1,161 @@
+name: ranked benchmark
+
+# Called by the per-track wrappers. Ranked evaluation only — never push/PR.
+# The caller owns workflow_dispatch and concurrency.
+on:
+  workflow_call:
+    inputs:
+      bench:
+        description: pinning or subset
+        required: true
+        type: string
+      runner-label:
+        description: exact self-hosted runner label required for this track
+        required: true
+        type: string
+
+# Neither this job nor checkout needs to modify repository contents.
+permissions:
+  contents: read
+
+# Start every run step with a clean Bash process and strict error handling.
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, "${{ inputs.runner-label }}"]
+    # 1200 s window + up to 600 s GPU cool-down wait + a stale-vet run +
+    # compile + verification. The runner's admission ceiling is 3600 s.
+    timeout-minutes: 60
+    env:
+      # Prevent candidate or host Git configuration from changing Git behavior.
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
+      # QSB_BRIDGE_OUTDIR cannot live here: jobs.<id>.env cannot use the
+      # runner context. Prepare exports a path unique to this run attempt.
+
+    steps:
+      # Materialize exactly the commit selected by workflow_dispatch. Do not
+      # persist credentials or add the candidate workspace to safe.directory.
+      - name: Checkout dispatched commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ github.sha }}
+          clean: true
+          persist-credentials: false
+          set-safe-directory: false
+
+      # Fail closed unless the dispatched ref is the default branch or a
+      # branch Yukon is allowed to dispatch on.
+      - name: Guard ranked ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [[ "${GITHUB_REF_TYPE}" == branch ]]
+          [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ||
+             "${GITHUB_REF_NAME}" == submissions/* ||
+             "${GITHUB_REF_NAME}" == yukon/baseline/* ]] || {
+            echo "ranked benchmark ref is not allowed: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          }
+
+      # Verify the host, the root bridge, and the work-root paths before any
+      # candidate code runs. Record facts for the diagnostics artifact.
+      - name: Host + bridge preflight
+        run: |
+          bridge="/opt/starkware-challenge/bench-exec.sh"
+          work_root="/home/runner/actions-runner/_work"
+          [[ "$(uname -s)" == Linux ]]
+          [[ "$(uname -m)" == x86_64 ]]
+          [[ -f "${bridge}" && ! -L "${bridge}" && -x "${bridge}" ]]
+          [[ "$(stat -c '%u' "${bridge}")" == 0 ]]
+          bridge_mode="$(stat -c '%a' "${bridge}")"
+          [[ "${bridge_mode}" =~ ^[0-7]{3,4}$ ]]
+          (( (8#${bridge_mode} & 8#022) == 0 ))
+          sudo -n -l /opt/starkware-challenge/bench-exec.sh >/dev/null
+          [[ -d "${RUNNER_TEMP:?}" && ! -L "${RUNNER_TEMP}" ]]
+          case "${RUNNER_TEMP:?}" in
+            "${work_root}"/*) ;;
+            *) echo "runner temp is outside the bridge work root" >&2; exit 1 ;;
+          esac
+          case "${GITHUB_WORKSPACE:?}" in
+            "${work_root}"/*) ;;
+            *) echo "workspace is outside the bridge work root" >&2; exit 1 ;;
+          esac
+          command -v nvidia-smi
+          [[ -x /usr/local/cuda-12.8/bin/nvcc ]]
+          command -v bwrap
+          python3 --version
+          mkdir -p benchmark-results
+          {
+            cat /etc/os-release
+            uname -a
+            nproc
+            nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+            /usr/local/cuda-12.8/bin/nvcc --version
+            git rev-parse HEAD
+          } | tee benchmark-results/runner.txt
+
+      # Compile kernels and generate the public seed-0 problems. nvcc is not
+      # on the default PATH; without the prefix, setup.sh silently skips CUDA.
+      - name: Setup
+        env:
+          BENCH: ${{ inputs.bench }}
+        run: |
+          export PATH="/usr/local/cuda-12.8/bin:${PATH}"
+          ./setup.sh "${BENCH}"
+
+      # The bridge refuses a missing or non-empty OUTDIR. A run-unique path
+      # prevents a canceled worker-owned directory from blocking later jobs.
+      - name: Prepare bridge output dir
+        env:
+          QSB_BRIDGE_OUTDIR: ${{ runner.temp }}/qsb-bridge-out-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir "${QSB_BRIDGE_OUTDIR:?}"
+          printf 'QSB_BRIDGE_OUTDIR=%s\n' "${QSB_BRIDGE_OUTDIR}" >> "${GITHUB_ENV}"
+
+      # One bench per invocation. Clear any leftover score so a failed run
+      # cannot be read as a previous result.
+      - name: Benchmark
+        env:
+          BENCH: ${{ inputs.bench }}
+        run: |
+          case "${BENCH}" in
+            pinning|subset) ;;
+            *) echo "invalid bench: ${BENCH}" >&2; exit 2 ;;
+          esac
+          rm -f "score-${BENCH}.json"
+          ./benchmark.sh "${BENCH}"
+
+      # Yukon reads a failed run that still uploaded a score as a partial
+      # result. A failed run without a score must fail this step too.
+      - name: Upload score
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: benchmark-score-${{ inputs.bench }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: score-${{ inputs.bench }}.json
+          if-no-files-found: error
+
+      # run JSON, problem dir, runner.txt, and root-measured bridge metrics.
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: benchmark-diagnostics-${{ inputs.bench }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            benchmark-results/
+            ${{ runner.temp }}/qsb-bridge-out-${{ github.run_id }}-${{ github.run_attempt }}/metrics.json
+          if-no-files-found: warn
+
+      # Normal bridge completion hands worker/ back to the runner. Cancellation
+      # may leave it protected; cleanup is best-effort and never masks the run.
+      - name: Cleanup bridge output dir
+        if: always()
+        continue-on-error: true
+        run: |
+          if [[ -n "${QSB_BRIDGE_OUTDIR:-}" ]]; then
+            rm -rf -- "${QSB_BRIDGE_OUTDIR:?}"
+          fi

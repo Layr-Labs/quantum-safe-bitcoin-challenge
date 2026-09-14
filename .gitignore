@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+run*.json
+run_*.json
+# candidate build artifacts (binaries land beside their .cu, inside the track dir)
+candidates/pinning/pinning
+candidates/subset/subset
+candidates/*/.*.build
+candidates/*/*.o
+candidates/results/
+/tmp/secp256k1_gtable_le.bin
+score-*.json
+benchmark-results/

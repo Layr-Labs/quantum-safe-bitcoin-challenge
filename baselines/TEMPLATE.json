@@ -1,0 +1,8 @@
+{
+  "gpu": "<GPU model, e.g. RTX_4090 / A100 / H100>",
+  "status": "TEMPLATE — copy to baselines/<GPU>.json and fill from a real run",
+  "problem_seed": 0,
+  "pinning": {"leading_zero_bits": null, "throughput_Mps": null, "hits_per_s": null},
+  "subset":  {"leading_zero_bits": null, "throughput_Mps": null, "hits_per_s": null},
+  "notes": "Run both benches ~15-20 min on the GPU being characterized, tune leading_zero_bits so each yields ~100-1000 verified hits, and record the baseline throughput + N here."
+}

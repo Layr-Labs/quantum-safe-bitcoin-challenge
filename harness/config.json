@@ -1,0 +1,18 @@
+{
+  "bench": "pinning",
+  "leading_zero_bits": 24,
+  "target_hits": 200,
+  "max_relative_variance": 0.1,
+  "max_seconds": 1200,
+  "mode": "fixed_time",
+  "gpu": "RTX_4090",
+  "grinder": "bridge:/opt/starkware-challenge/bench-exec.sh",
+  "_notes": {
+    "leading_zero_bits": "difficulty knob N: P(hit) per candidate is approximately 2^-N. Tune with target_hits.",
+    "max_relative_variance": "sufficiency bound on the verified-hit sample: the run is REJECTED unless sqrt((1-p)/K) <= this, with p = 2^-leading_zero_bits and K = verified hits (0.1 ⇔ K >= ~100). Also bounds the score's statistical noise (~1/√K), because the ranked candidate count is estimated from those hits. Set null to disable.",
+    "target_hits": "how many verified hits define a run (fixed_hits mode) / expected in the window (fixed_time). ~100-1000 recommended for the anti-cheat sample.",
+    "mode": "stopping condition only — BOTH modes score candidate throughput estimated from verified hits (verified_hits × 2^N / 2 / elapsed). fixed_time runs for max_seconds: the ranked mode, because a fixed window yields a large K and ~1/√K noise. fixed_hits runs until target_hits are found: for calibration and testing, where the runtime is itself Poisson and the estimate is noisier.",
+    "grinder": "The ranked grinder. 'bridge:<absolute path to bench-exec>' is the ranked form on the LeaderGPU runner (sudo -n <bench-exec> qsb-bench-v1 …). 'cmd:<shell command>' runs that command (run_benchmark appends --bench/--zeros/--mode/--out/--seconds/--hits); '{bench}' in it is replaced by the bench name, which is how one entry names each track's kernel. 'cpu' is the slow Python reference grinder for correctness/testing only, never ranked.",
+    "gpu": "declared hardware label for this run, e.g. RTX_4090 / A100 / H100. Recorded in the scorecard; not auto-detected or validated."
+  }
+}

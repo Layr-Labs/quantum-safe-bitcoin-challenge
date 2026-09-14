@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "name": "qsb-grind-benchmark",
+  "tracks": [
+    {
+      "name": "pinning",
+      "description": "Optimize the QSB pinning grinder: ECDSA public-key recovery + SHA-256 over candidates that vary a 75-byte tail of a ~10 KB preimage. Maximize verified candidate throughput on a single GPU.",
+      "category": "cuda",
+      "direction": "+",
+      "editablePaths": [
+        "candidates/pinning"
+      ],
+      "setupCommand": ["bash", "-lc", "./setup.sh pinning"],
+      "benchmarkCommand": ["bash", "-lc", "./benchmark.sh pinning"],
+      "scorePath": "score-pinning.json",
+      "minScoreImprovementBips": 100,
+      "maxSubmissionBytes": 8388608,
+      "runner": {
+        "provider": "github-actions",
+        "workflow": "benchmark-pinning.yml"
+      }
+    },
+    {
+      "name": "subset",
+      "description": "Optimize the QSB subset-selection grinder: ECDSA public-key recovery + SHA-256 over candidates that rebuild a ~1.7 KB section of a ~9.9 KB preimage (9 of 150 pushes omitted). Maximize verified candidate throughput on a single GPU.",
+      "category": "cuda",
+      "direction": "+",
+      "editablePaths": [
+        "candidates/subset"
+      ],
+      "setupCommand": ["bash", "-lc", "./setup.sh subset"],
+      "benchmarkCommand": ["bash", "-lc", "./benchmark.sh subset"],
+      "scorePath": "score-subset.json",
+      "minScoreImprovementBips": 100,
+      "maxSubmissionBytes": 8388608,
+      "runner": {
+        "provider": "github-actions",
+        "workflow": "benchmark-subset.yml"
+      }
+    }
+  ]
+}
