@@ -49,6 +49,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GPUHash.h"
 
 /* GTable */
+__constant__ uint64_t BINOM_C[151][10];
 __constant__ int CHUNK_FIRST_ELEMENT[16] = {
     65536*0,65536*1,65536*2,65536*3,65536*4,65536*5,65536*6,65536*7,
     65536*8,65536*9,65536*10,65536*11,65536*12,65536*13,65536*14,65536*15,
@@ -339,8 +340,32 @@ __device__ void gpu_scalar_mulmod(uint64_t r[4], const uint64_t a[4], const uint
 #define MAX_T 16
 #define SIG_PUSH_SIZE 10
 
-__global__ void kernel_digest(
-    const uint8_t *d_combos,       /* batch × T bytes: indices per combo */
+/* Combinadic unranking: rank -> sorted skip[0..t-1] in lex order for C(n,t).
+ * Uses BINOM_C table (C[n][k], capped at 2^63). Binary search per position
+ * via hockey-stick prefix sums: sum_{c=lo}^{mid} C[n-c-1][k] =
+ * C[n-lo][k+1] - C[n-mid-1][k+1]. O(t*log n) table lookups, low divergence. */
+__device__ __forceinline__ void unrank_combo(uint64_t rank, int n, int t, uint8_t *out) {
+    int lo = 0;
+    for (int i = 0; i < t; i++) {
+        int k = t - i - 1;
+        int hi = n - (t - i);
+        /* binary search smallest c in [lo,hi] with prefix(c) > rank */
+        while (lo < hi) {
+            int mid = (lo + hi) >> 1;
+            /* prefix(lo..mid) = C[n-lo][k+1] - C[n-mid-1][k+1] */
+            uint64_t a = BINOM_C[n - lo][k + 1];
+            uint64_t b = BINOM_C[n - mid - 1][k + 1];
+            uint64_t pref = (a >= b) ? (a - b) : 0;
+            if (rank < pref) hi = mid;
+            else { rank -= pref; lo = mid + 1; }
+        }
+        out[i] = (uint8_t)lo;
+        lo++;
+    }
+}
+
+__global__ void __launch_bounds__(256, 2) kernel_digest(
+    const uint8_t *d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t *d_midstate,
     const uint8_t *d_prefix_remainder,
@@ -359,51 +384,88 @@ __global__ void kernel_digest(
     uint8_t *d_hit_combos, uint8_t *d_hit_sighash,
     uint8_t *d_hit_keynonce, uint8_t *d_hit_pubhash,
     uint8_t *d_hit_qx, uint8_t *d_hit_qy,
-    int batch_size, int easy_mode, int single_hash, int calibrate_mode
+    int batch_size, int easy_mode, int single_hash, int calibrate_mode,
+    uint64_t enum_base
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= batch_size) return;
 
-    /* Load this thread's skip indices */
+    /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
+     * (no CPU fill, no HtoD), otherwise load precomputed combos. */
     uint8_t skip[MAX_T];
-    for (int i = 0; i < t_sel; i++)
-        skip[i] = d_combos[idx * t_sel + i];
-
-    /* Build suffix: [prefix_remainder] + remaining dummy sigs + tail + tx_suffix */
-    uint8_t suffix[8192];
-    int pos = 0;
-    /* Prepend prefix_remainder bytes (these are the tail end of fixed_prefix
-     * that didn't fit into the midstate's full-block boundary). */
-    for (int i = 0; i < prefix_remainder_len; i++)
-        suffix[pos++] = d_prefix_remainder[i];
-    int sel = 0;
-    for (int i = 0; i < n_pool; i++) {
-        if (sel < t_sel && skip[sel] == i) { sel++; continue; }
-        for (int b = 0; b < SIG_PUSH_SIZE; b++)
-            suffix[pos++] = d_dummy_sigs[i * SIG_PUSH_SIZE + b];
+    if (d_combos == NULL) {
+        unrank_combo(enum_base + (uint64_t)idx, n_pool, t_sel, skip);
+    } else {
+        for (int i = 0; i < t_sel; i++)
+            skip[i] = d_combos[idx * t_sel + i];
     }
-    for (int i = 0; i < tail_len; i++) suffix[pos++] = d_tail[i];
-    for (int i = 0; i < tx_suffix_len; i++) suffix[pos++] = d_tx_suffix[i];
 
-    /* SHA-256 from midstate */
+    /* Build suffix streaming directly into SHA-256 blocks (no 8KB stack).
+     * Variable section is ~1.7KB; materializing it cost 8688B stack + 168 regs.
+     * Instead emit bytes into a 64B window and transform full blocks on the fly.
+     * Byte sources in order: prefix_remainder, included dummy_sigs (skip-aware),
+     * tail, tx_suffix. Equivalent to the original suffix[] construction. */
     uint32_t state[8];
     for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
 
-    /* Process full 64-byte blocks */
-    int full_blocks = pos / 64;
-    for (int b = 0; b < full_blocks; b++) {
-        uint32_t blk[16];
-        for (int i = 0; i < 16; i++)
-            blk[i] = ((uint32_t)suffix[b*64+i*4]<<24)|((uint32_t)suffix[b*64+i*4+1]<<16)|
-                     ((uint32_t)suffix[b*64+i*4+2]<<8)|(uint32_t)suffix[b*64+i*4+3];
-        _SHA256Transform(state, blk);
+    uint8_t cur[64];
+    uint32_t blk[16];
+    int cur_pos = 0;
+    int pos_total = 0;
+    /* Emit helper inlined manually to avoid lambda capture overhead. */
+    for (int i = 0; i < prefix_remainder_len; i++) {
+        cur[cur_pos++] = d_prefix_remainder[i]; pos_total++;
+        if (cur_pos == 64) {
+            for (int k = 0; k < 16; k++)
+                blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
+                         ((uint32_t)cur[k*4+2]<<8)|(uint32_t)cur[k*4+3];
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
+    }
+    {
+        int sel = 0;
+        for (int i = 0; i < n_pool; i++) {
+            if (sel < t_sel && skip[sel] == i) { sel++; continue; }
+            const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
+            for (int b = 0; b < SIG_PUSH_SIZE; b++) {
+                cur[cur_pos++] = row[b]; pos_total++;
+                if (cur_pos == 64) {
+                    for (int k = 0; k < 16; k++)
+                        blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
+                                 ((uint32_t)cur[k*4+2]<<8)|(uint32_t)cur[k*4+3];
+                    _SHA256Transform(state, blk);
+                    cur_pos = 0;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < tail_len; i++) {
+        cur[cur_pos++] = d_tail[i]; pos_total++;
+        if (cur_pos == 64) {
+            for (int k = 0; k < 16; k++)
+                blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
+                         ((uint32_t)cur[k*4+2]<<8)|(uint32_t)cur[k*4+3];
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
+    }
+    for (int i = 0; i < tx_suffix_len; i++) {
+        cur[cur_pos++] = d_tx_suffix[i]; pos_total++;
+        if (cur_pos == 64) {
+            for (int k = 0; k < 16; k++)
+                blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
+                         ((uint32_t)cur[k*4+2]<<8)|(uint32_t)cur[k*4+3];
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
     }
 
-    /* Final block with padding */
+    /* Final block with padding; rem = bytes in partial window. */
     uint8_t last_block[128];
-    int rem = pos - full_blocks * 64;
+    int rem = cur_pos;
     memset(last_block, 0, 128);
-    memcpy(last_block, suffix + full_blocks * 64, rem);
+    memcpy(last_block, cur, rem);
     last_block[rem] = 0x80;
     int nblk = (rem < 56) ? 1 : 2;
     uint64_t bit_len = (uint64_t)total_preimage_len * 8;
@@ -1024,7 +1086,6 @@ int main(int argc, char **argv) {
     int n_pool = dp.n;
     int t_sel = dp.t;
 
-    /* GTable */
     size_t gt_sz = 16ULL*65536*32;
     uint8_t *h_gtX=(uint8_t*)malloc(gt_sz), *h_gtY=(uint8_t*)malloc(gt_sz);
     compute_gtable(h_gtX, h_gtY);
@@ -1097,8 +1158,8 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_qx, 1024 * 32);
     cudaMalloc(&d_hit_qy, 1024 * 32);
 
-    int BATCH = 65536;  /* smaller batch — each thread does more work */
-    int BLKSZ = 128;
+    int BATCH = 1048576;  /* 1M: fewer launches, better GPU saturation (enum mode has no host fill cost) */
+    int BLKSZ = 256;
 
     /* Multi-GPU: each GPU handles every Nth first-index */
     int num_gpus = 0;
@@ -1114,6 +1175,27 @@ int main(int argc, char **argv) {
 
     uint8_t *h_combos = (uint8_t*)malloc(BATCH * t_sel);
     uint8_t *d_combos; cudaMalloc(&d_combos, BATCH * t_sel);
+
+    /* Init combinadic table for GPU enum fast path: C[n][k] capped at 2^63. */
+    {
+        static uint64_t h_binom[151][10];
+        for (int n = 0; n <= 150; n++) {
+            for (int k = 0; k <= 9; k++) {
+                if (k > n) h_binom[n][k] = 0;
+                else if (k == 0 || k == n) h_binom[n][k] = 1;
+                else {
+                    int kk = k; if (kk > n - kk) kk = n - kk;
+                    __uint128_t r = 1;
+                    for (int i = 0; i < kk; i++) {
+                        r = r * (uint64_t)(n - i) / (uint64_t)(i + 1);
+                        if (r > (uint64_t)0x7FFFFFFFFFFFFFFFULL) { r = (uint64_t)0x7FFFFFFFFFFFFFFFULL; break; }
+                    }
+                    h_binom[n][k] = (uint64_t)r;
+                }
+            }
+        }
+        cudaMemcpyToSymbol(BINOM_C, h_binom, sizeof(h_binom));
+    }
 
     /* ── DEBUG MODE ──
      * If argv contains "debug" followed by comma-separated subset indices,
@@ -1246,6 +1328,155 @@ int main(int argc, char **argv) {
            100.0 * my_slice_total / (double)global_total);
     int found = 0;
 
+    /* GPU-enum fast path: single GPU, no tiles (the ranked benchmark case).
+     * Unrank combos on-GPU from a linear base, eliminating CPU fill + HtoD.
+     * Covers C(n,t) in lex order; runs until killed by harness timeout. */
+    if (tile_path == NULL && effective_total == 1) {
+        printf("  Using GPU-enum fast path (no CPU fill, base-linear)\n");
+        fflush(stdout);
+        uint64_t enum_base = 0;
+        struct timespec t_last_enum = t0;
+        while (!found) {
+            int batch_pos = BATCH;
+            uint32_t h_hit = 0;
+            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
+            kernel_digest<<<grdsz, BLKSZ>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, (int)dp.prefix_remainder_len,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gtX, d_gtY,
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, enum_base);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            total_searched += batch_pos;
+            g_total_searched = total_searched;
+            enum_base += batch_pos;
+            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (h_hit > 0) {
+                uint32_t hits[64];
+                int nh = (h_hit > 64) ? 64 : h_hit;
+                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
+                printf("\n  *** DIGEST HIT! ***\n");
+                mkdir("results", 0755);
+                char fname[256];
+                if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
+                else snprintf(fname, sizeof(fname), "results/digest_hit_%d.txt", gpu_index);
+                FILE *ff = fopen(fname, "a");
+                if (ff) {
+                    uint8_t all_combos[1024 * MAX_T];
+                    uint8_t all_sighash[1024 * 32];
+                    uint8_t all_keynonce[1024 * 33];
+                    uint8_t all_pubhash[1024 * 32];
+                    uint8_t all_qx[1024 * 32];
+                    uint8_t all_qy[1024 * 32];
+                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
+                    cudaMemcpy(all_sighash, d_hit_sighash, nh * 32, cudaMemcpyDeviceToHost);
+                    cudaMemcpy(all_keynonce, d_hit_keynonce, nh * 33, cudaMemcpyDeviceToHost);
+                    cudaMemcpy(all_pubhash, d_hit_pubhash, nh * 32, cudaMemcpyDeviceToHost);
+                    cudaMemcpy(all_qx, d_hit_qx, nh * 32, cudaMemcpyDeviceToHost);
+                    cudaMemcpy(all_qy, d_hit_qy, nh * 32, cudaMemcpyDeviceToHost);
+                    for (int h = 0; h < nh; h++) {
+                        uint32_t raw = hits[h];
+                        int combo_idx = raw & 0x3FFFFFFF;
+                        int ri = (raw >> 30) & 1;
+                        int hc = (raw >> 31) & 1;
+                        uint8_t *combo = all_combos + h * MAX_T;
+                        uint8_t *sighash_z = all_sighash + h * 32;
+                        uint8_t *kn = all_keynonce + h * 33;
+                        uint8_t *ph = all_pubhash + h * 32;
+                        uint8_t *qx = all_qx + h * 32;
+                        uint8_t *qy = all_qy + h * 32;
+                        fprintf(ff, "indices=");
+                        printf("  indices=");
+                        for (int j = 0; j < t_sel; j++) {
+                            fprintf(ff, "%s%d", j?",":"", combo[j]);
+                            printf("%s%d", j?",":"", combo[j]);
+                        }
+                        fprintf(ff, "\nhash_choice=%d\nrecid=%d\n", hc, ri);
+                        fprintf(ff, "sighash=");
+                        for (int j = 0; j < 32; j++) fprintf(ff, "%02x", sighash_z[j]);
+                        fprintf(ff, "\ncombo_idx=%d\n", combo_idx);
+                        fprintf(ff, "key_nonce=");
+                        for (int j = 0; j < 33; j++) fprintf(ff, "%02x", kn[j]);
+                        fprintf(ff, "\npubhash=");
+                        for (int j = 0; j < 32; j++) fprintf(ff, "%02x", ph[j]);
+                        fprintf(ff, "\nqx=");
+                        for (int j = 0; j < 32; j++) fprintf(ff, "%02x", qx[j]);
+                        fprintf(ff, "\nqy=");
+                        for (int j = 0; j < 32; j++) fprintf(ff, "%02x", qy[j]);
+                        fprintf(ff, "\n");
+                        printf(" hc=%d recid=%d\n", hc, ri);
+                        hit_counter++;
+                        g_hit_counter = hit_counter;
+                        if (summary_f) {
+                            time_t now_epoch = time(NULL);
+                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
+                            for (int j = 0; j < t_sel; j++)
+                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
+                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
+                            fprintf(summary_f, " sighash=");
+                            for (int j = 0; j < 32; j++) fprintf(summary_f, "%02x", sighash_z[j]);
+                            fprintf(summary_f, " pubhash=");
+                            for (int j = 0; j < 32; j++) fprintf(summary_f, "%02x", ph[j]);
+                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
+                            fflush(summary_f);
+                            fsync(fileno(summary_f));
+                        }
+                    }
+                    fclose(ff);
+                }
+            }
+            struct timespec t_now;
+            clock_gettime(CLOCK_MONOTONIC, &t_now);
+            double secs_since = (t_now.tv_sec - t_last_enum.tv_sec)
+                + (t_now.tv_nsec - t_last_enum.tv_nsec) / 1e9;
+            if (secs_since >= 15.0) {
+                double elapsed_total = (t_now.tv_sec - t0.tv_sec)
+                    + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
+                double rate = total_searched / elapsed_total;
+                printf("  [GPU %d] enum_base=%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
+                       gpu_index, (unsigned long long)enum_base,
+                       (unsigned long long)(total_searched/1000000),
+                       (unsigned long long)(global_total/1000000),
+                       rate/1e6, elapsed_total);
+                fflush(stdout);
+                if (summary_f) {
+                    time_t now_epoch = time(NULL);
+                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                            (long)now_epoch, (unsigned long long)total_searched,
+                            rate/1e6, elapsed_total, (unsigned long long)hit_counter);
+                    fflush(summary_f);
+                }
+                t_last_enum = t_now;
+            }
+            if (enum_base + (uint64_t)BATCH > global_total) break;
+        }
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
+        printf("\n  [GPU %d] Done enum: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
+               (unsigned long long)(total_searched/1000000), elapsed,
+               total_searched/elapsed/1e6);
+        if (summary_f) {
+            time_t now_epoch = time(NULL);
+            fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
+                    (long)now_epoch, (unsigned long long)total_searched,
+                    elapsed, (unsigned long long)hit_counter);
+            fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+            g_summary_f = NULL;
+        }
+        free(h_combos);
+        return 0;
+    }
+
     /* Enumerate combos.
      * If --tiles was supplied, walk the assigned tile list (balanced LPT partition).
      * Otherwise, fall back to mod-N partition by first-index (unbalanced but simple).
@@ -1317,7 +1548,7 @@ int main(int argc, char **argv) {
                 d_hit_combos, d_hit_sighash,
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate);
+                batch_pos, easy, single_hash, calibrate, (uint64_t)0);
             cudaDeviceSynchronize();
 
             cudaError_t err = cudaGetLastError();
