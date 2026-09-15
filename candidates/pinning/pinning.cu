@@ -548,7 +548,7 @@ __global__ void kernel_debug_pin_one_point(
 }
 
 
-__global__ void kernel_pinning_real(
+__global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -924,7 +924,7 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_hash, 64*32);
     cudaMalloc(&d_hit_sighash, 64*32);
 
-    int BATCH = 262144;
+    int BATCH = 1048576;  /* 1M: fewer launches/syncs; host passes seq/lt by value so no fill cost */
     int BLKSZ = 256;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
 
