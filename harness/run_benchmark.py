@@ -25,7 +25,7 @@ Usage:
   python3 harness/run_benchmark.py --score-out score-pinning.json
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, secrets, shlex, shutil, signal, subprocess, sys, time
+import argparse, hashlib, json, math, os, secrets, shlex, shutil, signal, subprocess, sys, time
 from pathlib import Path
 
 import problem as PB
@@ -35,11 +35,21 @@ import verify as V
 ROOT = Path(__file__).resolve().parent.parent
 
 UNSET = object()   # argparse default: flag not given, so keep the configured value
+FIXED_TIME_TOLERANCE_SECONDS = 1.0
 
 
 def opt_float(v: str):
     """A float, or None for 'none'/'null' (gate off)."""
     return None if v.lower() in ("none", "null") else float(v)
+
+
+def fixed_time_duration_failure(cfg: dict, elapsed: float) -> str | None:
+    if cfg["mode"] != "fixed_time":
+        return None
+    minimum = float(cfg["max_seconds"]) - FIXED_TIME_TOLERANCE_SECONDS
+    if math.isfinite(elapsed) and elapsed >= minimum:
+        return None
+    return f"fixed-time run ended early: {elapsed:.1f}s (minimum {minimum:.1f}s)"
 
 
 def snapshot_tree(paths) -> dict:
@@ -244,6 +254,7 @@ def main():
                                  "throughput_Mps": artifact.get("throughput_Mps")}
     claimed = artifact.get("elapsed_s")
     artifact["elapsed_s"] = round(harness_elapsed, 4)
+    duration_failure = fixed_time_duration_failure(cfg, harness_elapsed)
 
     # A grinder cannot have run longer than the harness watched it run; if it
     # claims otherwise, its whole accounting is untrustworthy. (Claiming LESS is
@@ -268,7 +279,7 @@ def main():
     artifact["gpu"] = cfg.get("gpu")
     # The seed is the harness's to record, not the grinder's to claim.
     artifact["problem_seed"] = prob.get("seed")
-    ok = (len(failures) == 0 and clock_failure is None
+    ok = (len(failures) == 0 and clock_failure is None and duration_failure is None
           and len(artifact.get("hits", [])) > 0)
 
     # ---- score ----
@@ -305,6 +316,8 @@ def main():
             print(f"    ✗ hit[{i}]: {why}" if i >= 0 else f"    ✗ {why}")
     if clock_failure:
         print(f"    ✗ {clock_failure}")
+    if duration_failure:
+        print(f"    ✗ {duration_failure}")
     if warn:
         print(f"    ⚠ {warn}")
     print("-" * 56)
