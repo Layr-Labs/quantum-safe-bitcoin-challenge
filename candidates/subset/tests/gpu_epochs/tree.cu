@@ -808,6 +808,12 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
 
 #include "tree_inverse.cuh"
 
+/* RankedShortEpoch is instantiated only for the hosted short-epoch shape:
+ * single_hash, leading-zero gate, no easy/calibrate diagnostics.  Keeping a
+ * separate template instantiation lets ptxas discard the generic byte-stream
+ * hash builders, DER gates and second pubkey hash from the scored kernel while
+ * preserving the complete fallback implementation below. */
+template <bool RankedShortEpoch>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -851,7 +857,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * original whole-pool behaviour. */
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
-    if (fast_inc == QSB_SE_N_INC) {
+    if (RankedShortEpoch || fast_inc == QSB_SE_N_INC) {
         /* Short-epoch mode: blockIdx.x selects the epoch descriptor, which
          * supplies the 6 early skips (already folded into the epoch midstate);
          * threadIdx.x selects one of the 256 window omission sets from WIN3.
@@ -880,7 +886,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
     }
 
-  if (fast_inc == QSB_SE_N_INC) {
+  if (RankedShortEpoch || fast_inc == QSB_SE_N_INC) {
     qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
   } else if (fast_inc == QSB_FAST_N_INC) {
     // Cached states are rebuilt from this batch's midstate and public input.
@@ -1017,7 +1023,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* Ranked gate reads the state words. Only the easy/calibrate
          * diagnostics need the digest as bytes, so only they build it. */
         int vv;
-        if (calibrate_mode || easy_mode) {
+        if (!RankedShortEpoch && (calibrate_mode || easy_mode)) {
             uint8_t h[32];
             for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
                 h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
@@ -1029,7 +1035,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* Config A hashes once, so everything below is dead work on every
          * candidate. Leave BEFORE building the 64-byte padded block, not
          * after it: the memset/memcpy used to run unconditionally. */
-        if (single_hash) continue;
+        if (RankedShortEpoch || single_hash) continue;
         uint8_t h[32];
         for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
@@ -1055,7 +1061,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
         if(p<1024) {
             d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            if(se_desc) {
+            if(RankedShortEpoch || se_desc) {
                 for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
             } else {
@@ -1581,7 +1587,7 @@ int main(int argc, char **argv) {
         cudaGetDeviceCount(&dev_count);
         if (dev_count < 1) dev_count = 1;
         int eff_total = (total_gpus_override > 0) ? total_gpus_override : dev_count;
-        if (tile_path == NULL && eff_total == 1 && !easy && !calibrate
+        if (tile_path == NULL && eff_total == 1 && !easy && !calibrate && single_hash
             && n_pool == 150 && t_sel == 9
             && (int)dp.prefix_remainder_len == 42
             && (int)dp.tail_section_len == 218 && (int)dp.tx_suffix_len == 44
@@ -2038,7 +2044,7 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            kernel_digest<true><<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -2179,7 +2185,7 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -2379,7 +2385,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
