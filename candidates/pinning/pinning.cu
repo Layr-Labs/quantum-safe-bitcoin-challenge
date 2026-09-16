@@ -1615,7 +1615,7 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1642,8 +1642,6 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
@@ -1655,7 +1653,6 @@ int main(int argc, char **argv) {
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -1668,7 +1665,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
@@ -1689,7 +1685,7 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
-        if (seqs_done % 10 == 0 || found) {
+        if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;
