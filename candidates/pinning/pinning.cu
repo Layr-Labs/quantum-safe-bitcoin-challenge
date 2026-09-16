@@ -53,8 +53,14 @@ __constant__ int CHUNK_FIRST_ELEMENT[16] = {
     65536*8,65536*9,65536*10,65536*11,65536*12,65536*13,65536*14,65536*15,
 };
 
-__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
-    int chunk=0; uint64_t qz[5]={1,0,0,0,0};
+/* Windowed u1*G from the affine G-table. Leaves (qx:qy:qz) Jacobian.
+ * The table point is affine so Z starts at 1; later 16-bit windows mixed-add
+ * into that Jacobian. Affine conversion is deferred to the caller's batch
+ * inverse of the two recovery points — converting here was immediately
+ * undone by treating the result as affine (Z=1) and mixed-adding u2R. */
+__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint64_t *qz, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
+    int chunk=0;
+    qz[0]=1; qz[1]=0; qz[2]=0; qz[3]=0; qz[4]=0;
     for(;chunk<16;chunk++){if(privKey[chunk]>0){
         int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
         memcpy(qx,gTableX+index,32);memcpy(qy,gTableY+index,32);chunk++;break;}}
@@ -63,7 +69,6 @@ __device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privK
         int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
         memcpy(gx,gTableX+index,32);memcpy(gy,gTableY+index,32);
         _PointAddSecp256k1(qx,qy,qz,gx,gy);}}
-    _ModInv(qz);_ModMult(qx,qz);_ModMult(qy,qz);
 }
 
 /* DER checks */
@@ -435,22 +440,22 @@ __global__ void kernel_debug_pin_one_point(
     uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
     DUMP_U64x4("u1", u1);
 
-    /* u1 * G via GTable */
+    /* u1 * G via GTable, left Jacobian (see production kernel). */
     uint16_t pk[16]; memcpy(pk,u1,32);
-    uint64_t qx[4],qy[4];
-    _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
-    DUMP_U64x4("u1G_x_affine", qx);
-    DUMP_U64x4("u1G_y_affine", qy);
+    uint64_t qx[4],qy[4],qz[5];
+    _PointMultiSecp256k1(qx,qy,qz,pk,d_gtX,d_gtY);
+    DUMP_U64x4("u1G_x_jac", qx);
+    DUMP_U64x4("u1G_y_jac", qy);
+    DUMP_U64x4("u1G_z_jac", qz);
 
-    /* Q1 = u1G + u2R (recid=0) */
+    /* Q1 = u1G + u2R (recid=0), mixed-add onto the Jacobian u1G. */
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
     DUMP_U64x4("u2R_x", u2rx);
     DUMP_U64x4("u2R_y", u2ry);
 
     uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32); memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
+    memcpy(q1x,qx,32); memcpy(q1y,qy,32); memcpy(q1z,qz,40);
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
     DUMP_U64x4("q1_proj_x", q1x);
     DUMP_U64x4("q1_proj_y", q1y);
@@ -619,14 +624,18 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     uint64_t nri[4]={d_neg_r_inv[0],d_neg_r_inv[1],d_neg_r_inv[2],d_neg_r_inv[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
     uint16_t pk[16]; memcpy(pk,u1,32);
-    uint64_t qx[4],qy[4]; _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
 
-    /* Q1 = u1*G + u2*R (recid=0) */
+    /* Q1 = u1*G + u2*R (recid=0).
+     * u1G stays Jacobian: the G-table is affine, windowed mixed-adds already
+     * produce a valid Jacobian point, and _PointAddSecp256k1 is mixed
+     * Jacobian-affine. Converting u1G to affine (ModInv + 2 ModMult) and
+     * then setting q1z = 1 was a round-trip of the identity. The ranked
+     * kernel only needs affine Q for SHA256(compress(Q)), which the batch
+     * inverse of (q1z, q2z) below still provides. */
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
     uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32); memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
+    _PointMultiSecp256k1(q1x,q1y,q1z,pk,d_gtX,d_gtY);
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
     /* Q2 = Q1 + neg_2u2R (recid=1) */
