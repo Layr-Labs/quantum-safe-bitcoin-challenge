@@ -799,15 +799,13 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     int total_preimage_len,
     uint32_t seq_value,         /* current sequence value */
     uint32_t start_lt,          /* starting locktime for this batch */
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gt,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (STAGE == 0 && idx == 0) *d_hit_cnt = 0;  /* replaces per-batch H2D zero */
     if (blockIdx.x * blockDim.x >= batch_size) return;
     int active = idx < batch_size;
     uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
@@ -1016,9 +1014,6 @@ static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
     int suffix_len, int seq_offset, int lt_offset, int total_preimage_len,
     uint32_t seq_value, uint32_t start_lt,
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gt, uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
@@ -1027,14 +1022,9 @@ static void launch_pinning_pipeline(
     int blocks=(batch_size+255)/256;
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        seq_value,start_lt,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree);
-    cudaError_t err=cudaGetLastError();
-    if(err!=cudaSuccess){
-        fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
-        exit(2);
-    }
     int root_groups=(blocks+255)/256;
     if(root_groups>256){
         fprintf(stderr,"Pipeline batch exceeds two-level inverse capacity\n");
@@ -1042,30 +1032,15 @@ static void launch_pinning_pipeline(
     }
     qsb_root_group_prepare<<<root_groups,256>>>(
         roots,blocks,super_roots,root_checkpoint);
-    err=cudaGetLastError();
-    if(err!=cudaSuccess){
-        fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
-        exit(2);
-    }
     qsb_invert_super_roots<<<1,256>>>(super_roots,root_groups);
-    err=cudaGetLastError();
-    if(err!=cudaSuccess){
-        fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
-        exit(2);
-    }
     qsb_root_group_finish<<<root_groups,256>>>(
         roots,blocks,super_roots,root_checkpoint);
-    err=cudaGetLastError();
-    if(err!=cudaSuccess){
-        fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
-        exit(2);
-    }
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks,256>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        seq_value,start_lt,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree);
-    err=cudaGetLastError();
+    cudaError_t err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
@@ -1448,44 +1423,11 @@ int main(int argc, char **argv) {
            gpu_suffix_len, pp.seq_offset, pp.lt_offset);
     printf("  Mode: %s\n", easy ? "EASY" : "REAL");
 
-    /* Upload EC constants */
-    uint64_t *d_nri, *d_u2rx, *d_u2ry, *d_neg2u2rx, *d_neg2u2ry;
-    cudaMalloc(&d_nri,32); cudaMalloc(&d_u2rx,32); cudaMalloc(&d_u2ry,32);
-    cudaMalloc(&d_neg2u2rx,32); cudaMalloc(&d_neg2u2ry,32);
-    cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
+    /* Upload EC constants: only the constant-memory u2R words are live
+     * (neg_r_inv is folded into the fixed-base table; neg_2u2R is unused).
+     * The removed d_nri/d_u2rx/d_neg2u2r device buffers were never read. */
     cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
-
-    /* Compute neg_2u2R */
-    {
-        EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1);
-        BN_CTX *ctx=BN_CTX_new();
-        BIGNUM *bx=BN_new(),*by=BN_new();
-        uint8_t be[32];
-        for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
-        for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
-        EC_POINT *pt=EC_POINT_new(grp);
-        EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
-        EC_POINT *dbl=EC_POINT_new(grp);
-        EC_POINT_dbl(grp,dbl,pt,ctx);
-        EC_POINT_invert(grp,dbl,ctx);
-        BIGNUM *dx=BN_new(),*dy=BN_new();
-        EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
-        uint8_t dxb[32],dyb[32]; memset(dxb,0,32);memset(dyb,0,32);
-        BN_bn2bin(dx,dxb+(32-BN_num_bytes(dx)));
-        BN_bn2bin(dy,dyb+(32-BN_num_bytes(dy)));
-        uint64_t n2x[4],n2y[4];
-        for(int i=0;i<4;i++){n2x[i]=0;n2y[i]=0;
-            for(int b=0;b<8;b++){n2x[i]|=(uint64_t)dxb[31-i*8-b]<<(b*8);
-                n2y[i]|=(uint64_t)dyb[31-i*8-b]<<(b*8);}}
-        cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice);
-        cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice);
-        BN_free(bx);BN_free(by);BN_free(dx);BN_free(dy);
-        EC_POINT_free(pt);EC_POINT_free(dbl);
-        EC_GROUP_free(grp);BN_CTX_free(ctx);
-    }
 
     const bool fast_tail = single_hash && !easy && pp.suffix_len == 75 &&
         pp.seq_offset == 31 && pp.lt_offset == 67 && pp.total_preimage_len == 9995;
@@ -1591,7 +1533,14 @@ int main(int argc, char **argv) {
 
     /* Benchmark runs for a fixed window ended by the harness's timeout.
      * The loop no longer stops at the first hit; hits are appended per batch.
-     */
+     * The hit file is opened once (fflush per hit-batch keeps prefix hits on
+     * disk when timeout kills the process); the device zeroes its hit counter
+     * in STAGE0 so no per-batch H2D is needed. */
+    mkdir("results", 0755);
+    char hit_fname[256];
+    snprintf(hit_fname, sizeof(hit_fname), "results/pinning_hit_%d.txt", gpu_index);
+    FILE *hit_file = fopen(hit_fname, "a");
+    if (!hit_file) fprintf(stderr, "Warning: cannot open %s, hits print only\n", hit_fname);
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -1615,7 +1564,6 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1623,7 +1571,6 @@ int main(int argc, char **argv) {
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
                     d_hit_cnt, d_hit_idx,
                     batch_sz, easy, single_hash,
@@ -1635,7 +1582,6 @@ int main(int argc, char **argv) {
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
                     d_hit_cnt, d_hit_idx,
                     batch_sz, easy, single_hash,
@@ -1651,32 +1597,39 @@ int main(int argc, char **argv) {
 
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
+                uint32_t hits[1024];
+                int nh = (h_hit > 1024) ? 1024 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
-                mkdir("results", 0755);
-                char fname[256];
-                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-                FILE *f = fopen(fname, "a");
-                if (f) {
+                if (hit_file) {
                     for (int h = 0; h < nh; h++) {
                         uint32_t raw = hits[h];
                         uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
                         int ri = (raw >> 30) & 1;
                         int hc = (raw >> 31) & 1;
-                        fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                        fprintf(hit_file, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
                         printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
-                    fclose(f);
+                    fflush(hit_file);
+                } else {
+                    for (int h = 0; h < nh; h++) {
+                        uint32_t raw = hits[h];
+                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
+                        int ri = (raw >> 30) & 1;
+                        int hc = (raw >> 31) & 1;
+                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
+                    }
                 }
+                if (h_hit > 1024)
+                    printf("  warning: %u hits truncated to 1024 device slots\n", h_hit);
                 found = 1;
             }
 
-            /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            /* Check if another GPU found it (skipped for single-GPU runs) */
+            if ((effective_total > 1 || num_gpus > 1) &&
+                (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;

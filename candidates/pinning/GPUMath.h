@@ -826,8 +826,10 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a, uint64_t *b)
 
 __device__ void _ModMult(uint64_t *r, uint64_t *a)
 {
-    uint64_t bb[4] = { r[0], r[1], r[2], r[3] };
-    _ModMultCore(r, a, bb);
+    // In-place r = r*a: _ModMultCore snapshots all input limbs into internal
+    // regs before writing results (same convention as in-place _ModSqr, which
+    // runs without a temp), so no bb[] copy is needed.
+    _ModMultCore(r, a, r);
 }
 
 // ---------------------------------------------------------------------------------------
