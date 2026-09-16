@@ -280,20 +280,22 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
     for (int c=0;c<16;c++) e[c]=gt_recode_step(M, sign, c);
 }
 
-/* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
- * Branchless: y is selected between y and p-y by a mask. */
+/* Load table point (c, idx) into (gx,gy); negate y (p - y) when the sign
+ * mask m is all-ones. Branchless, one carry chain, no select. */
 __device__ __forceinline__ void gt_load_signed(const uint8_t *gTX, const uint8_t *gTY,
-                                                int c, uint32_t idx, uint64_t neg,
+                                                int c, uint32_t idx, uint64_t m,
                                                 uint64_t gx[4], uint64_t gy[4]) {
     size_t off = ((size_t)c * GT_ENTRIES + idx) * 32;
     const ulonglong2 *tx=(const ulonglong2 *)(gTX+off), *ty=(const ulonglong2 *)(gTY+off);
     ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t y[4]={y0.x,y0.y,y1.x,y1.y}, yn[4];
-    _ModNeg256(yn, y);                                 /* p - y */
-    uint64_t m = 0 - neg;                              /* all-ones if negative digit */
-    gy[0]=(y[0]&~m)|(yn[0]&m); gy[1]=(y[1]&~m)|(yn[1]&m);
-    gy[2]=(y[2]&~m)|(yn[2]&m); gy[3]=(y[3]&~m)|(yn[3]&m);
+    /* p - y == ~y + (p + 1) (mod 2^256) for a canonical table y in [1, p):
+     * one carry chain from the sign mask replaces the negation plus the
+     * four-limb select (register-neutral; the mask folds into the addend). */
+    UADDO(gy[0], y0.x ^ m, m & 0xFFFFFFFEFFFFFC30ULL);
+    UADDC(gy[1], y0.y ^ m, m);
+    UADDC(gy[2], y1.x ^ m, m);
+    UADD (gy[3], y1.y ^ m, m);
 }
 
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
@@ -303,7 +305,7 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTX, const uint8_t
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
     uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
     *idx = (ae - 1) >> 1;
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)(int64_t)(ec >> 31);          /* sign mask: all-ones for a negative digit */
 }
 
 /* Accumulate sixteen points with an affine-anchor-deferred XYZZ ordinate:
@@ -314,7 +316,10 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 /* Stream sixteen signed digits and defer the affine anchor's Y term.
  * Retain the promoted 32 MiB table, field/square implementation and recovery.
  * Adapted from nullforest8200 PR17 and alvaroborras PR24. */
-__device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+/* Same accumulation, returned in XYZZ form (x = X/ZZ, y = Y/ZZZ, ZZ^3 == ZZZ^2)
+ * so the recovery below can use the block inverse directly without the three
+ * homogeneous-conversion multiplications. */
+__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                       const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY) {
     uint64_t M[4]; int sign; gt_recode_setup(scalar,M,&sign);
     uint32_t idx; uint64_t neg;
@@ -323,7 +328,6 @@ __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
     gt_load_signed(gTX,gTY,0,idx,neg,x0,y0);
     gt_digit_idx(gt_recode_step(M,sign,1), &idx, &neg);
     gt_load_signed(gTX,gTY,1,idx,neg,x1,y1);
-    uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     #pragma unroll 1
@@ -336,6 +340,12 @@ __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
     gt_digit_idx(gt_recode_step(M,sign,GT_CHUNKS-1), &idx, &neg);
     gt_load_signed(gTX,gTY,GT_CHUNKS-1,idx,neg,cx,cy);
     _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+}
+
+__device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+                                      const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY) {
+    uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
+    _FixedBaseSignedXYZZ(X,Y,ZZ,ZZZ,scalar,gTX,gTY);
     _ModMult(qx, X, ZZZ);
     _ModMult(qy, Y, ZZ);
     _ModMult(qz, ZZ, ZZZ);
@@ -806,6 +816,60 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
     _ModNeg256(y2);                /* y2 = -(m2*(xP - x2) + yP) */
 }
 
+/* Direct two-key recovery from the XYZZ accumulator P = (X/A, Y/B), A = ZZ, B = ZZZ,
+ * A^3 == B^2, with the fixed affine offset R = (xR, yR); targets P + R (recid 0) and
+ * P - R (recid 1). Preparation: D = xR*A - X and W = B*D, the lane's factor for the
+ * block inverse (2M). Finish, given inv = 1/W: h = A*inv, iz = h*D = A/B so iz^2 = 1/A,
+ * xP = xR - D*iz^2, m1 = (yR*B - Y)*h = lambda(P, R), m2 = (yR*B + Y)*h = -lambda(P, -R),
+ * xs = xP + xR, x1 = m1^2 - xs, x2 = m2^2 - xs, y1 = m1*(xR - x1) - yR,
+ * y2 = yR - m2*(xR - x2): 8M+3S, so 10M+3S in total instead of the 13M+3S of the
+ * homogeneous conversion plus the previous finish. Derivation and the same operation
+ * count as Meganpark980320's public (unpromoted) direct-recovery note; this is an
+ * independent implementation against these formulas. */
+__device__ __forceinline__ void qsb_xyzz_finish_prepare(const uint64_t *X, uint64_t *A, uint64_t *B,
+                                                        uint64_t *xR, uint64_t *D, uint64_t *W) {
+    _ModMult(D, xR, A);
+    _ModSub256(D, D, (uint64_t *)X);   /* D = xR*A - X */
+    W[4] = 0;
+    _ModMult(W, B, D);                 /* W = B*D */
+}
+
+/* Field zero in either 256-bit representation (0 or p): the lane must not feed a zero
+ * factor into the block product; it is treated like an inactive tail lane. */
+__device__ __forceinline__ int qsb_field_is_zero(const uint64_t *w) {
+    uint64_t z = w[0] | w[1] | w[2] | w[3];
+    uint64_t p = (w[0] ^ 0xFFFFFFFEFFFFFC2FULL) | (w[1] ^ 0xFFFFFFFFFFFFFFFFULL)
+               | (w[2] ^ 0xFFFFFFFFFFFFFFFFULL) | (w[3] ^ 0xFFFFFFFFFFFFFFFFULL);
+    return (z == 0ULL) | (p == 0ULL);
+}
+
+__device__ __forceinline__ void qsb_xyzz_finish(uint64_t *A, uint64_t *B, uint64_t *Y, uint64_t *D, uint64_t *inv,
+                                                uint64_t *xR, uint64_t *yR,
+                                                uint64_t *x1, uint64_t *y1, uint64_t *x2, uint64_t *y2) {
+    uint64_t h[4], iz[4], t[4], xP[4], yRB[4], s[4], m1[4], m2[4], xs[4], sq[4];
+    _ModMult(h, A, inv);           /* h = A/(B*D) */
+    _ModMult(iz, h, D);            /* A/B, whose square is 1/A */
+    _ModSqr(sq, iz);
+    _ModMult(t, D, sq);            /* D/A */
+    _ModSub256(xP, xR, t);         /* xP = X/A */
+    _ModMult(yRB, yR, B);
+    _ModSub256(s, yRB, Y);
+    _ModMult(m1, s, h);            /* lambda(P, R) */
+    _ModAdd256(s, yRB, Y);
+    _ModMult(m2, s, h);            /* -lambda(P, -R) */
+    _ModAdd256(xs, xP, xR);
+    _ModSqr(sq, m1);
+    _ModSub256(x1, sq, xs);
+    _ModSub256(t, xR, x1);
+    _ModMult(y1, m1, t);
+    _ModSub256(y1, y1, yR);        /* y1 = m1*(xR - x1) - yR */
+    _ModSqr(sq, m2);
+    _ModSub256(x2, sq, xs);
+    _ModSub256(t, xR, x2);
+    _ModMult(y2, m2, t);
+    _ModSub256(y2, yR, y2);        /* y2 = yR - m2*(xR - x2) */
+}
+
 #include "tree_inverse.cuh"
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
@@ -985,32 +1049,42 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* u1*G in projective form via the signed-digit 32 MiB A-table; the affine
      * conversion is deferred to the single inverse below, so both recids share
      * one _ModInv. */
-    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY);
+    uint64_t X[4],Y[4],A[4],B[4]; _FixedBaseSignedXYZZ(X,Y,A,B,z,d_gtX,d_gtY);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
-    /* Both recovery flags from one shared-denominator inverse. */
+    /* Both recovery flags from one shared-denominator inverse, straight from XYZZ. */
     uint64_t fD[4], prod[5]={0,0,0,0,0};
-    qsb_affine_finish_prepare(qx,qz,u2rx,fD,prod);
+    qsb_xyzz_finish_prepare(X,A,B,u2rx,fD,prod);
+    /* A zero denominator (P == +-R or an exceptional accumulator) would poison the
+     * whole block product; such a lane contributes the identity and reports nothing. */
+    active = active && !qsb_field_is_zero(prod);
     // One block-wide inverse, preserving identity factors for tail lanes.
     if(!active){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
     uint64_t q1x[4],q1y[4],q2x[4],q2y[4];
-    qsb_affine_finish(qx,qy,qz,fD,prod,u2rx,u2ry,q1x,q1y,q2x,q2y);
+    qsb_xyzz_finish(A,B,Y,fD,prod,u2rx,u2ry,q1x,q1y,q2x,q2y);
     if(!active)return;
 
     int v=0, hash_choice=0, recid=0;
-    uint64_t *pts_x[2]={q1x,q2x};
-    uint64_t *pts_y[2]={q1y,q2y};
-    for(int ri=0;ri<2&&!v;ri++){
-        uint32_t *x32=(uint32_t*)pts_x[ri];
+    #pragma unroll
+    for(int ri=0;ri<2;ri++){
+        if (v) break;
+        /* Select the recid's affine key in registers; no pointer arrays, so the
+         * four coordinates never go through local memory. Limb halves in
+         * little-endian order: w0 = low half of limb 0, ..., w7 = high half of limb 3. */
+        uint64_t rx0 = ri ? q2x[0] : q1x[0], rx1 = ri ? q2x[1] : q1x[1];
+        uint64_t rx2 = ri ? q2x[2] : q1x[2], rx3 = ri ? q2x[3] : q1x[3];
+        uint64_t ry0 = ri ? q2y[0] : q1y[0];
+        uint32_t w0=(uint32_t)rx0, w1=(uint32_t)(rx0>>32), w2=(uint32_t)rx1, w3=(uint32_t)(rx1>>32);
+        uint32_t w4=(uint32_t)rx2, w5=(uint32_t)(rx2>>32), w6=(uint32_t)rx3, w7=(uint32_t)(rx3>>32);
         uint32_t pb[16];
-        uint8_t prefix_byte = 0x2+(uint8_t)(pts_y[ri][0]&1);
-        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        uint8_t prefix_byte = 0x2+(uint8_t)(ry0&1);
+        pb[0]=__byte_perm(w7,prefix_byte,0x4321);
+        pb[1]=__byte_perm(w7,w6,0x0765);pb[2]=__byte_perm(w6,w5,0x0765);
+        pb[3]=__byte_perm(w5,w4,0x0765);pb[4]=__byte_perm(w4,w3,0x0765);
+        pb[5]=__byte_perm(w3,w2,0x0765);pb[6]=__byte_perm(w2,w1,0x0765);
+        pb[7]=__byte_perm(w1,w0,0x0765);pb[8]=__byte_perm(w0,0x80,0x0456);
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
         uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         /* Ranked gate reads the state words. Only the easy/calibrate
