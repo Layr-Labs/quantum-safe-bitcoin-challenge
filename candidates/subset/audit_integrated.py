@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent model of a full 16-point deferred-Y XYZZ chain."""
+"""Audit the promoted composed inverse tree with the mixed-table XYZZ core."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ def denominators_nonzero(points):
 
 
 def check(points, check_curve):
-    assert len(points) == 16
+    assert len(points) == 15
     exact = mm(points[0], points[1])
     chained = mm_deferred(points[0], points[1])
     anchor_y = points[0][1]
@@ -211,13 +211,50 @@ def recode(k):
     sign=1 if m&1 else -1
     if sign<0:m=N-m
     out=[]
-    for _ in range(15):
-        out.append(sign*((m&0x1ffff)-65536))
-        m=2*(m>>17)+1
+    out.append(sign*((m&((1<<19)-1))-(1<<18)))
+    m=2*(m>>19)+1
+    for _ in range(13):
+        out.append(sign*((m&((1<<18)-1))-(1<<17)))
+        m=2*(m>>18)+1
     out.append(sign*m)
-    assert all(v&1 and abs(v)<65536 for v in out)
-    assert sum(v<<(16*i) for i,v in enumerate(out))%N==2*k%N
+    assert len(out)==15 and all(v&1 for v in out)
+    assert abs(out[0]) < 1<<18
+    assert all(abs(v)<1<<17 for v in out[1:])
+    shifts=[0]+[17*c+1 for c in range(1,15)]
+    assert sum(v<<shift for v,shift in zip(out,shifts))%N==2*k%N
     return out
+
+
+def finish_homogeneous(X, Y, Z, xR, yR):
+    d=(xR*Z-X)%P
+    inv=pow(Z*d%P,-1,P)
+    iZ=inv*d%P
+    xP=X*iZ%P
+    yP=Y*iZ%P
+    slope1=(yR-yP)*pow(xR-xP,-1,P)%P
+    slope2=-(yR+yP)*pow(xR-xP,-1,P)%P
+    x1=(slope1*slope1-xP-xR)%P
+    x2=(slope2*slope2-xP-xR)%P
+    y1=(slope1*(xP-x1)-yP)%P
+    y2=(slope2*(xP-x2)-yP)%P
+    return x1,x2,y1&1,y2&1
+
+
+def finish_xyzz(X, Y, ZZ, ZZZ, xR, yR):
+    d=(xR*ZZ-X)%P
+    W=ZZ*ZZ%P*d%P
+    inv=pow(W,-1,P)
+    C=ZZ*d%P*d%P
+    h=ZZZ*inv%P
+    delta=C*inv%P
+    xs=(2*xR-delta)%P
+    m1=(yR*ZZZ-Y)%P*h%P
+    x1=(m1*m1-xs)%P
+    y1=(m1*(xR-x1)-yR)%P
+    m2=(yR*ZZZ+Y)%P*h%P
+    x2=(m2*m2-xs)%P
+    s2=(m2*(xR-x2)-yR)%P
+    return x1,x2,y1&1,(s2&1)^1
 
 
 def source_audit():
@@ -226,15 +263,20 @@ def source_audit():
     m=(root/'GPUMath.h').read_text()
     t=(root/'tests/gpu_epochs/tree_inverse.cuh').read_text()
     assert 'int32_t gte[16]' not in s
-    assert '_FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY)' in s
-    assert 'for (int c=2;c<GT_CHUNKS-1;c++)' in s
-    assert s.count('_PointAddXYZZ<true>')==1
-    assert s.count('_PointAddXYZZ<false>')==1
-    assert 'gt_recode_step(M,sign,GT_CHUNKS-1)' in s
-    assert '#define GT_CHUNKS   16' in s
+    assert '_FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt)' in s
+    assert 'gt_mixed_step<18>(M,sign)' in s
+    assert 'gt_mixed_step<17>(M,sign)' in s
+    assert 'for (int c=2;c<GT_CHUNKS;c++)' in s
+    assert '_PointAddXYZZ_mm_def(' in s
+    assert '_PointAddXYZZ_def(' in s
+    assert '#define GT_CHUNKS 15' in s
+    assert '#define GT_TOTAL_ENTRIES (1u << 20)' in s
+    assert 'qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod)' in s
+    assert 'qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod' in s
+    assert 'uint64_t *pts_x[2]' not in s
     assert '#include "square32.cuh"' in m
-    assert 'template<bool DEFER_Y>' in m
-    assert '_ModMult(Y3, Q, R);' in m
+    assert '_PointAddXYZZ_def(' in m
+    assert '_PointAddXYZZ_mm_def(' in m
     assert '__shared__ uint64_t tree[4][128]' in t
     assert 'n=blockDim.x/4' in t
     assert 'for(int width=n>=4 ? n>>3 : n>>1' in t
@@ -271,38 +313,48 @@ if __name__=='__main__':
             inverse_cases+=n
     arbitrary=0
     while arbitrary<20000:
-        pts=tuple((rng.randrange(P),rng.randrange(P)) for _ in range(16))
+        pts=tuple((rng.randrange(P),rng.randrange(P)) for _ in range(15))
         if denominators_nonzero(pts):check(pts,False);arbitrary+=1
     pool=[scalar_mult(rng.randrange(1,N)) for _ in range(64)]
     curves=0
     while curves<1000:
-        pts=tuple(rng.choice(pool) for _ in range(16))
+        pts=tuple(rng.choice(pool) for _ in range(15))
         if denominators_nonzero(pts):check(pts,True);curves+=1
     scalars=[0,1,N-1,N,N+1,2**256-1]
     scalars += [1<<b for b in range(256)]
     scalars += [rng.getrandbits(256) for _ in range(10000)]
     for k in scalars:recode(k)
-    # Complete folded table multiply, deferred chain, homogeneous conversion.
+    # Complete mixed-table multiply and raw-XYZZ finish representation.
     # Force boundary raw hashes >=n as well as random folded runtime bases.
     recovered=0
     for k in scalars[:6]+scalars[-24:]:
         if k%N==0:continue # inherited incomplete group law has no finite sum
         nri=rng.randrange(1,N)
         base=scalar_mult(nri*pow(2,-1,N)%N)
-        pts=tuple(scalar_mult(e*(1<<(16*i)),base) for i,e in enumerate(recode(k)))
+        shifts=[0]+[17*c+1 for c in range(1,15)]
+        pts=tuple(scalar_mult(e*(1<<shift),base) for e,shift in zip(recode(k),shifts))
         assert denominators_nonzero(pts)
         check(pts,True)
         exact=mm_deferred(*pts[:2]);anchor=pts[0][1]
-        for i in range(2,16):
-            exact=madd_from_deferred(exact,pts[i],anchor,i!=15)
+        for i in range(2,15):
+            exact=madd_from_deferred(exact,pts[i],anchor,i!=14)
             anchor=pts[i][1]
         x,y,zz,zzz=exact
-        z=zz*zzz%P
-        got=(x*zzz*pow(z,-1,P)%P,y*zz*pow(z,-1,P)%P)
+        got=normalize(exact)
         assert got==scalar_mult(k*nri)
         recovered+=1
+    finish_cases=0
+    while finish_cases<10000:
+        xP,yP,xR,yR=(rng.randrange(1,P) for _ in range(4))
+        z=rng.randrange(1,P)
+        zz=z*z%P; zzz=zz*z%P
+        X=xP*zz%P; Y=yP*zzz%P
+        if (xR*zz-X)%P==0:continue
+        assert finish_xyzz(X,Y,zz,zzz,xR,yR)==finish_homogeneous(
+            xP*z%P,yP*z%P,z,xR,yR
+        )
+        finish_cases+=1
     print(json.dumps(dict(status='PASS',include_files=includes,inverse_outputs=inverse_cases,
         arbitrary_field_chains=arbitrary,curve_chains=curves,scalar_recodes=len(scalars),
-        complete_folded_multiplies=recovered,tree_shared_bytes=4096,
+        complete_mixed_table_multiplies=recovered,xyzz_finish_cases=finish_cases,tree_shared_bytes=4096,
         block_barriers_256=12,multiplies_256=765),indent=2))
-
