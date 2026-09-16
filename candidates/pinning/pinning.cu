@@ -282,6 +282,69 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     return ok;
 }
 
+/* SHA-256 of a 33-byte compressed pubkey: W[9..14] are zero and W[15]=264.
+ * First sixteen rounds and the first message-schedule mix drop the zero-word
+ * sigmas. Later mixes are the generic WMIX. Bit-identical to _SHA256Transform
+ * on that padded block. */
+__device__ __forceinline__ void _SHA256TransformPk33(uint32_t output[8], const uint32_t in[9])
+{
+    uint32_t w[16];
+    #pragma unroll
+    for (int i = 0; i < 9; i++) w[i] = in[i];
+    #pragma unroll
+    for (int i = 9; i < 15; i++) w[i] = 0;
+    w[15] = 0x108u;
+
+    uint32_t t1, t2;
+    uint32_t a = I[0], b = I[1], c = I[2], d = I[3];
+    uint32_t e = I[4], f = I[5], g = I[6], h = I[7];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], w[8]);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
+
+    w[0] += s0(w[1]);
+    w[1] += s1(0x108u) + s0(w[2]);
+    w[2] += s1(w[0]) + s0(w[3]);
+    w[3] += s1(w[1]) + s0(w[4]);
+    w[4] += s1(w[2]) + s0(w[5]);
+    w[5] += s1(w[3]) + s0(w[6]);
+    w[6] += s1(w[4]) + 0x108u + s0(w[7]);
+    w[7] += s1(w[5]) + w[0] + s0(w[8]);
+    w[8] += s1(w[6]) + w[1];
+    w[9]  = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(0x108u);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    output[0] = I[0] + a; output[1] = I[1] + b;
+    output[2] = I[2] + c; output[3] = I[3] + d;
+    output[4] = I[4] + e; output[5] = I[5] + f;
+    output[6] = I[6] + g; output[7] = I[7] + h;
+}
+
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -964,14 +1027,13 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
         uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
         uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
-        uint32_t pb[16];
+        uint32_t pb[9];
         pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
         pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        uint32_t hs[8]; _SHA256TransformPk33(hs,pb);
         int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];
