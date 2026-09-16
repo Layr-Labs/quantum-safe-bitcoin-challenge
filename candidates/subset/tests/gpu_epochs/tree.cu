@@ -309,12 +309,12 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 /* Accumulate sixteen points with an affine-anchor-deferred XYZZ ordinate:
  * seed 3M+2S, thirteen deferred adds 7M+2S, final exact add 8M+2S.
  * The 102M+30S chain saves fourteen M versus the promoted 116M+30S chain.
- * Preserve the three-M homogeneous output conversion and downstream recovery:
- * X'=X*ZZZ, Y'=Y*ZZ, Z'=ZZ*ZZZ. No field inverse occurs here. */
+ * The ranked pipeline consumes raw XYZZ. The generic wrapper retains the
+ * three-M homogeneous conversion. No field inverse occurs in this chain. */
 /* Stream sixteen signed digits and defer the affine anchor's Y term.
- * Retain the promoted 32 MiB table, field/square implementation and recovery.
+ * Retain the promoted 32 MiB table geometry; arithmetic includes the carry repair.
  * Adapted from nullforest8200 PR17 and alvaroborras PR24. */
-__device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                       const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY) {
     uint64_t M[4]; int sign; gt_recode_setup(scalar,M,&sign);
     uint32_t idx; uint64_t neg;
@@ -323,7 +323,6 @@ __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
     gt_load_signed(gTX,gTY,0,idx,neg,x0,y0);
     gt_digit_idx(gt_recode_step(M,sign,1), &idx, &neg);
     gt_load_signed(gTX,gTY,1,idx,neg,x1,y1);
-    uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     #pragma unroll 1
@@ -336,10 +335,13 @@ __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
     gt_digit_idx(gt_recode_step(M,sign,GT_CHUNKS-1), &idx, &neg);
     gt_load_signed(gTX,gTY,GT_CHUNKS-1,idx,neg,cx,cy);
     _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
-    _ModMult(qx, X, ZZZ);
-    _ModMult(qy, Y, ZZ);
-    _ModMult(qz, ZZ, ZZZ);
-    qz[4]=0;
+}
+
+__device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+    const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY) {
+    uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
+    _FixedBaseSignedXYZZ(X,Y,ZZ,ZZZ,scalar,gTX,gTY);
+    _ModMult(qx,X,ZZZ); _ModMult(qy,Y,ZZ); _ModMult(qz,ZZ,ZZZ); qz[4]=0;
 }
 
 /* _FixedBaseSignedAffine: removed -- dead on the ranked path. It is still a __device__/
@@ -807,7 +809,14 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
 }
 
 #include "tree_inverse.cuh"
+#include "ranked_pipeline.cuh"
 
+/* RankedShortEpoch is instantiated only for the hosted short-epoch shape:
+ * single_hash, leading-zero gate, no easy/calibrate diagnostics.  Keeping a
+ * separate template instantiation lets ptxas discard the generic byte-stream
+ * hash builders, DER gates and second pubkey hash from the scored kernel while
+ * preserving the complete fallback implementation below. */
+template <bool RankedShortEpoch>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -851,7 +860,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * original whole-pool behaviour. */
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
-    if (fast_inc == QSB_SE_N_INC) {
+    if (RankedShortEpoch || fast_inc == QSB_SE_N_INC) {
         /* Short-epoch mode: blockIdx.x selects the epoch descriptor, which
          * supplies the 6 early skips (already folded into the epoch midstate);
          * threadIdx.x selects one of the 256 window omission sets from WIN3.
@@ -880,7 +889,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
     }
 
-  if (fast_inc == QSB_SE_N_INC) {
+  if (RankedShortEpoch || fast_inc == QSB_SE_N_INC) {
     qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
   } else if (fast_inc == QSB_FAST_N_INC) {
     // Cached states are rebuilt from this batch's midstate and public input.
@@ -1016,7 +1025,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* Ranked gate reads the state words. Only the easy/calibrate
          * diagnostics need the digest as bytes, so only they build it. */
         int vv;
-        if (calibrate_mode || easy_mode) {
+        if (!RankedShortEpoch && (calibrate_mode || easy_mode)) {
             uint8_t h[32];
             for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
                 h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
@@ -1028,7 +1037,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* Config A hashes once, so everything below is dead work on every
          * candidate. Leave BEFORE building the 64-byte padded block, not
          * after it: the memset/memcpy used to run unconditionally. */
-        if (single_hash) continue;
+        if (RankedShortEpoch || single_hash) continue;
         uint8_t h[32];
         for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
@@ -1054,7 +1063,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
         if(p<1024) {
             d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            if(se_desc) {
+            if(RankedShortEpoch || se_desc) {
                 for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
             } else {
@@ -1580,7 +1589,7 @@ int main(int argc, char **argv) {
         cudaGetDeviceCount(&dev_count);
         if (dev_count < 1) dev_count = 1;
         int eff_total = (total_gpus_override > 0) ? total_gpus_override : dev_count;
-        if (tile_path == NULL && eff_total == 1 && !easy && !calibrate
+        if (tile_path == NULL && eff_total == 1 && !easy && !calibrate && single_hash
             && n_pool == 150 && t_sel == 9
             && (int)dp.prefix_remainder_len == 42
             && (int)dp.tail_section_len == 218 && (int)dp.tx_suffix_len == 44
@@ -1892,6 +1901,26 @@ int main(int argc, char **argv) {
     printf("  Mode: %s, GPU %d (global %d of %d)\n", easy?"EASY":"REAL", gpu_index, effective_id, effective_total);
     printf("  Batch: %d combos per kernel launch\n", BATCH);
 
+    // 128 bytes of saved coordinates plus 32 bytes of tree space per candidate.
+    // At 8M candidates the scratch allocation is about 1.25 GiB, not a host transfer.
+    ulonglong2 *d_pipe_state = NULL;
+    uint64_t *d_pipe_roots = NULL, *d_pipe_tree = NULL;
+    uint64_t *d_pipe_super = NULL, *d_pipe_root_tree = NULL;
+    static_assert(QSB_SE_PER_EPOCH == 256, "pipeline requires 256 lanes");
+    static_assert(QSB_SE_LAUNCH_BLOCKS <= 65536, "root hierarchy capacity");
+    if (se_mode) {
+        size_t blocks = QSB_SE_LAUNCH_BLOCKS;
+        size_t groups = (blocks + 255) / 256;
+        cudaError_t pe;
+        if ((pe=cudaMalloc(&d_pipe_state, blocks*256u*8u*sizeof(ulonglong2))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_roots, blocks*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_tree, blocks*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_super, groups*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_root_tree, groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess) {
+            fprintf(stderr,"Ranked pipeline allocation: %s\n",cudaGetErrorString(pe)); return 1;
+        }
+    }
+
     uint8_t *h_combos = (uint8_t*)malloc(BATCH * t_sel);
     uint8_t *d_combos; cudaMalloc(&d_combos, BATCH * t_sel);
 
@@ -2037,22 +2066,15 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, 0,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gtX, d_gtY,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
+            cudaError_t launch_error = cudaGetLastError();
+            if (launch_error == cudaSuccess)
+                launch_error = qsb_launch_ranked_pipeline(nblk, batch_pos, d_epochs,
+                    d_gtX,d_gtY,d_u2rx,d_u2ry,d_pipe_state,d_pipe_roots,d_pipe_tree,
+                    d_pipe_super,d_pipe_root_tree,d_hit_cnt,d_hit_idx,d_hit_combos);
+            if (launch_error != cudaSuccess) {
+                fprintf(stderr,"Ranked pipeline launch: %s\n",cudaGetErrorString(launch_error)); return 1;
+            }
+            cudaError_t err = cudaDeviceSynchronize();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
@@ -2178,7 +2200,7 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -2378,7 +2400,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
