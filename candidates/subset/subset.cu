@@ -54,17 +54,50 @@ __constant__ int CHUNK_FIRST_ELEMENT[16] = {
     65536*0,65536*1,65536*2,65536*3,65536*4,65536*5,65536*6,65536*7,
     65536*8,65536*9,65536*10,65536*11,65536*12,65536*13,65536*14,65536*15,
 };
+/* Broadcast-from-all-threads recovery constants and the SHA pieces that are
+ * identical across candidates. Dummy signatures stay in global memory: skip
+ * sets diverge, so constant-cache broadcasting would serialize. */
+__constant__ uint64_t C_NRI[4];
+__constant__ uint64_t C_U2RX[4];
+__constant__ uint64_t C_U2RY[4];
+__constant__ uint64_t C_NEG2U2RX[4];
+__constant__ uint64_t C_NEG2U2RY[4];
+__constant__ uint8_t C_PREFIX_REM[64];
+__constant__ uint8_t C_TAIL[256];
+__constant__ uint8_t C_TX_SUFFIX[64];
 
-__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
-    int chunk=0; uint64_t qz[5]={1,0,0,0,0};
+__device__ __forceinline__ void load_gt_xy(uint64_t *x, uint64_t *y,
+        const uint8_t *gTableX, const uint8_t *gTableY, int chunk, uint16_t digit) {
+    size_t index = ((size_t)CHUNK_FIRST_ELEMENT[chunk] + (size_t)(digit - 1)) * 32;
+    const uint64_t *px = (const uint64_t *)(gTableX + index);
+    const uint64_t *py = (const uint64_t *)(gTableY + index);
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        x[i] = __ldg(px + i);
+        y[i] = __ldg(py + i);
+    }
+}
+
+/* Homogeneous (X:Y:Z) with affine meaning (X/Z, Y/Z) — the convention
+ * _PointAddSecp256k1 already uses for mixed affine adds. Returning Z
+ * avoids the per-candidate inverse that the affine wrapper used to do
+ * immediately before the caller set Z back to 1. */
+__device__ __forceinline__ void _PointMultiSecp256k1Projective(
+        uint64_t *qx, uint64_t *qy, uint64_t *qz,
+        uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
+    int chunk=0;
+    qz[0]=1;qz[1]=0;qz[2]=0;qz[3]=0;qz[4]=0;
     for(;chunk<16;chunk++){if(privKey[chunk]>0){
-        int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
-        memcpy(qx,gTableX+index,32);memcpy(qy,gTableY+index,32);chunk++;break;}}
+        load_gt_xy(qx,qy,gTableX,gTableY,chunk,privKey[chunk]);chunk++;break;}}
     for(;chunk<16;chunk++){if(privKey[chunk]>0){
         uint64_t gx[4],gy[4];
-        int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
-        memcpy(gx,gTableX+index,32);memcpy(gy,gTableY+index,32);
+        load_gt_xy(gx,gy,gTableX,gTableY,chunk,privKey[chunk]);
         _PointAddSecp256k1(qx,qy,qz,gx,gy);}}
+}
+
+__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
+    uint64_t qz[5]={1,0,0,0,0};
+    _PointMultiSecp256k1Projective(qx,qy,qz,privKey,gTableX,gTableY);
     _ModInv(qz);_ModMult(qx,qz);_ModMult(qy,qz);
 }
 
@@ -431,7 +464,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int pos_total = 0;
     /* Emit helper inlined manually to avoid lambda capture overhead. */
     for (int i = cached_bytes; i < prefix_remainder_len; i++) {
-        cur[cur_pos++] = d_prefix_remainder[i]; pos_total++;
+        cur[cur_pos++] = C_PREFIX_REM[i]; pos_total++;
         if (cur_pos == 64) {
             for (int k = 0; k < 16; k++)
                 blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
@@ -450,7 +483,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             if (sel < t_sel && skip[sel] == i) { sel++; continue; }
             const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
             for (int b = (i == first_row ? first_byte : 0); b < SIG_PUSH_SIZE; b++) {
-                cur[cur_pos++] = row[b]; pos_total++;
+                cur[cur_pos++] = __ldg(row + b); pos_total++;
                 if (cur_pos == 64) {
                     for (int k = 0; k < 16; k++)
                         blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
@@ -462,7 +495,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
     }
     for (int i = 0; i < tail_len; i++) {
-        cur[cur_pos++] = d_tail[i]; pos_total++;
+        cur[cur_pos++] = C_TAIL[i]; pos_total++;
         if (cur_pos == 64) {
             for (int k = 0; k < 16; k++)
                 blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
@@ -472,7 +505,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
     }
     for (int i = 0; i < tx_suffix_len; i++) {
-        cur[cur_pos++] = d_tx_suffix[i]; pos_total++;
+        cur[cur_pos++] = C_TX_SUFFIX[i]; pos_total++;
         if (cur_pos == 64) {
             for (int k = 0; k < 16; k++)
                 blk[k] = ((uint32_t)cur[k*4]<<24)|((uint32_t)cur[k*4+1]<<16)|
@@ -525,26 +558,26 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         sighash[i*4+2]=(s2[i]>>8)&0xFF; sighash[i*4+3]=s2[i]&0xFF;
     }
 
-    /* EC recovery with both flags + batch ModInv + 4 DER checks */
+    /* EC recovery: keep u1*G projective and add u2*R / -2u2*R in that
+     * frame, so the only field inverse is the final batch inverse of the
+     * two recovery Zs. Algebra: mixed-add of an affine point onto (X:Y:Z)
+     * is the same group add as first normalizing Z then adding. */
     uint64_t z[4]; for(int i=0;i<4;i++){z[i]=0;
         for(int b=0;b<8;b++) z[i]|=(uint64_t)sighash[31-i*8-b]<<(b*8);}
-    uint64_t nri[4]={d_nri[0],d_nri[1],d_nri[2],d_nri[3]};
+    uint64_t nri[4]={C_NRI[0],C_NRI[1],C_NRI[2],C_NRI[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1, nri, z);
     uint16_t pk[16]; memcpy(pk, u1, 32);
-    uint64_t qx[4],qy[4];
-    _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
-
-    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
-    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
     uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32);memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
+    _PointMultiSecp256k1Projective(q1x,q1y,q1z,pk,d_gtX,d_gtY);
+
+    uint64_t u2rx[4]={C_U2RX[0],C_U2RX[1],C_U2RX[2],C_U2RX[3]};
+    uint64_t u2ry[4]={C_U2RY[0],C_U2RY[1],C_U2RY[2],C_U2RY[3]};
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
     uint64_t q2x[4],q2y[4],q2z[5];
     memcpy(q2x,q1x,32);memcpy(q2y,q1y,32);memcpy(q2z,q1z,40);
-    uint64_t n2rx[4]={d_neg2u2rx[0],d_neg2u2rx[1],d_neg2u2rx[2],d_neg2u2rx[3]};
-    uint64_t n2ry[4]={d_neg2u2ry[0],d_neg2u2ry[1],d_neg2u2ry[2],d_neg2u2ry[3]};
+    uint64_t n2rx[4]={C_NEG2U2RX[0],C_NEG2U2RX[1],C_NEG2U2RX[2],C_NEG2U2RX[3]};
+    uint64_t n2ry[4]={C_NEG2U2RY[0],C_NEG2U2RY[1],C_NEG2U2RY[2],C_NEG2U2RY[3]};
     _PointAddSecp256k1(q2x,q2y,q2z,n2rx,n2ry);
 
     uint64_t prod[5]={0,0,0,0,0};
@@ -1194,12 +1227,23 @@ int main(int argc, char **argv) {
                 n2y[i]|=(uint64_t)dyb[31-i*8-b]<<(b*8);}}
         cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice);
         cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice);
+        cudaMemcpyToSymbol(C_NRI, dp.neg_r_inv, 32);
+        cudaMemcpyToSymbol(C_U2RX, dp.u2r_x, 32);
+        cudaMemcpyToSymbol(C_U2RY, dp.u2r_y, 32);
+        cudaMemcpyToSymbol(C_NEG2U2RX, n2x, 32);
+        cudaMemcpyToSymbol(C_NEG2U2RY, n2y, 32);
         BN_free(bx);BN_free(by);BN_free(dx);BN_free(dy);
         EC_POINT_free(pt);EC_POINT_free(dbl);
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    if (dp.prefix_remainder_len > 0 && dp.prefix_remainder_len <= 64)
+        cudaMemcpyToSymbol(C_PREFIX_REM, dp.prefix_remainder, dp.prefix_remainder_len);
+    if (dp.tail_section_len > 0 && dp.tail_section_len <= 256)
+        cudaMemcpyToSymbol(C_TAIL, dp.tail_section, dp.tail_section_len);
+    if (dp.tx_suffix_len > 0 && dp.tx_suffix_len <= 64)
+        cudaMemcpyToSymbol(C_TX_SUFFIX, dp.tx_suffix, dp.tx_suffix_len);
+
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
@@ -1211,7 +1255,7 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_qx, 1024 * 32);
     cudaMalloc(&d_hit_qy, 1024 * 32);
 
-    int BATCH = 1048576;  /* 1M: fewer launches, better GPU saturation (enum mode has no host fill cost) */
+    int BATCH = 4194304;  /* 4M: enum mode has no host fill; fewer launches keep the G-table hot */
     int BLKSZ = 256;
 
     /* Multi-GPU: each GPU handles every Nth first-index */
