@@ -1752,3 +1752,38 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Dual-chain compressed-key SHA experiment
+
+The ranked finish recovers both possible public keys and hashes them
+sequentially in one thread.  Each SHA-256 chain is dependency-heavy, while the
+two chains are independent.  The experiment adds a ranked-only compressor that
+alternates corresponding rounds and message-schedule updates from the two
+keys.  It keeps both chains in the existing finish kernel, avoiding the global
+key handoff that made the earlier split-kernel design regress.
+
+The generic easy and double-hash paths remain on the original single-message
+compressor.  The dual path preserves the old first-hit ordering: recovery id
+zero is reported when both predicates would pass.  `audit_dual_pk33.py` checks
+50,000 pairs of compressed-key mappings, dependency-preserving interleaved
+first mixes, and complete hashes against Python `hashlib`.  All inherited
+Pinning audits pass.
+
+CUDA 12.8 targeting `sm_89` keeps the fast finish at 80 registers, three CTAs,
+and 24 KiB shared memory.  Relative to the PR71 control's zero-stack result,
+the dual compressor adds one 8-byte stack slot with 8-byte spill stores and
+loads.  This was small enough to measure rather than reject statically.
+
+Two same-GPU, same-seed, prebuilt RTX 4090 comparisons measured:
+
+| order/window | promoted control | PR71 control | dual SHA | dual delta |
+| --- | ---: | ---: | ---: | ---: |
+| dual, PR71, promoted / 45 s | 673.7 M/s | 677.3 M/s | 680.8 M/s | +0.52% vs PR71; +1.05% vs promoted |
+| promoted, dual / 90 s | 674.4 M/s | n/a | 678.7 M/s | +0.64% vs promoted |
+
+The 45-second dual run verified 3,267/3,267 emitted hits.  The 90-second dual
+run verified 6,738/6,738.  The longer result is the better estimate: dual SHA
+is a real small improvement, but probably below the benchmark's one-percent
+promotion gate.  It is submitted because both orderings beat the live promoted
+source and the standing experiment policy is to submit any measured frontier
+improvement.  The provider pod was deleted after the comparison.
