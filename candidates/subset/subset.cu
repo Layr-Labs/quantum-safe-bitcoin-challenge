@@ -55,8 +55,12 @@ __constant__ int CHUNK_FIRST_ELEMENT[16] = {
     65536*8,65536*9,65536*10,65536*11,65536*12,65536*13,65536*14,65536*15,
 };
 
-__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
-    int chunk=0; uint64_t qz[5]={1,0,0,0,0};
+/* Keep homogeneous coordinates (X/Z, Y/Z) through the recovery additions.
+ * Only the final pair of public keys needs affine coordinates. */
+__device__ void _PointMultiSecp256k1Projective(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+                                            uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
+    int chunk=0;
+    qz[0]=1;qz[1]=0;qz[2]=0;qz[3]=0;qz[4]=0;
     for(;chunk<16;chunk++){if(privKey[chunk]>0){
         int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
         memcpy(qx,gTableX+index,32);memcpy(qy,gTableY+index,32);chunk++;break;}}
@@ -65,6 +69,13 @@ __device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privK
         int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
         memcpy(gx,gTableX+index,32);memcpy(gy,gTableY+index,32);
         _PointAddSecp256k1(qx,qy,qz,gx,gy);}}
+}
+
+/* The diagnostic kernel still requests the intermediate affine u1*G. */
+__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey,
+                                  uint8_t *gTableX, uint8_t *gTableY) {
+    uint64_t qz[5];
+    _PointMultiSecp256k1Projective(qx,qy,qz,privKey,gTableX,gTableY);
     _ModInv(qz);_ModMult(qx,qz);_ModMult(qy,qz);
 }
 
@@ -531,14 +542,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t nri[4]={d_nri[0],d_nri[1],d_nri[2],d_nri[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1, nri, z);
     uint16_t pk[16]; memcpy(pk, u1, 32);
-    uint64_t qx[4],qy[4];
-    _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
+    uint64_t q1x[4],q1y[4],q1z[5];
+    _PointMultiSecp256k1Projective(q1x,q1y,q1z,pk,d_gtX,d_gtY);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
-    uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32);memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
     uint64_t q2x[4],q2y[4],q2z[5];
