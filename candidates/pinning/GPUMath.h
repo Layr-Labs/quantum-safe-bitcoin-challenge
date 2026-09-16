@@ -1139,6 +1139,154 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
   _ModMult(p1z, vs3, p1z);
 }
 
+
+// ---------------------------------------------------------------------------------------
+// Fused field helpers for hot XYZZ / recovery tails:
+//   _ModAddSub256_abcc: r = a + b - 2*c
+//   _ModSub256_abcc:    r = a - b - 2*c
+//   _ModDblSub256:      r = 2*a - b
+// All keep the existing [0, 2^256) limb convention (not necessarily < p).
+// Replaces multi-step ModAdd/ModSub chains with one borrow/carry pass plus a
+// cheap C=2^32+977 fold. Independently audited.
+// ---------------------------------------------------------------------------------------
+__device__ __forceinline__ void _ModAddSub256_abcc(uint64_t *r, const uint64_t *a,
+                                                   const uint64_t *b, const uint64_t *c)
+{
+    /* r ≡ a + b - 2c (mod p), r in [0, 2^256). */
+    int64_t carry = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        __int128 t = (__int128)a[i] + (__int128)b[i]
+                   - (__int128)c[i] - (__int128)c[i] + (__int128)carry;
+        r[i] = (uint64_t)t;
+        carry = (int64_t)(t >> 64);
+    }
+    const uint64_t Cfold = 0x1000003D1ULL; /* 2^32 + 977 */
+    if (carry > 0) {
+        /* value = r + carry*2^256 ≡ r + carry*C; carry is 1 here. */
+        __int128 s = (__int128)r[0] + (__int128)carry * (__int128)Cfold;
+        r[0] = (uint64_t)s;
+        uint64_t cy = (uint64_t)(s >> 64);
+#pragma unroll
+        for (int i = 1; i < 4; i++) {
+            s = (__int128)r[i] + (__int128)cy;
+            r[i] = (uint64_t)s;
+            cy = (uint64_t)(s >> 64);
+        }
+        if (cy) {
+            s = (__int128)r[0] + (__int128)Cfold;
+            r[0] = (uint64_t)s;
+            cy = (uint64_t)(s >> 64);
+#pragma unroll
+            for (int i = 1; i < 4; i++) {
+                s = (__int128)r[i] + (__int128)cy;
+                r[i] = (uint64_t)s;
+                cy = (uint64_t)(s >> 64);
+            }
+        }
+        return;
+    }
+    uint64_t k = (uint64_t)(-carry); /* 0..2 */
+    if (k == 0) return;
+    uint64_t sub = k * Cfold;
+    uint64_t br;
+    USUBO(r[0], r[0], sub);
+    USUBC(r[1], r[1], 0ULL);
+    USUBC(r[2], r[2], 0ULL);
+    USUBC(r[3], r[3], 0ULL);
+    USUB(br, 0ULL, 0ULL);
+    if (br) {
+        /* wrapped = r_orig - sub + 2^256; want r_orig - sub + p = wrapped - C */
+        USUBO1(r[0], Cfold);
+        USUBC1(r[1], 0ULL);
+        USUBC1(r[2], 0ULL);
+        USUB1(r[3], 0ULL);
+    }
+}
+
+__device__ __forceinline__ void _ModSub256_abcc(uint64_t *r, const uint64_t *a,
+                                                const uint64_t *b, const uint64_t *c)
+{
+    /* r ≡ a - b - 2c (mod p), r in [0, 2^256). */
+    int64_t carry = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        __int128 t = (__int128)a[i] - (__int128)b[i]
+                   - (__int128)c[i] - (__int128)c[i] + (__int128)carry;
+        r[i] = (uint64_t)t;
+        carry = (int64_t)(t >> 64);
+    }
+    uint64_t k = (uint64_t)(-carry); /* 0..3 */
+    if (k == 0) return;
+    const uint64_t Cfold = 0x1000003D1ULL;
+    uint64_t sub = k * Cfold;
+    uint64_t br;
+    USUBO(r[0], r[0], sub);
+    USUBC(r[1], r[1], 0ULL);
+    USUBC(r[2], r[2], 0ULL);
+    USUBC(r[3], r[3], 0ULL);
+    USUB(br, 0ULL, 0ULL);
+    if (br) {
+        USUBO1(r[0], Cfold);
+        USUBC1(r[1], 0ULL);
+        USUBC1(r[2], 0ULL);
+        USUB1(r[3], 0ULL);
+    }
+}
+
+__device__ __forceinline__ void _ModDblSub256(uint64_t *r, const uint64_t *a,
+                                              const uint64_t *b)
+{
+    /* r ≡ 2*a - b (mod p), r in [0, 2^256). */
+    int64_t carry = 0;
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        __int128 t = (__int128)a[i] + (__int128)a[i]
+                   - (__int128)b[i] + (__int128)carry;
+        r[i] = (uint64_t)t;
+        carry = (int64_t)(t >> 64);
+    }
+    const uint64_t Cfold = 0x1000003D1ULL;
+    if (carry > 0) {
+        __int128 s = (__int128)r[0] + (__int128)carry * (__int128)Cfold;
+        r[0] = (uint64_t)s;
+        uint64_t cy = (uint64_t)(s >> 64);
+#pragma unroll
+        for (int i = 1; i < 4; i++) {
+            s = (__int128)r[i] + (__int128)cy;
+            r[i] = (uint64_t)s;
+            cy = (uint64_t)(s >> 64);
+        }
+        if (cy) {
+            s = (__int128)r[0] + (__int128)Cfold;
+            r[0] = (uint64_t)s;
+            cy = (uint64_t)(s >> 64);
+#pragma unroll
+            for (int i = 1; i < 4; i++) {
+                s = (__int128)r[i] + (__int128)cy;
+                r[i] = (uint64_t)s;
+                cy = (uint64_t)(s >> 64);
+            }
+        }
+        return;
+    }
+    uint64_t k = (uint64_t)(-carry); /* 0..1 */
+    if (k == 0) return;
+    uint64_t sub = k * Cfold;
+    uint64_t br;
+    USUBO(r[0], r[0], sub);
+    USUBC(r[1], r[1], 0ULL);
+    USUBC(r[2], r[2], 0ULL);
+    USUBC(r[3], r[3], 0ULL);
+    USUB(br, 0ULL, 0ULL);
+    if (br) {
+        USUBO1(r[0], Cfold);
+        USUBC1(r[1], 0ULL);
+        USUBC1(r[2], 0ULL);
+        USUB1(r[3], 0ULL);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // XYZZ coordinates: x = X/ZZ, y = Y/ZZZ with the invariant ZZ^3 == ZZZ^2 (a = 0 plays no
 // part in addition). Same limb convention as _ModMult: values in [0, 2^256), not
@@ -1181,9 +1329,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+  _ModAddSub256_abcc(T, T, PPP, Q);    // X3 = R^2 + PPP - 2V
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
@@ -1221,9 +1367,7 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
   _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+  _ModSub256_abcc(T, T, ZZZ3, Q);                  // X3 = R^2 - PPP - 2Q
 
   _ModSub256(Q, Q, T);                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)

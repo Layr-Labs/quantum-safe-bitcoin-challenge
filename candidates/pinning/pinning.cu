@@ -757,8 +757,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
 
     _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+    _ModDblSub256(W, xR, C);     /* xs = xP+xR = 2*xR-delta */
 
     _ModSub256(m, yb, Y);
     _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
