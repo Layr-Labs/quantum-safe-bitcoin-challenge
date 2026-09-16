@@ -516,6 +516,12 @@ static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
  * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
  * the block-wide inverse, and the benchmark scores verified throughput. */
 __device__ __constant__ uint8_t WIN3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
+/* The shared recovery point u2R is fixed for the loaded problem. Keeping its
+ * eight limbs in constant memory replaces eight 64-bit global loads per
+ * candidate on the hot path; the host uploads byte-identical copies once per
+ * run (see main), so every kernel observes the same values as before. */
+__device__ __constant__ uint64_t sub_u2rx_words[4];
+__device__ __constant__ uint64_t sub_u2ry_words[4];
 #include "window_schedule_shared.cuh"
 
 /* Combinadic unranking: rank -> sorted skip[0..t-1] in lex order for C(n,t).
@@ -891,6 +897,13 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 
+/* Ranked runs always grind single_hash && !easy && !calibrate: gpu_wrap.py
+ * appends single_hash, and the short-epoch ranked path requires !easy and
+ * !calibrate (see main). Forcing those constants through a template parameter
+ * lets the compiler drop the unreachable second public-key hash and the
+ * diagnostic DER byte paths from the hot kernel. Launches that need the
+ * generic behavior instantiate RANKED=false, whose codegen is unchanged. */
+template<bool RANKED>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -921,6 +934,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // All tail lanes remain present through the block inverse.
     if(blockIdx.x*blockDim.x>=batch_size)return;
     int active=idx<batch_size;
+    if (RANKED) { easy_mode = 0; single_hash = 1; calibrate_mode = 0; }
 
     /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
@@ -1070,8 +1084,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
 
-    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
-    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
+    uint64_t u2rx[4]={sub_u2rx_words[0],sub_u2rx_words[1],
+                      sub_u2rx_words[2],sub_u2rx_words[3]};
+    uint64_t u2ry[4]={sub_u2ry_words[0],sub_u2ry_words[1],
+                      sub_u2ry_words[2],sub_u2ry_words[3]};
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
      * W = ZZ^2*d with d = xR*ZZ - X; the block inverts W. */
     uint64_t prod[5];
@@ -1921,6 +1937,8 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri,dp.neg_r_inv,32,cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx,dp.u2r_x,32,cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(sub_u2rx_words,dp.u2r_x,sizeof(dp.u2r_x));
+    cudaMemcpyToSymbol(sub_u2ry_words,dp.u2r_y,sizeof(dp.u2r_y));
 
     /* Compute neg_2u2R */
     {
@@ -2123,7 +2141,23 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            if (single_hash && !easy && !calibrate)
+                kernel_digest<true><<<nblk, QSB_SE_PER_EPOCH>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+            else
+                kernel_digest<false><<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -2264,7 +2298,23 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            if (single_hash && !easy && !calibrate)
+                kernel_digest<true><<<grdsz, BLKSZ>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, prem_len_now,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, enum_base,
+                t_win, s_early, d_early, fast_inc, d_const_words, NULL);
+            else
+                kernel_digest<false><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -2464,7 +2514,23 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            if (single_hash && !easy && !calibrate)
+                kernel_digest<true><<<grdsz, BLKSZ>>>(
+                d_combos, n_pool, t_sel,
+                d_mid,
+                d_prem, (int)dp.prefix_remainder_len,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
+                t_sel, 0, d_early, 0, d_const_words, NULL);
+            else
+                kernel_digest<false><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
