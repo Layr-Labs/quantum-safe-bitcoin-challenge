@@ -340,6 +340,12 @@ __device__ void gpu_scalar_mulmod(uint64_t r[4], const uint64_t a[4], const uint
 #define MAX_T 16
 #define SIG_PUSH_SIZE 10
 
+/* The bytes before the first omitted push are identical for every subset
+ * with that first index. Cache their complete SHA blocks once per problem.
+ * Row zero is the supplied midstate; at most 24 additional blocks fit. */
+#define SUBSET_PREFIX_CACHE_ROWS (1 + (63 + MAX_N * SIG_PUSH_SIZE) / 64)
+__constant__ uint32_t SUBSET_PREFIX_MIDSTATES[SUBSET_PREFIX_CACHE_ROWS][8];
+
 /* Combinadic unranking: rank -> sorted skip[0..t-1] in lex order for C(n,t).
  * Uses BINOM_C table (C[n][k], capped at 2^63). Binary search per position
  * via hockey-stick prefix sums: sum_{c=lo}^{mid} C[n-c-1][k] =
@@ -394,7 +400,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
     uint8_t skip[MAX_T];
     if (d_combos == NULL) {
-        unrank_combo(enum_base + (uint64_t)idx, n_pool, t_sel, skip);
+        /* Reverse lexicographic order visits long retained prefixes first.
+         * It is a permutation of the entire space, with the same two recids
+         * and the same hit test for every candidate. */
+        uint64_t rank = BINOM_C[n_pool][t_sel] - 1 - enum_base - (uint64_t)idx;
+        unrank_combo(rank, n_pool, t_sel, skip);
     } else {
         for (int i = 0; i < t_sel; i++)
             skip[i] = d_combos[idx * t_sel + i];
@@ -405,15 +415,22 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * Instead emit bytes into a 64B window and transform full blocks on the fly.
      * Byte sources in order: prefix_remainder, included dummy_sigs (skip-aware),
      * tail, tx_suffix. Equivalent to the original suffix[] construction. */
+    int cached_blocks = 0;
+    if (n_pool <= MAX_N && prefix_remainder_len < 64) {
+        int first_skip = t_sel ? (int)skip[0] : n_pool;
+        cached_blocks = (prefix_remainder_len + first_skip * SIG_PUSH_SIZE) / 64;
+    }
+    int cached_bytes = cached_blocks * 64;
     uint32_t state[8];
-    for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
+    for (int i = 0; i < 8; i++)
+        state[i] = cached_blocks ? SUBSET_PREFIX_MIDSTATES[cached_blocks][i] : d_midstate[i];
 
     uint8_t cur[64];
     uint32_t blk[16];
     int cur_pos = 0;
     int pos_total = 0;
     /* Emit helper inlined manually to avoid lambda capture overhead. */
-    for (int i = 0; i < prefix_remainder_len; i++) {
+    for (int i = cached_bytes; i < prefix_remainder_len; i++) {
         cur[cur_pos++] = d_prefix_remainder[i]; pos_total++;
         if (cur_pos == 64) {
             for (int k = 0; k < 16; k++)
@@ -425,10 +442,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
     {
         int sel = 0;
-        for (int i = 0; i < n_pool; i++) {
+        int cached_dummy_bytes = cached_bytes > prefix_remainder_len
+                               ? cached_bytes - prefix_remainder_len : 0;
+        int first_row = cached_dummy_bytes / SIG_PUSH_SIZE;
+        int first_byte = cached_dummy_bytes % SIG_PUSH_SIZE;
+        for (int i = first_row; i < n_pool; i++) {
             if (sel < t_sel && skip[sel] == i) { sel++; continue; }
             const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
-            for (int b = 0; b < SIG_PUSH_SIZE; b++) {
+            for (int b = (i == first_row ? first_byte : 0); b < SIG_PUSH_SIZE; b++) {
                 cur[cur_pos++] = row[b]; pos_total++;
                 if (cur_pos == 64) {
                     for (int k = 0; k < 16; k++)
@@ -618,6 +639,28 @@ extern "C" {
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
+}
+
+static void build_subset_prefix_cache(
+    uint32_t out[SUBSET_PREFIX_CACHE_ROWS][8], const uint32_t initial[8],
+    const uint8_t *prefix, int prefix_len, const uint8_t *dummy, int n_pool
+) {
+    memset(out, 0, sizeof(uint32_t) * SUBSET_PREFIX_CACHE_ROWS * 8);
+    memcpy(out[0], initial, 32);
+    if (n_pool > MAX_N || prefix_len >= 64) return;
+    SHA256_CTX ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    for (int i = 0; i < 8; i++) ctx.h[i] = initial[i];
+    int blocks = (prefix_len + n_pool * SIG_PUSH_SIZE) / 64;
+    for (int b = 0; b < blocks; b++) {
+        uint8_t block[64];
+        for (int i = 0; i < 64; i++) {
+            int offset = b * 64 + i;
+            block[i] = offset < prefix_len ? prefix[offset] : dummy[offset - prefix_len];
+        }
+        SHA256_Transform(&ctx, block);
+        for (int i = 0; i < 8; i++) out[b + 1][i] = ctx.h[i];
+    }
 }
 
 static void compute_gtable(uint8_t *gTableX, uint8_t *gTableY) {
@@ -1086,6 +1129,16 @@ int main(int argc, char **argv) {
     int n_pool = dp.n;
     int t_sel = dp.t;
 
+    uint32_t prefix_cache[SUBSET_PREFIX_CACHE_ROWS][8];
+    build_subset_prefix_cache(prefix_cache, dp.midstate, dp.prefix_remainder,
+                              dp.prefix_remainder_len, dp.dummy_sigs, n_pool);
+    cudaError_t prefix_upload = cudaMemcpyToSymbol(
+        SUBSET_PREFIX_MIDSTATES, prefix_cache, sizeof(prefix_cache));
+    if (prefix_upload != cudaSuccess) {
+        fprintf(stderr, "Prefix midstate upload failed: %s\n", cudaGetErrorString(prefix_upload));
+        return 1;
+    }
+
     size_t gt_sz = 16ULL*65536*32;
     uint8_t *h_gtX=(uint8_t*)malloc(gt_sz), *h_gtY=(uint8_t*)malloc(gt_sz);
     compute_gtable(h_gtX, h_gtY);
@@ -1330,14 +1383,16 @@ int main(int argc, char **argv) {
 
     /* GPU-enum fast path: single GPU, no tiles (the ranked benchmark case).
      * Unrank combos on-GPU from a linear base, eliminating CPU fill + HtoD.
-     * Covers C(n,t) in lex order; runs until killed by harness timeout. */
+     * Covers all C(n,t) in reverse lex order; runs until harness timeout. */
     if (tile_path == NULL && effective_total == 1) {
-        printf("  Using GPU-enum fast path (no CPU fill, base-linear)\n");
+        printf("  Using GPU-enum fast path (reverse lex, cached SHA prefixes)\n");
         fflush(stdout);
         uint64_t enum_base = 0;
         struct timespec t_last_enum = t0;
         while (!found) {
-            int batch_pos = BATCH;
+            uint64_t remaining = global_total - enum_base;
+            int batch_pos = remaining < (uint64_t)BATCH ? (int)remaining : BATCH;
+            if (batch_pos == 0) break;
             uint32_t h_hit = 0;
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
@@ -1458,7 +1513,7 @@ int main(int argc, char **argv) {
                 }
                 t_last_enum = t_now;
             }
-            if (enum_base + (uint64_t)BATCH > global_total) break;
+            if (enum_base >= global_total) break;
         }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
