@@ -87,22 +87,25 @@ the represented scalar or introducing a new problem-dependent table format.
 The XYZZ addition chain now stores a deferred ordinate. If the stored point is
 `(X, Ycore, ZZ, ZZZ)` and its affine anchor is `a`, its actual ordinate is
 `Ycore - a*ZZZ`. The next addition restores that term in its slope numerator
-by using `(Ynext+a)*ZZZ - Ycore`. Intermediate additions leave the new anchor
-term deferred; the final addition explicitly subtracts it to return ordinary
-XYZZ coordinates. The seed also defers its first affine anchor.
+by using `(Ynext+a)*ZZZ - Ycore`. Every mixed add, including the last window,
+leaves the new anchor deferred. Affine recovery subtracts that last addend
+after dividing by `Z`: `y = Ycore/Z - Ylast`. The seed also defers its first
+affine anchor. The resolve specialization (`Y2*ZZZ` plus subtract) is gone,
+so the inlined multiply keeps a single 7M+2S live range.
 
 The two helper bodies come from the reviewed PR24 implementation, while their
 field primitives and `_ModSqr` remain those of the promoted Subset header.
-The loop processes chunks 2 through 14 with `<true>` and chunk 15 with
-`<false>`. The final dead anchor copy is absent. The unchanged conversion
-returns `X'=X*ZZZ`, `Y'=Y*ZZ`, `Z'=ZZ*ZZZ`, preserving the existing homogeneous
-recovery caller exactly.
+The loop processes chunks 2 through 15 with the same deferred add. The last
+affine addend is returned beside the homogeneous conversion `X'=X*ZZZ`,
+`Y'=Ycore*ZZ`, `Z'=ZZ*ZZZ`. Shared-denominator recovery then forms
+`yP = Y'*iZ - Ylast` before the two lambdas.
 
 At source arithmetic level, the original sixteen-point chain cost 116 field
-multiplications and 30 squares. The new chain costs 3M+2S for the seed,
-thirteen times 7M+2S, and 8M+2S for the last add: **102M+30S**. The three
-homogeneous-output multiplications remain in both versions. Saving fourteen
-multiplications is an operation-count result; it is not a measured percentage
+multiplications and 30 squares. The previous promoted chain cost 3M+2S for
+the seed, thirteen times 7M+2S, and 8M+2S for a resolved last add:
+**102M+30S**. This candidate uses fourteen times 7M+2S: **101M+30S**. The
+three homogeneous-output multiplications remain. Saving the last exact-Y
+multiply is an operation-count result; it is not a measured percentage
 speedup. Register allocation and instruction scheduling can change the outcome.
 
 ## Composed inverse schedule
@@ -158,13 +161,14 @@ Scalar cases include zero, n-1, n, n+1, 2^256-1, every single-bit input and
 point is infinity, matching the finite-output domain of this incomplete
 fixed-base addition chain. The promoted candidate has the same limitation.
 
-Static checks also verify helper specialization, elimination of the digit
-array on the production path, the retained 32 MiB geometry and square32
-implementation, include closure, and a clean `git diff --check`. Only the
-two point helpers, their one production call/accumulator, the inverse helper,
-and added documentation/audit change. SHA schedules, epoch construction,
-table generation, field multiplication, squaring, trusted harness and sibling
-Pinning files do not change.
+Static checks also verify the always-deferred mixed add, last-window affine
+anchor subtract, elimination of the digit array on the production path, the
+retained 32 MiB geometry and square32 implementation, include closure, and a
+clean `git diff --check`. The point helper, its production accumulator, the
+shared-denominator finish, the inverse helper, and the documentation/audit
+change together. SHA schedules, epoch construction, table generation, field
+multiplication, squaring, trusted harness and sibling Pinning files do not
+change except the one yOff subtract in affine recovery.
 
 These tests model arithmetic and scheduling; they do not execute CUDA source,
 PTX, GPU memory ordering, ptxas register allocation or the complete hit pipeline.

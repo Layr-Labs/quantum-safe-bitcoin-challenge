@@ -932,10 +932,11 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
-// Deferred-anchor variant imported from PR17/PR24. The stored ordinate is
-// Yactual + Yoff*ZZZ; intermediate calls carry that anchor, and the final
-// specialization resolves it. This is not a standalone ordinary XYZZ add.
-template<bool DEFER_Y>
+// Deferred-anchor mixed add imported from PR17/PR24. The stored ordinate is
+// Yactual + Y2*ZZZ after every window, including the last. Affine recovery
+// subtracts that last addend after dividing by ZZZ. This is not a standalone
+// ordinary XYZZ add: the resolve specialization is gone so the inlined
+// multiply keeps a single 7M+2S live range.
 __device__ __forceinline__ void _PointAddXYZZ(
     uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
     const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
@@ -967,13 +968,7 @@ __device__ __forceinline__ void _PointAddXYZZ(
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (DEFER_Y) {
-    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
-    _ModSub256(Y1, Q, S2);             // exact Y3
-  }
-
+  Load256(Y1, Q);                      // Ycore; actual Y3 = Ycore - Y2*ZZZ3
   Load256(X1, T);                      // X3
 }
 

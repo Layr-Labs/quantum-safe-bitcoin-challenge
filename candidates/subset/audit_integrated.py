@@ -132,20 +132,18 @@ def check(points, check_curve):
     assert chained[1] == (exact[1] + anchor_y * exact[3]) % P
     for i, point in enumerate(points[2:], start=2):
         exact = madd_old(exact, point)
-        final = i == len(points) - 1
-        chained = madd_from_deferred(chained, point, anchor_y, not final)
-        if final:
-            assert chained == exact, (i, points, exact, chained)
-        else:
-            anchor_y = point[1]
-            assert chained[0] == exact[0] and chained[2:] == exact[2:]
-            assert chained[1] == (exact[1] + anchor_y * exact[3]) % P
+        chained = madd_from_deferred(chained, point, anchor_y, True)
+        anchor_y = point[1]
+        assert chained[0] == exact[0] and chained[2:] == exact[2:]
+        assert chained[1] == (exact[1] + anchor_y * exact[3]) % P
     if check_curve:
         want = None
         for point in points:
             want = affine_add(want, point)
         assert want is not None
-        assert normalize(chained) == want
+        nx, ny = normalize(chained)
+        ny = (ny - points[-1][1]) % P
+        assert (nx, ny) == want
 
 
 def inverse_model(values):
@@ -226,14 +224,16 @@ def source_audit():
     m=(root/'GPUMath.h').read_text()
     t=(root/'tests/gpu_epochs/tree_inverse.cuh').read_text()
     assert 'int32_t gte[16]' not in s
-    assert '_FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY)' in s
-    assert 'for (int c=2;c<GT_CHUNKS-1;c++)' in s
-    assert s.count('_PointAddXYZZ<true>')==1
-    assert s.count('_PointAddXYZZ<false>')==1
-    assert 'gt_recode_step(M,sign,GT_CHUNKS-1)' in s
+    assert '_FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY,yoff)' in s
+    assert 'for (int c=2;c<GT_CHUNKS;c++)' in s
+    assert s.count('_PointAddXYZZ<true>')==0
+    assert s.count('_PointAddXYZZ<false>')==0
+    assert '_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0);' in s
+    assert '_ModSub256(yP, yP, yOff);' in s
+    assert 'template<bool DEFER_Y>' not in m
+    assert '_ModMult(S2, (uint64_t *)Y2, ZZZ1);' not in m
     assert '#define GT_CHUNKS   16' in s
     assert '#include "square32.cuh"' in m
-    assert 'template<bool DEFER_Y>' in m
     assert '_ModMult(Y3, Q, R);' in m
     assert '__shared__ uint64_t tree[4][128]' in t
     assert 'n=blockDim.x/4' in t
@@ -294,11 +294,12 @@ if __name__=='__main__':
         check(pts,True)
         exact=mm_deferred(*pts[:2]);anchor=pts[0][1]
         for i in range(2,16):
-            exact=madd_from_deferred(exact,pts[i],anchor,i!=15)
+            exact=madd_from_deferred(exact,pts[i],anchor,True)
             anchor=pts[i][1]
         x,y,zz,zzz=exact
         z=zz*zzz%P
-        got=(x*zzz*pow(z,-1,P)%P,y*zz*pow(z,-1,P)%P)
+        last=pts[15][1]
+        got=(x*zzz*pow(z,-1,P)%P,(y*zz*pow(z,-1,P)-last)%P)
         assert got==scalar_mult(k*nri)
         recovered+=1
     print(json.dumps(dict(status='PASS',include_files=includes,inverse_outputs=inverse_cases,

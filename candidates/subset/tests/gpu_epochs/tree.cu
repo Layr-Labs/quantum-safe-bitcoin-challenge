@@ -315,7 +315,8 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  * Retain the promoted 32 MiB table, field/square implementation and recovery.
  * Adapted from nullforest8200 PR17 and alvaroborras PR24. */
 __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
-                                      const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY) {
+                                      const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY,
+                                      uint64_t *yoff) {
     uint64_t M[4]; int sign; gt_recode_setup(scalar,M,&sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
@@ -327,16 +328,14 @@ __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
+    for (int c=2;c<GT_CHUNKS;c++){
         gt_digit_idx(gt_recode_step(M,sign,c), &idx, &neg);
         gt_load_signed(gTX,gTY,c,idx,neg,cx,cy);
-        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
     }
-    gt_digit_idx(gt_recode_step(M,sign,GT_CHUNKS-1), &idx, &neg);
-    gt_load_signed(gTX,gTY,GT_CHUNKS-1,idx,neg,cx,cy);
-    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
-    _ModMult(qx, X, ZZZ);
+    Load256(yoff, y0);                 /* last affine addend; y = Ycore/ZZZ - yoff */
+    _ModMult(qx, X, ZZZ);              /* Xh = X*ZZZ; Yh is still Ycore*ZZ */
     _ModMult(qy, Y, ZZ);
     _ModMult(qz, ZZ, ZZZ);
     qz[4]=0;
@@ -778,14 +777,16 @@ __device__ __forceinline__ void qsb_affine_finish_prepare(uint64_t *X, uint64_t 
     _ModMult(W, Z, D);
 }
 
-/* Stage 2: inv = 1/W. Outputs Q1 = P + R and Q2 = P - R in affine form. */
+/* Stage 2: inv = 1/W. Y is homogeneous Ycore (deferred last window).
+ * yP = Y/Z - yOff recovers the affine ordinate. Outputs Q1 = P+R and Q2 = P-R. */
 __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint64_t *Z, uint64_t *D, uint64_t *inv,
-                                                  uint64_t *xR, uint64_t *yR,
+                                                  uint64_t *xR, uint64_t *yR, uint64_t *yOff,
                                                   uint64_t *x1, uint64_t *y1, uint64_t *x2, uint64_t *y2) {
     uint64_t iZ[4], xP[4], yP[4], z2[4], id[4], s[4], t[4], m1[4], m2[4], sq[4], xs[4];
     _ModMult(iZ, inv, D);          /* 1/Z */
     _ModMult(xP, X, iZ);
     _ModMult(yP, Y, iZ);
+    _ModSub256(yP, yP, yOff);       /* Ycore/Z - last affine addend */
     _ModSqr(z2, Z);
     _ModMult(id, inv, z2);         /* 1/(xR - xP) */
     _ModSub256(s, yR, yP);
@@ -985,7 +986,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* u1*G in projective form via the signed-digit 32 MiB A-table; the affine
      * conversion is deferred to the single inverse below, so both recids share
      * one _ModInv. */
-    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY);
+    uint64_t qx[4],qy[4],qz[5],yoff[4]; _FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY,yoff);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
@@ -996,7 +997,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(!active){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
     uint64_t q1x[4],q1y[4],q2x[4],q2y[4];
-    qsb_affine_finish(qx,qy,qz,fD,prod,u2rx,u2ry,q1x,q1y,q2x,q2y);
+    qsb_affine_finish(qx,qy,qz,fD,prod,u2rx,u2ry,yoff,q1x,q1y,q2x,q2y);
     if(!active)return;
 
     int v=0, hash_choice=0, recid=0;
