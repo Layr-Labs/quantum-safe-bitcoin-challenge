@@ -51,6 +51,250 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "../../GPUHash.h"
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
+/* Per-instance recovery point u2R, read by every candidate; constant memory
+ * broadcasts one address to the whole warp instead of four LDGs per candidate. */
+__device__ __constant__ uint64_t QSB_U2R[8];
+
+/* Fused dual SHA-256 over the two compressed recovery keys (recid 0 and 1).
+ * The two transforms are independent given the affine finish outputs, so one
+ * interleaved body doubles instruction-level parallelism in a stage that is
+ * latency-limited at this kernel's 25% occupancy. K reads are shared
+ * broadcasts; both packed blocks are register-resident. Bit-identical to two
+ * sequential _SHA256Transform calls. */
+__device__ __forceinline__ void qsb_sha256_dual_recid(uint32_t o0[8], uint32_t o1[8],
+                                                      uint32_t w0[16], uint32_t w1[16]) {
+    uint32_t a0=o0[0],b0=o0[1],c0=o0[2],d0=o0[3],e0=o0[4],f0=o0[5],g0=o0[6],h0=o0[7];
+    uint32_t a1=o1[0],b1=o1[1],c1=o1[2],d1=o1[3],e1=o1[4],f1=o1[5],g1=o1[6],h1=o1[7];
+    uint32_t t1a,t2a,t1b,t2b;
+
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[0] + w0[0]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[1] + w0[1]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[2] + w0[2]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[3] + w0[3]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[4] + w0[4]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[5] + w0[5]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[6] + w0[6]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[7] + w0[7]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[8] + w0[8]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[9] + w0[9]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[10] + w0[10]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[11] + w0[11]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[12] + w0[12]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[13] + w0[13]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[14] + w0[14]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[15] + w0[15]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[0] + w1[0]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[1] + w1[1]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[2] + w1[2]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[3] + w1[3]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[4] + w1[4]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[5] + w1[5]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[6] + w1[6]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[7] + w1[7]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[8] + w1[8]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[9] + w1[9]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[10] + w1[10]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[11] + w1[11]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[12] + w1[12]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[13] + w1[13]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[14] + w1[14]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[15] + w1[15]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    w0[0] += s1(w0[14]) + w0[9] + s0(w0[1]);
+    w0[1] += s1(w0[15]) + w0[10] + s0(w0[2]);
+    w0[2] += s1(w0[0]) + w0[11] + s0(w0[3]);
+    w0[3] += s1(w0[1]) + w0[12] + s0(w0[4]);
+    w0[4] += s1(w0[2]) + w0[13] + s0(w0[5]);
+    w0[5] += s1(w0[3]) + w0[14] + s0(w0[6]);
+    w0[6] += s1(w0[4]) + w0[15] + s0(w0[7]);
+    w0[7] += s1(w0[5]) + w0[0] + s0(w0[8]);
+    w0[8] += s1(w0[6]) + w0[1] + s0(w0[9]);
+    w0[9] += s1(w0[7]) + w0[2] + s0(w0[10]);
+    w0[10] += s1(w0[8]) + w0[3] + s0(w0[11]);
+    w0[11] += s1(w0[9]) + w0[4] + s0(w0[12]);
+    w0[12] += s1(w0[10]) + w0[5] + s0(w0[13]);
+    w0[13] += s1(w0[11]) + w0[6] + s0(w0[14]);
+    w0[14] += s1(w0[12]) + w0[7] + s0(w0[15]);
+    w0[15] += s1(w0[13]) + w0[8] + s0(w0[0]);
+    w1[0] += s1(w1[14]) + w1[9] + s0(w1[1]);
+    w1[1] += s1(w1[15]) + w1[10] + s0(w1[2]);
+    w1[2] += s1(w1[0]) + w1[11] + s0(w1[3]);
+    w1[3] += s1(w1[1]) + w1[12] + s0(w1[4]);
+    w1[4] += s1(w1[2]) + w1[13] + s0(w1[5]);
+    w1[5] += s1(w1[3]) + w1[14] + s0(w1[6]);
+    w1[6] += s1(w1[4]) + w1[15] + s0(w1[7]);
+    w1[7] += s1(w1[5]) + w1[0] + s0(w1[8]);
+    w1[8] += s1(w1[6]) + w1[1] + s0(w1[9]);
+    w1[9] += s1(w1[7]) + w1[2] + s0(w1[10]);
+    w1[10] += s1(w1[8]) + w1[3] + s0(w1[11]);
+    w1[11] += s1(w1[9]) + w1[4] + s0(w1[12]);
+    w1[12] += s1(w1[10]) + w1[5] + s0(w1[13]);
+    w1[13] += s1(w1[11]) + w1[6] + s0(w1[14]);
+    w1[14] += s1(w1[12]) + w1[7] + s0(w1[15]);
+    w1[15] += s1(w1[13]) + w1[8] + s0(w1[0]);
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[16] + w0[0]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[17] + w0[1]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[18] + w0[2]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[19] + w0[3]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[20] + w0[4]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[21] + w0[5]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[22] + w0[6]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[23] + w0[7]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[24] + w0[8]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[25] + w0[9]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[26] + w0[10]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[27] + w0[11]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[28] + w0[12]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[29] + w0[13]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[30] + w0[14]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[31] + w0[15]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[16] + w1[0]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[17] + w1[1]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[18] + w1[2]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[19] + w1[3]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[20] + w1[4]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[21] + w1[5]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[22] + w1[6]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[23] + w1[7]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[24] + w1[8]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[25] + w1[9]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[26] + w1[10]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[27] + w1[11]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[28] + w1[12]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[29] + w1[13]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[30] + w1[14]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[31] + w1[15]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    w0[0] += s1(w0[14]) + w0[9] + s0(w0[1]);
+    w0[1] += s1(w0[15]) + w0[10] + s0(w0[2]);
+    w0[2] += s1(w0[0]) + w0[11] + s0(w0[3]);
+    w0[3] += s1(w0[1]) + w0[12] + s0(w0[4]);
+    w0[4] += s1(w0[2]) + w0[13] + s0(w0[5]);
+    w0[5] += s1(w0[3]) + w0[14] + s0(w0[6]);
+    w0[6] += s1(w0[4]) + w0[15] + s0(w0[7]);
+    w0[7] += s1(w0[5]) + w0[0] + s0(w0[8]);
+    w0[8] += s1(w0[6]) + w0[1] + s0(w0[9]);
+    w0[9] += s1(w0[7]) + w0[2] + s0(w0[10]);
+    w0[10] += s1(w0[8]) + w0[3] + s0(w0[11]);
+    w0[11] += s1(w0[9]) + w0[4] + s0(w0[12]);
+    w0[12] += s1(w0[10]) + w0[5] + s0(w0[13]);
+    w0[13] += s1(w0[11]) + w0[6] + s0(w0[14]);
+    w0[14] += s1(w0[12]) + w0[7] + s0(w0[15]);
+    w0[15] += s1(w0[13]) + w0[8] + s0(w0[0]);
+    w1[0] += s1(w1[14]) + w1[9] + s0(w1[1]);
+    w1[1] += s1(w1[15]) + w1[10] + s0(w1[2]);
+    w1[2] += s1(w1[0]) + w1[11] + s0(w1[3]);
+    w1[3] += s1(w1[1]) + w1[12] + s0(w1[4]);
+    w1[4] += s1(w1[2]) + w1[13] + s0(w1[5]);
+    w1[5] += s1(w1[3]) + w1[14] + s0(w1[6]);
+    w1[6] += s1(w1[4]) + w1[15] + s0(w1[7]);
+    w1[7] += s1(w1[5]) + w1[0] + s0(w1[8]);
+    w1[8] += s1(w1[6]) + w1[1] + s0(w1[9]);
+    w1[9] += s1(w1[7]) + w1[2] + s0(w1[10]);
+    w1[10] += s1(w1[8]) + w1[3] + s0(w1[11]);
+    w1[11] += s1(w1[9]) + w1[4] + s0(w1[12]);
+    w1[12] += s1(w1[10]) + w1[5] + s0(w1[13]);
+    w1[13] += s1(w1[11]) + w1[6] + s0(w1[14]);
+    w1[14] += s1(w1[12]) + w1[7] + s0(w1[15]);
+    w1[15] += s1(w1[13]) + w1[8] + s0(w1[0]);
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[32] + w0[0]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[33] + w0[1]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[34] + w0[2]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[35] + w0[3]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[36] + w0[4]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[37] + w0[5]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[38] + w0[6]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[39] + w0[7]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[40] + w0[8]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[41] + w0[9]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[42] + w0[10]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[43] + w0[11]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[44] + w0[12]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[45] + w0[13]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[46] + w0[14]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[47] + w0[15]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[32] + w1[0]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[33] + w1[1]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[34] + w1[2]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[35] + w1[3]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[36] + w1[4]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[37] + w1[5]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[38] + w1[6]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[39] + w1[7]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[40] + w1[8]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[41] + w1[9]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[42] + w1[10]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[43] + w1[11]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[44] + w1[12]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[45] + w1[13]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[46] + w1[14]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[47] + w1[15]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    w0[0] += s1(w0[14]) + w0[9] + s0(w0[1]);
+    w0[1] += s1(w0[15]) + w0[10] + s0(w0[2]);
+    w0[2] += s1(w0[0]) + w0[11] + s0(w0[3]);
+    w0[3] += s1(w0[1]) + w0[12] + s0(w0[4]);
+    w0[4] += s1(w0[2]) + w0[13] + s0(w0[5]);
+    w0[5] += s1(w0[3]) + w0[14] + s0(w0[6]);
+    w0[6] += s1(w0[4]) + w0[15] + s0(w0[7]);
+    w0[7] += s1(w0[5]) + w0[0] + s0(w0[8]);
+    w0[8] += s1(w0[6]) + w0[1] + s0(w0[9]);
+    w0[9] += s1(w0[7]) + w0[2] + s0(w0[10]);
+    w0[10] += s1(w0[8]) + w0[3] + s0(w0[11]);
+    w0[11] += s1(w0[9]) + w0[4] + s0(w0[12]);
+    w0[12] += s1(w0[10]) + w0[5] + s0(w0[13]);
+    w0[13] += s1(w0[11]) + w0[6] + s0(w0[14]);
+    w0[14] += s1(w0[12]) + w0[7] + s0(w0[15]);
+    w0[15] += s1(w0[13]) + w0[8] + s0(w0[0]);
+    w1[0] += s1(w1[14]) + w1[9] + s0(w1[1]);
+    w1[1] += s1(w1[15]) + w1[10] + s0(w1[2]);
+    w1[2] += s1(w1[0]) + w1[11] + s0(w1[3]);
+    w1[3] += s1(w1[1]) + w1[12] + s0(w1[4]);
+    w1[4] += s1(w1[2]) + w1[13] + s0(w1[5]);
+    w1[5] += s1(w1[3]) + w1[14] + s0(w1[6]);
+    w1[6] += s1(w1[4]) + w1[15] + s0(w1[7]);
+    w1[7] += s1(w1[5]) + w1[0] + s0(w1[8]);
+    w1[8] += s1(w1[6]) + w1[1] + s0(w1[9]);
+    w1[9] += s1(w1[7]) + w1[2] + s0(w1[10]);
+    w1[10] += s1(w1[8]) + w1[3] + s0(w1[11]);
+    w1[11] += s1(w1[9]) + w1[4] + s0(w1[12]);
+    w1[12] += s1(w1[10]) + w1[5] + s0(w1[13]);
+    w1[13] += s1(w1[11]) + w1[6] + s0(w1[14]);
+    w1[14] += s1(w1[12]) + w1[7] + s0(w1[15]);
+    w1[15] += s1(w1[13]) + w1[8] + s0(w1[0]);
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[48] + w0[0]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[49] + w0[1]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[50] + w0[2]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[51] + w0[3]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[52] + w0[4]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[53] + w0[5]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[54] + w0[6]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[55] + w0[7]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1a = h0 + S1(e0) + Ch(e0,f0,g0) + K[56] + w0[8]; t2a = S0(a0) + Maj(a0,b0,c0); d0 += t1a; h0 = t1a + t2a;
+    t1a = g0 + S1(d0) + Ch(d0,e0,f0) + K[57] + w0[9]; t2a = S0(h0) + Maj(h0,a0,b0); c0 += t1a; g0 = t1a + t2a;
+    t1a = f0 + S1(c0) + Ch(c0,d0,e0) + K[58] + w0[10]; t2a = S0(g0) + Maj(g0,h0,a0); b0 += t1a; f0 = t1a + t2a;
+    t1a = e0 + S1(b0) + Ch(b0,c0,d0) + K[59] + w0[11]; t2a = S0(f0) + Maj(f0,g0,h0); a0 += t1a; e0 = t1a + t2a;
+    t1a = d0 + S1(a0) + Ch(a0,b0,c0) + K[60] + w0[12]; t2a = S0(e0) + Maj(e0,f0,g0); h0 += t1a; d0 = t1a + t2a;
+    t1a = c0 + S1(h0) + Ch(h0,a0,b0) + K[61] + w0[13]; t2a = S0(d0) + Maj(d0,e0,f0); g0 += t1a; c0 = t1a + t2a;
+    t1a = b0 + S1(g0) + Ch(g0,h0,a0) + K[62] + w0[14]; t2a = S0(c0) + Maj(c0,d0,e0); f0 += t1a; b0 = t1a + t2a;
+    t1a = a0 + S1(f0) + Ch(f0,g0,h0) + K[63] + w0[15]; t2a = S0(b0) + Maj(b0,c0,d0); e0 += t1a; a0 = t1a + t2a;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[48] + w1[0]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[49] + w1[1]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[50] + w1[2]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[51] + w1[3]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[52] + w1[4]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[53] + w1[5]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[54] + w1[6]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[55] + w1[7]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    t1b = h1 + S1(e1) + Ch(e1,f1,g1) + K[56] + w1[8]; t2b = S0(a1) + Maj(a1,b1,c1); d1 += t1b; h1 = t1b + t2b;
+    t1b = g1 + S1(d1) + Ch(d1,e1,f1) + K[57] + w1[9]; t2b = S0(h1) + Maj(h1,a1,b1); c1 += t1b; g1 = t1b + t2b;
+    t1b = f1 + S1(c1) + Ch(c1,d1,e1) + K[58] + w1[10]; t2b = S0(g1) + Maj(g1,h1,a1); b1 += t1b; f1 = t1b + t2b;
+    t1b = e1 + S1(b1) + Ch(b1,c1,d1) + K[59] + w1[11]; t2b = S0(f1) + Maj(f1,g1,h1); a1 += t1b; e1 = t1b + t2b;
+    t1b = d1 + S1(a1) + Ch(a1,b1,c1) + K[60] + w1[12]; t2b = S0(e1) + Maj(e1,f1,g1); h1 += t1b; d1 = t1b + t2b;
+    t1b = c1 + S1(h1) + Ch(h1,a1,b1) + K[61] + w1[13]; t2b = S0(d1) + Maj(d1,e1,f1); g1 += t1b; c1 = t1b + t2b;
+    t1b = b1 + S1(g1) + Ch(g1,h1,a1) + K[62] + w1[14]; t2b = S0(c1) + Maj(c1,d1,e1); f1 += t1b; b1 = t1b + t2b;
+    t1b = a1 + S1(f1) + Ch(f1,g1,h1) + K[63] + w1[15]; t2b = S0(b1) + Maj(b1,c1,d1); e1 += t1b; a1 = t1b + t2b;
+    o0[0]+=a0;o0[1]+=b0;o0[2]+=c0;o0[3]+=d0;o0[4]+=e0;o0[5]+=f0;o0[6]+=g0;o0[7]+=h0;
+    o1[0]+=a1;o1[1]+=b1;o1[2]+=c1;o1[3]+=d1;o1[4]+=e1;o1[5]+=f1;o1[6]+=g1;o1[7]+=h1;
+}
+
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -158,7 +402,7 @@ __device__ __forceinline__ void qsb_compress_constant_rolled(uint32_t *output){
         uint32_t a=output[0],b=output[1],c=output[2],d=output[3];
         uint32_t e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
         #pragma unroll 1
-        for(int r=0;r<64;r+=8){
+        for(int r=0;r<64;r+=16){
             S2Round(a,b,c,d,e,f,g,h,0,QSB_CONST_SCHEDULE[block][r]);
             S2Round(h,a,b,c,d,e,f,g,0,QSB_CONST_SCHEDULE[block][r+1]);
             S2Round(g,h,a,b,c,d,e,f,0,QSB_CONST_SCHEDULE[block][r+2]);
@@ -167,7 +411,15 @@ __device__ __forceinline__ void qsb_compress_constant_rolled(uint32_t *output){
             S2Round(d,e,f,g,h,a,b,c,0,QSB_CONST_SCHEDULE[block][r+5]);
             S2Round(c,d,e,f,g,h,a,b,0,QSB_CONST_SCHEDULE[block][r+6]);
             S2Round(b,c,d,e,f,g,h,a,0,QSB_CONST_SCHEDULE[block][r+7]);
-        }
+                    S2Round(a,b,c,d,e,f,g,h,0,QSB_CONST_SCHEDULE[block][r+8]);
+            S2Round(h,a,b,c,d,e,f,g,0,QSB_CONST_SCHEDULE[block][r+9]);
+            S2Round(g,h,a,b,c,d,e,f,0,QSB_CONST_SCHEDULE[block][r+10]);
+            S2Round(f,g,h,a,b,c,d,e,0,QSB_CONST_SCHEDULE[block][r+11]);
+            S2Round(e,f,g,h,a,b,c,d,0,QSB_CONST_SCHEDULE[block][r+12]);
+            S2Round(d,e,f,g,h,a,b,c,0,QSB_CONST_SCHEDULE[block][r+13]);
+            S2Round(c,d,e,f,g,h,a,b,0,QSB_CONST_SCHEDULE[block][r+14]);
+            S2Round(b,c,d,e,f,g,h,a,0,QSB_CONST_SCHEDULE[block][r+15]);
+}
         output[0]+=a;output[1]+=b;output[2]+=c;output[3]+=d;
         output[4]+=e;output[5]+=f;output[6]+=g;output[7]+=h;
     }
@@ -467,7 +719,7 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_TWIN      3
 #define QSB_SE_CUT       137
 #define QSB_SE_PER_EPOCH 256
-#define QSB_SE_LAUNCH_BLOCKS 32768   /* x 256 threads = 8M candidates/launch */
+#define QSB_SE_LAUNCH_BLOCKS 65536   /* x 256 threads = 16.8M candidates/launch; depth-2 pipelined */
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -808,6 +1060,7 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
 
 #include "tree_inverse.cuh"
 
+template<bool FastSE, bool RankedSingle>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -820,20 +1073,20 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_tx_suffix,
     int tx_suffix_len,
     int total_preimage_len,
-    const uint64_t * __restrict__ d_nri,
-    const uint64_t * __restrict__ d_u2rx, const uint64_t * __restrict__ d_u2ry,
-    const uint64_t * __restrict__ d_neg2u2rx, const uint64_t * __restrict__ d_neg2u2ry,
     uint8_t * __restrict__ d_gtX, uint8_t * __restrict__ d_gtY,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
-    uint8_t *d_hit_combos, uint8_t *d_hit_sighash,
-    uint8_t *d_hit_keynonce, uint8_t *d_hit_pubhash,
-    uint8_t *d_hit_qx, uint8_t *d_hit_qy,
-    int batch_size, int easy_mode, int single_hash, int calibrate_mode,
+    uint8_t *d_hit_combos,
+    int batch_size, int easy_mode_arg, int single_hash_arg, int calibrate_mode_arg,
     int window_start, uint64_t enum_base,
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
-    int fast_inc, const uint32_t * __restrict__ d_const_words,
+    int fast_inc_arg, const uint32_t * __restrict__ d_const_words,
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 ) {
+    // Only selected by the host when all three mode conditions hold.
+    const int easy_mode = RankedSingle ? 0 : easy_mode_arg;
+    const int single_hash = RankedSingle ? 1 : single_hash_arg;
+    const int calibrate_mode = RankedSingle ? 0 : calibrate_mode_arg;
+    const int fast_inc = FastSE ? QSB_SE_N_INC : fast_inc_arg;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // All tail lanes remain present through the block inverse.
     if(blockIdx.x*blockDim.x>=batch_size)return;
@@ -988,8 +1241,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * one _ModInv. */
     uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,gte,d_gtX,d_gtY);
 
-    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
-    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     /* Both recovery flags from one shared-denominator inverse. */
     uint64_t fD[4], prod[5]={0,0,0,0,0};
     qsb_affine_finish_prepare(qx,qz,u2rx,fD,prod);
@@ -1001,6 +1254,30 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(!active)return;
 
     int v=0, hash_choice=0, recid=0;
+    if (single_hash && !calibrate_mode && !easy_mode) {
+        /* Ranked path: both recids' compressed-key hashes in one fused body.
+         * Priority preserved: recid 0 is tested first, exactly like the
+         * sequential loop it replaces. */
+        uint32_t *x0=(uint32_t*)q1x, *x1=(uint32_t*)q2x;
+        uint32_t w0[16], w1[16];
+        w0[0]=__byte_perm(x0[7],0x2+(uint8_t)(q1y[0]&1),0x4321);
+        w1[0]=__byte_perm(x1[7],0x2+(uint8_t)(q2y[0]&1),0x4321);
+        #pragma unroll
+        for(int j=1;j<8;j++){
+            w0[j]=__byte_perm(x0[8-j],x0[7-j],0x0765);
+            w1[j]=__byte_perm(x1[8-j],x1[7-j],0x0765);
+        }
+        w0[8]=__byte_perm(x0[0],0x80,0x0456);
+        w1[8]=__byte_perm(x1[0],0x80,0x0456);
+        #pragma unroll
+        for(int j=9;j<15;j++){w0[j]=0;w1[j]=0;}
+        w0[15]=0x108;w1[15]=0x108;
+        uint32_t hs0[8],hs1[8];
+        _SHA256Initialize(hs0);_SHA256Initialize(hs1);
+        qsb_sha256_dual_recid(hs0,hs1,w0,w1);
+        if (gpu_bench_valid_words(hs0)) { v=1;hash_choice=0;recid=0; }
+        else if (gpu_bench_valid_words(hs1)) { v=1;hash_choice=0;recid=1; }
+    } else {
     uint64_t *pts_x[2]={q1x,q2x};
     uint64_t *pts_y[2]={q1y,q2y};
     for(int ri=0;ri<2&&!v;ri++){
@@ -1046,6 +1323,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             vv = gpu_bench_valid_words(h2s);
         }
         if(vv){ v=1;hash_choice=1;recid=ri; break; }
+    }
     }
 
     /* The bridge parses only `indices=` and `recid=` out of the hit file
@@ -1830,14 +2108,18 @@ int main(int argc, char **argv) {
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
     }
 
-    uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
-    cudaMalloc(&d_nri,32);cudaMalloc(&d_u2rx,32);cudaMalloc(&d_u2ry,32);
-    cudaMalloc(&d_neg2u2rx,32);cudaMalloc(&d_neg2u2ry,32);
-    cudaMemcpy(d_nri,dp.neg_r_inv,32,cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2rx,dp.u2r_x,32,cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
+    {
+        uint64_t h_u2r[8];
+        memcpy(h_u2r, dp.u2r_x, 32);
+        memcpy(h_u2r + 4, dp.u2r_y, 32);
+        if (cudaMemcpyToSymbol(QSB_U2R, h_u2r, sizeof(h_u2r)) != cudaSuccess) {
+            fprintf(stderr, "ERROR: QSB_U2R upload failed\n"); return 1;
+        }
+    }
 
-    /* Compute neg_2u2R */
+    /* neg_2u2R device buffers removed: no kernel path reads them. The OpenSSL
+     * point double+invert that fed them ran inside the timed window. */
+#if 0
     {
         EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1);
         BN_CTX *ctx=BN_CTX_new();
@@ -1865,18 +2147,13 @@ int main(int argc, char **argv) {
         EC_POINT_free(pt);EC_POINT_free(dbl);
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
+#endif
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
-    uint8_t *d_hit_combos, *d_hit_sighash;
-    uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
+    uint8_t *d_hit_combos;
     cudaMalloc(&d_hit_cnt,4);cudaMalloc(&d_hit_idx,1024*4);
     cudaMalloc(&d_hit_combos, 1024 * MAX_T);
-    cudaMalloc(&d_hit_sighash, 1024 * 32);
-    cudaMalloc(&d_hit_keynonce, 1024 * 33);
-    cudaMalloc(&d_hit_pubhash, 1024 * 32);
-    cudaMalloc(&d_hit_qx, 1024 * 32);
-    cudaMalloc(&d_hit_qy, 1024 * 32);
 
     int BATCH = 8388608;  /* 8M: launch/sync overhead under 1%; enum mode has no host fill cost */
     int BLKSZ = 256;
@@ -2022,87 +2299,142 @@ int main(int argc, char **argv) {
      * consumer hashes 6 blocks per candidate from there. Per launch:
      * QSB_SE_LAUNCH_BLOCKS epochs x 256 candidates = 8M candidates. */
     if (se_mode) {
-        printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
+        printf("  Using short-epoch producer/consumer path (%d epochs per launch, depth-2 pipelined)\n",
                QSB_SE_LAUNCH_BLOCKS);
         fflush(stdout);
-        uint64_t epoch_base = 0;
+        /* Producer (streamP) builds epoch descriptors for launch i+1 while the
+         * consumer (streamC) still grinds launch i. Hit counts move by async
+         * DtoH into pinned memory; full hit records are read one launch later,
+         * off the critical path. The per-launch host round trip (hit-count
+         * reset memcpy + device-wide sync + 4-byte readback) is gone. */
+        cudaStream_t streamP, streamC;
+        cudaStreamCreateWithFlags(&streamP, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&streamC, cudaStreamNonBlocking);
+        cudaEvent_t evP[2], evC[2];
+        epoch_desc_t *d_epochs2[2];
+        uint32_t *d_hit_cnt2[2], *d_hit_idx2[2];
+        uint8_t *d_hit_combos2[2];
+        uint32_t *h_hit_pin = NULL;
+        int ok_pipe = 1;
+        for (int sl = 0; sl < 2; sl++) {
+            cudaEventCreateWithFlags(&evP[sl], cudaEventDisableTiming);
+            cudaEventCreateWithFlags(&evC[sl], cudaEventDisableTiming);
+            ok_pipe &= cudaMalloc(&d_epochs2[sl], (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t)) == cudaSuccess;
+            ok_pipe &= cudaMalloc(&d_hit_cnt2[sl], 4) == cudaSuccess;
+            ok_pipe &= cudaMalloc(&d_hit_idx2[sl], 1024 * 4) == cudaSuccess;
+            ok_pipe &= cudaMalloc(&d_hit_combos2[sl], 1024 * MAX_T) == cudaSuccess;
+        }
+        ok_pipe &= cudaHostAlloc(&h_hit_pin, 2 * sizeof(uint32_t), cudaHostAllocDefault) == cudaSuccess;
+        if (!ok_pipe) { fprintf(stderr, "OOM: pipeline buffers\n"); return 1; }
+
+        /* Drain one finished launch: verify its async hit count, pull complete
+         * hit records when present, append exactly as the serial loop did. */
+        auto drain_slot = [&](int slot, int batch_pos) {
+            uint32_t h_hit = h_hit_pin[slot];
+            if (h_hit == 0) return;
+            uint32_t hits[64];
+            int nh = (h_hit > 64) ? 64 : (int)h_hit;
+            cudaMemcpy(hits, d_hit_idx2[slot], nh * 4, cudaMemcpyDeviceToHost);
+            printf("\n  *** DIGEST HIT! ***\n");
+            mkdir("results", 0755);
+            char fname[256];
+            if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
+            else snprintf(fname, sizeof(fname), "results/digest_hit_%d.txt", gpu_index);
+            FILE *ff = fopen(fname, "a");
+            if (ff) {
+                uint8_t all_combos[1024 * MAX_T];
+                cudaMemcpy(all_combos, d_hit_combos2[slot], nh * MAX_T, cudaMemcpyDeviceToHost);
+                for (int h = 0; h < nh; h++) {
+                    uint32_t raw = hits[h];
+                    int combo_idx = raw & 0x3FFFFFFF;
+                    int ri = (raw >> 30) & 1;
+                    int hc = (raw >> 31) & 1;
+                    uint8_t *combo = all_combos + h * MAX_T;
+                    fprintf(ff, "indices=");
+                    printf("  indices=");
+                    for (int j = 0; j < t_sel; j++) {
+                        fprintf(ff, "%s%d", j ? "," : "", combo[j]);
+                        printf("%s%d", j ? "," : "", combo[j]);
+                    }
+                    fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
+                    printf(" hc=%d recid=%d\n", hc, ri);
+                    hit_counter++;
+                    g_hit_counter = hit_counter;
+                    if (summary_f) {
+                        time_t now_epoch = time(NULL);
+                        fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
+                        for (int j = 0; j < t_sel; j++)
+                            fprintf(summary_f, "%s%d", j ? "," : "", combo[j]);
+                        fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
+                        fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
+                        fflush(summary_f);
+                    }
+                }
+                fclose(ff);
+            }
+        };
+
+        uint64_t epoch_base = 0, completed_searched = 0;
+        int batch_hist[2] = {0, 0};
+        int launched = 0;
         struct timespec t_last_se = t0;
-        while (1) {
+        while (epoch_base < n_epochs) {
             uint64_t epochs_left = n_epochs - epoch_base;
             int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
                        ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
+            int slot = launched & 1;
+            if (launched >= 2) {
+                /* This slot's previous consumer must be finished before the
+                 * producer overwrites its epoch descriptors. */
+                cudaStreamWaitEvent(streamP, evC[slot], 0);
+            }
+            kernel_build_epochs<<<(nblk + 255) / 256, 256, 0, streamP>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+                d_dsigs, d_epochs2[slot]);
+            cudaEventRecord(evP[slot], streamP);
+            cudaStreamWaitEvent(streamC, evP[slot], 0);
+            cudaMemsetAsync(d_hit_cnt2[slot], 0, 4, streamC);
+            if (!easy && single_hash && !calibrate) {
+            kernel_digest<true,true><<<nblk, QSB_SE_PER_EPOCH, 0, streamC>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gtX, d_gtY,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
+                d_hit_cnt2[slot], d_hit_idx2[slot],
+                d_hit_combos2[slot],
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += batch_pos;
-            g_total_searched = total_searched;
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs2[slot]);
+            } else {
+            kernel_digest<true,false><<<nblk, QSB_SE_PER_EPOCH, 0, streamC>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_gtX, d_gtY,
+                d_hit_cnt2[slot], d_hit_idx2[slot],
+                d_hit_combos2[slot],
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs2[slot]);
+            }
+            cudaMemcpyAsync(h_hit_pin + slot, d_hit_cnt2[slot], 4,
+                            cudaMemcpyDeviceToHost, streamC);
+            cudaEventRecord(evC[slot], streamC);
+            batch_hist[slot] = batch_pos;
             epoch_base += nblk;
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                printf("\n  *** DIGEST HIT! ***\n");
-                mkdir("results", 0755);
-                char fname[256];
-                if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
-                else snprintf(fname, sizeof(fname), "results/digest_hit_%d.txt", gpu_index);
-                FILE *ff = fopen(fname, "a");
-                if (ff) {
-                    uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        int combo_idx = raw & 0x3FFFFFFF;
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        uint8_t *combo = all_combos + h * MAX_T;
-                        fprintf(ff, "indices=");
-                        printf("  indices=");
-                        for (int j = 0; j < t_sel; j++) {
-                            fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
-                        }
-                        /* The bridge reads `indices=` and `recid=`; the
-                         * diagnostic fields the kernel used to carry are gone. */
-                        fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d\n", hc, ri);
-                        hit_counter++;
-                        g_hit_counter = hit_counter;
-                        if (summary_f) {
-                            time_t now_epoch = time(NULL);
-                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
-                            for (int j = 0; j < t_sel; j++)
-                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
-                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
-                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
-                            fflush(summary_f);
-                            /* Preserve visibility without a disk barrier per hit. */
-                        }
-                    }
-                    fclose(ff);
-                }
+            launched++;
+            g_total_searched = completed_searched;
+            if (launched >= 2) {
+                int prev = slot ^ 1;
+                cudaEventSynchronize(evC[prev]);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+                drain_slot(prev, batch_hist[prev]);
+                completed_searched += (uint64_t)batch_hist[prev];
             }
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
@@ -2111,30 +2443,39 @@ int main(int argc, char **argv) {
             if (secs_since >= 15.0) {
                 double elapsed_total = (t_now.tv_sec - t0.tv_sec)
                     + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
-                double rate = total_searched / elapsed_total;
+                double rate = completed_searched / elapsed_total;
                 printf("  [GPU %d] epoch=%llu/%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
                        gpu_index,
                        (unsigned long long)epoch_base, (unsigned long long)n_epochs,
-                       (unsigned long long)(total_searched/1000000),
-                       (unsigned long long)(global_total/1000000),
-                       rate/1e6, elapsed_total);
+                       (unsigned long long)(completed_searched / 1000000),
+                       (unsigned long long)(global_total / 1000000),
+                       rate / 1e6, elapsed_total);
                 fflush(stdout);
                 if (summary_f) {
                     time_t now_epoch = time(NULL);
                     fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
-                            (long)now_epoch, (unsigned long long)total_searched,
-                            rate/1e6, elapsed_total, (unsigned long long)hit_counter);
+                            (long)now_epoch, (unsigned long long)completed_searched,
+                            rate / 1e6, elapsed_total, (unsigned long long)hit_counter);
                     fflush(summary_f);
                 }
                 t_last_se = t_now;
             }
-            if (epoch_base >= n_epochs) break;
         }
+        if (launched >= 1) {
+            int prev = (launched - 1) & 1;
+            cudaEventSynchronize(evC[prev]);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            drain_slot(prev, batch_hist[prev]);
+            completed_searched += (uint64_t)batch_hist[prev];
+        }
+        total_searched = completed_searched;
+        g_total_searched = total_searched;
         clock_gettime(CLOCK_MONOTONIC, &t1);
-        double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
+        double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
-               (unsigned long long)(total_searched/1000000), elapsed,
-               total_searched/elapsed/1e6);
+               (unsigned long long)(total_searched / 1000000), elapsed,
+               total_searched / elapsed / 1e6);
         if (summary_f) {
             time_t now_epoch = time(NULL);
             fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
@@ -2143,6 +2484,7 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+
         free(h_combos);
         return 0;
     }
@@ -2179,18 +2521,15 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false,false><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gtX, d_gtY,
                 d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
+                d_hit_combos,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
                 t_win, s_early, d_early, fast_inc, d_const_words, NULL);
             cudaDeviceSynchronize();
@@ -2379,18 +2718,15 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false,false><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gtX, d_gtY,
                 d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
+                d_hit_combos,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
                 t_sel, 0, d_early, 0, d_const_words, NULL);
             cudaDeviceSynchronize();
