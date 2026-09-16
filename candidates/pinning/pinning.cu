@@ -18,6 +18,7 @@
 #include <cuda_runtime.h>
 
 #include "GPUMath.h"
+#include "shared_finish.cuh"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -628,25 +629,28 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     /* Q1 = u1*G + u2*R (recid=0) */
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
-    uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32); memcpy(q1y,qy,32);
-    memcpy(q1z,qz,sizeof(q1z));
-    _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
+    uint64_t q1x[4],q1y[4],q2x[4],q2y[4];
+    if(!qsb_recover_pair_shared(qx,qy,qz,u2rx,u2ry,q1x,q1y,q2x,q2y)) {
+        uint64_t q1z[5];
+        memcpy(q1x,qx,32); memcpy(q1y,qy,32);
+        memcpy(q1z,qz,sizeof(q1z));
+        _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
-    /* Q2 = Q1 + neg_2u2R (recid=1) */
-    uint64_t q2x[4],q2y[4],q2z[5];
-    memcpy(q2x,q1x,32); memcpy(q2y,q1y,32); memcpy(q2z,q1z,40);
-    uint64_t n2rx[4]={d_neg2u2rx[0],d_neg2u2rx[1],d_neg2u2rx[2],d_neg2u2rx[3]};
-    uint64_t n2ry[4]={d_neg2u2ry[0],d_neg2u2ry[1],d_neg2u2ry[2],d_neg2u2ry[3]};
-    _PointAddSecp256k1(q2x,q2y,q2z,n2rx,n2ry);
+        /* Q2 = Q1 + neg_2u2R (recid=1) */
+        uint64_t q2z[5];
+        memcpy(q2x,q1x,32); memcpy(q2y,q1y,32); memcpy(q2z,q1z,40);
+        uint64_t n2rx[4]={d_neg2u2rx[0],d_neg2u2rx[1],d_neg2u2rx[2],d_neg2u2rx[3]};
+        uint64_t n2ry[4]={d_neg2u2ry[0],d_neg2u2ry[1],d_neg2u2ry[2],d_neg2u2ry[3]};
+        _PointAddSecp256k1(q2x,q2y,q2z,n2rx,n2ry);
 
-    /* Batch ModInv */
-    uint64_t prod[5]={0,0,0,0,0};
-    _ModMult(prod,q1z,q2z); _ModInv(prod);
-    uint64_t inv1[5],inv2[5];
-    _ModMult(inv1,prod,q2z); _ModMult(inv2,prod,q1z);
-    _ModMult(q1x,inv1);_ModMult(q1y,inv1);
-    _ModMult(q2x,inv2);_ModMult(q2y,inv2);
+        /* Batch ModInv */
+        uint64_t prod[5]={0,0,0,0,0};
+        _ModMult(prod,q1z,q2z); _ModInv(prod);
+        uint64_t inv1[5],inv2[5];
+        _ModMult(inv1,prod,q2z); _ModMult(inv2,prod,q1z);
+        _ModMult(q1x,inv1);_ModMult(q1y,inv1);
+        _ModMult(q2x,inv2);_ModMult(q2y,inv2);
+    }
 
     /* Check both pubkeys × 2 hashes */
     int v=0, hash_choice=0, recid=0;
