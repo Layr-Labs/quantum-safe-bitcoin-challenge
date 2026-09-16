@@ -2148,7 +2148,6 @@ int main(int argc, char **argv) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
                 char fname[256];
                 if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
@@ -2164,27 +2163,14 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         uint8_t *combo = all_combos + h * MAX_T;
                         fprintf(ff, "indices=");
-                        printf("  indices=");
                         for (int j = 0; j < t_sel; j++) {
                             fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
                         }
                         /* The bridge reads `indices=` and `recid=`; the
                          * diagnostic fields the kernel used to carry are gone. */
                         fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d\n", hc, ri);
                         hit_counter++;
                         g_hit_counter = hit_counter;
-                        if (summary_f) {
-                            time_t now_epoch = time(NULL);
-                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
-                            for (int j = 0; j < t_sel; j++)
-                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
-                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
-                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
-                            fflush(summary_f);
-                            /* Preserve visibility without a disk barrier per hit. */
-                        }
                     }
                     fclose(ff);
                 }
