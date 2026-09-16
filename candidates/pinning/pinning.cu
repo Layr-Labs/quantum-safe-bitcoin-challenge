@@ -66,6 +66,24 @@ __device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privK
     _ModInv(qz);_ModMult(qx,qz);_ModMult(qy,qz);
 }
 
+/* Projective-output twin of _PointMultiSecp256k1. _PointAddSecp256k1 uses
+ * scaled coordinates where affine is (X/Z, Y/Z), so it accepts a general Z.
+ * Returning Z lets the caller add the fixed u2*R / -2*u2*R offsets before
+ * converting to affine, so the single batched _ModInv that already recovers
+ * both recids does the only inversion on the per-candidate path; the _ModInv
+ * + two _ModMult this function omits were pure duplicated work. */
+__device__ void _PointMultiSecp256k1_proj(uint64_t *qx, uint64_t *qy, uint64_t *qz, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
+    int chunk=0; qz[0]=1;qz[1]=0;qz[2]=0;qz[3]=0;qz[4]=0;
+    for(;chunk<16;chunk++){if(privKey[chunk]>0){
+        int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
+        memcpy(qx,gTableX+index,32);memcpy(qy,gTableY+index,32);chunk++;break;}}
+    for(;chunk<16;chunk++){if(privKey[chunk]>0){
+        uint64_t gx[4],gy[4];
+        int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
+        memcpy(gx,gTableX+index,32);memcpy(gy,gTableY+index,32);
+        _PointAddSecp256k1(qx,qy,qz,gx,gy);}}
+}
+
 /* DER checks */
 __device__ int gpu_is_valid_der(const uint8_t *d, int l) {
     if(l<9||d[0]!=0x30) return 0;
@@ -562,7 +580,7 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gtX, uint8_t *d_gtY,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
-    int batch_size, int easy_mode, int single_hash
+    int batch_size, int easy_mode, int single_hash, int skip_first_block
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= batch_size) return;
@@ -591,7 +609,10 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     buf[last+6]=(bit_len>>8)&0xFF;buf[last+7]=bit_len&0xFF;
 
     uint32_t state[8]; for(int i=0;i<8;i++) state[i]=d_midstate[i];
-    for(int b=0;b<nblk;b++){
+    /* Byte 64.. of the suffix is the only part locktime (offset 67) can touch,
+     * so the host pre-derives the state after the first suffix block once per
+     * sequence and the device starts at block 1. */
+    for(int b=skip_first_block?1:0;b<nblk;b++){
         uint32_t blk[16]; for(int i=0;i<16;i++)
             blk[i]=((uint32_t)buf[b*64+i*4]<<24)|((uint32_t)buf[b*64+i*4+1]<<16)|
                    ((uint32_t)buf[b*64+i*4+2]<<8)|(uint32_t)buf[b*64+i*4+3];
@@ -619,14 +640,15 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     uint64_t nri[4]={d_neg_r_inv[0],d_neg_r_inv[1],d_neg_r_inv[2],d_neg_r_inv[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
     uint16_t pk[16]; memcpy(pk,u1,32);
-    uint64_t qx[4],qy[4]; _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
+    uint64_t qx[4],qy[4],qz[5];
+    _PointMultiSecp256k1_proj(qx,qy,qz,pk,d_gtX,d_gtY);
 
-    /* Q1 = u1*G + u2*R (recid=0) */
+    /* Q1 = u1*G + u2*R (recid=0); u1*G stays projective so the one batched
+     * _ModInv below is the only inversion on this path. */
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
     uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32); memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
+    memcpy(q1x,qx,32); memcpy(q1y,qy,32); memcpy(q1z,qz,40);
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
     /* Q2 = Q1 + neg_2u2R (recid=1) */
@@ -783,6 +805,72 @@ err:
     fclose(f); return -1;
 }
 
+/* Host-side SHA-256 single-block compression. The suffix is 75 B, so the first
+ * suffix block (bytes 0..63) holds only the sequence, which is fixed for a whole
+ * sequence; locktime lives at offset 67, in the second block. Advancing the
+ * prefix midstate through block 0 once per sequence removes a full 64-round
+ * compression (and its message-schedule expansion) from every candidate. */
+static const uint32_t SHA256_KH[64] = {
+ 0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+ 0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+ 0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+ 0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+ 0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+ 0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+ 0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+ 0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
+
+static void sha256_compress_host(uint32_t h[8], const uint8_t block[64]) {
+    uint32_t w[64];
+    for (int i = 0; i < 16; i++)
+        w[i] = ((uint32_t)block[4*i] << 24) | ((uint32_t)block[4*i+1] << 16) |
+               ((uint32_t)block[4*i+2] << 8) | (uint32_t)block[4*i+3];
+    for (int i = 16; i < 64; i++) {
+        uint32_t s0 = ((w[i-15] >> 7) | (w[i-15] << 25)) ^ ((w[i-15] >> 18) | (w[i-15] << 14)) ^ (w[i-15] >> 3);
+        uint32_t s1 = ((w[i-2] >> 17) | (w[i-2] << 15)) ^ ((w[i-2] >> 19) | (w[i-2] << 13)) ^ (w[i-2] >> 10);
+        w[i] = w[i-16] + s0 + w[i-7] + s1;
+    }
+    uint32_t a=h[0], b=h[1], c=h[2], d=h[3], e=h[4], f=h[5], g=h[6], hh=h[7];
+    for (int i = 0; i < 64; i++) {
+        uint32_t S1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+        uint32_t ch = (e & f) ^ ((~e) & g);
+        uint32_t t1 = hh + S1 + ch + SHA256_KH[i] + w[i];
+        uint32_t S0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        uint32_t t2 = S0 + maj;
+        hh=g; g=f; f=e; e=d+t1; d=c; c=b; b=a; a=t1+t2;
+    }
+    h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
+}
+
+/* Advance a 155-block prefix midstate through suffix block 0 for one sequence,
+ * reproducing exactly the kernel's buffer/padding layout. */
+static void derive_state0(const uint32_t midstate[8], uint8_t state0[32],
+                          const uint8_t *suffix, int suffix_len, int seq_offset,
+                          uint32_t seq, int total_preimage_len, int nblk) {
+    uint8_t b[128];
+    memset(b, 0, sizeof(b));
+    memcpy(b, suffix, suffix_len);
+    b[seq_offset]   = (uint8_t)(seq);
+    b[seq_offset+1] = (uint8_t)(seq >> 8);
+    b[seq_offset+2] = (uint8_t)(seq >> 16);
+    b[seq_offset+3] = (uint8_t)(seq >> 24);
+    b[suffix_len] = 0x80;
+    uint64_t bit_len = (uint64_t)total_preimage_len * 8;
+    int last = nblk * 64 - 8;
+    b[last]   = (uint8_t)(bit_len >> 56); b[last+1] = (uint8_t)(bit_len >> 48);
+    b[last+2] = (uint8_t)(bit_len >> 40); b[last+3] = (uint8_t)(bit_len >> 32);
+    b[last+4] = (uint8_t)(bit_len >> 24); b[last+5] = (uint8_t)(bit_len >> 16);
+    b[last+6] = (uint8_t)(bit_len >> 8);  b[last+7] = (uint8_t)(bit_len);
+    uint32_t h[8];
+    for (int i = 0; i < 8; i++) h[i] = midstate[i];
+    sha256_compress_host(h, b);
+    for (int i = 0; i < 8; i++) {
+        state0[i*4]   = (uint8_t)(h[i] >> 24); state0[i*4+1] = (uint8_t)(h[i] >> 16);
+        state0[i*4+2] = (uint8_t)(h[i] >> 8);  state0[i*4+3] = (uint8_t)(h[i]);
+    }
+}
+
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -849,6 +937,14 @@ int main(int argc, char **argv) {
     uint8_t *d_suffix; cudaMalloc(&d_suffix, 256);
     cudaMemcpy(d_suffix, suffix_template, 256, cudaMemcpyHostToDevice);
 
+    /* Suffix block 0 (bytes 0..63) is sequence-fixed and locktime-independent,
+     * so its post-block SHA-256 state is derived once per sequence on the host
+     * and the device starts at block 1. */
+    int nblk_suffix = (gpu_suffix_len < 56) ? 1 : 2;
+    int skip_b0 = (pp.lt_offset >= 64);
+    uint32_t *d_state0; cudaMalloc(&d_state0, 32);
+    if (skip_b0) printf("  suffix block 0 precomputed per sequence (host)\n");
+
     printf("  Full suffix: %d bytes, seq@%d, lt@%d\n",
            gpu_suffix_len, pp.seq_offset, pp.lt_offset);
     printf("  Mode: %s\n", easy ? "EASY" : "REAL");
@@ -894,7 +990,7 @@ int main(int argc, char **argv) {
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
-    int BATCH = 1048576;  /* 1M: fewer launches/syncs; host passes seq/lt by value so no fill cost */
+    int BATCH = 4194304;  /* 4M: seq/lt go by value, so bigger batches only cut launch/sync overhead */
     int BLKSZ = 256;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
 
@@ -965,6 +1061,12 @@ int main(int argc, char **argv) {
      * The loop no longer stops at the first hit; hits are appended per batch.
      */
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+        if (skip_b0) {
+            uint8_t s0[32];
+            derive_state0(pp.midstate, s0, suffix_template, gpu_suffix_len,
+                          pp.seq_offset, seq, pp.total_preimage_len, nblk_suffix);
+            cudaMemcpy(d_state0, s0, 32, cudaMemcpyHostToDevice);
+        }
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
@@ -974,14 +1076,14 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             kernel_pinning_real<<<GRDSZ,BLKSZ>>>(
-                d_mid, d_suffix, gpu_suffix_len,
+                skip_b0 ? d_state0 : d_mid, d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
                 pp.total_preimage_len,
                 seq, batch_lt,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gtX, d_gtY,
                 d_hit_cnt, d_hit_idx,
-                batch_sz, easy, single_hash);
+                batch_sz, easy, single_hash, skip_b0);
             cudaDeviceSynchronize();
 
             cudaError_t err = cudaGetLastError();
