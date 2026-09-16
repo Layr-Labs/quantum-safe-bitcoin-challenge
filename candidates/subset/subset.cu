@@ -1211,7 +1211,7 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_qx, 1024 * 32);
     cudaMalloc(&d_hit_qy, 1024 * 32);
 
-    int BATCH = 1048576;  /* 1M: fewer launches, better GPU saturation (enum mode has no host fill cost) */
+    int BATCH = 4194304;  /* 4M: fewer launches/syncs; enum mode has no host fill cost, so a larger batch only trades tail latency for less per-batch overhead */
     int BLKSZ = 256;
 
     /* Multi-GPU: each GPU handles every Nth first-index */
@@ -1483,8 +1483,6 @@ int main(int argc, char **argv) {
                             fprintf(summary_f, " pubhash=");
                             for (int j = 0; j < 32; j++) fprintf(summary_f, "%02x", ph[j]);
                             fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
-                            fflush(summary_f);
-                            fsync(fileno(summary_f));
                         }
                     }
                     fclose(ff);
@@ -1718,8 +1716,6 @@ int main(int argc, char **argv) {
                             hit_counter++;
                             g_hit_counter = hit_counter;
                         }
-                        fflush(summary_f);
-                        fsync(fileno(summary_f));   /* immediate, on every hit */
                     }
                 }
             }
