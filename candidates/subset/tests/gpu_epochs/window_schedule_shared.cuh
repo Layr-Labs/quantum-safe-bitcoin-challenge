@@ -2,19 +2,109 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
-__device__ uint32_t QSB_WINDOW_FIRST[14][256];
-__device__ uint32_t QSB_WINDOW_SECOND[64][256];
-__device__ uint32_t QSB_WINDOW_CLASS[256];
-__device__ uint32_t QSB_FIRST_CLASS[256];
-__device__ uint32_t QSB_FIRST_UNIQUE[14][256];
+
+/* There are C(13,3)=286 valid window triples but one consumer block has 256
+ * lanes.  Which 256 triples we use is therefore a performance choice, not a
+ * correctness constraint.  The old lexicographic prefix happened to retain
+ * all 84 distinct first-block tails.  Prefer triples from large equivalence
+ * classes instead: this leaves only 54 first-block tails, so two warps rather
+ * than three build the per-epoch first states.  Finally group equal second
+ * blocks so adjacent lanes read adjacent/broadcast schedule slots. */
+#define QSB_WINDOW_ALL 286
+#define QSB_WINDOW_CLASS_CAP 64
+
+typedef struct {
+    uint8_t skip[3];
+    uint8_t kept[100];
+    int first_freq;
+    int selected;
+    int emitted;
+} qsb_window_choice_t;
+
+static int qsb_choice_less(const qsb_window_choice_t *a,
+                           const qsb_window_choice_t *b) {
+    int d = memcmp(a->kept + 56, b->kept + 56, 44);
+    if (d) return d < 0;
+    d = memcmp(a->kept, b->kept, 56);
+    if (d) return d < 0;
+    return memcmp(a->skip, b->skip, 3) < 0;
+}
+
+static int qsb_select_window_schedule(const uint8_t *rows,
+        uint8_t windows[QSB_SE_PER_EPOCH][QSB_SE_TWIN]) {
+    qsb_window_choice_t choices[QSB_WINDOW_ALL];
+    int count = 0;
+    for (int a = 0; a < 13; a++)
+        for (int b = a + 1; b < 13; b++)
+            for (int c = b + 1; c < 13; c++) {
+                qsb_window_choice_t *q = &choices[count++];
+                q->skip[0] = (uint8_t)a;
+                q->skip[1] = (uint8_t)b;
+                q->skip[2] = (uint8_t)c;
+                q->first_freq = q->selected = q->emitted = 0;
+                int pos = 0;
+                for (int i = 0; i < 13; i++) {
+                    if (i == a || i == b || i == c) continue;
+                    memcpy(q->kept + pos, rows + (QSB_SE_CUT + i) * SIG_PUSH_SIZE,
+                           SIG_PUSH_SIZE);
+                    pos += SIG_PUSH_SIZE;
+                }
+                if (pos != 100) return 1;
+            }
+    if (count != QSB_WINDOW_ALL) return 1;
+
+    for (int i = 0; i < count; i++)
+        for (int j = 0; j < count; j++)
+            choices[i].first_freq +=
+                memcmp(choices[i].kept, choices[j].kept, 56) == 0;
+
+    /* Take the 256 members of the largest first-block classes.  Equal-size
+     * ties use lexicographic skip order, making the runtime choice stable. */
+    for (int pick = 0; pick < QSB_SE_PER_EPOCH; pick++) {
+        int best = -1;
+        for (int i = 0; i < count; i++) {
+            if (choices[i].selected) continue;
+            if (best < 0 || choices[i].first_freq > choices[best].first_freq ||
+                (choices[i].first_freq == choices[best].first_freq &&
+                 memcmp(choices[i].skip, choices[best].skip, 3) < 0))
+                best = i;
+        }
+        if (best < 0) return 1;
+        choices[best].selected = 1;
+    }
+
+    /* Lane order is otherwise semantically irrelevant.  Sort by the second
+     * message block first, then the first-block tail, to make schedule slots
+     * and shared-state reads as warp-friendly as the selected set permits. */
+    for (int lane = 0; lane < QSB_SE_PER_EPOCH; lane++) {
+        int best = -1;
+        for (int i = 0; i < count; i++) {
+            if (!choices[i].selected || choices[i].emitted) continue;
+            if (best < 0 || qsb_choice_less(&choices[i], &choices[best])) best = i;
+        }
+        if (best < 0) return 1;
+        choices[best].emitted = 1;
+        for (int j = 0; j < QSB_SE_TWIN; j++)
+            windows[lane][j] = (uint8_t)(QSB_SE_CUT + choices[best].skip[j]);
+    }
+    return 0;
+}
+
+#ifndef QSB_SCHEDULE_SELECT_ONLY
+__device__ uint32_t QSB_WINDOW_SECOND[64][QSB_WINDOW_CLASS_CAP];
+__device__ uint8_t QSB_WINDOW_CLASS[256];
+__device__ uint8_t QSB_FIRST_CLASS[256];
+__device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_WINDOW_CLASS_CAP];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
 
 static int qsb_prepare_window_schedule(const uint8_t *rows,
         const uint8_t windows[256][3], const uint32_t *constant) {
-    uint32_t first[14][256], second[64][256]={}, round_k[64];
-    uint32_t classes[256], unique[256][16];
-    uint32_t first_classes[256], first_unique[256][14], transposed[14][256]={};
+    uint32_t second[64][QSB_WINDOW_CLASS_CAP]={}, round_k[64];
+    uint8_t classes[256], first_classes[256];
+    uint32_t unique[QSB_WINDOW_CLASS_CAP][16];
+    uint32_t first_unique[QSB_WINDOW_CLASS_CAP][14];
+    uint32_t transposed[14][QSB_WINDOW_CLASS_CAP]={};
     int first_distinct=0;
     int distinct=0;
     if (cudaMemcpyFromSymbol(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
@@ -33,14 +123,19 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
         for (int j=0; j<32; j++)
             words[j]=((uint32_t)bytes[4*j]<<24)|((uint32_t)bytes[4*j+1]<<16)|
                      ((uint32_t)bytes[4*j+2]<<8)|bytes[4*j+3];
-        for (int j=0; j<14; j++) first[j][lane]=words[j+2];
         int first_slot=0;
         while(first_slot<first_distinct && memcmp(first_unique[first_slot],words+2,56))first_slot++;
-        if(first_slot==first_distinct){memcpy(first_unique[first_distinct],words+2,56);first_distinct++;}
+        if(first_slot==first_distinct){
+            if(first_distinct>=QSB_WINDOW_CLASS_CAP)return 1;
+            memcpy(first_unique[first_distinct],words+2,56);first_distinct++;
+        }
         first_classes[lane]=first_slot;
         int slot=0;
         while(slot<distinct && memcmp(unique[slot],words+16,64))slot++;
-        if(slot==distinct){memcpy(unique[distinct],words+16,64);distinct++;}
+        if(slot==distinct){
+            if(distinct>=QSB_WINDOW_CLASS_CAP)return 1;
+            memcpy(unique[distinct],words+16,64);distinct++;
+        }
         classes[lane]=slot;
         for (int j=0; j<16; j++) expanded[j]=words[j+16];
         for (int j=16; j<64; j++) {
@@ -59,14 +154,13 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
     if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
     if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
     return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         const epoch_desc_t *epoch, int lane) {
     // Every lane in this epoch's block reaches the shared-memory barrier.
-    __shared__ uint32_t first_states[8][256];
+    __shared__ uint32_t first_states[8][QSB_WINDOW_CLASS_CAP];
     if(lane<QSB_FIRST_COUNT) {
         uint32_t initial[8],W[16];
         #pragma unroll
@@ -100,3 +194,4 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     state[4]+=e;state[5]+=f;state[6]+=g;state[7]+=h;
     qsb_compress_constant_rolled(state);
 }
+#endif

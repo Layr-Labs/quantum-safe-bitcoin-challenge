@@ -51,6 +51,10 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "../../GPUHash.h"
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
+/* The recovery point is identical for every candidate in this problem.
+ * Constant memory broadcasts its limbs to a warp and removes repeated global
+ * coordinate loads from the recovery hot path. */
+__device__ __constant__ uint64_t QSB_U2R[8];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -511,10 +515,11 @@ typedef struct {
 } epoch_desc_t;
 static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
 
-/* The first 256 lexicographic 3-from-13 window omission sets, stored as actual
- * push indices (QSB_SE_CUT + 0..12). Filled by the host once per run. Keeping
- * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
- * the block-wide inverse, and the benchmark scores verified throughput. */
+/* A schedule-packed selection of 256 distinct 3-from-13 window omission sets,
+ * stored as actual push indices (QSB_SE_CUT + 0..12). Filled by the host once
+ * per run. Keeping any 256 of C(13,3)=286 is legitimate sampling: one block
+ * per epoch aligns with the block-wide inverse, and the benchmark scores
+ * verified throughput. */
 __device__ __constant__ uint8_t WIN3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "window_schedule_shared.cuh"
 
@@ -1070,8 +1075,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
 
-    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
-    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
      * W = ZZ^2*d with d = xR*ZZ - X; the block inverts W. */
     uint64_t prod[5];
@@ -1892,23 +1897,15 @@ int main(int argc, char **argv) {
     uint8_t *d_suf; cudaMalloc(&d_suf, dp.tx_suffix_len);
     cudaMemcpy(d_suf, dp.tx_suffix, dp.tx_suffix_len, cudaMemcpyHostToDevice);
 
-    /* Short-epoch tables: the first 256 lex 3-from-13 window combos (as actual
-     * push indices 137..149) and the per-launch epoch descriptor buffer.
+    /* Short-epoch tables: 256 schedule-packed 3-from-13 window combos (as
+     * actual push indices 137..149) and the per-launch epoch descriptor buffer.
      * d_mid/d_prem stay at the PROBLEM base midstate / prefix_remainder in
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
-        int cnt = 0;
-        for (int a = 0; a < 13 && cnt < QSB_SE_PER_EPOCH; a++)
-            for (int b = a + 1; b < 13 && cnt < QSB_SE_PER_EPOCH; b++)
-                for (int c = b + 1; c < 13 && cnt < QSB_SE_PER_EPOCH; c++) {
-                    h_win3[cnt][0] = (uint8_t)(QSB_SE_CUT + a);
-                    h_win3[cnt][1] = (uint8_t)(QSB_SE_CUT + b);
-                    h_win3[cnt][2] = (uint8_t)(QSB_SE_CUT + c);
-                    cnt++;
-                }
+        if (qsb_select_window_schedule(dp.dummy_sigs, h_win3)) return 1;
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
@@ -1921,6 +1918,11 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri,dp.neg_r_inv,32,cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx,dp.u2r_x,32,cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
+    uint64_t h_u2r[8];
+    memcpy(h_u2r,dp.u2r_x,32);memcpy(h_u2r+4,dp.u2r_y,32);
+    if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
+        fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
+    }
 
     /* Compute neg_2u2R */
     {
