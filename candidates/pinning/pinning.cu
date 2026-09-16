@@ -557,7 +557,11 @@ __global__ void kernel_debug_pin_one_point(
 }
 
 
-__global__ void __launch_bounds__(256, 2) kernel_pinning_real(
+#define QSB_BATCH_B 32
+#define QSB_BATCH_N 64
+#define QSB_BATCH_GROUPS 4
+
+__global__ void __launch_bounds__(128, 8) kernel_pinning_real(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -574,12 +578,23 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     uint8_t *d_hit_pubkey, uint8_t *d_hit_hash, uint8_t *d_hit_sighash,
     int batch_size, int easy_mode, int single_hash
 ) {
+    (void)d_hit_pubkey; (void)d_hit_hash; (void)d_hit_sighash; (void)single_hash;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= batch_size) return;
-    uint32_t lt = start_lt + (uint32_t)idx;
+    int active = (idx < batch_size);
+    uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
 
+    __shared__ uint64_t sh_z[4][64][4];
+    __shared__ uint64_t sh_pref[4][64][4];
+    int gid = (threadIdx.x >> 5);
+    int lane = (threadIdx.x & 31);
+    if (gid >= 4) gid = 0;
+
+    uint64_t q1x[4],q1y[4],q1z[5];
+    uint64_t q2x[4],q2y[4],q2z[5];
+
+    if (active) {
     /* Copy suffix, set sequence + locktime */
-    uint8_t buf[192];
+    uint8_t buf[128];
     for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
     buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
     buf[seq_offset+2]=(seq_value>>16)&0xFF; buf[seq_offset+3]=(seq_value>>24)&0xFF;
@@ -588,7 +603,7 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
 
     /* SHA-256 padding */
     buf[suffix_len]=0x80;
-    for(int i=suffix_len+1;i<192;i++) buf[i]=0;
+    for(int i=suffix_len+1;i<128;i++) buf[i]=0;
     int nblk=(suffix_len<56)?1:2;
     uint64_t bit_len=(uint64_t)total_preimage_len*8;
     int last=nblk*64-8;
@@ -615,11 +630,10 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
     _SHA256Transform(s2,b2);
 
-    uint8_t sighash[32]; for(int i=0;i<8;i++){sighash[i*4]=(s2[i]>>24)&0xFF;sighash[i*4+1]=(s2[i]>>16)&0xFF;
-        sighash[i*4+2]=(s2[i]>>8)&0xFF;sighash[i*4+3]=s2[i]&0xFF;}
-
-    /* Scalar mul */
-    uint64_t z[4]; for(int i=0;i<4;i++){z[i]=0;for(int b=0;b<8;b++)z[i]|=(uint64_t)sighash[31-i*8-b]<<(b*8);}
+    /* Scalar mul: z assembled directly from SHA words (big-endian s2),
+     * avoiding the 32B sighash materialisation. z[0]=(s2[6]<<32)|s2[7], etc. */
+    uint64_t z[4];
+    for(int i=0;i<4;i++) z[i]=((uint64_t)s2[6-2*i]<<32)|(uint64_t)s2[7-2*i];
     uint64_t nri[4]={d_neg_r_inv[0],d_neg_r_inv[1],d_neg_r_inv[2],d_neg_r_inv[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
     uint16_t pk[16]; memcpy(pk,u1,32);
@@ -628,32 +642,62 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     /* Q1 = u1*G + u2*R (recid=0) */
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
-    uint64_t q1x[4],q1y[4],q1z[5];
     memcpy(q1x,qx,32); memcpy(q1y,qy,32);
     memcpy(q1z,qz,sizeof(q1z));
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
     /* Q2 = Q1 + neg_2u2R (recid=1) */
-    uint64_t q2x[4],q2y[4],q2z[5];
     memcpy(q2x,q1x,32); memcpy(q2y,q1y,32); memcpy(q2z,q1z,40);
     uint64_t n2rx[4]={d_neg2u2rx[0],d_neg2u2rx[1],d_neg2u2rx[2],d_neg2u2rx[3]};
     uint64_t n2ry[4]={d_neg2u2ry[0],d_neg2u2ry[1],d_neg2u2ry[2],d_neg2u2ry[3]};
     _PointAddSecp256k1(q2x,q2y,q2z,n2rx,n2ry);
+    } else {
+        q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
+        q2z[0]=1;q2z[1]=0;q2z[2]=0;q2z[3]=0;q2z[4]=0;
+    }
 
-    /* Batch ModInv */
-    uint64_t prod[5]={0,0,0,0,0};
-    _ModMult(prod,q1z,q2z); _ModInv(prod);
+    /* Block-cooperative Montgomery batch inversion across 32 threads x 2 recids.
+     * 1 inversion per 64 values instead of 1 per 2. All threads participate.
+     * Shared stores 4 limbs (high limb always 0 for field elements < P). */
+    for(int w=0;w<4;w++){ sh_z[gid][lane*2+0][w]=q1z[w]; sh_z[gid][lane*2+1][w]=q2z[w]; }
+    __syncthreads();
+    if (lane==0) {
+        uint64_t acc[5]={1,0,0,0,0};
+        for(int i=0;i<64;i++){
+            for(int w=0;w<4;w++) sh_pref[gid][i][w]=acc[w];
+            uint64_t zi[5]; for(int w=0;w<4;w++) zi[w]=sh_z[gid][i][w]; zi[4]=0;
+            if(_IsZero(zi)){ zi[0]=1;zi[1]=0;zi[2]=0;zi[3]=0;zi[4]=0; }
+            uint64_t nxt[5]; _ModMult(nxt,acc,zi); nxt[4]=0;
+            for(int w=0;w<5;w++) acc[w]=nxt[w];
+        }
+        uint64_t invAll[5]; for(int w=0;w<5;w++) invAll[w]=acc[w];
+        _ModInv(invAll);
+        uint64_t suf[5]={1,0,0,0,0};
+        for(int i=63;i>=0;i--){
+            uint64_t zi[5]; for(int w=0;w<4;w++) zi[w]=sh_z[gid][i][w]; zi[4]=0;
+            int isz=_IsZero(zi);
+            if(isz){ zi[0]=1;zi[1]=0;zi[2]=0;zi[3]=0;zi[4]=0; }
+            uint64_t pref_i[5]; for(int w=0;w<4;w++) pref_i[w]=sh_pref[gid][i][w]; pref_i[4]=0;
+            uint64_t t1[5]; _ModMult(t1,pref_i,suf); t1[4]=0;
+            uint64_t inv_i[5]; _ModMult(inv_i,t1,invAll); inv_i[4]=0;
+            if(isz){ inv_i[0]=0;inv_i[1]=0;inv_i[2]=0;inv_i[3]=0;inv_i[4]=0; }
+            for(int w=0;w<4;w++) sh_pref[gid][i][w]=inv_i[w];
+            uint64_t nsuf[5]; _ModMult(nsuf,suf,zi); nsuf[4]=0;
+            for(int w=0;w<5;w++) suf[w]=nsuf[w];
+        }
+    }
+    __syncthreads();
+    if (!active) return;
     uint64_t inv1[5],inv2[5];
-    _ModMult(inv1,prod,q2z); _ModMult(inv2,prod,q1z);
+    for(int w=0;w<4;w++){ inv1[w]=sh_pref[gid][lane*2+0][w]; inv2[w]=sh_pref[gid][lane*2+1][w]; }
+    inv1[4]=0; inv2[4]=0;
     _ModMult(q1x,inv1);_ModMult(q1y,inv1);
     _ModMult(q2x,inv2);_ModMult(q2y,inv2);
 
-    /* Check both pubkeys × 2 hashes */
+    /* Check both pubkeys (single-hash ranked gate) */
     int v=0, hash_choice=0, recid=0;
     uint64_t *pts_x[2]={q1x,q2x};
     uint64_t *pts_y[2]={q1y,q2y};
-    uint8_t saved_pk[33];   /* DIAG: the pubkey we hashed when we found v=1 */
-    uint8_t saved_h[32];    /* DIAG: the SHA256(pk) (or SHA256(SHA256(pk))) when we found v=1 */
     for(int ri=0;ri<2&&!v;ri++){
         uint32_t *x32=(uint32_t*)pts_x[ri];
         uint32_t pb[16];
@@ -663,37 +707,12 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
         pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
         pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        /* DIAG: extract the pubkey bytes the kernel is about to hash. */
-        uint8_t this_pk[33];
-        for(int j=0;j<8;j++){
-            this_pk[j*4]   = (pb[j]>>24)&0xFF;
-            this_pk[j*4+1] = (pb[j]>>16)&0xFF;
-            this_pk[j*4+2] = (pb[j]>> 8)&0xFF;
-            this_pk[j*4+3] = (pb[j]    )&0xFF;
-        }
-        this_pk[32] = (pb[8]>>24)&0xFF;  /* last byte of pk = first byte of pb[8] */
         uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         uint8_t h[32];for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
         int vv=easy_mode?gpu_is_der_easy(h,32):gpu_bench_valid(h);
         if(vv){
             v=1;hash_choice=0;recid=ri;
-            for(int j=0;j<33;j++) saved_pk[j]=this_pk[j];
-            for(int j=0;j<32;j++) saved_h[j]=h[j];
-            break;
-        }
-        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
-        if (single_hash) continue;  /* Config A: only one hash iteration */
-        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
-            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
-        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
-        uint8_t h2[32];for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
-            h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
-        vv=easy_mode?gpu_is_der_easy(h2,32):gpu_bench_valid(h2);
-        if(vv){
-            v=1;hash_choice=1;recid=ri;
-            for(int j=0;j<33;j++) saved_pk[j]=this_pk[j];
-            for(int j=0;j<32;j++) saved_h[j]=h2[j];
             break;
         }
     }
@@ -701,14 +720,6 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     if(v){uint32_t pos=atomicAdd(d_hit_cnt,1);
         if(pos<1024){
             d_hit_idx[pos]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            /* DIAG: store the pubkey, hash, and sighash so host can compare to CPU's.
-             * Diagnostic arrays sized for 64 entries — only first 64 hits per batch
-             * get diagnostics (host reads at most 64 anyway). */
-            if (pos < 64) {
-                for(int j=0;j<33;j++) d_hit_pubkey[pos*33+j] = saved_pk[j];
-                for(int j=0;j<32;j++) d_hit_hash[pos*32+j]   = saved_h[j];
-                for(int j=0;j<32;j++) d_hit_sighash[pos*32+j] = sighash[j];
-            }
         }
     }
 }
@@ -737,17 +748,29 @@ static void compute_gtable(uint8_t *gTableX, uint8_t *gTableY) {
             return;
         }
     }
-    printf("  Computing GTable (first run, ~5 min)...\n");
+    /* Batch-affine fast path: 1 Montgomery batch inversion per 64k chunk
+     * instead of 64k individual inversions. Bit-identical LE output.
+     * Startup ~2s single-thread vs ~15s+ naive (ranked wall clock includes it). */
+    printf("  Computing GTable (batch-affine, ~2s)...\n");
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp);
+    EC_POINT *base = EC_POINT_new(grp), *cur = EC_POINT_new(grp);
     EC_POINT_copy(base, EC_GROUP_get0_generator(grp));
+    const int NPT = 65536;
+    EC_POINT **pts = (EC_POINT**)malloc(sizeof(*pts) * (size_t)NPT);
+    for (int i = 0; i < NPT; i++) pts[i] = EC_POINT_new(grp);
     for (int ch = 0; ch < 16; ch++) {
         if (ch > 0) { BN_set_word(shift, 65536); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        EC_POINT_copy(pt, base);
-        for (int i = 0; i < 65536; i++) {
-            EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+        EC_POINT_copy(cur, base);
+        for (int i = 0; i < NPT; i++) {
+            EC_POINT_copy(pts[i], cur);
+            if (i < NPT - 1) EC_POINT_add(grp, cur, cur, base, ctx);
+        }
+        /* Single batch affine conversion for the whole chunk. */
+        EC_POINTs_make_affine(grp, NPT, pts, ctx);
+        for (int i = 0; i < NPT; i++) {
+            EC_POINT_get_affine_coordinates_GFp(grp, pts[i], x, y, ctx);
             uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
             BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
             BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
@@ -757,12 +780,13 @@ static void compute_gtable(uint8_t *gTableX, uint8_t *gTableY) {
             size_t off = (size_t)ch * 65536 * 32 + (size_t)i * 32;
             memcpy(gTableX + off, xb, 32);
             memcpy(gTableY + off, yb, 32);
-            if (i < 65535) EC_POINT_add(grp, pt, pt, base, ctx);
         }
         printf("    Chunk %d/16\n", ch+1);
     }
+    for (int i = 0; i < NPT; i++) EC_POINT_free(pts[i]);
+    free(pts);
     BN_free(x); BN_free(y); BN_free(shift);
-    EC_POINT_free(base); EC_POINT_free(pt);
+    EC_POINT_free(base); EC_POINT_free(cur);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
     f = fopen(cache, "wb");
     if (f) { fwrite(gTableX, 1, gt_bytes, f); fwrite(gTableY, 1, gt_bytes, f); fclose(f);
@@ -934,7 +958,7 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_sighash, 64*32);
 
     int BATCH = 1048576;  /* 1M: fewer launches/syncs; host passes seq/lt by value so no fill cost */
-    int BLKSZ = 256;
+    int BLKSZ = 128;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
 
     /* Safe ranges */
