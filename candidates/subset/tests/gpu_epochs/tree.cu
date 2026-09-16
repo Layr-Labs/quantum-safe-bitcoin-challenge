@@ -319,21 +319,27 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  * unchanged. Convert XYZZ->homogeneous once: X'=X*ZZZ, Y'=Y*ZZ, Z'=ZZ*ZZZ
  * (X'/Z' = X/ZZ = x, Y'/Z' = Y/ZZZ = y). */
 __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
-                                      const int32_t e[16], const uint8_t *gTX, const uint8_t *gTY) {
+                                      const uint64_t k[4], const uint8_t *gTX, const uint8_t *gTY) {
+    /* Peel signed odd digits from the 32-byte recode state. The 16-entry
+     * digit array was the largest single spill source on this multiply;
+     * gt_recode_setup/step already exist and are the same arithmetic
+     * gt_recode_signed used to dump into e[16] before the call. */
+    uint64_t M[4]; int sign; gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    gt_digit_idx(e[0], &idx, &neg); gt_load_signed(gTX,gTY,0,idx,neg,x0,y0);
-    gt_digit_idx(e[1], &idx, &neg); gt_load_signed(gTX,gTY,1,idx,neg,x1,y1);
+    int32_t e0 = gt_recode_step(M, sign, 0);
+    gt_digit_idx(e0, &idx, &neg); gt_load_signed(gTX,gTY,0,idx,neg,x0,y0);
+    int32_t e1 = gt_recode_step(M, sign, 1);
+    gt_digit_idx(e1, &idx, &neg); gt_load_signed(gTX,gTY,1,idx,neg,x1,y1);
     uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);        /* seed = P0 + P1 */
     /* No software prefetch: keeping the next table point live alongside the
-     * 128-byte XYZZ accumulator raised spills (92/64 -> measured worse). Load
-     * each chunk just-in-time; the loads are still independent (indices known
-     * from the recoded digits) so the hardware overlaps them. */
+     * 128-byte XYZZ accumulator raised spills (92/64 -> measured worse). */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
     for (int c=2;c<16;c++){
-        gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTX,gTY,c,idx,neg,cx,cy);
+        int32_t ec = gt_recode_step(M, sign, c);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTX,gTY,c,idx,neg,cx,cy);
         _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy);
     }
     _ModMult(qx, X, ZZZ);      /* X' = X*ZZZ */
@@ -982,11 +988,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* neg_r_inv is folded into the fixed base A = neg_r_inv*G, so recoding z
      * directly gives z*A = (neg_r_inv*z mod n)*G = u1*G -- no per-candidate
      * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
-    int32_t gte[16]; gt_recode_signed(z, gte);
-    /* u1*G in projective form via the signed-digit 32 MiB A-table; the affine
-     * conversion is deferred to the single inverse below, so both recids share
-     * one _ModInv. */
-    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,gte,d_gtX,d_gtY);
+    /* u1*G in projective form via the signed-digit 32 MiB A-table; digits
+     * peel inside the multiply so e[16] never lives in this kernel. Affine
+     * conversion is deferred to the single inverse below. */
+    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
