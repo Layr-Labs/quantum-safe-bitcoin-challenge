@@ -88,17 +88,18 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
     __uint128_t s;
-    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
-     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
-     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
-     * < n this is a no-op. */
-    s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
-    uint64_t k0=(k[0]&~km)|(kd0&km), k1=(k[1]&~km)|(kd1&km),
-             k2=(k[2]&~km)|(kd2&km), k3=(k[3]&~km)|(kd3&km);
+    /* A raw SHA scalar is at least n with probability (2^256-n)/2^256. Keep
+     * that exact case, but let the overwhelmingly common path avoid a
+     * four-limb subtract and four selects. */
+    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
+    if (k3 == n3 &&
+        (k2 > n2 ||
+         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
+        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
+    }
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -140,18 +141,19 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
     e[GT_CHUNKS-1]=sign*(int32_t)M[0];
 }
 
-/* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
+/* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg_mask != 0.
  * Branchless: y is selected between y and p-y by a mask. */
-__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
+__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
-                                                     uint64_t neg,
-                                                     uint64_t gx[4], uint64_t gy[4]) {
+                                                     uint64_t neg_mask,
+                                                     uint64_t *__restrict__ gx,
+                                                     uint64_t *__restrict__ gy) {
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t m=0ULL-neg;
+    uint64_t m=neg_mask;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
     UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
@@ -166,9 +168,10 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 
 /* Decode one signed table digit. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
+    int32_t mask = ec >> 31;
+    uint32_t ae = ((uint32_t)ec ^ (uint32_t)mask) - (uint32_t)mask;
     *idx = (ae - 1) >> 1;
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)(int64_t)mask;
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -185,10 +188,10 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  * Production consumes the raw XYZZ output directly. This avoids the three
  * field multiplications formerly used to convert it to homogeneous projective
  * form before recovery. */
-__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
-                                      uint64_t *ZZ, uint64_t *ZZZ,
-                                      const int32_t e[GT_CHUNKS],
-                                      const uint8_t *gTable) {
+__device__ void _FixedBaseSignedXYZZ(
+    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
+    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
+    const int32_t *__restrict__ e, const uint8_t *__restrict__ gTable) {
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
     gt_digit_idx(e[0], &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -200,19 +203,22 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
+    for (int c=2;c<GT_CHUNKS-1;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
     }
+    gt_digit_idx(e[GT_CHUNKS-1], &idx, &neg);
+    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
-__device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
-                                            uint64_t *ZZ, uint64_t *ZZZ,
-                                            const uint64_t k[4],
-                                            const uint8_t *gTable) {
+__device__ void _FixedBaseSignedXYZZScalar(
+    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
+    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
+    const uint64_t *__restrict__ k, const uint8_t *__restrict__ gTable) {
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
@@ -225,13 +231,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+    ec=sign*(int32_t)M[0];
+    gt_digit_idx(ec, &idx, &neg);
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -289,6 +299,9 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 
 /* kernel_debug_pin_one_point: removed from benchmark builds. */
 
+/* After the second fold, carry implies low < C*C for C=2^32+977.
+ * Adding carry*C cannot reach limb 3: C*C+C < 2^96. Thus the exact
+ * correction requires only z0,z1,z2, avoiding five idle carry operations. */
 __device__ __forceinline__ void qsb_field_mul(uint64_t *out,uint64_t *a,uint64_t *b){
     uint64_t r0,r1,r2,r3;
     asm(
@@ -442,18 +455,12 @@ __device__ __forceinline__ void qsb_field_mul(uint64_t *out,uint64_t *a,uint64_t
         "\taddc.cc.u32 z5, z5, 0;\n"
         "\taddc.cc.u32 z6, z6, 0;\n"
         "\taddc.cc.u32 z7, z7, 0;\n"
-        "    .reg .u32 cf, k0, k1, v0, v1, v2, v3, v4, v5, v6, v7, borrow;\n"
-        "    .reg .pred take;\n"
+        "    .reg .u32 cf, k0;\n"
         "    addc.u32 cf, 0, 0;\n"
         "    mul.lo.u32 k0, cf, 977;\n"
         "    add.cc.u32 z0, z0, k0;\n"
         "    addc.cc.u32 z1, z1, cf;\n"
-        "    addc.cc.u32 z2, z2, 0;\n"
-        "    addc.cc.u32 z3, z3, 0;\n"
-        "    addc.cc.u32 z4, z4, 0;\n"
-        "    addc.cc.u32 z5, z5, 0;\n"
-        "    addc.cc.u32 z6, z6, 0;\n"
-        "    addc.u32 z7, z7, 0;\n"
+        "    addc.u32 z2, z2, 0;\n"
         "mov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n"
         "\t}\n"
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
@@ -791,21 +798,22 @@ __device__ __constant__ uint64_t pin_u2ry_words[4];
 
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeline(
-    const uint32_t *d_midstate,
-    const uint8_t *d_suffix,    /* suffix template */
+    const uint32_t *__restrict__ d_midstate,
+    const uint8_t *__restrict__ d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
     int seq_offset,             /* offset of sequence in suffix */
     int lt_offset,              /* offset of locktime in suffix */
     int total_preimage_len,
     uint32_t seq_value,         /* current sequence value */
     uint32_t start_lt,          /* starting locktime for this batch */
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
-    uint8_t *d_gt,
-    uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
-    int batch_size, int easy_mode, int single_hash,
-    ulonglong2 *saved, uint64_t *roots, uint64_t *tree
+    const uint64_t *__restrict__ d_neg_r_inv,
+    const uint64_t *__restrict__ d_u2rx, const uint64_t *__restrict__ d_u2ry,
+    const uint64_t *__restrict__ d_neg2u2rx, const uint64_t *__restrict__ d_neg2u2ry,
+    const uint8_t *__restrict__ d_gt,
+    uint32_t *__restrict__ d_hit_cnt, uint32_t *__restrict__ d_hit_idx,
+    int batch_size, int easy_mode, int single_hash, uint32_t group_slot,
+    ulonglong2 *__restrict__ saved, uint64_t *__restrict__ roots,
+    uint64_t *__restrict__ tree
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (blockIdx.x * blockDim.x >= batch_size) return;
@@ -955,6 +963,7 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
+    #pragma unroll
     for(int ri=0;ri<2;ri++){
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
@@ -983,7 +992,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         }
         if(vv){
             uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
+            if(pos<1024){
+                if(FAST_TAIL)
+                    d_hit_idx[pos]=(lt & 0x7FFFFFFFu)|(ri<<31);
+                else
+                    d_hit_idx[pos]=((uint32_t)idx)|(group_slot<<24)|(ri<<30);
+            }
             return;
         }
         if (FAST_TAIL || single_hash) continue;  /* Config A: only one hash iteration */
@@ -1004,7 +1018,7 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         }
         if(vv){
             uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30)|(1u<<31);
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(group_slot<<24)|(ri<<30)|(1u<<31);
             return;
         }
     }
@@ -1020,7 +1034,7 @@ static void launch_pinning_pipeline(
     const uint64_t *d_u2rx, const uint64_t *d_u2ry,
     const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gt, uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
-    int batch_size, int easy_mode, int single_hash,
+    int batch_size, int easy_mode, int single_hash, uint32_t group_slot,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
     uint64_t *super_roots, uint64_t *root_checkpoint
 ) {
@@ -1028,7 +1042,7 @@ static void launch_pinning_pipeline(
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,group_slot,
         saved,roots,tree);
     cudaError_t err=cudaGetLastError();
     if(err!=cudaSuccess){
@@ -1063,7 +1077,7 @@ static void launch_pinning_pipeline(
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks,256>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,group_slot,
         saved,roots,tree);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
@@ -1171,12 +1185,34 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
  * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
  * comes from the runtime problem (little-endian 32 bytes), so the ladders are
  * rebuilt per instance and NOT cached across problems (anti-replay). */
+/* Batched host affine normalization from jacklightChen submission e582bda4,
+ * following MakiRH4 PR46. The device pipeline and exact carry fixes are unchanged. */
+static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
+                            uint64_t *out, BIGNUM *x, BIGNUM *y, BN_CTX *ctx) {
+    EC_POINT *points[GT_HI];
+    if(count<1 || count>=GT_HI) { fprintf(stderr,"Invalid ladder size\n");exit(2); }
+    for(int i=0;i<count;i++) {
+        points[i]=EC_POINT_new(grp);
+        if(!points[i]) { fprintf(stderr,"Ladder allocation failed\n");exit(2); }
+        int ok=i==0 ? EC_POINT_copy(points[i],step)
+                    : EC_POINT_add(grp,points[i],points[i-1],step,ctx);
+        if(!ok) { fprintf(stderr,"Ladder addition failed\n");exit(2); }
+    }
+    if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+        fprintf(stderr,"Ladder batch normalization failed\n");exit(2);
+    }
+    for(int i=0;i<count;i++) {
+        gt_point_to_limbs(grp,points[i],x,y,ctx,out+(size_t)(i+1)*8);
+        EC_POINT_free(points[i]);
+    }
+}
+
 static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
            *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp), *acc = EC_POINT_new(grp);
+    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp);
     /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
@@ -1187,22 +1223,16 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        EC_POINT_copy(acc, base);
-        for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
-            gt_point_to_limbs(grp, acc, x, y, ctx, hL + ((size_t)ch * GT_LO + lo) * 8);
-            EC_POINT_add(grp, acc, acc, base, ctx);
-        }
+        gt_batch_ladder(grp,base,GT_LO-1,
+            hL+(size_t)ch*GT_LO*8,x,y,ctx);
         BN_set_word(shift, 256);                             /* step = 256 * B */
         EC_POINT_mul(grp, step, NULL, base, shift, ctx);
-        EC_POINT_copy(acc, step);
-        for (int hi = 1; hi < (ch==0?1024:512); hi++) {                 /* H[hi] = hi * 256 * B */
-            gt_point_to_limbs(grp, acc, x, y, ctx, hH + ((size_t)ch * GT_HI + hi) * 8);
-            EC_POINT_add(grp, acc, acc, step, ctx);
-        }
+        gt_batch_ladder(grp,step,(ch==0?1024:512)-1,
+            hH+(size_t)ch*GT_HI*8,x,y,ctx);
     }
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
     BN_free(nri); BN_free(bscal);
-    EC_POINT_free(base); EC_POINT_free(step); EC_POINT_free(acc);
+    EC_POINT_free(base); EC_POINT_free(step);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
 }
 
@@ -1506,7 +1536,7 @@ int main(int argc, char **argv) {
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    cudaDeviceSetLimit(cudaLimitStackSize, 4096);
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
@@ -1609,50 +1639,60 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Search all safe locktimes for this sequence */
-        for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
-            uint32_t batch_lt = LT_MIN + lt_off;
-            int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
-
+        /* Queue complete pipelines before the synchronous counter readback.
+         * Ranked fast mode packs the absolute 31-bit locktime plus recid, so
+         * all pipelines for one sequence can share a readback.  The fallback
+         * keeps six group-slot bits above its 24-bit batch index. */
+        static const uint32_t MAX_READBACK_GROUP = 128;
+        uint32_t readback_group = fast_tail ? MAX_READBACK_GROUP : 64;
+        for (uint32_t group_off = 0; group_off < lt_range;
+             group_off += readback_group * (uint32_t)BATCH) {
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-
-            if (fast_tail) {
-                launch_pinning_pipeline<true>(
-                    d_mid, d_suffix, gpu_suffix_len,
-                    pp.seq_offset, pp.lt_offset,
-                    pp.total_preimage_len,
-                    seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                    d_gt,
-                    d_hit_cnt, d_hit_idx,
-                    batch_sz, easy, single_hash,
-                    d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                    d_super_roots,d_root_checkpoint);
-            } else {
-                launch_pinning_pipeline<false>(
-                    d_mid, d_suffix, gpu_suffix_len,
-                    pp.seq_offset, pp.lt_offset,
-                    pp.total_preimage_len,
-                    seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                    d_gt,
-                    d_hit_cnt, d_hit_idx,
-                    batch_sz, easy, single_hash,
-                    d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                    d_super_roots,d_root_checkpoint);
-            }
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
+            cudaError_t err = cudaMemsetAsync(d_hit_cnt, 0, 4);
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
-            total_searched += batch_sz;
+            uint32_t group_lt[MAX_READBACK_GROUP];
+            uint32_t group_count = 0;
+            for (; group_count < readback_group; group_count++) {
+                uint32_t lt_off = group_off + group_count * (uint32_t)BATCH;
+                if (lt_off >= lt_range) break;
+                uint32_t batch_lt = LT_MIN + lt_off;
+                int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
+                group_lt[group_count] = batch_lt;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+                if (fast_tail) {
+                    launch_pinning_pipeline<true>(
+                        d_mid, d_suffix, gpu_suffix_len,
+                        pp.seq_offset, pp.lt_offset,
+                        pp.total_preimage_len,
+                        seq, batch_lt,
+                        d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                        d_gt,
+                        d_hit_cnt, d_hit_idx,
+                        batch_sz, easy, single_hash, group_count,
+                        d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
+                        d_super_roots,d_root_checkpoint);
+                } else {
+                    launch_pinning_pipeline<false>(
+                        d_mid, d_suffix, gpu_suffix_len,
+                        pp.seq_offset, pp.lt_offset,
+                        pp.total_preimage_len,
+                        seq, batch_lt,
+                        d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                        d_gt,
+                        d_hit_cnt, d_hit_idx,
+                        batch_sz, easy, single_hash, group_count,
+                        d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
+                        d_super_roots,d_root_checkpoint);
+                }
+                total_searched += batch_sz;
+            }
+
+            err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
+                uint32_t hits[1024];
+                int nh = (h_hit > 1024) ? 1024 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
@@ -1663,9 +1703,19 @@ int main(int argc, char **argv) {
                 if (f) {
                     for (int h = 0; h < nh; h++) {
                         uint32_t raw = hits[h];
-                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
+                        uint32_t lt;
+                        int ri, hc;
+                        if (fast_tail) {
+                            lt = raw & 0x7FFFFFFFu;
+                            ri = (raw >> 31) & 1;
+                            hc = 0;
+                        } else {
+                            uint32_t slot = (raw >> 24) & 0x3Fu;
+                            if (slot >= group_count) continue;
+                            lt = group_lt[slot] + (raw & 0x00FFFFFFu);
+                            ri = (raw >> 30) & 1;
+                            hc = (raw >> 31) & 1;
+                        }
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
                         printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
@@ -1676,7 +1726,8 @@ int main(int argc, char **argv) {
             }
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if ((total_searched % (50*1024*1024)) <
+                (uint64_t)readback_group * (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;

@@ -1,5 +1,70 @@
 # Pinning research log
 
+## Grouped readback integration (2026-09-16 19:02 UTC)
+
+See GROUPED_INTEGRATION.md for the current candidate8. It integrates reviewed
+alvaroborras PR64 no-alias, recoding, table-load and grouped-readback changes
+with candidate7's preserved canonical arithmetic and prior host ladders.
+Fresh CUDA compile/setup, source-extracted official CPU hit verification and
+the new actual-source grouped-record audit pass. No GPU timing or qualifying
+score exists. The current main8c5cd11 is a subset-only promotion with identical
+pinning source to4d39b5f. PR29 has now terminated at252,350,693 with36,121/36,121
+hits verified, rejected below the advanced frontier. Its source is preserved;
+candidate8 is selected for the now-free official evaluation slot. GPU speed
+and the1% qualifying margin remain unknown; see GROUPED_INTEGRATION.md.
+The sections below are historical evidence, not current performance claims.
+
+## Canonical point arithmetic follow-up (2026-09-16 18:29 UTC)
+
+See CANONICAL_RECOVERY.md for the current candidate and source attribution.
+An independent valid-curve recovery witness exposed noncanonical coordinate
+bytes after the prior exact-carry repair. Canonicalizing the hot multiply and
+square resolves all270 constructed cases; audit_exact_field.py now checks
+canonical point results and the actual shared C++ postlude after PTX. The
+historical arithmetic passes below checked residues, so they did not prove
+correct coordinate encodings. audit_canonical_recovery.py exercises actual
+add/sub bodies as well. No GPU throughput or official promotion is claimed.
+
+## Production follow-up: exact short carry folding (2026-09-16)
+
+This section describes the new delta on alvaroborras PR #24 (`6e76a74`),
+which specializes the deferred-Y calls on the nullforest8200 PR #17 port
+(`6476983`). The historical ledger below is preserved with its attribution;
+its earlier GPU numbers are not new measurements for this candidate.
+
+The carried-forward field multiply/square still dropped the second fold's
+final carry, despite the earlier ledger identifying the counterexample.
+The literal host and PTX implementations both fail on canonical values such
+as `a=b=p-65537`. This candidate adds the exact final fold to both paths.
+It also proves that a final carry leaves a remainder below C^2, C=2^32+977;
+since C^2+C < 2^96, only three 32-bit limbs can change. The already-correct
+tree multiplier now uses that shortened correction, removing five redundant
+PTX carry-propagation instructions per call.
+
+`audit_exact_field.py` is a standalone source-bound regression check. It
+extracts the actual host functions and emulates the actual PTX instruction
+strings on CPU under UBSan, comparing all results with Python big integers.
+50,580 input pairs / 252,900 results and 2,500 alias checks pass. The parent
+has 10,037 multiply and 10,050 square failures in the dense boundary corpus;
+the corrected candidate has zero. This is CPU instruction emulation, not
+device execution. Ten inherited mathematical/source audits also pass.
+
+Local source-extracted fast/generic prepare and finish kernels were checked
+on 512 candidates across four fresh generated problems. Their products use
+the emulated production PTX; other primitives use OpenSSL; referenced table
+entries are independently populated; a scalar inverse substitutes for the
+collective. All expected first-recid hits agree, and all 70 reported hits
+pass the unchanged official verifier at diagnostic N=4. CUDA synchronization
+and GPU table construction are not covered by this CPU test.
+
+CUDA13 sm_89 full compile/link and the unchanged official setup/smoke pass;
+six harness tests and the crypto self-test pass. Fast prepare uses 128 regs
+(parent126), no stack/spills. Fast finish remains80regs, zero stack/spills.
+Fast prepare/finish native sizes rise7200->7344 and3096->3136 slots; root-group
+finish drops400->392, super-root inverse1808->1792. These static counts show
+the correction's cost and the tree saving; no GPU speedup is claimed.
+Official CUDA12.8/RTX4090 execution and promotion remain unestablished.
+
 ## Starting state (2026-09-11)
 
 - Checkout: `356afa3feb0645eb0f0835cb15696b5dfaf69597`, cloned with
@@ -1752,3 +1817,11 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+
+## 2026-09-16: runtime ladder batch normalization integration
+
+See LADDER_INTEGRATION.md for current source, attribution, exact-field carry
+corrections, independent all-point checks and pipeline/official CPU diagnostics.
+The GPU/device source is identical to the tested candidate4. No local GPU
+execution or qualifying score is claimed; existing queued submissions are preserved.
