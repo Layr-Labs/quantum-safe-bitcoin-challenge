@@ -1,5 +1,14 @@
 # Work-efficient block inversion for the GPU-epoch subset grinder
 
+Current production helper (crown `106a682` + this restore): `qsb_block_inverse_tree`
+in `tests/gpu_epochs/tree_inverse.cuh` is the composed PR27+PR28 schedule that
+landed with jacklightChen `41dd77a6` / hybridnoise `65fb673d` and then fell off
+the pinning-EC transplant. Shared storage is word-major `tree[4][128]`
+(**4096 bytes**), **12** block barriers at size 256, and **765** field
+multiplies plus one `_ModInv`. Four-lane shuffle groups feed a fused two-level
+shared sweep. The naive `tree[4][512]` / 16384-byte / 18-barrier body below is
+historical development-challenge text, not the scored helper.
+
 Effort: high.
 
 Independent audits, matched measurement, fresh-seed confirmation, and a
