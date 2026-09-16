@@ -562,7 +562,6 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gtX, uint8_t *d_gtY,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
-    uint8_t *d_hit_pubkey, uint8_t *d_hit_hash, uint8_t *d_hit_sighash,
     int batch_size, int easy_mode, int single_hash
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -570,7 +569,9 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     uint32_t lt = start_lt + (uint32_t)idx;
 
     /* Copy suffix, set sequence + locktime */
-    uint8_t buf[192];
+    /* The suffix is 75 B and nblk is 1 or 2, so 128 B of buffer is all the
+     * SHA-256 tail ever touches; 192 B only grew the per-thread stack frame. */
+    uint8_t buf[128];
     for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
     buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
     buf[seq_offset+2]=(seq_value>>16)&0xFF; buf[seq_offset+3]=(seq_value>>24)&0xFF;
@@ -578,9 +579,10 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     buf[lt_offset+2]=(lt>>16)&0xFF; buf[lt_offset+3]=(lt>>24)&0xFF;
 
     /* SHA-256 padding */
-    buf[suffix_len]=0x80;
-    for(int i=suffix_len+1;i<192;i++) buf[i]=0;
     int nblk=(suffix_len<56)?1:2;
+    buf[suffix_len]=0x80;
+    /* Only bytes up to the end of the last block are ever read back. */
+    for(int i=suffix_len+1;i<nblk*64;i++) buf[i]=0;
     uint64_t bit_len=(uint64_t)total_preimage_len*8;
     int last=nblk*64-8;
     buf[last]=(bit_len>>56)&0xFF;buf[last+1]=(bit_len>>48)&0xFF;
@@ -606,11 +608,14 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
     _SHA256Transform(s2,b2);
 
-    uint8_t sighash[32]; for(int i=0;i<8;i++){sighash[i*4]=(s2[i]>>24)&0xFF;sighash[i*4+1]=(s2[i]>>16)&0xFF;
-        sighash[i*4+2]=(s2[i]>>8)&0xFF;sighash[i*4+3]=s2[i]&0xFF;}
+    /* z = SHA256d(preimage) as a 256-bit integer, limbs z[0] (least significant)
+     * .. z[3]. s2 already holds the digest as 8 big-endian words, so assemble the
+     * limbs straight from registers instead of materialising 32 digest bytes and
+     * reading them back with shifts. Identical value, fewer instructions. */
+    uint64_t z[4];
+    for(int i=0;i<4;i++) z[i]=((uint64_t)s2[6-2*i]<<32)|(uint64_t)s2[7-2*i];
 
     /* Scalar mul */
-    uint64_t z[4]; for(int i=0;i<4;i++){z[i]=0;for(int b=0;b<8;b++)z[i]|=(uint64_t)sighash[31-i*8-b]<<(b*8);}
     uint64_t nri[4]={d_neg_r_inv[0],d_neg_r_inv[1],d_neg_r_inv[2],d_neg_r_inv[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
     uint16_t pk[16]; memcpy(pk,u1,32);
@@ -643,8 +648,6 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     int v=0, hash_choice=0, recid=0;
     uint64_t *pts_x[2]={q1x,q2x};
     uint64_t *pts_y[2]={q1y,q2y};
-    uint8_t saved_pk[33];   /* DIAG: the pubkey we hashed when we found v=1 */
-    uint8_t saved_h[32];    /* DIAG: the SHA256(pk) (or SHA256(SHA256(pk))) when we found v=1 */
     for(int ri=0;ri<2&&!v;ri++){
         uint32_t *x32=(uint32_t*)pts_x[ri];
         uint32_t pb[16];
@@ -654,52 +657,25 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
         pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
         pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        /* DIAG: extract the pubkey bytes the kernel is about to hash. */
-        uint8_t this_pk[33];
-        for(int j=0;j<8;j++){
-            this_pk[j*4]   = (pb[j]>>24)&0xFF;
-            this_pk[j*4+1] = (pb[j]>>16)&0xFF;
-            this_pk[j*4+2] = (pb[j]>> 8)&0xFF;
-            this_pk[j*4+3] = (pb[j]    )&0xFF;
-        }
-        this_pk[32] = (pb[8]>>24)&0xFF;  /* last byte of pk = first byte of pb[8] */
         uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         uint8_t h[32];for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
         int vv=easy_mode?gpu_is_der_easy(h,32):gpu_bench_valid(h);
-        if(vv){
-            v=1;hash_choice=0;recid=ri;
-            for(int j=0;j<33;j++) saved_pk[j]=this_pk[j];
-            for(int j=0;j<32;j++) saved_h[j]=h[j];
-            break;
-        }
-        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
+        if(vv){ v=1;hash_choice=0;recid=ri; break; }
         if (single_hash) continue;  /* Config A: only one hash iteration */
+        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
         uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
             ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
         uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
         uint8_t h2[32];for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
             h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
         vv=easy_mode?gpu_is_der_easy(h2,32):gpu_bench_valid(h2);
-        if(vv){
-            v=1;hash_choice=1;recid=ri;
-            for(int j=0;j<33;j++) saved_pk[j]=this_pk[j];
-            for(int j=0;j<32;j++) saved_h[j]=h2[j];
-            break;
-        }
+        if(vv){ v=1;hash_choice=1;recid=ri; break; }
     }
 
     if(v){uint32_t pos=atomicAdd(d_hit_cnt,1);
         if(pos<1024){
             d_hit_idx[pos]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            /* DIAG: store the pubkey, hash, and sighash so host can compare to CPU's.
-             * Diagnostic arrays sized for 64 entries — only first 64 hits per batch
-             * get diagnostics (host reads at most 64 anyway). */
-            if (pos < 64) {
-                for(int j=0;j<33;j++) d_hit_pubkey[pos*33+j] = saved_pk[j];
-                for(int j=0;j<32;j++) d_hit_hash[pos*32+j]   = saved_h[j];
-                for(int j=0;j<32;j++) d_hit_sighash[pos*32+j] = sighash[j];
-            }
         }
     }
 }
@@ -916,13 +892,7 @@ int main(int argc, char **argv) {
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
-    uint8_t *d_hit_pubkey, *d_hit_hash, *d_hit_sighash;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
-    /* DIAGNOSTIC: per-hit pubkey, SHA256(pk), and sighash. Host compares to CPU
-     * computation post-hit to localize any GPU/CPU divergence. */
-    cudaMalloc(&d_hit_pubkey, 64*33);   /* up to 64 hits per batch */
-    cudaMalloc(&d_hit_hash, 64*32);
-    cudaMalloc(&d_hit_sighash, 64*32);
 
     int BATCH = 1048576;  /* 1M: fewer launches/syncs; host passes seq/lt by value so no fill cost */
     int BLKSZ = 256;
@@ -1011,7 +981,6 @@ int main(int argc, char **argv) {
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gtX, d_gtY,
                 d_hit_cnt, d_hit_idx,
-                d_hit_pubkey, d_hit_hash, d_hit_sighash,
                 batch_sz, easy, single_hash);
             cudaDeviceSynchronize();
 
@@ -1023,14 +992,8 @@ int main(int argc, char **argv) {
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
                 uint32_t hits[64];
-                uint8_t hit_pubkey[64*33];   /* GPU-claimed pubkey for each hit */
-                uint8_t hit_hash[64*32];     /* GPU-claimed SHA256(pk) for each hit */
-                uint8_t hit_sighash[64*32];  /* GPU-computed sighash z */
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                cudaMemcpy(hit_pubkey, d_hit_pubkey, nh*33, cudaMemcpyDeviceToHost);
-                cudaMemcpy(hit_hash, d_hit_hash, nh*32, cudaMemcpyDeviceToHost);
-                cudaMemcpy(hit_sighash, d_hit_sighash, nh*32, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
@@ -1045,16 +1008,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        /* DIAGNOSTIC: dump GPU's claimed pubkey, SHA256(pk), and sighash.
-                         * If these don't match what CPU computes for the same (seq, lt),
-                         * we've localized the bug. */
-                        fprintf(f, "gpu_pubkey=");
-                        for (int j = 0; j < 33; j++) fprintf(f, "%02x", hit_pubkey[h*33+j]);
-                        fprintf(f, "\ngpu_sha_pk=");
-                        for (int j = 0; j < 32; j++) fprintf(f, "%02x", hit_hash[h*32+j]);
-                        fprintf(f, "\ngpu_sighash=");
-                        for (int j = 0; j < 32; j++) fprintf(f, "%02x", hit_sighash[h*32+j]);
-                        fprintf(f, "\n");
                         printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
