@@ -208,7 +208,12 @@ __device__ int gpu_bench_oncurve(const uint8_t *h) {
     return gpu_is_on_curve(x);
 }
 __device__ int gpu_bench_valid(const uint8_t *h) {
+#if QSB_ZEROS_N == 24
+    /* >= 24 leading zero bits is exactly three zero bytes. */
+    return h[0] == 0 && h[1] == 0 && h[2] == 0;
+#else
     return gpu_leading_zero_bits(h) >= QSB_ZEROS_N;  /* leading-zeros gate only; no on-curve(h) check */
+#endif
 }
 
 /* Scalar mulmod */
@@ -381,6 +386,7 @@ __device__ __forceinline__ void unrank_combo(uint64_t rank, int n, int t, uint8_
     }
 }
 
+template<int kRanked>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t *d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -406,6 +412,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= batch_size) return;
+    /* Ranked wrapper always passes single_hash and the leading-zeros gate.
+     * Bake that in so the second pubkey SHA and DER modes can DCE. */
+    const int easy_flag = kRanked ? 0 : easy_mode;
+    const int single_hash_flag = kRanked ? 1 : single_hash;
+    const int calibrate_flag = kRanked ? 0 : calibrate_mode;
 
     /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
@@ -583,7 +594,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         uint8_t h[32];for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-        int vv = calibrate_mode ? gpu_is_der_relaxed(h,32) : (easy_mode ? gpu_is_der_easy(h,32) : gpu_bench_valid(h));
+        int vv = calibrate_flag ? gpu_is_der_relaxed(h,32) : (easy_flag ? gpu_is_der_easy(h,32) : gpu_bench_valid(h));
         if(vv){
             v=1;hash_choice=0;recid=ri;
             /* Build pubkey: prefix byte + 32 X bytes (BE) */
@@ -603,13 +614,13 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* If single_hash (Config A), don't try the second iteration — the script
          * doesn't hash twice, so any h2-based hit would be invalid under the actual
          * scripting. Break out of the recovery-flag loop without setting v. */
-        if (single_hash) continue;
+        if (single_hash_flag) continue;
         uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
             ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
         uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
         uint8_t h2[32];for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
             h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
-        vv = calibrate_mode ? gpu_is_der_relaxed(h2,32) : (easy_mode ? gpu_is_der_easy(h2,32) : gpu_bench_valid(h2));
+        vv = calibrate_flag ? gpu_is_der_relaxed(h2,32) : (easy_flag ? gpu_is_der_easy(h2,32) : gpu_bench_valid(h2));
         if(vv){
             v=1;hash_choice=1;recid=ri;
             winning_pubkey[0] = prefix_byte;
@@ -1404,7 +1415,7 @@ int main(int argc, char **argv) {
             uint32_t h_hit = 0;
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<1><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
@@ -1599,7 +1610,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<0><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
