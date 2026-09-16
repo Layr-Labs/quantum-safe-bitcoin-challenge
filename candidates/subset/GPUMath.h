@@ -932,8 +932,13 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                              const uint64_t *X2, const uint64_t *Y2)
+// Deferred-anchor variant imported from PR17/PR24. The stored ordinate is
+// Yactual + Yoff*ZZZ; intermediate calls carry that anchor, and the final
+// specialization resolves it. This is not a standalone ordinary XYZZ add.
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZ(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -945,32 +950,40 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   uint64_t T[4];
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-  _ModMult(S2, (uint64_t *)Y2, ZZZ1);  // S2 = Y2*ZZZ1
+  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
   _ModSqr(PP, P);                      // PP = P^2
   _ModMult(PPP, PP, P);                // PPP = P*PP
-  _ModMult(Q, X1, PP);                 // Q  = X1*PP
+  _ModMult(Q, U2, PP);                 // V  = U2*PP
+  _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
-  _ModSub256(T, T, PPP);
+  _ModAdd256(T, T, PPP);
   _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 - PPP - 2Q
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
 
-  _ModSub256(Q, Q, T);                 // Q - X3
-  _ModMult(Q, R);                      // R*(Q - X3)
-  _ModMult(S2, Y1, PPP);               // Y1*PPP
-  _ModSub256(Y1, Q, S2);               // Y3 = R*(Q - X3) - Y1*PPP
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModSub256(Q, Q, T);                 // V - X3
+  _ModMult(Q, R);                      // R*(V - X3)
+  if (DEFER_Y) {
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+  } else {
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+    _ModSub256(Y1, Q, S2);             // exact Y3
+  }
 
   Load256(X1, T);                      // X3
-  _ModMult(ZZ1, PP);                   // ZZ3  = ZZ1*PP
-  _ModMult(ZZZ1, PPP);                 // ZZZ3 = ZZZ1*PPP
 }
 
-// EFD "mmadd-2008-s" -- affine (X1,Y1) + affine (X2,Y2) -> XYZZ, 4M + 2S (ZZ1 = ZZZ1 = 1):
-//   P = X2-X1, R = Y2-Y1, PP = P^2, PPP = P*PP, Q = X1*PP
-//   X3 = R^2 - PPP - 2Q,  Y3 = R*(Q-X3) - Y1*PPP,  ZZ3 = PP,  ZZZ3 = PPP
-// Used to seed the accumulator from the first two table points instead of a Z = 1 madd.
+// Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3,
+// ZZ3, and ZZZ3 are the ordinary coordinates of P1+P2, while Y3 deliberately
+// holds only R*(Q-X3), omitting -Y1*ZZZ3. The caller adds Y1 only to the third
+// affine point's slope input for one affine-anchored madd. Its slope numerator
+// is then (Ythird+Y1)*ZZZ3-R*(Q-X3) = Ythird*ZZZ3-Y(P1+P2), while its final
+// affine anchor remains Ythird. The combined seed is therefore exact and costs
+// 11M+4S rather than 12M+4S.
 __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                  const uint64_t *X1, const uint64_t *Y1,
                                  const uint64_t *X2, const uint64_t *Y2)
@@ -992,8 +1005,6 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
 
   _ModSub256(Q, Q, T);                             // Q - X3
-  _ModMult(Q, R);                                  // R*(Q - X3)
-  _ModMult(R, (uint64_t *)Y1, ZZZ3);               // Y1*PPP
-  _ModSub256(Y3, Q, R);                            // Y3 = R*(Q - X3) - Y1*PPP
+  _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }

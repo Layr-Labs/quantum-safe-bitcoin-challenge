@@ -306,39 +306,39 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
     *neg = (ec < 0) ? 1ULL : 0ULL;
 }
 
-/* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
- * y=Y/ZZZ). Seed with an mmadd of the first two chunks' points (4M+2S), then 14
- * madd (8M+2S each) -- vs 15 homogeneous adds at 9M+2S, so ~ -14M/candidate for
- * the +3M end conversion below. Rolled loop (fully unrolling inlines the asm
- * multiply ~150x past ptxas' budget); the back-edge is a uniform loop-counter
- * branch, and every signed odd digit is non-zero so there is NO data-dependent
- * branch and no chunk is skipped. Next chunk's table point loaded one step ahead.
- *
- * The OUTPUT is homogeneous projective (qx,qy,qz) -- identical signature to the
- * previous multiply -- so the downstream conjugate pair + block inverse are
- * unchanged. Convert XYZZ->homogeneous once: X'=X*ZZZ, Y'=Y*ZZ, Z'=ZZ*ZZZ
- * (X'/Z' = X/ZZ = x, Y'/Z' = Y/ZZZ = y). */
+/* Accumulate sixteen points with an affine-anchor-deferred XYZZ ordinate:
+ * seed 3M+2S, thirteen deferred adds 7M+2S, final exact add 8M+2S.
+ * The 102M+30S chain saves fourteen M versus the promoted 116M+30S chain.
+ * Preserve the three-M homogeneous output conversion and downstream recovery:
+ * X'=X*ZZZ, Y'=Y*ZZ, Z'=ZZ*ZZZ. No field inverse occurs here. */
+/* Stream sixteen signed digits and defer the affine anchor's Y term.
+ * Retain the promoted 32 MiB table, field/square implementation and recovery.
+ * Adapted from nullforest8200 PR17 and alvaroborras PR24. */
 __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
-                                      const int32_t e[16], const uint8_t *gTX, const uint8_t *gTY) {
+                                      const uint64_t scalar[4], const uint8_t *gTX, const uint8_t *gTY) {
+    uint64_t M[4]; int sign; gt_recode_setup(scalar,M,&sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    gt_digit_idx(e[0], &idx, &neg); gt_load_signed(gTX,gTY,0,idx,neg,x0,y0);
-    gt_digit_idx(e[1], &idx, &neg); gt_load_signed(gTX,gTY,1,idx,neg,x1,y1);
+    gt_digit_idx(gt_recode_step(M,sign,0), &idx, &neg);
+    gt_load_signed(gTX,gTY,0,idx,neg,x0,y0);
+    gt_digit_idx(gt_recode_step(M,sign,1), &idx, &neg);
+    gt_load_signed(gTX,gTY,1,idx,neg,x1,y1);
     uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
-    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);        /* seed = P0 + P1 */
-    /* No software prefetch: keeping the next table point live alongside the
-     * 128-byte XYZZ accumulator raised spills (92/64 -> measured worse). Load
-     * each chunk just-in-time; the loads are still independent (indices known
-     * from the recoded digits) so the hardware overlaps them. */
+    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<16;c++){
-        gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTX,gTY,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy);
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_digit_idx(gt_recode_step(M,sign,c), &idx, &neg);
+        gt_load_signed(gTX,gTY,c,idx,neg,cx,cy);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        Load256(y0, cy);
     }
-    _ModMult(qx, X, ZZZ);      /* X' = X*ZZZ */
-    _ModMult(qy, Y, ZZ);       /* Y' = Y*ZZ  */
-    _ModMult(qz, ZZ, ZZZ);     /* Z' = ZZ*ZZZ */
+    gt_digit_idx(gt_recode_step(M,sign,GT_CHUNKS-1), &idx, &neg);
+    gt_load_signed(gTX,gTY,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+    _ModMult(qx, X, ZZZ);
+    _ModMult(qy, Y, ZZ);
+    _ModMult(qz, ZZ, ZZZ);
     qz[4]=0;
 }
 
@@ -982,11 +982,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* neg_r_inv is folded into the fixed base A = neg_r_inv*G, so recoding z
      * directly gives z*A = (neg_r_inv*z mod n)*G = u1*G -- no per-candidate
      * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
-    int32_t gte[16]; gt_recode_signed(z, gte);
     /* u1*G in projective form via the signed-digit 32 MiB A-table; the affine
      * conversion is deferred to the single inverse below, so both recids share
      * one _ModInv. */
-    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,gte,d_gtX,d_gtY);
+    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
