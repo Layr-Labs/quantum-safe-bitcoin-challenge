@@ -200,11 +200,14 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
+    for (int c=2;c<GT_CHUNKS-1;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
     }
+    gt_digit_idx(e[GT_CHUNKS-1], &idx, &neg);
+    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
@@ -225,13 +228,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+    ec=sign*(int32_t)M[0];
+    gt_digit_idx(ec, &idx, &neg);
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -567,6 +574,19 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 
 #define QSB_CHECKPOINT_NODES 254
 #define QSB_CHECKPOINT_STRIDE 256
+
+/* Finish-tree experiment: after the downward pass reaches the 64 four-leaf
+ * subtrees, one owner finishes either all four leaves (64 owners) or one pair
+ * (128 owners).  Both variants preserve the packed node map and exactly the
+ * original six field multiplications per four returned inverses.  Keeping the
+ * choice in one source makes the active-warp tradeoff easy to A/B without
+ * changing any arithmetic or checkpoint layout. */
+#ifndef QSB_FINISH_LEAVES_PER_OWNER
+#define QSB_FINISH_LEAVES_PER_OWNER 2
+#endif
+#if QSB_FINISH_LEAVES_PER_OWNER != 2 && QSB_FINISH_LEAVES_PER_OWNER != 4
+#error "QSB_FINISH_LEAVES_PER_OWNER must be 2 or 4"
+#endif
 
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
@@ -920,42 +940,142 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     return;
     } else {
 
-    bool usable = false;
+    /* Restore only W for the 256 original lanes first.  All lanes must reach
+     * the tree barriers; unusable/tail lanes contribute the identity exactly
+     * as in qsb_block_inverse_checkpoint. */
+    bool leaf_usable = false;
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
         ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
         ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
-        qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
-        qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
-        qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
-        usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
+        leaf_usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
     }
-    /* qzz carries the original, pre-identity-substitution W, so this exactly
-     * recreates the promoted kernel's usability decision without a flag. */
     #pragma unroll
-    for(int limb=0;limb<4;limb++)prod[limb]=usable?qzz[limb]:(limb==0?1ULL:0ULL);
+    for(int limb=0;limb<4;limb++)prod[limb]=leaf_usable?qzz[limb]:(limb==0?1ULL:0ULL);
     prod[4]=0;
-    qsb_block_inverse_checkpoint(prod,roots,tree);
-    if (!usable) return;
-    uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
-                      pin_u2rx_words[2],pin_u2rx_words[3]};
-    uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
-                      pin_u2ry_words[2],pin_u2ry_words[3]};
-    uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(
-        qx,qy,qzz,qzzz,prod,u2rx,u2ry,
-        q1x,q2x);
 
-    /* Check both pubkeys × 2 hashes */
-    for(int ri=0;ri<2;ri++){
+    __shared__ uint64_t finish_products[4][512];
+    __shared__ uint64_t finish_inverses[4][256];
+    int owner=(int)threadIdx.x;
+    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+    #pragma unroll
+    for(int limb=0;limb<4;limb++){
+        finish_products[limb][owner]=prod[limb];
+        if(owner<QSB_CHECKPOINT_NODES)
+            finish_products[limb][256+owner]=
+                tree[block_base+(size_t)limb*QSB_CHECKPOINT_STRIDE+owner];
+        if(owner==0)
+            finish_inverses[limb][254]=roots[(size_t)blockIdx.x*4u+limb];
+    }
+    __syncthreads();
+
+    /* Expand through node ids 384..447 (the 64 four-leaf products), then
+     * stop before node ids 256..383.  The owner consumes those final two
+     * levels directly, so no pair inverse is written back to shared memory. */
+    int down_offset=508;
+    #pragma unroll 1
+    for(int count=2;count<128;count<<=1){
+        int half=count>>1;
+        if(owner<count){
+            int local_parent=owner&(half-1);
+            uint64_t parent_inv[5],sibling[5],child_inv[5];
+            #pragma unroll
+            for(int limb=0;limb<4;limb++){
+                parent_inv[limb]=finish_inverses[limb][down_offset+count-256+local_parent];
+                sibling[limb]=finish_products[limb][down_offset+(owner^half)];
+            }
+            parent_inv[4]=sibling[4]=0;
+            qsb_field_mul(child_inv,parent_inv,sibling);
+            #pragma unroll
+            for(int limb=0;limb<4;limb++)
+                finish_inverses[limb][down_offset-256+owner]=child_inv[limb];
+        }
+        down_offset-=count<<1;
+        __syncthreads();
+    }
+
+#if QSB_FINISH_LEAVES_PER_OWNER == 4
+    if(owner>=64) return;
+    int group=owner;
+    uint64_t group_inv[5],left_pair[5],right_pair[5];
+    uint64_t left_pair_inv[5],right_pair_inv[5];
+    #pragma unroll
+    for(int limb=0;limb<4;limb++){
+        group_inv[limb]=finish_inverses[limb][128+group];
+        left_pair[limb]=finish_products[limb][256+group];
+        right_pair[limb]=finish_products[limb][320+group];
+    }
+    group_inv[4]=left_pair[4]=right_pair[4]=0;
+    qsb_field_mul(left_pair_inv,group_inv,right_pair);
+    qsb_field_mul(right_pair_inv,group_inv,left_pair);
+    #define QSB_OWNER_SLOTS 4
+#else
+    if(owner>=128) return;
+    int group=owner&63;
+    int owner_pair=owner>>6;
+    uint64_t group_inv[5],other_pair[5],owned_pair_inv[5];
+    #pragma unroll
+    for(int limb=0;limb<4;limb++){
+        group_inv[limb]=finish_inverses[limb][128+group];
+        other_pair[limb]=finish_products[limb][256+group+((owner_pair^1)<<6)];
+    }
+    group_inv[4]=other_pair[4]=0;
+    qsb_field_mul(owned_pair_inv,group_inv,other_pair);
+    #define QSB_OWNER_SLOTS 2
+#endif
+
+    #pragma unroll 1
+    for(int owner_slot=0;owner_slot<QSB_OWNER_SLOTS;owner_slot++){
+#if QSB_FINISH_LEAVES_PER_OWNER == 4
+        int leaf_tid=group+(owner_slot<<6);
+        uint64_t *pair_inv=(owner_slot&1)?right_pair_inv:left_pair_inv;
+#else
+        int leaf_tid=group+(owner_pair<<6)+(owner_slot<<7);
+        uint64_t *pair_inv=owned_pair_inv;
+#endif
+        int candidate_idx=(int)(blockIdx.x*blockDim.x)+leaf_tid;
+        bool candidate_active=candidate_idx<batch_size;
+        uint64_t sibling_leaf[5],leaf_inv[5];
+        #pragma unroll
+        for(int limb=0;limb<4;limb++)
+            sibling_leaf[limb]=finish_products[limb][leaf_tid^128];
+        sibling_leaf[4]=0;
+        qsb_field_mul(leaf_inv,pair_inv,sibling_leaf);
+        qsb_field_normalize(leaf_inv);
+
+        bool usable=false;
+        if(candidate_active){
+            size_t state_plane_stride=(size_t)batch_size;
+            size_t state_idx=(size_t)candidate_idx;
+            ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
+            ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
+            ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
+            ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
+            ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
+            ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
+            ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
+            ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
+            qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
+            qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
+            qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
+            qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
+            usable=((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
+        }
+        if(!usable) continue;
+
+        uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
+                          pin_u2rx_words[2],pin_u2rx_words[3]};
+        uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
+                          pin_u2ry_words[2],pin_u2ry_words[3]};
+        uint64_t q1x[4],q2x[4];
+        uint32_t y_parities=qsb_xyzz_finish_precomputed(
+            qx,qy,qzz,qzzz,leaf_inv,u2rx,u2ry,q1x,q2x);
+
+        bool candidate_hit=false;
+        /* Check both pubkeys × 2 hashes. */
+        for(int ri=0;ri<2&&!candidate_hit;ri++){
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
         uint64_t sx2=ri ? q2x[2] : q1x[2];
@@ -983,8 +1103,9 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         }
         if(vv){
             uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
-            return;
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)candidate_idx)|(ri<<30);
+            candidate_hit=true;
+            continue;
         }
         if (FAST_TAIL || single_hash) continue;  /* Config A: only one hash iteration */
         uint8_t h[32];
@@ -1004,10 +1125,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         }
         if(vv){
             uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30)|(1u<<31);
-            return;
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)candidate_idx)|(ri<<30)|(1u<<31);
+            candidate_hit=true;
+        }
         }
     }
+#undef QSB_OWNER_SLOTS
     }
 }
 

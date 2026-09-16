@@ -81,7 +81,12 @@ def audit_source():
     assert "alignof(ulonglong2)-1u" in source
     for plane in range(VECTOR_PLANES):
         address = f"saved[{plane}u*state_plane_stride+state_idx]"
-        assert source.count(address) == 2
+        # The fused finish first reads W (planes 4/5) with all 256 lanes to
+        # rebuild the inverse tree, then each owner reloads the complete state
+        # while finishing its two or four candidates.  Every other plane still
+        # has exactly one write and one finish read.
+        expected = 3 if plane in (4, 5) else 2
+        assert source.count(address) == expected
 
 
 def audit_production_batch():
@@ -110,7 +115,7 @@ def main():
     print(
         "PASS: 4x256-bit state maps bijectively to 8 ulonglong2 planes; "
         "all vector elements are 16-byte aligned, warp addresses are contiguous, "
-        "traffic remains exactly 128 bytes/candidate/direction, and the "
+        "prepare writes 128 bytes/candidate and fused finish reads 160 bytes/candidate, and the "
         "16,777,216-candidate allocation remains exactly 2 GiB"
     )
 
