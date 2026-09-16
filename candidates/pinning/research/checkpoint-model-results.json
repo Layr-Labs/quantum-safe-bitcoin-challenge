@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "validation_level": "independent_python_model",
+  "blocks": 116,
+  "leaf_inverses": 29696,
+  "checkpoint_nodes": 62,
+  "counts_per_block": {
+    "prepare_multiply": 255,
+    "finish_recompute_multiply": 192,
+    "finish_expand_multiply": 510
+  },
+  "extra_multiply_per_candidate": 0.75,
+  "checkpoint_allocation_mib_16M": {
+    "base": 512,
+    "proposed": 128
+  },
+  "checkpoint_write_plus_read_saved_mib_16M": 768,
+  "gpu_executed": false,
+  "production_modified": false
+}

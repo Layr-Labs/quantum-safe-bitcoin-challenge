@@ -16,7 +16,6 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <cuda_runtime.h>
-#include <vector>
 
 #include "GPUMath.h"
 
@@ -51,16 +50,26 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #include "GPUHash.h"
 
-/* Ten signed odd windows [26x6,25x4], 16 GiB runtime-specific table.
- * Keeps PR64 streamed recoding, deferred XYZZ and no-alias contracts. */
-#include "wide_geometry.cuh"
-#define GT_CHUNKS WIDE_CHUNKS
-#define GT_TOTAL_ENTRIES ((uint32_t)WIDE_TOTAL_ENTRIES)
-#define GT_LO 8192
-#define GT_HI 8192
-__host__ __device__ __forceinline__ unsigned gt_entries(int c){return wide_entries(c);}
-__host__ __device__ __forceinline__ unsigned gt_offset(int c){return wide_offset(c);}
-__host__ __device__ __forceinline__ int gt_shift(int c){return wide_shift(c);}
+/* Mixed regular odd digits: widths [18,17,...,17], 15 chunks.
+ * Chunk c starts at bit 0 when c=0, otherwise 17*c+1. Entry d is
+ * (2*d+1)*2^offset*(A/2). Every digit is odd and nonzero; the reconstruction
+ * is 2*k modulo the group order, as in the original regular recoder.
+ * First chunk has 2^17 entries, others 2^16: 2^20 points, 64 MiB total. */
+#define GT_CHUNKS 15
+#define GT_TOTAL_ENTRIES (1u << 20)
+#define GT_LO 256
+#define GT_HI 1024
+__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
+    return c == 0 ? (1u << 17) : (1u << 16);
+}
+__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+    return c == 0 ? 0u : (unsigned)(c+1) << 16;
+}
+__host__ __device__ __forceinline__ int gt_shift(int c) {
+    return c == 0 ? 0 : 17*c+1;
+}
+static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
+              "mixed table must contain exactly 64 MiB");
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -124,10 +133,11 @@ __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
     M[2]=(r2<<1)|(r1>>63); M[3]=(r3<<1)|(r2>>63);
     return sign*digit;
 }
-__device__ __forceinline__ void gt_recode_signed(const uint64_t k[4],int32_t e[GT_CHUNKS]){
-    uint64_t M[4];int sign;gt_recode_setup(k,M,&sign);
+__device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
+    uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
+    e[0]=gt_mixed_step<18>(M,sign);
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS-1;c++)e[c]=wide_step(M,sign,wide_bits(c));
+    for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<17>(M,sign);
     e[GT_CHUNKS-1]=sign*(int32_t)M[0];
 }
 
@@ -168,8 +178,8 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  * y=Y/ZZZ). Seed the first two chunks with a deferred-Y mmadd (3M+2S), adjust
  * each next point's y by the preceding affine anchor, and defer the new anchor
  * term through every intermediate addition. Only the final addition resolves
- * Y exactly. This costs 3M+2S + 7*(7M+2S) + 8M+2S = 60M+18S across all
- * 10 points; the former15-point chain cost95M+28S. Fully unrolling
+ * Y exactly. This costs 3M+2S + 12*(7M+2S) + 8M+2S = 95M+28S across all
+ * 15 points instead of 108M+28S. Fully unrolling
  * inlines the asm multiply ~150x past ptxas' budget); the back-edge is a
  * uniform loop-counter
  * branch, and every signed odd digit is non-zero so there is NO data-dependent
@@ -205,20 +215,33 @@ __device__ void _FixedBaseSignedXYZZ(
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
-__device__ void _FixedBaseSignedXYZZScalar(uint64_t *__restrict__ X,uint64_t *__restrict__ Y,uint64_t *__restrict__ ZZ,uint64_t *__restrict__ ZZZ,const uint64_t *__restrict__ k,const uint8_t *__restrict__ table){
-    uint64_t M[4];int sign;gt_recode_setup(k,M,&sign);
-    uint32_t idx;uint64_t neg;uint64_t x0[4],y0[4],x1[4],y1[4];
-    int32_t e=wide_step(M,sign,26);gt_digit_idx(e,&idx,&neg);gt_load_signed_flat(table,wide_offset(0),idx,neg,x0,y0);
-    e=wide_step(M,sign,26);gt_digit_idx(e,&idx,&neg);gt_load_signed_flat(table,wide_offset(1),idx,neg,x1,y1);
-    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ,x0,y0,x1,y1);
-    uint64_t x[4],y[4];unsigned offset=wide_offset(2);
+__device__ void _FixedBaseSignedXYZZScalar(
+    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
+    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
+    const uint64_t *__restrict__ k, const uint8_t *__restrict__ gTable) {
+    uint64_t M[4]; int sign;
+    gt_recode_setup(k, M, &sign);
+    uint32_t idx; uint64_t neg;
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+    int32_t ec=gt_mixed_step<18>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<17>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for(int c=2;c<WIDE_CHUNKS-1;++c){
-        e=wide_step(M,sign,wide_bits(c));gt_digit_idx(e,&idx,&neg);gt_load_signed_flat(table,offset,idx,neg,x,y);
-        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ,x,y,y0);Load256(y0,y);offset+=wide_entries(c);
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
     }
-    e=sign*(int32_t)M[0];gt_digit_idx(e,&idx,&neg);gt_load_signed_flat(table,offset,idx,neg,x,y);
-    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ,x,y,y0);
+    ec=sign*(int32_t)M[0];
+    gt_digit_idx(ec, &idx, &neg);
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -868,7 +891,7 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
-    /* u1*G as raw XYZZ via the signed 16 GiB runtime A-table. */
+    /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
@@ -1005,9 +1028,6 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     }
 }
 
-#include "wide_fused_kernel.cuh"
-static bool wide_use_fused=false;
-
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -1022,16 +1042,6 @@ static void launch_pinning_pipeline(
     uint64_t *super_roots, uint64_t *root_checkpoint
 ) {
     int blocks=(batch_size+255)/256;
-    if(FAST_TAIL&&wide_use_fused){
-        kernel_pinning_fused<FAST_TAIL><<<blocks,256>>>(
-            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,group_slot,
-            saved,roots,tree);
-        cudaError_t err=cudaGetLastError();
-        if(err!=cudaSuccess){fprintf(stderr,"Fused search launch failed: %s\n",cudaGetErrorString(err));exit(2);}
-        return;
-    }
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
@@ -1079,7 +1089,70 @@ static void launch_pinning_pipeline(
     }
 }
 
-#include "wide_table_kernels.cuh"
+/* ============================================================
+ * Fixed-base table construction on the GPU (signed-digit table)
+ *
+ * Entry (ch, d) is (2d+1) * 2^gt_shift(ch) * (A/2) in affine form, limbs
+ * little-endian -- the layout _FixedBaseSignedXYZZScalar indexes it.
+ *
+ * Building it on the host would cost a modular inversion per entry through
+ * OpenSSL. Split the odd index instead: with m = 2d+1 = hi*256 + lo,
+ *
+ *     m*base_c = hi*(256*base_c) + lo*base_c = H[hi] + L[lo]
+ *
+ * so the host only produces two short ladders per chunk (L[lo]=lo*base_c,
+ * H[hi]=hi*256*base_c) and every table entry is ONE independent mixed addition
+ * plus one inversion -- perfectly parallel, one inversion per thread.
+ *
+ * m is odd so lo is odd (never 0); L[0] is never referenced. H[0] is the
+ * identity (m < 256) -> copy L[lo]. H[hi] == +-L[lo] would need m == 0 (mod n),
+ * impossible for m below 2^18. Base A/2 uses A=neg_r_inv*G.
+ * ============================================================ */
+
+/* Mixed geometry (GT_CHUNKS/GT_TOTAL_ENTRIES/GT_LO/GT_HI) is defined once near the top,
+ * beside gt_recode_signed / _FixedBaseSignedXYZZScalar. Base of chunk c is
+ * base_c = 2^gt_shift(c) * (A/2). Entry (c,d) = (2d+1)*base_c with m odd;
+ * split m = hi*256 + lo, lo odd in [1,255], hi below 1024:
+ *     m*base_c = H[hi] + L[lo],  L[lo] = lo*base_c,  H[hi] = hi*256*base_c.
+ * H[0] is the identity (m < 256) -> copy L[lo]; lo is always odd so never 0,
+ * so L[0] is never referenced. H[hi] == +-L[lo] would need m == 0 (mod n),
+ * impossible for m below 2^18. */
+__global__ void kernel_build_gtable(
+    const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
+    const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
+    uint8_t * __restrict__ gTable)
+{
+    uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= GT_TOTAL_ENTRIES) return;
+    int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
+    int d=(int)(t-gt_offset(ch));
+    int m  = 2*d + 1;                        /* odd multiple below 2^18 */
+    int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 1024 */
+
+    const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
+    const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
+
+    uint64_t rx[4], ry[4];
+    if (hi == 0) {
+        for (int k = 0; k < 4; k++) { rx[k] = Lp[k]; ry[k] = Lp[4 + k]; }
+    } else {
+        uint64_t px[4], py[4], pz[5] = {1, 0, 0, 0, 0}, qx[4], qy[4];
+        for (int k = 0; k < 4; k++) {
+            px[k] = Hp[k]; py[k] = Hp[4 + k];
+            qx[k] = Lp[k]; qy[k] = Lp[4 + k];
+        }
+        _PointAddSecp256k1(px, py, pz, qx, qy);
+        _ModInv(pz);
+        _ModMult(px, pz); _ModMult(py, pz);
+        for (int k = 0; k < 4; k++) { rx[k] = px[k]; ry[k] = py[k]; }
+    }
+    /* Limbs are little-endian in memory, which is exactly the table's byte
+     * order, so the store is a straight copy. */
+    size_t off = ((size_t)gt_offset(ch) + d) * 64;
+    memcpy(gTable + off,      rx, 32);
+    memcpy(gTable + off + 32, ry, 32);
+}
+
 
 /* ============================================================
  * Host code
@@ -1106,45 +1179,49 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
-static void gt_require(bool ok,const char *where){if(!ok){fprintf(stderr,"OpenSSL table builder failure: %s\n",where);exit(2);}}
-// Batched affine ladder normalization, as independently described in public
-// MakiRH4 PR46 and jacklightChen PR53; extended to odd13-bit lows and wide highs.
-static void gt_build_ladders(uint64_t *hL,uint64_t *hH,const uint8_t neg_r_inv[32]){
-    EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1);BN_CTX *ctx=BN_CTX_new();
-    BIGNUM *x=BN_new(),*y=BN_new(),*shift=BN_new(),*order=BN_new(),*inv2=BN_new(),*nri=BN_new(),*coef=BN_new();
-    EC_POINT *base=grp?EC_POINT_new(grp):nullptr,*step=grp?EC_POINT_new(grp):nullptr;
-    gt_require(grp&&ctx&&x&&y&&shift&&order&&inv2&&nri&&coef&&base&&step,"allocate");
-    gt_require(EC_GROUP_get_order(grp,order,ctx),"group order");gt_require(BN_set_word(shift,2),"set2");
-    gt_require(BN_mod_inverse(inv2,shift,order,ctx)!=nullptr,"inverse2");
-    gt_require(BN_lebin2bn(neg_r_inv,32,nri)!=nullptr,"runtime coefficient");
-    gt_require(BN_mod_mul(coef,inv2,nri,order,ctx),"fold base coefficient");
-    gt_require(!BN_is_zero(coef),"nonzero runtime base");
-    gt_require(EC_POINT_mul(grp,base,coef,nullptr,nullptr,ctx),"base point");
-    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
-    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
-    for(int ch=0;ch<GT_CHUNKS;++ch){
-        if(ch){gt_require(BN_set_word(shift,1u<<wide_bits(ch-1)),"window shift");gt_require(EC_POINT_mul(grp,base,nullptr,base,shift,ctx),"shifted base");}
-        std::vector<EC_POINT*> points;std::vector<uint64_t*> destinations;
-        gt_require(EC_POINT_dbl(grp,step,base,ctx),"low step");
-        for(int lo=1;lo<GT_LO;lo+=2){
-            EC_POINT *pt=EC_POINT_new(grp);gt_require(pt!=nullptr,"low point allocate");
-            gt_require(lo==1?EC_POINT_copy(pt,base):EC_POINT_add(grp,pt,points.back(),step,ctx),"low ladder");
-            points.push_back(pt);destinations.push_back(hL+((size_t)ch*GT_LO+lo)*8);
+/* The two ladders the GPU builder needs: L[ch][lo] = lo * base_ch and
+ * H[ch][hi] = hi * 256 * base_ch. Index 0 of each is the identity and is
+ * left zeroed; the kernel treats it as such. 12,002 real points, against the
+ * 1,048,576 the host would otherwise have to make affine one at a time. */
+/* Build the ladders for base A/2 where A = neg_r_inv * G (problem-dependent).
+ * With the table on base A, recoding z directly gives z*A = z*neg_r_inv*G =
+ * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
+ * comes from the runtime problem (little-endian 32 bytes), so the ladders are
+ * rebuilt per instance and NOT cached across problems (anti-replay). */
+static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32]) {
+    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
+           *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
+    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp), *acc = EC_POINT_new(grp);
+    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
+    EC_GROUP_get_order(grp, order, ctx);
+    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
+    BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
+    BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
+    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
+    memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
+    memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
+    for (int ch = 0; ch < GT_CHUNKS; ch++) {
+        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
+        EC_POINT_copy(acc, base);
+        for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
+            gt_point_to_limbs(grp, acc, x, y, ctx, hL + ((size_t)ch * GT_LO + lo) * 8);
+            EC_POINT_add(grp, acc, acc, base, ctx);
         }
-        gt_require(BN_set_word(shift,GT_LO),"high step scalar");
-        gt_require(EC_POINT_mul(grp,step,nullptr,base,shift,ctx),"high step");
-        int high_count=(int)((uint64_t)gt_entries(ch)*2/GT_LO);
-        for(int hi=1;hi<high_count;++hi){
-            EC_POINT *pt=EC_POINT_new(grp);gt_require(pt!=nullptr,"high point allocate");
-            gt_require(hi==1?EC_POINT_copy(pt,step):EC_POINT_add(grp,pt,points.back(),step,ctx),"high ladder");
-            points.push_back(pt);destinations.push_back(hH+((size_t)ch*GT_HI+hi)*8);
+        BN_set_word(shift, 256);                             /* step = 256 * B */
+        EC_POINT_mul(grp, step, NULL, base, shift, ctx);
+        EC_POINT_copy(acc, step);
+        for (int hi = 1; hi < (ch==0?1024:512); hi++) {                 /* H[hi] = hi * 256 * B */
+            gt_point_to_limbs(grp, acc, x, y, ctx, hH + ((size_t)ch * GT_HI + hi) * 8);
+            EC_POINT_add(grp, acc, acc, step, ctx);
         }
-        gt_require(EC_POINTs_make_affine(grp,points.size(),points.data(),ctx),"batch normalize");
-        for(size_t i=0;i<points.size();++i){gt_point_to_limbs(grp,points[i],x,y,ctx,destinations[i]);EC_POINT_free(points[i]);}
     }
-    EC_POINT_free(base);EC_POINT_free(step);BN_free(x);BN_free(y);BN_free(shift);BN_free(order);BN_free(inv2);BN_free(nri);BN_free(coef);EC_GROUP_free(grp);BN_CTX_free(ctx);
+    BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
+    BN_free(nri); BN_free(bscal);
+    EC_POINT_free(base); EC_POINT_free(step); EC_POINT_free(acc);
+    EC_GROUP_free(grp); BN_CTX_free(ctx);
 }
-
 
 /* Spot-check the built table against OpenSSL. The builder runs on hardware this
  * code has never executed on, so a silent wrong table -- which would simply
@@ -1167,10 +1244,10 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
-        if (t < GT_CHUNKS * 8) {
-            ch = t / 8;
-            const int corner[8] = {0,1,2,4095,4096,4097,(int)gt_entries(ch)-2,(int)gt_entries(ch)-1};
-            i = corner[t % 8];
+        if (t < GT_CHUNKS * 4) {
+            ch = t / 4;
+            const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
+            i = corner[t % 4];
         } else {
             seed = seed * 1664525u + 1013904223u;
             ch = (int)(seed >> 28) % GT_CHUNKS;
@@ -1184,9 +1261,8 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, ctx, want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        uint8_t sample[64];
-        if(cudaMemcpy(sample,gTable+off,64,cudaMemcpyDeviceToHost)!=cudaSuccess){ok=0;break;}
-        if (memcmp(sample,want,32)!=0 || memcmp(sample+32,want+4,32)!=0) {
+        if (memcmp(gTable + off,      want,     32) != 0 ||
+            memcmp(gTable + off + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -1196,8 +1272,44 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     return ok;
 }
 
-#include "wide_table_host.cuh"
-#include "wide_search_tuner.cuh"
+/* OpenSSL fallback builder (only if the GPU builder's spot check fails). Emits
+ * the signed table: entry (ch,d) = (2d+1) * 2^gt_shift(ch) * (A/2). Walks odd
+ * multiples by stepping 2*base_c per entry (acc = base_c, 3base_c, ...). */
+static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
+    /* No cache: base A/2 is problem-dependent (neg_r_inv fresh per instance). */
+    printf("  Computing GTable (OpenSSL fallback)...\n");
+    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(), *order = BN_new(),
+           *nri = BN_new(), *bscal = BN_new();
+    EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp), *two_base = EC_POINT_new(grp);
+    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
+    EC_GROUP_get_order(grp, order, ctx);
+    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
+    BN_lebin2bn(neg_r_inv, 32, nri);
+    BN_mod_mul(bscal, inv2, nri, order, ctx);
+    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);
+    for (int ch = 0; ch < GT_CHUNKS; ch++) {
+        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
+        BN_set_word(shift, 2); EC_POINT_mul(grp, two_base, NULL, base, shift, ctx);  /* 2*base_c */
+        EC_POINT_copy(pt, base);                                                     /* (2*0+1)*base_c */
+        for (unsigned d = 0; d < gt_entries(ch); d++) {
+            EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+            uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
+            BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
+            BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
+            for(int j=0;j<16;j++){uint8_t t=xb[j];xb[j]=xb[31-j];xb[31-j]=t;}
+            for(int j=0;j<16;j++){uint8_t t=yb[j];yb[j]=yb[31-j];yb[31-j]=t;}
+            size_t off = ((size_t)gt_offset(ch) + d) * 64;
+            memcpy(gTable + off,      xb, 32);
+            memcpy(gTable + off + 32, yb, 32);
+            if (d < gt_entries(ch) - 1) EC_POINT_add(grp, pt, pt, two_base, ctx);
+        }
+    }
+    BN_free(x);BN_free(y);BN_free(shift);BN_free(inv2);BN_free(order);BN_free(nri);BN_free(bscal);
+    EC_POINT_free(base);EC_POINT_free(pt);EC_POINT_free(two_base);
+    EC_GROUP_free(grp);BN_CTX_free(ctx);
+}
 
 /* Params loader for pinning2.bin */
 typedef struct {
@@ -1272,28 +1384,61 @@ int main(int argc, char **argv) {
     }
 
     /* Use the specified GPU */
-    wide_cuda_require(cudaSetDevice(gpu_index),"select device");
-    wide_cuda_require(cudaDeviceSetLimit(cudaLimitStackSize,4096),"set stack limit");
+    cudaSetDevice(gpu_index);
 
-    cudaDeviceProp prop; wide_cuda_require(cudaGetDeviceProperties(&prop,gpu_index),"device properties");
+    cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
 
-    /* Reserve the large runtime table only on the GPU. Builder scratch is
-     * released before allocating the search checkpoints. */
-    size_t free_bytes=0,total_bytes=0;
-    wide_cuda_require(cudaMemGetInfo(&free_bytes,&total_bytes),"device memory query");
-    const size_t gt_sz=(size_t)GT_TOTAL_ENTRIES*64;
-    const size_t search_bytes=(5ull<<29)+(4ull<<20)+(8ull<<10);
-    if(free_bytes<gt_sz+search_bytes+(64ull<<20)){
-        fprintf(stderr,"Insufficient GPU memory for16GiB table and search checkpoints: %.2fGiB free\n",(double)free_bytes/(1ull<<30));return 2;
+    /* GTable */
+    size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
+    uint8_t *d_gt;
+    cudaMalloc(&d_gt,gt_sz);
+    {
+        /* Build the fixed-base table on the GPU. The host only produces the two
+         * small ladders; the million entries are one parallel addition each.
+         * The result is then spot-checked against OpenSSL, and anything that
+         * does not match falls back to the original host builder -- a wrong
+         * table yields zero verifiable hits, so it must never reach the run. */
+        struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
+        size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
+        size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
+        uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
+        if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
+        gt_build_ladders(hL,hH,pp.neg_r_inv);
+        uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
+        cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
+        cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
+        free(hL); free(hH);
+        int gt_total = GT_TOTAL_ENTRIES;
+        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+        cudaDeviceSynchronize();
+        cudaError_t gerr = cudaGetLastError();
+        cudaFree(dL); cudaFree(dH);
+        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
+        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+        int gt_ok = (gerr==cudaSuccess);
+        if(gt_ok){
+            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &tb);
+        double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
+        if(gt_ok){
+            printf("  GTable built on GPU in %.2fs (%d points, %.0f MiB total, spot check passed)\n",
+                   gt_secs, gt_total, (double)gt_sz/(1024*1024));
+        } else {
+            printf("  GTable GPU build rejected (%s); using the host builder\n",
+                   gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+            compute_gtable(chk_table,pp.neg_r_inv);
+            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+        }
+        fflush(stdout);
+        free(chk_table);
     }
-    uint8_t *d_gt=nullptr;
-    wide_cuda_require(cudaMalloc(&d_gt,gt_sz),"allocate wide table");
-    wide_build_table(d_gt,pp.neg_r_inv);
 
     /* Upload midstate */
     uint32_t *d_mid; cudaMalloc(&d_mid, 32);
@@ -1378,7 +1523,7 @@ int main(int argc, char **argv) {
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
 
-
+    cudaDeviceSetLimit(cudaLimitStackSize, 4096);
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
@@ -1440,7 +1585,6 @@ int main(int argc, char **argv) {
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     uint64_t total_searched = 0;
-    WideSearchTuner schedule_tuner(fast_tail);
     int found = 0;
 
     /* Each GPU handles sequences: SEQ_MIN + effective_id, SEQ_MIN + effective_id + effective_total, ... */
@@ -1490,9 +1634,6 @@ int main(int argc, char **argv) {
         uint32_t readback_group = fast_tail ? MAX_READBACK_GROUP : 64;
         for (uint32_t group_off = 0; group_off < lt_range;
              group_off += readback_group * (uint32_t)BATCH) {
-            readback_group=schedule_tuner.group_limit(fast_tail?MAX_READBACK_GROUP:64);
-            uint64_t group_start_count=total_searched;
-            schedule_tuner.begin();
             uint32_t h_hit = 0;
             cudaError_t err = cudaMemsetAsync(d_hit_cnt, 0, 4);
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -1534,14 +1675,12 @@ int main(int argc, char **argv) {
                 total_searched += batch_sz;
             }
 
-            schedule_tuner.end();
             err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            schedule_tuner.observe(total_searched-group_start_count);
             if (h_hit > 0) {
                 uint32_t hits[1024];
                 int nh = (h_hit > 1024) ? 1024 : h_hit;
-                wide_cuda_require(cudaMemcpy(hits,d_hit_idx,nh*4,cudaMemcpyDeviceToHost),"hit records copy");
+                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
