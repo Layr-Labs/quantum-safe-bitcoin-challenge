@@ -482,10 +482,11 @@ typedef struct {
 } epoch_desc_t;
 static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
 
-/* The first 256 lexicographic 3-from-13 window omission sets, stored as actual
- * push indices (QSB_SE_CUT + 0..12). Filled by the host once per run. Keeping
- * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
- * the block-wide inverse, and the benchmark scores verified throughput. */
+/* A schedule-packed selection of 256 distinct 3-from-13 window omission sets,
+ * stored as actual push indices (QSB_SE_CUT + 0..12). Filled by the host once
+ * per run. Keeping any 256 of C(13,3)=286 is legitimate sampling: one block
+ * per epoch aligns with the block-wide inverse, and the benchmark scores
+ * verified throughput. */
 __device__ __constant__ uint8_t WIN3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "window_schedule_shared.cuh"
 
@@ -1806,23 +1807,15 @@ int main(int argc, char **argv) {
     uint8_t *d_suf; cudaMalloc(&d_suf, dp.tx_suffix_len);
     cudaMemcpy(d_suf, dp.tx_suffix, dp.tx_suffix_len, cudaMemcpyHostToDevice);
 
-    /* Short-epoch tables: the first 256 lex 3-from-13 window combos (as actual
-     * push indices 137..149) and the per-launch epoch descriptor buffer.
+    /* Short-epoch tables: 256 schedule-packed 3-from-13 window combos (as
+     * actual push indices 137..149) and the per-launch epoch descriptor buffer.
      * d_mid/d_prem stay at the PROBLEM base midstate / prefix_remainder in
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
-        int cnt = 0;
-        for (int a = 0; a < 13 && cnt < QSB_SE_PER_EPOCH; a++)
-            for (int b = a + 1; b < 13 && cnt < QSB_SE_PER_EPOCH; b++)
-                for (int c = b + 1; c < 13 && cnt < QSB_SE_PER_EPOCH; c++) {
-                    h_win3[cnt][0] = (uint8_t)(QSB_SE_CUT + a);
-                    h_win3[cnt][1] = (uint8_t)(QSB_SE_CUT + b);
-                    h_win3[cnt][2] = (uint8_t)(QSB_SE_CUT + c);
-                    cnt++;
-                }
+        if (qsb_select_window_schedule(dp.dummy_sigs, h_win3)) return 1;
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
