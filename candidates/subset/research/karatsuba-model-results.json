@@ -1,0 +1,137 @@
+{
+  "status": "PASS",
+  "validation_level": "python_limb_model",
+  "exact_products_and_reductions": 21465,
+  "word_products": 48,
+  "schoolbook_word_products": 64,
+  "difference_signs": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "cases_with_257_bit_middle": 1573,
+  "final_fold_carry_cases": 9,
+  "max_128bit_product_column_bits": 66,
+  "carry_regression_case": {
+    "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2e",
+    "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2e",
+    "correct_residue": 4295098369,
+    "incorrect_dropped_carry_residue": 130096
+  },
+  "ordinary_signed_table_screens": {
+    "16": {
+      "widths": [
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16
+      ],
+      "table_mib": 32.0
+    },
+    "15": {
+      "widths": [
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        18
+      ],
+      "table_mib": 64.0
+    },
+    "14": {
+      "widths": [
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        19,
+        19,
+        19,
+        19
+      ],
+      "table_mib": 144.0
+    },
+    "13": {
+      "widths": [
+        19,
+        19,
+        19,
+        19,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "table_mib": 352.0
+    }
+  },
+  "idealized_glv_shared_table_screen": {
+    "assumed_component_bits": 128,
+    "windows_each": 7,
+    "widths": [
+      18,
+      18,
+      18,
+      18,
+      18,
+      19,
+      19
+    ],
+    "table_mib": 72.0,
+    "total_point_lookups": 14,
+    "additional_beta_multiplications_if_transformed_on_load": 7,
+    "limitations": "No GLV decomposition or signed recoder implemented; table is a lower-bound size model, not a complete algorithm."
+  },
+  "source_identity": {
+    "source_fingerprint": "d0ccab7c66830429f8bc39dc619ad4b369883d0ea9c7929b64a569592c65512e",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "efeb6f75e9ae097005f0b79771529ddf23b405ce7da68629a9b18a8bc9a3717e",
+      "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/tree.cu": "6694341256a400aacf344b48013aeabdff988481593b615d0d3da6e6d96ed832",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "67103970f3761c1be263b7df114bd5a6d3b63e48be36e423892a2f68efa91b41",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "57dede3365f0d87bfa5307bd73440f9ae25773d913c96b46a3316363fd734cb8"
+    }
+  },
+  "model_sha256": "a275fca0210ac197df26e3b04ad5b75a4bff039ebd4faf02642065e2d0a296cb",
+  "selected_for_production": false,
+  "gpu_executed": false,
+  "limitations": "48 products excludes reduction, sign, carry and merge overhead. No CUDA/PTX implementation, resource count or performance result."
+}

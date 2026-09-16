@@ -24,6 +24,31 @@ static uint32_t qsb_window_first_key(const uint8_t w[3]) {
     return key;
 }
 
+// Select/reorder the promoted alvaroborras 9c914db3 schedule. This helper is
+// shared by the production host path and the extracted CPU source audit.
+static int qsb_select_window_triples(uint8_t windows[256][3]) {
+    int count=0;
+    for(int a=0;a<13;a++)for(int b=a+1;b<13;b++)for(int c=b+1;c<13;c++){
+        if(a>=1 && c<=7 && !(a==1 && b==2))continue;
+        if(count>=256)return 1;
+        windows[count][0]=(uint8_t)(137+a);
+        windows[count][1]=(uint8_t)(137+b);
+        windows[count][2]=(uint8_t)(137+c);
+        count++;
+    }
+    if(count!=256)return 1;
+    for(int i=1;i<256;i++){
+        uint8_t w[3];memcpy(w,windows[i],3);
+        uint32_t second=qsb_window_second_key(w),first=qsb_window_first_key(w);int j=i;
+        while(j>0 && (qsb_window_second_key(windows[j-1])>second ||
+              (qsb_window_second_key(windows[j-1])==second && qsb_window_first_key(windows[j-1])>first))){
+            memcpy(windows[j],windows[j-1],3);j--;
+        }
+        memcpy(windows[j],w,3);
+    }
+    return 0;
+}
+
 static int qsb_prepare_window_schedule(const uint8_t *rows,
         const uint8_t windows[256][3], const uint32_t *constant) {
     uint32_t first[14][256], second[64][256]={}, round_k[64];

@@ -51,7 +51,6 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "../../GPUHash.h"
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
-__device__ __constant__ uint64_t QSB_U2R[8];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -180,30 +179,7 @@ __device__ __forceinline__ void qsb_compress_constant_rolled(uint32_t *output){
  * addresses one per cycle. At 12 KB the table sits in L1, where divergent
  * reads are served normally. */
 __device__ uint64_t BINOM_C[151][10];
-/* ============================================================
- * Signed-digit fixed-base geometry (B1).
- *
- * Table entry (c,d) = (2d+1) * 2^(16c) * (G/2), d in [0, 2^15), where
- * G/2 = (2^-1 mod n) * G. Two coordinate arrays (SoA), 16 chunks * 2^15
- * entries * 32 B = 16 MiB each, 32 MiB total -- half the previous 64 MiB, to
- * stay L2-resident on the 4090 (a 772 MiB w=20 table lost 20%).
- *
- * gt_recode_signed turns the 256-bit scalar k into 16 signed ODD digits e_c
- * (|e_c| < 2^16) with  sum_c e_c * 2^(16c) == 2k (mod n). Then
- *   sum_c e_c * 2^(16c) * (G/2) = ((2k) mod-n representative) * (G/2) = k*G,
- * because n*(G/2) = O so any 2k-congruent representative works. A negative
- * digit selects the same table point with y negated (p - y) -- free. Every
- * digit is odd hence non-zero, so the window multiply is branchless (no skip),
- * which is what lets the next step's table loads issue an iteration ahead.
- *
- * Derivation of the odd digits (Joye-Tunstall regular recoding): make a 2k-
- * representative M odd (M = m0 if m0=2k mod n is odd, else M = n-m0 with a
- * global sign flip; n odd so exactly one of m0, n-m0 is odd, both < 2^256).
- * Then repeatedly e = (M mod 2^17) - 2^16 (odd, in (-2^16,2^16)); M becomes
- * 2*(M>>17)+1, which stays odd -- so every extracted digit is odd. 15 windowed
- * digits + the (< 2^16) remainder = 16 digits. Verified in Python over 10^5 k.
- * ============================================================ */
-/* Mixed regular odd digits (from the promoted pinning frontier): widths
+/* Mixed regular odd digits (welttowelt submission 80a850f, source 099c7d5): widths
  * [18,17,...,17], 15 chunks. Chunk c starts at bit 0 when c=0, otherwise
  * 17*c+1. Entry d is (2*d+1)*2^offset*(A/2), stored as one 64-byte X||Y
  * record. Every digit is odd and nonzero; the reconstruction is 2*k modulo
@@ -231,12 +207,12 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
     0xFFFFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFFFFFULL
 };
 
-/* k -> 16 signed odd digits. Branchless (no data-dependent BRA) so warps stay
+/* k -> 15 mixed-width signed odd digits. Branchless (no data-dependent BRA) so warps stay
  * convergent; correctness mirrored on CPU by the same source. */
 /* Recode state: the odd 2k-representative M (4 limbs) plus a global sign.
  * gt_recode_setup computes it once; gt_recode_step peels one signed odd digit
  * per chunk and advances M. The window multiply carries this 32-byte state and
- * peels digits on the fly, so the 16-entry digit array never materialises
+ * peels digits on the fly, so the digit array never materialises
  * (that array was the largest single spill source). gt_recode_signed keeps the
  * array form for the CPU cross-check; both share the same step logic. */
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
@@ -286,6 +262,13 @@ __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
     M[2]=(r2<<1)|(r1>>63); M[3]=(r3<<1)|(r2>>63);
     return sign*digit;
 }
+
+__device__ __forceinline__ int32_t gt_recode_step(uint64_t M[4], int sign, int c) {
+    if(c==0)return gt_mixed_step<18>(M,sign);
+    if(c<GT_CHUNKS-1)return gt_mixed_step<17>(M,sign);
+    return sign*(int32_t)M[0];
+}
+
 __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
     uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
     e[0]=gt_mixed_step<18>(M,sign);
@@ -319,7 +302,7 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 }
 
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
- * 16 signed digits -> 1 seed load + 15 mixed adds; the next chunk's load is
+ * 15 signed digits -> 1 seed load + 14 mixed adds; the next chunk's load is
  * issued one iteration ahead. Returns (qx,qy,qz) WITHOUT affine conversion so
  * the caller shares one inverse across the recid finish. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
@@ -328,48 +311,42 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
     *neg = (ec < 0) ? 1ULL : 0ULL;
 }
 
-/* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
- * y=Y/ZZZ). Seed with an mmadd of the first two chunks' points (4M+2S), then 14
- * madd (8M+2S each) -- vs 15 homogeneous adds at 9M+2S, so ~ -14M/candidate for
- * the +3M end conversion below. Rolled loop (fully unrolling inlines the asm
- * multiply ~150x past ptxas' budget); the back-edge is a uniform loop-counter
- * branch, and every signed odd digit is non-zero so there is NO data-dependent
- * branch and no chunk is skipped. Next chunk's table point loaded one step ahead.
- *
- * The OUTPUT is homogeneous projective (qx,qy,qz) -- identical signature to the
- * previous multiply -- so the downstream conjugate pair + block inverse are
- * unchanged. Convert XYZZ->homogeneous once: X'=X*ZZZ, Y'=Y*ZZ, Z'=ZZ*ZZZ
- * (X'/Z' = X/ZZ = x, Y'/Z' = Y/ZZZ = y). */
-/* Signed-digit fixed-base multiply returning RAW XYZZ (x=X/ZZ, y=Y/ZZZ).
- * Transplanted from the promoted pinning frontier (dev commit 6d81454):
- *  - the 16 signed odd digits are peeled from the four-limb recode state one
- *    chunk ahead of each table load, so no int32 digit array is materialised;
- *  - Y is kept in affine-anchor-deferred form: after the 3M+2S two-point seed
- *    each intermediate addition costs 7M+2S and only the last one (8M+2S)
- *    resolves the exact Y. 3M+2S + 13*(7M+2S) + 8M+2S = 102M+30S for the
- *    16-point sum, versus 4M+2S + 14*(8M+2S) = 116M+30S before, and the
- *    caller consumes XYZZ directly (no 3M homogeneous conversion). */
-__device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
-                                           const uint64_t k[4], const uint8_t *gTable) {
-    uint64_t M[4]; int sign;
-    gt_recode_setup(k, M, &sign);
+/* Accumulate fifteen points with an affine-anchor-deferred XYZZ ordinate:
+ * seed 3M+2S, twelve deferred adds 7M+2S, final exact add 8M+2S.
+ * The 95M+28S chain saves 7M+2S versus the 16-point external baseline.
+ * The ranked pipeline consumes raw XYZZ. The generic wrapper retains the
+ * three-M homogeneous conversion. No field inverse occurs in this chain. */
+/* Stream fifteen signed digits and defer the affine anchor's Y term.
+ * Use the 64 MiB interleaved mixed table; retain the corrected field primitives.
+ * Adapted from nullforest8200 PR17 and alvaroborras PR24. */
+__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+                                      const uint64_t scalar[4], const uint8_t *gTable) {
+    uint64_t M[4]; int sign; gt_recode_setup(scalar,M,&sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-    _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
+    gt_digit_idx(gt_recode_step(M,sign,0), &idx, &neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_digit_idx(gt_recode_step(M,sign,1), &idx, &neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
-    uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_digit_idx(gt_recode_step(M,sign,c), &idx, &neg);
+        gt_load_signed(gTable,c,idx,neg,cx,cy);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        Load256(y0, cy);
     }
+    gt_digit_idx(gt_recode_step(M,sign,GT_CHUNKS-1), &idx, &neg);
+    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+}
+
+__device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+    const uint64_t scalar[4], const uint8_t *gTable) {
+    uint64_t X[4],Y[4],ZZ[4],ZZZ[4];
+    _FixedBaseSignedXYZZ(X,Y,ZZ,ZZZ,scalar,gTable);
+    _ModMult(qx,X,ZZZ); _ModMult(qy,Y,ZZ); _ModMult(qz,ZZ,ZZZ); qz[4]=0;
 }
 
 /* _FixedBaseSignedAffine: removed -- dead on the ranked path. It is still a __device__/
@@ -512,7 +489,7 @@ typedef struct {
 } epoch_desc_t;
 static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
 
-/* The first 256 lexicographic 3-from-13 window omission sets, stored as actual
+/* Selected 256 schedule-grouped 3-from-13 window omission sets, stored as actual
  * push indices (QSB_SE_CUT + 0..12). Filled by the host once per run. Keeping
  * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
  * the block-wide inverse, and the benchmark scores verified throughput. */
@@ -836,62 +813,15 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
     _ModNeg256(y2);                /* y2 = -(m2*(xP - x2) + yP) */
 }
 
-/* XYZZ shared-denominator recovery (transplanted from the promoted pinning
- * frontier). Stage 1: d = xR*ZZ - X (kept in X_D), W = ZZ^2*d. */
-__device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
-) {
-    uint64_t t[4];
-    _ModMult(t, xR, ZZ);
-    _ModSub256(t, t, X_D);
-    Load256(X_D, t);             /* X_D becomes d */
-    _ModSqr(W, ZZ);
-    _ModMult(W, X_D);            /* W = ZZ^2*d */
-    W[4] = 0;
-}
-
-/* Stage 2. C=ZZ*d^2, W=ZZ^2*d, inv=1/W. h=inv*ZZZ=A/(B*d) is the common slope
- * scale and delta=inv*C=d/ZZ=xR-xP, so xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R (no affine yP is reconstructed):
- *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
- * Returns the two y parities in bits 0 and 1; C, W and ZZZ are reused. */
-__device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
-    uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2
-) {
-    uint64_t yb[4], m[4], t[4], s[4];
-
-    _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
-
-    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
-
-    _ModSub256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
-    _ModSqr(x1, m);
-    _ModSub256(x1, W);
-    _ModSub256(t, xR, x1);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    uint32_t parities = (uint32_t)(s[0] & 1ULL);
-
-    _ModAdd256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
-    _ModSqr(x2, m);
-    _ModSub256(x2, W);
-    _ModSub256(t, xR, x2);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    /* y2=-s. Since p is odd, field negation flips its parity. */
-    parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
-    return parities;
-}
-
 #include "tree_inverse.cuh"
+#include "ranked_pipeline.cuh"
 
+/* RankedShortEpoch is instantiated only for the hosted short-epoch shape:
+ * single_hash, leading-zero gate, no easy/calibrate diagnostics.  Keeping a
+ * separate template instantiation lets ptxas discard the generic byte-stream
+ * hash builders, DER gates and second pubkey hash from the scored kernel while
+ * preserving the complete fallback implementation below. */
+template <bool RankedShortEpoch>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -919,8 +849,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
-    const int easy_flag=0,single_hash_flag=1,calibrate_flag=0;
     // All tail lanes remain present through the block inverse.
     if(blockIdx.x*blockDim.x>=batch_size)return;
     int active=idx<batch_size;
@@ -937,7 +865,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * original whole-pool behaviour. */
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
-    if (fast_inc == QSB_SE_N_INC) {
+    if (RankedShortEpoch || fast_inc == QSB_SE_N_INC) {
         /* Short-epoch mode: blockIdx.x selects the epoch descriptor, which
          * supplies the 6 early skips (already folded into the epoch midstate);
          * threadIdx.x selects one of the 256 window omission sets from WIN3.
@@ -966,7 +894,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
     }
 
-  if (fast_inc == QSB_SE_N_INC) {
+  if (RankedShortEpoch || fast_inc == QSB_SE_N_INC) {
     qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
   } else if (fast_inc == QSB_FAST_N_INC) {
     // Cached states are rebuilt from this batch's midstate and public input.
@@ -1068,37 +996,30 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* neg_r_inv is folded into the fixed base A = neg_r_inv*G, so recoding z
      * directly gives z*A = (neg_r_inv*z mod n)*G = u1*G -- no per-candidate
      * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
-    /* u1*G as raw XYZZ via the signed-digit 32 MiB A-table: digits streamed
-     * from the recode state, Y anchor-deferred through the chain. */
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
-    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+    /* u1*G in projective form via the mixed signed-digit 64 MiB A-table; the affine
+     * conversion is deferred to the single inverse below, so both recids share
+     * one _ModInv. */
+    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,z,d_gt);
 
-    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
-    /* Both recovery flags from one shared-denominator inverse, in XYZZ:
-     * W = ZZ^2*d with d = xR*ZZ - X; the block inverts W. */
-    uint64_t prod[5];
-    qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod);        /* qx -> d, prod -> W */
-    bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
-    uint64_t Wsave[4]; Load256(Wsave,prod);
-    if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C = ZZ*d^2 */
-    // One block-wide inverse, preserving identity factors for tail/unusable lanes.
-    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
+    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
+    /* Both recovery flags from one shared-denominator inverse. */
+    uint64_t fD[4], prod[5]={0,0,0,0,0};
+    qsb_affine_finish_prepare(qx,qz,u2rx,fD,prod);
+    // One block-wide inverse, preserving identity factors for tail lanes.
+    if(!active){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
-    if(!usable)return;
-    uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint64_t q1x[4],q1y[4],q2x[4],q2y[4];
+    qsb_affine_finish(qx,qy,qz,fD,prod,u2rx,u2ry,q1x,q1y,q2x,q2y);
+    if(!active)return;
 
     int v=0, hash_choice=0, recid=0;
+    uint64_t *pts_x[2]={q1x,q2x};
+    uint64_t *pts_y[2]={q1y,q2y};
     for(int ri=0;ri<2&&!v;ri++){
-        uint64_t sx0=ri ? q2x[0] : q1x[0];
-        uint64_t sx1=ri ? q2x[1] : q1x[1];
-        uint64_t sx2=ri ? q2x[2] : q1x[2];
-        uint64_t sx3=ri ? q2x[3] : q1x[3];
-        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
-                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+        uint32_t *x32=(uint32_t*)pts_x[ri];
         uint32_t pb[16];
-        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+        uint8_t prefix_byte = 0x2+(uint8_t)(pts_y[ri][0]&1);
         pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
         pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
         pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
@@ -1109,11 +1030,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* Ranked gate reads the state words. Only the easy/calibrate
          * diagnostics need the digest as bytes, so only they build it. */
         int vv;
-        if (calibrate_flag || easy_flag) {
+        if (!RankedShortEpoch && (calibrate_mode || easy_mode)) {
             uint8_t h[32];
             for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
                 h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-            vv = calibrate_flag ? gpu_is_der_relaxed(h,32) : gpu_is_der_easy(h,32);
+            vv = calibrate_mode ? gpu_is_der_relaxed(h,32) : gpu_is_der_easy(h,32);
         } else {
             vv = gpu_bench_valid_words(hs);
         }
@@ -1121,7 +1042,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         /* Config A hashes once, so everything below is dead work on every
          * candidate. Leave BEFORE building the 64-byte padded block, not
          * after it: the memset/memcpy used to run unconditionally. */
-        if (single_hash_flag) continue;
+        if (RankedShortEpoch || single_hash) continue;
         uint8_t h[32];
         for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
@@ -1129,11 +1050,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
             ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
         uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
-        if (calibrate_flag || easy_flag) {
+        if (calibrate_mode || easy_mode) {
             uint8_t h2[32];
             for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
                 h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
-            vv = calibrate_flag ? gpu_is_der_relaxed(h2,32) : gpu_is_der_easy(h2,32);
+            vv = calibrate_mode ? gpu_is_der_relaxed(h2,32) : gpu_is_der_easy(h2,32);
         } else {
             vv = gpu_bench_valid_words(h2s);
         }
@@ -1147,7 +1068,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
         if(p<1024) {
             d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            if(se_desc) {
+            if(RankedShortEpoch || se_desc) {
                 for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
             } else {
@@ -1160,8 +1081,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 /* ============================================================
  * Fixed-base table construction on the GPU (signed-digit table)
  *
- * Entry (ch, d) is (2d+1) * 2^(16*ch) * (G/2) in affine form, limbs little-
- * endian -- the layout _FixedBaseSignedProj indexes. base_c = 2^(16c)*(G/2).
+ * Entry (ch, d) is (2d+1) * 2^gt_shift(ch) * (A/2) in affine form, limbs
+ * little-endian in a 64-byte X||Y record. A is the runtime folded base.
  *
  * Building it on the host would cost a modular inversion per entry through
  * OpenSSL. Split the odd index instead: with m = 2d+1 = hi*256 + lo,
@@ -1177,14 +1098,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
  * impossible for m in [1, 2^16-1]. Base G/2 = (2^-1 mod n)*G.
  * ============================================================ */
 
-/* Geometry (GT_CHUNKS/GT_ENTRIES/GT_LO/GT_HI) is defined once near the top,
+/* Geometry (GT_CHUNKS/GT_TOTAL_ENTRIES/GT_LO/GT_HI) is defined once near the top,
  * beside gt_recode_signed / _FixedBaseSignedProj. Base of chunk c is
- * base_c = 2^(16c) * (G/2). Entry (c,d) = (2d+1)*base_c with m = 2d+1 odd;
- * split m = hi*256 + lo, lo odd in [1,255], hi in [0,255]:
+ * base_c = 2^gt_shift(c) * (A/2). Entry (c,d) = (2d+1)*base_c, m=2d+1 odd;
+ * split m = hi*256 + lo, lo odd in [1,255], hi < 1024 for c=0 and <512 otherwise:
  *     m*base_c = H[hi] + L[lo],  L[lo] = lo*base_c,  H[hi] = hi*256*base_c.
  * H[0] is the identity (m < 256) -> copy L[lo]; lo is always odd so never 0,
  * so L[0] is never referenced. H[hi] == +-L[lo] would need m == 0 (mod n),
- * impossible for m in [1, 2^16-1]. */
+ * impossible for m in [1, 2^18-1]. */
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
@@ -1246,10 +1167,9 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
-/* The two ladders the GPU builder needs: L[ch][lo] = lo * 2^(16ch) * G and
- * H[ch][hi] = hi * 256 * 2^(16ch) * G. Index 0 of each is the identity and is
- * left zeroed; the kernel treats it as such. 8176 real points, against the
- * 1,048,576 the host would otherwise have to make affine one at a time. */
+/* The two small ladders contain L[ch][lo] = lo*base_ch and
+ * H[ch][hi] = hi*256*base_ch, where base_ch = 2^gt_shift(ch)*(A/2).
+ * Index zero represents the identity and is left zeroed. */
 /* Build the ladders for base A/2 where A = neg_r_inv * G (problem-dependent).
  * With the table on base A, recoding z directly gives z*A = z*neg_r_inv*G =
  * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
@@ -1340,7 +1260,7 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
 }
 
 /* OpenSSL fallback builder (only if the GPU builder's spot check fails). Emits
- * the signed table: entry (ch,d) = (2d+1) * 2^(16ch) * (G/2). Walks odd
+ * the signed table: entry (ch,d) = (2d+1) * 2^gt_shift(ch) * (A/2). Walks odd
  * multiples by stepping 2*base_c per entry (acc = base_c, 3base_c, ...). */
 static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     /* No cache: base A/2 is problem-dependent (neg_r_inv fresh per instance). */
@@ -1671,7 +1591,7 @@ int main(int argc, char **argv) {
         cudaGetDeviceCount(&dev_count);
         if (dev_count < 1) dev_count = 1;
         int eff_total = (total_gpus_override > 0) ? total_gpus_override : dev_count;
-        if (tile_path == NULL && eff_total == 1 && !easy && !calibrate
+        if (tile_path == NULL && eff_total == 1 && !easy && !calibrate && single_hash
             && n_pool == 150 && t_sel == 9
             && (int)dp.prefix_remainder_len == 42
             && (int)dp.tail_section_len == 218 && (int)dp.tx_suffix_len == 44
@@ -1895,7 +1815,7 @@ int main(int argc, char **argv) {
     uint8_t *d_suf; cudaMalloc(&d_suf, dp.tx_suffix_len);
     cudaMemcpy(d_suf, dp.tx_suffix, dp.tx_suffix_len, cudaMemcpyHostToDevice);
 
-    /* Short-epoch tables: the first 256 lex 3-from-13 window combos (as actual
+    /* Short-epoch tables: 256 schedule-grouped 3-from-13 window combos (as actual
      * push indices 137..149) and the per-launch epoch descriptor buffer.
      * d_mid/d_prem stay at the PROBLEM base midstate / prefix_remainder in
      * this mode -- the producer kernel consumes them, and the per-epoch
@@ -1903,31 +1823,8 @@ int main(int argc, char **argv) {
     epoch_desc_t *d_epochs = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
-        int cnt = 0;
-        for (int a = 0; a < 13; a++)
-            for (int b = a + 1; b < 13; b++)
-                for (int c = b + 1; c < 13; c++) {
-                    /* Drop 30 low-reuse triples so the retained 256 need only
-                     * 54 distinct first-block schedules instead of 84. */
-                    if(a>=1 && c<=7 && !(a==1 && b==2))continue;
-                    h_win3[cnt][0] = (uint8_t)(QSB_SE_CUT + a);
-                    h_win3[cnt][1] = (uint8_t)(QSB_SE_CUT + b);
-                    h_win3[cnt][2] = (uint8_t)(QSB_SE_CUT + c);
-                    cnt++;
-                }
-        if(cnt!=QSB_SE_PER_EPOCH)return 1;
-        /* Keep the same 256 candidates, but group lanes whose second message
-         * block is identical so warp loads from QSB_WINDOW_SECOND coalesce. */
-        for(int i=1;i<QSB_SE_PER_EPOCH;i++){
-            uint8_t w[3];memcpy(w,h_win3[i],3);
-            uint32_t second=qsb_window_second_key(w),first=qsb_window_first_key(w);int j=i;
-            while(j>0 && (qsb_window_second_key(h_win3[j-1])>second ||
-                  (qsb_window_second_key(h_win3[j-1])==second && qsb_window_first_key(h_win3[j-1])>first))){
-                memcpy(h_win3[j],h_win3[j-1],3);j--;
-            }
-            memcpy(h_win3[j],w,3);
-        }
-        cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
+        if(qsb_select_window_triples(h_win3))return 1;
+        if(cudaMemcpyToSymbol(WIN3,h_win3,sizeof(h_win3))!=cudaSuccess)return 1;
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -1939,9 +1836,7 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri,dp.neg_r_inv,32,cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx,dp.u2r_x,32,cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
-    uint64_t h_u2r[8];
-    memcpy(h_u2r,dp.u2r_x,32);memcpy(h_u2r+4,dp.u2r_y,32);
-    if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
+    if(qsb_prepare_recovery_point(dp.u2r_x,dp.u2r_y)){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
 
@@ -2000,6 +1895,26 @@ int main(int argc, char **argv) {
 
     printf("  Mode: %s, GPU %d (global %d of %d)\n", easy?"EASY":"REAL", gpu_index, effective_id, effective_total);
     printf("  Batch: %d combos per kernel launch\n", BATCH);
+
+    // 128 bytes of saved coordinates plus 8 bytes of tree space per candidate.
+    // At 8M candidates the main scratch allocation is 1.0625 GiB on the GPU.
+    ulonglong2 *d_pipe_state = NULL;
+    uint64_t *d_pipe_roots = NULL, *d_pipe_tree = NULL;
+    uint64_t *d_pipe_super = NULL, *d_pipe_root_tree = NULL;
+    static_assert(QSB_SE_PER_EPOCH == 256, "pipeline requires 256 lanes");
+    static_assert(QSB_SE_LAUNCH_BLOCKS <= 65536, "root hierarchy capacity");
+    if (se_mode) {
+        size_t blocks = QSB_SE_LAUNCH_BLOCKS;
+        size_t groups = (blocks + 255) / 256;
+        cudaError_t pe;
+        if ((pe=cudaMalloc(&d_pipe_state, blocks*256u*8u*sizeof(ulonglong2))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_roots, blocks*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_tree, blocks*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_super, groups*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_root_tree, groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess) {
+            fprintf(stderr,"Ranked pipeline allocation: %s\n",cudaGetErrorString(pe)); return 1;
+        }
+    }
 
     uint8_t *h_combos = (uint8_t*)malloc(BATCH * t_sel);
     uint8_t *d_combos; cudaMalloc(&d_combos, BATCH * t_sel);
@@ -2146,22 +2061,15 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, 0,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
+            cudaError_t launch_error = cudaGetLastError();
+            if (launch_error == cudaSuccess)
+                launch_error = qsb_launch_ranked_pipeline(nblk, batch_pos, d_epochs,
+                    d_gt,d_u2rx,d_u2ry,d_pipe_state,d_pipe_roots,d_pipe_tree,
+                    d_pipe_super,d_pipe_root_tree,d_hit_cnt,d_hit_idx,d_hit_combos);
+            if (launch_error != cudaSuccess) {
+                fprintf(stderr,"Ranked pipeline launch: %s\n",cudaGetErrorString(launch_error)); return 1;
+            }
+            cudaError_t err = cudaDeviceSynchronize();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
@@ -2287,7 +2195,7 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -2487,7 +2395,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
