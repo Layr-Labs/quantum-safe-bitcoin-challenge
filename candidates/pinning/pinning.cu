@@ -282,6 +282,82 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     return ok;
 }
 
+/* SHA-256 of a 32-byte message that is already eight big-endian words.
+ * The only pad is W[8]=0x80000000, W[9..14]=0, W[15]=256. First 16 rounds
+ * and the first in-place WMIX drop the zero addends; later 48 rounds are
+ * the generic SHA256_RND / WMIX schedule. Bit-identical to Initialize +
+ * Transform on that pad. Used for SHA256d's inner hash of the sighash. */
+__device__ __forceinline__ void _SHA256TransformSha256d32(uint32_t output[8], const uint32_t in[8])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = I[0];
+    uint32_t b = I[1];
+    uint32_t c = I[2];
+    uint32_t d = I[3];
+    uint32_t e = I[4];
+    uint32_t f = I[5];
+    uint32_t g = I[6];
+    uint32_t h = I[7];
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 8; i++) w[i] = in[i];
+    w[8] = 0x80000000u;
+    w[15] = 256u;
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0x80000000u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 256u);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(256u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 256u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
+        w[8] += s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(256u);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    output[0] = I[0] + a;
+    output[1] = I[1] + b;
+    output[2] = I[2] + c;
+    output[3] = I[3] + d;
+    output[4] = I[4] + e;
+    output[5] = I[5] + f;
+    output[6] = I[6] + g;
+    output[7] = I[7] + h;
+}
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -859,17 +935,10 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
 
     }
 
-    /* Second SHA-256: the first digest is already in big-endian words. */
-    uint32_t b2[16];
-    #pragma unroll
-    for(int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000u;
-    #pragma unroll
-    for(int i=9;i<15;i++) b2[i]=0;
-    b2[15]=256;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2,b2);
+    /* Second SHA-256: the first digest is already in big-endian words.
+     * Pad is W[8]=0x80000000, W[9..14]=0, W[15]=256. */
+    uint32_t s2[8];
+    _SHA256TransformSha256d32(s2, state);
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
     uint64_t z[4];
