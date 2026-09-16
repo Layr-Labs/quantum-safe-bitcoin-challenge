@@ -390,6 +390,69 @@ __device__ void _ModSub256(uint64_t *r, uint64_t *b)
 
 // ---------------------------------------------------------------------------------------
 
+/* r = a + b - c - c mod p with all intermediates in registers.
+ * Computed as (a-c) + (b-c): each difference is canonicalized exactly like
+ * _ModSub256 and the final sum exactly like _ModAdd256, so every step stays
+ * in proven ranges ([0,p) everywhere). Replaces one add plus two subtract
+ * round-trips of the intermediate through memory with a single pass.
+ * Aliasing r==a is safe (a is fully consumed before r is stored). */
+__device__ void _ModAddSubSub256(uint64_t *r, uint64_t *a, uint64_t *b, uint64_t *c)
+{
+
+    uint64_t e[4], f[4];
+    uint64_t t;
+    uint64_t T[4];
+    uint64_t rr[5];
+
+    /* e = a - c mod p */
+    USUBO(e[0], a[0], c[0]);
+    USUBC(e[1], a[1], c[1]);
+    USUBC(e[2], a[2], c[2]);
+    USUBC(e[3], a[3], c[3]);
+    USUB(t, 0ULL, 0ULL);
+    T[0] = 0xFFFFFFFEFFFFFC2FULL & t;
+    T[1] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[2] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[3] = 0xFFFFFFFFFFFFFFFFULL & t;
+    UADDO1(e[0], T[0]);
+    UADDC1(e[1], T[1]);
+    UADDC1(e[2], T[2]);
+    UADD1(e[3], T[3]);
+
+    /* f = b - c mod p */
+    USUBO(f[0], b[0], c[0]);
+    USUBC(f[1], b[1], c[1]);
+    USUBC(f[2], b[2], c[2]);
+    USUBC(f[3], b[3], c[3]);
+    USUB(t, 0ULL, 0ULL);
+    T[0] = 0xFFFFFFFEFFFFFC2FULL & t;
+    T[1] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[2] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[3] = 0xFFFFFFFFFFFFFFFFULL & t;
+    UADDO1(f[0], T[0]);
+    UADDC1(f[1], T[1]);
+    UADDC1(f[2], T[2]);
+    UADD1(f[3], T[3]);
+
+    /* r = e + f mod p */
+    UADDO(rr[0], e[0], f[0]);
+    UADDC(rr[1], e[1], f[1]);
+    UADDC(rr[2], e[2], f[2]);
+    UADDC(rr[3], e[3], f[3]);
+    UADD(rr[4], 0UL, 0UL);
+
+    Load256(r, rr);
+
+    SubP(rr);
+
+    if(_IsPositive(rr)) {
+        Load256(r, rr);
+    }
+
+}
+
+// ---------------------------------------------------------------------------------------
+
 __device__ __forceinline__ uint32_t _CTZ(uint64_t x)
 {
     uint32_t n;
@@ -1181,9 +1244,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+  _ModAddSubSub256(T, T, PPP, Q);      // X3 = R^2 + PPP - 2V (fused)
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3

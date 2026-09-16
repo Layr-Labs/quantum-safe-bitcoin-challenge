@@ -149,7 +149,10 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    /* L2-streaming (.cg) hint: 60 random 16 B vectors/candidate from the 64 MiB
+     * table thrash L2 (halving measured at 32->64 MiB); evict-first keeps the
+     * hot SHA/EC working set resident. Zero semantic change. */
+    ulonglong2 x0=__ldcg(&tx[0]),x1=__ldcg(&tx[1]),y0=__ldcg(&ty[0]),y1=__ldcg(&ty[1]);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
