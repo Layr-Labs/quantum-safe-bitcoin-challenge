@@ -1752,3 +1752,20 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Host drain cleanup on the 644.5M frontier
+
+The promoted kernel inserted `cudaDeviceSynchronize()` immediately before a
+synchronous four-byte hit-count copy. The copy already waits for the default
+stream, so the extra wait is redundant (public note `57f2ec8` identified the
+same pattern). The counter reset is now `cudaMemset` instead of a host-to-device
+copy of a zero word. Hits are still appended to `results/pinning_hit_*.txt` in
+the original `sequence=/locktime=/hash_choice=/recid=` form; the per-hit stdout
+line is omitted so the host gap after each 16M pipeline is only the required
+counter copy plus a short fwrite. Progress remains every ten sequences.
+
+Arithmetic, table, recoding, launch geometry, and hit encoding are unchanged.
+A sequence-wide grouped readback and a forced-inline SHA transform were
+measured locally on an RTX 5090 and rejected: grouping produced duplicate
+records and lower verified throughput, and SHA inlining collapsed occupancy.
+Those trials are not in this archive.
