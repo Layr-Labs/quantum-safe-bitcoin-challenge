@@ -1,11 +1,7 @@
-/* qsb_real_search.cu — Real pinning search with sequence + locktime variation
- *
- * Reads pinning2.bin (midstate with sequence in suffix)
- * Loops: outer=sequence (0x80000000+), inner=locktime (500000000-1744600000)
- * 4 DER checks per candidate (2 recovery flags × 2 hashes)
- *
- * Build:  nvcc -O3 -o qsb_real qsb_real_search.cu -lcrypto -lm
- * Usage:  ./qsb_real pinning2.bin [easy]
+/* QSB Pinning: problem-dependent recovery tables and sequence SHA reuse.
+ * Derived from the GPLv3-governed QSB candidate using VanitySearch headers.
+ * See COPYING and the preserved notices in GPUMath.h and GPUHash.h.
+ * Build and hit-file interfaces are the benchmark's unchanged interfaces.
  */
 
 #include <stdio.h>
@@ -18,6 +14,7 @@
 #include <cuda_runtime.h>
 
 #include "GPUMath.h"
+#include "RecoveryScale.h"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -47,24 +44,38 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #include "GPUHash.h"
 
-/* GTable lookup */
-__constant__ int CHUNK_FIRST_ELEMENT[16] = {
-    65536*0,65536*1,65536*2,65536*3,65536*4,65536*5,65536*6,65536*7,
-    65536*8,65536*9,65536*10,65536*11,65536*12,65536*13,65536*14,65536*15,
-};
+/* Runtime problem-dependent table: H=(-r^-1 mod n)G.
+ * First window includes u2R. Other windows hold j*2^(14*w)*H.
+ * Thus lookup computes z*H+u2R directly, without a scalar modular multiply. */
+#define REC_WINDOW 14
+#define REC_STRIDE (1u << REC_WINDOW)
+#define REC_CHUNKS 19
+#define REC_POINTS (18u * REC_STRIDE + 16u)
 
-__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
-    int chunk=0; uint64_t qz[5]={1,0,0,0,0};
-    for(;chunk<16;chunk++){if(privKey[chunk]>0){
-        int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
-        memcpy(qx,gTableX+index,32);memcpy(qy,gTableY+index,32);chunk++;break;}}
-    for(;chunk<16;chunk++){if(privKey[chunk]>0){
-        uint64_t gx[4],gy[4];
-        int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
-        memcpy(gx,gTableX+index,32);memcpy(gy,gTableY+index,32);
-        _PointAddSecp256k1(qx,qy,qz,gx,gy);}}
-    _ModInv(qz);_ModMult(qx,qz);_ModMult(qy,qz);
+__device__ __forceinline__ void recover_projective(
+    uint64_t *qx, uint64_t *qy, uint64_t *qz,
+    const uint64_t *z, const uint8_t *tx, const uint8_t *ty) {
+    qz[0]=1; qz[1]=qz[2]=qz[3]=qz[4]=0;
+    unsigned digit=(unsigned)z[0]&(REC_STRIDE-1);
+    memcpy(qx,tx+(size_t)digit*32,32);
+    memcpy(qy,ty+(size_t)digit*32,32);
+    #pragma unroll 1
+    for(int chunk=1;chunk<REC_CHUNKS;chunk++) {
+        const int bit=chunk*REC_WINDOW, word=bit>>6, shift=bit&63;
+        uint64_t bits=z[word]>>shift;
+        if(shift>64-REC_WINDOW && word<3) bits|=z[word+1]<<(64-shift);
+        digit=(unsigned)bits&(REC_STRIDE-1);
+        if(digit) {
+            uint64_t x[4],y[4];
+            size_t off=((size_t)chunk*REC_STRIDE+digit)*32;
+            memcpy(x,tx+off,32); memcpy(y,ty+off,32);
+            _PointAddSecp256k1(qx,qy,qz,x,y);
+        }
+    }
 }
+
+__device__ __constant__ uint32_t pin_sequence_state[8];
+__device__ __constant__ uint32_t pin_tail_words[16];
 
 /* DER checks */
 __device__ int gpu_is_valid_der(const uint8_t *d, int l) {
@@ -196,358 +207,44 @@ __device__ int gpu_bench_valid(const uint8_t *h) {
     return gpu_leading_zero_bits(h) >= QSB_ZEROS_N;  /* leading-zeros gate only; no on-curve(h) check */
 }
 
-/* 256-bit modular multiplication for scalar */
-/* Correct modular multiplication mod secp256k1 group order n
- * Uses reduction: 2^256 ≡ c (mod n) where c = 2^256 - n (129 bits) */
-__device__ void gpu_scalar_mulmod(uint64_t r[4], const uint64_t a[4], const uint64_t b[4]) {
-    /* FIXED v16: incremental carry propagation to avoid 129-bit overflow.
-     *
-     * The original used __int128 accumulators per limb and summed up to 4
-     * 128-bit products into a single slot. For some inputs t[3] (or t[4],
-     * t[5]) reaches 129 bits, overflowing __int128 and producing garbage
-     * after the carry shift. Verified failing inputs included nri*z for
-     * z = a8f2d43a... and z = N-1.
-     *
-     * Fix: after each product, add it into the limb AND propagate the carry
-     * immediately into the next limb. Each limb stays <= 64 bits.
-     */
-
-    /* Step 1: 512-bit schoolbook multiplication with incremental carry */
-    uint64_t p[8] = {0};
-    for (int i = 0; i < 4; i++) {
-        __uint128_t carry = 0;
-        for (int j = 0; j < 4; j++) {
-            __uint128_t v = (__uint128_t)p[i+j] + (__uint128_t)a[i]*b[j] + carry;
-            p[i+j] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        p[i+4] = (uint64_t)carry;
+/* Keep digest words in registers. Materialize diagnostics only for hits. */
+__device__ __forceinline__ void emit_recovered_hit(
+    const uint64_t *x, const uint64_t *y, const uint32_t *sighash,
+    unsigned idx, unsigned recid, uint32_t *count, uint32_t *indices,
+    uint8_t *pubkeys, uint8_t *hashes, uint8_t *sighashes) {
+    uint32_t pb[16],hs[8];
+    pb[0]=((uint32_t)(2+(y[0]&1))<<24)|(uint32_t)(x[3]>>40);
+    #pragma unroll
+    for(int i=1;i<8;i++) {
+        const int bit=264-32*(i+1), limb=bit/64, shift=bit%64;
+        uint64_t v=x[limb]>>shift;
+        if(shift>32) v|=x[limb+1]<<(64-shift);
+        pb[i]=(uint32_t)v;
     }
-
-    /* c = 2^256 - n = {C0, C1, 1, 0} */
-    const uint64_t C0=0x402DA1732FC9BEBFULL, C1=0x4551231950B75FC4ULL;
-
-    /* Step 2: first reduction — q = p_hi * c + p_lo, with incremental carry */
-    uint64_t q[8] = {0};
-    for (int i = 0; i < 4; i++) q[i] = p[i];
-    /* Add p_hi[i] * C0 starting at q[i] */
-    {
-        uint64_t carry = 0;
-        for (int i = 0; i < 4; i++) {
-            __uint128_t v = (__uint128_t)q[i] + (__uint128_t)p[4+i] * C0 + carry;
-            q[i] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        q[4] = carry;
-    }
-    /* Add p_hi[i] * C1 starting at q[i+1] */
-    {
-        uint64_t carry = 0;
-        for (int i = 0; i < 4; i++) {
-            __uint128_t v = (__uint128_t)q[i+1] + (__uint128_t)p[4+i] * C1 + carry;
-            q[i+1] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        __uint128_t v = (__uint128_t)q[5] + carry;
-        q[5] = (uint64_t)v;
-        if (v >> 64) {
-            v = (__uint128_t)q[6] + (v >> 64);
-            q[6] = (uint64_t)v;
-            if (v >> 64) q[7] += (uint64_t)(v >> 64);
+    pb[8]=((uint32_t)x[0]<<24)|0x00800000u;
+    #pragma unroll
+    for(int i=9;i<15;i++) pb[i]=0;
+    pb[15]=264;
+    _SHA256Initialize(hs); _SHA256Transform(hs,pb);
+    #pragma unroll
+    for(int i=0;i<QSB_ZEROS_N/32;i++) if(hs[i]) return;
+#if QSB_ZEROS_N % 32 != 0
+    if(hs[QSB_ZEROS_N/32]>>(32-QSB_ZEROS_N%32)) return;
+#endif
+    unsigned pos=atomicAdd(count,1u);
+    if(pos<1024) indices[pos]=idx|(recid<<30);
+    if(pos<64) {
+        pubkeys[pos*33]=(uint8_t)(2+(y[0]&1));
+        #pragma unroll
+        for(int j=0;j<32;j++) {
+            pubkeys[pos*33+1+j]=(uint8_t)(x[3-j/8]>>(56-8*(j%8)));
+            hashes[pos*32+j]=(uint8_t)(hs[j/4]>>(24-8*(j%4)));
+            sighashes[pos*32+j]=(uint8_t)(sighash[j/4]>>(24-8*(j%4)));
         }
     }
-    /* Add p_hi[i] * 1 starting at q[i+2] */
-    {
-        uint64_t carry = 0;
-        for (int i = 0; i < 4; i++) {
-            __uint128_t v = (__uint128_t)q[i+2] + (__uint128_t)p[4+i] + carry;
-            q[i+2] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        if (carry) {
-            __uint128_t v = (__uint128_t)q[6] + carry;
-            q[6] = (uint64_t)v;
-            if (v >> 64) q[7] += (uint64_t)(v >> 64);
-        }
-    }
-
-    /* Step 3: second reduction — same as step 2, with q in place of p */
-    uint64_t r2[8] = {0};
-    for (int i = 0; i < 4; i++) r2[i] = q[i];
-    {
-        uint64_t carry = 0;
-        for (int i = 0; i < 4; i++) {
-            __uint128_t v = (__uint128_t)r2[i] + (__uint128_t)q[4+i] * C0 + carry;
-            r2[i] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        r2[4] = carry;
-    }
-    {
-        uint64_t carry = 0;
-        for (int i = 0; i < 4; i++) {
-            __uint128_t v = (__uint128_t)r2[i+1] + (__uint128_t)q[4+i] * C1 + carry;
-            r2[i+1] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        __uint128_t v = (__uint128_t)r2[5] + carry;
-        r2[5] = (uint64_t)v;
-        if (v >> 64) r2[6] += (uint64_t)(v >> 64);
-    }
-    {
-        uint64_t carry = 0;
-        for (int i = 0; i < 4; i++) {
-            __uint128_t v = (__uint128_t)r2[i+2] + (__uint128_t)q[4+i] + carry;
-            r2[i+2] = (uint64_t)v;
-            carry = v >> 64;
-        }
-        if (carry) r2[6] += carry;
-    }
-
-    uint64_t res[5];
-    for (int i = 0; i < 5; i++) res[i] = r2[i];
-
-    /* Step 4: conditional subtraction of N (up to 5 reps to be safe) */
-    const uint64_t N[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
-    for (int rep = 0; rep < 5; rep++) {
-        int ge = 0;
-        if (res[4] > 0) ge = 1;
-        else { ge = 1; for (int i = 3; i >= 0; i--) { if (res[i] > N[i]) { ge = 1; break; } if (res[i] < N[i]) { ge = 0; break; } } }
-        if (!ge) break;
-        uint64_t borrow = 0;
-        for (int i = 0; i < 4; i++) {
-            uint64_t old = res[i];
-            uint64_t sub = N[i] + borrow;
-            res[i] = old - sub;
-            borrow = (old < sub || (borrow && N[i] == 0xFFFFFFFFFFFFFFFFULL)) ? 1 : 0;
-        }
-        if (res[4] > 0) res[4]--;
-    }
-
-    for (int i = 0; i < 4; i++) r[i] = res[i];
 }
 
-/* ============================================================
- * Kernel: searches locktime range for a fixed sequence value
- * ============================================================ */
-
-/* ============================================================
- * DEBUG KERNEL: run the full pin pipeline for ONE specific (seq, lt) and
- * dump every intermediate value via device printf. Used to localize
- * GPU/CPU divergence on a known-bad input.
- *
- * Output format: one "DBG: name = hex" per line, parseable by a comparison
- * script. Each thread group = 1 thread for determinism.
- * ============================================================ */
-__global__ void kernel_debug_pin_one_point(
-    const uint32_t *d_midstate,
-    const uint8_t *d_suffix,
-    int suffix_len,
-    int seq_offset,
-    int lt_offset,
-    int total_preimage_len,
-    uint32_t seq_value,
-    uint32_t lt_value,
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
-    uint8_t *d_gtX, uint8_t *d_gtY,
-    int single_hash
-) {
-    if (threadIdx.x != 0 || blockIdx.x != 0) return;
-
-    /* Helper to printf a 32-byte value as 64 hex chars (BE) */
-    #define DUMP32_BE(name, ptr) do { \
-        printf("DBG: " name " = "); \
-        for(int _i=0;_i<32;_i++) printf("%02x", (ptr)[_i]); \
-        printf("\n"); \
-    } while(0)
-    /* Helper for uint64_t[4] in LE-words = native 256-bit. Print BE hex. */
-    #define DUMP_U64x4(name, ptr) do { \
-        printf("DBG: " name " = "); \
-        for(int _w=3;_w>=0;_w--) printf("%016llx", (unsigned long long)(ptr)[_w]); \
-        printf("\n"); \
-    } while(0)
-
-    printf("DBG: seq = %08x\n", seq_value);
-    printf("DBG: lt = %u\n", lt_value);
-    printf("DBG: suffix_len = %d\n", suffix_len);
-    printf("DBG: total_preimage_len = %d\n", total_preimage_len);
-
-    /* Build patched suffix */
-    uint8_t buf[192];
-    for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
-    buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
-    buf[seq_offset+2]=(seq_value>>16)&0xFF; buf[seq_offset+3]=(seq_value>>24)&0xFF;
-    buf[lt_offset]=(lt_value)&0xFF; buf[lt_offset+1]=(lt_value>>8)&0xFF;
-    buf[lt_offset+2]=(lt_value>>16)&0xFF; buf[lt_offset+3]=(lt_value>>24)&0xFF;
-
-    /* SHA-256 padding (matching production kernel) */
-    buf[suffix_len]=0x80;
-    for(int i=suffix_len+1;i<192;i++) buf[i]=0;
-    int nblk=(suffix_len<56)?1:2;
-    uint64_t bit_len=(uint64_t)total_preimage_len*8;
-    int last=nblk*64-8;
-    buf[last]=(bit_len>>56)&0xFF;buf[last+1]=(bit_len>>48)&0xFF;
-    buf[last+2]=(bit_len>>40)&0xFF;buf[last+3]=(bit_len>>32)&0xFF;
-    buf[last+4]=(bit_len>>24)&0xFF;buf[last+5]=(bit_len>>16)&0xFF;
-    buf[last+6]=(bit_len>>8)&0xFF;buf[last+7]=bit_len&0xFF;
-
-    /* Dump suffix bytes */
-    printf("DBG: patched_suffix = ");
-    for(int i=0;i<suffix_len;i++) printf("%02x", buf[i]);
-    printf("\n");
-
-    /* Continue SHA-256 from midstate */
-    uint32_t state[8]; for(int i=0;i<8;i++) state[i]=d_midstate[i];
-    printf("DBG: midstate = ");
-    for(int i=0;i<8;i++) printf("%08x", d_midstate[i]);
-    printf("\n");
-    for(int b=0;b<nblk;b++){
-        uint32_t blk[16]; for(int i=0;i<16;i++)
-            blk[i]=((uint32_t)buf[b*64+i*4]<<24)|((uint32_t)buf[b*64+i*4+1]<<16)|
-                   ((uint32_t)buf[b*64+i*4+2]<<8)|(uint32_t)buf[b*64+i*4+3];
-        _SHA256Transform(state,blk);
-    }
-    uint8_t first[32];
-    for(int i=0;i<8;i++){first[i*4]=(state[i]>>24)&0xFF;first[i*4+1]=(state[i]>>16)&0xFF;
-        first[i*4+2]=(state[i]>>8)&0xFF;first[i*4+3]=state[i]&0xFF;}
-    DUMP32_BE("first_sha256", first);
-
-    /* Second SHA-256 */
-    uint8_t p2[64]; memset(p2,0,64); memcpy(p2,first,32); p2[32]=0x80; p2[62]=0x01; p2[63]=0x00;
-    uint32_t b2[16]; for(int i=0;i<16;i++) b2[i]=((uint32_t)p2[i*4]<<24)|((uint32_t)p2[i*4+1]<<16)|
-        ((uint32_t)p2[i*4+2]<<8)|(uint32_t)p2[i*4+3];
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2,b2);
-    uint8_t sighash[32]; for(int i=0;i<8;i++){sighash[i*4]=(s2[i]>>24)&0xFF;sighash[i*4+1]=(s2[i]>>16)&0xFF;
-        sighash[i*4+2]=(s2[i]>>8)&0xFF;sighash[i*4+3]=s2[i]&0xFF;}
-    DUMP32_BE("sighash_z", sighash);
-
-    /* z to scalar (BE input → LE-word array) */
-    uint64_t z[4]; for(int i=0;i<4;i++){z[i]=0;for(int b=0;b<8;b++)z[i]|=(uint64_t)sighash[31-i*8-b]<<(b*8);}
-    DUMP_U64x4("z_scalar", z);
-
-    /* u1 = neg_r_inv * z mod n */
-    uint64_t nri[4]={d_neg_r_inv[0],d_neg_r_inv[1],d_neg_r_inv[2],d_neg_r_inv[3]};
-    DUMP_U64x4("neg_r_inv", nri);
-    uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
-    DUMP_U64x4("u1", u1);
-
-    /* u1 * G via GTable */
-    uint16_t pk[16]; memcpy(pk,u1,32);
-    uint64_t qx[4],qy[4];
-    _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
-    DUMP_U64x4("u1G_x_affine", qx);
-    DUMP_U64x4("u1G_y_affine", qy);
-
-    /* Q1 = u1G + u2R (recid=0) */
-    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
-    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
-    DUMP_U64x4("u2R_x", u2rx);
-    DUMP_U64x4("u2R_y", u2ry);
-
-    uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32); memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
-    _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
-    DUMP_U64x4("q1_proj_x", q1x);
-    DUMP_U64x4("q1_proj_y", q1y);
-    DUMP_U64x4("q1_proj_z", q1z);
-
-    /* Q2 = Q1 + neg_2u2R (recid=1) */
-    uint64_t q2x[4],q2y[4],q2z[5];
-    memcpy(q2x,q1x,32); memcpy(q2y,q1y,32); memcpy(q2z,q1z,40);
-    uint64_t n2rx[4]={d_neg2u2rx[0],d_neg2u2rx[1],d_neg2u2rx[2],d_neg2u2rx[3]};
-    uint64_t n2ry[4]={d_neg2u2ry[0],d_neg2u2ry[1],d_neg2u2ry[2],d_neg2u2ry[3]};
-    DUMP_U64x4("neg_2u2R_x", n2rx);
-    DUMP_U64x4("neg_2u2R_y", n2ry);
-    _PointAddSecp256k1(q2x,q2y,q2z,n2rx,n2ry);
-    DUMP_U64x4("q2_proj_x", q2x);
-    DUMP_U64x4("q2_proj_y", q2y);
-    DUMP_U64x4("q2_proj_z", q2z);
-
-    /* Batch ModInv */
-    uint64_t prod[5]={0,0,0,0,0};
-    _ModMult(prod,q1z,q2z);
-    DUMP_U64x4("q1z_mul_q2z", prod);
-    _ModInv(prod);
-    DUMP_U64x4("q1z_q2z_inv", prod);
-    uint64_t inv1[5],inv2[5];
-    _ModMult(inv1,prod,q2z); _ModMult(inv2,prod,q1z);
-    DUMP_U64x4("inv1_q1z", inv1);
-    DUMP_U64x4("inv2_q2z", inv2);
-    _ModMult(q1x,inv1); _ModMult(q1y,inv1);
-    _ModMult(q2x,inv2); _ModMult(q2y,inv2);
-    DUMP_U64x4("Q1_aff_x", q1x);
-    DUMP_U64x4("Q1_aff_y", q1y);
-    DUMP_U64x4("Q2_aff_x", q2x);
-    DUMP_U64x4("Q2_aff_y", q2y);
-
-    /* For each recid, compute compressed pubkey, SHA256, DER check */
-    uint64_t *pts_x[2]={q1x,q2x};
-    uint64_t *pts_y[2]={q1y,q2y};
-    for(int ri=0;ri<2;ri++){
-        uint32_t *x32=(uint32_t*)pts_x[ri];
-        uint32_t pb[16];
-        pb[0]=__byte_perm(x32[7],0x2+(uint8_t)(pts_y[ri][0]&1),0x4321);
-        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        /* Extract pubkey bytes */
-        uint8_t this_pk[33];
-        for(int j=0;j<8;j++){
-            this_pk[j*4]   = (pb[j]>>24)&0xFF;
-            this_pk[j*4+1] = (pb[j]>>16)&0xFF;
-            this_pk[j*4+2] = (pb[j]>> 8)&0xFF;
-            this_pk[j*4+3] = (pb[j]    )&0xFF;
-        }
-        this_pk[32] = (pb[8]>>24)&0xFF;
-        printf("DBG: recid%d_pubkey = ", ri);
-        for(int j=0;j<33;j++) printf("%02x", this_pk[j]);
-        printf("\n");
-
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
-        uint8_t h[32];for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
-            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-        printf("DBG: recid%d_sha_pk = ", ri);
-        for(int j=0;j<32;j++) printf("%02x", h[j]);
-        printf("\n");
-
-        int valid_der = gpu_is_valid_der(h, 32);
-        int r_on_curve = gpu_der_r_on_curve(h);
-        int valid_strict = valid_der && r_on_curve;
-        int valid_easy = gpu_is_der_easy(h, 32);
-        printf("DBG: recid%d_valid_der = %d\n", ri, valid_der);
-        printf("DBG: recid%d_r_on_curve = %d\n", ri, r_on_curve);
-        printf("DBG: recid%d_valid_strict = %d\n", ri, valid_strict);
-        printf("DBG: recid%d_valid_easy = %d\n", ri, valid_easy);
-
-        if (!single_hash) {
-            uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
-            uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
-                ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
-            uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
-            uint8_t h2[32];for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
-                h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
-            printf("DBG: recid%d_sha_sha_pk = ", ri);
-            for(int j=0;j<32;j++) printf("%02x", h2[j]);
-            printf("\n");
-            int valid_der2 = gpu_is_valid_der(h2, 32);
-            int r_on_curve2 = gpu_der_r_on_curve(h2);
-            printf("DBG: recid%d_h2_valid_der = %d\n", ri, valid_der2);
-            printf("DBG: recid%d_h2_r_on_curve = %d\n", ri, r_on_curve2);
-        }
-    }
-    printf("DBG: END\n");
-    #undef DUMP32_BE
-    #undef DUMP_U64x4
-}
-
-
+template<bool Fast>
 __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
@@ -562,16 +259,34 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gtX, uint8_t *d_gtY,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
+    uint8_t *d_hit_pubkey, uint8_t *d_hit_hash, uint8_t *d_hit_sighash,
     int batch_size, int easy_mode, int single_hash
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= batch_size) return;
     uint32_t lt = start_lt + (uint32_t)idx;
 
+    uint32_t s2[8];
+    if (Fast) {
+        uint32_t state[8], block[16];
+        #pragma unroll
+        for(int i=0;i<8;i++) state[i]=pin_sequence_state[i];
+        #pragma unroll
+        for(int i=0;i<16;i++) block[i]=pin_tail_words[i];
+        const uint32_t lt_be=__byte_perm(lt,0,0x0123);
+        block[0]=(block[0]&0xffffff00u)|(lt_be>>24);
+        block[1]=(block[1]&0x000000ffu)|(lt_be<<8);
+        _SHA256Transform(state,block);
+        #pragma unroll
+        for(int i=0;i<8;i++) block[i]=state[i];
+        block[8]=0x80000000u;
+        #pragma unroll
+        for(int i=9;i<15;i++) block[i]=0;
+        block[15]=256;
+        _SHA256Initialize(s2); _SHA256Transform(s2,block);
+    } else {
     /* Copy suffix, set sequence + locktime */
-    /* The suffix is 75 B and nblk is 1 or 2, so 128 B of buffer is all the
-     * SHA-256 tail ever touches; 192 B only grew the per-thread stack frame. */
-    uint8_t buf[128];
+    uint8_t buf[192];
     for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
     buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
     buf[seq_offset+2]=(seq_value>>16)&0xFF; buf[seq_offset+3]=(seq_value>>24)&0xFF;
@@ -579,10 +294,9 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     buf[lt_offset+2]=(lt>>16)&0xFF; buf[lt_offset+3]=(lt>>24)&0xFF;
 
     /* SHA-256 padding */
-    int nblk=(suffix_len<56)?1:2;
     buf[suffix_len]=0x80;
-    /* Only bytes up to the end of the last block are ever read back. */
-    for(int i=suffix_len+1;i<nblk*64;i++) buf[i]=0;
+    for(int i=suffix_len+1;i<192;i++) buf[i]=0;
+    int nblk=(suffix_len<56)?1:2;
     uint64_t bit_len=(uint64_t)total_preimage_len*8;
     int last=nblk*64-8;
     buf[last]=(bit_len>>56)&0xFF;buf[last+1]=(bit_len>>48)&0xFF;
@@ -604,50 +318,47 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     uint8_t p2[64]; memset(p2,0,64); memcpy(p2,first,32); p2[32]=0x80; p2[62]=0x01; p2[63]=0x00;
     uint32_t b2[16]; for(int i=0;i<16;i++) b2[i]=((uint32_t)p2[i*4]<<24)|((uint32_t)p2[i*4+1]<<16)|
         ((uint32_t)p2[i*4+2]<<8)|(uint32_t)p2[i*4+3];
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Initialize(s2);
     _SHA256Transform(s2,b2);
 
-    /* z = SHA256d(preimage) as a 256-bit integer, limbs z[0] (least significant)
-     * .. z[3]. s2 already holds the digest as 8 big-endian words, so assemble the
-     * limbs straight from registers instead of materialising 32 digest bytes and
-     * reading them back with shifts. Identical value, fewer instructions. */
+    }
+
+    uint8_t sighash[32]; for(int i=0;i<8;i++){sighash[i*4]=(s2[i]>>24)&0xFF;sighash[i*4+1]=(s2[i]>>16)&0xFF;
+        sighash[i*4+2]=(s2[i]>>8)&0xFF;sighash[i*4+3]=s2[i]&0xFF;}
+
+    /* SHA state words already represent the big-endian digest. */
     uint64_t z[4];
-    for(int i=0;i<4;i++) z[i]=((uint64_t)s2[6-2*i]<<32)|(uint64_t)s2[7-2*i];
-
-    /* Scalar mul */
-    uint64_t nri[4]={d_neg_r_inv[0],d_neg_r_inv[1],d_neg_r_inv[2],d_neg_r_inv[3]};
-    uint64_t u1[4]; gpu_scalar_mulmod(u1,nri,z);
-    uint16_t pk[16]; memcpy(pk,u1,32);
-    uint64_t qx[4],qy[4]; _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
-
-    /* Q1 = u1*G + u2*R (recid=0) */
-    uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
-    uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
+    #pragma unroll
+    for(int i=0;i<4;i++) z[i]=((uint64_t)s2[6-2*i]<<32)|s2[7-2*i];
     uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32); memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
-    _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
+    recover_projective(q1x,q1y,q1z,z,d_gtX,d_gtY);
 
-    /* Q2 = Q1 + neg_2u2R (recid=1) */
-    uint64_t q2x[4],q2y[4],q2z[5];
+    /* The mixed addition has Z2=V^3*Z1. Reuse that factor to recover
+     * 1/Z1 from 1/Z2 without forming/inverting the product Z1*Z2. */
+    uint64_t q2x[4],q2y[4],q2z[5],v3[4];
     memcpy(q2x,q1x,32); memcpy(q2y,q1y,32); memcpy(q2z,q1z,40);
     uint64_t n2rx[4]={d_neg2u2rx[0],d_neg2u2rx[1],d_neg2u2rx[2],d_neg2u2rx[3]};
     uint64_t n2ry[4]={d_neg2u2ry[0],d_neg2u2ry[1],d_neg2u2ry[2],d_neg2u2ry[3]};
-    _PointAddSecp256k1(q2x,q2y,q2z,n2rx,n2ry);
+    qsb_point_add_with_z_factor(q2x,q2y,q2z,n2rx,n2ry,v3);
+    _ModInv(q2z);
+    _ModMult(q1z,v3,q2z);
+    _ModMult(q1x,q1z);_ModMult(q1y,q1z);
+    _ModMult(q2x,q2z);_ModMult(q2y,q2z);
 
-    /* Batch ModInv */
-    uint64_t prod[5]={0,0,0,0,0};
-    _ModMult(prod,q1z,q2z); _ModInv(prod);
-    uint64_t inv1[5],inv2[5];
-    _ModMult(inv1,prod,q2z); _ModMult(inv2,prod,q1z);
-    _ModMult(q1x,inv1);_ModMult(q1y,inv1);
-    _ModMult(q2x,inv2);_ModMult(q2y,inv2);
+    if (Fast) {
+        emit_recovered_hit(q1x,q1y,s2,idx,0,d_hit_cnt,d_hit_idx,
+                           d_hit_pubkey,d_hit_hash,d_hit_sighash);
+        emit_recovered_hit(q2x,q2y,s2,idx,1,d_hit_cnt,d_hit_idx,
+                           d_hit_pubkey,d_hit_hash,d_hit_sighash);
+        return;
+    }
 
     /* Check both pubkeys × 2 hashes */
     int v=0, hash_choice=0, recid=0;
     uint64_t *pts_x[2]={q1x,q2x};
     uint64_t *pts_y[2]={q1y,q2y};
+    uint8_t saved_pk[33];   /* DIAG: the pubkey we hashed when we found v=1 */
+    uint8_t saved_h[32];    /* DIAG: the SHA256(pk) (or SHA256(SHA256(pk))) when we found v=1 */
     for(int ri=0;ri<2&&!v;ri++){
         uint32_t *x32=(uint32_t*)pts_x[ri];
         uint32_t pb[16];
@@ -657,25 +368,52 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
         pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
         pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        /* DIAG: extract the pubkey bytes the kernel is about to hash. */
+        uint8_t this_pk[33];
+        for(int j=0;j<8;j++){
+            this_pk[j*4]   = (pb[j]>>24)&0xFF;
+            this_pk[j*4+1] = (pb[j]>>16)&0xFF;
+            this_pk[j*4+2] = (pb[j]>> 8)&0xFF;
+            this_pk[j*4+3] = (pb[j]    )&0xFF;
+        }
+        this_pk[32] = (pb[8]>>24)&0xFF;  /* last byte of pk = first byte of pb[8] */
         uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         uint8_t h[32];for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
         int vv=easy_mode?gpu_is_der_easy(h,32):gpu_bench_valid(h);
-        if(vv){ v=1;hash_choice=0;recid=ri; break; }
-        if (single_hash) continue;  /* Config A: only one hash iteration */
+        if(vv){
+            v=1;hash_choice=0;recid=ri;
+            for(int j=0;j<33;j++) saved_pk[j]=this_pk[j];
+            for(int j=0;j<32;j++) saved_h[j]=h[j];
+            break;
+        }
         uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
+        if (Fast || single_hash) continue;  /* Config A: only one hash iteration */
         uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
             ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
         uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
         uint8_t h2[32];for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
             h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
         vv=easy_mode?gpu_is_der_easy(h2,32):gpu_bench_valid(h2);
-        if(vv){ v=1;hash_choice=1;recid=ri; break; }
+        if(vv){
+            v=1;hash_choice=1;recid=ri;
+            for(int j=0;j<33;j++) saved_pk[j]=this_pk[j];
+            for(int j=0;j<32;j++) saved_h[j]=h2[j];
+            break;
+        }
     }
 
     if(v){uint32_t pos=atomicAdd(d_hit_cnt,1);
         if(pos<1024){
             d_hit_idx[pos]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
+            /* DIAG: store the pubkey, hash, and sighash so host can compare to CPU's.
+             * Diagnostic arrays sized for 64 entries — only first 64 hits per batch
+             * get diagnostics (host reads at most 64 anyway). */
+            if (pos < 64) {
+                for(int j=0;j<33;j++) d_hit_pubkey[pos*33+j] = saved_pk[j];
+                for(int j=0;j<32;j++) d_hit_hash[pos*32+j]   = saved_h[j];
+                for(int j=0;j<32;j++) d_hit_sighash[pos*32+j] = sighash[j];
+            }
         }
     }
 }
@@ -691,49 +429,57 @@ extern "C" {
 #include <openssl/obj_mac.h>
 }
 
-static void compute_gtable(uint8_t *gTableX, uint8_t *gTableY) {
-    size_t gt_bytes = 16ULL * 65536 * 32;
-    const char *cache = "/tmp/secp256k1_gtable_le.bin";
-    FILE *f = fopen(cache, "rb");
-    if (f) {
-        size_t r1 = fread(gTableX, 1, gt_bytes, f);
-        size_t r2 = fread(gTableY, 1, gt_bytes, f);
-        fclose(f);
-        if (r1 == gt_bytes && r2 == gt_bytes) {
-            printf("  GTable loaded from cache\n");
-            return;
+static void compute_recovery_table(uint8_t *tx, uint8_t *ty,
+                                   const uint8_t *nri, const uint8_t *rx,
+                                   const uint8_t *ry) {
+    EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1);
+    BN_CTX *ctx=BN_CTX_new();
+    BIGNUM *k=BN_lebin2bn(nri,32,NULL), *x=BN_lebin2bn(rx,32,NULL),
+           *y=BN_lebin2bn(ry,32,NULL);
+    EC_POINT *base=EC_POINT_new(grp), *cursor=EC_POINT_new(grp);
+    if(!grp || !ctx || !k || !x || !y || !base || !cursor) {
+        fprintf(stderr,"recovery table allocation failed\n"); exit(1);
+    }
+    if(!EC_POINT_mul(grp,base,k,NULL,NULL,ctx)) exit(1);
+    const int GROUP=256;
+    EC_POINT *points[GROUP];
+    for(int i=0;i<GROUP;i++) points[i]=EC_POINT_new(grp);
+    for(int window=0;window<REC_CHUNKS;window++) {
+        const unsigned count=window==REC_CHUNKS-1 ? 16u : REC_STRIDE;
+        if(window) {
+            for(int i=0;i<REC_WINDOW;i++)
+                if(!EC_POINT_dbl(grp,base,base,ctx)) exit(1);
+        }
+        if(!EC_POINT_make_affine(grp,base,ctx)) exit(1);
+        unsigned first;
+        if(window==0) {
+            if(!EC_POINT_set_affine_coordinates_GFp(grp,cursor,x,y,ctx)) exit(1);
+            first=0;
+        } else {
+            EC_POINT_copy(cursor,base); first=1;
+            memset(tx+(size_t)window*REC_STRIDE*32,0,32);
+            memset(ty+(size_t)window*REC_STRIDE*32,0,32);
+        }
+        for(unsigned start=first;start<count;start+=GROUP) {
+            const unsigned n=count-start<GROUP ? count-start : GROUP;
+            for(unsigned i=0;i<n;i++) {
+                EC_POINT_copy(points[i],cursor);
+                if(!EC_POINT_add(grp,cursor,cursor,base,ctx)) exit(1);
+            }
+            /* One field inversion for an entire group of table entries. */
+            if(!EC_POINTs_make_affine(grp,n,points,ctx)) exit(1);
+            for(unsigned i=0;i<n;i++) {
+                if(!EC_POINT_get_affine_coordinates_GFp(grp,points[i],x,y,ctx)) exit(1);
+                const size_t off=((size_t)window*REC_STRIDE+start+i)*32;
+                if(BN_bn2lebinpad(x,tx+off,32)!=32 || BN_bn2lebinpad(y,ty+off,32)!=32) exit(1);
+            }
         }
     }
-    printf("  Computing GTable (first run, ~5 min)...\n");
-    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
-    BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp);
-    EC_POINT_copy(base, EC_GROUP_get0_generator(grp));
-    for (int ch = 0; ch < 16; ch++) {
-        if (ch > 0) { BN_set_word(shift, 65536); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        EC_POINT_copy(pt, base);
-        for (int i = 0; i < 65536; i++) {
-            EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
-            uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
-            BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
-            BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
-            /* Convert BE to LE for GPUMath.h */
-            for(int j=0;j<16;j++){uint8_t t=xb[j];xb[j]=xb[31-j];xb[31-j]=t;}
-            for(int j=0;j<16;j++){uint8_t t=yb[j];yb[j]=yb[31-j];yb[31-j]=t;}
-            size_t off = (size_t)ch * 65536 * 32 + (size_t)i * 32;
-            memcpy(gTableX + off, xb, 32);
-            memcpy(gTableY + off, yb, 32);
-            if (i < 65535) EC_POINT_add(grp, pt, pt, base, ctx);
-        }
-        printf("    Chunk %d/16\n", ch+1);
-    }
-    BN_free(x); BN_free(y); BN_free(shift);
-    EC_POINT_free(base); EC_POINT_free(pt);
+    for(int i=0;i<GROUP;i++) EC_POINT_free(points[i]);
+    BN_free(k); BN_free(x); BN_free(y);
+    EC_POINT_free(base); EC_POINT_free(cursor);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
-    f = fopen(cache, "wb");
-    if (f) { fwrite(gTableX, 1, gt_bytes, f); fwrite(gTableY, 1, gt_bytes, f); fclose(f);
-        printf("  GTable saved to cache\n"); }
+    printf("  Recovery table: %u points, 14-bit windows, batched host inversion\n",REC_POINTS);
 }
 
 /* Params loader for pinning2.bin */
@@ -819,9 +565,9 @@ int main(int argc, char **argv) {
     if (load_pinning2(argv[1], &pp) < 0) return 1;
 
     /* GTable */
-    size_t gt_sz = 16ULL*65536*32;
+    size_t gt_sz = (size_t)REC_POINTS*32;
     uint8_t *h_gtX=(uint8_t*)malloc(gt_sz), *h_gtY=(uint8_t*)malloc(gt_sz);
-    compute_gtable(h_gtX, h_gtY);
+    compute_recovery_table(h_gtX,h_gtY,pp.neg_r_inv,pp.u2r_x,pp.u2r_y);
     uint8_t *d_gtX, *d_gtY;
     cudaMalloc(&d_gtX,gt_sz); cudaMalloc(&d_gtY,gt_sz);
     cudaMemcpy(d_gtX,h_gtX,gt_sz,cudaMemcpyHostToDevice);
@@ -848,6 +594,18 @@ int main(int argc, char **argv) {
 
     uint8_t *d_suffix; cudaMalloc(&d_suffix, 256);
     cudaMemcpy(d_suffix, suffix_template, 256, cudaMemcpyHostToDevice);
+
+    const bool fast_pinning = single_hash && !easy && pp.suffix_len==75 &&
+                              pp.seq_offset==31 && pp.lt_offset==67;
+    if (fast_pinning) {
+        uint8_t tail[64]={0}; uint32_t words[16];
+        memcpy(tail,pp.suffix+64,11); tail[11]=0x80;
+        const uint64_t bits=(uint64_t)pp.total_preimage_len*8;
+        for(int i=0;i<8;i++) tail[63-i]=(uint8_t)(bits>>(8*i));
+        for(int i=0;i<16;i++) words[i]=((uint32_t)tail[4*i]<<24)|
+            ((uint32_t)tail[4*i+1]<<16)|((uint32_t)tail[4*i+2]<<8)|tail[4*i+3];
+        cudaMemcpyToSymbol(pin_tail_words,words,sizeof(words));
+    }
 
     printf("  Full suffix: %d bytes, seq@%d, lt@%d\n",
            gpu_suffix_len, pp.seq_offset, pp.lt_offset);
@@ -892,9 +650,15 @@ int main(int argc, char **argv) {
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
+    uint8_t *d_hit_pubkey, *d_hit_hash, *d_hit_sighash;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
+    /* DIAGNOSTIC: per-hit pubkey, SHA256(pk), and sighash. Host compares to CPU
+     * computation post-hit to localize any GPU/CPU divergence. */
+    cudaMalloc(&d_hit_pubkey, 64*33);   /* up to 64 hits per batch */
+    cudaMalloc(&d_hit_hash, 64*32);
+    cudaMalloc(&d_hit_sighash, 64*32);
 
-    int BATCH = 1048576;  /* 1M: fewer launches/syncs; host passes seq/lt by value so no fill cost */
+    int BATCH = 4194304;  /* Amortize launch and hit readback overhead. */
     int BLKSZ = 256;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
 
@@ -925,46 +689,19 @@ int main(int argc, char **argv) {
 
     /* Each GPU handles sequences: SEQ_MIN + effective_id, SEQ_MIN + effective_id + effective_total, ... */
 
-    /* ── DEBUG MODE ──
-     * If argv contains "debug" followed by <seq_hex> <lt>, run the
-     * single-point diagnostic kernel and exit. Use this to investigate a
-     * specific (seq, lt) that the production kernel claims is a hit but
-     * which CPU verification rejects.
-     *
-     * Example:
-     *   ./qsb_real pinning.bin 0 single_hash debug 0x80006137 1317906633
-     */
-    {
-        int debug_idx = -1;
-        for (int i = 3; i < argc; i++) {
-            if (strcmp(argv[i], "debug") == 0) { debug_idx = i; break; }
-        }
-        if (debug_idx >= 0 && debug_idx + 2 < argc) {
-            uint32_t dbg_seq = (uint32_t)strtoul(argv[debug_idx+1], NULL, 0);
-            uint32_t dbg_lt  = (uint32_t)strtoul(argv[debug_idx+2], NULL, 0);
-            printf("\n=== DEBUG MODE: dumping all intermediates for seq=0x%08x lt=%u ===\n",
-                   dbg_seq, dbg_lt);
-            kernel_debug_pin_one_point<<<1,32>>>(
-                d_mid, d_suffix, gpu_suffix_len,
-                pp.seq_offset, pp.lt_offset, pp.total_preimage_len,
-                dbg_seq, dbg_lt,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gtX, d_gtY,
-                single_hash);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                printf("kernel_debug_pin_one_point failed: %s\n", cudaGetErrorString(err));
-            }
-            printf("=== DEBUG MODE END ===\n");
-            return 0;
-        }
-    }
-
     /* Benchmark runs for a fixed window ended by the harness's timeout.
      * The loop no longer stops at the first hit; hits are appended per batch.
      */
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+        if (fast_pinning) {
+            uint8_t first_block[64]; memcpy(first_block,pp.suffix,64);
+            for(int i=0;i<4;i++) first_block[pp.seq_offset+i]=(uint8_t)(seq>>(8*i));
+            SHA256_CTX ctx; SHA256_Init(&ctx);
+            for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
+            SHA256_Transform(&ctx,first_block);
+            uint32_t state[8]; for(int i=0;i<8;i++) state[i]=ctx.h[i];
+            cudaMemcpyToSymbol(pin_sequence_state,state,sizeof(state));
+        }
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
@@ -973,7 +710,8 @@ int main(int argc, char **argv) {
             uint32_t h_hit = 0;
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
-            kernel_pinning_real<<<GRDSZ,BLKSZ>>>(
+            if (fast_pinning) {
+            kernel_pinning_real<true><<<GRDSZ,BLKSZ>>>(
                 d_mid, d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
                 pp.total_preimage_len,
@@ -981,7 +719,20 @@ int main(int argc, char **argv) {
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gtX, d_gtY,
                 d_hit_cnt, d_hit_idx,
+                d_hit_pubkey, d_hit_hash, d_hit_sighash,
                 batch_sz, easy, single_hash);
+            } else {
+            kernel_pinning_real<false><<<GRDSZ,BLKSZ>>>(
+                d_mid, d_suffix, gpu_suffix_len,
+                pp.seq_offset, pp.lt_offset,
+                pp.total_preimage_len,
+                seq, batch_lt,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gtX, d_gtY,
+                d_hit_cnt, d_hit_idx,
+                d_hit_pubkey, d_hit_hash, d_hit_sighash,
+                batch_sz, easy, single_hash);
+            }
             cudaDeviceSynchronize();
 
             cudaError_t err = cudaGetLastError();
@@ -992,8 +743,14 @@ int main(int argc, char **argv) {
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
                 uint32_t hits[64];
+                uint8_t hit_pubkey[64*33];   /* GPU-claimed pubkey for each hit */
+                uint8_t hit_hash[64*32];     /* GPU-claimed SHA256(pk) for each hit */
+                uint8_t hit_sighash[64*32];  /* GPU-computed sighash z */
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
+                cudaMemcpy(hit_pubkey, d_hit_pubkey, nh*33, cudaMemcpyDeviceToHost);
+                cudaMemcpy(hit_hash, d_hit_hash, nh*32, cudaMemcpyDeviceToHost);
+                cudaMemcpy(hit_sighash, d_hit_sighash, nh*32, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
@@ -1008,6 +765,16 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
+                        /* DIAGNOSTIC: dump GPU's claimed pubkey, SHA256(pk), and sighash.
+                         * If these don't match what CPU computes for the same (seq, lt),
+                         * we've localized the bug. */
+                        fprintf(f, "gpu_pubkey=");
+                        for (int j = 0; j < 33; j++) fprintf(f, "%02x", hit_pubkey[h*33+j]);
+                        fprintf(f, "\ngpu_sha_pk=");
+                        for (int j = 0; j < 32; j++) fprintf(f, "%02x", hit_hash[h*32+j]);
+                        fprintf(f, "\ngpu_sighash=");
+                        for (int j = 0; j < 32; j++) fprintf(f, "%02x", hit_sighash[h*32+j]);
+                        fprintf(f, "\n");
                         printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
