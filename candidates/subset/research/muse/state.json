@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "next_topic": 4,
+  "seen_sources": [
+    "https://arxiv.org/abs/1907.02894",
+    "https://arxiv.org/abs/2202.01280",
+    "https://arxiv.org/abs/2501.03245",
+    "https://arxiv.org/abs/2505.01845v1",
+    "https://arxiv.org/abs/2507.03980",
+    "https://developer.download.nvidia.com/CUDA/training/register_spilling.pdf",
+    "https://developer.nvidia.com/blog/boosting-application-performance-with-gpu-memory-prefetching",
+    "https://docs.nvidia.com/cuda/parallel-thread-execution/contents.html",
+    "https://github.com/NVlabs/CGBN/blob/master/docs/CGBN.md",
+    "https://github.com/XopMC/CudaBrainSecp",
+    "https://github.com/bitcoin-core/secp256k1/blob/master/src/ecmult_gen.h",
+    "https://github.com/bitcoin-core/secp256k1/pull/16",
+    "https://github.com/ipsbruno3/fast_secp256k1_opencl",
+    "https://github.com/shrec/UltrafastSecp256k1/blob/main/src/cuda/README.md",
+    "https://github.com/sora5801/cuda-double-sha256-miner/blob/main/docs/04-midstate-optimization.md",
+    "https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/main/spec/PROBLEM.md",
+    "https://raw.githubusercontent.com/sora5801/CUDA-SHA256-SHA3/main/src/sha256_gpu.cu"
+  ],
+  "runs": [
+    {
+      "at": "2026-09-16T20:16:56.945458+00:00",
+      "topic": 0,
+      "report": "reports/20260916T201656945458Z.json",
+      "status": "completed"
+    },
+    {
+      "at": "2026-09-16T20:39:38.232177+00:00",
+      "topic": 1,
+      "report": "reports/20260916T203938232177Z.json",
+      "status": "completed"
+    },
+    {
+      "at": "2026-09-16T21:00:14.675087+00:00",
+      "topic": 2,
+      "report": "reports/20260916T210014675087Z.json",
+      "status": "completed"
+    },
+    {
+      "at": "2026-09-16T21:28:09.592581+00:00",
+      "topic": 3,
+      "report": "reports/20260916T212809592581Z.json",
+      "status": "completed"
+    }
+  ],
+  "reviewed_ideas": [
+    {
+      "ids": [
+        "signed-multicomb-tiny-table",
+        "tunable-limlee-mary-geometry"
+      ],
+      "decision": "Retain one combined small-table comb hypothesis as deferred; no established substantial gain and no candidate change.",
+      "corrections": [
+        "PR60 has16 signed windows of2MiB each, totaling32MiB, not16x64KB. The wide variant is interleaved, not planar.",
+        "A comb still needs a runtime-base-dependent table. Smaller tables may reduce traffic but do not guarantee zero DRAM accesses or residency. Divergent CUDA constant accesses may serialize.",
+        "The two suggestions overlap: retain one geometry family, not two independent improvements. The default11x6 comb gives44 lookup terms and3 doublings; the actual implementation seeds the first term and adds a final offset. This arithmetic increase is substantial versus16 or10 terms.",
+        "The arXiv abstract supports author ElGamal/NS3 claims, not grinding performance, GPU transfer or a checked fixed-base comparison table. Full paper and code have not been validated.",
+        "The external README memory claims are author hypotheses on a different workload. Do not treat them as measurements of our32MiB or16GiB pipeline."
+      ],
+      "revisit_when": "A concrete parameterization and full arithmetic/traffic model improves the tradeoff or new relevant GPU evidence appears."
+    },
+    {
+      "ids": [
+        "wide-table-load-lookahead",
+        "wide-table-l2-prefetch"
+      ],
+      "decision": "Two CPU/native-tested prototypes. Keep optional prefetch for comparison; not a proven GPU gain.",
+      "evidence": "Full source fingerprint d0174fa761b852b0f30f71246dd3e43b3e1a053dc9c011b8a4508d246eb0af18;128regs/24KiB/no prepare spills, versus8-byte store/load in wide control. CPU414 chains/822keys/3312next-load address checks; native production/audit pass.",
+      "limitation": "SASS issues hints late, no measured latency overlap or end-to-end speed. Preserve submitted sources."
+    },
+    {
+      "ids": [
+        "address-only-rolling-l2-lookahead",
+        "live-range-split-spill-avoidance"
+      ],
+      "decision": "First is duplicate of completed experiment; second deferred absent a new concrete bottleneck/removal. No new implementation selected.",
+      "corrections": [
+        "Address-only distance1 rolling L2 prefetch is exactly the already-tested implementation, not a refinement/new proposal.",
+        "Zero spills do not prove why allocation improved or that any stalls were removed. ptxas cannot report Stall Long Scoreboard relief; that requires actual GPU profiling.",
+        "No proof that this is the only affordable latency-hiding strategy. Divergent addresses do not imply universal serialization; distinguish address spaces and hardware behavior.",
+        "Required accumulator/deferred-anchor recurrence cannot simply be discarded. Shared spilling adds traffic and can reduce occupancy; generic RegDem results are not a new end-to-end gain for our now-zero-spill variant."
+      ]
+    }
+  ],
+  "consecutive_failures": 0,
+  "last_attempt_epoch": 1789594089.595447,
+  "setup_correction": "Resolved runtime location, Bun temporary directory and v1.18.31 scalar webfetch permission schema. These setup errors occurred before any research model call."
+}

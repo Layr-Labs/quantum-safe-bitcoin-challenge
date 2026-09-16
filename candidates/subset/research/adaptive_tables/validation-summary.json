@@ -1,0 +1,115 @@
+{
+  "status": "PASS",
+  "scope": "CPU/source/native compiler evidence only; no GPU execution or speed claim",
+  "candidate_source_fingerprint": "c8daa257dd1d3f3a1483eaa8047aa3c0af7a7b309103823a3ab959d43a46c9d6",
+  "branches": {
+    "small-cpu.json": {
+      "status": "PASS",
+      "validation_level": "CPU-extracted subset point chain with OpenSSL field and sparse table oracle",
+      "recoding_cases": 12769,
+      "curve_chains": 414,
+      "recovered_keys_compared": 822,
+      "geometry_cases": 16,
+      "actual_loader_cases": 608,
+      "table_bytes": 33554432,
+      "branch": "small planar",
+      "point_chain_operations": {
+        "multiplications": 102,
+        "squares": 30
+      },
+      "prefetch_next_load_checks": 0,
+      "source_fingerprint": "c8daa257dd1d3f3a1483eaa8047aa3c0af7a7b309103823a3ab959d43a46c9d6",
+      "gpu_executed": false
+    },
+    "wide-cpu.json": {
+      "status": "PASS",
+      "validation_level": "CPU-extracted subset point chain with OpenSSL field and sparse table oracle",
+      "recoding_cases": 12769,
+      "curve_chains": 414,
+      "recovered_keys_compared": 822,
+      "geometry_cases": 10,
+      "actual_loader_cases": 380,
+      "table_bytes": 17179869184,
+      "branch": "wide interleaved",
+      "point_chain_operations": {
+        "multiplications": 60,
+        "squares": 18
+      },
+      "prefetch_next_load_checks": 3312,
+      "source_fingerprint": "c8daa257dd1d3f3a1483eaa8047aa3c0af7a7b309103823a3ab959d43a46c9d6",
+      "gpu_executed": false
+    },
+    "host-flow-results.json": {
+      "status": "PASS",
+      "validation_level": "CPU execution of extracted policy, launch dispatch and ranked host loop with mocked GPU computation/events",
+      "host_scenarios": 20,
+      "policy_cases": 10,
+      "allocation_scenarios": 7,
+      "source_fingerprint": "c8daa257dd1d3f3a1483eaa8047aa3c0af7a7b309103823a3ab959d43a46c9d6",
+      "projection_sha256": "769642833a5544306ed3af77c8757381e631a8af5c41a63d04b95acf9b3ea136",
+      "gpu_executed": false
+    }
+  },
+  "native": {
+    "native-results.json": {
+      "status": "PASS",
+      "default_flags_build": true,
+      "kernels": {
+        "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": {
+          "registers": 80,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 4696
+        },
+        "_Z24qsb_ranked_prepare_smallPK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+          "registers": 128,
+          "shared_bytes": 24576,
+          "stack_bytes": 8,
+          "spill_store_bytes": 8,
+          "spill_load_bytes": 8,
+          "instruction_slots": 8408
+        },
+        "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+          "registers": 128,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 8440
+        }
+      }
+    },
+    "audit-native-results.json": {
+      "status": "PASS",
+      "default_flags_build": false,
+      "kernels": {
+        "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": {
+          "registers": 80,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 4696
+        },
+        "_Z24qsb_ranked_prepare_smallPK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+          "registers": 128,
+          "shared_bytes": 24576,
+          "stack_bytes": 8,
+          "spill_store_bytes": 8,
+          "spill_load_bytes": 8,
+          "instruction_slots": 8408
+        },
+        "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+          "registers": 128,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 8440
+        }
+      }
+    }
+  }
+}

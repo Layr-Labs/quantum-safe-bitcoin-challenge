@@ -1,0 +1,21 @@
+{
+  "reviewed_at": "2026-09-16T21:34:08.990602+00:00",
+  "decision": "duplicate / premise rejected",
+  "report": "reports/20260916T212809592581Z.json",
+  "source_fingerprint": "6bfe0e61fbbcabce237877c95e238f0bd22914ed6ceade6baf97e058c5e51ac6",
+  "findings": [
+    {
+      "id": "gather-direct-var-sha",
+      "decision": "reject premise; no such global intermediate exists in current ranked path",
+      "evidence": "tree.cu kernel_build_epochs and window_schedule_shared.cuh qsb_scheduled_window_hash build/hash message words directly. No per-candidate1.7KiB global preimage is materialized. The public problem specification describes full-message semantics, not current optimized runtime work.",
+      "revisit_when": "Identify an exact current store/load and removable bytes, not a baseline workload assumption."
+    },
+    {
+      "id": "prefix-coherent-sha-checkpoint",
+      "decision": "duplicate of existing epoch and prefix-state reuse, with generalized orderings deferred absent a new geometry",
+      "evidence": "The ranked path enumerates six early omissions per epoch, sharing the first21variable transforms across256 candidates, plus84first-state classes and26second-schedule classes. qsb_scheduled_window_hash performs remaining window/constant-tail work; broad prefix reuse is already present. Existing bounded window scan is not a universal negative result.",
+      "revisit_when": "Supply a concrete grouping that improves current8.41015625equal-cost transforms/candidate accounting, exact bytes/state and still-large search space; no repeated27-block baseline."
+    }
+  ],
+  "scope": "Independent current-source applicability review; external paper/code claims not validated because neither proposal established a new applicable mechanism."
+}

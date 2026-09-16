@@ -1,0 +1,19 @@
+{
+  "source_fingerprint": "6bfe0e61fbbcabce237877c95e238f0bd22914ed6ceade6baf97e058c5e51ac6",
+  "review_models": {
+    "Gemini 3.8 Flash High": {
+      "cli_model": "gemini-3.8-flash-high",
+      "status": "completed",
+      "reported_findings": "No blocking integration defect found; actual table geometry, namespacing, dispatch and release reviewed.",
+      "independent_disposition": "CPU/source/native evidence supports implementation checks. Reject numerical startup/score estimates, guaranteed regression protection or cache residency, claimed32768activewarps, wrongC1376value, builder1MiBunit and unverifiedPR62registers. Tuner compares GPU event time, not total startup/process cost."
+    },
+    "Grok 4.6": {
+      "cli_model": "grok-4.6",
+      "status": "bounded240-second request timed out without final output",
+      "validation_credit": false,
+      "earlier_review": "Earlier adaptive component reviews exist in adaptive_tables/external-review.json; not a finalcombinedreview."
+    }
+  },
+  "GPU_executed": false,
+  "decision": "Proceed as a substantial expected-gain experiment under active user authorization; no measured lead claimed. Compact branch independently integrates promoted geometry with external inverse; wide removes35M+10S and5lookups with runtime comparison, at unmeasuredmemory/startuprisk."
+}

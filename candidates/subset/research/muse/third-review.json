@@ -1,0 +1,32 @@
+{
+  "report": "reports/20260916T210014675087Z.json",
+  "reviewed_at": "2026-09-16T21:11:49.762205+00:00",
+  "decision": "Reject H-only proposal for current layout; defer tile-local proposal as incomplete. Retain checkpoint recomputation as a separately costed hypothesis, not an implementation recommendation.",
+  "source_checks": [
+    "https://github.com/shrec/UltrafastSecp256k1/blob/main/src/cuda/README.md",
+    "https://github.com/ipsbruno3/fast_secp256k1_opencl",
+    "https://arxiv.org/html/2501.03245v1",
+    "candidates/subset/tests/gpu_epochs/ranked_pipeline.cuh"
+  ],
+  "current_layout": {
+    "saved_fields": [
+      "C",
+      "Y",
+      "W",
+      "ZZZ"
+    ],
+    "state_bytes_per_candidate": 128,
+    "checkpoint_nodes_per_256_candidates": 254,
+    "bytes_per_node": 32,
+    "checkpoint_store_plus_load_bytes_per_candidate": 63.5,
+    "inversions_per_full_batch": 1
+  },
+  "corrections": [
+    "We do not checkpoint every mixed-add intermediate point. Only final C,Y,W,ZZZ state and inverse product-tree nodes cross the kernel boundary. H-only per-step output does not replace these values or reconstruct recovery without more information/work.",
+    "A tile-local tree plus a global root hierarchy already describes our current decomposition. Shared memory cannot remain live across the separate prepare, root-inverse and finish launches; the proposal does not supply a valid persistence/recomputation/synchronization plan.",
+    "The referenced OpenCL example performs inversion within a workgroup; it does not demonstrate eliminating checkpoints while preserving our one-inversion-per-large-batch architecture.",
+    "The cited paper full HTML is available. Sections3.2\u20133.3 describe grouped inversion, recomputation of inexpensive intermediates and cache placement; they do not establish a zero-global-checkpoint variant for this source.",
+    "A concrete recomputation variant would remove254 field-node stores+loads per256 candidates but add254 multiplications and up-sweep barriers in finish. It retains128B/candidate recovery state. At477182283/s removed checkpoint payload is30.3GB/s; no measured bottleneck or substantial gain follows."
+  ],
+  "feedback": "For future memory proposals identify the exact current stored symbol, byte count, use and lifetime before proposing removal. Explain kernel-boundary synchronization and reconstruction. A bibliography of batch inversion methods is not itself a new mechanism."
+}

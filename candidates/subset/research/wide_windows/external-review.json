@@ -1,0 +1,27 @@
+{
+  "candidate_source_fingerprint": "49ebdc07297b38908c1fd285e9563ec3c646ca8cd937a57976382b8debd36593",
+  "grok": {
+    "model": "grok-4.6-build",
+    "completion": "end_turn",
+    "accepted": "Geometry and builder review is consistent with the independently tested source. Cache/memory tradeoff remains real and unmeasured.",
+    "resolved_conditions": "All gt/wide aliases are correct; actual loader/recoder/chain/builder checks pass, including k=0 and table offsets beyond4GiB. Recovery routes table reads through the changed loader.",
+    "next_hypothesis": "Load the next window before current point arithmetic to overlap memory latency. Requires native live-range/spill inspection and GPU comparison; extra coordinate registers can backfire.",
+    "correction": "Nonzero individual digits do not prove the final sum is finite: k=0 yields infinity and is covered by the curve oracle."
+  },
+  "gemini": {
+    "model": "gemini-3.8-flash-high",
+    "completion": "SUCCESS",
+    "accepted": "Large table cache risk and importance of checking all table ABI uses.",
+    "rejected_anchor_change": "Proposed Load256(y0,y1) before the add loop is incorrect. The seed keeps Yactual+y0*ZZZ; y0 is its correct affine anchor. Negative-control mutation fails for scalar1/runtimebase1, while unchanged source passes414chains.",
+    "rejected_performance_claims": [
+      "No measured cache hit rate or cycle latency supports the quoted numbers.",
+      "The8-byte spill belongs to qsb_ranked_prepare, not wide_table_prepare (44registers,zero spills).",
+      "A2GiB reserve includes search scratch; adding the scratch again double-counts it.",
+      "GLV does not automatically halve total fixed-base additions.",
+      "Gray-order subset changes do not yield known additive changes in the SHA-derived scalar."
+    ],
+    "action": "No proposed source fix applied. Added an explicit negative-control regression for the false anchor proposal."
+  },
+  "gpu_executed": false,
+  "scope": "Reviewed conclusions only; no raw reasoning transcript or account metadata included."
+}

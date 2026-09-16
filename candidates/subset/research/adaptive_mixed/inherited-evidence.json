@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "6bfe0e61fbbcabce237877c95e238f0bd22914ed6ceade6baf97e058c5e51ac6",
+  "scope": "Evidence reused only for exact unchanged source or verified token-identical kernel bodies",
+  "field_report": "research/pipeline-field-results.json",
+  "field_report_sha256": "fb606ade401113deca5c1d6d5287cbbd92f387bfe77f9984ba99a86ce87f893a",
+  "pipeline_report": "research/pipeline-integrated-results.json",
+  "pipeline_report_sha256": "a185003d925153d85d14540d1c8b5db984634dc56b28840fe9c261e79701f463",
+  "checks": [
+    "GPUMath.h and square32.cuh byte-identical to tested field report",
+    "GPUHash.h and tree_inverse.cuh byte-identical to tested pipeline report",
+    "All pre-launch pipeline code token-identical after removing new compact prepare",
+    "Compact prepare identical to wide prepare except symbol and separately tested fixed-base helper"
+  ],
+  "gpu_executed": false
+}

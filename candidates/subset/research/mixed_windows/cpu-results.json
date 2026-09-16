@@ -1,0 +1,34 @@
+{
+  "status": "PASS",
+  "validation_level": "CPU-extracted subset point chain with OpenSSL field and sparse table oracle",
+  "recoding_cases": 12769,
+  "curve_chains": 414,
+  "recovered_keys_compared": 822,
+  "geometry_cases": 15,
+  "actual_loader_cases": 570,
+  "table_bytes": 67108864,
+  "branch": "mixed15 interleaved",
+  "point_chain_operations": {
+    "multiplications": 95,
+    "squares": 28
+  },
+  "prefetch_next_load_checks": 5382,
+  "source_fingerprint": "3205a7177cb0a51fcb269b5ea1f06daedc7ef0b6c7000029095ad86c49d1bb0b",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "2025be571e25b67a9afe9a3531a47d08f0a22b2e95ca1dc91c18a62aa0530459",
+    "square32.cuh": "34f62cd4e19f317c39a3d240386641dc1adcc6f8f74d66b93571e87e2dfc3914",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/ranked_pipeline.cuh": "25ef9d0e0b5c4095abdfd060a74ec46170e46d5209bed21c378a52133bc8cb7e",
+    "tests/gpu_epochs/tree.cu": "945f5405c435f083c047513e55f780744f4498fa2c583a4b0440ed99123feaa2",
+    "tests/gpu_epochs/tree_audit.cu": "c6015b15d7a3b7728d85492504836677ad082dc0b641d3debc40105c3d14ac66",
+    "tests/gpu_epochs/tree_inverse.cuh": "67103970f3761c1be263b7df114bd5a6d3b63e48be36e423892a2f68efa91b41",
+    "tests/gpu_epochs/wide_geometry.cuh": "4fe3ffda7a7224261cc55f6a5d02bc915a8bb78707077444312bae1059e19bcf",
+    "tests/gpu_epochs/wide_table_host.cuh": "ac27e68bbc52f7cb8d9c00faba61f96f75545af0aa22d2a8d0adf4ffd41e8e4b",
+    "tests/gpu_epochs/wide_table_kernels.cuh": "574ac987162e82545afc9e3bf543edce9b818ea9f4552f08c7785b1093de7a2e",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "57dede3365f0d87bfa5307bd73440f9ae25773d913c96b46a3316363fd734cb8"
+  },
+  "gpu_executed": false,
+  "limits": "Actual recoder, chain and recovery use OpenSSL field/table oracle. Actual vector loader runs on CPU against sparse virtual mappings with independently calculated offsets. No full resident table, CUDA arithmetic execution or GPU throughput measurement."
+}

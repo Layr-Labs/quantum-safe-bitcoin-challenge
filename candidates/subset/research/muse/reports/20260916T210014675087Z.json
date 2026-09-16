@@ -1,0 +1,310 @@
+{
+  "model": "opencode/muse-spark-1.3-contributor-free",
+  "harness": "OpenCode 1.18.31",
+  "effort": "high",
+  "created_at": "2026-09-16T21:00:14.675087+00:00",
+  "topic": "Batch inversion and checkpoint architecture: reduce whole-pipeline arithmetic or transport substantially without changing runtime problem dependence or correctness.",
+  "context_sha256": "f9f55782ff929372cf62280c91b670e080ed990f078678e52d270226a05b1610",
+  "source_state": {
+    "subset": {
+      "ours": "65fb673d-5014-4ee8-866d-97d972e7b1f0",
+      "status": "promoted",
+      "score": 451135044,
+      "promoted_frontier_score": 451135044,
+      "pr": 60,
+      "validation_commit": "f31dcba6b5a3de04a28e9dcf47b336bad8278fa2",
+      "submitted_source_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+      "successor_status": "Isolated adaptive small32MiB/wide16GiB candidate5b40afb has source-bound CPU/native checks and Grok/Gemini reviews; startup/optional-allocation limits documented. No GPU gain established; not yet selected for upload."
+    },
+    "pinning": {
+      "ours": "66c031c6-16e4-484e-ad4d-0e7e0ef3f38f",
+      "status": "validating",
+      "score": null,
+      "promoted_frontier_score": 644546620,
+      "pr": 74,
+      "validation_commit": "154b2bd97a9c918ac3d992c31a6cf7901aeab1a0",
+      "submitted_source_fingerprint": "ed600d1c31cc168b0010419da1dfafc78d1be147b816e78dbab52cd37f2e5e54",
+      "successor_status": "Ten-window16GiB candidate with bounded builder, canonical carry repairs, PR64 bundle and runtime inverse-schedule comparison submitted asPR74. Native builds/CPU checks passed; no GPU result yet."
+    },
+    "observed_at_utc": "2026-09-16T20:59:35.304599+00:00",
+    "priority_track": "subset",
+    "priority_reason": "Only pinning remains pending. Subset now has a free slot; prioritize a substantial supported successor to our promoted451135044 result."
+  },
+  "model_metadata": {
+    "id": "muse-spark-1.3-contributor-free",
+    "providerID": "opencode",
+    "name": "Muse Spark 1.3 Free",
+    "family": "muse-free",
+    "api": {
+      "id": "muse-spark-1.3-contributor-free",
+      "url": "https://opencode.ai/zen/v1",
+      "npm": "@ai-sdk/openai"
+    },
+    "status": "active",
+    "headers": {},
+    "options": {},
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "capabilities": {
+      "temperature": true,
+      "reasoning": true,
+      "attachment": true,
+      "toolcall": true,
+      "input": {
+        "text": true,
+        "audio": true,
+        "image": true,
+        "video": true,
+        "pdf": true
+      },
+      "output": {
+        "text": true,
+        "audio": false,
+        "image": false,
+        "video": false,
+        "pdf": false
+      },
+      "interleaved": false
+    },
+    "release_date": "2026-09-02",
+    "variants": {
+      "minimal": {
+        "reasoningEffort": "minimal",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "low": {
+        "reasoningEffort": "low",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "medium": {
+        "reasoningEffort": "medium",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "high": {
+        "reasoningEffort": "high",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "xhigh": {
+        "reasoningEffort": "xhigh",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      }
+    }
+  },
+  "usage": [
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 9601,
+        "input": 8818,
+        "output": 363,
+        "reasoning": 307,
+        "cache": {
+          "write": 0,
+          "read": 113
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 41648,
+        "input": 40298,
+        "output": 262,
+        "reasoning": 975,
+        "cache": {
+          "write": 0,
+          "read": 113
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 59377,
+        "input": 17107,
+        "output": 369,
+        "reasoning": 1596,
+        "cache": {
+          "write": 0,
+          "read": 40305
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 71706,
+        "input": 11131,
+        "output": 1223,
+        "reasoning": 2023,
+        "cache": {
+          "write": 0,
+          "read": 57329
+        }
+      }
+    }
+  ],
+  "research_tools": [
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "Montgomery batch inversion GPU elliptic curve throughput checkpoint",
+        "type": "deep"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "quantum safe bitcoin challenge batch inversion checkpoint Layr-Labs GitHub",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "secp256k1 batch inversion affine recovery GPU grinding ecMult",
+        "type": "deep"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://arxiv.org/abs/2501.03245"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/shrec/UltrafastSecp256k1/blob/main/src/cuda/README.md"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/bitcoin-core/secp256k1/pull/16"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "error",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/arkadianet/erg-vanity-gpu/commit/be85729dc206431142ce35d236a0a0a5987319"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 6,
+        "query": "fast_secp256k1_opencl point_to_affine_batch64 Blelloch scan local memory batch inversion",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 8000,
+        "numResults": 6,
+        "query": "Okeya Sakurai Montgomery trick multi-scalar multiplication affine batch inversion precomputation",
+        "type": "auto"
+      }
+    }
+  ],
+  "review_status": "unreviewed; claims require independent verification",
+  "research": {
+    "summary": "Two checkpoint/inversion refinements distinct from already-inherited external inversion, deferred-Y/XYZZ and direct recovery: (1) denominator-only H checkpoints, (2) tile-local two-level batch inversion. Both reduce checkpoint transport without changing problem dependence. No GPU gain established; hypotheses only.",
+    "findings": [
+      {
+        "id": "h-denominator-checkpoint",
+        "title": "Denominator-only H checkpoints from mixed-add chain",
+        "mechanism": "Emit/store only the lambda denominator H per step from H-output mixed adds instead of full Z/point checkpoints; reconstruct inversion chain as Z_k=Z0*H0*... and fuse decompress with recovery. Removes separate denominator muls and shrinks per-checkpoint bytes vs full Jacobian stores.",
+        "sources": [
+          {
+            "url": "https://github.com/shrec/UltrafastSecp256k1/blob/main/src/cuda/README.md",
+            "locator": "Point Operations mixed addition: jacobian_add_mixed_h madd-2004-hmv (8M+3S) H output for batch inversion; Z=1 specialized (5M+2S); Batch Inversion prefix/suffix scan",
+            "supports": "Implementation exposes H-output add variants explicitly for batch inversion and separate Z1 fast path; supports denominator-only checkpoint pattern"
+          },
+          {
+            "url": "https://github.com/bitcoin-core/secp256k1/pull/16",
+            "locator": "PR title plus peterdettman comment: Montgomery trick 1 inversion +3 muls each; Jacobian-to-affine table conversion use-case",
+            "supports": "Canonical cost model 1 inv +3(N-1) muls and Jacobian->affine conversion purpose; does not by itself establish H-only checkpoint gain"
+          }
+        ],
+        "new_vs_memory": "Memory records external checkpoint/batch inversion plus deferred-Y/XYZZ/direct recovery, but not H-output adds or denominator-only checkpoint width. Distinct from reviewed comb/prefetch IDs and from already-inherited direct recovery.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed: larger checkpoint stores/loads and separate denominator-build muls per step. Added: small per-add delta for H-output form (e.g. 8M+3S vs 7M+4S family) plus unchanged 1-inv+3N-mul inversion math. Large only if checkpoints currently spill to DRAM/global and dominate.",
+        "risks": "If current checkpoints already H-only there is no gain. Must preserve H/Z recurrence liveness across chain; formula change risks consensus/correctness; register/shared pressure from H liveness.",
+        "falsification": "Mac-only: extract current checkpoint type/bytes per step; CPU-verify H-chain vs full-Z recovery equivalence on random grind scalars; stub-compile reg/shared estimate only, no timing claim.",
+        "recommendation": "investigate"
+      },
+      {
+        "id": "tiled-blelloch-batch-inversion",
+        "title": "Tile-local Blelloch/GAS two-level batch inversion",
+        "mechanism": "Replace single global linear prefix chain (O(N) global checkpoint writes/reads) with tiles (e.g. 64): intra-tile Blelloch scan in local/shared, one global aggregate per tile, global compress, single/ few Fermat inversions, then scatter/decompress. Keeps prefix traffic on-chip.",
+        "sources": [
+          {
+            "url": "https://github.com/ipsbruno3/fast_secp256k1_opencl",
+            "locator": "Batch Affine Conversion point_to_affine_batch64: parallel Montgomery inversion for 64 points using Blelloch scan in local memory; WG=64 local lz/lprefix/lscan/linvTot",
+            "supports": "Worked GPU implementation of tile-local Blelloch inversion with fixed WG and local-memory prefix buffers; author RTX5090 bench numbers are workload-specific, not grinding transfer"
+          },
+          {
+            "url": "https://arxiv.org/abs/2501.03245",
+            "locator": "Abstract (verified via fetch): Montgomery trick + memory management + 5.56x ECDSA /4.94x ECDH vs SOTA GPU claims; Subjects cs.CR/cs.AR/cs.DC, 22 Dec 2024",
+            "supports": "Abstract supports batch EC + memory-management scope and author-measured ECDSA/ECDH gains only; compress/decompress, 6N-vs-11N, N>20, GAS 32n-to-sp and 128MB+96MB-vs-20MB details seen only in search snippets, full text not verified - marked limitation"
+          }
+        ],
+        "new_vs_memory": "Memory records monolithic external inversion and pinning batched ladders/inversion plus 1M-tile builder, but not tile-local Blelloch scan or GAS gather-apply-scatter hierarchy. Distinct from wide/small table and prefetch reviewed IDs.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed: global checkpoint transport of N prefix products (store in compress, reload in decompress). Added: per-tile shared/local traffic, barriers/sync, tile aggregates and small extra scan muls. Large only if global checkpoint traffic is the bottleneck at large batch sizes.",
+        "risks": "Shared/local budget vs 24KiB PR60 budget and 128-reg prepare pressure; barriers can break overlap; zero-Z/infinity must be filtered or it zeroes tile product; occupancy/divergence risks.",
+        "falsification": "Mac-only: CPU tile-vs-linear inverse equivalence including infinity/zero-Z filtering; shared-budget accounting for 32B*tilesize vs 24KiB; native ptxas regs/spills estimate only, no GPU timing.",
+        "recommendation": "investigate"
+      }
+    ],
+    "no_gain_reason": "",
+    "next_question": "What are current checkpoint element type/bytes and global prefix store/load count per inversion batch, and what tile size fits H-only prefixes in 24KiB shared at 128 regs without spills?"
+  }
+}

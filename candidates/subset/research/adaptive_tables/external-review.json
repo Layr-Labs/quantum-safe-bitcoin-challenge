@@ -1,0 +1,47 @@
+{
+  "grok": {
+    "models": [
+      "grok-4.6-build"
+    ],
+    "status": "completed",
+    "reviewed_source_fingerprint": "3538225c9b1545aa55971510d9dd72315bdc238fb34304020ec6141603238729",
+    "accepted": [
+      "Warmup/measurement ordering, current dispatch and hit/range preservation match source.",
+      "Explicit mode argument and event cleanup improvements applied and rechecked.",
+      "GPU correctness, latency and whole-program gain remain unverified; preserve control."
+    ],
+    "limits": [
+      "Other callers were a potential interface hazard, not an observed wrong dispatch.",
+      "Existing64-hit host cap is inherited, not a new selector defect.",
+      "Timing covers complete GPU pipeline but excludes startup, host I/O and table construction. Keeping both tables during trials has memory/startup cost."
+    ]
+  },
+  "gemini": {
+    "model": "Gemini 3.8 Flash High",
+    "status": "completed",
+    "reviewed_source_fingerprint": "5b40afb310e408b38744f7b766005fa92f7cfeb31c2651c409ab3e70d2a65a3d",
+    "accepted": [
+      "Source dispatch/table layouts and real search-range accounting are coherent.",
+      "Optional wide allocation failure currently aborts; add a narrow small fallback before promoting prototype.",
+      "Both tables remain allocated after selection; startup and retained memory remain costs."
+    ],
+    "corrected": [
+      "Zero epochs is unreachable through the actual ranked guard, which assigns C(137,6). The extracted loop alone is not an arbitrary-length API.",
+      "Retaining the wide table is not an accumulating per-batch leak. Fixed680MiB headroom is unsupported without concrete GPU memory state.",
+      "Whole-pipeline measurement is the intended target; unchanged producer work reducing percentage differences is not itself a defect."
+    ],
+    "limits": [
+      "No GPU execution or performance evidence. Short/noisy runtime measurements and startup costs remain.",
+      "Tuner copy prevention is a future API precaution; current source never copies it."
+    ]
+  },
+  "followup": {
+    "source_fingerprint": "c8daa257dd1d3f3a1483eaa8047aa3c0af7a7b309103823a3ab959d43a46c9d6",
+    "changes": [
+      "cudaErrorMemoryAllocation-only fallback, clearing recoverable last error",
+      "Release unused wide table after selection/synchronization",
+      "Delete event-owner copy operations"
+    ],
+    "verification": "20 host-flow,10 policy,7 allocation scenarios; both branch curve/recovery audits; real production/default/audit rebuilds. No GPU execution."
+  }
+}

@@ -1,0 +1,441 @@
+{
+  "model": "opencode/muse-spark-1.3-contributor-free",
+  "harness": "OpenCode 1.18.31",
+  "effort": "high",
+  "created_at": "2026-09-16T21:28:09.592581+00:00",
+  "topic": "SHA/EC dataflow and subset search-space ordering: seek substantial reuse or parallelism beyond already tried schedule packing; no SHA-linear curve shortcuts.",
+  "context_sha256": "acf06a6895e6531f677128907646c694b510f5bf001908ee94d6281c447c8635",
+  "source_state": {
+    "subset": {
+      "ours": "65fb673d-5014-4ee8-866d-97d972e7b1f0",
+      "status": "promoted",
+      "score": 451135044,
+      "promoted_frontier_score": 477182283,
+      "pr": 60,
+      "validation_commit": "f31dcba6b5a3de04a28e9dcf47b336bad8278fa2",
+      "submitted_source_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+      "successor_status": "Combined adaptive64MiB/16GiB source6bfe0e61: compact/wide CPU curve and20host-flow+10policy+7allocation checks pass; native production/default pass; builder/audit checks and independent reviews in progress. No GPU score."
+    },
+    "pinning": {
+      "ours": "66c031c6-16e4-484e-ad4d-0e7e0ef3f38f",
+      "status": "validating",
+      "score": null,
+      "promoted_frontier_score": 644546620,
+      "pr": 74,
+      "validation_commit": "154b2bd97a9c918ac3d992c31a6cf7901aeab1a0",
+      "submitted_source_fingerprint": "ed600d1c31cc168b0010419da1dfafc78d1be147b816e78dbab52cd37f2e5e54",
+      "successor_status": "Ten-window16GiB candidate with bounded builder, canonical carry repairs, PR64 bundle and runtime inverse-schedule comparison submitted asPR74. Native builds/CPU checks passed; no GPU result yet."
+    },
+    "observed_at_utc": "2026-09-16T21:26:54.597057+00:00",
+    "priority_track": "subset",
+    "priority_reason": "Only pinning remains pending. Subset now has a free slot; prioritize a substantial supported successor to our promoted451135044 result."
+  },
+  "model_metadata": {
+    "id": "muse-spark-1.3-contributor-free",
+    "providerID": "opencode",
+    "name": "Muse Spark 1.3 Free",
+    "family": "muse-free",
+    "api": {
+      "id": "muse-spark-1.3-contributor-free",
+      "url": "https://opencode.ai/zen/v1",
+      "npm": "@ai-sdk/openai"
+    },
+    "status": "active",
+    "headers": {},
+    "options": {},
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "capabilities": {
+      "temperature": true,
+      "reasoning": true,
+      "attachment": true,
+      "toolcall": true,
+      "input": {
+        "text": true,
+        "audio": true,
+        "image": true,
+        "video": true,
+        "pdf": true
+      },
+      "output": {
+        "text": true,
+        "audio": false,
+        "image": false,
+        "video": false,
+        "pdf": false
+      },
+      "interleaved": false
+    },
+    "release_date": "2026-09-02",
+    "variants": {
+      "minimal": {
+        "reasoningEffort": "minimal",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "low": {
+        "reasoningEffort": "low",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "medium": {
+        "reasoningEffort": "medium",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "high": {
+        "reasoningEffort": "high",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "xhigh": {
+        "reasoningEffort": "xhigh",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      }
+    }
+  },
+  "usage": [
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 12317,
+        "input": 11363,
+        "output": 343,
+        "reasoning": 498,
+        "cache": {
+          "write": 0,
+          "read": 113
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 29056,
+        "input": 17314,
+        "output": 352,
+        "reasoning": 13,
+        "cache": {
+          "write": 0,
+          "read": 11377
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 43819,
+        "input": 14565,
+        "output": 243,
+        "reasoning": 354,
+        "cache": {
+          "write": 0,
+          "read": 28657
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 63874,
+        "input": 19721,
+        "output": 342,
+        "reasoning": 690,
+        "cache": {
+          "write": 0,
+          "read": 43121
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 76912,
+        "input": 12165,
+        "output": 293,
+        "reasoning": 1621,
+        "cache": {
+          "write": 0,
+          "read": 62833
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 96102,
+        "input": 19798,
+        "output": 253,
+        "reasoning": 1058,
+        "cache": {
+          "write": 0,
+          "read": 74993
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 109199,
+        "input": 11383,
+        "output": 1533,
+        "reasoning": 1578,
+        "cache": {
+          "write": 0,
+          "read": 94705
+        }
+      }
+    }
+  ],
+  "research_tools": [
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "SHA256 midstate reuse prefix shared block GPU mining optimization",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "SHA256 message schedule reuse W optimization GPU arXiv",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "quantum-safe bitcoin challenge subset SHA EC search Layr-Labs GitHub",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "Layr-Labs quantum-safe-bitcoin-challenge subset GitHub SHA256 secp256k1",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "GPU SHA256 using __shfl warp cooperative message schedule arXiv CUDA",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "CUDA SHA256 midstate precompute first block reuse mining GitHub implementation",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/sora5801/cuda-double-sha256-miner/blob/main/docs/04-midstate-optimization.md"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/sora5801/CUDA-SHA256-SHA3"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "text",
+        "url": "https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/main/spec/PROBLEM.md"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "CUDA SHA256 single block 33 bytes optimization message schedule W register arXiv GPU throughput",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "Bitcoin vanity address GPU grind secp256k1 recovery SHA256 fused kernel GitHub VanitySearch",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "text",
+        "url": "https://raw.githubusercontent.com/FlareCO/cuda-vanity-secp256k1/main/vanity.cu"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "arXiv GPU SHA256 optimization throughput message schedule registers",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 10000,
+        "numResults": 8,
+        "query": "arXiv combinatorial generation combinations revolving door Gray code lexicographic prefix sharing",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://arxiv.org/abs/2202.01280"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://arxiv.org/abs/2507.03980"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "text",
+        "url": "https://raw.githubusercontent.com/sora5801/CUDA-SHA256-SHA3/main/src/sha256_gpu.cu"
+      }
+    }
+  ],
+  "review_status": "unreviewed; claims require independent verification",
+  "research": {
+    "summary": "Subset per-candidate work is SHA256d over ~128 fixed blocks plus ~27 variable blocks then full ECDSA recovery then single-block SHA256(compress(Q)). Fixed-prefix midstate is already shipped in .bin. Beyond within-candidate schedule packing, the remaining untried SHA/dataflow levers are (1) never materializing the ~1.7KB variable section and (2) ordering skip sets for shared-variable-prefix SHA-state reuse. Both are hypotheses only; EC recovery still runs fully per candidate and SHA outputs remain pseudorandom so no EC-table or curve-delta reuse follows.",
+    "findings": [
+      {
+        "id": "gather-direct-var-sha",
+        "title": "Gather-direct variable-section SHA256d without materializing 1.7KB preimage",
+        "mechanism": "Starting from the shipped fixed-prefix SHA state, compute the ~27 variable-block compressions by gathering 10B dummy_sigs entries and tail bytes directly into the 16-word ring schedule path, never building/storing/loading the ~1.7KB variable section in global memory. Table lives in constant/shared/broadcast-friendly location; per-thread compress uses ring W reuse.",
+        "sources": [
+          {
+            "url": "https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/main/spec/PROBLEM.md",
+            "locator": "Subset-selection benchmark: fixed_prefix 8234B, 8192B fixed, ~1.7KB ~27 blocks variable; .bin ships SHA state after fixed prefix",
+            "supports": "Variable-section size/location and that fixed-state reuse is already architected; remaining per-candidate cost is variable blocks"
+          },
+          {
+            "url": "https://raw.githubusercontent.com/sora5801/CUDA-SHA256-SHA3/main/src/sha256_gpu.cu",
+            "locator": "dev_sha256_compress 16-word ring buffer w[16]; c_K256 constant broadcast; one-thread-per-message",
+            "supports": "Ring schedule keeps W in 16 registers and K broadcast is efficient only when all lanes read same address; supports gather-direct pattern and divergent-data risk"
+          },
+          {
+            "url": "https://arxiv.org/abs/2507.03980",
+            "locator": "Abstract: fused-program efficiency determined by intrinsic generator efficiency; hardware-compatible parallelizable combination generators (metadata/abstract only, full text not verified)",
+            "supports": "Generator-plus-consumer fusion framing only; no grinding throughput claim"
+          }
+        ],
+        "new_vs_memory": "Distinct from reviewed schedule packing (within-candidate W packing), sparse33-byte SHA, paired SHA, ldcg/fused tails, streaming stores and producer overlap which still assume a materialized variable section or tail path. Memory records no gather-direct no-materialization variant. Not a rename of epoch reuse/ranked specialization.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed work: per-candidate build plus global store/load of ~1.7KB variable preimage and its re-read by SHA. Added work: per-block gather address ALU and small-table broadcast/shared reads plus ring-schedule compute unchanged. Large only if variable-section DRAM traffic is on the critical path at scale; EC chain unchanged so Amdahl-limited.",
+        "risks": "Divergent gather indices serialize constant path and can add shared/bank or occupancy pressure at 128-reg prepare; table placement must be proven broadcast-friendly; correctness must preserve exact dummy order, padding and SHA256d lengths.",
+        "falsification": "Mac-only: CPU reference that gathers dummy table on the fly bit-matches CPU grind digests on random skip sets; stub-compile reg/shared estimate only, no timing claim.",
+        "recommendation": "investigate"
+      },
+      {
+        "id": "prefix-coherent-sha-checkpoint",
+        "title": "Prefix-coherent skip ordering with cross-candidate variable-prefix SHA-state reuse",
+        "mechanism": "Enumerate 9-of-150 skip sets in genlex/prefix-partitioned or revolving-door order so candidates sharing the same early kept/skipped dummies are consecutive, then reuse intermediate SHA states after shared variable blocks instead of recompressing every variable block from the fixed midstate. EC recovery and final SHA256(compress(Q)) still run fully; only shared-prefix compressions are skipped via checkpoint load.",
+        "sources": [
+          {
+            "url": "https://github.com/sora5801/cuda-double-sha256-miner/blob/main/docs/04-midstate-optimization.md",
+            "locator": "Sections 2-3 and 7: midstate 3->2 transforms; explicit host precompute matters across launches and with few nonces per thread; ~1.0x honest benchmark via LICM",
+            "supports": "Midstate reuse pattern and warning that in-loop recompute may already be hoisted; cross-boundary reuse needs explicit state handoff, not assumed speedup"
+          },
+          {
+            "url": "https://arxiv.org/abs/2202.01280",
+            "locator": "Abstract: combinatorial Gray codes as small-change listings; genlex as prefix/suffix-partitioned generalization (metadata/abstract only, full text not verified)",
+            "supports": "Prefix-grouped and small-change orderings exist for combinations; supports ordering vocabulary only, not SHA/EC gain"
+          },
+          {
+            "url": "https://arxiv.org/abs/2507.03980",
+            "locator": "Abstract: revolving-door ordering for k-combinations and parallelizable generators (metadata/abstract only)",
+            "supports": "Revolving-door as concrete skip-set ordering candidate; no GPU-grinding measurement"
+          }
+        ],
+        "new_vs_memory": "Distinct from rejected Gray-code curve shortcut: claims only SHA-state prefix reuse, explicitly no point-delta or scalar-linearity shortcut since z=SHA256d destroys relations and both recids still need full recovery. Distinct from ranked specialization/epoch reuse and from under-1% window-family SHA scan which did not reorder enumeration for prefix sharing.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed work: recompression of shared leading variable blocks for consecutive candidates in the same prefix group. Added work: checkpoint state store/load, grouping/ordering constraint, reduced independent parallelism and possible occupancy loss. Large only for groups with long shared prefixes and if variable SHA is a measurable fraction; no EC-table reuse because scalars stay pseudorandom.",
+        "risks": "SHA fraction may be small vs EC fixed-base chain so end-to-end gain bounded; grouping harms parallelism and load balance; checkpoint traffic can exceed saved compressions; must not replay hits or bias coverage.",
+        "falsification": "Mac-only: enumerate skip sets in proposed order on CPU, measure shared-prefix-block histogram and checkpoint bytes vs recompute blocks; verify SHA256d equality vs reference; no GPU timing claim.",
+        "recommendation": "investigate"
+      }
+    ],
+    "no_gain_reason": "",
+    "next_question": "What fraction of subset pipeline time is variable-section build plus ~27-block SHA256d versus EC fixed-base chain, and what average shared-prefix length does a genlex/revolving-door 9-of-150 order actually yield without harming parallelism?"
+  }
+}

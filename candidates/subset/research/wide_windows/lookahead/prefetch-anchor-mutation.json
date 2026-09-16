@@ -1,0 +1,10 @@
+{
+  "status": "MUTATION_DETECTED",
+  "mutation": "replace seed anchor y0 with y1",
+  "case_index": 0,
+  "scalar_hex": "0x1",
+  "runtime_base_scalar_hex": "0x1",
+  "source_fingerprint": "d0174fa761b852b0f30f71246dd3e43b3e1a053dc9c011b8a4508d246eb0af18",
+  "production_modified": false,
+  "limits": "Mutation exists only in temporary extracted CPU code; mismatch against independent OpenSSL scalar multiplication."
+}

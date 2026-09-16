@@ -1,0 +1,82 @@
+{
+  "status": "PASS",
+  "scope": "CPU/source/native compiler evidence only; no GPU execution or speed claim",
+  "candidate_source_fingerprint": "3205a7177cb0a51fcb269b5ea1f06daedc7ef0b6c7000029095ad86c49d1bb0b",
+  "branches": {
+    "cpu-results.json": {
+      "status": "PASS",
+      "validation_level": "CPU-extracted subset point chain with OpenSSL field and sparse table oracle",
+      "recoding_cases": 12769,
+      "curve_chains": 414,
+      "recovered_keys_compared": 822,
+      "geometry_cases": 15,
+      "actual_loader_cases": 570,
+      "table_bytes": 67108864,
+      "branch": "mixed15 interleaved",
+      "point_chain_operations": {
+        "multiplications": 95,
+        "squares": 28
+      },
+      "prefetch_next_load_checks": 5382,
+      "source_fingerprint": "3205a7177cb0a51fcb269b5ea1f06daedc7ef0b6c7000029095ad86c49d1bb0b",
+      "gpu_executed": false
+    },
+    "builder-results.json": {
+      "status": "PASS",
+      "validation_level": "CPU source-derived host ladders and builder affine formulas with OpenSSL",
+      "entry_decode_cases": 101491,
+      "runtime_bases": 3,
+      "table_entries_compared": 4473,
+      "full_ladder_points_per_base": 10097,
+      "source_fingerprint": "3205a7177cb0a51fcb269b5ea1f06daedc7ef0b6c7000029095ad86c49d1bb0b",
+      "gpu_executed": false,
+      "geometry": "mixed15/64MiB"
+    }
+  },
+  "native": {
+    "native-results.json": {
+      "status": "PASS",
+      "default_flags_build": true,
+      "kernels": {
+        "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": {
+          "registers": 80,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 4696
+        },
+        "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+          "registers": 128,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 8424
+        }
+      }
+    },
+    "audit-native-results.json": {
+      "status": "PASS",
+      "default_flags_build": false,
+      "kernels": {
+        "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": {
+          "registers": 80,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 4696
+        },
+        "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+          "registers": 128,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 8424
+        }
+      }
+    }
+  }
+}

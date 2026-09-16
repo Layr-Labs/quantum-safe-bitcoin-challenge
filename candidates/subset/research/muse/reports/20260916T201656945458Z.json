@@ -1,0 +1,339 @@
+{
+  "model": "opencode/muse-spark-1.3-contributor-free",
+  "harness": "OpenCode 1.18.31",
+  "effort": "high",
+  "created_at": "2026-09-16T20:16:56.945458+00:00",
+  "topic": "Fixed-base secp256k1 algorithms and table geometry: seek a substantial alternative to the 16GiB memory/arithmetic tradeoff, grounded in actual GitHub code and arXiv papers.",
+  "context_sha256": "fa7bc3e6a253dca3674952612eaa37ec1b9f8a08b711241a51b04d77c12d9f37",
+  "source_state": {
+    "subset": {
+      "ours": "65fb673d-5014-4ee8-866d-97d972e7b1f0",
+      "status": "validating",
+      "score": null,
+      "promoted_frontier_score": 440270249,
+      "pr": 60,
+      "validation_commit": "f31dcba6b5a3de04a28e9dcf47b336bad8278fa2",
+      "submitted_source_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+      "successor_status": "Isolated ten-window full-grinder prototype prepared under research/wide_windows; production PR60 stays unchanged. CPU chain/builder/load checks and native builds pass. GPU speed unknown."
+    },
+    "pinning": {
+      "ours": "66c031c6-16e4-484e-ad4d-0e7e0ef3f38f",
+      "status": "validating",
+      "score": null,
+      "promoted_frontier_score": 644546620,
+      "pr": 74,
+      "validation_commit": "154b2bd97a9c918ac3d992c31a6cf7901aeab1a0",
+      "submitted_source_fingerprint": "ed600d1c31cc168b0010419da1dfafc78d1be147b816e78dbab52cd37f2e5e54",
+      "successor_status": "Ten-window16GiB candidate with bounded builder, canonical carry repairs, PR64 bundle and runtime inverse-schedule comparison submitted asPR74. Native builds/CPU checks passed; no GPU result yet."
+    },
+    "observed_at_utc": "2026-09-16T20:03:56.502779+00:00",
+    "priority_track": "subset",
+    "priority_reason": "Both own entries validate. Subset is older and only one earlier subset entry remains pending; tentative first-finisher heuristic, not guaranteed order."
+  },
+  "model_metadata": {
+    "id": "muse-spark-1.3-contributor-free",
+    "providerID": "opencode",
+    "name": "Muse Spark 1.3 Free",
+    "family": "muse-free",
+    "api": {
+      "id": "muse-spark-1.3-contributor-free",
+      "url": "https://opencode.ai/zen/v1",
+      "npm": "@ai-sdk/openai"
+    },
+    "status": "active",
+    "headers": {},
+    "options": {},
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "capabilities": {
+      "temperature": true,
+      "reasoning": true,
+      "attachment": true,
+      "toolcall": true,
+      "input": {
+        "text": true,
+        "audio": true,
+        "image": true,
+        "video": true,
+        "pdf": true
+      },
+      "output": {
+        "text": true,
+        "audio": false,
+        "image": false,
+        "video": false,
+        "pdf": false
+      },
+      "interleaved": false
+    },
+    "release_date": "2026-09-02",
+    "variants": {
+      "minimal": {
+        "reasoningEffort": "minimal",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "low": {
+        "reasoningEffort": "low",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "medium": {
+        "reasoningEffort": "medium",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "high": {
+        "reasoningEffort": "high",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "xhigh": {
+        "reasoningEffort": "xhigh",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      }
+    }
+  },
+  "usage": [
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 4349,
+        "input": 3848,
+        "output": 261,
+        "reasoning": 127,
+        "cache": {
+          "write": 0,
+          "read": 113
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 34306,
+        "input": 29595,
+        "output": 286,
+        "reasoning": 472,
+        "cache": {
+          "write": 0,
+          "read": 3953
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 60951,
+        "input": 27254,
+        "output": 159,
+        "reasoning": 17,
+        "cache": {
+          "write": 0,
+          "read": 33521
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 77109,
+        "input": 15137,
+        "output": 257,
+        "reasoning": 1058,
+        "cache": {
+          "write": 0,
+          "read": 60657
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 93217,
+        "input": 15160,
+        "output": 1561,
+        "reasoning": 735,
+        "cache": {
+          "write": 0,
+          "read": 75761
+        }
+      }
+    }
+  ],
+  "research_tools": [
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "fixed-base scalar multiplication large table bucket method Pippenger GPU arXiv"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "comb method fixed base point multiplication windowed optimization elliptic curve arXiv"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "secp256k1 fixed-base comb ecmult_gen table windows github"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "site:arxiv.org fixed-base comb scalar multiplication elliptic curve table"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "Layr-Labs quantum-safe-bitcoin-challenge PR60 PR74 fixed base table"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "site:arxiv.org secp256k1 GLV endomorphism scalar splitting acceleration"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "github quantum-safe-bitcoin-challenge GTable CudaBrainSecp 16 chunks"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "numResults": 8,
+        "query": "arXiv fixed-base scalar multiplication comb Lim Lee window wNAF precomputation"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://arxiv.org/abs/2505.01845v1"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/XopMC/CudaBrainSecp"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/bitcoin-core/secp256k1/blob/master/src/ecmult_gen.h"
+      }
+    }
+  ],
+  "review_status": "unreviewed; claims require independent verification",
+  "research": {
+    "summary": "Current endpoints are 16x16-bit planar tables (~32 MiB, 15 adds, 1024 B/candidate) vs 10x~26-bit tables (16 GiB, 9 adds, 640 B/candidate). Both stay on the doubling-free direct-add curve. Primary GitHub + arXiv evidence supports a third curve: tiny-table signed-digit/Lim-Lee combs that remove per-candidate DRAM reads in exchange for doublings+adds. Only abstract-level arXiv check was possible for one paper; no GPU timing is claimed.",
+    "findings": [
+      {
+        "id": "signed-multicomb-tiny-table",
+        "title": "Signed-digit multi-comb with KB-scale table instead of GB-scale planar tables",
+        "mechanism": "Replace per-candidate random reads of 16x64KB or 10x~1.6GB planar windows with bitcoin-core style multi-comb: split 256-bit scalar into BLOCKS interleaved combs of TEETH bits with SPACING, precompute BLOCKS*(2^(TEETH-1)) points, then loop SPACING times doing BLOCKS adds + 1 doubling. Default (11,6) is 22 kB total.",
+        "sources": [
+          {
+            "url": "https://github.com/bitcoin-core/secp256k1/blob/master/src/ecmult_gen.h",
+            "locator": "COMB_BLOCKS/COMB_TEETH/COMB_SPACING comment + default (11,6) 22 kB",
+            "supports": "Table size is BLOCKS*(2^(TEETH-1)) storages; adds=BLOCKS*SPACING, doublings=SPACING-1; default 11x6 = 22 kB"
+          },
+          {
+            "url": "https://github.com/XopMC/CudaBrainSecp",
+            "locator": "README Secp256k1 Point Multiplication + Bottlenecks/Global Memory Access",
+            "supports": "16 chunks x 2 bytes = 1048576 points ~67MB needs 16*64 bytes DRAM per key; author states GTable random access without coalescing is probably main bottleneck and ~20x vs no precomputation"
+          },
+          {
+            "url": "https://arxiv.org/abs/2505.01845v1",
+            "locator": "Abstract + Subjects (metadata only, full text not verified)",
+            "supports": "Paper compares M-ary method against fixed-base comb/sliding-window and reports author-measured secp256k1 results; only abstract checked so no transfer claim to grinding"
+          }
+        ],
+        "new_vs_memory": "Memory records planar 16-bit and 10-window 26-bit tables and a 772 MiB regression warning, plus bitcoin-core ecmult_gen_impl.h as a lead. It does not record a concrete tiny-table signed multi-comb (11,6)-style transfer that eliminates the runtime base table and DRAM path.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed work: 640-1024 bytes of random table reads per candidate plus 16 GiB/32 MiB residency, tiling, sampling checks and reserve handling. Added work: O(BLOCKS*SPACING) point adds and SPACING-1 doublings from a KB table resident in cache/constants. Gain case is DRAM/latency-bound grinding where table reads stall the EC chain; no percentage claimed.",
+        "risks": "Adds doublings back where current chain is doubling-free; register/shared pressure from longer chain; cmov/negation and recoding cost per candidate; different scalar reuse vs bitcoin-core single-shot use.",
+        "falsification": "Mac-only: CPU-extract recoding for (11,6) and (43,6)-style configs, count adds/doubles vs 16x16-bit baseline and verify k*G against OpenSSL for random grind scalars; compile stub kernel for register/shared estimate only, no timing claim.",
+        "recommendation": "investigate"
+      },
+      {
+        "id": "tunable-limlee-mary-geometry",
+        "title": "Tunable Lim-Lee / M-ary (w,d) sweep between 512KB and 67MB",
+        "mechanism": "Use Lim-Lee comb parameter w (rows) and d=256/w (columns): table 2^w-1 points, evaluation (d-1) doublings + ~(d-1) adds. M-ary generalization in arXiv paper exposes radix/memory knob with stated Theta(Q log p / log Q) time vs Theta(Q log p / log^2 Q) memory. Sweep w=8 (255 pts ~16KB) to w=16 against current 16x16-bit to find cache-resident sweet spot instead of jumping to 16 GiB.",
+        "sources": [
+          {
+            "url": "https://github.com/XopMC/CudaBrainSecp",
+            "locator": "Optimizations: GTable Chunk Size",
+            "supports": "Author explicitly lists geometry trade: 8 chunks x 4 bytes needs 2TB, 32 chunks x 1 byte is 512KB but still not constants; 22/23-bit hybrid considered but lacked DRAM"
+          },
+          {
+            "url": "https://arxiv.org/abs/2505.01845v1",
+            "locator": "Abstract time/memory complexity + fixed-base comb baseline table (metadata only)",
+            "supports": "Paper states M-ary vs fixed-base-comb/sliding-window comparison and complexity formulas; author-measured 59% encryption-time / 30% memory figures are ElGamal/NS3 workload, not grinding throughput"
+          },
+          {
+            "url": "https://github.com/bitcoin-core/secp256k1/blob/master/src/ecmult_gen.h",
+            "locator": "COMB_BITS/BLOCKS/TEETH sanity checks",
+            "supports": "Shows comb geometry is explicitly parameterizable with efficiency guards, supporting a sweep rather than fixed endpoints"
+          }
+        ],
+        "new_vs_memory": "Memory notes wide-table transfer and small/wide runtime comparison but not a systematic Lim-Lee (w,d) / M-ary radix sweep at KB-MB scale with doublings reintroduced; distinct from rejected epoch/window-family SHA scan and from deferred-Y/folding already inherited.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed work: 16 GiB table build/tiles/loads and large random DRAM fanout. Added work: small-table build once plus per-candidate doublings and adds. Large only if a cache-resident w fits occupancy/register budget while DRAM stalls dominate; no invented hit-rate or speedup.",
+        "risks": "Per-candidate doublings increase arithmetic and live state; optimal w is GPU-occupancy specific; paper gains do not transfer to per-candidate grind; builder/loader comparison must be bounded.",
+        "falsification": "Mac-only: enumerate w=4..16 table bytes and d-1 double/add counts, check cache-residency hypothesis against PR60 shared/register budget (128 regs prepare, 80 regs finish) without claiming GPU time.",
+        "recommendation": "investigate"
+      }
+    ],
+    "no_gain_reason": "",
+    "next_question": "What (BLOCKS,TEETH,SPACING) or (w,d) point keeps the table in cache/constants within PR60 register/shared budget while minimizing adds+doubles per grind candidate on CPU reference counts?"
+  }
+}

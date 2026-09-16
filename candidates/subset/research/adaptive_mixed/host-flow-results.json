@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "validation_level": "CPU execution of extracted policy, launch dispatch and ranked host loop with mocked GPU computation/events",
+  "host_scenarios": 20,
+  "policy_cases": 10,
+  "allocation_scenarios": 7,
+  "source_fingerprint": "6bfe0e61fbbcabce237877c95e238f0bd22914ed6ceade6baf97e058c5e51ac6",
+  "projection_sha256": "06f0e87f5e0cc83f9f7745700ec78036dc7a911f016a100f78ac0efe71a9c228",
+  "gpu_executed": false,
+  "limits": "Does not execute CUDA, table building, EC, SHA, GPU timing, or real rare-hit behavior. Actual branches have separate OpenSSL audits. Mocks exercise every host hit path with two records per batch and check ordered, non-overlapping full/tail epoch ranges.",
+  "compact_layout": "interleaved64MiB"
+}

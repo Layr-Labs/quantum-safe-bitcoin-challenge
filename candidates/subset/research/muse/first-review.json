@@ -1,0 +1,20 @@
+{
+  "reviewed_at": "2026-09-16T20:20:24.242648+00:00",
+  "report": "reports/20260916T201656945458Z.json",
+  "reviewer": "GPT 6 Astra / Codex",
+  "decision": "Retain one combined small-table comb hypothesis as deferred; no established substantial gain and no candidate change.",
+  "source_checks": [
+    "https://raw.githubusercontent.com/bitcoin-core/secp256k1/master/src/ecmult_gen.h",
+    "https://raw.githubusercontent.com/bitcoin-core/secp256k1/master/src/ecmult_gen_impl.h",
+    "https://arxiv.org/abs/2505.01845v1",
+    "https://github.com/XopMC/CudaBrainSecp"
+  ],
+  "corrections": [
+    "PR60 has16 signed windows of2MiB each, totaling32MiB, not16x64KB. The wide variant is interleaved, not planar.",
+    "A comb still needs a runtime-base-dependent table. Smaller tables may reduce traffic but do not guarantee zero DRAM accesses or residency. Divergent CUDA constant accesses may serialize.",
+    "The two suggestions overlap: retain one geometry family, not two independent improvements. The default11x6 comb gives44 lookup terms and3 doublings; the actual implementation seeds the first term and adds a final offset. This arithmetic increase is substantial versus16 or10 terms.",
+    "The arXiv abstract supports author ElGamal/NS3 claims, not grinding performance, GPU transfer or a checked fixed-base comparison table. Full paper and code have not been validated.",
+    "The external README memory claims are author hypotheses on a different workload. Do not treat them as measurements of our32MiB or16GiB pipeline."
+  ],
+  "next_gate": "Use a bounded arithmetic/table geometry screen first; only prototype if it survives full field-work and runtime-base accounting. No GPU speed claim. Prefer ongoing wide-table feedback/load-liveness work."
+}

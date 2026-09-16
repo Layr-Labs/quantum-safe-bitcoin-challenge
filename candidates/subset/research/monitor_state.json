@@ -1,0 +1,336 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-09-16",
+  "scope": "Preserve pending entries; monitor both tracks and later completions; prioritize free track, otherwise likely first finisher; scheduled follow-up researches/prepares only, no cancellation or submission.",
+  "subset": {
+    "ours": "65fb673d-5014-4ee8-866d-97d972e7b1f0",
+    "status": "promoted",
+    "score": 451135044,
+    "original_comparison_score": 433346795,
+    "promoted_frontier_score": 477182283,
+    "earlier_pending": [],
+    "later_observed": {
+      "80a850f0-3bd5-484b-b890-70faec8a39d0": {
+        "status": "promoted",
+        "pr": 62,
+        "head": "099c7d515baec9936c7ef16ecbc149a8a0438487",
+        "created_at": "2026-09-16T18:19:49Z",
+        "score": 477182283
+      },
+      "78c7e7d9-85f4-402d-9aec-ad484d64a8fb": {
+        "status": "cancelled",
+        "pr": 63,
+        "head": "5950479ab7b941a4c5cc35a04501ad88620eef55",
+        "created_at": "2026-09-16T18:31:28Z",
+        "score": null
+      },
+      "8185e838-5109-47bb-b500-65859bf376bb": {
+        "status": "cancelled",
+        "pr": 69,
+        "head": "0e653a4aa1c4b0a63ddafda3914563c87784e570",
+        "created_at": "2026-09-16T19:11:28Z",
+        "score": null
+      },
+      "4924be1f-f4e0-47e9-8540-a268b6eb8b25": {
+        "status": "validating",
+        "pr": 68,
+        "head": "470f7c7fea98d91fbfb2f4d12ad7f25a1c99f858",
+        "created_at": "2026-09-16T19:07:51Z",
+        "score": null
+      },
+      "03818d8e-f137-4fee-be6f-adc9b5622ddf": {
+        "status": "rejected",
+        "pr": 67,
+        "head": "f2c722ac36615ab1b2d584d8eb1a2aedab9bd231",
+        "created_at": "2026-09-16T19:04:50Z",
+        "score": 470825789
+      },
+      "8339d955-c7c6-49de-8fc8-8159091bc071": {
+        "status": "validating",
+        "pr": 72,
+        "head": "6aba26674a8feca0d094e87921f79fc3c8222d57",
+        "created_at": "2026-09-16T19:19:33Z",
+        "score": null
+      },
+      "60c21768-9c1d-4b52-8c64-71bff99f6385": {
+        "status": "validating",
+        "score": null,
+        "pr": 75,
+        "head": "951640ec1d29c7c29517a5caeaae4c485cd3f2b2",
+        "created_at": "2026-09-16T19:45:35Z"
+      },
+      "9c914db3-2c29-4621-a2d5-eb8335a4d619": {
+        "status": "validating",
+        "score": null,
+        "pr": 77,
+        "head": "e3a95b0f07e426443d5801b71588e469b3670bb3",
+        "created_at": "2026-09-16T20:10:30Z"
+      },
+      "a4ab6a2a-8706-4d4f-bd1b-8737e0261989": {
+        "status": "validating",
+        "score": null,
+        "pr": 78,
+        "head": "0da7df8803c2a86e20c40b40adb8f123f37124b7",
+        "created_at": "2026-09-16T20:13:27Z"
+      },
+      "4182c646-cebb-42a9-b344-6ebf92184f7f": {
+        "status": "cancelled",
+        "score": null,
+        "pr": 79,
+        "head": "f6ba024e0a0fec6e9dad9428132b463f43545c21",
+        "created_at": "2026-09-16T20:19:38Z"
+      },
+      "6af05251-dc83-4238-a2ab-19905bef184b": {
+        "status": "validating",
+        "score": null,
+        "pr": 82,
+        "head": "6bf63e6a3538c3ffb0337c28a6907afde5f4c57e",
+        "created_at": "2026-09-16T20:59:04Z",
+        "note_reviewed": true,
+        "source_reviewed": false
+      }
+    },
+    "later_completed_before_ours": [],
+    "notified_events": [
+      "subset-65fb673d-submitted",
+      "subset-frontier-41dd77a6-promoted-440270249",
+      "subset-65fb673d-promoted-451135044",
+      "subset-frontier-80a850f0-promoted-477182283"
+    ],
+    "earlier_completed": {
+      "54918fb4-7e8e-4b7e-b958-68c2700394a0": {
+        "status": "rejected",
+        "score": 131027832
+      },
+      "7bf15b2f-c085-4be4-865a-c2ee0a857691": {
+        "status": "rejected",
+        "score": 130687084
+      },
+      "41dd77a6-9b18-4e88-a3bf-3cf05f5ef985": {
+        "status": "promoted",
+        "score": 440270249
+      },
+      "5f72864e-52fc-48a9-801a-1c334f050ad3": {
+        "status": "rejected",
+        "score": 424023018
+      },
+      "2a1d050c-e1d1-4983-b141-c24787e08788": {
+        "status": "cancelled",
+        "score": null
+      },
+      "37aeaf70-1aea-404f-9f88-c1b23dd03f2d": {
+        "status": "rejected",
+        "score": 168579851
+      },
+      "5605ad84-dd72-4aed-9e6d-60a6bb64a61b": {
+        "status": "cancelled",
+        "score": null
+      },
+      "3b1bba4b-5095-4dc5-a072-1589c5589107": {
+        "status": "rejected",
+        "score": 438769398
+      }
+    },
+    "submission_order_status": "Our PR60 completed and was promoted before any later scored subset completion observed.",
+    "successor_status": "Selected adaptive64MiB/16GiB6bfe0e61; all source-bound CPU/native checks pass and public note reviewed. Upload prepared; current own submission remains historicalPR60 until server confirms new ID.",
+    "submitted_source_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+    "submitted_note": "submission-ranked-pipeline.md",
+    "submitted_note_sha256": "a783c8233b89adc8097e52260dec33729cbc7f08259847c6d0292b5dfd7949f1",
+    "pr": 60,
+    "validation_commit": "f31dcba6b5a3de04a28e9dcf47b336bad8278fa2",
+    "submission_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/60",
+    "local_cuda_check": {
+      "status": "PASS",
+      "gpu_executed": false,
+      "compiler": "CUDA 12.8.93 in local ARM Linux VM on this Mac",
+      "production_report": "candidates/pinning/research/subset-pr60-native.json",
+      "audit_report": "candidates/pinning/research/subset-pr60-audit-native.json",
+      "ranked_prepare": "128 registers; 24576 shared bytes; 8-byte spill store/load",
+      "ranked_finish": "80 registers; 24576 shared bytes; zero spills",
+      "next_feedback": "Investigate producer live ranges and streamed recoding when subset is selected; preserve the pending submission."
+    },
+    "promoted_frontier_submission": "80a850f0-3bd5-484b-b890-70faec8a39d0",
+    "promoted_frontier_commit": "106a6826ecf8998e684169f46e8de9dce1cf3f0f",
+    "visible_gpu_progress": "PR60 and PR74 show only completed CodeQL checks; no GPU benchmark progress exposed.",
+    "successor_artifacts": [
+      "candidates/subset/research/wide_windows/README.md",
+      "candidates/subset/research/wide_windows/provenance.json",
+      "candidates/subset/research/wide_windows/compiler-comparison.json",
+      "candidates/subset/research/adaptive_tables/README.md",
+      "candidates/subset/research/adaptive_tables/validation-summary.json",
+      "candidates/subset/research/adaptive_tables/external-review.json",
+      "candidates/subset/research/adaptive_tables/submission-draft.md",
+      "candidates/subset/research/mixed_windows/README.md",
+      "candidates/subset/research/mixed_windows/validation-summary.json"
+    ],
+    "result_comparison": {
+      "previous_frontier": 440270249,
+      "delta": 10864795,
+      "improvement_percent": 2.4677558896331497,
+      "submission_time_frontier": 433346795,
+      "improvement_from_submission_time_frontier_percent": 4.104853019623689,
+      "interpretation": "Official result for the full composite; no matched ablation attributing individual changes."
+    },
+    "latest_public_note_review": {
+      "prefix": "fa6e0a3",
+      "author": "DPZZxlz",
+      "mechanism": "exactPR62mixedcore plus our promoted external inverse and carryfix; different square schedule; directcompactcompetitor",
+      "source_reviewed": false,
+      "reported_gpu_score": null
+    }
+  },
+  "pinning": {
+    "ours": "66c031c6-16e4-484e-ad4d-0e7e0ef3f38f",
+    "status": "validating",
+    "score": null,
+    "original_comparison_score": 644546620,
+    "promoted_frontier_score": 644546620,
+    "notified_events": [
+      "pinning-8150e0be-rejected-226444961",
+      "pinning-frontier-6ce23203-promoted-644546620",
+      "pinning-66c031c6-submitted"
+    ],
+    "priority_research": "candidates/pinning/research/PRIORITY_REVIEW.md",
+    "preferred_public_base": "a7b21d0f62e6d73b66fe820e228f8db50d504716",
+    "successor_status": "Ten-window16GiB candidate with bounded builder, canonical carry repairs, PR64 bundle and runtime inverse-schedule comparison submitted asPR74. Native builds/CPU checks passed; no GPU result yet.",
+    "promoted_frontier_submission": "6ce23203-c159-4f84-a668-1066d5fde85b",
+    "promoted_frontier_commit": "4d39b5f0a881653d6332a7801dd84bc14175fa61",
+    "latest_additional_note_reviewed": "PR71 sparseSHA bundle andPR73 ldcg/fused tails reviewed; neither supplies ranked evidence of a large improvement. PR70 grouped-record audit adapted and extended.",
+    "additional_prs_reviewed": [
+      51,
+      53,
+      54,
+      56,
+      58,
+      61,
+      64,
+      65,
+      66,
+      70,
+      71,
+      73,
+      76
+    ],
+    "research_next": "PreservePR74; prioritize subset preparation. Read official result before changing this submitted closure. Keep note/source fingerprints and no GPU speed claim.",
+    "preferred_public_base_pr": 64,
+    "research_artifacts": [
+      "candidates/pinning/research/wide_windows/README.md",
+      "candidates/pinning/research/wide_windows/cpu-results.json",
+      "candidates/pinning/research/wide_windows/cpu-results-pr64.json",
+      "candidates/pinning/research/wide_windows/native-results.json",
+      "candidates/pinning/research/wide_windows/cost-results.json",
+      "candidates/pinning/research/pr64-native-results.json",
+      "candidates/pinning/research/wide_windows/production-native-results.json",
+      "candidates/pinning/research/wide_windows/builder-results.json",
+      "candidates/pinning/research/wide_windows/schedule-results.json",
+      "candidates/pinning/research/wide_windows/grouped-records-results.json"
+    ],
+    "pr": 74,
+    "validation_commit": "154b2bd97a9c918ac3d992c31a6cf7901aeab1a0",
+    "submission_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/74",
+    "created_at": "2026-09-16T19:38:29Z",
+    "submitted_source_fingerprint": "ed600d1c31cc168b0010419da1dfafc78d1be147b816e78dbab52cd37f2e5e54",
+    "submitted_note": "submission-wide-windows.md",
+    "submitted_note_sha256": "9c46e452d05f6637f154ce95efa5fa9b86ba1295e32d10341acb0599e08c851e",
+    "later_observed": {
+      "167018b1-fa79-4694-9134-31ee9dcdf6e8": {
+        "status": "validating",
+        "score": null,
+        "pr": 76,
+        "head": "f2648b9586524d714fa8459cae24b6e6c416c8e1",
+        "created_at": "2026-09-16T19:52:59Z"
+      },
+      "d2c69c15-d848-44f2-9c90-a95b46c2716e": {
+        "status": "validating",
+        "score": null,
+        "pr": 83,
+        "head": "c22a3af38779b202c90b7626e0b9772172c6748d",
+        "created_at": "2026-09-16T21:04:45Z",
+        "note_reviewed": true,
+        "source_reviewed": false
+      },
+      "36d4266d-ae9b-47ab-85bc-1f955f2ac6a8": {
+        "status": "validating",
+        "score": null,
+        "pr": 84,
+        "head": "4bac83adba5251eb7193b0acf3270e907077e2e9",
+        "created_at": "2026-09-16T21:14:12Z",
+        "note_reviewed": true,
+        "source_reviewed": false
+      }
+    },
+    "later_completed_before_ours": [],
+    "latest_queue_observation": "Still validating; earlier e582bda rejected645336311. New later2d01e27 validating; full public note/source not yet read."
+  },
+  "latest_subset_pr_reviewed": 79,
+  "additional_pinning_prs_reviewed_this_round": [
+    44,
+    45,
+    46,
+    47
+  ],
+  "prepared_control_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+  "observed_at_utc": "2026-09-16T21:26:54.597057+00:00",
+  "research_next": "Mixed64 geometry is now the independently measured public direction. Validate our full mixed64 external-inversion control, then compare/integrate with wide16GiB before selecting next substantial upload. Preserve pinningPR74.",
+  "priority_track": "subset",
+  "priority_reason": "Only pinning remains pending. Subset now has a free slot; prioritize a substantial supported successor to our promoted451135044 result.",
+  "completed_own_submissions": [
+    {
+      "ours": "c9a85a87-e2b8-4ab8-8d4f-c79d96546d03",
+      "status": "rejected",
+      "score": 418504460,
+      "original_comparison_score": 129574439,
+      "promoted_frontier_score": 433346795,
+      "later_completed_before_ours": [],
+      "notified_events": [
+        "earlier-54918fb-finished-ours-oldest-pending",
+        "subset-c9a85a87-rejected-418504460"
+      ]
+    },
+    {
+      "ours": "8150e0be-d5f7-4a2c-bcb7-bec3d0a4cc64",
+      "status": "rejected",
+      "score": 226444961,
+      "track": "pinning"
+    }
+  ],
+  "public_research_followups": {
+    "62": "Now officially promoted477182283; exact promoted snapshot inspected for mixed15-window recoder/flat loader/builders/direct-recovery interfaces. No external pipeline. Preserve local carry repairs; importing geometry is not importing the whole arithmetic header.",
+    "63": "Minor fused table negation and scalar recid selection; author reports native codegen only. Our split finish already keeps coordinates scalar. No CUDA performance win established.",
+    "61": "Sparse 33-byte pubkey SHA schedule. Needs exact compiler comparison since constant padding may already be folded. Minor supporting hypothesis only.",
+    "64": "Preferred compatible pinning base now corrected PR64; author3080 gain not transferable score. GPUHash unchanged; GPUMath only adds restrict vs PR24, so hot carry defects persist upstream and are repaired locally.",
+    "70": "PR64 bundle plus arithmetic repairs; adopted and extended source-derived grouped-record audit. Our hot-field carry/normalization repairs already retained.",
+    "71": "PR64 plus sparse33-byte SHA; useful native comparison candidate, but no measured new score; same sparse direction asPR61.",
+    "72": "Subset final deferred-Y anchor carried into affine recovery saves1M but adds saved anchor state; inspect compatibility with our direct external recovery before any adoption.",
+    "73": "Pinning ldcg and fusedX3 minor bundle. Public text mislabels.cg as evict-first; do not import cache hints based on that claim alone. No established large gain.",
+    "75": "Schedule packing reduces first classes84->54, increases second26->56. Author paired4090 reports+1.35% verified,+1.69%kernel; small incremental gain with close variance. Record for compatibility review, not main architectural focus.",
+    "76": "Pinning streaming saved-state stores using st.global.cs.v2.u64; narrow cache-policy hypothesis without measured result. Track official feedback; no substantial new architecture to port.",
+    "77": "Exacte3a95b0 source inspected for geometry/inverse/SHA integration and constant recovery coordinates. Same arithmetic header asPR62; no external pipeline. Its fixed ranked flags are unconditional inside kernel, so do not copy into generic modes. Reported small3080 delta remains nontransferable. No full independent GPU audit.",
+    "78": "Direct XYZZ recovery integrated into promoted deferred-chain parent, removing3M. RelatedPR57 officially scored438769398. Current pipeline already uses direct recovery; new note reports more spill stores underCUDA13.0. Read note; exact source not yet reviewed. No new large mechanism established.",
+    "79": "Replaces author-cancelledPR69 with direct XYZZ recovery plus sign-mask negation and scalar recid packing. Direct recovery/scalar recids already in our pipeline; negation is a narrow supporting option. Full new kernel resource build not captured despite broad introductory claims. No new GPU result or large architecture. Note read; exact source not yet reviewed.",
+    "68": "Exact470f7c7 source inspected for mixed15 geometry, templated deferred chain, ranked flags and direct recovery; uses per-CTA inverse, not external pipeline. Note documents carry corrections. No local GPU evidence; not all supplied tests re-executed.",
+    "82": "Rebased small negation/scalar-key-packing changes onto our promotedPR60. Author explicitly reports only stub codegen; finish rewrite codegen-neutral there. About1% per-candidate instruction hypothesis, no full GPU speed. No large new architecture. Exact source not yet reviewed.",
+    "83": "Pinning32MiB uniform16-window alternative to64MiB15-window table; extra7M+2S for half table footprint. CPUrecoder/mapping/EC checks claimed, noGPU result. Note has incorrect fewer-window/ladder wording; the actual described change adds a window. Track memory tradeoff, not established speed. Exact source not yet reviewed.",
+    "84": "Pinning host drain resubmission after cancelled80/81. Reports+0.68% paired5090/60s under~1.3% per-arm hit-count noise; device kernels unchanged. No substantial new mechanism or expected official win established. Exact source not yet reviewed."
+  },
+  "local_cuda": {
+    "workflow": "candidates/pinning/research/LOCAL_CUDA.md",
+    "helper": "candidates/pinning/research/compile_local.py",
+    "native_pinning_report": "candidates/pinning/research/native-base-comparison.json",
+    "gpu_available": false,
+    "vm_lifecycle": "Stopped after completed repaired adaptive and mixed64 production/default/audit builds."
+  },
+  "typesafe_review": "candidates/subset/research/TYPESAFE_REVIEW.md: reviewed; defer integration pending demonstrated material note-triage value.",
+  "muse_research": {
+    "path": "candidates/subset/research/muse",
+    "model": "opencode/muse-spark-1.3-contributor-free",
+    "first_round": "reports/20260916T201656945458Z.json",
+    "status": "Three zero-cost rounds now reviewed with concrete feedback. Latest H-only/tile-local suggestions rejected/deferred against actual checkpoint layout; next round continues automatically.",
+    "feedback": "candidates/subset/research/muse/feedback.json",
+    "inbox_command": "python3 -B candidates/subset/research/muse/run.py --inbox",
+    "second_round": "reports/20260916T203938232177Z.json",
+    "latest_round": "reports/20260916T210014675087Z.json",
+    "pending_reviews": 0
+  },
+  "research_updated_at_utc": "2026-09-16T21:17:18.470959+00:00"
+}

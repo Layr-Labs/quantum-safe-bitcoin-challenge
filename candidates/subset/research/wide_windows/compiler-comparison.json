@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "scope": "matched CUDA12.8.93 sm89 compiler reports; no GPU execution",
+  "control_source_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+  "candidate_source_fingerprint": "49ebdc07297b38908c1fd285e9563ec3c646ca8cd937a57976382b8debd36593",
+  "kernels": {
+    "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": {
+      "control": {
+        "registers": 80,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "instruction_slots": 4696
+      },
+      "candidate": {
+        "registers": 80,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "instruction_slots": 4696
+      }
+    },
+    "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+      "control": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 8,
+        "spill_store_bytes": 8,
+        "spill_load_bytes": 8,
+        "instruction_slots": 8408
+      },
+      "candidate": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 8,
+        "spill_store_bytes": 8,
+        "spill_load_bytes": 8,
+        "instruction_slots": 8392
+      }
+    }
+  }
+}

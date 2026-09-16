@@ -1,0 +1,346 @@
+{
+  "model": "opencode/muse-spark-1.3-contributor-free",
+  "harness": "OpenCode 1.18.31",
+  "effort": "high",
+  "created_at": "2026-09-16T20:39:38.232177+00:00",
+  "topic": "Memory-latency hiding and live-state reduction in our fixed-base EC chain: investigate lookahead/prefetch or arithmetic scheduling, accounting for 128-register prepare and spills.",
+  "context_sha256": "6fb629b8181b1e7a17621330c45452673c3e5c068c8eaf851c89d625a9f993e9",
+  "source_state": {
+    "subset": {
+      "ours": "65fb673d-5014-4ee8-866d-97d972e7b1f0",
+      "status": "validating",
+      "score": null,
+      "promoted_frontier_score": 440270249,
+      "pr": 60,
+      "validation_commit": "f31dcba6b5a3de04a28e9dcf47b336bad8278fa2",
+      "submitted_source_fingerprint": "44f9d5808add05e204b169194af8893dc91a9c01d31448362b0e01c667c9fd06",
+      "successor_status": "Wide16GiB full-grinder prototype remains frozen and validated on CPU/native compiler. Two lookahead variants added; prefetch passes CPU/native production+audit, removes8-byte prepare spill, but latency overlap and speed remain unmeasured. See wide_windows/lookahead."
+    },
+    "pinning": {
+      "ours": "66c031c6-16e4-484e-ad4d-0e7e0ef3f38f",
+      "status": "validating",
+      "score": null,
+      "promoted_frontier_score": 644546620,
+      "pr": 74,
+      "validation_commit": "154b2bd97a9c918ac3d992c31a6cf7901aeab1a0",
+      "submitted_source_fingerprint": "ed600d1c31cc168b0010419da1dfafc78d1be147b816e78dbab52cd37f2e5e54",
+      "successor_status": "Ten-window16GiB candidate with bounded builder, canonical carry repairs, PR64 bundle and runtime inverse-schedule comparison submitted asPR74. Native builds/CPU checks passed; no GPU result yet."
+    },
+    "observed_at_utc": "2026-09-16T20:19:32.207312+00:00",
+    "priority_track": "subset",
+    "priority_reason": "Both own entries validate; no visible GPU progress. Our subset entry is now oldest among active subset entries. Prefer subset as tentative first finisher, not guaranteed FIFO."
+  },
+  "model_metadata": {
+    "id": "muse-spark-1.3-contributor-free",
+    "providerID": "opencode",
+    "name": "Muse Spark 1.3 Free",
+    "family": "muse-free",
+    "api": {
+      "id": "muse-spark-1.3-contributor-free",
+      "url": "https://opencode.ai/zen/v1",
+      "npm": "@ai-sdk/openai"
+    },
+    "status": "active",
+    "headers": {},
+    "options": {},
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "capabilities": {
+      "temperature": true,
+      "reasoning": true,
+      "attachment": true,
+      "toolcall": true,
+      "input": {
+        "text": true,
+        "audio": true,
+        "image": true,
+        "video": true,
+        "pdf": true
+      },
+      "output": {
+        "text": true,
+        "audio": false,
+        "image": false,
+        "video": false,
+        "pdf": false
+      },
+      "interleaved": false
+    },
+    "release_date": "2026-09-02",
+    "variants": {
+      "minimal": {
+        "reasoningEffort": "minimal",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "low": {
+        "reasoningEffort": "low",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "medium": {
+        "reasoningEffort": "medium",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "high": {
+        "reasoningEffort": "high",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "xhigh": {
+        "reasoningEffort": "xhigh",
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      }
+    }
+  },
+  "usage": [
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 7285,
+        "input": 6372,
+        "output": 392,
+        "reasoning": 408,
+        "cache": {
+          "write": 0,
+          "read": 113
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 21477,
+        "input": 14713,
+        "output": 350,
+        "reasoning": 29,
+        "cache": {
+          "write": 0,
+          "read": 6385
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 37979,
+        "input": 15920,
+        "output": 285,
+        "reasoning": 797,
+        "cache": {
+          "write": 0,
+          "read": 20977
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 57156,
+        "input": 19998,
+        "output": 150,
+        "reasoning": 159,
+        "cache": {
+          "write": 0,
+          "read": 36849
+        }
+      }
+    },
+    {
+      "cost": 0,
+      "tokens": {
+        "total": 76922,
+        "input": 16660,
+        "output": 1254,
+        "reasoning": 2191,
+        "cache": {
+          "write": 0,
+          "read": 56817
+        }
+      }
+    }
+  ],
+  "research_tools": [
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "secp256k1 fixed base GPU CUDA fast point multiplication table precomputation",
+        "type": "deep"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "arXiv GPU elliptic curve scalar multiplication fixed base scheduling register pressure",
+        "type": "deep"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "CUDA L2 prefetch __prefetch_global_L2 PTX prefetch.global latency hiding 2025 2026",
+        "type": "deep"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "NVlabs CGBN cooperative big integer modular multiplication register shared memory GPU",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "NVIDIA PTX prefetch.global L2 cache instruction sm_90 Ada reference",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "websearch",
+      "status": "completed",
+      "input": {
+        "contextMaxCharacters": 12000,
+        "numResults": 8,
+        "query": "CUDA max registers 255 spill __launch_bounds__ occupancy software pipelining live range splitting",
+        "type": "auto"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://arxiv.org/abs/1907.02894"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://github.com/NVlabs/CGBN/blob/master/docs/CGBN.md"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://developer.nvidia.com/blog/boosting-application-performance-with-gpu-memory-prefetching"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://arxiv.org/abs/2405.14642"
+      }
+    },
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "input": {
+        "format": "markdown",
+        "url": "https://docs.nvidia.com/cuda/parallel-thread-execution/index.html"
+      }
+    }
+  ],
+  "review_status": "unreviewed; claims require independent verification",
+  "research": {
+    "summary": "At 128 regs with 8-byte prepare spills vs 0-spill prefetch and 24KiB shared, the only affordable latency hiding is address-only distance-1 L2 lookahead overlapped with point-add field math, plus live-range shortening to preserve 0-spill. No GPU timing claimed.",
+    "findings": [
+      {
+        "id": "address-only-rolling-l2-lookahead",
+        "title": "Address-only rolling L2 lookahead (distance-1) overlapped with field arithmetic",
+        "mechanism": "Compute next-window index/address one iteration early and issue L2 hint, overlapping with current-window point-add field muls/squares. Keep only address/index live, not next X/Y point, preserving the 0-spill form. Rolling form avoids re-paying latency each batch if fenced correctly; L2 path avoids extra shared/register buffer.",
+        "sources": [
+          {
+            "url": "https://developer.nvidia.com/blog/boosting-application-performance-with-gpu-memory-prefetching",
+            "locator": "Unrolling / Rolling prefetch / L2 variant sections",
+            "supports": "Compiler can overlap independent loads only with distinct registers; rolling uses same resources as batched but avoids repeated latencies; sync forces completion so async copy needed; L2-from-global variant via PTX useful when shared too small"
+          },
+          {
+            "url": "https://docs.nvidia.com/cuda/parallel-thread-execution/contents.html",
+            "locator": "Contents: Data Movement Instructions prefetch, prefetchu",
+            "supports": "PTX ISA exposes prefetch/prefetchu instructions; supports existence only, not latency guarantee"
+          }
+        ],
+        "new_vs_memory": "Memory records loaded-next-point (128 regs + 8B spill) vs L2-prefetch (128 regs, 0 spills, hints late in SASS, overlap unmeasured). This refines to address-only distance-1 as the spill-free form, not full next-point load; explains spill difference as extra live point state.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed work: serial load-use stall per window in prepare chain. Added work: one early index/address calc plus L2 hint overlapped with existing field arithmetic. Large only if Stall Long Scoreboard on table loads dominates and bandwidth underutilized; no percentage claimed.",
+        "risks": "Compiler/CUDA may sink hint late as already observed in SASS; distance>1 re-adds live regs and spills; divergent addresses serialize; no occupancy gain guaranteed at 128 regs.",
+        "falsification": "Mac-only: compare ptxas -v regs/spills and check PTX/SASS hint placement before first use; reuse CPU 414-chain and next-load address check; no timing claim.",
+        "recommendation": "investigate"
+      },
+      {
+        "id": "live-range-split-spill-avoidance",
+        "title": "Live-range splitting and recompute to hold 0-spill at 128 regs",
+        "mechanism": "Shorten live ranges in prepare: recompute window indices on demand, drop table-point regs immediately after add, split address/load vs accumulate phases, avoid holding deferred-Y/accumulator across full chain. If spill unavoidable, consider explicit shared-memory spill slot instead of local-memory spill.",
+        "sources": [
+          {
+            "url": "https://github.com/NVlabs/CGBN/blob/master/docs/CGBN.md",
+            "locator": "Concepts premise + add_kernel load/add/store example",
+            "supports": "Multiple-precision arithmetic requires a lot of register resources, premise is to spread value across thread group within warp; shows load/compute/store structure"
+          },
+          {
+            "url": "https://arxiv.org/abs/1907.02894",
+            "locator": "Abstract (metadata/abstract only, full text not verified)",
+            "supports": "Authors state registers often limit occupancy, nvcc spills excess to off-chip ignoring shared, RegDem SASS spill to shared improves over nvcc with 9% geomean up to 18% author-measured on their workloads; not grinding/GPU-throughput transfer"
+          },
+          {
+            "url": "https://developer.download.nvidia.com/CUDA/training/register_spilling.pdf",
+            "locator": "When is Local Memory Used? / How Does LMEM Affect Performance?",
+            "supports": "Exceeding register limit uses local memory for spills; hurts via increased memory traffic and instruction count"
+          }
+        ],
+        "new_vs_memory": "Memory records 128-reg prepare with 8B spill vs 0-spill prefetch, 24KiB shared, finish 80 regs 0 spills. This is scheduling to keep 0-spill without adding prefetch live state, distinct from rejected blanket cooperative 2/4-lane and from adding full-point lookahead.",
+        "evidence_level": "hypothesis",
+        "large_gain_case": "Removed work: local-memory spill loads/stores and extended live state in hot prepare loop. Added work: index recompute ALU or small shared spill traffic plus potential sync. Large only if spills sit in hot loop and occupancy is register-limited; no percentage claimed.",
+        "risks": "Recompute adds ALU and pressure; shared spill risks bank conflicts, sync/fence breaking overlap, and reduced occupancy; may re-inflate regs.",
+        "falsification": "Mac-only: native ptxas -v spill bytes and Nsight-occupancy estimate from regs/shared only; CPU correctness unchanged; no GPU speed claim.",
+        "recommendation": "investigate"
+      }
+    ],
+    "no_gain_reason": "",
+    "next_question": "Can distance-1 address-only L2 hint be placed before current-window field math in PTX/SASS while holding 128 regs / 0 prepare spills, and does ptxas report Stall Long Scoreboard relief without GPU timing?"
+  }
+}

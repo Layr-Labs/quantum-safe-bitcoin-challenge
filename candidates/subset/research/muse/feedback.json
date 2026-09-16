@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-16T21:34:08.990602+00:00",
+  "reviewed_ideas": [
+    {
+      "ids": [
+        "signed-multicomb-tiny-table",
+        "tunable-limlee-mary-geometry"
+      ],
+      "decision": "Retain one combined small-table comb hypothesis as deferred; no established substantial gain and no candidate change.",
+      "corrections": [
+        "PR60 has16 signed windows of2MiB each, totaling32MiB, not16x64KB. The wide variant is interleaved, not planar.",
+        "A comb still needs a runtime-base-dependent table. Smaller tables may reduce traffic but do not guarantee zero DRAM accesses or residency. Divergent CUDA constant accesses may serialize.",
+        "The two suggestions overlap: retain one geometry family, not two independent improvements. The default11x6 comb gives44 lookup terms and3 doublings; the actual implementation seeds the first term and adds a final offset. This arithmetic increase is substantial versus16 or10 terms.",
+        "The arXiv abstract supports author ElGamal/NS3 claims, not grinding performance, GPU transfer or a checked fixed-base comparison table. Full paper and code have not been validated.",
+        "The external README memory claims are author hypotheses on a different workload. Do not treat them as measurements of our32MiB or16GiB pipeline."
+      ],
+      "revisit_when": "A concrete parameterization and full arithmetic/traffic model improves the tradeoff or new relevant GPU evidence appears."
+    },
+    {
+      "ids": [
+        "wide-table-load-lookahead",
+        "wide-table-l2-prefetch"
+      ],
+      "decision": "Two CPU/native-tested prototypes. Keep optional prefetch for comparison; not a proven GPU gain.",
+      "evidence": "Full source fingerprint d0174fa761b852b0f30f71246dd3e43b3e1a053dc9c011b8a4508d246eb0af18;128regs/24KiB/no prepare spills, versus8-byte store/load in wide control. CPU414 chains/822keys/3312next-load address checks; native production/audit pass.",
+      "limitation": "SASS issues hints late, no measured latency overlap or end-to-end speed. Preserve submitted sources."
+    },
+    {
+      "ids": [
+        "address-only-rolling-l2-lookahead",
+        "live-range-split-spill-avoidance"
+      ],
+      "decision": "First is duplicate of completed experiment; second deferred absent a new concrete bottleneck/removal. No new implementation selected.",
+      "corrections": [
+        "Address-only distance1 rolling L2 prefetch is exactly the already-tested implementation, not a refinement/new proposal.",
+        "Zero spills do not prove why allocation improved or that any stalls were removed. ptxas cannot report Stall Long Scoreboard relief; that requires actual GPU profiling.",
+        "No proof that this is the only affordable latency-hiding strategy. Divergent addresses do not imply universal serialization; distinguish address spaces and hardware behavior.",
+        "Required accumulator/deferred-anchor recurrence cannot simply be discarded. Shared spilling adds traffic and can reduce occupancy; generic RegDem results are not a new end-to-end gain for our now-zero-spill variant."
+      ]
+    },
+    {
+      "ids": [
+        "h-denominator-checkpoint",
+        "tile-local-gas-batch-inversion"
+      ],
+      "decision": "Reject H-only proposal for current layout; defer tile-local proposal as incomplete. Retain checkpoint recomputation as a separately costed hypothesis, not an implementation recommendation.",
+      "corrections": [
+        "We do not checkpoint every mixed-add intermediate point. Only final C,Y,W,ZZZ state and inverse product-tree nodes cross the kernel boundary. H-only per-step output does not replace these values or reconstruct recovery without more information/work.",
+        "A tile-local tree plus a global root hierarchy already describes our current decomposition. Shared memory cannot remain live across the separate prepare, root-inverse and finish launches; the proposal does not supply a valid persistence/recomputation/synchronization plan.",
+        "The referenced OpenCL example performs inversion within a workgroup; it does not demonstrate eliminating checkpoints while preserving our one-inversion-per-large-batch architecture.",
+        "The cited paper full HTML is available. Sections3.2\u20133.3 describe grouped inversion, recomputation of inexpensive intermediates and cache placement; they do not establish a zero-global-checkpoint variant for this source.",
+        "A concrete recomputation variant would remove254 field-node stores+loads per256 candidates but add254 multiplications and up-sweep barriers in finish. It retains128B/candidate recovery state. At477182283/s removed checkpoint payload is30.3GB/s; no measured bottleneck or substantial gain follows."
+      ],
+      "revisit_when": "An explicit reconstructible state and legal kernel-boundary schedule remove a demonstrated substantial cost; compare with existing one-inversion hierarchy."
+    },
+    {
+      "id": "gather-direct-var-sha",
+      "decision": "reject premise; no such global intermediate exists in current ranked path",
+      "evidence": "tree.cu kernel_build_epochs and window_schedule_shared.cuh qsb_scheduled_window_hash build/hash message words directly. No per-candidate1.7KiB global preimage is materialized. The public problem specification describes full-message semantics, not current optimized runtime work.",
+      "revisit_when": "Identify an exact current store/load and removable bytes, not a baseline workload assumption."
+    },
+    {
+      "id": "prefix-coherent-sha-checkpoint",
+      "decision": "duplicate of existing epoch and prefix-state reuse, with generalized orderings deferred absent a new geometry",
+      "evidence": "The ranked path enumerates six early omissions per epoch, sharing the first21variable transforms across256 candidates, plus84first-state classes and26second-schedule classes. qsb_scheduled_window_hash performs remaining window/constant-tail work; broad prefix reuse is already present. Existing bounded window scan is not a universal negative result.",
+      "revisit_when": "Supply a concrete grouping that improves current8.41015625equal-cost transforms/candidate accounting, exact bytes/state and still-large search space; no repeated27-block baseline."
+    }
+  ],
+  "reviewed_reports": {
+    "reports/20260916T201656945458Z.json": {
+      "decision": "defer",
+      "review": "first-review.json",
+      "summary": "Overlapping small-comb geometry proposals; arithmetic increase and unsupported cache/workload claims corrected."
+    },
+    "reports/20260916T203938232177Z.json": {
+      "decision": "duplicate/defer",
+      "review": "second-review.json",
+      "summary": "Already implemented address-only prefetch; generic liveness advice supplies no new concrete substantial mechanism."
+    },
+    "reports/20260916T210014675087Z.json": {
+      "decision": "reject/defer",
+      "review": "third-review.json",
+      "summary": "H-only checkpoints assume nonexistent per-add point stores; tile-local shared state does not survive split launches. Source layout and explicit recomputation cost supplied."
+    },
+    "reports/20260916T212809592581Z.json": {
+      "review": "fourth-review.json",
+      "decision": "duplicate / premise rejected"
+    }
+  },
+  "guidance": [
+    "Continue researching even while some reports await review. Label prior unreviewed claims as hypotheses.",
+    "Prioritize a new substantial end-to-end mechanism; no invented speedups, novelty, exclusivity or GPU measurements.",
+    "Return no findings when only duplicates are found. Revisit rejected ideas only with specific new evidence.",
+    "PR60 is now officially promoted at451135044 candidates/s. Its2.47% gain versus prior frontier measures the composite, not an isolated inversion or arithmetic contribution.",
+    "For future memory proposals identify the exact current stored symbol, byte count, use and lifetime before proposing removal. Explain kernel-boundary synchronization and reconstruction. A bibliography of batch inversion methods is not itself a new mechanism.",
+    "PR62 is now promoted at477182283. Our PR60 remains a451135044 promoted historical result; update comparisons. Mixed64MiB geometry is being independently integrated with our external inversion and repaired arithmetic; no source counts imply GPU speed.",
+    "Do not derive hot-kernel work from spec/PROBLEM.md. Ranked search does not materialize1.7KiB/candidate and already shares epoch/prefixSHAstates. Current equal-cost compression accounting:(21+84)/256+1+4+1+2=8.41015625per candidate. First prove an exact current-source removable operation/byte; otherwise report no new finding."
+  ]
+}
