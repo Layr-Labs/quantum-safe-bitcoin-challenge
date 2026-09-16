@@ -552,7 +552,7 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
-    int seq_offset,             /* offset of sequence in suffix */
+    int seq_offset,             /* offset, or -1 when absorbed into midstate */
     int lt_offset,              /* offset of locktime in suffix */
     int total_preimage_len,
     uint32_t seq_value,         /* current sequence value */
@@ -572,8 +572,10 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     /* Copy suffix, set sequence + locktime */
     uint8_t buf[192];
     for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
-    buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
-    buf[seq_offset+2]=(seq_value>>16)&0xFF; buf[seq_offset+3]=(seq_value>>24)&0xFF;
+    if (seq_offset >= 0) {
+        buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
+        buf[seq_offset+2]=(seq_value>>16)&0xFF; buf[seq_offset+3]=(seq_value>>24)&0xFF;
+    }
     buf[lt_offset]=(lt)&0xFF; buf[lt_offset+1]=(lt>>8)&0xFF;
     buf[lt_offset+2]=(lt>>16)&0xFF; buf[lt_offset+3]=(lt>>24)&0xFF;
 
@@ -714,6 +716,8 @@ extern "C" {
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
 }
+
+#include "SequenceMidstate.h"
 
 static void compute_gtable(uint8_t *gTableX, uint8_t *gTableY) {
     size_t gt_bytes = 16ULL * 65536 * 32;
@@ -994,7 +998,25 @@ int main(int argc, char **argv) {
     /* Benchmark runs for a fixed window ended by the harness's timeout.
      * The loop no longer stops at the first hit; hits are appended per batch.
      */
+    uint32_t *d_sequence_mid;
+    cudaError_t sequence_alloc = cudaMalloc(&d_sequence_mid, 32);
+    if (sequence_alloc != cudaSuccess) {
+        fprintf(stderr, "Sequence midstate allocation failed: %s\n", cudaGetErrorString(sequence_alloc));
+        return 1;
+    }
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+        PinningSequencePlan plan = prepare_sequence_midstate(
+            pp.midstate, suffix_template, gpu_suffix_len,
+            pp.seq_offset, pp.lt_offset, seq);
+        const uint32_t *search_mid = d_mid;
+        if (plan.suffix_skip) {
+            cudaError_t uploaded = cudaMemcpy(d_sequence_mid, plan.midstate, 32, cudaMemcpyHostToDevice);
+            if (uploaded != cudaSuccess) {
+                fprintf(stderr, "Sequence midstate upload failed: %s\n", cudaGetErrorString(uploaded));
+                return 1;
+            }
+            search_mid = d_sequence_mid;
+        }
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
@@ -1004,8 +1026,8 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             kernel_pinning_real<<<GRDSZ,BLKSZ>>>(
-                d_mid, d_suffix, gpu_suffix_len,
-                pp.seq_offset, pp.lt_offset,
+                search_mid, d_suffix + plan.suffix_skip, gpu_suffix_len - plan.suffix_skip,
+                plan.seq_offset, plan.lt_offset,
                 pp.total_preimage_len,
                 seq, batch_lt,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
