@@ -1508,7 +1508,18 @@ int main(int argc, char **argv) {
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
-    cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
+    /* Keep the counter and indices contiguous for one batch-result readback. */
+    cudaError_t hit_err = cudaMalloc(&d_hit_cnt, (1 + 1024)*sizeof(uint32_t));
+    if (hit_err != cudaSuccess) {
+        fprintf(stderr, "Hit buffer allocation failed: %s\n", cudaGetErrorString(hit_err));
+        return 1;
+    }
+    d_hit_idx = d_hit_cnt + 1;
+    hit_err = cudaMemset(d_hit_cnt, 0, (1 + 1024)*sizeof(uint32_t));
+    if (hit_err != cudaSuccess) {
+        fprintf(stderr, "Hit buffer initialization failed: %s\n", cudaGetErrorString(hit_err));
+        return 1;
+    }
 
     int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
@@ -1615,7 +1626,11 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            hit_err = cudaMemcpy(d_hit_cnt, &h_hit, sizeof(h_hit), cudaMemcpyHostToDevice);
+            if (hit_err != cudaSuccess) {
+                fprintf(stderr, "Hit counter reset failed: %s\n", cudaGetErrorString(hit_err));
+                return 1;
+            }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1642,18 +1657,19 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
+            /* The blocking default-stream copy waits for all five kernels and
+             * returns the counter plus the same first 64 indices reported below. */
+            uint32_t hit_report[1 + 64];
+            cudaError_t err = cudaMemcpy(hit_report, d_hit_cnt, sizeof(hit_report),
+                                         cudaMemcpyDeviceToHost);
+            if (err == cudaSuccess) err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            h_hit = hit_report[0];
             if (h_hit > 0) {
-                uint32_t hits[64];
+                const uint32_t *hits = hit_report + 1;
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
