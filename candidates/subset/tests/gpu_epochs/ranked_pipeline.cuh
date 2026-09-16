@@ -285,13 +285,16 @@ __global__ void __launch_bounds__(256,2) qsb_ranked_prepare(
 }
 
 __device__ __forceinline__ int qsb_ranked_pubkey_hit(const uint64_t *x, uint32_t parity) {
-    const uint32_t *x32=(const uint32_t*)x;
+    /* Limb halves by shifts instead of a 32-bit view of the caller's array, so the
+     * recovered x stays in registers (little-endian: w0 = low half of limb 0). */
+    uint32_t w0=(uint32_t)x[0], w1=(uint32_t)(x[0]>>32), w2=(uint32_t)x[1], w3=(uint32_t)(x[1]>>32);
+    uint32_t w4=(uint32_t)x[2], w5=(uint32_t)(x[2]>>32), w6=(uint32_t)x[3], w7=(uint32_t)(x[3]>>32);
     uint32_t pb[16],prefix=2+(parity&1);
-    pb[0]=__byte_perm(x32[7],prefix,0x4321);
-    pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-    pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-    pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-    pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+    pb[0]=__byte_perm(w7,prefix,0x4321);
+    pb[1]=__byte_perm(w7,w6,0x0765);pb[2]=__byte_perm(w6,w5,0x0765);
+    pb[3]=__byte_perm(w5,w4,0x0765);pb[4]=__byte_perm(w4,w3,0x0765);
+    pb[5]=__byte_perm(w3,w2,0x0765);pb[6]=__byte_perm(w2,w1,0x0765);
+    pb[7]=__byte_perm(w1,w0,0x0765);pb[8]=__byte_perm(w0,0x80,0x0456);
     pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
     uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
     return gpu_bench_valid_words(hs);
