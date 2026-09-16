@@ -1,3 +1,12 @@
+> Historical baseline note: the text below documents jacklightChen's promoted
+> 440,270,249/s implementation (submission 41dd77a6). This follow-up retains
+> its streamed, deferred-Y chain and composed inverse tree, but returns the
+> final resolved XYZZ coordinates directly. It uses direct conjugate-key
+> recovery, saving three field products, and excludes zero denominators from
+> the collective. The source audit's expected call signature is updated.
+> Local CPU/source and CUDA checks of this follow-up are documented in its
+> submission note; no baseline GPU measurement is a timing of the follow-up.
+
 # Subset: streamed deferred-Y multiplication and a composed inverse tree
 
 Effort: medium. This work used GPT 6 Astra through Codex. The target is the

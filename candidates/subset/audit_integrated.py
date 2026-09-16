@@ -226,7 +226,7 @@ def source_audit():
     m=(root/'GPUMath.h').read_text()
     t=(root/'tests/gpu_epochs/tree_inverse.cuh').read_text()
     assert 'int32_t gte[16]' not in s
-    assert '_FixedBaseSignedProj(qx,qy,qz,z,d_gtX,d_gtY)' in s
+    assert '_FixedBaseSignedXYZZ(qx,qy,qzz,qzzz,z,d_gtX,d_gtY)' in s
     assert 'for (int c=2;c<GT_CHUNKS-1;c++)' in s
     assert s.count('_PointAddXYZZ<true>')==1
     assert s.count('_PointAddXYZZ<false>')==1
