@@ -309,16 +309,15 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
  * y=Y/ZZZ). Seed with an mmadd of the first two chunks' points (4M+2S), then 14
  * madd (8M+2S each) -- vs 15 homogeneous adds at 9M+2S, so ~ -14M/candidate for
- * the +3M end conversion below. Rolled loop (fully unrolling inlines the asm
+ * the former +3M end conversion. Rolled loop (fully unrolling inlines the asm
  * multiply ~150x past ptxas' budget); the back-edge is a uniform loop-counter
  * branch, and every signed odd digit is non-zero so there is NO data-dependent
  * branch and no chunk is skipped. Next chunk's table point loaded one step ahead.
  *
- * The OUTPUT is homogeneous projective (qx,qy,qz) -- identical signature to the
- * previous multiply -- so the downstream conjugate pair + block inverse are
- * unchanged. Convert XYZZ->homogeneous once: X'=X*ZZZ, Y'=Y*ZZ, Z'=ZZ*ZZZ
- * (X'/Z' = X/ZZ = x, Y'/Z' = Y/ZZZ = y). */
-__device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
+ * Keep the XYZZ output through conjugate recovery. Converting to homogeneous
+ * coordinates here would cost three products that the direct finish avoids. */
+__device__ void _FixedBaseSignedXYZZ(uint64_t *qx, uint64_t *qy,
+                                      uint64_t *qzz, uint64_t *qzzz,
                                       const int32_t e[16], const uint8_t *gTX, const uint8_t *gTY) {
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
@@ -336,10 +335,8 @@ __device__ void _FixedBaseSignedProj(uint64_t *qx, uint64_t *qy, uint64_t *qz,
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTX,gTY,c,idx,neg,cx,cy);
         _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy);
     }
-    _ModMult(qx, X, ZZZ);      /* X' = X*ZZZ */
-    _ModMult(qy, Y, ZZ);       /* Y' = Y*ZZ  */
-    _ModMult(qz, ZZ, ZZZ);     /* Z' = ZZ*ZZZ */
-    qz[4]=0;
+    Load256(qx, X); Load256(qy, Y);
+    Load256(qzz, ZZ); Load256(qzzz, ZZZ);
 }
 
 /* _FixedBaseSignedAffine: removed -- dead on the ranked path. It is still a __device__/
@@ -767,43 +764,54 @@ __device__ __forceinline__ void qsb_field_mul(uint64_t *out,uint64_t *a,uint64_t
 
 
 
-/* Shared-denominator affine finish for both recovery flags.
- * P = (X:Y:Z) homogeneous projective, R = (xR, yR) affine (u2R).
- * Stage 1 produces the value to invert, W = Z*(xR*Z - X). */
-__device__ __forceinline__ void qsb_affine_finish_prepare(uint64_t *X, uint64_t *Z, uint64_t *xR, uint64_t *D, uint64_t *W) {
-    uint64_t t[4];
-    _ModMult(t, xR, Z);
-    _ModSub256(D, t, X);
-    W[4] = 0;
-    _ModMult(W, Z, D);
+/* Direct XYZZ recovery. P=(X/ZZ,Y/ZZZ), with ZZ^3=ZZZ^2.
+ * Set D=xR*ZZ-X and invert W=ZZZ*D once for both recovery flags.
+ * The nonzero denominator contract is the same as the inherited finish. */
+__device__ __forceinline__ bool qsb_zero_field(const uint64_t *a) {
+    return ((a[0]|a[1]|a[2]|a[3])==0) ||
+        (a[0]==0xFFFFFFFEFFFFFC2FULL && (a[1]&a[2]&a[3])==UINT64_MAX);
 }
 
-/* Stage 2: inv = 1/W. Outputs Q1 = P + R and Q2 = P - R in affine form. */
-__device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint64_t *Z, uint64_t *D, uint64_t *inv,
+__device__ __forceinline__ void qsb_xyzz_finish_prepare(uint64_t *X, uint64_t *ZZ,
+        uint64_t *ZZZ, uint64_t *xR, uint64_t *D, uint64_t *W) {
+    uint64_t t[4];
+    _ModMult(t, xR, ZZ);
+    _ModSub256(D, t, X);
+    W[4] = 0;
+    _ModMult(W, ZZZ, D);
+}
+
+/* h=ZZ/(ZZZ*D), iz=h*D=ZZ/ZZZ, and iz^2=1/ZZ by the XYZZ invariant.
+ * Thus xP=xR-D*iz^2, lambda1=(yR*ZZZ-Y)*h, -lambda2=(yR*ZZZ+Y)*h.
+ * Reconstruct xP from D so X need not remain live across the block inverse.
+ * Finish each y from the affine R endpoint, avoiding normalization of yP.
+ * Preparation + finish: 10M+3S, versus 13M+3S including the old conversion. */
+__device__ __forceinline__ void qsb_xyzz_finish(uint64_t *Y,
+                                                  uint64_t *ZZ, uint64_t *ZZZ, uint64_t *D, uint64_t *inv,
                                                   uint64_t *xR, uint64_t *yR,
                                                   uint64_t *x1, uint64_t *y1, uint64_t *x2, uint64_t *y2) {
-    uint64_t iZ[4], xP[4], yP[4], z2[4], id[4], s[4], t[4], m1[4], m2[4], sq[4], xs[4];
-    _ModMult(iZ, inv, D);          /* 1/Z */
-    _ModMult(xP, X, iZ);
-    _ModMult(yP, Y, iZ);
-    _ModSqr(z2, Z);
-    _ModMult(id, inv, z2);         /* 1/(xR - xP) */
-    _ModSub256(s, yR, yP);
-    _ModMult(m1, s, id);           /* lambda1 */
-    _ModAdd256(t, yR, yP);
-    _ModMult(m2, t, id);           /* -lambda2 */
+    uint64_t h[4], iz[4], xP[4], yRz[4], s[4], t[4], m1[4], m2[4], sq[4], xs[4];
+    _ModMult(h, inv, ZZ);
+    _ModMult(iz, h, D);
+    _ModSqr(sq, iz);
+    _ModMult(xP, D, sq);
+    _ModSub256(xP, xR, xP);
+    _ModMult(yRz, yR, ZZZ);
+    _ModSub256(s, yRz, Y);
+    _ModMult(m1, s, h);
+    _ModAdd256(t, yRz, Y);
+    _ModMult(m2, t, h);
     _ModAdd256(xs, xP, xR);
     _ModSqr(sq, m1);
     _ModSub256(x1, sq, xs);
-    _ModSub256(t, xP, x1);
+    _ModSub256(t, xR, x1);
     _ModMult(y1, m1, t);
-    _ModSub256(y1, y1, yP);
+    _ModSub256(y1, y1, yR);
     _ModSqr(sq, m2);
     _ModSub256(x2, sq, xs);
-    _ModSub256(t, xP, x2);
+    _ModSub256(t, xR, x2);
     _ModMult(y2, m2, t);
-    _ModAdd256(y2, y2, yP);
-    _ModNeg256(y2);                /* y2 = -(m2*(xP - x2) + yP) */
+    _ModSub256(y2, yR, y2);
 }
 
 #include "tree_inverse.cuh"
@@ -983,22 +991,25 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * directly gives z*A = (neg_r_inv*z mod n)*G = u1*G -- no per-candidate
      * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
     int32_t gte[16]; gt_recode_signed(z, gte);
-    /* u1*G in projective form via the signed-digit 32 MiB A-table; the affine
-     * conversion is deferred to the single inverse below, so both recids share
-     * one _ModInv. */
-    uint64_t qx[4],qy[4],qz[5]; _FixedBaseSignedProj(qx,qy,qz,gte,d_gtX,d_gtY);
+    /* Keep u1*G in XYZZ form through the shared-denominator recovery. */
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    _FixedBaseSignedXYZZ(qx,qy,qzz,qzzz,gte,d_gtX,d_gtY);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
     /* Both recovery flags from one shared-denominator inverse. */
     uint64_t fD[4], prod[5]={0,0,0,0,0};
-    qsb_affine_finish_prepare(qx,qz,u2rx,fD,prod);
-    // One block-wide inverse, preserving identity factors for tail lanes.
-    if(!active){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,fD,prod);
+    // The inherited incomplete point formulas can produce a zero denominator
+    // on exceptional scalars or P=+/-R. Skip those candidates, and contribute
+    // one to the collective so a zero cannot invalidate the other 255 lanes.
+    // Every lane still reaches every block barrier before any lane returns.
+    int recoverable=active && !qsb_zero_field(prod);
+    if(!recoverable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
+    if(!recoverable)return;
     uint64_t q1x[4],q1y[4],q2x[4],q2y[4];
-    qsb_affine_finish(qx,qy,qz,fD,prod,u2rx,u2ry,q1x,q1y,q2x,q2y);
-    if(!active)return;
+    qsb_xyzz_finish(qy,qzz,qzzz,fD,prod,u2rx,u2ry,q1x,q1y,q2x,q2y);
 
     int v=0, hash_choice=0, recid=0;
     uint64_t *pts_x[2]={q1x,q2x};
