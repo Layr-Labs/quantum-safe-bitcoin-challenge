@@ -789,6 +789,13 @@ __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
 
+/* One 16-byte PTX store; .cs requests evict-first for streaming state. */
+__device__ __forceinline__ void qsb_store_state_streaming(ulonglong2 *dst, ulonglong2 value) {
+    const uint64_t address = __cvta_generic_to_global(dst);
+    asm volatile ("st.global.cs.v2.u64 [%0], {%1, %2};"
+                  :: "l"(address), "l"(value.x), "l"(value.y) : "memory");
+}
+
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
@@ -907,14 +914,14 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
          * limbs into naturally aligned 128-bit stores. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
-        saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
-        saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
+        qsb_store_state_streaming(&saved[0u*state_plane_stride+state_idx],make_ulonglong2(qx[0],qx[1]));
+        qsb_store_state_streaming(&saved[1u*state_plane_stride+state_idx],make_ulonglong2(qx[2],qx[3]));
+        qsb_store_state_streaming(&saved[2u*state_plane_stride+state_idx],make_ulonglong2(qy[0],qy[1]));
+        qsb_store_state_streaming(&saved[3u*state_plane_stride+state_idx],make_ulonglong2(qy[2],qy[3]));
+        qsb_store_state_streaming(&saved[4u*state_plane_stride+state_idx],make_ulonglong2(qzz[0],qzz[1]));
+        qsb_store_state_streaming(&saved[5u*state_plane_stride+state_idx],make_ulonglong2(qzz[2],qzz[3]));
+        qsb_store_state_streaming(&saved[6u*state_plane_stride+state_idx],make_ulonglong2(qzzz[0],qzzz[1]));
+        qsb_store_state_streaming(&saved[7u*state_plane_stride+state_idx],make_ulonglong2(qzzz[2],qzzz[3]));
     }
     qsb_block_product_checkpoint(prod,roots,tree);
     return;
