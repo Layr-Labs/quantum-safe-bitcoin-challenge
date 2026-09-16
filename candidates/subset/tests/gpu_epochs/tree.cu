@@ -280,20 +280,22 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
     for (int c=0;c<16;c++) e[c]=gt_recode_step(M, sign, c);
 }
 
-/* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
- * Branchless: y is selected between y and p-y by a mask. */
+/* Load table point (c, idx) into (gx,gy); negate y (p - y) when the sign
+ * mask m is all-ones. Branchless, one carry chain, no select. */
 __device__ __forceinline__ void gt_load_signed(const uint8_t *gTX, const uint8_t *gTY,
-                                                int c, uint32_t idx, uint64_t neg,
+                                                int c, uint32_t idx, uint64_t m,
                                                 uint64_t gx[4], uint64_t gy[4]) {
     size_t off = ((size_t)c * GT_ENTRIES + idx) * 32;
     const ulonglong2 *tx=(const ulonglong2 *)(gTX+off), *ty=(const ulonglong2 *)(gTY+off);
     ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t y[4]={y0.x,y0.y,y1.x,y1.y}, yn[4];
-    _ModNeg256(yn, y);                                 /* p - y */
-    uint64_t m = 0 - neg;                              /* all-ones if negative digit */
-    gy[0]=(y[0]&~m)|(yn[0]&m); gy[1]=(y[1]&~m)|(yn[1]&m);
-    gy[2]=(y[2]&~m)|(yn[2]&m); gy[3]=(y[3]&~m)|(yn[3]&m);
+    /* p - y == ~y + (p + 1) (mod 2^256) for a canonical table y in [1, p):
+     * one carry chain from the sign mask replaces the negation plus the
+     * four-limb select (register-neutral; the mask folds into the addend). */
+    UADDO(gy[0], y0.x ^ m, m & 0xFFFFFFFEFFFFFC30ULL);
+    UADDC(gy[1], y0.y ^ m, m);
+    UADDC(gy[2], y1.x ^ m, m);
+    UADD (gy[3], y1.y ^ m, m);
 }
 
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
@@ -303,7 +305,7 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTX, const uint8_t
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
     uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
     *idx = (ae - 1) >> 1;
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)(int64_t)(ec >> 31);          /* sign mask: all-ones for a negative digit */
 }
 
 /* Accumulate sixteen points with an affine-anchor-deferred XYZZ ordinate:
@@ -1000,17 +1002,24 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(!active)return;
 
     int v=0, hash_choice=0, recid=0;
-    uint64_t *pts_x[2]={q1x,q2x};
-    uint64_t *pts_y[2]={q1y,q2y};
-    for(int ri=0;ri<2&&!v;ri++){
-        uint32_t *x32=(uint32_t*)pts_x[ri];
+    #pragma unroll
+    for(int ri=0;ri<2;ri++){
+        if (v) break;
+        /* Select the recid's affine key in registers; no pointer arrays, so the
+         * four coordinates never go through local memory. Limb halves in
+         * little-endian order: w0 = low half of limb 0, ..., w7 = high half of limb 3. */
+        uint64_t rx0 = ri ? q2x[0] : q1x[0], rx1 = ri ? q2x[1] : q1x[1];
+        uint64_t rx2 = ri ? q2x[2] : q1x[2], rx3 = ri ? q2x[3] : q1x[3];
+        uint64_t ry0 = ri ? q2y[0] : q1y[0];
+        uint32_t w0=(uint32_t)rx0, w1=(uint32_t)(rx0>>32), w2=(uint32_t)rx1, w3=(uint32_t)(rx1>>32);
+        uint32_t w4=(uint32_t)rx2, w5=(uint32_t)(rx2>>32), w6=(uint32_t)rx3, w7=(uint32_t)(rx3>>32);
         uint32_t pb[16];
-        uint8_t prefix_byte = 0x2+(uint8_t)(pts_y[ri][0]&1);
-        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        uint8_t prefix_byte = 0x2+(uint8_t)(ry0&1);
+        pb[0]=__byte_perm(w7,prefix_byte,0x4321);
+        pb[1]=__byte_perm(w7,w6,0x0765);pb[2]=__byte_perm(w6,w5,0x0765);
+        pb[3]=__byte_perm(w5,w4,0x0765);pb[4]=__byte_perm(w4,w3,0x0765);
+        pb[5]=__byte_perm(w3,w2,0x0765);pb[6]=__byte_perm(w2,w1,0x0765);
+        pb[7]=__byte_perm(w1,w0,0x0765);pb[8]=__byte_perm(w0,0x80,0x0456);
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
         uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         /* Ranked gate reads the state words. Only the easy/calibrate
