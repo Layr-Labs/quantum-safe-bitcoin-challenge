@@ -162,6 +162,14 @@ def audit_source() -> None:
 
 
 def main() -> None:
+    source = Path(__file__).resolve().with_name("pinning.cu").read_text()
+    if "#define GT_CHUNKS 16" in source:
+        # The mixed 15-chunk geometry this file models is retired from
+        # production. Its uniform successor is covered by
+        # audit_uniform16.py (recode, digit range, address map, loader
+        # integration, builder bindings). This file is kept as history.
+        print("RETIRED: mixed 15-chunk geometry superseded; see audit_uniform16.py")
+        return
     audit_source()
     audit_table()
     cases = {0, 1, 2, 3, N - 2, N - 1, N, N + 1, MASK256 - 1, MASK256}
