@@ -55,8 +55,13 @@ __constant__ int CHUNK_FIRST_ELEMENT[16] = {
     65536*8,65536*9,65536*10,65536*11,65536*12,65536*13,65536*14,65536*15,
 };
 
-__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
-    int chunk=0; uint64_t qz[5]={1,0,0,0,0};
+/* G-table product in projective coordinates (X:Y:Z). Mixed add already
+ * consumes a general Z. Returning affine used to spend a full _ModInv only
+ * to rebuild Z=1 on the next recovery add. Callers keep Z live, add the
+ * precomputed offsets, then share one batch inverse for both recids. */
+__device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint64_t *qz, uint16_t *privKey, uint8_t *gTableX, uint8_t *gTableY) {
+    int chunk=0;
+    qz[0]=1; qz[1]=0; qz[2]=0; qz[3]=0; qz[4]=0;
     for(;chunk<16;chunk++){if(privKey[chunk]>0){
         int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
         memcpy(qx,gTableX+index,32);memcpy(qy,gTableY+index,32);chunk++;break;}}
@@ -65,7 +70,6 @@ __device__ void _PointMultiSecp256k1(uint64_t *qx, uint64_t *qy, uint16_t *privK
         int index=(CHUNK_FIRST_ELEMENT[chunk]+(privKey[chunk]-1))*32;
         memcpy(gx,gTableX+index,32);memcpy(gy,gTableY+index,32);
         _PointAddSecp256k1(qx,qy,qz,gx,gy);}}
-    _ModInv(qz);_ModMult(qx,qz);_ModMult(qy,qz);
 }
 
 /* DER checks */
@@ -531,14 +535,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t nri[4]={d_nri[0],d_nri[1],d_nri[2],d_nri[3]};
     uint64_t u1[4]; gpu_scalar_mulmod(u1, nri, z);
     uint16_t pk[16]; memcpy(pk, u1, 32);
-    uint64_t qx[4],qy[4];
-    _PointMultiSecp256k1(qx,qy,pk,d_gtX,d_gtY);
+    uint64_t q1x[4],q1y[4],q1z[5];
+    _PointMultiSecp256k1(q1x,q1y,q1z,pk,d_gtX,d_gtY);
 
     uint64_t u2rx[4]={d_u2rx[0],d_u2rx[1],d_u2rx[2],d_u2rx[3]};
     uint64_t u2ry[4]={d_u2ry[0],d_u2ry[1],d_u2ry[2],d_u2ry[3]};
-    uint64_t q1x[4],q1y[4],q1z[5];
-    memcpy(q1x,qx,32);memcpy(q1y,qy,32);
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
     _PointAddSecp256k1(q1x,q1y,q1z,u2rx,u2ry);
 
     uint64_t q2x[4],q2y[4],q2z[5];
@@ -897,12 +898,13 @@ __global__ void kernel_debug_digest_one_subset(
     uint64_t u1[4]; gpu_scalar_mulmod(u1, nri, z);
     DUMP_U64x4("u1", u1);
 
-    /* u1 * G via GTable */
+    /* u1 * G via GTable, left projective so recovery mixed-adds reuse Z */
     uint16_t pk[16]; for (int i = 0; i < 32; i++) ((uint8_t*)pk)[i] = ((uint8_t*)u1)[i];
-    uint64_t qx[4], qy[4];
-    _PointMultiSecp256k1(qx, qy, pk, d_gtX, d_gtY);
-    DUMP_U64x4("u1G_x_affine", qx);
-    DUMP_U64x4("u1G_y_affine", qy);
+    uint64_t qx[4], qy[4], qz[5];
+    _PointMultiSecp256k1(qx, qy, qz, pk, d_gtX, d_gtY);
+    DUMP_U64x4("u1G_x_proj", qx);
+    DUMP_U64x4("u1G_y_proj", qy);
+    DUMP_U64x4("u1G_z_proj", qz);
 
     /* u2R, neg_2u2R */
     uint64_t u2rx[4] = {d_u2rx[0], d_u2rx[1], d_u2rx[2], d_u2rx[3]};
@@ -914,10 +916,10 @@ __global__ void kernel_debug_digest_one_subset(
     DUMP_U64x4("neg_2u2R_x", n2rx);
     DUMP_U64x4("neg_2u2R_y", n2ry);
 
-    /* Q1 = u1G + u2R, Q2 = Q1 + neg_2u2R */
+    /* Q1 = u1G + u2R, Q2 = Q1 + neg_2u2R — mixed add on the live Z */
     uint64_t q1x[4],q1y[4],q1z[5];
     for (int i = 0; i < 4; i++) { q1x[i] = qx[i]; q1y[i] = qy[i]; }
-    q1z[0]=1;q1z[1]=0;q1z[2]=0;q1z[3]=0;q1z[4]=0;
+    for (int i = 0; i < 5; i++) q1z[i] = qz[i];
     _PointAddSecp256k1(q1x, q1y, q1z, u2rx, u2ry);
     DUMP_U64x4("q1_proj_x", q1x);
     DUMP_U64x4("q1_proj_y", q1y);
