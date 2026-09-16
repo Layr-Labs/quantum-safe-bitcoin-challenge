@@ -259,7 +259,7 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
     uint8_t *d_gtX, uint8_t *d_gtY,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     uint8_t *d_hit_pubkey, uint8_t *d_hit_hash, uint8_t *d_hit_sighash,
-    int batch_size, int easy_mode, int single_hash
+    int batch_size, int easy_mode, int single_hash, int group_slot
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= batch_size) return;
@@ -407,7 +407,10 @@ __global__ void __launch_bounds__(256, 2) kernel_pinning_real(
 
     if(v){uint32_t pos=atomicAdd(d_hit_cnt,1);
         if(pos<1024){
-            d_hit_idx[pos]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
+            /* idx needs only 22 bits (batch_size <= BATCH = 2^22); bits
+             * 22-29 were unused, so the launch's slot within its group of
+             * back-to-back kernels rides along for free. */
+            d_hit_idx[pos]=((uint32_t)idx)|((uint32_t)group_slot<<22)|(recid<<30)|(hash_choice<<31);
             /* DIAG: store the pubkey, hash, and sighash so host can compare to CPU's.
              * Diagnostic arrays sized for 64 entries — only first 64 hits per batch
              * get diagnostics (host reads at most 64 anyway). */
@@ -704,45 +707,62 @@ int main(int argc, char **argv) {
             uint32_t state[8]; for(int i=0;i<8;i++) state[i]=ctx.h[i];
             cudaMemcpyToSymbol(pin_sequence_state,state,sizeof(state));
         }
-        /* Search all safe locktimes for this sequence */
-        for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
-            uint32_t batch_lt = LT_MIN + lt_off;
-            int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
-
+        /* Search all safe locktimes for this sequence. Batches are launched
+         * back-to-back in groups of up to GROUP_K, with the hit counter
+         * reset once per group and read back once per group instead of once
+         * per batch: consecutive launches on the default stream queue
+         * without the host waiting between them, so only the group's single
+         * trailing sync is paid. Each launch is told its slot (0..ng-1)
+         * within the group, packed into otherwise-unused bits of the hit
+         * record, so a hit is fully identified without re-running anything. */
+        #define GROUP_K 32
+        static uint32_t group_lt[GROUP_K];
+        for (uint32_t lt_off = 0; lt_off < lt_range; ) {
+            int ng = 0;
             uint32_t h_hit = 0;
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
-            if (fast_pinning) {
-            kernel_pinning_real<true><<<GRDSZ,BLKSZ>>>(
-                d_mid, d_suffix, gpu_suffix_len,
-                pp.seq_offset, pp.lt_offset,
-                pp.total_preimage_len,
-                seq, batch_lt,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gtX, d_gtY,
-                d_hit_cnt, d_hit_idx,
-                d_hit_pubkey, d_hit_hash, d_hit_sighash,
-                batch_sz, easy, single_hash);
-            } else {
-            kernel_pinning_real<false><<<GRDSZ,BLKSZ>>>(
-                d_mid, d_suffix, gpu_suffix_len,
-                pp.seq_offset, pp.lt_offset,
-                pp.total_preimage_len,
-                seq, batch_lt,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gtX, d_gtY,
-                d_hit_cnt, d_hit_idx,
-                d_hit_pubkey, d_hit_hash, d_hit_sighash,
-                batch_sz, easy, single_hash);
-            }
-            cudaDeviceSynchronize();
+            for (; ng < GROUP_K && lt_off < lt_range; ng++, lt_off += BATCH) {
+                uint32_t batch_lt = LT_MIN + lt_off;
+                int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
+                group_lt[ng] = batch_lt;
 
+                if (fast_pinning) {
+                kernel_pinning_real<true><<<GRDSZ,BLKSZ>>>(
+                    d_mid, d_suffix, gpu_suffix_len,
+                    pp.seq_offset, pp.lt_offset,
+                    pp.total_preimage_len,
+                    seq, batch_lt,
+                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                    d_gtX, d_gtY,
+                    d_hit_cnt, d_hit_idx,
+                    d_hit_pubkey, d_hit_hash, d_hit_sighash,
+                    batch_sz, easy, single_hash, ng);
+                } else {
+                kernel_pinning_real<false><<<GRDSZ,BLKSZ>>>(
+                    d_mid, d_suffix, gpu_suffix_len,
+                    pp.seq_offset, pp.lt_offset,
+                    pp.total_preimage_len,
+                    seq, batch_lt,
+                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                    d_gtX, d_gtY,
+                    d_hit_cnt, d_hit_idx,
+                    d_hit_pubkey, d_hit_hash, d_hit_sighash,
+                    batch_sz, easy, single_hash, ng);
+                }
+
+                total_searched += batch_sz;
+            }
+
+            /* This copy is synchronous on the default stream, so it already
+             * waits for every launch in the group above to finish; no
+             * separate cudaDeviceSynchronize() is needed, and
+             * cudaGetLastError() here still reports the group's
+             * launch/execution error state. */
+            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
-            total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
                 uint32_t hits[64];
                 uint8_t hit_pubkey[64*33];   /* GPU-claimed pubkey for each hit */
@@ -762,7 +782,8 @@ int main(int argc, char **argv) {
                 if (f) {
                     for (int h = 0; h < nh; h++) {
                         uint32_t raw = hits[h];
-                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
+                        int slot = (int)((raw >> 22) & 0xFF);
+                        uint32_t lt = group_lt[slot] + (raw & 0x3FFFFF);
                         int ri = (raw >> 30) & 1;
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
