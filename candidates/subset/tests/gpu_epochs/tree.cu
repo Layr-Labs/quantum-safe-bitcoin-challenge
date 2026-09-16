@@ -885,11 +885,12 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModMult(s, m, t);
     _ModSub256(s, yR);
     /* y2=-s. Since p is odd, field negation flips its parity. */
-    parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
+    parities |= (uint32_t)((((s[0]|s[1]|s[2]|s[3]) != 0) && !(s[0]&1ULL)) << 1);
     return parities;
 }
 
 #include "tree_inverse.cuh"
+#include "ranked_pipeline.cuh"
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
@@ -1978,6 +1979,26 @@ int main(int argc, char **argv) {
     printf("  Mode: %s, GPU %d (global %d of %d)\n", easy?"EASY":"REAL", gpu_index, effective_id, effective_total);
     printf("  Batch: %d combos per kernel launch\n", BATCH);
 
+    // 128 bytes of saved coordinates plus 32 bytes of tree space per candidate.
+    // At 8M candidates the scratch allocation is about 1.25 GiB, not a host transfer.
+    ulonglong2 *d_pipe_state = NULL;
+    uint64_t *d_pipe_roots = NULL, *d_pipe_tree = NULL;
+    uint64_t *d_pipe_super = NULL, *d_pipe_root_tree = NULL;
+    static_assert(QSB_SE_PER_EPOCH == 256, "pipeline requires 256 lanes");
+    static_assert(QSB_SE_LAUNCH_BLOCKS <= 65536, "root hierarchy capacity");
+    if (se_mode) {
+        size_t blocks = QSB_SE_LAUNCH_BLOCKS;
+        size_t groups = (blocks + 255) / 256;
+        cudaError_t pe;
+        if ((pe=cudaMalloc(&d_pipe_state, blocks*256u*8u*sizeof(ulonglong2))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_roots, blocks*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_tree, blocks*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_super, groups*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_root_tree, groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess) {
+            fprintf(stderr,"Ranked pipeline allocation: %s\n",cudaGetErrorString(pe)); return 1;
+        }
+    }
+
     uint8_t *h_combos = (uint8_t*)malloc(BATCH * t_sel);
     uint8_t *d_combos; cudaMalloc(&d_combos, BATCH * t_sel);
 
@@ -2123,22 +2144,15 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, 0,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
+            cudaError_t launch_error = cudaGetLastError();
+            if (launch_error == cudaSuccess)
+                launch_error = qsb_launch_ranked_pipeline(nblk, batch_pos, d_epochs,
+                    d_gt,d_u2rx,d_u2ry,d_pipe_state,d_pipe_roots,d_pipe_tree,
+                    d_pipe_super,d_pipe_root_tree,d_hit_cnt,d_hit_idx,d_hit_combos);
+            if (launch_error != cudaSuccess) {
+                fprintf(stderr,"Ranked pipeline launch: %s\n",cudaGetErrorString(launch_error)); return 1;
+            }
+            cudaError_t err = cudaDeviceSynchronize();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;

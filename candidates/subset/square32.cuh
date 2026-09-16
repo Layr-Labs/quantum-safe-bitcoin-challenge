@@ -203,32 +203,23 @@ __device__ __forceinline__ void qsb_square32(uint64_t *out,const uint64_t *a){
         "\taddc.cc.u32 z4, z4, 0;\n"
         "\taddc.cc.u32 z5, z5, 0;\n"
         "\taddc.cc.u32 z6, z6, 0;\n"
-        "\taddc.u32 z7, z7, 0;\n"
-        /* The third 977-fold and the conditional subtract that used to sit here
-         * are removed. _ModMultCore (GPUMath.h) is documented as returning a
-         * value in [0,2^256) with the final 2^256 carry dropped -- deliberately
-         * NOT canonical -- and 126 of the 159 field operations per candidate
-         * already go through it. This square was the only primitive canonicalising
-         * its result, at a cost of 11 PTX ops plus a conditional subtract, on
-         * every one of its 33 calls per candidate.
-         *
-         * It was also inconsistent with itself: the host branch of this same
-         * function is literally `_ModMultCore(out,a,a)` (below), i.e. already the
-         * non-canonical contract. Deleting the device tail removes that
-         * host/device divergence rather than creating one.
-         *
-         * The inputs that would expose the difference are those in [p, 2^256),
-         * which arise with probability ~2^-224 per operation and are the same
-         * inputs on which _ModMult is already non-canonical. */
+        "\taddc.cc.u32 z7, z7, 0;\n"
+        "\t.reg .u32 cf;\n"
+        "\taddc.u32 cf, 0, 0;\n"
+        "\tmul.lo.u32 m0, cf, 977;\n"
+        "\tadd.cc.u32 z0, z0, m0;\n"
+        "\taddc.cc.u32 z1, z1, cf;\n"
+        "\taddc.u32 z2, z2, 0;\n"
         "mov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n"
         "\t}\n"
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]));
-    /* Conditional canonical subtract removed with the third fold above; the
-     * result now carries exactly _ModMultCore's contract. */
     out[0]=r0;out[1]=r1;out[2]=r2;out[3]=r3;
 #else
     _ModMultCore(out,a,a);
 #endif
+    if ((out[1]&out[2]&out[3]) == UINT64_MAX && out[0] >= 0xFFFFFFFEFFFFFC2FULL) {
+        out[0] -= 0xFFFFFFFEFFFFFC2FULL;
+        out[1] = out[2] = out[3] = 0;
+    }
 }
-
