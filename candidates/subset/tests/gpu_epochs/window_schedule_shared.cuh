@@ -2,11 +2,13 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
-__device__ uint32_t QSB_WINDOW_FIRST[14][256];
 __device__ uint32_t QSB_WINDOW_SECOND[64][256];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
 __device__ uint32_t QSB_FIRST_CLASS[256];
-__device__ uint32_t QSB_FIRST_UNIQUE[14][256];
+#ifndef QSB_FIRST_STATE_CAP
+#define QSB_FIRST_STATE_CAP 64
+#endif
+__device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_FIRST_STATE_CAP];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
 
@@ -26,9 +28,9 @@ static uint32_t qsb_window_first_key(const uint8_t w[3]) {
 
 static int qsb_prepare_window_schedule(const uint8_t *rows,
         const uint8_t windows[256][3], const uint32_t *constant) {
-    uint32_t first[14][256], second[64][256]={}, round_k[64];
+    uint32_t second[64][256]={}, round_k[64];
     uint32_t classes[256], unique[256][16];
-    uint32_t first_classes[256], first_unique[256][14], transposed[14][256]={};
+    uint32_t first_classes[256], first_unique[QSB_FIRST_STATE_CAP][14], transposed[14][QSB_FIRST_STATE_CAP]={};
     int first_distinct=0;
     int distinct=0;
     if (cudaMemcpyFromSymbol(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
@@ -47,10 +49,17 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
         for (int j=0; j<32; j++)
             words[j]=((uint32_t)bytes[4*j]<<24)|((uint32_t)bytes[4*j+1]<<16)|
                      ((uint32_t)bytes[4*j+2]<<8)|bytes[4*j+3];
-        for (int j=0; j<14; j++) first[j][lane]=words[j+2];
         int first_slot=0;
         while(first_slot<first_distinct && memcmp(first_unique[first_slot],words+2,56))first_slot++;
-        if(first_slot==first_distinct){memcpy(first_unique[first_distinct],words+2,56);first_distinct++;}
+        if(first_slot==first_distinct){
+            if(first_distinct>=QSB_FIRST_STATE_CAP) {
+                fprintf(stderr,"Window first-block classes %d exceed cap %d\n",
+                        first_distinct+1,QSB_FIRST_STATE_CAP);
+                return 1;
+            }
+            memcpy(first_unique[first_distinct],words+2,56);
+            first_distinct++;
+        }
         first_classes[lane]=first_slot;
         int slot=0;
         while(slot<distinct && memcmp(unique[slot],words+16,64))slot++;
@@ -73,14 +82,13 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
     if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
     if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
     return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         const epoch_desc_t *epoch, int lane) {
     // Every lane in this epoch's block reaches the shared-memory barrier.
-    __shared__ uint32_t first_states[8][256];
+    __shared__ uint32_t first_states[8][QSB_FIRST_STATE_CAP];
     if(lane<QSB_FIRST_COUNT) {
         uint32_t initial[8],W[16];
         #pragma unroll

@@ -345,23 +345,17 @@ __device__ void _ModAdd256(uint64_t *r, uint64_t *a, uint64_t *b)
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
 {
     uint64_t t;
-    uint64_t T[4];
 
     USUBO(r[0], a[0], b[0]);
     USUBC(r[1], a[1], b[1]);
     USUBC(r[2], a[2], b[2]);
     USUBC(r[3], a[3], b[3]);
     USUB(t, 0ULL, 0ULL);
-
-    T[0] = 0xFFFFFFFEFFFFFC2FULL & t;
-    T[1] = 0xFFFFFFFFFFFFFFFFULL & t;
-    T[2] = 0xFFFFFFFFFFFFFFFFULL & t;
-    T[3] = 0xFFFFFFFFFFFFFFFFULL & t;
-
-    UADDO1(r[0], T[0]);
-    UADDC1(r[1], T[1]);
-    UADDC1(r[2], T[2]);
-    UADD1(r[3], T[3]);
+    t &= 0x1000003D1ULL;
+    USUBO1(r[0], t);
+    USUBC1(r[1], 0ULL);
+    USUBC1(r[2], 0ULL);
+    USUB1(r[3], 0ULL);
 
 }
 
@@ -371,20 +365,16 @@ __device__ void _ModSub256(uint64_t *r, uint64_t *b)
 {
 
     uint64_t t;
-    uint64_t T[4];
     USUBO(r[0], r[0], b[0]);
     USUBC(r[1], r[1], b[1]);
     USUBC(r[2], r[2], b[2]);
     USUBC(r[3], r[3], b[3]);
     USUB(t, 0ULL, 0ULL);
-    T[0] = 0xFFFFFFFEFFFFFC2FULL & t;
-    T[1] = 0xFFFFFFFFFFFFFFFFULL & t;
-    T[2] = 0xFFFFFFFFFFFFFFFFULL & t;
-    T[3] = 0xFFFFFFFFFFFFFFFFULL & t;
-    UADDO1(r[0], T[0]);
-    UADDC1(r[1], T[1]);
-    UADDC1(r[2], T[2]);
-    UADD1(r[3], T[3]);
+    t &= 0x1000003D1ULL;
+    USUBO1(r[0], t);
+    USUBC1(r[1], 0ULL);
+    USUBC1(r[2], 0ULL);
+    USUB1(r[3], 0ULL);
 
 }
 
