@@ -1,0 +1,10 @@
+[2m$[22m bash -lc "./benchmark.sh pinning"
+benchmark.sh: benches=pinning N=24 mode=fixed_time grinder=bridge:/opt/starkware-challenge/bench-exec.sh seed=63298050
+benchmark.sh: === pinning ===
+  pinning: /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/problem/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/problem/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=63298050 — no real coin material)
+▶ grinder: sudo -n /opt/starkware-challenge/bench-exec.sh qsb-bench-v1 run pinning /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge /home/frosty40/comps/bitcoin/qsb-bridge-out-pinning 1200 24 benchmark-results/problem
+sudo: /opt/starkware-challenge/bench-exec.sh: command not found
+bridge: missing or invalid /home/frosty40/comps/bitcoin/qsb-bridge-out-pinning/metrics.json: [Errno 2] No such file or directory: '/home/frosty40/comps/bitcoin/qsb-bridge-out-pinning/metrics.json'
+benchmarkCommand failed with exit code 1

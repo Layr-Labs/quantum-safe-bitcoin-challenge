@@ -1,0 +1,9 @@
+Native architecture experiment review
+Only build option changed: -arch=sm_121; source unchanged.
+ELF file    1: pinning.1.sm_121.cubin
+ELF file    2: pinning.2.sm_121.cubin
+Native vs restored diagnostic baseline: -5.1771%
+Tracked source diff:
+(none)
+Removed build stamp: next wrapper run must rebuild default target; --no-build will refuse this experimental binary.
+ZERO SUBMISSIONS: unchanged source, no measured improvement; binary-only architecture experiment is not a portable submission.

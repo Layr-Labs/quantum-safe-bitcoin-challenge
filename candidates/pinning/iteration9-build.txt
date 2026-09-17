@@ -1,0 +1,77 @@
+  compile: nvcc -O3 -DQSB_ZEROS_N=24 -o /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu -lcrypto -lm
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu(2433): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu(2361): warning #550-D: variable "BLKSZ" was set but never used
+      int BLKSZ = 256;
+          ^
+
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu(1687): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *) [with FAST_TAIL=true, STAGE=0]" at line 1780
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *) [with FAST_TAIL=true]" at line 2469
+
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu(1687): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *) [with FAST_TAIL=true, STAGE=2]" at line 1828
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *) [with FAST_TAIL=true]" at line 2469
+
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu: In function ‘void gt_point_to_limbs(EC_GROUP*, EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*, uint64_t*)’:
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:1917:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 1917 |     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/ec.h:659:52: note: declared here
+  659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu: In function ‘void gt_batch_ladder(EC_GROUP*, const EC_POINT*, int, uint64_t*, BIGNUM*, BIGNUM*, BN_CTX*)’:
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:1940:28: warning: ‘int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 1940 |     if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+      |       ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/ec.h:846:52: note: declared here
+  846 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu: In function ‘void compute_gtable(uint8_t*, const uint8_t*)’:
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:2058:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2058 |             EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/ec.h:659:52: note: declared here
+  659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu: In function ‘int main(int, char**)’:
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:2249:56: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2249 |             if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
+      |                                  ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~     
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/ec.h:354:52: note: declared here
+  354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:2268:36: warning: ‘int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2268 |         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/ec.h:646:52: note: declared here
+  646 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:2273:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2273 |         EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/ec.h:659:52: note: declared here
+  659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:2449:12: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2449 |             SHA256_Init(&ctx);
+      |            ^~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+/home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning.cu:2451:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2451 |             SHA256_Transform(&ctx,block);
+      |             ~~~~^~~~~~~~~~~~~
+/home/frosty40/comps/bitcoin/local-deps/root/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          

@@ -1,0 +1,24 @@
+benchmark.sh: benches=pinning N=24 mode=fixed_time grinder=cmd:python3 harness/gpu_wrap.py --src candidates/pinning/pinning.cu --no-build seed=872538836
+benchmark.sh: === pinning ===
+  pinning: /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/iteration4-direct/problem/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/iteration4-direct/problem/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=872538836 — no real coin material)
+▶ grinder: python3 harness/gpu_wrap.py --src candidates/pinning/pinning.cu --no-build --bench pinning --zeros 24 --mode fixed_time --out /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/iteration4-direct/run-pinning.json --seconds 120.0 --hits 200
+  compile: reusing /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning (already built for N=24)
+  run: stdbuf -oL timeout 120 /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/candidates/pinning/pinning /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/iteration4-direct/problem/pinning.bin 0 1 0 single_hash
+  → /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/benchmark-results/iteration4-direct/run-pinning.json: 73.3M/s, 8,811,424,372 candidates, 1057 hits
+score.py: pinning score = 73743066.0 verified candidates per second  →  /home/frosty40/comps/bitcoin/quantum-safe-bitcoin-challenge/score-pinning.json
+
+========================================================
+  BENCH   : pinning   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 8,811,424,372  in 120.2s (harness clock)
+  candidates (from N verified hits): 8,866,758,656
+  grinder self-reported: 120.2s, 73.3 M/s (not scored)
+  verified hits: 1057 / 1057
+  hit rel. variance: 0.030758  (max 0.1)
+--------------------------------------------------------
+  SCORE (throughput) : 73.7431 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 8.790861 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
