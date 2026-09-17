@@ -724,60 +724,65 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
  *
  * P has affine coordinates xP=X/ZZ and yP=Y/ZZZ, with ZZZ^2=ZZ^3.
  * For affine R=(xR,yR), let d=xR*ZZ-X=ZZ*(xR-xP). The collective
- * inverts W=ZZ^2*d. X is dead after d is formed, so overwrite it with d and
- * keep only four field elements live across the block-wide inverse. */
+ * inverts W=ZZ^2*d. Only Y, ZZZ, and W cross the kernel boundary. */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
+    uint64_t *X, uint64_t *ZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
     _ModMult(t, xR, ZZ);
-    _ModSub256(t, t, X_D);
-    Load256(X_D, t);             /* X_D becomes d */
+    _ModSub256(t, t, X);         /* d = xR*ZZ-X */
     _ModSqr(W, ZZ);
-    _ModMult(W, X_D);            /* W = ZZ^2*d */
+    _ModMult(W, t);              /* W = ZZ^2*d */
     W[4] = 0;
 }
 
-/* Across the kernel boundary, X_D has been replaced by C=ZZ*d^2 and ZZ by
- * W=ZZ^2*d. With inv=1/W, h=inv*ZZZ=A/(B*d) is the common slope scale and
- * delta=inv*C=d/ZZ=xR-xP. Thus xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R, avoiding reconstruction of affine yP:
- *   y1 = lambda1*(xR-x1)-yR
- *   y2 = -(m2*(xR-x2)-yR).
- * Returns the two y parities in bits 0 and 1. C, W, and ZZZ are deliberately
- * reused as delta, xs, and h. */
-__device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
-    uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2
+/* With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let u=yR*t and
+ * v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
+ * K=3*xR^2 is fixed for the entire problem. The shared x base is
+ * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H.
+ * Both y coordinates are anchored at R. Return their parities in bits 0,1. */
+__device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
+    uint64_t *Y, uint64_t *V, uint64_t *inv,
+    uint64_t *xR, uint64_t *yR, uint64_t *K,
+    uint64_t *x_plus, uint64_t *x_minus
 ) {
-    uint64_t yb[4], m[4], t[4], s[4];
+    uint64_t h[4], u[4], v[4], f[4];
+    _ModMult(h, V, inv);         /* h = V*I */
+    _ModMult(V, h);              /* V becomes t = V*h */
+    _ModMult(u, yR, V);          /* u = yR*t */
+    _ModMult(v, Y, h);           /* v = Y*h */
 
-    _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
+    /* GPUMath's square drops a final carry for some near-p operands. For
+     * upper-half u, square the equivalent negative representative; keep u
+     * unchanged for H and y. */
+    qsb_field_normalize(u);
+    if(u[3] >> 63) _ModNeg256(h, u);
+    else Load256(h, u);
+    _ModSqr(f, h);
+    _ModAdd256(f, f, f);
+    _ModMult(h, K, V);           /* h becomes K*t */
+    _ModSub256(f, h);
+    _ModAdd256(f, f, xR);        /* F = 2*u^2-K*t+xR */
+    _ModMult(h, u, v);
+    _ModAdd256(h, h, h);         /* H = 2*u*v */
+    _ModSub256(x_plus, f, h);
+    _ModAdd256(x_minus, f, h);
+    qsb_field_normalize(x_plus);
+    qsb_field_normalize(x_minus);
 
-    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+    _ModSub256(h, u, v);
+    _ModSub256(V, xR, x_plus);
+    _ModMult(h, V);
+    _ModSub256(h, yR);
+    qsb_field_normalize(h);
+    uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModSub256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
-    _ModSqr(x1, m);
-    _ModSub256(x1, W);
-    _ModSub256(t, xR, x1);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    uint32_t parities = (uint32_t)(s[0] & 1ULL);
-
-    _ModAdd256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
-    _ModSqr(x2, m);
-    _ModSub256(x2, W);
-    _ModSub256(t, xR, x2);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    /* y2=-s. Since p is odd, field negation flips its parity. */
-    parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
+    _ModAdd256(h, u, v);
+    _ModSub256(V, xR, x_minus);
+    _ModMult(h, V);
+    _ModSub256(V, yR, h);
+    qsb_field_normalize(V);
+    parities |= (uint32_t)((V[0] & 1ULL) << 1);
     return parities;
 }
 
@@ -788,6 +793,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
+__device__ __constant__ uint64_t pin_u2rk_words[4];
 
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeline(
@@ -892,29 +898,21 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         qsb_xyzz_finish_prepare(qx,qzz,prep_xR,prod);
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-    /* Preserve exactly four fields across the kernel boundary.  The finish
-     * needs C=ZZ*d^2 and W=ZZ^2*d, but no longer needs d or ZZ separately. */
-    if(usable){
-        _ModSqr(qx,qx);
-        _ModMult(qx,qzz);        /* qx becomes C */
-    }
     Load256(qzz,prod);           /* qzz becomes W */
     if (!usable) {
         prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
     }
     if(active){
-        /* Eight vector planes retain SoA coalescing while pairing adjacent
+        /* Six vector planes retain SoA coalescing while pairing adjacent
          * limbs into naturally aligned 128-bit stores. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
+        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
+        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
+        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
+        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
         saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
         saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
     }
     qsb_block_product_checkpoint(prod,roots,tree);
     return;
@@ -924,15 +922,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
+        ulonglong2 qy01=saved[0u*state_plane_stride+state_idx];
+        ulonglong2 qy23=saved[1u*state_plane_stride+state_idx];
+        ulonglong2 qzzz01=saved[2u*state_plane_stride+state_idx];
+        ulonglong2 qzzz23=saved[3u*state_plane_stride+state_idx];
         ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
         ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
-        qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
@@ -949,9 +944,11 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
                       pin_u2ry_words[2],pin_u2ry_words[3]};
+    uint64_t u2rk[4]={pin_u2rk_words[0],pin_u2rk_words[1],
+                      pin_u2rk_words[2],pin_u2rk_words[3]};
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(
-        qx,qy,qzz,qzzz,prod,u2rx,u2ry,
+    uint32_t y_parities = qsb_xyzz_finish_symmetric(
+        qy,qzzz,prod,u2rx,u2ry,u2rk,
         q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
@@ -1466,6 +1463,25 @@ int main(int argc, char **argv) {
         uint8_t be[32];
         for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
         for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
+        /* K=3*xR^2 is invariant across all candidates in this problem. */
+        BIGNUM *field=BN_new(),*bk=BN_new();
+        if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
+           !BN_mod_sqr(bk,bx,field,ctx) || !BN_mul_word(bk,3) ||
+           !BN_nnmod(bk,bk,field,ctx)) {
+            fprintf(stderr,"Failed to precompute recovery K\n");
+            return 1;
+        }
+        uint8_t kb[32]={0};
+        BN_bn2bin(bk,kb+(32-BN_num_bytes(bk)));
+        uint64_t kw[4]={0,0,0,0};
+        for(int i=0;i<4;i++)for(int b=0;b<8;b++)
+            kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
+        cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
+        if(kerr!=cudaSuccess){
+            fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
+            return 1;
+        }
+        BN_free(field); BN_free(bk);
         EC_POINT *pt=EC_POINT_new(grp);
         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
         EC_POINT *dbl=EC_POINT_new(grp);
@@ -1517,7 +1533,7 @@ int main(int argc, char **argv) {
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
-    size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
+    size_t pipeline_state_bytes=(size_t)BATCH*6u*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
     size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
