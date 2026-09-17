@@ -1507,6 +1507,32 @@ int main(int argc, char **argv) {
     }
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+
+    /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
+     * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
+     * per-candidate state through the same cache every 16M batch, which evicts
+     * it. Advisory: if the device or driver refuses, the run is unaffected. */
+    {
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        if (want > 0 && max_window > 0) {
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av = {};
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
+                   pe==cudaSuccess?"ok":cudaGetErrorString(pe));
+            fflush(stdout);
+        }
+    }
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
