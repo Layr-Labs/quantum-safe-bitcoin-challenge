@@ -14,6 +14,8 @@
  *      with the same lazy/barrier schedule as 1; barrier kind chosen by the
  *      lanes that READ the next level (warp barrier only when all readers and
  *      writers sit in warp 0).
+ *  3 = experimental in-place packed tree; pair-owned downward writes reuse
+ *      product storage and remove the separate 8 KiB inverse allocation.
  * Leaves are returned as exact residues below 2^256, the same contract as
  * every _ModMult output that feeds the finish. */
 #ifndef ZLAB_TREE
@@ -144,6 +146,8 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
+#elif ZLAB_TREE == 3
+#include "tree_inverse_inplace.cuh"
 #else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
