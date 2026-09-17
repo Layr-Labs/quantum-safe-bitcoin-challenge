@@ -207,6 +207,26 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
     }
 }
 
+/* ZLAB_DIRECT_DIGITS: direct regular-digit extraction, from public submission
+ * f535811 (subset) by dun999. Chunk c's signed odd digit is 2f+1-2^w for the
+ * w-bit field f of the recode setup value M starting at bit 17c+2 (bit 1 for
+ * chunk 0), so the 15 digits no longer come from a serial gt_mixed_step
+ * recurrence: every table index depends only on the setup state. Index is
+ * (f^(t-1)) masked, with t the field's top bit; the digit is negative iff
+ * t==0 XOR the global sign; the last chunk is the positive remainder.
+ * Equivalence proven against gt_mixed_step in zlab_audit_direct_digits.py.
+ * Credit: dun999 / f535811. */
+#ifndef ZLAB_DIRECT_DIGITS
+#define ZLAB_DIRECT_DIGITS 1
+#endif
+__device__ __forceinline__ uint32_t zlab_field_bits(uint64_t m0, uint64_t m1, uint64_t m2,
+                                                    uint64_t m3, unsigned pos) {
+    unsigned li = pos >> 6, sh = pos & 63u;
+    uint64_t lo = li == 0 ? m0 : li == 1 ? m1 : li == 2 ? m2 : m3;
+    uint64_t hi = li == 0 ? m1 : li == 1 ? m2 : li == 2 ? m3 : 0ULL;
+    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
+}
+
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
@@ -217,6 +237,40 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if ZLAB_DIRECT_DIGITS
+    uint64_t sflag = (uint64_t)(sign < 0);
+    {
+        uint32_t f = zlab_field_bits(M[0],M[1],M[2],M[3], 1u) & 0x3ffffu;
+        uint32_t t = f >> 17;
+        idx = (f ^ (t - 1u)) & 0x1ffffu;
+        neg = (uint64_t)(t ^ 1u) ^ sflag;
+        gt_load_signed_flat(gTable, gt_offset(0), idx, neg, x0, y0);
+    }
+    {
+        uint32_t f = zlab_field_bits(M[0],M[1],M[2],M[3], 19u) & 0x1ffffu;
+        uint32_t t = f >> 16;
+        idx = (f ^ (t - 1u)) & 0xffffu;
+        neg = (uint64_t)(t ^ 1u) ^ sflag;
+        gt_load_signed_flat(gTable, gt_offset(1), idx, neg, x1, y1);
+    }
+    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+    unsigned pos = 36u;
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS;c++){
+        uint32_t f = zlab_field_bits(M[0],M[1],M[2],M[3], pos) & 0x1ffffu;
+        uint32_t t = f >> 16;
+        bool last = (c == GT_CHUNKS-1);
+        idx = last ? (f & 0xffffu) : ((f ^ (t - 1u)) & 0xffffu);
+        neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+        pos += 17u;
+    }
+#else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
     ec=gt_mixed_step<17>(M,sign);
@@ -232,6 +286,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+#endif
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -669,6 +724,25 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     qsb_field_normalize(value);
 }
 
+/* ZLAB_BATCH_LOG / ZLAB_BIG_BATCH: batch size 2^N candidates. Larger batches
+ * amortize the five launches, the host round trip and the pipeline ramp over
+ * more candidates (idea from public b756a1c by welttowelt, 64M + a third
+ * inverse level). Here the extra level is unnecessary: the super-root inverse
+ * simply runs one CTA per 256 group roots. Memory: 2^N * 160 B + change
+ * (16M -> 2.5 GiB, 32M -> 5 GiB, 64M -> 10 GiB). */
+#ifndef ZLAB_BATCH_LOG
+#define ZLAB_BATCH_LOG 26
+#endif
+#define ZLAB_BIG_BATCH (ZLAB_BATCH_LOG > 24)
+/* ZLAB_HOST_DRAIN: welttowelt's host-drain set from public submission 36d4266
+ * (ranked 647.6M, +0.47% over the promoted 644.5M): reset the hit counter with
+ * cudaMemset instead of a host-to-device copy, drop the explicit
+ * cudaDeviceSynchronize before the blocking counter read-back (the blocking D2H
+ * copy already orders the stream), and drop the per-hit stdout mirror so a hit
+ * batch does not stall the loop on I/O. Credit: welttowelt / 36d4266. */
+#ifndef ZLAB_HOST_DRAIN
+#define ZLAB_HOST_DRAIN 1
+#endif
 /* Batch the per-search-CTA roots one level further. Groups of 256 roots use
  * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
  * group roots. A full 16M candidate batch therefore executes one _ModInv
@@ -689,7 +763,14 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
 __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
+#if ZLAB_BIG_BATCH
+    /* One CTA per 256 group roots, so a batch may have more than 256 groups.
+     * Each CTA runs one _ModInv on its own 256-leaf tree, exactly as the
+     * single-CTA form did for the first 256. */
+    int tid=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+#else
     int tid=(int)threadIdx.x;
+#endif
     bool active=tid<count;
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
@@ -1036,7 +1117,7 @@ static void launch_pinning_pipeline(
         exit(2);
     }
     int root_groups=(blocks+255)/256;
-    if(root_groups>256){
+    if(!ZLAB_BIG_BATCH && root_groups>256){
         fprintf(stderr,"Pipeline batch exceeds two-level inverse capacity\n");
         exit(2);
     }
@@ -1047,7 +1128,11 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#if ZLAB_BIG_BATCH
+    qsb_invert_super_roots<<<(root_groups+255)/256,256>>>(super_roots,root_groups);
+#else
     qsb_invert_super_roots<<<1,256>>>(super_roots,root_groups);
+#endif
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
@@ -1510,27 +1595,45 @@ int main(int argc, char **argv) {
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
-    int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
+    int BATCH = 1 << ZLAB_BATCH_LOG;  /* 16M default: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
     int ROOT_GRDSZ=(GRDSZ+255)/256;
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
-    size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
-    size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
-    size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
-    size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
-    cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_root_checkpoint,root_checkpoint_bytes);
+    size_t pipeline_state_bytes=0,pipeline_root_bytes=0,pipeline_tree_bytes=0;
+    size_t super_root_bytes=0,root_checkpoint_bytes=0;
+    cudaError_t pipeline_err=cudaErrorMemoryAllocation;
+    /* A 2^26 batch needs about 10.1 GiB. Halve the batch and retry rather than
+     * abort if the device cannot supply it; 2^24 is the promoted size. */
+    for(int batch_log=ZLAB_BATCH_LOG; batch_log>=24; batch_log--){
+        BATCH=1<<batch_log;
+        GRDSZ=(BATCH+BLKSZ-1)/BLKSZ;
+        ROOT_GRDSZ=(GRDSZ+255)/256;
+        pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
+        pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
+        pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+        super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
+        root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+        pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_root_checkpoint,root_checkpoint_bytes);
+        if(pipeline_err==cudaSuccess) break;
+        if(d_pipeline_state){cudaFree(d_pipeline_state);d_pipeline_state=NULL;}
+        if(d_pipeline_roots){cudaFree(d_pipeline_roots);d_pipeline_roots=NULL;}
+        if(d_pipeline_tree){cudaFree(d_pipeline_tree);d_pipeline_tree=NULL;}
+        if(d_super_roots){cudaFree(d_super_roots);d_super_roots=NULL;}
+        if(d_root_checkpoint){cudaFree(d_root_checkpoint);d_root_checkpoint=NULL;}
+        cudaGetLastError();
+        printf("  Pipeline allocation for a 2^%d batch failed; retrying smaller\n",batch_log);
+    }
     if(pipeline_err!=cudaSuccess){
         fprintf(stderr,"Pipeline allocation failed: %s\n",cudaGetErrorString(pipeline_err));
         return 1;
@@ -1615,7 +1718,11 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
+#if ZLAB_HOST_DRAIN
+            cudaMemset(d_hit_cnt, 0, 4);
+#else
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+#endif
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1642,8 +1749,9 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
+#if !ZLAB_HOST_DRAIN
             cudaDeviceSynchronize();
-
+#endif
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
@@ -1655,7 +1763,9 @@ int main(int argc, char **argv) {
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
+#if !ZLAB_HOST_DRAIN
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
+#endif
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -1668,7 +1778,9 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
+#if !ZLAB_HOST_DRAIN
                         printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
+#endif
                     }
                     fclose(f);
                 }
@@ -1689,7 +1801,11 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
+#if ZLAB_HOST_DRAIN
+        if (seqs_done % 10 == 0) {
+#else
         if (seqs_done % 10 == 0 || found) {
+#endif
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;

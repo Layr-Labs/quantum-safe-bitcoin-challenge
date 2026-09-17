@@ -1157,6 +1157,40 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
+#ifndef ZLAB_FUSED_X3
+#define ZLAB_FUSED_X3 1
+#endif
+// zlab: T = A + s*B - 2*C (mod p), s = +1 or -1 (sub_b), all inputs in [0,2^256).
+// One add/sub chain for A (+/-) B, one sub chain for 2C (formed by shifts, no
+// carry chain), then one signed fold of the 257-bit overflow word through
+// 2^256 == 2^32+977. The fold's own carry-out is dropped: it can only occur for
+// representatives within 2^35 of 0 or 2^256 (probability ~2^-221 per call),
+// the same class as the multiply's dropped final carry.
+__device__ __forceinline__ void _ZModAddSub2(uint64_t *T, const uint64_t *A,
+                                             const uint64_t *B, const uint64_t *C,
+                                             bool sub_b)
+{
+  uint64_t r0, r1, r2, r3, hi;
+  uint64_t c0 = C[0] << 1;
+  uint64_t c1 = (C[1] << 1) | (C[0] >> 63);
+  uint64_t c2 = (C[2] << 1) | (C[1] >> 63);
+  uint64_t c3 = (C[3] << 1) | (C[2] >> 63);
+  uint64_t hb = C[3] >> 63;
+  if (sub_b) {
+    USUBO(r0, A[0], B[0]); USUBC(r1, A[1], B[1]); USUBC(r2, A[2], B[2]); USUBC(r3, A[3], B[3]);
+    USUB(hi, 0ULL, 0ULL);
+  } else {
+    UADDO(r0, A[0], B[0]); UADDC(r1, A[1], B[1]); UADDC(r2, A[2], B[2]); UADDC(r3, A[3], B[3]);
+    UADD(hi, 0ULL, 0ULL);
+  }
+  USUBO1(r0, c0); USUBC1(r1, c1); USUBC1(r2, c2); USUBC1(r3, c3);
+  USUB1(hi, hb);
+  uint64_t sx = (uint64_t)((int64_t)hi >> 63);
+  uint64_t lo = hi * 0x1000003D1ULL;
+  UADDO1(r0, lo); UADDC1(r1, sx); UADDC1(r2, sx); UADD1(r3, sx);
+  T[0] = r0; T[1] = r1; T[2] = r2; T[3] = r3;
+}
+
 __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
                               const uint64_t *X2, const uint64_t *Y2,
                               const uint64_t *Yoff, bool defer_y)
@@ -1181,9 +1215,13 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
+#if ZLAB_FUSED_X3
+  _ZModAddSub2(T, T, PPP, Q, false);   // X3 = R^2 + PPP - 2V
+#else
   _ModAdd256(T, T, PPP);
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
@@ -1221,9 +1259,13 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
   _ModSqr(T, R);                                   // R^2
+#if ZLAB_FUSED_X3
+  _ZModAddSub2(T, T, ZZZ3, Q, true);               // X3 = R^2 - PPP - 2Q
+#else
   _ModSub256(T, T, ZZZ3);
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+#endif
 
   _ModSub256(Q, Q, T);                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
