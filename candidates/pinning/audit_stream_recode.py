@@ -145,19 +145,22 @@ def audit_source() -> None:
         "#define GT_TOTAL_ENTRIES (1u << 20)",
         "int32_t ec=gt_mixed_step<18>(M,sign);",
         "ec=gt_mixed_step<17>(M,sign);",
-        "for (int c=2;c<GT_CHUNKS;c++)",
-        "ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];",
-        "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);",
+        "for (int c=2;c<GT_CHUNKS-1;c++)",
+        "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());",
         "return c == 0 ? 0 : 17*c+1;",
         "return c == 0 ? 0u : (unsigned)(c+1) << 16;",
         "uint32_t table_base=gt_offset(2);",
         "gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);",
         "table_base += 1u << 16;",
+        "#define QSB_FINAL_TEMPLATE 1",
+        "_PointAddXYZZT<true>(X,Y,ZZ,ZZZ, cx,cy, y0);",
+        "_PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);",
+        "__ldg(tx)",
     )
     for token in required:
         assert token in source, token
     assert source.count("__device__ void _FixedBaseSignedXYZZScalar") == 1
-    assert source.count("_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);") == 1
+    assert source.count("_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());") == 1
     assert "int32_t gte[GT_CHUNKS]" not in source
 
 

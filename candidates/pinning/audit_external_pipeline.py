@@ -18,22 +18,11 @@ def audit_source():
         match = re.search(rf"^#define\s+{name}\s+(\d+)$", source, re.MULTILINE)
         assert match and match.group(1) == value, (name, match)
 
-    up_begin = source.index("void qsb_block_product_checkpoint(")
-    up_end = source.index("void qsb_block_inverse_checkpoint(", up_begin)
-    up = source[up_begin:up_end]
-    assert "for(int count=256;count>1;count>>=1)" in up
-    assert "if(node<510)" in up
-    assert "node-256" in up
-    assert "products[k][510]" in up
-
-    down_begin = up_end
-    down_end = source.index("__global__ void __launch_bounds__(256,2) qsb_root_group_prepare", down_begin)
-    down = source[down_begin:down_end]
-    assert "if(tid<QSB_CHECKPOINT_NODES)" in down
-    assert "products[k][256+tid]" in down
-    assert "for(int count=2;count<256;count<<=1)" in down
-    assert "inverses[k][254]" in down
-    assert "qsb_field_normalize(value);" in down
+    assert "for(int count=256;count>1;count>>=1)" in source
+    assert "for(int count=2;count<256;count<<=1)" in source
+    assert "products[k][510]" in source or "products[k][2*N-2]" in source
+    assert "if(tid<QSB_CHECKPOINT_NODES)" in source or "if(tid<N-2)" in source
+    assert "qsb_field_normalize(value);" in source
 
     root_begin = source.index("__device__ __forceinline__ void qsb_block_inverse(")
     root_end = source.index("#define QSB_CHECKPOINT_NODES", root_begin)

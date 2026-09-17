@@ -85,13 +85,13 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
-#define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#define QSB_HOST_READBACK 1   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
 #endif
 #ifndef QSB_SPARSE_TAIL
-#define QSB_SPARSE_TAIL 0     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
+#define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
 #endif
 #ifndef QSB_FINAL_TEMPLATE
-#define QSB_FINAL_TEMPLATE 0  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
+#define QSB_FINAL_TEMPLATE 1  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
 #endif
 #ifndef QSB_SPARSE_D
 #define QSB_SPARSE_D 0        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
@@ -220,17 +220,18 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
     __uint128_t s;
-    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
-     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
-     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
-     * < n this is a no-op. */
-    s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
-    uint64_t k0=(k[0]&~km)|(kd0&km), k1=(k[1]&~km)|(kd1&km),
-             k2=(k[2]&~km)|(kd2&km), k3=(k[3]&~km)|(kd3&km);
+    /* A raw SHA scalar is at least n with probability (2^256-n)/2^256. Keep
+     * that exact case, but let the overwhelmingly common path avoid a
+     * four-limb subtract and four selects. */
+    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
+    if (k3 == n3 &&
+        (k2 > n2 ||
+         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
+        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
+    }
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -274,16 +275,17 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
 
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
-__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
+__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
-                                                     uint64_t neg,
-                                                     uint64_t gx[4], uint64_t gy[4]) {
+                                                     uint64_t neg_mask,
+                                                     uint64_t *__restrict__ gx,
+                                                     uint64_t *__restrict__ gy) {
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t m=0ULL-neg;
+    uint64_t m=neg_mask;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
     UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
@@ -298,12 +300,13 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 
 /* Decode one signed table digit. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
+    int32_t mask = ec >> 31;
+    uint32_t ae = ((uint32_t)ec ^ (uint32_t)mask) - (uint32_t)mask;
     *idx = (ae - 1) >> 1;
 #if QSB_PROBE_MASK
     *idx &= (uint32_t)QSB_PROBE_MASK;
 #endif
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)(int64_t)mask;
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -2532,7 +2535,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
