@@ -29,8 +29,11 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         for(int k=0;k<4;k++)tree[k][1]=root[k];
     }
     __syncthreads();
+    // Expand every internal inverse into shared memory. The leaf level has no
+    // shared inverse destination and no following join: each lane returns
+    // parent[(n+tid)/2] * sibling_product[n+(tid^1)] directly.
     #pragma unroll 1
-    for(int width=1;width<n;width<<=1){
+    for(int width=1;width<(n>>1);width<<=1){
         if(tid<width){
             int node=width+tid;
             uint64_t parent[5]={0,0,0,0,0},left[5]={0,0,0,0,0},right[5]={0,0,0,0,0};
@@ -47,7 +50,14 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         }
         if((width<<1)>32)__syncthreads();else __syncwarp();
     }
-    #pragma unroll
-    for(int k=0;k<4;k++)value[k]=tree[k][n+tid];
-    value[4]=0;
+    {
+        uint64_t parent[5]={0,0,0,0,0},sibling[5]={0,0,0,0,0};
+        int leaf=n+tid;
+        #pragma unroll
+        for(int k=0;k<4;k++){
+            parent[k]=tree[k][leaf>>1];
+            sibling[k]=tree[k][leaf^1];
+        }
+        qsb_field_mul(value,parent,sibling);
+    }
 }

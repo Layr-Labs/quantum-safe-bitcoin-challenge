@@ -118,15 +118,20 @@ and both child products into registers. It computes the left inverse as
 parent_inverse times right_product, and the right inverse as parent_inverse
 times left_product. Only after both child products have been loaded are the
 shared child slots overwritten with inverses. A barrier separates levels.
-After the last level, each lane reads its own leaf inverse and explicitly
-clears value[4].
+Internal inverses stop at nodes n/2 .. n-1. The leaf level has no shared
+inverse destination and no following join: each lane returns
+parent[(n+tid)/2] times the sibling leaf product, and qsb_field_mul clears
+value[4].
 
 For n=256, the up sweep uses 255 field multiplications and the down sweep
-uses 510, for 765 multiplications plus one modular inverse. There are 18
-block barriers including the initial leaf publication and root-inverse
-publication. These are source-level counts, not a promise about machine
-instruction counts or elapsed time. The shared array is in addition to the
-base's 8 KiB first-block SHA state cache.
+uses 510, for 765 multiplications plus one modular inverse. HEAD already
+replaces block barriers with `__syncwarp` once a level fits in a warp.
+Skipping the last shared leaf store and its join leaves 17 source-level
+synchronizations instead of 18 (leaf publication, eight up-sweep joins,
+root-inverse publication, seven internal down-sweep joins). These are
+source-level counts, not a promise about machine instruction counts or
+elapsed time. The shared array is in addition to the base's 8 KiB
+first-block SHA state cache.
 
 The algebra is ordinary batch inversion. If a parent product is L*R, then
 (L*R)^-1 * R = L^-1 and (L*R)^-1 * L = R^-1. Applying this recursively gives
