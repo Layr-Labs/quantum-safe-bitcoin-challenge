@@ -931,8 +931,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
  *
  * P has affine coordinates xP=X/ZZ and yP=Y/ZZZ, with ZZZ^2=ZZ^3.
  * For affine R=(xR,yR), let d=xR*ZZ-X=ZZ*(xR-xP). The collective
- * inverts W=ZZ^2*d. X is dead after d is formed, so overwrite it with d and
- * keep only four field elements live across the block-wide inverse. */
+ * inverts W=ZZ^2*d. X is dead after d is formed, so overwrite it with d.
+ * The kernel boundary keeps three fields: Y, V=ZZZ, and W. C=ZZ*d^2 is
+ * not materialised; finish uses the symmetric chord in (Y,V,I=1/W). */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
 ) {
@@ -945,46 +946,61 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare(
     W[4] = 0;
 }
 
-/* Across the kernel boundary, X_D has been replaced by C=ZZ*d^2 and ZZ by
- * W=ZZ^2*d. With inv=1/W, h=inv*ZZZ=A/(B*d) is the common slope scale and
- * delta=inv*C=d/ZZ=xR-xP. Thus xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R, avoiding reconstruction of affine yP:
- *   y1 = lambda1*(xR-x1)-yR
- *   y2 = -(m2*(xR-x2)-yR).
- * Returns the two y parities in bits 0 and 1. C, W, and ZZZ are deliberately
- * reused as delta, xs, and h. */
+/* Three-field symmetric finish. R=(a,b), P=(X/U,Y/V), I=1/W, K=3a^2.
+ *   h=V*I, t=V*h=1/(a-xP), u=b*t, v=Y*h
+ *   F=2*u^2-K*t+a, H=2*u*v
+ *   x_+ = F-H,  x_- = F+H
+ *   y_+ = (u-v)*(a-x_+)-b
+ *   y_- = b-(u+v)*(a-x_-)
+ * u is normalised and squared through a signed representative so the
+ * inherited _ModSqr near-prime carry drop cannot change the residue.
+ * Returns the two y parities in bits 0 and 1. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
-    uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *Y, uint64_t *V, uint64_t *inv,
+    uint64_t *xR, uint64_t *yR, uint64_t *k,
     uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t yb[4], m[4], t[4], s[4];
+    uint64_t h[4], t[4], u[4], v[4], F[4], H[4], s[4];
 
-    _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
+    _ModMult(h, V, inv);         /* h = V*I */
+    _ModMult(t, V, h);           /* t = 1/(a-xP) */
+    _ModMult(u, yR, t);          /* u = b*t */
+    _ModMult(v, Y, h);           /* v = Y*h */
 
-    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+    qsb_field_normalize(u);
+    if (u[3] & 0x8000000000000000ULL) {
+        _ModNeg256(s, u);
+        _ModSqr(F, s);
+    } else {
+        _ModSqr(F, u);
+    }
+    _ModAdd256(F, F, F);         /* 2*u^2 */
+    _ModMult(s, k, t);           /* K*t */
+    _ModSub256(F, s);
+    _ModAdd256(F, F, xR);        /* + a */
 
-    _ModSub256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
-    _ModSqr(x1, m);
-    _ModSub256(x1, W);
+    _ModMult(H, u, v);
+    _ModAdd256(H, H, H);         /* 2*u*v */
+
+    _ModSub256(x1, F, H);        /* x_+ = F-H */
+    _ModAdd256(x2, F, H);        /* x_- = F+H */
+
+    _ModSub256(s, u, v);
     _ModSub256(t, xR, x1);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
+    _ModMult(s, t);
+    _ModSub256(s, yR);           /* y_+ */
+    qsb_field_normalize(s);
     uint32_t parities = (uint32_t)(s[0] & 1ULL);
 
-    _ModAdd256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
-    _ModSqr(x2, m);
-    _ModSub256(x2, W);
+    _ModAdd256(s, u, v);
     _ModSub256(t, xR, x2);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    /* y2=-s. Since p is odd, field negation flips its parity. */
-    parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
+    _ModMult(s, t);
+    _ModSub256(t, yR, s);        /* y_- */
+    qsb_field_normalize(t);
+    parities |= (uint32_t)((t[0] & 1ULL) << 1);
+
+    qsb_field_normalize(x1);
+    qsb_field_normalize(x2);
     return parities;
 }
 
@@ -995,6 +1011,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
+__device__ __constant__ uint64_t pin_k_words[4];
 
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
@@ -1100,29 +1117,22 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         qsb_xyzz_finish_prepare(qx,qzz,prep_xR,prod);
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-    /* Preserve exactly four fields across the kernel boundary.  The finish
-     * needs C=ZZ*d^2 and W=ZZ^2*d, but no longer needs d or ZZ separately. */
-    if(usable){
-        _ModSqr(qx,qx);
-        _ModMult(qx,qzz);        /* qx becomes C */
-    }
+    /* Three-field checkpoint Y, V=ZZZ, W. C is not stored. */
     Load256(qzz,prod);           /* qzz becomes W */
     if (!usable) {
         prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
     }
     if(active){
-        /* Eight vector planes retain SoA coalescing while pairing adjacent
-         * limbs into naturally aligned 128-bit stores. */
+        /* Six vector planes: Y, V, W. W stays on planes 4-5 so the optional
+         * dense tree kernels keep their existing W-plane addresses. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qx[0],qx[1]);
-        qsb_st_v2(&saved[1u*state_plane_stride+state_idx],qx[2],qx[3]);
-        qsb_st_v2(&saved[2u*state_plane_stride+state_idx],qy[0],qy[1]);
-        qsb_st_v2(&saved[3u*state_plane_stride+state_idx],qy[2],qy[3]);
+        qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qy[0],qy[1]);
+        qsb_st_v2(&saved[1u*state_plane_stride+state_idx],qy[2],qy[3]);
+        qsb_st_v2(&saved[2u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
+        qsb_st_v2(&saved[3u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
         qsb_st_v2(&saved[4u*state_plane_stride+state_idx],qzz[0],qzz[1]);
         qsb_st_v2(&saved[5u*state_plane_stride+state_idx],qzz[2],qzz[3]);
-        qsb_st_v2(&saved[6u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
-        qsb_st_v2(&saved[7u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
     }
 #if QSB_TREE_OFFLOAD
     /* The leaf product tree is built by qsb_leaf_tree_prepare from the saved
@@ -1138,18 +1148,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
-        ulonglong2 qx23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
-        ulonglong2 qy01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
-        ulonglong2 qy23=qsb_ld_v2(&saved[3u*state_plane_stride+state_idx]);
+        ulonglong2 qy01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
+        ulonglong2 qy23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
+        ulonglong2 qzzz01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
+        ulonglong2 qzzz23=qsb_ld_v2(&saved[3u*state_plane_stride+state_idx]);
         ulonglong2 qzz01=qsb_ld_v2(&saved[4u*state_plane_stride+state_idx]);
         ulonglong2 qzz23=qsb_ld_v2(&saved[5u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz01=qsb_ld_v2(&saved[6u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz23=qsb_ld_v2(&saved[7u*state_plane_stride+state_idx]);
-        qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
-        qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
+        qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
     }
 #if QSB_TREE_OFFLOAD2
@@ -1172,8 +1179,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
                       pin_u2ry_words[2],pin_u2ry_words[3]};
     uint64_t q1x[4],q2x[4];
+    uint64_t kR[4]={pin_k_words[0],pin_k_words[1],
+                    pin_k_words[2],pin_k_words[3]};
     uint32_t y_parities = qsb_xyzz_finish_precomputed(
-        qx,qy,qzz,qzzz,prod,u2rx,u2ry,
+        qy,qzzz,prod,u2rx,u2ry,kR,
         q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
@@ -1769,6 +1778,39 @@ int main(int argc, char **argv) {
                 n2y[i]|=(uint64_t)dyb[31-i*8-b]<<(b*8);}}
         cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice);
         cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice);
+        /* K=3*a^2 mod p, a=xR. Once per problem; finish loads pin_k_words. */
+        {
+            BIGNUM *p=BN_new(),*kk=BN_new(),*three=BN_new();
+            int k_ok = (p!=NULL) && (kk!=NULL) && (three!=NULL);
+            k_ok = k_ok && EC_GROUP_get_curve_GFp(grp,p,NULL,NULL,ctx);
+            k_ok = k_ok && BN_mod_sqr(kk,bx,p,ctx);
+            k_ok = k_ok && BN_set_word(three,3);
+            k_ok = k_ok && BN_mod_mul(kk,kk,three,p,ctx);
+            if(k_ok==0){
+                fprintf(stderr,"Failed to compute recovery constant K=3a^2\n");
+                BN_free(p);BN_free(kk);BN_free(three);
+                return 1;
+            }
+            uint8_t kb[32]; memset(kb,0,32);
+            int kn=BN_num_bytes(kk);
+            k_ok = (kn>=0) && (kn<=32);
+            if(k_ok && kn>0) k_ok = BN_bn2bin(kk,kb+(32-kn))>0;
+            if(k_ok==0){
+                fprintf(stderr,"Failed to serialise recovery constant K\n");
+                BN_free(p);BN_free(kk);BN_free(three);
+                return 1;
+            }
+            uint64_t k_le[4]={0,0,0,0};
+            for(int i=0;i<4;i++) for(int b=0;b<8;b++)
+                k_le[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
+            cudaError_t kerr=cudaMemcpyToSymbol(pin_k_words,k_le,sizeof(k_le));
+            BN_free(p);BN_free(kk);BN_free(three);
+            if(kerr!=cudaSuccess){
+                fprintf(stderr,"Failed to upload recovery constant K: %s\n",
+                        cudaGetErrorString(kerr));
+                return 1;
+            }
+        }
         BN_free(bx);BN_free(by);BN_free(dx);BN_free(dy);
         EC_POINT_free(pt);EC_POINT_free(dbl);
         EC_GROUP_free(grp);BN_CTX_free(ctx);
@@ -1831,7 +1873,7 @@ int main(int argc, char **argv) {
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
-    size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
+    size_t pipeline_state_bytes=(size_t)BATCH*6u*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
     size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CAND_STRIDE*sizeof(uint64_t);
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
