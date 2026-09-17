@@ -1157,6 +1157,132 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
 }
 
+#include "tree_pipeline.cuh"
+
+/* Ranked short-epoch pipeline. prepare = scheduled window hash, SHA-256d,
+ * fixed-base multiply, shared-denominator prepare and the product-tree
+ * checkpoint; the root groups are inverted externally; finish = restore the
+ * tree, expand the root inverse, recover both keys, hash and gate. Per
+ * candidate arithmetic, table access, epoch/window selection and the hit
+ * encoding are identical to kernel_digest, which stays the fused reference. */
+__global__ void __launch_bounds__(256, 2) kernel_digest_prepare(
+    uint8_t * __restrict__ d_gt, int batch_size,
+    const epoch_desc_t * __restrict__ d_epochs,
+    ulonglong2 * __restrict__ saved, uint64_t * __restrict__ roots,
+    uint64_t * __restrict__ tree
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(blockIdx.x*blockDim.x>=batch_size)return;
+    int active=idx<batch_size;
+    const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
+    uint32_t state[8];
+    for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+
+    uint32_t b2[16];
+    for (int i=0;i<8;i++) b2[i]=state[i];
+    b2[8]=0x80000000;
+    for (int i=9;i<15;i++) b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2, b2);
+    uint64_t z[4];
+    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t prod[5];
+    qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod);        /* qx -> d, prod -> W */
+    bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
+    if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C = ZZ*d^2 */
+    if(active){
+        /* Eight vector planes keep SoA coalescing with 128-bit stores.
+         * qzz carries the raw W, so the finish recreates the usability
+         * decision without a flag. */
+        size_t stride=(size_t)batch_size, i=(size_t)idx;
+        saved[0u*stride+i]=make_ulonglong2(qx[0],qx[1]);
+        saved[1u*stride+i]=make_ulonglong2(qx[2],qx[3]);
+        saved[2u*stride+i]=make_ulonglong2(qy[0],qy[1]);
+        saved[3u*stride+i]=make_ulonglong2(qy[2],qy[3]);
+        saved[4u*stride+i]=make_ulonglong2(prod[0],prod[1]);
+        saved[5u*stride+i]=make_ulonglong2(prod[2],prod[3]);
+        saved[6u*stride+i]=make_ulonglong2(qzzz[0],qzzz[1]);
+        saved[7u*stride+i]=make_ulonglong2(qzzz[2],qzzz[3]);
+    }
+    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=0;}
+    prod[4]=0;
+    qsb_block_product_checkpoint(prod,roots,tree);
+}
+
+__global__ void __launch_bounds__(256, 3) kernel_digest_finish(
+    uint32_t *d_hit_cnt, uint32_t *d_hit_idx, uint8_t *d_hit_combos,
+    int batch_size, const epoch_desc_t * __restrict__ d_epochs,
+    const ulonglong2 * __restrict__ saved, const uint64_t * __restrict__ roots,
+    const uint64_t * __restrict__ tree
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(blockIdx.x*blockDim.x>=batch_size)return;
+    int active=idx<batch_size;
+    uint64_t qx[4],qy[4],Wsave[4],qzzz[4];
+    bool usable=false;
+    if(active){
+        size_t stride=(size_t)batch_size, i=(size_t)idx;
+        ulonglong2 c01=saved[0u*stride+i],c23=saved[1u*stride+i];
+        ulonglong2 y01=saved[2u*stride+i],y23=saved[3u*stride+i];
+        ulonglong2 w01=saved[4u*stride+i],w23=saved[5u*stride+i];
+        ulonglong2 z01=saved[6u*stride+i],z23=saved[7u*stride+i];
+        qx[0]=c01.x;qx[1]=c01.y;qx[2]=c23.x;qx[3]=c23.y;
+        qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
+        Wsave[0]=w01.x;Wsave[1]=w01.y;Wsave[2]=w23.x;Wsave[3]=w23.y;
+        qzzz[0]=z01.x;qzzz[1]=z01.y;qzzz[2]=z23.x;qzzz[3]=z23.y;
+        usable=((Wsave[0]|Wsave[1]|Wsave[2]|Wsave[3])!=0);
+    }
+    uint64_t prod[5];
+    #pragma unroll
+    for(int k=0;k<4;k++)prod[k]=usable?Wsave[k]:(k==0?1ULL:0ULL);
+    prod[4]=0;
+    qsb_block_inverse_checkpoint(prod,roots,tree);
+    if(!usable)return;
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
+
+    int v=0, recid=0;
+    for(int ri=0;ri<2&&!v;ri++){
+        uint64_t sx0=ri ? q2x[0] : q1x[0];
+        uint64_t sx1=ri ? q2x[1] : q1x[1];
+        uint64_t sx2=ri ? q2x[2] : q1x[2];
+        uint64_t sx3=ri ? q2x[3] : q1x[3];
+        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+        uint32_t pb[16];
+        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        /* Ranked gate on the state words; Config A hashes once. */
+        if(gpu_bench_valid_words(hs)){ v=1;recid=ri; break; }
+    }
+    if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
+        if(p<1024) {
+            d_hit_idx[p]=((uint32_t)idx)|(recid<<30);
+            const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
+            for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
+            for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
+        }
+    }
+}
+
 /* ============================================================
  * Fixed-base table construction on the GPU (signed-digit table)
  *
@@ -1901,6 +2027,7 @@ int main(int argc, char **argv) {
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
+    ulonglong2 *d_saved=NULL; uint64_t *d_roots=NULL,*d_tree=NULL,*d_super_roots=NULL,*d_root_ckpt=NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -1931,6 +2058,17 @@ int main(int argc, char **argv) {
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
+        /* External inversion pipeline: per-candidate state (8 x 16 B), one raw
+         * root per epoch block, the checkpointed tree nodes, and the root
+         * groups (at most 256 groups of 256 blocks per launch). */
+        size_t se_batch=(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_SE_PER_EPOCH;
+        if(cudaMalloc(&d_saved,se_batch*8u*sizeof(ulonglong2))!=cudaSuccess||
+           cudaMalloc(&d_roots,(size_t)QSB_SE_LAUNCH_BLOCKS*4u*sizeof(uint64_t))!=cudaSuccess||
+           cudaMalloc(&d_tree,(size_t)QSB_SE_LAUNCH_BLOCKS*4u*QSB_CKPT_STRIDE*sizeof(uint64_t))!=cudaSuccess||
+           cudaMalloc(&d_super_roots,256u*4u*sizeof(uint64_t))!=cudaSuccess||
+           cudaMalloc(&d_root_ckpt,256u*4u*QSB_CKPT_STRIDE*sizeof(uint64_t))!=cudaSuccess){
+            fprintf(stderr, "OOM: inversion pipeline buffers\n"); return 1;
+        }
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -2146,20 +2284,17 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, 0,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+            kernel_digest_prepare<<<nblk, QSB_SE_PER_EPOCH>>>(
+                d_gt, batch_pos, d_epochs, d_saved, d_roots, d_tree);
+            {
+                int root_groups = (nblk + 255) / 256;
+                qsb_root_group_prepare<<<root_groups, 256>>>(d_roots, nblk, d_super_roots, d_root_ckpt);
+                qsb_invert_super_roots<<<1, 256>>>(d_super_roots, root_groups);
+                qsb_root_group_finish<<<root_groups, 256>>>(d_roots, nblk, d_super_roots, d_root_ckpt);
+            }
+            kernel_digest_finish<<<nblk, QSB_SE_PER_EPOCH>>>(
+                d_hit_cnt, d_hit_idx, d_hit_combos, batch_pos, d_epochs,
+                d_saved, d_roots, d_tree);
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
