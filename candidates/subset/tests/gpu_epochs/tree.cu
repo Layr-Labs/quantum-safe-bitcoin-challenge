@@ -40,6 +40,14 @@
 #ifndef ZLAB_PAIRSHA
 #define ZLAB_PAIRSHA 0
 #endif
+/* QSB_PAIR_N: epochs per 256-thread block on the ranked path. Each thread runs
+ * QSB_PAIR_N candidates (WIN3[tid] of epochs QSB_PAIR_N*b+c) and contributes the
+ * product of their denominators to the unchanged 256-leaf inverse tree, so one
+ * serial _ModInv serves QSB_PAIR_N*256 candidates at unchanged block geometry.
+ * 1 = promoted behaviour. Only 1 and 2 are implemented. */
+#ifndef QSB_PAIR_N
+#define QSB_PAIR_N 2
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -1138,12 +1146,26 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int fast_inc, const uint32_t * __restrict__ d_const_words,
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
     const int easy_flag=0,single_hash_flag=1,calibrate_flag=0;
     // All tail lanes remain present through the block inverse.
-    if(blockIdx.x*blockDim.x>=batch_size)return;
+    if(blockIdx.x*blockDim.x*QSB_PAIR_N>=batch_size)return;
+#if ZLAB_TRIM && QSB_PAIR_N==2
+    /* Candidate A's finish fields wait in local memory while candidate B runs;
+     * volatile keeps the 128 B out of the register file. */
+    volatile uint64_t savedA[16];
+    bool usableA=false;
+    uint64_t qy[4],qzz[4],qzzz[4],prod[5];
+    bool usable=false;
+    int idx=0;
+    const epoch_desc_t *se_desc=NULL;
+    #pragma unroll
+    for(int pc=0;pc<QSB_PAIR_N;pc++){
+    idx = (blockIdx.x*QSB_PAIR_N+pc)*blockDim.x + threadIdx.x;
     int active=idx<batch_size;
+#else
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
 
     /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
@@ -1156,9 +1178,26 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
 #if ZLAB_TRIM
+#if QSB_PAIR_N==2
+    {
+        /* An odd epoch count leaves the last block's second slot without a
+         * descriptor; keep the read in bounds (the lane is inactive anyway). */
+        int ep = blockIdx.x*QSB_PAIR_N + pc;
+        const int built = batch_size / (int)blockDim.x;
+        if(ep >= built) ep = built - 1;
+        se_desc = d_epochs + ep;
+    }
+#else
     const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
+#endif
     uint32_t state[8];
     for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
+#if QSB_PAIR_N==2
+    /* The scheduled hash stages this epoch's first-block states in shared
+     * memory behind one barrier; a second epoch in the same block must not
+     * overwrite them while slower lanes still read the first. */
+    if(pc>0)__syncthreads();
+#endif
     qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
 #else
     uint8_t skip[MAX_T];
@@ -1297,24 +1336,97 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
     /* u1*G as raw XYZZ via the signed-digit 32 MiB A-table: digits streamed
      * from the recode state, Y anchor-deferred through the chain. */
+#if ZLAB_TRIM && QSB_PAIR_N==2
+    uint64_t qx[4];
+#else
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+#endif
     _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
 
     uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+#if !(ZLAB_TRIM && QSB_PAIR_N==2)
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+#endif
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
      * W = ZZZ*d with d = xR*ZZ - X; the block inverts W. */
+#if !(ZLAB_TRIM && QSB_PAIR_N==2)
     uint64_t prod[5];
+#endif
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W = ZZZ*d */
+#if ZLAB_TRIM && QSB_PAIR_N==2
+    usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
+#else
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
+#endif
     /* d and W are not needed after the inverse: the finish derives both
      * x-coordinates from the two slopes and the constant QSB_U2R_C. */
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+#if ZLAB_TRIM && QSB_PAIR_N==2
+    if(pc==0){
+        /* Park candidate A: the three finish fields and its denominator W_A. */
+        #pragma unroll
+        for(int k=0;k<4;k++){savedA[k]=qy[k];savedA[4+k]=qzz[k];savedA[8+k]=qzzz[k];savedA[12+k]=prod[k];}
+        usableA=usable;
+        continue;
+    }
+    } /* end of the candidate loop; pc==1 state (qy,qzz,qzzz,prod,usable,idx,se_desc) is live */
+    /* One tree for both: leaf = W_A*W_B, then split the inverse. Identity
+     * factors keep unusable lanes exact, as before. W_B stays parked in local
+     * memory next to W_A so the tree runs with the promoted register budget. */
+    volatile uint64_t savedB[4];
+    {
+        uint64_t wa[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){wa[k]=savedA[12+k];savedB[k]=prod[k];}
+        wa[4]=0;
+        qsb_field_mul_raw(prod,wa,prod);
+        prod[4]=0;
+    }
+    /* Park candidate B's finish fields across the tree as well, so nothing
+     * of either candidate lives in registers while the tree runs. */
+    volatile uint64_t savedBf[12];
+    #pragma unroll
+    for(int k=0;k<4;k++){savedBf[k]=qy[k];savedBf[4+k]=qzz[k];savedBf[8+k]=qzzz[k];}
+    qsb_block_inverse_tree(prod);
+    #pragma unroll
+    for(int k=0;k<4;k++){qy[k]=savedBf[k];qzz[k]=savedBf[4+k];qzzz[k]=savedBf[8+k];}
+    #pragma unroll 1
+    for(int fc=0;fc<QSB_PAIR_N;fc++){
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities;
+    uint64_t inv[5];
+    {
+        /* 1/W_A = inv(W_A W_B) * W_B ; 1/W_B = inv(W_A W_B) * W_A */
+        uint64_t other[5];
+        #pragma unroll
+        for(int k=0;k<4;k++)other[k]=fc==0?savedB[k]:savedA[12+k];
+        other[4]=0;
+        qsb_field_mul_raw(inv,prod,other);
+        inv[4]=0;
+    }
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    if(fc==0){
+        if(!usableA){continue;}
+        uint64_t ay[4],azz[4],azzz[4];
+        #pragma unroll
+        for(int k=0;k<4;k++){ay[k]=savedA[k];azz[k]=savedA[4+k];azzz[k]=savedA[8+k];}
+        y_parities = qsb_xyzz_finish_precomputed(ay,azz,azzz,inv,u2rx,u2ry,q1x,q2x);
+    } else {
+        if(!usable){continue;}
+        y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,inv,u2rx,u2ry,q1x,q2x);
+    }
+    const int hit_idx_c = (blockIdx.x*QSB_PAIR_N+fc)*blockDim.x + threadIdx.x;
+    const epoch_desc_t *se_hit = d_epochs + (hit_idx_c < batch_size ? blockIdx.x*QSB_PAIR_N + fc : 0);
+#else
     qsb_block_inverse_tree(prod);
     if(!usable)return;
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    const int hit_idx_c = idx;
+    const epoch_desc_t *se_hit = se_desc;
+#endif
 
     int v=0, hash_choice=0, recid=0;
 #if ZLAB_PAIRSHA
@@ -1400,10 +1512,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
         if(p<1024) {
 #if ZLAB_HITPATH
-          if(se_desc) {
+          if(se_hit) {
             /* Packed record p at d_hit_idx[4p] (tag) and d_hit_combos[16p..] (9 indices). */
-            d_hit_idx[p*4]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            for(int i=0;i<6;i++)d_hit_combos[p*ZLAB_HIT_REC+i]=se_desc->early[i];
+            d_hit_idx[p*4]=((uint32_t)hit_idx_c)|(recid<<30)|(hash_choice<<31);
+            for(int i=0;i<6;i++)d_hit_combos[p*ZLAB_HIT_REC+i]=se_hit->early[i];
             for(int i=0;i<3;i++)d_hit_combos[p*ZLAB_HIT_REC+6+i]=WIN3[threadIdx.x][i];
           } else
 #endif
@@ -1412,8 +1524,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
           {}
 #else
           {
-            d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
+            d_hit_idx[p]=((uint32_t)hit_idx_c)|(recid<<30)|(hash_choice<<31);
+            for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_hit->early[i];
             for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
           }
 #endif
@@ -1430,6 +1542,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
         }
     }
+#if ZLAB_TRIM && QSB_PAIR_N==2
+    } /* finish loop */
+#endif
 }
 
 /* ============================================================
@@ -2472,7 +2587,7 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            kernel_digest<<<(nblk + QSB_PAIR_N - 1) / QSB_PAIR_N, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
