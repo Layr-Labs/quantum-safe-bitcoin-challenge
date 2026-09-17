@@ -245,7 +245,7 @@ __device__ uint64_t BINOM_C[151][10];
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
 #ifndef ZLAB_T14
-#define ZLAB_T14 0
+#define ZLAB_T14 1
 #endif
 #if ZLAB_T14
 #define GT_CHUNKS 14
