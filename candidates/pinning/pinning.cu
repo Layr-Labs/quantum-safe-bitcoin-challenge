@@ -22,6 +22,20 @@
 static_assert(sizeof(ulonglong2) == 16, "pipeline vector must be 128 bits");
 static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligned");
 
+/* Batch size: 2^26 candidates per pipeline launch. Larger batches amortize the
+ * five kernel launches, the host round trip and the pipeline ramp over more
+ * candidates (idea from public submission b756a1c by welttowelt). The
+ * super-root inverse runs one CTA per 256 group roots, so no third tree level
+ * is needed. State is 96 B + 32 B of tree checkpoint per candidate, so a 2^26
+ * batch needs about 8.2 GiB; main() halves the batch and retries down to the
+ * promoted 2^24 if the device cannot supply it.
+ *
+ * Host drain: from public submission 36d4266 by welttowelt. The hit counter is
+ * reset with cudaMemset instead of a host-to-device copy, the explicit
+ * cudaDeviceSynchronize before the blocking counter read-back is dropped (the
+ * blocking D2H copy already orders the stream), and the per-hit stdout mirror
+ * is dropped so a hit batch does not stall the loop on I/O. */
+
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
 #define AFFIX_IS_SUFFIX true
@@ -88,18 +102,17 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
     __uint128_t s;
-    /* A raw SHA scalar is at least n with probability (2^256-n)/2^256. Keep
-     * that exact case, but let the overwhelmingly common path avoid a
-     * four-limb subtract and four selects. */
-    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
-    if (k3 == n3 &&
-        (k2 > n2 ||
-         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
-        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
-    }
+    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
+     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
+     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
+     * < n this is a no-op. */
+    s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
+    s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+    s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+    s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+    uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
+    uint64_t k0=(k[0]&~km)|(kd0&km), k1=(k[1]&~km)|(kd1&km),
+             k2=(k[2]&~km)|(kd2&km), k3=(k[3]&~km)|(kd3&km);
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -143,17 +156,16 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
 
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
-__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
+__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
                                                      uint32_t base, uint32_t idx,
-                                                     uint64_t neg_mask,
-                                                     uint64_t *__restrict__ gx,
-                                                     uint64_t *__restrict__ gy) {
+                                                     uint64_t neg,
+                                                     uint64_t gx[4], uint64_t gy[4]) {
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t m=neg_mask;
+    uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
     UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
@@ -168,10 +180,9 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 
 /* Decode one signed table digit. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    int32_t mask = ec >> 31;
-    uint32_t ae = ((uint32_t)ec ^ (uint32_t)mask) - (uint32_t)mask;
+    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
     *idx = (ae - 1) >> 1;
-    *neg = (uint64_t)(int64_t)mask;
+    *neg = (ec < 0) ? 1ULL : 0ULL;
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -188,10 +199,10 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  * Production consumes the raw XYZZ output directly. This avoids the three
  * field multiplications formerly used to convert it to homogeneous projective
  * form before recovery. */
-__device__ void _FixedBaseSignedXYZZ(
-    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
-    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
-    const int32_t *__restrict__ e, const uint8_t *__restrict__ gTable) {
+__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
+                                      uint64_t *ZZ, uint64_t *ZZZ,
+                                      const int32_t e[GT_CHUNKS],
+                                      const uint8_t *gTable) {
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
     gt_digit_idx(e[0], &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -203,45 +214,73 @@ __device__ void _FixedBaseSignedXYZZ(
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
+    for (int c=2;c<GT_CHUNKS;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
     }
-    gt_digit_idx(e[GT_CHUNKS-1], &idx, &neg);
-    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
-    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+}
+
+/* Direct regular-digit extraction, from public submission f535811 (subset
+ * track) by dun999. Chunk c's signed odd digit is 2f+1-2^w for the
+ * w-bit field f of the recode setup value M starting at bit 17c+2 (bit 1 for
+ * chunk 0), so the 15 digits no longer come from a serial gt_mixed_step
+ * recurrence: every table index depends only on the setup state. Index is
+ * (f^(t-1)) masked, with t the field's top bit; the digit is negative iff
+ * t==0 XOR the global sign; the last chunk is the positive remainder.
+ * Credit: dun999 / f535811. */
+__device__ __forceinline__ uint32_t gt_field_bits(uint64_t m0, uint64_t m1, uint64_t m2,
+                                                    uint64_t m3, unsigned pos) {
+    unsigned li = pos >> 6, sh = pos & 63u;
+    uint64_t lo = li == 0 ? m0 : li == 1 ? m1 : li == 2 ? m2 : m3;
+    uint64_t hi = li == 0 ? m1 : li == 1 ? m2 : li == 2 ? m3 : 0ULL;
+    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
 }
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
-__device__ void _FixedBaseSignedXYZZScalar(
-    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
-    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
-    const uint64_t *__restrict__ k, const uint8_t *__restrict__ gTable) {
+__device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
+                                            uint64_t *ZZ, uint64_t *ZZZ,
+                                            const uint64_t k[4],
+                                            const uint8_t *gTable) {
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    uint64_t sflag = (uint64_t)(sign < 0);
+    {
+        uint32_t f = gt_field_bits(M[0],M[1],M[2],M[3], 1u) & 0x3ffffu;
+        uint32_t t = f >> 17;
+        idx = (f ^ (t - 1u)) & 0x1ffffu;
+        neg = (uint64_t)(t ^ 1u) ^ sflag;
+        gt_load_signed_flat(gTable, gt_offset(0), idx, neg, x0, y0);
+    }
+    {
+        uint32_t f = gt_field_bits(M[0],M[1],M[2],M[3], 19u) & 0x1ffffu;
+        uint32_t t = f >> 16;
+        idx = (f ^ (t - 1u)) & 0xffffu;
+        neg = (uint64_t)(t ^ 1u) ^ sflag;
+        gt_load_signed_flat(gTable, gt_offset(1), idx, neg, x1, y1);
+    }
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
+    {
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
+    unsigned pos = 36u;
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+    for (int c=2;c<GT_CHUNKS;c++){
+        uint32_t f = gt_field_bits(M[0],M[1],M[2],M[3], pos) & 0x1ffffu;
+        uint32_t t = f >> 16;
+        bool last = (c == GT_CHUNKS-1);
+        idx = last ? (f & 0xffffu) : ((f ^ (t - 1u)) & 0xffffu);
+        neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
+        pos += 17u;
     }
-    ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg);
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -292,92 +331,6 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     return ok;
 }
 
-
-
-
-
-/* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block.
- * Pad shape (matches check_tail_words.py): W[0..2] live, W[3..14]=0,
- * W[15]=9995*8=79960. Continues from an existing midstate (unlike the
- * fresh-IV Pk33 / SHA256d32 helpers). First 16 rounds and the first
- * in-place WMIX drop zero addends; later 48 rounds use the generic
- * SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on that
- * padded block. */
-__device__ __forceinline__ void _SHA256TransformFastTail11(
-    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
-{
-    const uint32_t L = 9995u * 8u; /* 79960 */
-    uint32_t t1;
-    uint32_t t2;
-
-    uint32_t a = state[0];
-    uint32_t b = state[1];
-    uint32_t c = state[2];
-    uint32_t d = state[3];
-    uint32_t e = state[4];
-    uint32_t f = state[5];
-    uint32_t g = state[6];
-    uint32_t h = state[7];
-
-    uint32_t w[16];
-    w[0] = w0;
-    w[1] = w1;
-    w[2] = w2;
-#pragma unroll
-    for (int i = 3; i < 15; i++) w[i] = 0;
-    w[15] = L;
-
-    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
-    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
-    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
-    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
-    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
-    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
-    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
-    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
-    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
-    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
-    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
-    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
-    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
-    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
-    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
-    S2Round(b, c, d, e, f, g, h, a, K[15], L);
-
-    {
-        w[0] += s0(w[1]);
-        w[1] += s1(L) + s0(w[2]);
-        w[2] += s1(w[0]);
-        w[3]  = s1(w[1]);
-        w[4]  = s1(w[2]);
-        w[5]  = s1(w[3]);
-        w[6]  = s1(w[4]) + L;
-        w[7]  = s1(w[5]) + w[0];
-        w[8]  = s1(w[6]) + w[1];
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(L);
-        w[15] += s1(w[13]) + w[8] + s0(w[0]);
-    }
-
-    SHA256_RND(16);
-    WMIX();
-    SHA256_RND(32);
-    WMIX();
-    SHA256_RND(48);
-
-    state[0] += a;
-    state[1] += b;
-    state[2] += c;
-    state[3] += d;
-    state[4] += e;
-    state[5] += f;
-    state[6] += g;
-    state[7] += h;
-}
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -671,12 +624,12 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
  * inverse, and returns canonical leaf inverses.  The packed node numbering is
  * identical to qsb_block_inverse; leaves come from the saved W field and node
  * 510 is omitted because roots owns it. */
+template<int N>
 __device__ __forceinline__ void qsb_block_product_checkpoint(
-    uint64_t *value, uint64_t *roots, uint64_t *checkpoint
+    uint64_t *value, uint64_t *roots, uint64_t *checkpoint, uint64_t (*products)[2*N]
 ) {
-    __shared__ uint64_t products[4][512];
     int tid=threadIdx.x;
-    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+    size_t block_base=(size_t)blockIdx.x*4u*N;
 
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
@@ -684,7 +637,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
 
     int offset=0;
     #pragma unroll 1
-    for(int count=256;count>1;count>>=1){
+    for(int count=N;count>1;count>>=1){
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
@@ -699,8 +652,8 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             #pragma unroll
             for(int k=0;k<4;k++){
                 products[k][node]=out[k];
-                if(node<510)
-                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256]=out[k];
+                if(node<2*N-2)
+                    checkpoint[block_base+(size_t)k*N+node-N]=out[k];
             }
         }
         offset+=count;
@@ -709,17 +662,25 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
 
     if(tid==0){
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][510];
+        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
     }
 }
+template<int N>
+__device__ __forceinline__ void qsb_block_product_checkpoint(
+    uint64_t *value, uint64_t *roots, uint64_t *checkpoint
+) {
+    __shared__ uint64_t products[4][2*N];
+    qsb_block_product_checkpoint<N>(value,roots,checkpoint,products);
+}
 
+template<int N>
 __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     uint64_t *value, const uint64_t *roots, const uint64_t *checkpoint
 ) {
-    __shared__ uint64_t products[4][512];
-    __shared__ uint64_t inverses[4][256];
+    __shared__ uint64_t products[4][2*N];
+    __shared__ uint64_t inverses[4][N];
     int tid=threadIdx.x;
-    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+    size_t block_base=(size_t)blockIdx.x*4u*N;
 
     /* Each lane supplies its saved W leaf and all but the last two lanes
      * restore one internal node. Lane zero also publishes the external root inverse.
@@ -727,28 +688,28 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     #pragma unroll
     for(int k=0;k<4;k++){
         products[k][tid]=value[k];
-        if(tid<QSB_CHECKPOINT_NODES)
-            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
-        if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
+        if(tid<N-2)
+            products[k][N+tid]=checkpoint[block_base+(size_t)k*N+tid];
+        if(tid==0)inverses[k][N-2]=roots[(size_t)blockIdx.x*4u+k];
     }
     __syncthreads();
 
-    int offset=508;
+    int offset=2*N-4;
     #pragma unroll 1
-    for(int count=2;count<256;count<<=1){
+    for(int count=2;count<N;count<<=1){
         int half=count>>1;
         if(tid<count){
             int local_parent=tid&(half-1);
             uint64_t parent_inv[5],sibling[5],child_inv[5];
             #pragma unroll
             for(int k=0;k<4;k++){
-                parent_inv[k]=inverses[k][offset+count-256+local_parent];
+                parent_inv[k]=inverses[k][offset+count-N+local_parent];
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
             qsb_field_mul(child_inv,parent_inv,sibling);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
+            for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
         __syncthreads();
@@ -757,8 +718,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     uint64_t parent_inv[5],sibling[5];
     #pragma unroll
     for(int k=0;k<4;k++){
-        parent_inv[k]=inverses[k][tid&127];
-        sibling[k]=products[k][tid^128];
+        parent_inv[k]=inverses[k][tid&(N/2-1)];
+        sibling[k]=products[k][tid^(N/2)];
     }
     parent_inv[4]=sibling[4]=0;
     qsb_field_mul(value,parent_inv,sibling);
@@ -779,13 +740,15 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
-    qsb_block_product_checkpoint(r,super_roots,root_checkpoint);
+    qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
 }
 
+/* One 256-lane CTA per 256 group roots; each CTA runs its own _ModInv, so
+ * batches with more than 65,536 candidate trees need no third tree level. */
 __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
-    int tid=(int)threadIdx.x;
+    int tid=(int)(blockIdx.x*256u+threadIdx.x);
     bool active=tid<count;
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
@@ -808,7 +771,7 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
-    qsb_block_inverse_checkpoint(r,super_roots,root_checkpoint);
+    qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
         #pragma unroll
         for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
@@ -820,60 +783,65 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
  *
  * P has affine coordinates xP=X/ZZ and yP=Y/ZZZ, with ZZZ^2=ZZ^3.
  * For affine R=(xR,yR), let d=xR*ZZ-X=ZZ*(xR-xP). The collective
- * inverts W=ZZ^2*d. X is dead after d is formed, so overwrite it with d and
- * keep only four field elements live across the block-wide inverse. */
+ * inverts W=ZZ^2*d. Only Y, ZZZ, and W cross the kernel boundary. */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
+    uint64_t *X, uint64_t *ZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
     _ModMult(t, xR, ZZ);
-    _ModSub256(t, t, X_D);
-    Load256(X_D, t);             /* X_D becomes d */
+    _ModSub256(t, t, X);         /* d = xR*ZZ-X */
     _ModSqr(W, ZZ);
-    _ModMult(W, X_D);            /* W = ZZ^2*d */
+    _ModMult(W, t);              /* W = ZZ^2*d */
     W[4] = 0;
 }
 
-/* Across the kernel boundary, X_D has been replaced by C=ZZ*d^2 and ZZ by
- * W=ZZ^2*d. With inv=1/W, h=inv*ZZZ=A/(B*d) is the common slope scale and
- * delta=inv*C=d/ZZ=xR-xP. Thus xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R, avoiding reconstruction of affine yP:
- *   y1 = lambda1*(xR-x1)-yR
- *   y2 = -(m2*(xR-x2)-yR).
- * Returns the two y parities in bits 0 and 1. C, W, and ZZZ are deliberately
- * reused as delta, xs, and h. */
-__device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
-    uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2
+/* With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let u=yR*t and
+ * v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
+ * K=3*xR^2 is fixed for the entire problem. The shared x base is
+ * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H.
+ * Both y coordinates are anchored at R. Return their parities in bits 0,1. */
+__device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
+    uint64_t *Y, uint64_t *V, uint64_t *inv,
+    uint64_t *xR, uint64_t *yR, uint64_t *K,
+    uint64_t *x_plus, uint64_t *x_minus
 ) {
-    uint64_t yb[4], m[4], t[4], s[4];
+    uint64_t h[4], u[4], v[4], f[4];
+    _ModMult(h, V, inv);         /* h = V*I */
+    _ModMult(V, h);              /* V becomes t = V*h */
+    _ModMult(u, yR, V);          /* u = yR*t */
+    _ModMult(v, Y, h);           /* v = Y*h */
 
-    _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
+    /* GPUMath's square drops a final carry for some near-p operands. For
+     * upper-half u, square the equivalent negative representative; keep u
+     * unchanged for H and y. */
+    qsb_field_normalize(u);
+    if(u[3] >> 63) _ModNeg256(h, u);
+    else Load256(h, u);
+    _ModSqr(f, h);
+    _ModAdd256(f, f, f);
+    _ModMult(h, K, V);           /* h becomes K*t */
+    _ModSub256(f, h);
+    _ModAdd256(f, f, xR);        /* F = 2*u^2-K*t+xR */
+    _ModMult(h, u, v);
+    _ModAdd256(h, h, h);         /* H = 2*u*v */
+    _ModSub256(x_plus, f, h);
+    _ModAdd256(x_minus, f, h);
+    qsb_field_normalize(x_plus);
+    qsb_field_normalize(x_minus);
 
-    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+    _ModSub256(h, u, v);
+    _ModSub256(V, xR, x_plus);
+    _ModMult(h, V);
+    _ModSub256(h, yR);
+    qsb_field_normalize(h);
+    uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModSub256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
-    _ModSqr(x1, m);
-    _ModSub256(x1, W);
-    _ModSub256(t, xR, x1);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    uint32_t parities = (uint32_t)(s[0] & 1ULL);
-
-    _ModAdd256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
-    _ModSqr(x2, m);
-    _ModSub256(x2, W);
-    _ModSub256(t, xR, x2);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    /* y2=-s. Since p is odd, field negation flips its parity. */
-    parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
+    _ModAdd256(h, u, v);
+    _ModSub256(V, xR, x_minus);
+    _ModMult(h, V);
+    _ModSub256(V, yR, h);
+    qsb_field_normalize(V);
+    parities |= (uint32_t)((V[0] & 1ULL) << 1);
     return parities;
 }
 
@@ -884,9 +852,11 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
+__device__ __constant__ uint64_t pin_u2rk_words[4];
 
 template<bool FAST_TAIL, int STAGE>
-__global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeline(
+__global__ void __launch_bounds__(STAGE == 0 ? 128 : 128,
+                                  STAGE == 0 ? 4 : 6) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -917,12 +887,14 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-        /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
-        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
-        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
-        uint32_t w2 = pin_tail_words[2];
-        _SHA256TransformFastTail11(state, w0, w1, w2);
+        uint32_t blk[16] = {
+            pin_tail_words[0] | (lt & 0xffu),
+            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
+            pin_tail_words[2],
+            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
+        };
+        _SHA256Transform(state,blk);
     } else {
         /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
@@ -986,31 +958,23 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         qsb_xyzz_finish_prepare(qx,qzz,prep_xR,prod);
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-    /* Preserve exactly four fields across the kernel boundary.  The finish
-     * needs C=ZZ*d^2 and W=ZZ^2*d, but no longer needs d or ZZ separately. */
-    if(usable){
-        _ModSqr(qx,qx);
-        _ModMult(qx,qzz);        /* qx becomes C */
-    }
     Load256(qzz,prod);           /* qzz becomes W */
     if (!usable) {
         prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
     }
     if(active){
-        /* Eight vector planes retain SoA coalescing while pairing adjacent
+        /* Six vector planes retain SoA coalescing while pairing adjacent
          * limbs into naturally aligned 128-bit stores. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
+        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
+        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
+        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
+        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
         saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
         saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
     }
-    qsb_block_product_checkpoint(prod,roots,tree);
+    qsb_block_product_checkpoint<128>(prod,roots,tree);
     return;
     } else {
 
@@ -1018,15 +982,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
+        ulonglong2 qy01=saved[0u*state_plane_stride+state_idx];
+        ulonglong2 qy23=saved[1u*state_plane_stride+state_idx];
+        ulonglong2 qzzz01=saved[2u*state_plane_stride+state_idx];
+        ulonglong2 qzzz23=saved[3u*state_plane_stride+state_idx];
         ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
         ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
-        qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
@@ -1037,15 +998,17 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     #pragma unroll
     for(int limb=0;limb<4;limb++)prod[limb]=usable?qzz[limb]:(limb==0?1ULL:0ULL);
     prod[4]=0;
-    qsb_block_inverse_checkpoint(prod,roots,tree);
+    qsb_block_inverse_checkpoint<128>(prod,roots,tree);
     if (!usable) return;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
                       pin_u2ry_words[2],pin_u2ry_words[3]};
+    uint64_t u2rk[4]={pin_u2rk_words[0],pin_u2rk_words[1],
+                      pin_u2rk_words[2],pin_u2rk_words[3]};
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(
-        qx,qy,qzz,qzzz,prod,u2rx,u2ry,
+    uint32_t y_parities = qsb_xyzz_finish_symmetric(
+        qy,qzzz,prod,u2rx,u2ry,u2rk,
         q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
@@ -1118,8 +1081,9 @@ static void launch_pinning_pipeline(
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
     uint64_t *super_roots, uint64_t *root_checkpoint
 ) {
-    int blocks=(batch_size+255)/256;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
+    int blocks=(batch_size+128-1)/128;
+    int blocks0=(batch_size+128-1)/128;
+    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,128>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -1130,10 +1094,6 @@ static void launch_pinning_pipeline(
         exit(2);
     }
     int root_groups=(blocks+255)/256;
-    if(root_groups>256){
-        fprintf(stderr,"Pipeline batch exceeds two-level inverse capacity\n");
-        exit(2);
-    }
     qsb_root_group_prepare<<<root_groups,256>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
@@ -1141,7 +1101,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<1,256>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+255)/256,256>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
@@ -1154,7 +1114,8 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks,256>>>(
+    int blocks2=(batch_size+128-1)/128;
+    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,128>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -1560,6 +1521,25 @@ int main(int argc, char **argv) {
         uint8_t be[32];
         for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
         for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
+        /* K=3*xR^2 is invariant across all candidates in this problem. */
+        BIGNUM *field=BN_new(),*bk=BN_new();
+        if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
+           !BN_mod_sqr(bk,bx,field,ctx) || !BN_mul_word(bk,3) ||
+           !BN_nnmod(bk,bk,field,ctx)) {
+            fprintf(stderr,"Failed to precompute recovery K\n");
+            return 1;
+        }
+        uint8_t kb[32]={0};
+        BN_bn2bin(bk,kb+(32-BN_num_bytes(bk)));
+        uint64_t kw[4]={0,0,0,0};
+        for(int i=0;i<4;i++)for(int b=0;b<8;b++)
+            kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
+        cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
+        if(kerr!=cudaSuccess){
+            fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
+            return 1;
+        }
+        BN_free(field); BN_free(bk);
         EC_POINT *pt=EC_POINT_new(grp);
         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
         EC_POINT *dbl=EC_POINT_new(grp);
@@ -1614,8 +1594,19 @@ int main(int argc, char **argv) {
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
             cudaStreamAttrValue av = {};
-            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            /* Skip chunk 0. It holds 2^17 entries (8 MiB) against 2^16 (4 MiB)
+             * for each of the other fourteen, yet every chunk is read exactly
+             * once per candidate -- so a byte in chunk 0 is half as hot as a
+             * byte anywhere else. With only `want` bytes of persisting L2
+             * available, spending 8 MiB of it on the coldest region is waste:
+             * starting the window past chunk 0 covers 12.5 of the 15 reads per
+             * candidate instead of 11.5. */
+            size_t cold = (size_t)(1u << 17) * 64;            /* chunk 0 */
+            size_t skip = (gt_sz > cold + want) ? cold : 0;
+            av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+            size_t avail = gt_sz - skip;
+            size_t nb = want < avail ? want : avail;
+            av.accessPolicyWindow.num_bytes = nb < (size_t)max_window ? nb : (size_t)max_window;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
@@ -1630,27 +1621,46 @@ int main(int argc, char **argv) {
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
-    int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
+    int BATCH = 1 << 26;
     int BLKSZ = 256;
-    int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
+    (void)BLKSZ;
+    int GRDSZ = (BATCH+128-1)/128;
     int ROOT_GRDSZ=(GRDSZ+255)/256;
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
-    size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
-    size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
-    size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
-    size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
-    cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_root_checkpoint,root_checkpoint_bytes);
+    size_t pipeline_state_bytes=0,pipeline_root_bytes=0,pipeline_tree_bytes=0;
+    size_t super_root_bytes=0,root_checkpoint_bytes=0;
+    cudaError_t pipeline_err=cudaErrorMemoryAllocation;
+    /* A 2^26 batch needs about 10.1 GiB. Halve the batch and retry rather than
+     * abort if the device cannot supply it; 2^24 is the promoted size. */
+    for(int batch_log=26; batch_log>=24; batch_log--){
+        BATCH=1<<batch_log;
+        GRDSZ=(BATCH+128-1)/128;
+        ROOT_GRDSZ=(GRDSZ+255)/256;
+        pipeline_state_bytes=(size_t)BATCH*6u*sizeof(ulonglong2);
+        pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
+        pipeline_tree_bytes=(size_t)GRDSZ*4u*128*sizeof(uint64_t);
+        super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
+        root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+        pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_root_checkpoint,root_checkpoint_bytes);
+        if(pipeline_err==cudaSuccess) break;
+        if(d_pipeline_state){cudaFree(d_pipeline_state);d_pipeline_state=NULL;}
+        if(d_pipeline_roots){cudaFree(d_pipeline_roots);d_pipeline_roots=NULL;}
+        if(d_pipeline_tree){cudaFree(d_pipeline_tree);d_pipeline_tree=NULL;}
+        if(d_super_roots){cudaFree(d_super_roots);d_super_roots=NULL;}
+        if(d_root_checkpoint){cudaFree(d_root_checkpoint);d_root_checkpoint=NULL;}
+        cudaGetLastError();
+        printf("  Pipeline allocation for a 2^%d batch failed; retrying smaller\n",batch_log);
+    }
     if(pipeline_err!=cudaSuccess){
         fprintf(stderr,"Pipeline allocation failed: %s\n",cudaGetErrorString(pipeline_err));
         return 1;
