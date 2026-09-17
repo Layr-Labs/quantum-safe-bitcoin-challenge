@@ -234,8 +234,13 @@ def source_audit():
     assert "Load256(Y1, Q);" in mixed
     assert "_ModMult(S2, (uint64_t *)Y2, ZZZ1);" in mixed
     expected = "_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);"
-    assert pinning.count(expected) == 2
-    assert pinning.count("Load256(y0, cy);") == 2
+    # Exact 1a keeps the production materialized path plus the default and
+    # optional-prefetch scalar variants in source. Direct extraction adds one
+    # equivalent scalar loop. The shared-memory experiment uses an equivalent
+    # local `ya` anchor behind its disabled compile-time switch.
+    assert pinning.count(expected) == 4
+    assert pinning.count("Load256(y0, cy);") == 4
+    assert pinning.count("_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);") == 1
 
 
 if __name__ == "__main__":
