@@ -16,13 +16,6 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
-/* Ranked frontend specialization, from promoted PR120's ZLAB_TRIM idea.
- * Runtime problem bytes still build every table and schedule. Unsupported
- * shapes are rejected by the existing host eligibility gate before allocation.
- * Compile with -DQSB_RANKED_ONLY=0 to retain the original generic routes. */
-#ifndef QSB_RANKED_ONLY
-#define QSB_RANKED_ONLY 1
-#endif
 #include <cuda_runtime.h>
 #include <vector>
 #include "startup_check.cuh"
@@ -822,12 +815,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * sees exactly the same convention as before. Non-enum launches pass
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
-#if QSB_RANKED_ONLY
-    const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
-    uint32_t state[8];
-    for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
-#else
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
     if (fast_inc == QSB_SE_N_INC) {
@@ -937,8 +924,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
   }
 
-#endif
-
     /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
      * the state words themselves in big-endian order, followed by standard
      * 32-byte-message padding (total length 256 bits = 0x100). */
@@ -1044,12 +1029,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             if(se_desc) {
                 for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
-            }
-#if !QSB_RANKED_ONLY
-            else {
+            } else {
                 for(int i=0;i<t_sel;i++)d_hit_combos[p*MAX_T+i]=skip[i];
             }
-#endif
         }
     }
 }
@@ -1407,12 +1389,6 @@ int main(int argc, char **argv) {
                    t_win, (int)per_epoch, (double)per_epoch * (double)n_epochs);
         }
     }
-#if QSB_RANKED_ONLY
-    if (!se_mode) {
-        fprintf(stderr, "ERROR: ranked build requires the supported short-epoch shape\n");
-        return 1;
-    }
-#endif
     if (!se_mode && tile_path == NULL && total_gpus_override == 1 && t_sel >= 2 && n_pool > t_sel) {
         const double SPACE_MIN = 4.0e11;  /* candidates in the family */
         const double EPOCH_MIN = 1.0e6;   /* candidates per epoch (= per launch) */
@@ -1604,7 +1580,6 @@ int main(int argc, char **argv) {
             }
             memcpy(h_win3[j],w,3);
         }
-        if(qsb_pack_second_classes(h_win3))return 1;
         wide_cuda_require(cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3)), "startup cudaMemcpyToSymbol");
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         wide_cuda_require(cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t)), "startup cudaMalloc");
@@ -1935,7 +1910,6 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-#if !QSB_RANKED_ONLY
     /* GPU-enum fast path: single GPU, no tiles (the ranked benchmark case).
      * Unrank combos on-GPU from a linear base, eliminating CPU fill + HtoD.
      * Covers C(n,t) in lex order; runs until killed by harness timeout. */
@@ -2363,6 +2337,4 @@ int main(int argc, char **argv) {
 
     free(h_combos);
     return 0;
-#endif
-    return 1; // The ranked branch returns above after exhausting its epochs.
 }

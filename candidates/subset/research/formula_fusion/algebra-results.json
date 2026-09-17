@@ -1,0 +1,42 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "b832d7ba4ec2b2554aa5279e46858a5163e83e3ad7e714e9b108551165c95f7b",
+  "validation_level": "Independent Python integer identities and affine-law oracle; no extracted CUDA execution",
+  "recovery_cases": 4079,
+  "recovered_affine_points": 8158,
+  "singular_recovery_cases": 65,
+  "wrong_constant_mutations_caught": 4079,
+  "deferred_transition_cases": 4078,
+  "raw_product_difference_cases": 16627,
+  "lost_borrow_mutations_caught": 8323,
+  "current_recovery_operations_excluding_collective": {
+    "M": 10,
+    "S": 4
+  },
+  "cubic_recovery_operations_excluding_collective": {
+    "M": 10,
+    "S": 1
+  },
+  "full_chain_plus_recovery_current": {
+    "M": 98,
+    "S": 30
+  },
+  "full_chain_plus_recovery_cubic": {
+    "M": 98,
+    "S": 27
+  },
+  "deferred_raw_difference_opportunity": {
+    "point_chain_transitions": 12,
+    "unchanged_field_product_count": true,
+    "separate_512_to_field_reductions_removed": 12,
+    "additional_logical_state_bits": 256,
+    "signed_difference_magnitude_bound": "(p-1)^2",
+    "raw_unsigned_representation": "512-bit subtraction result plus one borrow bit",
+    "borrow_correction_mod_p": "-borrow*(2^32+977)^2",
+    "terminal_exact_Y_fusion": "One further two-product difference; separate optional region"
+  },
+  "checker_sha256": "c6ec7c9d932e84a588a76524282fe408d2ed4798fd740bbbe7d3b349a296d670",
+  "gpu_executed": false,
+  "candidate_modified": false,
+  "limits": "No optimality claim, PTX implementation, register allocation, carry-chain instruction model or speed prediction."
+}

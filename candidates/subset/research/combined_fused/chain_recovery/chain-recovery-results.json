@@ -1,0 +1,114 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "581e22633f7120ace8605576e64c5022ac67b93660920b100aebd5944e35f8e9",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+    "tests/gpu_epochs/compact_table_device.cuh": "4cb6bad8e3d61c76f250101118bbcf426d53ee142ec73e4fe1f2f27de0c26095",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "1cb56861191d7e0d82c4e34f7bda4f2dfc6d84f61485526ca83d4f0d28ad67e4",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "96cc9c827594ea380c414260861a261644e1ceeb717b3f603148e70e0126eb5d",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "58ba3bfe698dae1c8a384f322a24595672d56969776a9cb1a8571e0428e70268"
+  },
+  "validation_level": "Actual compact chain to cubic recovery with OpenSSL fields; actual runtime host constant helper with checked mocked CUDA symbol upload",
+  "actual_field_call_arities": {
+    "_ModAdd256": [
+      3
+    ],
+    "_ModSub256": [
+      2,
+      3
+    ],
+    "_ModMult": [
+      2,
+      3
+    ],
+    "_ModSqr": [
+      2
+    ]
+  },
+  "recoding_cases": 12769,
+  "curve_chains": 628,
+  "recovered_keys_compared": 1242,
+  "actual_loader_cases": 532,
+  "prefetch_next_load_checks": 7536,
+  "geometry_bits": [
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    26,
+    26
+  ],
+  "checked_chain_order": [
+    12,
+    13,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "actual_helper_cases": {
+    "equal": 159,
+    "opposite": 159,
+    "ordinary": 159,
+    "unguarded_doubling_failures_detected": 159
+  },
+  "prefix_bound_cases": 11,
+  "added_chain_scalar_cases": 214,
+  "extracted_actual_function_sha256": {
+    "compact_fixed_xyzz": "38a1cb4c498b12c40dc45ea2b3b0a27f7310f4c936c2c3cca45f0ee131257a80",
+    "qsb_prepare_cubic_constant": "e07e9e752890cc98922b5d61192f0611af88992e0ef1963659f18aec207104d2",
+    "compact_load_signed": "74ffa3e9768040b0e00567606e524d653e32a879a09e68f50909c065d6507aff",
+    "qsb_asym_last_add": "b56ee3e6b8a90566d9ef5773d10014dfc29f724380c0749157f8851a924fc4f7",
+    "_PointAddXYZZ_def": "484301cd7e1cd98f390315a58ee9cce15c9f9531f921e08c04157725c081b2af",
+    "_PointAddXYZZ_mm_def": "e55a81dabdd1862d2b067cc8aaaba513659c15fc7e48a24a1210270d7b7d5225",
+    "qsb_xyzz_finish_prepare": "7003f8091ece85a08923bc5bd8c34376f6effedc2657cf8d050af67463f98ea2",
+    "qsb_xyzz_finish_precomputed": "749a0fcebaa98207b7d1548fe1f2621229e290671c41e2adece8ca443c94a30d"
+  },
+  "checker_original_sha256": {
+    "check_wide.py": "cf6b5916da80c984293bd2603b68e5626311968a3fbc08da00e17a29562c5c6c",
+    "check_exceptions.py": "56d632037a7ccc721b3110a78725cd024bac9ef561db2ea1d78b18c46e5470ed"
+  },
+  "checker_adapted_sha256": {
+    "check_wide.py": "0fcb876bb9d8cd171ecb66b8cf4baed485d2eafb52af30ef937a8a8a4db155a9",
+    "check_exceptions.py": "6b9363a11114f207ef0355552ad17783a72effef62804142ed7c81bb32ac6f6e"
+  },
+  "adapter_sha256": "af73d5a50e218af0289c786763ccef634fdb915f3d01832d4bfe2c6ceb2aefaf",
+  "projection_changes": [
+    "Read direct recovery from actual fused tree.cu; do not read old ranked_pipeline.cuh.",
+    "Extract actual fused _PointAddXYZZ_def and _PointAddXYZZ_mm_def instead of old template/seed.",
+    "Use actual fused _PointAddXYZZ_def(...,false) as exceptional negative control.",
+    "Retain legacy independent scalar, geometry, order, loader, prefetch and affine oracles unchanged.",
+    "Pass actual chain ZZZ into new prepare ABI and unchanged chain ZZ into new finish ABI; remove obsolete C construction.",
+    "Extract actual OpenSSL runtime constant helper; replace only CUDA symbol upload with checked CPU memory copy."
+  ],
+  "gpu_executed": false,
+  "production_modified": false,
+  "limits": "Check the actual guarded compact chain followed by cubic direct recovery.\n\nOnly checker extraction is adapted, in memory. Production source is never\nrewritten to satisfy a legacy test. Actual fused recoding, vector loads, cold\ndigits, deferred seed/intermediate/final point helpers, cubic recovery, and the\nactual host constant helper run against OpenSSL field operations and independent\ncurve multiplication. The chain table entries come from the independent curve\noracle; actual vector memory loads are checked separately with sparse memory. This is\nnot native field/PTX execution, a complete fused-kernel audit, or a GPU test.\n"
+}

@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "9c812950d091bd60c653e98076cd676ee419410c76cf3e24053083ecbeb546ca",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+    "tests/gpu_epochs/compact_table_device.cuh": "a75997b4258e6bc80bcfcf111e9b3241341e053668a7268b29fa09d53d917350",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "c04dd7b718757f5a6df095e4f5d2e7b5f6143332f72c5b07bae055c08e85e9b6",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "96cc9c827594ea380c414260861a261644e1ceeb717b3f603148e70e0126eb5d",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "58ba3bfe698dae1c8a384f322a24595672d56969776a9cb1a8571e0428e70268"
+  },
+  "counts": {
+    "scalars": 17278,
+    "direct_digits": 241892,
+    "preserved_cold_digits": 34556,
+    "wrong_start_controls_caught": 17278,
+    "wrong_last_controls_caught": 17278
+  },
+  "actual_helper_sha256": {
+    "setup": "e8225e22d018eafd88b51b8572a2efb2983e9d02791d2fd093a0b9d51b4a51b4",
+    "bits": "6aeb908a93de6d1a4e28d20f41d39838a1ee1cb96e0306826c9f3702cc27f90b",
+    "direct": "c291852d21658448963484bc6974568f3dec63b79530b46143ca74b2058081fa",
+    "step": "acd35a345c3ec13f05a35888aa9bf131eb834dd3a5ad825df7f7366437a75c61",
+    "reference": "8f403c0e8129d740000ca702a4493e78653c72469cd983df6ed26b42e8b05a25",
+    "cold": "df63b32d335de24015680397d58117f73370d7be82f7508d64f48633009038a5",
+    "index": "4e2cda47b2d3b53b41755a56384bc273f48afbeab68234937db8580ae6ecd6fe"
+  },
+  "actual_chain_sha256": "16d0a6a74e55758909f82b4c91c8560cfeb10ccfdded440ead4291dc910ebef3",
+  "projection_sha256": "d19991254bc9ca9812060271ce5f61848f33af3550601425722ccab8fb3d7379",
+  "checker_sha256": "f03dd431b9ee4e1326d9059d7415e4bdae8a444bfd6c924e56e5c9ab3a00e25e",
+  "validation_level": "Actual extracted donor helper, setup, unchanged reference peel and cold helper on CPU with UBSan; independent Python regular recoder",
+  "gpu_executed": false,
+  "limits": "Finite boundary/random full-uint256 samples and source algebra; not exhaustive enumeration or CUDA execution. Whole point-chain/recovery checked separately."
+}

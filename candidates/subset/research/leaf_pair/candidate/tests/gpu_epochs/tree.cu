@@ -16,13 +16,6 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
-/* Ranked frontend specialization, from promoted PR120's ZLAB_TRIM idea.
- * Runtime problem bytes still build every table and schedule. Unsupported
- * shapes are rejected by the existing host eligibility gate before allocation.
- * Compile with -DQSB_RANKED_ONLY=0 to retain the original generic routes. */
-#ifndef QSB_RANKED_ONLY
-#define QSB_RANKED_ONLY 1
-#endif
 #include <cuda_runtime.h>
 #include <vector>
 #include "startup_check.cuh"
@@ -61,8 +54,6 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
-// Runtime-problem constant:3*xR^2 mod p; never a precomputed problem answer.
-__device__ __constant__ uint64_t QSB_U2R_C3X2[4];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -723,55 +714,56 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
     _ModNeg256(y2);                /* y2 = -(m2*(xP - x2) + yP) */
 }
 
-/* Cubic-identity pair recovery. For A=ZZ,B=ZZZ,d=xR*A-X, invert B*d.
- * The finish uses yP^2=xP^3+7 and yR^2=xR^3+7 to eliminate three squares.
- * Requires valid on-curve points and nonzero A,B,d; the caller preserves the
- * original identity-padding/skip behavior for zero denominators. */
+/* XYZZ shared-denominator recovery (transplanted from the promoted pinning
+ * frontier). Stage 1: d = xR*ZZ - X (kept in X_D), W = ZZ^2*d. */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
     _ModMult(t, xR, ZZ);
     _ModSub256(t, t, X_D);
-    Load256(X_D, t);             // d = A*(xR-xP)
-    _ModMult(W, ZZZ, X_D);       // W = B*d; A=ZZ, B=ZZZ
+    Load256(X_D, t);             /* X_D becomes d */
+    _ModSqr(W, ZZ);
+    _ModMult(W, X_D);            /* W = ZZ^2*d */
     W[4] = 0;
 }
 
-/* k=1/(xR-xP),alpha=yR*k,beta=yP*k.
- * x1,2 = 2*alpha^2 - 3*xR^2*k + xR -/+ 2*alpha*beta.
- * The same slopes alpha-/+beta recover the two compressed-key parities.
- * Existing A,Y,B,W storage is reused; the inverse tree itself is unchanged. */
+/* Stage 2. C=ZZ*d^2, W=ZZ^2*d, inv=1/W. h=inv*ZZZ=A/(B*d) is the common slope
+ * scale and delta=inv*C=d/ZZ=xR-xP, so xs=2*xR-delta=xP+xR. The y formulas are
+ * anchored at R (no affine yP is reconstructed):
+ *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
+ * Returns the two y parities in bits 0 and 1; C, W and ZZZ are reused. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *A, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
+    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
     uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t c3x2[4]={QSB_U2R_C3X2[0],QSB_U2R_C3X2[1],QSB_U2R_C3X2[2],QSB_U2R_C3X2[3]};
-    uint64_t m[4],t[4],s[4];
-    _ModMult(A, inv);             // h = A/(B*d)
-    _ModMult(ZZZ, A);             // k = A/d = 1/(xR-xP)
-    _ModMult(Y, A);               // beta = yP*k
-    _ModMult(A, yR, ZZZ);         // alpha = yR*k; h dies
-    _ModMult(ZZZ, c3x2);          // 3*xR^2*k; k dies
-    _ModSqr(W, A);
-    _ModAdd256(W, W, W);
-    _ModSub256(W, ZZZ);
-    _ModAdd256(W, W, xR);         // center = 2*alpha^2 - 3*xR^2*k + xR
-    _ModMult(m, A, Y);
-    _ModAdd256(m, m, m);          // difference = 2*alpha*beta
-    _ModSub256(x1, W, m);
-    _ModAdd256(x2, W, m);
+    uint64_t yb[4], m[4], t[4], s[4];
 
-    _ModSub256(m, A, Y);          // lambda1 = alpha-beta
+    _ModMult(yb, yR, ZZZ);       /* yR*B */
+    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
+
+    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
+    _ModAdd256(W, xR, xR);
+    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+
+    _ModSub256(m, yb, Y);
+    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
+    _ModSqr(x1, m);
+    _ModSub256(x1, W);
     _ModSub256(t, xR, x1);
     _ModMult(s, m, t);
     _ModSub256(s, yR);
     uint32_t parities = (uint32_t)(s[0] & 1ULL);
-    _ModAdd256(m, A, Y);          // -lambda2 = alpha+beta
+
+    _ModAdd256(m, yb, Y);
+    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
+    _ModSqr(x2, m);
+    _ModSub256(x2, W);
     _ModSub256(t, xR, x2);
     _ModMult(s, m, t);
     _ModSub256(s, yR);
+    /* y2=-s. Since p is odd, field negation flips its parity. */
     parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
@@ -822,12 +814,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * sees exactly the same convention as before. Non-enum launches pass
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
-#if QSB_RANKED_ONLY
-    const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
-    uint32_t state[8];
-    for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
-#else
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
     if (fast_inc == QSB_SE_N_INC) {
@@ -937,8 +923,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
   }
 
-#endif
-
     /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
      * the state words themselves in big-endian order, followed by standard
      * 32-byte-message padding (total length 256 bits = 0x100). */
@@ -970,18 +954,19 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 
     uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
-    /* Both recovery flags use W=ZZZ*d, d=xR*ZZ-X. The block inverse and
-     * zero-denominator participation contract are unchanged. */
+    /* Both recovery flags from one shared-denominator inverse, in XYZZ:
+     * W = ZZ^2*d with d = xR*ZZ - X; the block inverts W. */
     uint64_t prod[5];
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);        /* qx -> d, prod -> W */
+    qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod);        /* qx -> d, prod -> W */
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
     uint64_t Wsave[4]; Load256(Wsave,prod);
+    if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C = ZZ*d^2 */
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
     if(!usable)return;
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qzz,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
 
     int v=0, hash_choice=0, recid=0;
     for(int ri=0;ri<2&&!v;ri++){
@@ -1044,12 +1029,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             if(se_desc) {
                 for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
-            }
-#if !QSB_RANKED_ONLY
-            else {
+            } else {
                 for(int i=0;i<t_sel;i++)d_hit_combos[p*MAX_T+i]=skip[i];
             }
-#endif
         }
     }
 }
@@ -1069,24 +1051,6 @@ extern "C" {
 
 #include "compact_table_host.cuh"
 #include "l2_policy.cuh"
-
-// One legitimate per-problem field square and a multiplication by3.
-// Its CPU cost and constant upload remain inside process startup.
-static void qsb_prepare_cubic_constant(const uint8_t x_le[32]){
-    BN_CTX *ctx=BN_CTX_new();
-    BIGNUM *x=BN_lebin2bn(x_le,32,nullptr),*value=BN_new(),*prime=nullptr;
-    compact_require(ctx&&x&&value,"cubic constant allocation");
-    compact_require(BN_hex2bn(&prime,"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")!=0,
-                    "cubic constant field modulus");
-    compact_require(BN_mod_sqr(value,x,prime,ctx),"cubic constant square");
-    compact_require(BN_mul_word(value,3),"cubic constant triple");
-    compact_require(BN_nnmod(value,value,prime,ctx),"cubic constant reduction");
-    uint8_t le[32];uint64_t limbs[4];
-    compact_require(BN_bn2lebinpad(value,le,32)==32,"cubic constant serialization");
-    memcpy(limbs,le,32);
-    BN_free(x);BN_free(value);BN_free(prime);BN_CTX_free(ctx);
-    wide_cuda_require(cudaMemcpyToSymbol(QSB_U2R_C3X2,limbs,sizeof(limbs)),"upload cubic recovery constant");
-}
 
 /* Digest params loader */
 typedef struct {
@@ -1407,12 +1371,6 @@ int main(int argc, char **argv) {
                    t_win, (int)per_epoch, (double)per_epoch * (double)n_epochs);
         }
     }
-#if QSB_RANKED_ONLY
-    if (!se_mode) {
-        fprintf(stderr, "ERROR: ranked build requires the supported short-epoch shape\n");
-        return 1;
-    }
-#endif
     if (!se_mode && tile_path == NULL && total_gpus_override == 1 && t_sel >= 2 && n_pool > t_sel) {
         const double SPACE_MIN = 4.0e11;  /* candidates in the family */
         const double EPOCH_MIN = 1.0e6;   /* candidates per epoch (= per launch) */
@@ -1604,7 +1562,6 @@ int main(int argc, char **argv) {
             }
             memcpy(h_win3[j],w,3);
         }
-        if(qsb_pack_second_classes(h_win3))return 1;
         wide_cuda_require(cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3)), "startup cudaMemcpyToSymbol");
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         wide_cuda_require(cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t)), "startup cudaMalloc");
@@ -1622,8 +1579,6 @@ int main(int argc, char **argv) {
     if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
-
-    qsb_prepare_cubic_constant(dp.u2r_x);
 
     /* Compute neg_2u2R */
     {
@@ -1935,7 +1890,6 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-#if !QSB_RANKED_ONLY
     /* GPU-enum fast path: single GPU, no tiles (the ranked benchmark case).
      * Unrank combos on-GPU from a linear base, eliminating CPU fill + HtoD.
      * Covers C(n,t) in lex order; runs until killed by harness timeout. */
@@ -2363,6 +2317,4 @@ int main(int argc, char **argv) {
 
     free(h_combos);
     return 0;
-#endif
-    return 1; // The ranked branch returns above after exhausting its epochs.
 }

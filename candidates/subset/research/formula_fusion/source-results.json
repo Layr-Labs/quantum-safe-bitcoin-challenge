@@ -1,0 +1,43 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "7afe2d8642468c1245febc0aa9d159c76e6724e44035497a1d6623b75256c37e",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+    "tests/gpu_epochs/compact_table_device.cuh": "4cb6bad8e3d61c76f250101118bbcf426d53ee142ec73e4fe1f2f27de0c26095",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "7a7a201f021de07023283908da0b96d435f86e485a60d322793231f309eb9853",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "059e371b7ccedacd20c7c368a00c700e4c7f6be65a536e0b50fea58240303cd8",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+  },
+  "curve_recoveries": 4077,
+  "affine_keys": 8154,
+  "singular_cases": 115,
+  "mutations_caught": 4077,
+  "runtime_constants": 4192,
+  "validation_level": "Actual extracted recovery and host constant helper; actual corrected host multiply/square; OpenSSL add/sub/inverse; independent affine oracle",
+  "per_recovery_cost": {
+    "M": 10,
+    "S": 1,
+    "inversions": 1
+  },
+  "helper_sha256": {
+    "prepare": "7003f8091ece85a08923bc5bd8c34376f6effedc2657cf8d050af67463f98ea2",
+    "finish": "749a0fcebaa98207b7d1548fe1f2621229e290671c41e2adece8ca443c94a30d",
+    "host_constant": "e07e9e752890cc98922b5d61192f0611af88992e0ef1963659f18aec207104d2"
+  },
+  "projection_sha256": "9bc2c936d51c96ac2781bcfc6a8acba09ddbf337dfa2f94898806449117861a3",
+  "checker_sha256": "f24aa9c916b09ec938087049ae45d09f0e7776a8d94141d8caa7e919acab3195",
+  "sanitizer": "CPU UBSan trap mode; no dynamic sanitizer runtime",
+  "gpu_executed": false,
+  "limits": "No CUDA collective execution, full hash pipeline, PTX scheduling or throughput. Frozen base covers unchanged guarded chain and field carry regression suites."
+}

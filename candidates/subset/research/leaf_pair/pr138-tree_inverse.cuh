@@ -66,9 +66,6 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if((width<<1)>32)__syncthreads();else __syncwarp();
     }
 
-    // At n=64, warp 0 produced pair inverses consumed by warp 1.
-    if(n==64)__syncthreads();
-
     // tree[n/2 + tid/2] is the inverse of this lane pair. Multiplying it by
     // the neighboring original leaf gives this lane's inverse directly.
     uint64_t pair_inverse[5]={0,0,0,0,0};
