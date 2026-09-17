@@ -97,7 +97,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_SPARSE_D 1        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
 #endif
 #ifndef QSB_SYM_FINISH
-#define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
+#define QSB_SYM_FINISH 1      /* six-plane recovery; squaring-free C=3xR^2/(2yR) finish */
 #endif
 #define QSB_STATE_PLANES (QSB_SYM_FINISH ? 6u : 8u)
 #ifndef QSB_PROBE_MASK
@@ -391,11 +391,48 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
+/* Direct extraction ported from the promoted subset recoder. The odd
+ * recurrence state at chunk c is (M >> gt_shift(c)) with bit zero set.
+ * Read the immutable setup value instead of shifting all four limbs. */
+#ifndef QSB_DIRECT_DIGITS
+#define QSB_DIRECT_DIGITS 1
+#endif
+__device__ __forceinline__ void pin_direct_digit(const uint64_t M[4], int sign,
+    unsigned pos, unsigned width, bool last, uint32_t *idx, uint64_t *neg) {
+    unsigned li=pos>>6, sh=pos&63u;
+    uint64_t lo=li==0?M[0]:li==1?M[1]:li==2?M[2]:M[3];
+    uint64_t hi=li==0?M[1]:li==1?M[2]:li==2?M[3]:0ULL;
+    uint32_t f=(uint32_t)((lo>>sh)|((hi<<1)<<(63u-sh))) & ((1u<<width)-1u);
+    uint32_t top=f>>(width-1), mask=(1u<<(width-1))-1u;
+    *idx=(last?f:(f^(top-1u)))&mask;
+    *neg=(last?0ULL:(uint64_t)(top^1u)) ^ (uint64_t)(sign<0);
+}
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
                                             uint64_t *ZZ, uint64_t *ZZZ,
                                             const uint64_t k[4],
                                             const uint8_t *gTable,
                                             uint64_t (*scratch)[2*QSB_TREE_N]) {
+#if QSB_DIRECT_DIGITS
+    (void)scratch;
+    uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
+    uint32_t idx; uint64_t neg, x0[4],y0[4],x1[4],y1[4];
+    pin_direct_digit(M,sign,1,18,false,&idx,&neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    pin_direct_digit(M,sign,19,17,false,&idx,&neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ,x0,y0,x1,y1);
+    uint64_t cx[4],cy[4];uint32_t table_base=gt_offset(2);unsigned pos=36;
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS-1;c++) {
+        pin_direct_digit(M,sign,pos,17,false,&idx,&neg);pos+=17;
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZT<true>(X,Y,ZZ,ZZZ,cx,cy,y0);
+        Load256(y0,cy);table_base+=1u<<16;
+    }
+    pin_direct_digit(M,sign,pos,17,true,&idx,&neg);
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZT<false>(X,Y,ZZ,ZZZ,cx,cy,y0);
+#else
 #if QSB_S0_SHM
     /* Cold per-thread state lives in the (currently unused) tree buffer:
      * limb-major, lane-contiguous, so each access is one 8-byte shared op.
@@ -543,6 +580,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         table_base += 1u << 16;
     }
 #endif
+#endif // QSB_DIRECT_DIGITS
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -1352,17 +1390,16 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
-__device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2 (delta E) */
+__device__ __constant__ uint64_t pin_u2rc_words[4];   /* C = 3*xR^2/(2*yR) */
 
-/* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
- * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
- * K=3*xR^2 is fixed for the entire problem. The shared x base is
- * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
- * coordinates are anchored at R. Returns their parities in bits 0,1.
- * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+/* Squaring-free recovery, using the identity already used by subset.
+ * With t=V^2/W, u=yR*t, v=Y*V/W, a=u-v and b=u+v:
+ * x_plus=(a+b)*(a-C)+xR; x_minus=(a+b)*(b-C)+xR.
+ * C=3*xR^2/(2*yR) is computed once on the host. This retains
+ * the six-plane checkpoint and canonical normalization for parity. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
-    uint64_t *xR, uint64_t *yR, uint64_t *K,
+    uint64_t *xR, uint64_t *yR, uint64_t *C,
     uint64_t *x_plus, uint64_t *x_minus
 ) {
     uint64_t h[4], u[4], v[4], f[4];
@@ -1371,21 +1408,15 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(u, yR, V);          /* u = yR*t */
     _ModMult(v, Y, h);           /* v = Y*h */
 
-    /* GPUMath's square drops a final carry for some near-p operands. For
-     * upper-half u, square the equivalent negative representative; keep u
-     * unchanged for H and y. */
-    qsb_field_normalize(u);
-    if(u[3] >> 63) _ModNeg256(h, u);
-    else Load256(h, u);
-    _ModSqr(f, h);
-    _ModAdd256(f, f, f);
-    _ModMult(h, K, V);           /* h becomes K*t */
-    _ModSub256(f, h);
-    _ModAdd256(f, f, xR);        /* F = 2*u^2-K*t+xR */
-    _ModMult(h, u, v);
-    _ModAdd256(h, h, h);         /* H = 2*u*v */
-    _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    _ModAdd256(f, u, u);         /* a+b = 2*u */
+    _ModSub256(h, u, v);
+    _ModSub256(h, C);
+    _ModMult(x_plus, f, h);
+    _ModAdd256(x_plus, x_plus, xR);
+    _ModAdd256(h, u, v);
+    _ModSub256(h, C);
+    _ModMult(x_minus, f, h);
+    _ModAdd256(x_minus, x_minus, xR);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1629,10 +1660,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                       pin_u2ry_words[2],pin_u2ry_words[3]};
     uint64_t q1x[4],q2x[4];
 #if QSB_SYM_FINISH
-    uint64_t u2rk[4]={pin_u2rk_words[0],pin_u2rk_words[1],
-                      pin_u2rk_words[2],pin_u2rk_words[3]};
+    uint64_t u2rc[4]={pin_u2rc_words[0],pin_u2rc_words[1],
+                      pin_u2rc_words[2],pin_u2rc_words[3]};
     uint32_t y_parities = qsb_xyzz_finish_symmetric(
-        qy,qzzz,prod,u2rx,u2ry,u2rk,
+        qy,qzzz,prod,u2rx,u2ry,u2rc,
         q1x,q2x);
 #else
     uint32_t y_parities = qsb_xyzz_finish_precomputed(
@@ -2244,12 +2275,15 @@ int main(int argc, char **argv) {
         uint8_t be[32];
         for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
         for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
-        {   /* K=3*xR^2 is invariant across all candidates in this problem (delta E). */
-            BIGNUM *field=BN_new(),*bk=BN_new();
-            if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
+        {   /* C=3*xR^2/(2*yR), invariant across this problem. */
+            BIGNUM *field=BN_new(),*bk=BN_new(),*den=BN_new();
+            if(!field || !bk || !den || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
                !BN_mod_sqr(bk,bx,field,ctx) || !BN_mul_word(bk,3) ||
-               !BN_nnmod(bk,bk,field,ctx)) {
-                fprintf(stderr,"Failed to precompute recovery K\n");
+               !BN_nnmod(bk,bk,field,ctx) ||
+               !BN_mod_add(den,by,by,field,ctx) ||
+               !BN_mod_inverse(den,den,field,ctx) ||
+               !BN_mod_mul(bk,bk,den,field,ctx)) {
+                fprintf(stderr,"Failed to precompute recovery C\n");
                 return 1;
             }
             uint8_t kb[32]={0};
@@ -2257,12 +2291,12 @@ int main(int argc, char **argv) {
             uint64_t kw[4]={0,0,0,0};
             for(int i=0;i<4;i++)for(int b=0;b<8;b++)
                 kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
-            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
+            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rc_words,kw,sizeof(kw));
             if(kerr!=cudaSuccess){
-                fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
+                fprintf(stderr,"Failed to upload recovery C: %s\n",cudaGetErrorString(kerr));
                 return 1;
             }
-            BN_free(field); BN_free(bk);
+            BN_free(field); BN_free(bk); BN_free(den);
         }
         EC_POINT *pt=EC_POINT_new(grp);
         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
