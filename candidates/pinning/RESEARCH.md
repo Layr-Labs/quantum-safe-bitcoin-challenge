@@ -1752,3 +1752,27 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Seven-block finish occupancy (2026-09-17 integration)
+
+The 128-leaf composition normally launches six 128-thread finish CTAs per SM.
+That preserves the older 768-thread / 24-warp finish occupancy at 80 registers
+per thread. The public rejected occupancy result instead forced a 256-thread
+finish to four CTAs: 64 registers, roughly 140 bytes of spill traffic, and a
+1.1% local regression. It does not measure the intermediate 128-thread geometry.
+
+This integration changes only the finish launch bound to seven 128-thread CTAs.
+On AD102 that exposes 896 threads / 28 warps. CUDA 12.6 selects 72 registers,
+so the seven blocks use 64,512 of 65,536 registers and 84 KiB of shared memory.
+Against the exact six-block control, the fast finish grows from 3,328 to 3,336
+SASS instructions. The compiler report moves from 20 to 28 bytes of spill
+loads and stores, and the image contains one additional local load and store.
+An eight-block screen was rejected statically: it forced 64 registers, 80 bytes
+of fast-path spill traffic in each direction, and 3,432 instructions.
+
+The seven-block choice is therefore a bounded latency-hiding experiment: four
+additional resident warps for eight static instructions and one local round
+trip, without changing arithmetic, state layout, tree width, or kernel ABI.
+This host has no NVIDIA GPU, so no throughput improvement is claimed. All
+mathematical/source audits pass and the full candidate compiles and links for
+`sm_89`; the ranked run is the performance test.

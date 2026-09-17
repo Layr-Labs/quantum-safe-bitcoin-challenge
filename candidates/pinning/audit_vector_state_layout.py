@@ -4,11 +4,11 @@
 from pathlib import Path
 
 
-FIELDS = 4
+FIELDS = 3
 LIMBS = 4
 LIMB_BYTES = 8
 VECTOR_BYTES = 16
-VECTOR_PLANES = 8
+VECTOR_PLANES = 6
 WARP = 32
 
 
@@ -76,8 +76,11 @@ def audit_source():
     source = Path(__file__).with_name("pinning.cu").read_text()
     assert 'static_assert(sizeof(ulonglong2) == 16' in source
     assert 'static_assert(alignof(ulonglong2) == 16' in source
-    assert source.count("ulonglong2 *saved") == 2
-    assert "BATCH*8u*sizeof(ulonglong2)" in source
+    # Two disabled tree-offload kernels remain in addition to the production
+    # kernel and launcher signatures.
+    assert source.count("ulonglong2 *saved") == 4
+    assert source.count("const ulonglong2 *saved") == 1
+    assert "BATCH*6u*sizeof(ulonglong2)" in source
     assert "alignof(ulonglong2)-1u" in source
     for plane in range(VECTOR_PLANES):
         address = f"saved[{plane}u*state_plane_stride+state_idx]"
@@ -87,7 +90,7 @@ def audit_source():
 def audit_production_batch():
     batch_size = 16_777_216
     total_bytes = batch_size * VECTOR_PLANES * VECTOR_BYTES
-    assert total_bytes == 2 * 1024**3
+    assert total_bytes == 1536 * 1024**2
     for plane in range(VECTOR_PLANES):
         assert plane * batch_size * VECTOR_BYTES % VECTOR_BYTES == 0
     assert vector_offset(batch_size, FIELDS - 1, LIMBS - 1, batch_size - 1) == (
@@ -104,14 +107,14 @@ def audit_production_batch():
 
 def main():
     for batch_size in (1, 2, 3, 31, 32, 33, 255, 256, 257, 4096):
-        assert audit_batch(batch_size) == batch_size * 128
+        assert audit_batch(batch_size) == batch_size * 96
     audit_production_batch()
     audit_source()
     print(
-        "PASS: 4x256-bit state maps bijectively to 8 ulonglong2 planes; "
+        "PASS: 3x256-bit state maps bijectively to 6 ulonglong2 planes; "
         "all vector elements are 16-byte aligned, warp addresses are contiguous, "
-        "traffic remains exactly 128 bytes/candidate/direction, and the "
-        "16,777,216-candidate allocation remains exactly 2 GiB"
+        "traffic is exactly 96 bytes/candidate/direction, and the "
+        "16,777,216-candidate allocation is exactly 1.5 GiB"
     )
 
 
