@@ -283,6 +283,91 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 }
 
 
+
+
+/* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block.
+ * Pad shape (matches check_tail_words.py): W[0..2] live, W[3..14]=0,
+ * W[15]=9995*8=79960. Continues from an existing midstate (unlike the
+ * fresh-IV Pk33 / SHA256d32 helpers). First 16 rounds and the first
+ * in-place WMIX drop zero addends; later 48 rounds use the generic
+ * SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on that
+ * padded block. */
+__device__ __forceinline__ void _SHA256TransformFastTail11(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t L = 9995u * 8u; /* 79960 */
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = state[0];
+    uint32_t b = state[1];
+    uint32_t c = state[2];
+    uint32_t d = state[3];
+    uint32_t e = state[4];
+    uint32_t f = state[5];
+    uint32_t g = state[6];
+    uint32_t h = state[7];
+
+    uint32_t w[16];
+    w[0] = w0;
+    w[1] = w1;
+    w[2] = w2;
+#pragma unroll
+    for (int i = 3; i < 15; i++) w[i] = 0;
+    w[15] = L;
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], L);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(L) + s0(w[2]);
+        w[2] += s1(w[0]);
+        w[3]  = s1(w[1]);
+        w[4]  = s1(w[2]);
+        w[5]  = s1(w[3]);
+        w[6]  = s1(w[4]) + L;
+        w[7]  = s1(w[5]) + w[0];
+        w[8]  = s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(L);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
  * ============================================================ */
@@ -513,7 +598,8 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        // At half <= 32 every producer and next consumer is in warp zero.
+        if(count>64)__syncthreads();else if(count>2)__syncwarp();
     }
 
     if(tid==0){
@@ -549,7 +635,8 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
             for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        // The next level crosses warps once it has 64 children.
+        if(count>=32)__syncthreads();else __syncwarp();
     }
 
     // The leaf level has no shared inverse destination or following barrier.
@@ -608,7 +695,8 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             }
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        // At half <= 32 every producer and next consumer is in warp zero.
+        if(count>64)__syncthreads();else if(count>2)__syncwarp();
     }
 
     if(tid==0){
@@ -655,7 +743,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        // The next level crosses warps once it has 64 children.
+        if(count>=32)__syncthreads();else __syncwarp();
     }
 
     uint64_t parent_inv[5],sibling[5];
@@ -821,14 +910,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-        uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
-            pin_tail_words[2],
-            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
-        };
-        _SHA256Transform(state,blk);
+        /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
+        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        uint32_t w2 = pin_tail_words[2];
+        _SHA256TransformFastTail11(state, w0, w1, w2);
     } else {
         /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
@@ -1508,7 +1595,15 @@ int main(int argc, char **argv) {
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
-    cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
+    // One contiguous result report permits a single blocking batch readback.
+    cudaError_t hit_err = cudaMalloc(&d_hit_cnt, (1 + 1024) * sizeof(uint32_t));
+    if (hit_err == cudaSuccess)
+        hit_err = cudaMemset(d_hit_cnt, 0, (1 + 1024) * sizeof(uint32_t));
+    if (hit_err != cudaSuccess) {
+        fprintf(stderr, "Hit buffer initialization failed: %s\n", cudaGetErrorString(hit_err));
+        return 1;
+    }
+    d_hit_idx = d_hit_cnt + 1;
 
     int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
@@ -1615,7 +1710,8 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaError_t reset_err = cudaMemset(d_hit_cnt, 0, sizeof(h_hit));
+            if (reset_err != cudaSuccess) { fprintf(stderr, "Hit reset failed: %s\n", cudaGetErrorString(reset_err)); return 1; }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1642,20 +1738,20 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
+            // The blocking report copy below waits for this default-stream pipeline.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            uint32_t hit_report[1 + 64];
+            err = cudaMemcpy(hit_report, d_hit_cnt, sizeof(hit_report), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
+            h_hit = hit_report[0];
             if (h_hit > 0) {
-                uint32_t hits[64];
+                const uint32_t *hits = hit_report + 1;
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -1668,7 +1764,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
