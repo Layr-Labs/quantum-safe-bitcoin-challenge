@@ -13,24 +13,35 @@ def audit_source():
     source = Path(__file__).with_name("pinning.cu").read_text()
     for name, value in (
         ("QSB_CHECKPOINT_NODES", "254"),
-        ("QSB_CHECKPOINT_STRIDE", "256"),
+        ("QSB_CHECKPOINT_BASE", "384"),
+        ("QSB_CHECKPOINT_SAVED_NODES", "(510-QSB_CHECKPOINT_BASE)"),
+        ("QSB_CHECKPOINT_STRIDE", "128"),
     ):
         match = re.search(rf"^#define\s+{name}\s+(\d+)$", source, re.MULTILINE)
-        assert match and match.group(1) == value, (name, match)
+        if name == "QSB_CHECKPOINT_SAVED_NODES":
+            assert re.search(
+                rf"^#define\s+{name}\s+{re.escape(value)}$", source, re.MULTILINE
+            ), name
+        else:
+            assert match and match.group(1) == value, (name, match)
 
     up_begin = source.index("void qsb_block_product_checkpoint(")
     up_end = source.index("void qsb_block_inverse_checkpoint(", up_begin)
     up = source[up_begin:up_end]
     assert "for(int count=256;count>1;count>>=1)" in up
-    assert "if(node<510)" in up
-    assert "node-256" in up
+    assert "if(node>=QSB_CHECKPOINT_BASE && node<510)" in up
+    assert "node-QSB_CHECKPOINT_BASE" in up
     assert "products[k][510]" in up
 
     down_begin = up_end
     down_end = source.index("__global__ void __launch_bounds__(256,2) qsb_root_group_prepare", down_begin)
     down = source[down_begin:down_end]
-    assert "if(tid<QSB_CHECKPOINT_NODES)" in down
+    assert "if(tid<QSB_CHECKPOINT_SAVED_NODES)" in down
+    assert "products[k][QSB_CHECKPOINT_BASE+tid]" in down
+    assert "if(tid<128)" in down
+    assert "products[k][128+tid]" in down
     assert "products[k][256+tid]" in down
+    assert down.count("__syncthreads();") >= 2
     assert "for(int count=2;count<256;count<<=1)" in down
     assert "inverses[k][254]" in down
     assert "qsb_field_normalize(value);" in down
@@ -62,13 +73,20 @@ def checkpoint_up(raw, active):
             )
         offset += count
     assert offset == 510
-    # CUDA stores exactly nodes 256..509; node 510 uses the compact root array.
-    return products[256:510], products[510], products[:256]
+    # CUDA stores exactly nodes 384..509; node 510 uses the compact root array.
+    # Nodes 256..383 are reconstructed in finish from the leaves.
+    return products[384:510], products[510], products[:256]
 
 
 def checkpoint_down(saved_internal, root, leaves):
-    assert len(saved_internal) == 254
-    products = list(leaves) + list(saved_internal) + [None]
+    assert len(saved_internal) == 126
+    products = list(leaves) + [None] * 255
+    products[384:510] = saved_internal
+    # The omitted lower internal level is exactly the first pairwise product
+    # level. Every multiplication sees the same identity-substituted leaves
+    # as the CUDA prepare and finish helpers.
+    for tid in range(128):
+        products[256 + tid] = products[tid] * products[128 + tid] % P
     inverses = [0] * 255
     # The root kernel is the only internal normalization boundary.
     inverses[254] = pow(root % P, P - 2, P)

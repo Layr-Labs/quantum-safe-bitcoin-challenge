@@ -566,15 +566,21 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 }
 
 #define QSB_CHECKPOINT_NODES 254
-#define QSB_CHECKPOINT_STRIDE 256
+/* The first 128 internal nodes (256..383) are cheap to rebuild from the
+ * saved leaves in finish.  Persist only nodes 384..509, packed into a
+ * 128-slot stride; the two unused slots keep each field plane naturally
+ * power-of-two spaced. */
+#define QSB_CHECKPOINT_BASE 384
+#define QSB_CHECKPOINT_SAVED_NODES (510-QSB_CHECKPOINT_BASE)
+#define QSB_CHECKPOINT_STRIDE 128
 
-/* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
- * internal non-root product-tree nodes to global memory and publishes the raw root.
+/* Split form of qsb_block_inverse.  The prepare kernel checkpoints the upper
+ * 126 internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
- * kernel restores the immutable product tree, expands the supplied root
- * inverse, and returns canonical leaf inverses.  The packed node numbering is
- * identical to qsb_block_inverse; leaves come from the saved W field and node
- * 510 is omitted because roots owns it. */
+ * kernel restores the immutable upper product tree, rebuilds nodes 256..383
+ * from the saved W leaves, expands the supplied root inverse, and returns
+ * canonical leaf inverses.  The packed node numbering is identical to
+ * qsb_block_inverse; node 510 is omitted because roots owns it. */
 __device__ __forceinline__ void qsb_block_product_checkpoint(
     uint64_t *value, uint64_t *roots, uint64_t *checkpoint
 ) {
@@ -603,8 +609,9 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             #pragma unroll
             for(int k=0;k<4;k++){
                 products[k][node]=out[k];
-                if(node<510)
-                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256]=out[k];
+                if(node>=QSB_CHECKPOINT_BASE && node<510)
+                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+
+                               node-QSB_CHECKPOINT_BASE]=out[k];
             }
         }
         offset+=count;
@@ -625,15 +632,36 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     int tid=threadIdx.x;
     size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
 
-    /* Each lane supplies its saved W leaf and all but the last two lanes
-     * restore one internal node. Lane zero also publishes the external root inverse.
-     * One barrier makes both immutable inputs visible to the downward pass. */
+    /* Each lane supplies its saved W leaf and the first 126 lanes restore the
+     * persisted upper nodes 384..509. Lane zero also publishes the external
+     * root inverse. One barrier makes both inputs visible before the lower
+     * tree is rebuilt. */
     #pragma unroll
     for(int k=0;k<4;k++){
         products[k][tid]=value[k];
-        if(tid<QSB_CHECKPOINT_NODES)
-            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
+        if(tid<QSB_CHECKPOINT_SAVED_NODES)
+            products[k][QSB_CHECKPOINT_BASE+tid]=
+                checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
         if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
+    }
+    __syncthreads();
+
+    /* Nodes 256..383 are exactly the first level of the original tree. They
+     * depend only on the 256 saved leaves, so recomputing them trades 128 field
+     * multiplies per CTA for 4,096 bytes of checkpoint traffic per direction.
+     * The second barrier is required before the existing downward expansion
+     * reads those products. */
+    if(tid<128){
+        uint64_t a[5],b[5],out[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){
+            a[k]=products[k][tid];
+            b[k]=products[k][128+tid];
+        }
+        a[4]=b[4]=0;
+        qsb_field_mul(out,a,b);
+        #pragma unroll
+        for(int k=0;k<4;k++)products[k][256+tid]=out[k];
     }
     __syncthreads();
 
@@ -1539,7 +1567,7 @@ int main(int argc, char **argv) {
         fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
         return 1;
     }
-    printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB tree + %.0f MiB roots + %.2f MiB root tree\n",
+    printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB upper tree + %.0f MiB roots + %.2f MiB upper root tree\n",
            (double)pipeline_state_bytes/(1024*1024),
            (double)pipeline_tree_bytes/(1024*1024),
            (double)pipeline_root_bytes/(1024*1024),

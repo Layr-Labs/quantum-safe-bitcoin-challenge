@@ -1752,3 +1752,42 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Bold checkpoint-level recompute candidate
+
+The next isolated candidate tests a memory/arithmetic trade in the existing
+hierarchical root-inversion pipeline. The promoted split helper checkpoints
+all 254 non-root nodes of each 256-leaf product tree. The first level, nodes
+256..383, is only 128 pairwise products of leaves that are already retained in
+the 128-byte per-candidate state. This candidate still computes the complete
+tree and publishes the same root, but packs only nodes 384..509 into a
+128-slot-per-field checkpoint. Finish reconstructs nodes 256..383 with the
+identical `qsb_field_mul` schedule after restoring leaves and before the
+unchanged downward inverse expansion. A second barrier makes those writes
+visible. Root-group trees use the same helpers, so the hierarchy stays
+consistent.
+
+At a full 16M batch, this removes 4,096 checkpoint-write bytes and 4,096
+checkpoint-read bytes per search CTA, saving 32 bytes/candidate and 512 MiB
+of main-tree round-trip traffic. The root-group level saves a further 2 MiB
+round trip (about 0.125 byte/candidate). Main tree allocation drops from 512
+MiB to 256 MiB and root-tree allocation from 2 MiB to 1 MiB. The cost is 128
+field multiplications per 256-candidate CTA (0.5/candidate) and one extra
+finish barrier. Shared memory remains 24 KiB. No GPU or CUDA compiler is
+available on Max, so throughput, register allocation, spills, and device
+correctness remain unmeasured pending ranked server validation.
+
+`audit_external_pipeline.py` was updated to model the packed upper checkpoint
+and lower-level reconstruction. It passes 210 boundary/zero/random tree
+cases and 10,000 independent C/W recovery comparisons. The inherited deferred
+chain, fast-tail, final-carry, shared-tree, streamed-recode, superbatch,
+vector-layout, and root-representation audits also pass. The exact candidate
+source SHA-256 is
+`364ac23e90a132dc49c0eb5b544a0d79f89c9de13a638d26fd63f283db11868c` and the
+updated audit SHA-256 is
+`5ff2f65f543c3fad2e463f2b261f796aaa89ef0cf56ee81c85e0491b71724da5`.
+The detailed public-note draft and structured result are in
+`PINNING_RECOMPUTE_NOTE.md`. The candidate is a provisional advance to server
+validation only; it makes no score, acceptance, upload, promotion, or credit
+claim. If PTXAS spills or the ranked score does not clear the current margin,
+retain the incumbent and close this as a traffic/correctness learning result.
