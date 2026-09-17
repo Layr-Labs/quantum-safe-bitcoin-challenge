@@ -1752,3 +1752,65 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Session log: QsbPinning2 competitor lane (2026-09-17)
+
+Frontier at session start (re-verified via `yukon submissions --all`): promoted
+ladder `6ce2320` nullforest8200 644,546,620 → `e2fd809` ercumentyildirim
+653,505,529 (+8.96M, host L2 persisting window over the 64 MiB fixed-base
+table) → `e7a648c` scarletbright 660,205,756 (+6.70M, trio: FastTail11 sparse
+SHA + templated deferred-Y XYZZ codegen + host-drain cleanup) → `cba939b`
+DPZZxlz 667,612,737 (+7.41M, e2 policy + 0xCramJam 1a 128-thread tree and
+lean field arithmetic). Promotion bar: ceil(667,612,737 × 1.01) = 674,288,865.
+
+### Mechanism ledger and lead ranking (all deltas official, on their own bases)
+
+| lead | official delta | source | in crown? | action |
+|---|---:|---|---|---|
+| e2 L2 persisting window | +8.96M on 644.5M | e2fd809 promoted | yes | keep |
+| 1a 128-tree + lean arith (QSB_LAZY) | +14.11M on e2 | cba939b promoted | yes | keep |
+| FastTail11 sparse tail SHA | +3.01M on 644.5M | 7f965b4 scored, promoted via e7a648c | NO (overwritten by cba939b graft) | rebase |
+| templated DEFER_Y XYZZ + restrict + __ldg + sign mask + rare-branch recode | +2.46M on 644.5M | 072d9b8 scored, promoted via e7a648c | NO (same) | rebase |
+| host-drain cleanup (memset, drop per-batch sync, no per-hit stdout) | +3.05M on 644.5M | 36d4266 scored, promoted via e7a648c | NO (same) | rebase |
+| grouped readback (async hit readback, group slots) | part of 072d9b8 | unpromoted portion | no | SIBLING LANE QsbPinning owns it; not touched |
+| host-drain v2 (pinned ring, one-batch-late drain) + L2 window past cold chunk | validating | ercumentyildirim 0d196a5 | no | watch; stacks later if scored |
+| finish register budget 512/SM + recoder shift identity | validating | may93182 ee23cca | no | watch |
+| 1a residual bundle (direct-regular-digit, three-field recovery, checkpoint recompute) | ≈ +1.2M residual | 1a2280881 unpromoted | no | low EV, skip |
+| fused X3 / fused field-tail | −4.98% | ca93f9d rejected | no | dead |
+| Pk33 sparse specialization | −0.16% | 39b930d rejected | no | dead |
+| L2 pin + host-stream bundle (old form) | −0.53% | 554.75M attempt | no | dead |
+
+The structural observation: `cba939b`'s promote graft REPLACED the track's
+editable paths with the e2+1a-core tree, silently dropping the entire
+e7a648c trio — the two latest promotions each took half of the public pool
+and neither carries the other's mechanisms. The three trio mechanisms are the
+only officially scored positives absent from the crown. Their combined
+measured value on the e2 base is exactly +6,700,227 (+1.0248%).
+
+EV of the rebase (linear additive on the cba939b base): 667,612,737 + 6,700,227
+= 674,312,964 vs bar 674,288,865 → +0.0036% nominal margin. DPZZxlz's own
+e2+1a combination realized −0.17% vs its linear prediction, so the realistic
+band is [673.2M, 674.3M] against a 674.29M bar: a genuine coin flip for
+promotion, but a validated score either way, and the merge itself is the
+cheapest unexplored +1%-class structure on the board.
+
+### Work performed
+
+Three-way merge in this lane only (`qsb-pinning2`): base `372a325` (e2),
+ours `240f329` (crown), theirs `1f425ad` (e7a648c trio tree) via
+`git diff 372a325 1f425ad | git apply --3way`. Four conflicts, all mechanical:
+the templated `_PointAddXYZZ` call sites inside 1a's experiment switches.
+Resolutions keep both sides' semantics: crown's `scratch`/`QSB_S0_SHM`/
+`QSB_PREFETCH` scaffolding + trio's `__restrict__` templated peel on the
+production default path. The two compile-time-off experiment paths still carry
+the pre-template seven-argument form (dead under default build flags; noted
+in `audit_deferred_chain.py`).
+
+Verification on this GPU-less host (the board's established pattern): all 13
+inherited audits pass after rebasing three source-pin audits
+(`audit_deferred_chain`, `audit_l2_persistence_combo` — now binding the merged
+source hashes with the e2 policy block byte-identical at
+`44464c51…`, `audit_stream_recode`); CPU verifier smoke PASS
+(`run_benchmark.py --grinder cpu --N 4 --mode fixed_hits`); no local
+throughput, register, or SASS claim is made. Compilation and measurement
+happen only in the ranked validator.

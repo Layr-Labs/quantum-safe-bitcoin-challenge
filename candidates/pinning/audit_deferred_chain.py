@@ -226,21 +226,24 @@ def source_audit():
     root = Path(__file__).resolve().parent
     math = (root / "GPUMath.h").read_text()
     pinning = (root / "pinning.cu").read_text()
-    mixed = function_body(math, "__device__ void _PointAddXYZZ(uint64_t")
+    mixed = function_body(math, "__device__ __forceinline__ void _PointAddXYZZ(")
     assert len(re.findall(r"\b_ModMult\(", mixed)) == 8
     assert len(re.findall(r"\b_ModSqr\(", mixed)) == 2
-    assert "const uint64_t *Yoff, bool defer_y" in mixed
-    assert "if (defer_y)" in mixed
+    assert "template<bool DEFER_Y>" in math
+    assert mixed.count("__restrict__") == 7
+    assert "if (DEFER_Y)" in mixed
     assert "Load256(Y1, Q);" in mixed
     assert "_ModMult(S2, (uint64_t *)Y2, ZZZ1);" in mixed
-    expected = "_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);"
-    # Exact 1a keeps the production materialized path plus the default and
-    # optional-prefetch scalar variants in source.  The shared-memory
-    # experiment uses an equivalent local `ya` anchor behind its disabled
-    # compile-time switch.
-    assert pinning.count(expected) == 3
+    assert pinning.count("_PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);") == 2
+    assert pinning.count("_PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);") == 2
     assert pinning.count("Load256(y0, cy);") == 3
-    assert pinning.count("_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);") == 1
+    # The QSB_S0_SHM path stores its anchor through the QSB_Y0_ST macro and
+    # the two compile-time-off experiment paths (QSB_PREFETCH==1 and
+    # QSB_S0_SHM) still carry the pre-template seven-argument form.
+    assert pinning.count(
+        "_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);") == 1
+    assert pinning.count(
+        "_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);") == 1
 
 
 if __name__ == "__main__":
