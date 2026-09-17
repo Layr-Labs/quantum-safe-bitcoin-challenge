@@ -82,7 +82,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PK_UNROLL 0       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
-#define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
+#define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
@@ -102,6 +102,18 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_STATE_PLANES (QSB_SYM_FINISH ? 6u : 8u)
 #ifndef QSB_PROBE_MASK
 #define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
+#endif
+#ifndef QSB_DIRDIG
+#define QSB_DIRDIG 1          /* 1: derive every chunk's (idx,neg) directly from the unchanged recode
+                               *    setup value M with independent bit-field extracts, instead of
+                               *    peeling them with the serial gt_mixed_step recurrence */
+#endif
+#ifndef QSB_SQFREE
+#define QSB_SQFREE 1          /* 1: square-free recovery x-pair (subset frontier e00f5566). With
+                               *    c = 3*xR^2/(2*yR) uploaded per problem, x1 = (l1+m2)*(l1-c)+xR
+                               *    and x2 = (l1+m2)*(m2-c)+xR replace F=2u^2-K*t+xR / H=2*u*v, so
+                               *    the pair costs 2M instead of 2M+1S. Only takes effect under
+                               *    QSB_SYM_FINISH=1; the 8-plane QSB_SYM_FINISH=0 path is unchanged. */
 #endif
 #if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
 #undef QSB_S0_THREADS
@@ -272,6 +284,73 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
     e[GT_CHUNKS-1]=sign*(int32_t)M[0];
 }
 
+/* ---- Direct (non-recurrent) signed-digit derivation -----------------------
+ * gt_mixed_step is the classic regular recoding d = (M mod 2^(w+1)) - 2^w,
+ * M' = (M-d)/2^w.  Writing M_c = 2*u_c + 1 the recurrence collapses to
+ * u_{c+1} = floor(u_c / 2^w_c), i.e.
+ *
+ *      u_c = floor(M / 2^(gt_shift(c)+1))        for every chunk c,
+ *
+ * so every chunk's digit is an INDEPENDENT bit-field of the unchanged setup
+ * value M: d_c = 2*f + 1 - 2^w_c where f is the w_c-bit field of M starting at
+ * bit gt_shift(c)+1 (note the +1).  Widths w_c = gt_shift(c+1) - gt_shift(c):
+ * 18 for chunk 0, 17 for chunks 1..13.  With t = f >> (w_c-1) the field's top
+ * bit, the digit decodes branchlessly to
+ *      idx = (f ^ (t-1)) & (2^(w_c-1)-1),   neg = t ^ 1,
+ * and the global sign folds in as neg ^= (sign < 0).
+ *
+ * Chunk 14 is special: gt_recode_signed ends with e[14] = sign*M[14] and no
+ * subtraction, so its digit is 2*u_14 + 1 with u_14 = floor(M / 2^240) -- a
+ * plain 16-bit extract, always positive before the global sign.  gt_entries(14)
+ * is 2^16 and M < 2^256, so u_14 < 2^16 fits.
+ *
+ * This removes the loop-carried M update from the addition chain: the 15 digit
+ * derivations become mutually independent.  Enabled by QSB_DIRDIG (default 1);
+ * QSB_DIRDIG=0 restores the serial peel for A/B.  gt_recode_signed above is
+ * left untouched as the CPU cross-check reference. */
+
+/* 256-bit bit-field extract starting at bit pos; widths used here are <= 18 so
+ * a uint32_t result is enough.  The limb pick is a ternary chain, never an
+ * index, so M stays in registers.  The doubled left shift is well defined when
+ * sh == 0 (it then contributes nothing). */
+__device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigned pos) {
+    unsigned li = pos >> 6, sh = pos & 63u;
+    uint64_t lo = li==0?m[0]:li==1?m[1]:li==2?m[2]:m[3];
+    uint64_t hi = li==0?m[1]:li==1?m[2]:li==2?m[3]:0ULL;
+    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));   /* safe when sh==0 */
+}
+
+/* Chunk 0: 18-bit field at bit gt_shift(0)+1 = 1, 2^17 table entries. */
+__device__ __forceinline__ void gt_dirdig_chunk0(const uint64_t M[4], uint32_t sflag,
+                                                 uint32_t *idx, uint64_t *neg) {
+    uint32_t f = (uint32_t)(M[0] >> 1) & 0x3FFFFu;
+    uint32_t t = f >> 17;
+    uint32_t i = (f ^ (t - 1u)) & 0x1FFFFu;
+#if QSB_PROBE_MASK
+    i &= (uint32_t)QSB_PROBE_MASK;
+#endif
+    *idx = i;
+    *neg = (uint64_t)((t ^ 1u) ^ sflag);
+}
+
+/* Chunks 1..14: 17-bit field at bit gt_shift(c)+1 = 17*c+2, 2^16 table entries.
+ * Chunk 14 takes the unsigned 16-bit form (its field is exactly M >> 240, so the
+ * same extract serves as both f and the final index); the select is uniform
+ * across the warp, no data-dependent branch. */
+__device__ __forceinline__ void gt_dirdig_chunk(const uint64_t M[4], int c, uint32_t sflag,
+                                                uint32_t *idx, uint64_t *neg) {
+    uint32_t f = gt_field_bits_v(M, (unsigned)(17*c + 2)) & 0x1FFFFu;
+    uint32_t t = f >> 16;
+    bool last = (c == GT_CHUNKS-1);
+    uint32_t i = last ? f : ((f ^ (t - 1u)) & 0xFFFFu);
+    uint32_t n = last ? sflag : ((t ^ 1u) ^ sflag);
+#if QSB_PROBE_MASK
+    i &= (uint32_t)QSB_PROBE_MASK;
+#endif
+    *idx = i;
+    *neg = (uint64_t)n;
+}
+
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
 __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
@@ -409,12 +488,30 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
 #endif
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
+#if QSB_DIRDIG
+    /* M is never mutated below: every chunk's digit is an independent bit-field
+     * of it. sflag is the global sign as a 0/1 FLAG (gt_load_signed_flat takes a
+     * flag, not a mask); each chunk's neg is its field-derived neg XOR sflag. */
+    const uint32_t sflag = (uint32_t)(sign < 0);
+#endif
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
 #if QSB_PREFETCH == 2
     {   /* Warm L2 with every remaining table record before the addition chain.
-         * Runs the recoder on a copy; digits 0 and 1 are loaded immediately
+         * QSB_DIRDIG reads each digit straight out of M; the serial path has to
+         * run the recoder on a copy. Digits 0 and 1 are loaded immediately
          * below, so only chunks 2..14 are prefetched. */
+#if QSB_DIRDIG
+        /* No copy needed: the digits are read straight out of M. */
+        uint32_t pb=gt_offset(2);
+        #pragma unroll
+        for(int c=2;c<GT_CHUNKS;c++){
+            uint32_t pi; uint64_t pn; gt_dirdig_chunk(M,c,sflag,&pi,&pn);
+            qsb_prefetch_l2(gTable+((size_t)pb+pi)*64);
+            qsb_prefetch_l2(gTable+((size_t)pb+pi)*64+32);
+            pb+=1u<<16;
+        }
+#else
         uint64_t Mp[4]={M[0],M[1],M[2],M[3]};
         (void)gt_mixed_step<18>(Mp,sign);
         (void)gt_mixed_step<17>(Mp,sign);
@@ -427,32 +524,56 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
             qsb_prefetch_l2(gTable+((size_t)pb+pi)*64+32);
             pb+=1u<<16;
         }
+#endif
     }
 #endif
+#if QSB_DIRDIG
+    gt_dirdig_chunk0(M, sflag, &idx, &neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_dirdig_chunk(M, 1, sflag, &idx, &neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+#else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
     ec=gt_mixed_step<17>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+#endif
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
 #if QSB_PREFETCH == 1
-    /* Peel the digit one chunk ahead and prefetch its record into L2. Only the
-     * next signed digit (one register) stays live, not the 64-byte point. */
+    /* Derive the digit one chunk ahead and prefetch its record into L2. Only the
+     * next index (one register) stays live, not the 64-byte point. */
+#if QSB_DIRDIG
+    gt_dirdig_chunk(M, 2, sflag, &idx, &neg);
+#else
     int32_t ec_next=gt_mixed_step<17>(M,sign);
     gt_digit_idx(ec_next, &idx, &neg);
+#endif
     qsb_prefetch_l2(gTable+((size_t)table_base+idx)*64);
     qsb_prefetch_l2(gTable+((size_t)table_base+idx)*64+32);
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c++){
+#if !QSB_DIRDIG
         ec=ec_next;
+#endif
         if (c<GT_CHUNKS-1) {
+            uint32_t pi; uint64_t pn;
+#if QSB_DIRDIG
+            gt_dirdig_chunk(M,c+1,sflag,&pi,&pn);   /* the record one chunk ahead */
+#else
             ec_next=(c+1<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-            uint32_t pi; uint64_t pn; gt_digit_idx(ec_next,&pi,&pn);
+            gt_digit_idx(ec_next,&pi,&pn);
+#endif
             qsb_prefetch_l2(gTable+((size_t)table_base+(1u<<16)+pi)*64);
             qsb_prefetch_l2(gTable+((size_t)table_base+(1u<<16)+pi)*64+32);
         }
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+#if QSB_DIRDIG
+        gt_dirdig_chunk(M,c,sflag,&idx,&neg);
+#else
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
@@ -462,9 +583,14 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     for(int i=0;i<4;i++){ QSB_M_ST(i,M[i]); QSB_Y0_ST(i,y0[i]); }
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c++){
-        uint64_t Ms[4]; int32_t ecs;
+        uint64_t Ms[4];
         #pragma unroll
         for(int i=0;i<4;i++) Ms[i]=QSB_M_LD(i);
+#if QSB_DIRDIG
+        /* The stashed state is the unchanged setup M: read it, never write back. */
+        gt_dirdig_chunk(Ms,c,sflag,&idx,&neg);
+#else
+        int32_t ecs;
         if (c<GT_CHUNKS-1) {
             ecs=gt_mixed_step<17>(Ms,sign);
             #pragma unroll
@@ -472,7 +598,9 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         } else {
             ecs=sign*(int32_t)Ms[0];
         }
-        gt_digit_idx(ecs, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        gt_digit_idx(ecs, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         uint64_t ya[4];
         #pragma unroll
         for(int i=0;i<4;i++) ya[i]=QSB_Y0_LD(i);
@@ -489,14 +617,23 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     /* Chunk 2 is loaded up front; every later record is loaded inside the
      * preceding addition. Two point buffers alternate roles. */
     uint64_t nx[4],ny[4];
+#if QSB_DIRDIG
+    gt_dirdig_chunk(M, 2, sflag, &idx, &neg);
+#else
     ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    gt_digit_idx(ec, &idx, &neg);
+#endif
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c+=2){
         /* iteration c: consume cx/cy, load c+1 into nx/ny */
         bool more=(c+1<GT_CHUNKS);
         uint32_t ni=0; uint64_t nn=0;
+#if QSB_DIRDIG
+        if (more) { gt_dirdig_chunk(M,c+1,sflag,&ni,&nn); }
+#else
         if (more) { ec=(c+1<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0]; gt_digit_idx(ec,&ni,&nn); }
+#endif
         _PointAddXYZZ_early(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1,
                             more, gTable, table_base+(1u<<16), ni, nn, nx, ny);
         Load256(y0, cy);
@@ -505,7 +642,11 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         /* iteration c+1: consume nx/ny, load c+2 into cx/cy */
         bool more2=(c+2<GT_CHUNKS);
         ni=0; nn=0;
+#if QSB_DIRDIG
+        if (more2) { gt_dirdig_chunk(M,c+2,sflag,&ni,&nn); }
+#else
         if (more2) { ec=(c+2<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0]; gt_digit_idx(ec,&ni,&nn); }
+#endif
         _PointAddXYZZ_early(X,Y,ZZ,ZZZ, nx,ny, y0, c+1 != GT_CHUNKS-1,
                             more2, gTable, table_base+(1u<<16), ni, nn, cx, cy);
         Load256(y0, ny);
@@ -517,14 +658,23 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
      * specialisation, so the loop body carries no defer_y branch. */
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
+#if QSB_DIRDIG
+        gt_dirdig_chunk(M,c,sflag,&idx,&neg);
+#else
         ec=gt_mixed_step<17>(M,sign);
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         _PointAddXYZZT<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+#if QSB_DIRDIG
+    gt_dirdig_chunk(M,GT_CHUNKS-1,sflag,&idx,&neg);
+#else
     ec=sign*(int32_t)M[0];
     gt_digit_idx(ec, &idx, &neg);
+#endif
     gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
     _PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 #else
@@ -536,8 +686,13 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     #pragma unroll 1
 #endif
     for (int c=2;c<GT_CHUNKS;c++){
+#if QSB_DIRDIG
+        gt_dirdig_chunk(M,c,sflag,&idx,&neg);
+#else
         ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
@@ -1353,8 +1508,10 @@ __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
 __device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2 (delta E) */
+__device__ __constant__ uint64_t pin_u2rc_words[4];   /* c = 3*xR^2/(2*yR) (QSB_SQFREE) */
 
-/* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
+/* Delta E (xlib 0c6f4c8), with the QSB_SQFREE x-pair layered on top.
+ * With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
  * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
  * K=3*xR^2 is fixed for the entire problem. The shared x base is
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
@@ -1362,9 +1519,53 @@ __device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2 (delta E) */
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
-    uint64_t *xR, uint64_t *yR, uint64_t *K,
+    uint64_t *xR, uint64_t *yR,
+#if QSB_SQFREE
+    uint64_t *c,
+#else
+    uint64_t *K,
+#endif
     uint64_t *x_plus, uint64_t *x_minus
 ) {
+#if QSB_SQFREE
+    /* Square-free x-pair (subset frontier e00f5566). lambda1=u-v and m2=u+v are
+     * the two slopes, so lambda1+m2=2*u and, with c=3*xR^2/(2*yR),
+     * 2*u*c = K*t exactly. Hence F-H = (lambda1+m2)*(lambda1-c)+xR and
+     * F+H = (lambda1+m2)*(m2-c)+xR: the u^2 square, the K*t multiply and the
+     * u*v multiply collapse into the two multiplies that already had to
+     * produce x_plus and x_minus. The y formulas are bit-for-bit the ones
+     * below, so both compressed-key parities are unchanged. */
+    uint64_t h[4], u[4], v[4], s[4];
+    _ModMult(h, V, inv);         /* h = V*I */
+    _ModMult(V, h);              /* V becomes t = V*h */
+    _ModMult(u, yR, V);          /* u = yR*t */
+    _ModMult(v, Y, h);           /* v = Y*h */
+    qsb_field_normalize(u);      /* same canonical u the old path fed to H and y */
+    _ModAdd256(s, u, u);         /* s = lambda1+m2 = 2*u */
+
+    _ModSub256(h, u, v);         /* lambda1 */
+    _ModSub256(V, h, c);         /* t is dead: reuse V for lambda1-c */
+    _ModMult(x_plus, s, V);
+    _ModAdd256(x_plus, x_plus, xR);
+    qsb_field_normalize(x_plus);
+    _ModSub256(V, xR, x_plus);
+    _ModMult(h, V);
+    _ModSub256(h, yR);
+    qsb_field_normalize(h);
+    uint32_t parities = (uint32_t)(h[0] & 1ULL);
+
+    _ModAdd256(h, u, v);         /* m2 */
+    _ModSub256(V, h, c);
+    _ModMult(x_minus, s, V);
+    _ModAdd256(x_minus, x_minus, xR);
+    qsb_field_normalize(x_minus);
+    _ModSub256(V, xR, x_minus);
+    _ModMult(h, V);
+    _ModSub256(V, yR, h);
+    qsb_field_normalize(V);
+    parities |= (uint32_t)((V[0] & 1ULL) << 1);
+    return parities;
+#else
     uint64_t h[4], u[4], v[4], f[4];
     _ModMult(h, V, inv);         /* h = V*I */
     _ModMult(V, h);              /* V becomes t = V*h */
@@ -1403,6 +1604,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(V);
     parities |= (uint32_t)((V[0] & 1ULL) << 1);
     return parities;
+#endif
 }
 
 template<bool FAST_TAIL, int STAGE>
@@ -1629,11 +1831,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                       pin_u2ry_words[2],pin_u2ry_words[3]};
     uint64_t q1x[4],q2x[4];
 #if QSB_SYM_FINISH
+#if QSB_SQFREE
+    uint64_t u2rc[4]={pin_u2rc_words[0],pin_u2rc_words[1],
+                      pin_u2rc_words[2],pin_u2rc_words[3]};
+    uint32_t y_parities = qsb_xyzz_finish_symmetric(
+        qy,qzzz,prod,u2rx,u2ry,u2rc,
+        q1x,q2x);
+#else
     uint64_t u2rk[4]={pin_u2rk_words[0],pin_u2rk_words[1],
                       pin_u2rk_words[2],pin_u2rk_words[3]};
     uint32_t y_parities = qsb_xyzz_finish_symmetric(
         qy,qzzz,prod,u2rx,u2ry,u2rk,
         q1x,q2x);
+#endif
 #else
     uint32_t y_parities = qsb_xyzz_finish_precomputed(
         qx,qy,qzz,qzzz,prod,u2rx,u2ry,
@@ -2261,6 +2471,37 @@ int main(int argc, char **argv) {
             if(kerr!=cudaSuccess){
                 fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
                 return 1;
+            }
+            /* c = K/(2*yR) = 3*xR^2/(2*yR), the square-free x-pair constant
+             * (QSB_SQFREE). Uploaded unconditionally so the same binary layout
+             * serves both settings of the switch. */
+            {
+                BIGNUM *bc=BN_new(),*b2y=BN_new(),*chk=BN_new();
+                if(!bc || !b2y || !chk ||
+                   !BN_mod_add(b2y,by,by,field,ctx) ||
+                   BN_mod_inverse(b2y,b2y,field,ctx)==NULL ||
+                   !BN_mod_mul(bc,bk,b2y,field,ctx)) {
+                    fprintf(stderr,"Failed to precompute recovery c\n");
+                    return 1;
+                }
+                /* 2*yR*c == 3*xR^2 (mod p) for this problem's R. */
+                if(!BN_mod_add(chk,by,by,field,ctx) ||
+                   !BN_mod_mul(chk,chk,bc,field,ctx) ||
+                   BN_cmp(chk,bk)!=0) {
+                    fprintf(stderr,"Recovery c failed its 2*yR*c==3*xR^2 check\n");
+                    return 1;
+                }
+                uint8_t cb[32]={0};
+                BN_bn2bin(bc,cb+(32-BN_num_bytes(bc)));
+                uint64_t cw[4]={0,0,0,0};
+                for(int i=0;i<4;i++)for(int b=0;b<8;b++)
+                    cw[i]|=(uint64_t)cb[31-i*8-b]<<(b*8);
+                cudaError_t cerr=cudaMemcpyToSymbol(pin_u2rc_words,cw,sizeof(cw));
+                if(cerr!=cudaSuccess){
+                    fprintf(stderr,"Failed to upload recovery c: %s\n",cudaGetErrorString(cerr));
+                    return 1;
+                }
+                BN_free(bc); BN_free(b2y); BN_free(chk);
             }
             BN_free(field); BN_free(bk);
         }
