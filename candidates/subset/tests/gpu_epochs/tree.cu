@@ -892,7 +892,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+__global__ void __launch_bounds__(256, 3) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
