@@ -10,20 +10,6 @@ __device__ uint32_t QSB_FIRST_UNIQUE[14][256];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
 
-static uint32_t qsb_window_second_key(const uint8_t w[3]) {
-    uint32_t key=0;
-    for(int i=12,n=0;i>=0 && n<5;i--)
-        if(i!=w[0]-137 && i!=w[1]-137 && i!=w[2]-137){key=(key<<4)|i;n++;}
-    return key;
-}
-
-static uint32_t qsb_window_first_key(const uint8_t w[3]) {
-    uint32_t key=0;
-    for(int i=0,n=0;i<13 && n<6;i++)
-        if(i!=w[0]-137 && i!=w[1]-137 && i!=w[2]-137){key=(key<<4)|i;n++;}
-    return key;
-}
-
 static int qsb_prepare_window_schedule(const uint8_t *rows,
         const uint8_t windows[256][3], const uint32_t *constant) {
     uint32_t first[14][256], second[64][256]={}, round_k[64];

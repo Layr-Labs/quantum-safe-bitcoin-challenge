@@ -16,7 +16,6 @@
 */
 
 // ---------------------------------------------------------------------------------
-// 256(+64) bits integer CUDA libray for SECPK1
 // ---------------------------------------------------------------------------------
 
 
@@ -965,82 +964,6 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   Load256(X1, T);                      // X3
   _ModMult(ZZ1, PP);                   // ZZ3  = ZZ1*PP
   _ModMult(ZZZ1, PPP);                 // ZZZ3 = ZZZ1*PPP
-}
-
-// ---------------------------------------------------------------------------------------
-// Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
-// The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
-// the ordinary slope numerator is (Y2+Yoff)*ZZZ1 - Yd, so the Y1*PPP product is
-// skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
-// addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final.
-// ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                                  const uint64_t *X2, const uint64_t *Y2,
-                                  const uint64_t *Yoff, bool defer_y)
-{
-  uint64_t U2[4];
-  uint64_t S2[4];
-  uint64_t P[4];
-  uint64_t R[4];
-  uint64_t PP[4];
-  uint64_t PPP[4];
-  uint64_t Q[4];
-  uint64_t T[4];
-
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
-  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-  _ModSqr(PP, P);                      // PP = P^2
-  _ModMult(PPP, PP, P);                // PPP = P*PP
-  _ModMult(Q, U2, PP);                 // V  = U2*PP
-  _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
-
-  _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
-
-  _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
-    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
-    _ModSub256(Y1, Q, S2);             // exact Y3
-  }
-
-  Load256(X1, T);                      // X3
-}
-
-// Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
-// X3, ZZ3, ZZZ3 are the ordinary coordinates of P1+P2; Y3 holds only R*(Q-X3). The
-// caller anchors the next _PointAddXYZZ_def with Yoff = Y1 (the first affine y).
-__device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
-                                     const uint64_t *X1, const uint64_t *Y1,
-                                     const uint64_t *X2, const uint64_t *Y2)
-{
-  uint64_t P[4];
-  uint64_t R[4];
-  uint64_t Q[4];
-  uint64_t T[4];
-
-  _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
-  _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
-  _ModSqr(ZZ3, P);                                 // ZZ3  = PP  = P^2
-  _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
-  _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
-
-  _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
-
-  _ModSub256(Q, Q, T);                             // Q - X3
-  _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
-  Load256(X3, T);                                  // X3
 }
 
 // EFD "mmadd-2008-s" -- affine (X1,Y1) + affine (X2,Y2) -> XYZZ, 4M + 2S (ZZ1 = ZZZ1 = 1):
