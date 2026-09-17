@@ -82,22 +82,28 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PK_UNROLL 0       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
-#define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
+#define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
-#define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#define QSB_HOST_READBACK 1   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#endif
+#ifndef QSB_HOST_DRAIN
+#define QSB_HOST_DRAIN 1      /* async host drain (e7a648c7/0d196a5b): pinned staging + event, hits drained one batch late */
 #endif
 #ifndef QSB_SPARSE_TAIL
-#define QSB_SPARSE_TAIL 0     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
+#define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
 #endif
 #ifndef QSB_FINAL_TEMPLATE
-#define QSB_FINAL_TEMPLATE 0  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
+#define QSB_FINAL_TEMPLATE 1  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
 #endif
 #ifndef QSB_SPARSE_D
-#define QSB_SPARSE_D 0        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
+#define QSB_SPARSE_D 1        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
 #endif
 #ifndef QSB_SYM_FINISH
 #define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
+#endif
+#if QSB_HOST_DRAIN && !QSB_HOST_READBACK
+#error "QSB_HOST_DRAIN needs the contiguous hit buffer (QSB_HOST_READBACK=1)"
 #endif
 #define QSB_STATE_PLANES (QSB_SYM_FINISH ? 6u : 8u)
 #ifndef QSB_PROBE_MASK
@@ -2357,6 +2363,32 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 #endif
 
+#if QSB_HOST_DRAIN
+    /* Async host drain (e7a648c7/0d196a5b): the launch loop's blocking
+     * synchronize, counter copy and per-hit file I/O all hold the device
+     * drained. Hits ride back on each batch's own async copy into pinned
+     * staging and are drained one batch late, keeping the host a batch
+     * ahead of the device. With QSB_HOST_READBACK's contiguous hit buffer
+     * one 65-word copy carries the counter and the report window. */
+    mkdir("results", 0755);
+    char pin_fname[256];
+    snprintf(pin_fname, sizeof(pin_fname), "results/pinning_hit_%d.txt", gpu_index);
+    FILE *pin_ff = fopen(pin_fname, "a");
+    if (!pin_ff) { fprintf(stderr, "cannot open %s\n", pin_fname); return 1; }
+    uint32_t *h_pin_report[2] = {NULL, NULL};
+    uint32_t *h_pin_mid[2] = {NULL, NULL};
+    cudaEvent_t pin_ev[2];
+    for (int e_ = 0; e_ < 2; e_++) {
+        cudaHostAlloc((void**)&h_pin_report[e_], (1 + 64)*sizeof(uint32_t), cudaHostAllocDefault);
+        cudaHostAlloc((void**)&h_pin_mid[e_], 8*sizeof(uint32_t), cudaHostAllocDefault);
+        if (!h_pin_report[e_] || !h_pin_mid[e_]) {
+            fprintf(stderr, "OOM: pinned staging\n"); return 1; }
+        cudaEventCreateWithFlags(&pin_ev[e_], cudaEventDisableTiming);
+    }
+    int pin_cur = 0, pin_have_prev = 0, pin_midslot = 0;
+    uint32_t pin_prev_seq = 0, pin_prev_lt = 0;
+#endif
+
     int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
     (void)BLKSZ;
@@ -2449,7 +2481,18 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
+#if QSB_HOST_DRAIN
+            /* Async from a pinned ring: a synchronous copy here drains the
+             * queue the batch loop just built. Stream order still places this
+             * upload after the previous sequence's kernels, which read d_mid. */
+            uint32_t *mslot = h_pin_mid[pin_midslot];
+            pin_midslot ^= 1;
+            for (int i = 0; i < 8; i++) mslot[i] = ctx.h[i];
+            cudaError_t copy_err = cudaMemcpyAsync(d_mid, mslot, 32,
+                                                   cudaMemcpyHostToDevice, 0);
+#else
             cudaError_t copy_err = cudaMemcpy(d_mid,ctx.h,32,cudaMemcpyHostToDevice);
+#endif
             if (copy_err != cudaSuccess) {
                 fprintf(stderr, "Failed to upload per-sequence SHA state: %s\n",
                         cudaGetErrorString(copy_err));
@@ -2462,8 +2505,12 @@ int main(int argc, char **argv) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
+#if QSB_HOST_DRAIN
+            cudaMemsetAsync(d_hit_cnt, 0, 4, 0);
+#else
             uint32_t h_hit = 0;
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+#endif
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -2490,7 +2537,43 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-#if QSB_HOST_READBACK
+#if QSB_HOST_DRAIN
+            /* The 65-word report (counter + first 64 indices) rides the
+             * batch's own stream position into pinned memory; its event is
+             * waited on after the next batch is queued, so the device never
+             * drains for the host. Hit locktimes need the previous batch's
+             * seq/batch_lt, carried beside the staging slot. */
+            cudaMemcpyAsync(h_pin_report[pin_cur], d_hit_cnt, (1+64)*sizeof(uint32_t),
+                            cudaMemcpyDeviceToHost, 0);
+            cudaEventRecord(pin_ev[pin_cur], 0);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+
+            total_searched += batch_sz;
+
+            if (pin_have_prev) {
+                int pv = pin_cur ^ 1;
+                cudaEventSynchronize(pin_ev[pv]);
+                uint32_t p_hit = h_pin_report[pv][0];
+                if (p_hit > 0) {
+                    const uint32_t *hits = h_pin_report[pv] + 1;
+                    int nh = (p_hit > 64) ? 64 : (int)p_hit;
+                    printf("\n  *** HIT! seq=0x%08X ***\n", pin_prev_seq);
+                    for (int h = 0; h < nh; h++) {
+                        uint32_t raw = hits[h];
+                        uint32_t lt = pin_prev_lt + (raw & 0x3FFFFFFF);
+                        int ri = (raw >> 30) & 1;
+                        int hc = (raw >> 31) & 1;
+                        fprintf(pin_ff, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                                pin_prev_seq, lt, hc, ri);
+                    }
+                    fflush(pin_ff);
+                    found = 1;
+                }
+            }
+            pin_prev_seq = seq; pin_prev_lt = batch_lt;
+            pin_cur ^= 1; pin_have_prev = 1;
+#elif QSB_HOST_READBACK
             /* The blocking default-stream copy waits for all kernels and
              * returns the counter plus the same first 64 indices reported below. */
             uint32_t hit_report[1 + 64];
@@ -2518,6 +2601,7 @@ int main(int argc, char **argv) {
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 #endif
+#if !QSB_HOST_DRAIN
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
@@ -2538,6 +2622,7 @@ int main(int argc, char **argv) {
                 }
                 found = 1;
             }
+#endif
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
