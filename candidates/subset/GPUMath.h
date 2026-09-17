@@ -1154,51 +1154,15 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 }
 
 // ---------------------------------------------------------------------------------------
-// XYZZ coordinates: x = X/ZZ, y = Y/ZZZ with the invariant ZZ^3 == ZZZ^2 (a = 0 plays no
-// part in addition). Same limb convention as _ModMult: values in [0, 2^256), not
-// necessarily < p. Outputs must not alias inputs.
-//
-// EFD "madd-2008-s" -- (X1,Y1,ZZ1,ZZZ1) += affine (X2,Y2) in place, 8M + 2S:
-//   U2 = X2*ZZ1, S2 = Y2*ZZZ1, P = U2-X1, R = S2-Y1, PP = P^2, PPP = P*PP, Q = X1*PP
-//   X3 = R^2 - PPP - 2Q,  Y3 = R*(Q-X3) - Y1*PPP,  ZZ3 = ZZ1*PP,  ZZZ3 = ZZZ1*PPP
-// P == 0 (x1 == x2) gives ZZ3 == ZZZ3 == 0: the point at infinity for P1 == -P2 and, as
-// with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
-// the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
+// _PointAddXYZZ (eager madd-2008-s, 8M+2S): removed -- dead on the ranked path.
+// It is still a __device__ symbol, so it is emitted into the PTX the driver must
+// JIT at first launch, INSIDE the measured 1200 s window. Measured on a previous
+// base: ptxas on the full PTX took 5.9 s vs 3.6 s after stripping dead code.
+// The live accumulator is _PointAddXYZZ_def (deferred-anchor, 7M+2S then 8M+2S
+// on the last addend) plus _PointAddXYZZ_mm_def (two-affine prefix, 3M+2S).
+// kernel_build_gtable still uses _PointAddSecp256k1; that helper is untouched.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                              const uint64_t *X2, const uint64_t *Y2)
-{
-  uint64_t U2[4];
-  uint64_t S2[4];
-  uint64_t P[4];
-  uint64_t R[4];
-  uint64_t PP[4];
-  uint64_t PPP[4];
-  uint64_t Q[4];
-  uint64_t T[4];
 
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-  _ModMult(S2, (uint64_t *)Y2, ZZZ1);  // S2 = Y2*ZZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-  _ModSqr(PP, P);                      // PP = P^2
-  _ModMult(PPP, PP, P);                // PPP = P*PP
-  _ModMult(Q, X1, PP);                 // Q  = X1*PP
-
-  _ModSqr(T, R);                       // R^2
-  _ModSub256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 - PPP - 2Q
-
-  _ModSub256(Q, Q, T);                 // Q - X3
-  _ModMult(Q, R);                      // R*(Q - X3)
-  _ModMult(S2, Y1, PPP);               // Y1*PPP
-  _ModSub256(Y1, Q, S2);               // Y3 = R*(Q - X3) - Y1*PPP
-
-  Load256(X1, T);                      // X3
-  _ModMult(ZZ1, PP);                   // ZZ3  = ZZ1*PP
-  _ModMult(ZZZ1, PPP);                 // ZZZ3 = ZZZ1*PPP
-}
 
 // ---------------------------------------------------------------------------------------
 // Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
