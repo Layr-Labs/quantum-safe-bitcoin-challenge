@@ -1162,7 +1162,13 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             }
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        if(count>2){
+            /* The next level is read only by the low half of this level's
+             * writers. Once all writers fit in warp zero, its warp barrier
+             * covers every dependency; other warps have no remaining work.
+             * This follows the promoted subset tree's synchronization rule. */
+            if(half>32)__syncthreads();else __syncwarp();
+        }
     }
 
     if(tid==0){
@@ -1217,7 +1223,10 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        /* The next level (including the final leaf read) has twice as many
+         * consumers as this level has writers. A block barrier is required
+         * before any of those consumers can leave warp zero. */
+        if((count<<1)>32)__syncthreads();else __syncwarp();
     }
 
     uint64_t parent_inv[5],sibling[5];
