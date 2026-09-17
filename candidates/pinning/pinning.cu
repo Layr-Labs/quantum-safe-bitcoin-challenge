@@ -22,6 +22,110 @@
 static_assert(sizeof(ulonglong2) == 16, "pipeline vector must be 128 bits");
 static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligned");
 
+/* ---- Experiment switches (fable round 2). Defaults are set at the end of
+ * this block; ab.sh overrides them with -D on the build line. ---- */
+#ifndef QSB_TREE_N
+#define QSB_TREE_N 128        /* leaves per candidate product tree = prepare/finish block size (256, 128 or 64) */
+#endif
+#ifndef QSB_S0_SHM
+#define QSB_S0_SHM 0          /* 1: keep the recode state and the y anchor in shared memory (register relief) */
+#endif
+#if QSB_TREE_N != 256 && QSB_TREE_N != 128 && QSB_TREE_N != 64
+#error "QSB_TREE_N must be 256, 128 or 64"
+#endif
+#ifndef QSB_BATCH
+#define QSB_BATCH 16777216    /* candidates per pipeline launch */
+#endif
+#ifndef QSB_PREFETCH
+#define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
+#endif
+#ifndef QSB_STREAM
+#define QSB_STREAM 0          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
+#endif
+#ifndef QSB_TREE_OFFLOAD
+#define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
+#endif
+#ifndef QSB_S0_THREADS
+#define QSB_S0_THREADS 256    /* prepare-kernel block size (only free when the tree is offloaded) */
+#endif
+#ifndef QSB_S0_BLOCKS
+#define QSB_S0_BLOCKS 2       /* prepare-kernel resident blocks per SM */
+#endif
+#ifndef QSB_TREE_BLOCKS
+#define QSB_TREE_BLOCKS 4     /* dense tree kernel resident blocks per SM */
+#endif
+#ifndef QSB_TREE_OFFLOAD2
+#define QSB_TREE_OFFLOAD2 0   /* 1: expand the leaf inverses in a dense kernel, not in finish */
+#endif
+#ifndef QSB_S2_THREADS
+#define QSB_S2_THREADS 256    /* finish-kernel block size (only free when the down-tree is offloaded) */
+#endif
+#ifndef QSB_S2_BLOCKS
+#define QSB_S2_BLOCKS 3       /* finish-kernel resident blocks per SM */
+#endif
+#if QSB_TREE_N != 256 && QSB_S2_THREADS == 256
+#undef QSB_S2_THREADS
+#define QSB_S2_THREADS QSB_TREE_N
+#undef QSB_S2_BLOCKS
+#define QSB_S2_BLOCKS (768/QSB_TREE_N)    /* keep 768 threads per SM at 80 registers */
+#endif
+#if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
+#error "finish block size must equal the tree width unless the inverse tree is offloaded"
+#endif
+#ifndef QSB_PROBE_MASK
+#define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
+#endif
+#if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
+#undef QSB_S0_THREADS
+#define QSB_S0_THREADS QSB_TREE_N
+#undef QSB_S0_BLOCKS
+#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */
+#endif
+#if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD
+#error "prepare block size must equal the tree width unless the tree is offloaded"
+#endif
+
+__device__ __forceinline__ void qsb_prefetch_l2(const void *p) {
+    asm volatile("prefetch.global.L2 [%0];" :: "l"(p));
+}
+/* Streaming (evict-first) 128-bit and 64-bit global accesses. */
+__device__ __forceinline__ void qsb_st_v2(ulonglong2 *p, uint64_t a, uint64_t b) {
+#if QSB_STREAM
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.cs.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(a), "l"(b) : "memory");
+#else
+    *p = make_ulonglong2(a, b);
+#endif
+}
+__device__ __forceinline__ ulonglong2 qsb_ld_v2(const ulonglong2 *p) {
+#if QSB_STREAM
+    uint64_t a, b;
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.v2.u64 {%0,%1}, [g]; }"
+                 : "=l"(a), "=l"(b) : "l"(p) : "memory");
+    return make_ulonglong2(a, b);
+#else
+    return *p;
+#endif
+}
+__device__ __forceinline__ void qsb_st_u64(uint64_t *p, uint64_t a) {
+#if QSB_STREAM
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.cs.u64 [g], %1; }"
+                 :: "l"(p), "l"(a) : "memory");
+#else
+    *p = a;
+#endif
+}
+__device__ __forceinline__ uint64_t qsb_ld_u64(const uint64_t *p) {
+#if QSB_STREAM
+    uint64_t a;
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %1; ld.global.cs.u64 %0, [g]; }"
+                 : "=l"(a) : "l"(p) : "memory");
+    return a;
+#else
+    return *p;
+#endif
+}
+
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
 #define AFFIX_IS_SUFFIX true
@@ -168,6 +272,9 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
     uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
     *idx = (ae - 1) >> 1;
+#if QSB_PROBE_MASK
+    *idx &= (uint32_t)QSB_PROBE_MASK;
+#endif
     *neg = (ec < 0) ? 1ULL : 0ULL;
 }
 
@@ -212,11 +319,41 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
                                             uint64_t *ZZ, uint64_t *ZZZ,
                                             const uint64_t k[4],
-                                            const uint8_t *gTable) {
+                                            const uint8_t *gTable,
+                                            uint64_t (*scratch)[2*QSB_TREE_N]) {
+#if QSB_S0_SHM
+    /* Cold per-thread state lives in the (currently unused) tree buffer:
+     * limb-major, lane-contiguous, so each access is one 8-byte shared op.
+     * Slot [k][tid] holds M[k]; slot [k][QSB_TREE_N+tid] holds y0[k]. */
+    #define QSB_M_LD(i)   (scratch[i][threadIdx.x])
+    #define QSB_M_ST(i,v) (scratch[i][threadIdx.x]=(v))
+    #define QSB_Y0_LD(i)  (scratch[i][QSB_TREE_N+threadIdx.x])
+    #define QSB_Y0_ST(i,v) (scratch[i][QSB_TREE_N+threadIdx.x]=(v))
+#else
+    (void)scratch;
+#endif
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_PREFETCH == 2
+    {   /* Warm L2 with every remaining table record before the addition chain.
+         * Runs the recoder on a copy; digits 0 and 1 are loaded immediately
+         * below, so only chunks 2..14 are prefetched. */
+        uint64_t Mp[4]={M[0],M[1],M[2],M[3]};
+        (void)gt_mixed_step<18>(Mp,sign);
+        (void)gt_mixed_step<17>(Mp,sign);
+        uint32_t pb=gt_offset(2);
+        #pragma unroll
+        for(int c=2;c<GT_CHUNKS;c++){
+            int32_t e=(c<GT_CHUNKS-1)?gt_mixed_step<17>(Mp,sign):sign*(int32_t)Mp[0];
+            uint32_t pi; uint64_t pn; gt_digit_idx(e,&pi,&pn);
+            qsb_prefetch_l2(gTable+((size_t)pb+pi)*64);
+            qsb_prefetch_l2(gTable+((size_t)pb+pi)*64+32);
+            pb+=1u<<16;
+        }
+    }
+#endif
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
     ec=gt_mixed_step<17>(M,sign);
@@ -224,6 +361,56 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
+#if QSB_PREFETCH == 1
+    /* Peel the digit one chunk ahead and prefetch its record into L2. Only the
+     * next signed digit (one register) stays live, not the 64-byte point. */
+    int32_t ec_next=gt_mixed_step<17>(M,sign);
+    gt_digit_idx(ec_next, &idx, &neg);
+    qsb_prefetch_l2(gTable+((size_t)table_base+idx)*64);
+    qsb_prefetch_l2(gTable+((size_t)table_base+idx)*64+32);
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS;c++){
+        ec=ec_next;
+        if (c<GT_CHUNKS-1) {
+            ec_next=(c+1<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
+            uint32_t pi; uint64_t pn; gt_digit_idx(ec_next,&pi,&pn);
+            qsb_prefetch_l2(gTable+((size_t)table_base+(1u<<16)+pi)*64);
+            qsb_prefetch_l2(gTable+((size_t)table_base+(1u<<16)+pi)*64+32);
+        }
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+#elif QSB_S0_SHM
+    #pragma unroll
+    for(int i=0;i<4;i++){ QSB_M_ST(i,M[i]); QSB_Y0_ST(i,y0[i]); }
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS;c++){
+        uint64_t Ms[4]; int32_t ecs;
+        #pragma unroll
+        for(int i=0;i<4;i++) Ms[i]=QSB_M_LD(i);
+        if (c<GT_CHUNKS-1) {
+            ecs=gt_mixed_step<17>(Ms,sign);
+            #pragma unroll
+            for(int i=0;i<4;i++) QSB_M_ST(i,Ms[i]);
+        } else {
+            ecs=sign*(int32_t)Ms[0];
+        }
+        gt_digit_idx(ecs, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        uint64_t ya[4];
+        #pragma unroll
+        for(int i=0;i<4;i++) ya[i]=QSB_Y0_LD(i);
+        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);
+        #pragma unroll
+        for(int i=0;i<4;i++) QSB_Y0_ST(i,cy[i]);   /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    #undef QSB_M_LD
+    #undef QSB_M_ST
+    #undef QSB_Y0_LD
+    #undef QSB_Y0_ST
+#else
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c++){
         ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
@@ -232,6 +419,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+#endif
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -567,6 +755,15 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 
 #define QSB_CHECKPOINT_NODES 254
 #define QSB_CHECKPOINT_STRIDE 256
+/* Candidate trees may be narrower than the 256-wide root-group trees. */
+#define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
 
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
@@ -575,12 +772,12 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
  * inverse, and returns canonical leaf inverses.  The packed node numbering is
  * identical to qsb_block_inverse; leaves come from the saved W field and node
  * 510 is omitted because roots owns it. */
+template<int N>
 __device__ __forceinline__ void qsb_block_product_checkpoint(
-    uint64_t *value, uint64_t *roots, uint64_t *checkpoint
+    uint64_t *value, uint64_t *roots, uint64_t *checkpoint, uint64_t (*products)[2*N]
 ) {
-    __shared__ uint64_t products[4][512];
     int tid=threadIdx.x;
-    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+    size_t block_base=(size_t)blockIdx.x*4u*N;
 
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
@@ -588,7 +785,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
 
     int offset=0;
     #pragma unroll 1
-    for(int count=256;count>1;count>>=1){
+    for(int count=N;count>1;count>>=1){
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
@@ -603,8 +800,8 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             #pragma unroll
             for(int k=0;k<4;k++){
                 products[k][node]=out[k];
-                if(node<510)
-                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256]=out[k];
+                if(node<2*N-2)
+                    qsb_st_u64(&checkpoint[block_base+(size_t)k*N+node-N],out[k]);
             }
         }
         offset+=count;
@@ -613,17 +810,25 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
 
     if(tid==0){
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][510];
+        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
     }
 }
+template<int N>
+__device__ __forceinline__ void qsb_block_product_checkpoint(
+    uint64_t *value, uint64_t *roots, uint64_t *checkpoint
+) {
+    __shared__ uint64_t products[4][2*N];
+    qsb_block_product_checkpoint<N>(value,roots,checkpoint,products);
+}
 
+template<int N>
 __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     uint64_t *value, const uint64_t *roots, const uint64_t *checkpoint
 ) {
-    __shared__ uint64_t products[4][512];
-    __shared__ uint64_t inverses[4][256];
+    __shared__ uint64_t products[4][2*N];
+    __shared__ uint64_t inverses[4][N];
     int tid=threadIdx.x;
-    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+    size_t block_base=(size_t)blockIdx.x*4u*N;
 
     /* Each lane supplies its saved W leaf and all but the last two lanes
      * restore one internal node. Lane zero also publishes the external root inverse.
@@ -631,28 +836,28 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     #pragma unroll
     for(int k=0;k<4;k++){
         products[k][tid]=value[k];
-        if(tid<QSB_CHECKPOINT_NODES)
-            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
-        if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
+        if(tid<N-2)
+            products[k][N+tid]=qsb_ld_u64(&checkpoint[block_base+(size_t)k*N+tid]);
+        if(tid==0)inverses[k][N-2]=roots[(size_t)blockIdx.x*4u+k];
     }
     __syncthreads();
 
-    int offset=508;
+    int offset=2*N-4;
     #pragma unroll 1
-    for(int count=2;count<256;count<<=1){
+    for(int count=2;count<N;count<<=1){
         int half=count>>1;
         if(tid<count){
             int local_parent=tid&(half-1);
             uint64_t parent_inv[5],sibling[5],child_inv[5];
             #pragma unroll
             for(int k=0;k<4;k++){
-                parent_inv[k]=inverses[k][offset+count-256+local_parent];
+                parent_inv[k]=inverses[k][offset+count-N+local_parent];
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
             qsb_field_mul(child_inv,parent_inv,sibling);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
+            for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
         __syncthreads();
@@ -661,8 +866,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     uint64_t parent_inv[5],sibling[5];
     #pragma unroll
     for(int k=0;k<4;k++){
-        parent_inv[k]=inverses[k][tid&127];
-        sibling[k]=products[k][tid^128];
+        parent_inv[k]=inverses[k][tid&(N/2-1)];
+        sibling[k]=products[k][tid^(N/2)];
     }
     parent_inv[4]=sibling[4]=0;
     qsb_field_mul(value,parent_inv,sibling);
@@ -683,13 +888,15 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
-    qsb_block_product_checkpoint(r,super_roots,root_checkpoint);
+    qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
 }
 
+/* One 256-lane CTA per 256 group roots; each CTA runs its own _ModInv, so
+ * batches with more than 65,536 candidate trees need no third tree level. */
 __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
-    int tid=(int)threadIdx.x;
+    int tid=(int)(blockIdx.x*256u+threadIdx.x);
     bool active=tid<count;
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
@@ -712,7 +919,7 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
-    qsb_block_inverse_checkpoint(r,super_roots,root_checkpoint);
+    qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
         #pragma unroll
         for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
@@ -790,7 +997,8 @@ __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
 
 template<bool FAST_TAIL, int STAGE>
-__global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeline(
+__global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
+                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -881,7 +1089,7 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -907,16 +1115,22 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
          * limbs into naturally aligned 128-bit stores. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
-        saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
-        saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
+        qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qx[0],qx[1]);
+        qsb_st_v2(&saved[1u*state_plane_stride+state_idx],qx[2],qx[3]);
+        qsb_st_v2(&saved[2u*state_plane_stride+state_idx],qy[0],qy[1]);
+        qsb_st_v2(&saved[3u*state_plane_stride+state_idx],qy[2],qy[3]);
+        qsb_st_v2(&saved[4u*state_plane_stride+state_idx],qzz[0],qzz[1]);
+        qsb_st_v2(&saved[5u*state_plane_stride+state_idx],qzz[2],qzz[3]);
+        qsb_st_v2(&saved[6u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
+        qsb_st_v2(&saved[7u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
     }
-    qsb_block_product_checkpoint(prod,roots,tree);
+#if QSB_TREE_OFFLOAD
+    /* The leaf product tree is built by qsb_leaf_tree_prepare from the saved
+     * W plane, so this kernel has no shared memory and no barriers. */
+    (void)prod; (void)roots; (void)tree;
+#else
+    qsb_block_product_checkpoint<QSB_TREE_N>(prod,roots,tree,qsb_prepare_scratch());
+#endif
     return;
     } else {
 
@@ -924,27 +1138,35 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
-        ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
-        ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
+        ulonglong2 qx01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
+        ulonglong2 qx23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
+        ulonglong2 qy01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
+        ulonglong2 qy23=qsb_ld_v2(&saved[3u*state_plane_stride+state_idx]);
+        ulonglong2 qzz01=qsb_ld_v2(&saved[4u*state_plane_stride+state_idx]);
+        ulonglong2 qzz23=qsb_ld_v2(&saved[5u*state_plane_stride+state_idx]);
+        ulonglong2 qzzz01=qsb_ld_v2(&saved[6u*state_plane_stride+state_idx]);
+        ulonglong2 qzzz23=qsb_ld_v2(&saved[7u*state_plane_stride+state_idx]);
         qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
         usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
     }
+#if QSB_TREE_OFFLOAD2
+    /* qsb_leaf_tree_finish replaced the W plane by the canonical leaf inverse
+     * (zero for unusable lanes), so qzz already holds 1/W. */
+    if (!usable) return;
+    Load256(prod,qzz); prod[4]=0;
+    (void)roots; (void)tree;
+#else
     /* qzz carries the original, pre-identity-substitution W, so this exactly
      * recreates the promoted kernel's usability decision without a flag. */
     #pragma unroll
     for(int limb=0;limb<4;limb++)prod[limb]=usable?qzz[limb]:(limb==0?1ULL:0ULL);
     prod[4]=0;
-    qsb_block_inverse_checkpoint(prod,roots,tree);
+    qsb_block_inverse_checkpoint<QSB_TREE_N>(prod,roots,tree);
     if (!usable) return;
+#endif
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
@@ -1011,6 +1233,57 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     }
 }
 
+#if QSB_TREE_OFFLOAD
+/* Dense product-tree kernel: one 256-leaf tree per CTA over the saved W plane.
+ * Candidate i is leaf (i mod 256) of tree (i / 256), exactly the numbering the
+ * finish kernel restores. Inactive lanes and zero denominators enter as the
+ * identity, as before. It runs at several CTAs per SM, so its barriers and
+ * the tree's shrinking active set no longer idle the 124-register prepare
+ * kernel. */
+__global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_prepare(
+    const ulonglong2 *saved, int batch_size, uint64_t *roots, uint64_t *tree
+) {
+    int idx=(int)(blockIdx.x*256u+threadIdx.x);
+    uint64_t prod[5]={1ULL,0ULL,0ULL,0ULL,0ULL};
+    if(idx<batch_size){
+        size_t s=(size_t)batch_size;
+        ulonglong2 w01=qsb_ld_v2(&saved[4u*s+(size_t)idx]);
+        ulonglong2 w23=qsb_ld_v2(&saved[5u*s+(size_t)idx]);
+        if((w01.x|w01.y|w23.x|w23.y)!=0ULL){
+            prod[0]=w01.x; prod[1]=w01.y; prod[2]=w23.x; prod[3]=w23.y;
+        }
+    }
+    qsb_block_product_checkpoint<256>(prod,roots,tree);
+}
+#endif
+
+#if QSB_TREE_OFFLOAD2
+/* Dense inverse-expansion kernel: restores the checkpointed tree, expands the
+ * group-supplied root inverse down to the 256 leaves and overwrites the W
+ * plane in place with each lane's canonical inverse (zero when the lane was
+ * unusable, which the finish kernel tests exactly as it tested W). */
+__global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
+    ulonglong2 *saved, int batch_size, const uint64_t *roots, const uint64_t *tree
+) {
+    int idx=(int)(blockIdx.x*256u+threadIdx.x);
+    bool active=idx<batch_size, usable=false;
+    uint64_t prod[5]={1ULL,0ULL,0ULL,0ULL,0ULL};
+    size_t s=(size_t)batch_size;
+    if(active){
+        ulonglong2 w01=qsb_ld_v2(&saved[4u*s+(size_t)idx]);
+        ulonglong2 w23=qsb_ld_v2(&saved[5u*s+(size_t)idx]);
+        usable=(w01.x|w01.y|w23.x|w23.y)!=0ULL;
+        if(usable){ prod[0]=w01.x; prod[1]=w01.y; prod[2]=w23.x; prod[3]=w23.y; }
+    }
+    qsb_block_inverse_checkpoint<256>(prod,roots,tree);
+    if(active){
+        if(!usable){ prod[0]=prod[1]=prod[2]=prod[3]=0ULL; }
+        qsb_st_v2(&saved[4u*s+(size_t)idx],prod[0],prod[1]);
+        qsb_st_v2(&saved[5u*s+(size_t)idx],prod[2],prod[3]);
+    }
+}
+#endif
+
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -1024,8 +1297,9 @@ static void launch_pinning_pipeline(
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
     uint64_t *super_roots, uint64_t *root_checkpoint
 ) {
-    int blocks=(batch_size+255)/256;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
+    int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+    int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
+    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -1035,11 +1309,15 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    int root_groups=(blocks+255)/256;
-    if(root_groups>256){
-        fprintf(stderr,"Pipeline batch exceeds two-level inverse capacity\n");
+#if QSB_TREE_OFFLOAD
+    qsb_leaf_tree_prepare<<<blocks,256>>>(saved,batch_size,roots,tree);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Leaf-tree launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#endif
+    int root_groups=(blocks+255)/256;
     qsb_root_group_prepare<<<root_groups,256>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
@@ -1047,7 +1325,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<1,256>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+255)/256,256>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
@@ -1060,7 +1338,16 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks,256>>>(
+#if QSB_TREE_OFFLOAD2
+    qsb_leaf_tree_finish<<<blocks,256>>>(saved,batch_size,roots,tree);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Leaf-inverse launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+#endif
+    int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
+    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -1510,16 +1797,17 @@ int main(int argc, char **argv) {
     uint32_t *d_hit_cnt, *d_hit_idx;
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
-    int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
+    int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
-    int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
+    (void)BLKSZ;
+    int GRDSZ = (BATCH+QSB_TREE_N-1)/QSB_TREE_N;
     int ROOT_GRDSZ=(GRDSZ+255)/256;
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
     size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CAND_STRIDE*sizeof(uint64_t);
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
