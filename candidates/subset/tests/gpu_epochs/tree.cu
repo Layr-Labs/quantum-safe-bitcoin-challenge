@@ -78,6 +78,8 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
+/* Squaring-free recovery (odinfree e00f556): c = 3*xR^2/(2*yR) on secp256k1. */
+__device__ __constant__ uint64_t QSB_U2R_C[4];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -1043,54 +1045,60 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
     _ModNeg256(y2);                /* y2 = -(m2*(xP - x2) + yP) */
 }
 
-/* XYZZ shared-denominator recovery (transplanted from the promoted pinning
- * frontier). Stage 1: d = xR*ZZ - X (kept in X_D), W = ZZ^2*d. */
+/* XYZZ shared-denominator recovery — squaring-free finish (mechanism:
+ * odinfree subset e00f556). Stage 1: d = xR*ZZ - X (kept in X_D), W = ZZZ*d.
+ * Inverting W and forming slopes with ZZ*inv removes the ZZ^2 and finish
+ * squarings; x-coords use the on-curve identity with host constant
+ * c = 3*xR^2/(2*yR) in QSB_U2R_C. */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
     _ModMult(t, xR, ZZ);
     _ModSub256(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    _ModSqr(W, ZZ);
-    _ModMult(W, X_D);            /* W = ZZ^2*d */
+    _ModMult(W, ZZZ, X_D);       /* W = ZZZ*d  (was ZZ^2*d) */
     W[4] = 0;
 }
 
-/* Stage 2. C=ZZ*d^2, W=ZZ^2*d, inv=1/W. h=inv*ZZZ=A/(B*d) is the common slope
- * scale and delta=inv*C=d/ZZ=xR-xP, so xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R (no affine yP is reconstructed):
- *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
- * Returns the two y parities in bits 0 and 1; C, W and ZZZ are reused. */
+/* Stage 2. inv=1/W with W=ZZZ*d. hi=ZZ*inv, lam1=(yR*ZZZ-Y)*hi,
+ * m2=(yR*ZZZ+Y)*hi. Then x1=(lam1+m2)*(lam1-c)+xR and
+ * x2=(lam1+m2)*(m2-c)+xR. Y-parity formulas unchanged (anchored at R).
+ * ZZ is overwritten with hi. Returns y parities in bits 0 and 1. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
+    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
     uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t yb[4], m[4], t[4], s[4];
+    uint64_t yb[4], lam1[4], m2[4], s[4], t[4], c[4];
 
-    _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
+    c[0]=QSB_U2R_C[0]; c[1]=QSB_U2R_C[1]; c[2]=QSB_U2R_C[2]; c[3]=QSB_U2R_C[3];
 
-    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+    _ModMult(yb, yR, ZZZ);       /* yR*ZZZ */
+    _ModMult(ZZ, inv);           /* hi = ZZ/W = ZZ/(ZZZ*d) */
 
-    _ModSub256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
-    _ModSqr(x1, m);
-    _ModSub256(x1, W);
+    _ModSub256(lam1, yb, Y);
+    _ModMult(lam1, ZZ);          /* lambda1 */
+
+    _ModAdd256(m2, yb, Y);
+    _ModMult(m2, ZZ);            /* m2 = -lambda2 */
+
+    _ModAdd256(s, lam1, m2);     /* lam1+m2 */
+    _ModSub256(t, lam1, c);      /* lam1-c */
+    _ModMult(x1, s, t);
+    _ModAdd256(x1, x1, xR);
+
+    _ModSub256(t, m2, c);        /* m2-c */
+    _ModMult(x2, s, t);
+    _ModAdd256(x2, x2, xR);
+
     _ModSub256(t, xR, x1);
-    _ModMult(s, m, t);
+    _ModMult(s, lam1, t);
     _ModSub256(s, yR);
     uint32_t parities = (uint32_t)(s[0] & 1ULL);
 
-    _ModAdd256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
-    _ModSqr(x2, m);
-    _ModSub256(x2, W);
     _ModSub256(t, xR, x2);
-    _ModMult(s, m, t);
+    _ModMult(s, m2, t);
     _ModSub256(s, yR);
     /* y2=-s. Since p is odd, field negation flips its parity. */
     parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
@@ -1290,18 +1298,16 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
-     * W = ZZ^2*d with d = xR*ZZ - X; the block inverts W. */
+     * W = ZZZ*d with d = xR*ZZ - X (squaring-free); the block inverts W. */
     uint64_t prod[5];
-    qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod);        /* qx -> d, prod -> W */
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W */
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
-    uint64_t Wsave[4]; Load256(Wsave,prod);
-    if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C = ZZ*d^2 */
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
     if(!usable)return;
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
 
     int v=0, hash_choice=0, recid=0;
 #if ZLAB_PAIRSHA
@@ -2211,7 +2217,7 @@ int main(int argc, char **argv) {
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
 
-    /* Compute neg_2u2R */
+    /* Compute neg_2u2R and squaring-free slope constant c = 3*xR^2/(2*yR). */
     {
         EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1);
         BN_CTX *ctx=BN_CTX_new();
@@ -2235,12 +2241,36 @@ int main(int argc, char **argv) {
                 n2y[i]|=(uint64_t)dyb[31-i*8-b]<<(b*8);}}
         cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice);
         cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice);
+
+        /* c = 3*xR^2 / (2*yR)  (field), little-endian limbs for QSB_U2R_C. */
+        {
+            BIGNUM *p=BN_new(),*xr2=BN_new(),*num=BN_new(),*den=BN_new(),*c=BN_new(),*three=BN_new();
+            EC_GROUP_get_curve_GFp(grp,p,NULL,NULL,ctx);
+            BN_mod_sqr(xr2,bx,p,ctx);
+            BN_set_word(three,3);
+            BN_mod_mul(num,xr2,three,p,ctx);
+            BN_mod_add(den,by,by,p,ctx);
+            BIGNUM *den_inv=BN_mod_inverse(NULL,den,p,ctx);
+            if(!den_inv){fprintf(stderr,"ERROR: QSB_U2R_C inverse failed\n");return 1;}
+            BN_mod_mul(c,num,den_inv,p,ctx);
+            uint8_t cb[32]; memset(cb,0,32);
+            int n=BN_num_bytes(c); BN_bn2bin(c,cb+(32-n));
+            uint64_t h_c[4]={0,0,0,0};
+            for(int i=0;i<4;i++){
+                for(int b=0;b<8;b++) h_c[i]|=(uint64_t)cb[31-i*8-b]<<(b*8);
+            }
+            if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
+                fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
+            }
+            BN_free(p);BN_free(xr2);BN_free(num);BN_free(den);BN_free(c);BN_free(three);BN_free(den_inv);
+        }
+
         BN_free(bx);BN_free(by);BN_free(dx);BN_free(dy);
         EC_POINT_free(pt);EC_POINT_free(dbl);
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    cudaDeviceSetLimit(cudaLimitStackSize, 2048);  /* compact residual: ~120B static stack, 2KiB headroom */
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
