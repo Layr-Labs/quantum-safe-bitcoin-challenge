@@ -1,0 +1,89 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "230f651785e7bcd9affd8cb188e41287a057a06caa8d50749487c5f7a73dec0a",
+  "control": "research/startup_budget/candidate",
+  "control_native_report_sha256": "ffaa675ff6fb1b526972257048f916cc47aa597b79c7ca5ef2dee81c32159aad",
+  "native_report_sha256": "588fb2e4b95fe7a752b8e2abb5418ab7340b5bd4826b0855b8589db92b3a6a24",
+  "cpu_report_sha256": {
+    "curve-results.json": "042c6b0fef99354ef83e8802604f3ce33917471b8cafcae2d5c05321197a1cb7",
+    "builder-results.json": "ebfac1cdb80ff9aec8cc8ba576b4ca45d5161c4b8e8449152bee1fdac2732cec",
+    "builder-pipeline-results.json": "5a5b16363864ca94bd295620af3f1ea4171d9ce407b2e6cd043e5bcb1d941169",
+    "mutation-results.json": "88c99821f83754daca03d6d1cb581142cdf1d24f8ba7c651b8105f3155f1d938"
+  },
+  "changed_kernel_reports": {
+    "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhS6_PjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_t": {
+      "control": {
+        "registers": 128,
+        "shared_bytes": 12288,
+        "stack_bytes": 640,
+        "spill_store_bytes": 80,
+        "spill_load_bytes": 68,
+        "non_nop": 32551
+      },
+      "asymmetric": {
+        "registers": 128,
+        "shared_bytes": 12288,
+        "stack_bytes": 640,
+        "spill_store_bytes": 80,
+        "spill_load_bytes": 68,
+        "non_nop": 32568
+      }
+    },
+    "_Z18mixed_table_finishPKmS0_PhjiS0_S0_": {
+      "control": {
+        "registers": 58,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 1180
+      },
+      "asymmetric": {
+        "registers": 58,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 1179
+      }
+    },
+    "_Z19mixed_table_preparePKmS0_PhjiPmS2_": {
+      "control": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 354
+      },
+      "asymmetric": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 359
+      }
+    },
+    "_Z26qsb_ranked_prepare_compactPK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+      "control": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 8412
+      },
+      "asymmetric": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 8428
+      }
+    }
+  },
+  "gpu_executed": false,
+  "selection": "Keep research candidate; no expected-best or throughput claim yet. Native static instruction counts do not count loop executions or cycles."
+}

@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "control_source_fingerprint": "df16d1bd5cd279bb881f29049cdd797e2f0da6be1f065e530dae926c472cd117",
+  "policy_source_fingerprint": "76c07307fc835215e0974b0fe73118da9c2375ca0c9cf757661b73fb53678d5f",
+  "kernel_resource_opcode_dictionaries_equal": true,
+  "native_instruction_listing_sha256": {
+    "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhS6_PjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_t": "e3b68ab34f0a43606784e2a4ccb223b5bd59218db9cc67cebd0b042fedbc39c2",
+    "_Z18mixed_table_finishPKmS0_PhjiS0_S0_": "656e93dc32f3d7c6d183721f202496b938e90de11e5359759718647cb289bb04",
+    "_Z19mixed_table_preparePKmS0_PhjiPmS2_": "35feb2c6fcae81989ab383400a8c21f5e43e08319accad709c06f890eda159c9",
+    "_Z17wide_table_finishPKmS0_PhjiS0_S0_": "668135e629a966231cac1c932f132e89023ae2a94a798473e1cedf3212408de1",
+    "_Z18wide_table_preparePKmS0_PhjiPmS2_": "9d8fb2c2fa48d3eb06cf7ec168b8b0dbfb69cd63c2affa0ccd44fab44e07e85b",
+    "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": "92cba8bd1fc03321279b2d99853203698e46d6ce595abe99e99ed79a7eb41fea",
+    "_Z26qsb_ranked_prepare_compactPK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": "a43248a606b0f21d6edeb71bea618b4ed5fda7ea1b51bb34871f0103fb3d2d8d",
+    "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": "9194708f98948cd365c4f8cc35f79c2f604f0c162bb65ba676d2832e7817a544",
+    "_Z21qsb_root_group_finishPmiPKmS1_": "162c28208ae9502c44ddf5c370c78d5ce571a3488f9dc4402f26ac287b4f6f65",
+    "_Z22qsb_invert_super_rootsPmi": "654e8af1755058a54f3c612dc30ea39141f289c788a603f4ad952ad747b59a3d",
+    "_Z22qsb_root_group_preparePKmiPmS1_": "fda1c0b2f5443dea85e48db1805a20ac517d9bcc7ecdd3a8a6a8cb6f27d3bb55",
+    "_Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_t": "bfe2c07444ee4ae30396188967e314d102233870a9b512fa46e42e63765948b4",
+    "_Z24qsb_prepare_prefix_cachePKjii": "61b046fa8dd68b335128ddf8d5a89868ac22e26a5529a2040a371d3ee9e09761"
+  },
+  "identical_instruction_listings": true,
+  "gpu_executed": false,
+  "limits": "Per-kernel sm89 disassembly instructions and encoding/control lines compare identically. Not whole host binary identity, driver-JIT equivalence or GPU performance."
+}

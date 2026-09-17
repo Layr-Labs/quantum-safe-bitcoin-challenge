@@ -1,0 +1,212 @@
+{
+  "source_fingerprint": "230f651785e7bcd9affd8cb188e41287a057a06caa8d50749487c5f7a73dec0a",
+  "status": "SYMBOLIC_COST_SCREEN",
+  "gpu_executed": false,
+  "equations": {
+    "control_bytes": "64*15*(1-h_control)",
+    "asymmetric_bytes": "64*(12*(1-h_small)+2*(1-h_cold))",
+    "no_extra_table_bytes": "h_small >= (15*h_control - 1 - 2*h_cold)/12"
+  },
+  "assumptions": [
+    "Uniform64Bpoint requests; hit rates are hypothetical request-weighted inputs, not measured probabilities.",
+    "Counts logical table bytes missed; omits prefetch duplication, cache-line traffic amplification, writeback/checkpoint interference and overlapping requests.",
+    "Both variants have the same319.5B/candidate logical main checkpoint roundtrip; its DRAM traffic need not be equal because cache policies interact.",
+    "Byte parity does not imply time parity:14serialpoint dependencies differ from15, and saved7M2S may offset more bytes or fail to offset latency.",
+    "3.05GiBtable must be generated at runtime; startup/setup and warmup time remain unmeasured."
+  ],
+  "scenarios": [
+    {
+      "assumed_control_hit_rate": 0,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 960,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 960,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.25,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.22916666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 720.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.25,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.22083333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 720.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.5,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.5416666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 480.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.5,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.5333333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 480.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.6,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.6666666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 384.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.6,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.6583333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 384.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.7,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.7916666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 288.00000000000006,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.7,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.7833333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 288.00000000000006,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.75,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.8541666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 240.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.75,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.8458333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 240.0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.8,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.9166666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 191.99999999999994,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.8,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.9083333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 191.99999999999994,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.85,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.9791666666666666,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 144.00000000000003,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.85,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.9708333333333333,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 144.00000000000003,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.8666666666666667,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.0,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 127.99999999999997,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.8666666666666667,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 0.9916666666666667,
+      "achievable_in_model": true,
+      "control_miss_bytes_per_candidate": 127.99999999999997,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.9,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.0416666666666667,
+      "achievable_in_model": false,
+      "control_miss_bytes_per_candidate": 95.99999999999997,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.9,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.0333333333333334,
+      "achievable_in_model": false,
+      "control_miss_bytes_per_candidate": 95.99999999999997,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 0.95,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.1041666666666667,
+      "achievable_in_model": false,
+      "control_miss_bytes_per_candidate": 48.00000000000004,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 0.95,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.0958333333333334,
+      "achievable_in_model": false,
+      "control_miss_bytes_per_candidate": 48.00000000000004,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    },
+    {
+      "assumed_control_hit_rate": 1,
+      "assumed_cold_hit_rate": 0,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.1666666666666667,
+      "achievable_in_model": false,
+      "control_miss_bytes_per_candidate": 0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 128
+    },
+    {
+      "assumed_control_hit_rate": 1,
+      "assumed_cold_hit_rate": 0.05,
+      "minimum_small_table_hit_rate_for_no_extra_table_bytes": 1.1583333333333334,
+      "achievable_in_model": false,
+      "control_miss_bytes_per_candidate": 0,
+      "asymmetric_miss_bytes_with_perfect_small_hits": 121.6
+    }
+  ],
+  "decision": "CPU/native checks preserve plausibility, but cache reuse is the deciding unknown. No supported substantial expected-lead claim over current/pending submissions yet."
+}

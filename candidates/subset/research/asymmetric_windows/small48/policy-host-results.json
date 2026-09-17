@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "76c07307fc835215e0974b0fe73118da9c2375ca0c9cf757661b73fb53678d5f",
+  "host_cases": 180,
+  "injected_failures": 30,
+  "checks": "Exact48MiBprefix, defaultstream/device/pointer ownership, insufficient/unsupported limits, effective limit, rollback, unrelated/fatal error visibility, after-build placement.",
+  "projection_sha256": "78ddd6474e85e1aaa65408830363e1911de146f8f9fe54ff56e526d61ce14506",
+  "gpu_executed": false,
+  "limits": "Execute the actual optional cache-policy host code against a fault-injected API.\n\nChecks bounds, pointer/stream ownership, rollback and visible unexpected errors.\nThis does not simulate cache residency, CUDA runtime behavior or GPU performance.\n"
+}

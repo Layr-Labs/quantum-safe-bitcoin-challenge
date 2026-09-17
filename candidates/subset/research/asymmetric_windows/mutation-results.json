@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "230f651785e7bcd9affd8cb188e41287a057a06caa8d50749487c5f7a73dec0a",
+  "mutations": [
+    {
+      "mutation": "last_window_shift",
+      "status": "DETECTED",
+      "oracle": "check_wide.py",
+      "diagnostic_tail": [
+        "  File \"candidates/subset/research/wide_windows/check_wide.py\", line 239, in main",
+        "    assert list(gout[3*c:3*c+3])==[1<<(bits-1),offset,shift]",
+        "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        "AssertionError"
+      ]
+    },
+    {
+      "mutation": "cold_window_decode_boundary",
+      "status": "DETECTED",
+      "oracle": "check_builder.py",
+      "diagnostic_tail": [
+        "  File \"candidates/subset/research/wide_windows/check_builder.py\", line 91, in main",
+        "    assert list(got)==[ch,m>>low_bits,m&(low_size-1)]",
+        "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        "AssertionError"
+      ]
+    }
+  ],
+  "gpu_executed": false,
+  "scope": "Wrong final shift and off-by-one cold-window decoder were applied only in temporary source copies; independent CPU geometry oracles rejected both."
+}

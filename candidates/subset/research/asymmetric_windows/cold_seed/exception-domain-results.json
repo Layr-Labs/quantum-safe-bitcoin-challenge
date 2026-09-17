@@ -1,0 +1,88 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "d24ad6f6c020a36f84b8167613adb2e3fabd0ff0429b8e78da731b5800104be6",
+  "actual_helper_cases": {
+    "equal": 159,
+    "opposite": 159,
+    "ordinary": 159,
+    "unguarded_doubling_failures_detected": 159
+  },
+  "prefix_bounds": [
+    {
+      "window": 0,
+      "end_bit": 18,
+      "min_signed_difference": "0x1ffffffffffffffffffffffffffffffffffffffffffffffc0001",
+      "max_signed_difference": "0xffffffffffffe00000000000000000000000000000000000000000000003ffff"
+    },
+    {
+      "window": 1,
+      "end_bit": 35,
+      "min_signed_difference": "0x1ffffffffffffffffffffffffffffffffffffffffff800000001",
+      "max_signed_difference": "0xffffffffffffe0000000000000000000000000000000000000000007ffffffff"
+    },
+    {
+      "window": 2,
+      "end_bit": 52,
+      "min_signed_difference": "0x1ffffffffffffffffffffffffffffffffffffff0000000000001",
+      "max_signed_difference": "0xffffffffffffe00000000000000000000000000000000000000fffffffffffff"
+    },
+    {
+      "window": 3,
+      "end_bit": 69,
+      "min_signed_difference": "0x1fffffffffffffffffffffffffffffffffe00000000000000001",
+      "max_signed_difference": "0xffffffffffffe0000000000000000000000000000000001fffffffffffffffff"
+    },
+    {
+      "window": 4,
+      "end_bit": 86,
+      "min_signed_difference": "0x1fffffffffffffffffffffffffffffc000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe000000000000000000000000000003fffffffffffffffffffff"
+    },
+    {
+      "window": 5,
+      "end_bit": 103,
+      "min_signed_difference": "0x1fffffffffffffffffffffffff80000000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe00000000000000000000000007fffffffffffffffffffffffff"
+    },
+    {
+      "window": 6,
+      "end_bit": 120,
+      "min_signed_difference": "0x1fffffffffffffffffffff000000000000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe000000000000000000000ffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 7,
+      "end_bit": 137,
+      "min_signed_difference": "0x1ffffffffffffffffe0000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe00000000000000001ffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 8,
+      "end_bit": 154,
+      "min_signed_difference": "0x1ffffffffffffc00000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe0000000000003ffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 9,
+      "end_bit": 171,
+      "min_signed_difference": "0x1ffffffff8000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe000000007ffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 10,
+      "end_bit": 188,
+      "min_signed_difference": "0x1ffff00000000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffffffffe0000fffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ],
+  "added_chain_scalar_cases": 214,
+  "whole_chain_report": "guarded-curve-results.json",
+  "derivation": "For odd1<=M<=n, C=((M>>205)|1)*2^205; low prefix L=M-((M>>S)|1)*2^S. Bounds exclude equal/opposite/infinite prefixes through window10. Final helper handles both remaining cases.",
+  "negative_controls": [
+    "exception-results.json",
+    "../exception-results.json"
+  ],
+  "audit_sha256": "bf22e30a2d711308acb816e0aaa545732c6fa1940643fe79480f22246bbd853b",
+  "gpu_executed": false,
+  "limits": "Check the actual final-add helper, cold-prefix bounds and constructed scalars.\n\nOpenSSL executes field operations; a separate Python affine law is the oracle.\nThe prefix argument assumes a valid nonzero order-n runtime base and the stated\nregular odd recoding identity. This is not GPU execution or an exhaustive CUDA\nverification of all input hashes.\n"
+}

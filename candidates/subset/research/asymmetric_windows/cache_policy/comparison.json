@@ -1,0 +1,269 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "80267671027b602ea51002c533aa05c7972600fdd30e61d619d2099cb7911d0e",
+  "cpu_reports_sha256": {
+    "curve-results.json": "0bba96b92a88b384e213cd1a54cfd9bd4173784804c23368d6b65a472fcd84b5",
+    "pipeline-results.json": "28ae8d5f4d2509ef3e0c8fa4a61a1da4b6aded9a7fc700354b6f865bd9746214",
+    "builder-pipeline-results.json": "87634acb83d78e21d18d3985e4143039eba83fec76623f646a33367d6d553017"
+  },
+  "native_report_sha256": "66ec4997ffc911a12f9b67369c09864bb0b1a4984fb05a1d6c364727aa7887b2",
+  "cold_prefetch_negative_control": "DETECTED: restoring ordinary L2 prefetch on cold windows violates the independent address/policy oracle.",
+  "changed_kernel_reports": {
+    "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhS6_PjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_t": {
+      "control": {
+        "registers": 128,
+        "shared_bytes": 12288,
+        "stack_bytes": 640,
+        "spill_store_bytes": 80,
+        "spill_load_bytes": 68,
+        "non_nop": 32568
+      },
+      "variant": {
+        "registers": 128,
+        "shared_bytes": 12288,
+        "stack_bytes": 640,
+        "spill_store_bytes": 80,
+        "spill_load_bytes": 68,
+        "non_nop": 32575
+      },
+      "memory_opcodes": {
+        "CCTL.E.PF2": 4,
+        "LDG.E": 26,
+        "LDG.E.128": 44,
+        "LDG.E.64": 2,
+        "LDG.E.64.CONSTANT": 11,
+        "LDG.E.CONSTANT": 23,
+        "LDG.E.EF.128": 8,
+        "LDG.E.U8.CONSTANT": 24,
+        "STG.E": 1,
+        "STG.E.U8": 38
+      }
+    },
+    "_Z18mixed_table_finishPKmS0_PhjiS0_S0_": {
+      "control": {
+        "registers": 58,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 1179
+      },
+      "variant": {
+        "registers": 58,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 1179
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 28,
+        "LDG.E.EF.64": 4,
+        "LDG.E.U8": 32,
+        "STG.E.U8": 64
+      }
+    },
+    "_Z19mixed_table_preparePKmS0_PhjiPmS2_": {
+      "control": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 359
+      },
+      "variant": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 359
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 8,
+        "STG.E.64": 4,
+        "STG.E.EF.64": 4,
+        "STG.E.U8": 32
+      }
+    },
+    "_Z17wide_table_finishPKmS0_PhjiS0_S0_": {
+      "control": {
+        "registers": 58,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 1183
+      },
+      "variant": {
+        "registers": 58,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 1183
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 28,
+        "LDG.E.EF.64": 4,
+        "LDG.E.U8": 32,
+        "STG.E.U8": 64
+      }
+    },
+    "_Z18wide_table_preparePKmS0_PhjiPmS2_": {
+      "control": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 356
+      },
+      "variant": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 356
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 8,
+        "STG.E.64": 4,
+        "STG.E.EF.64": 4,
+        "STG.E.U8": 32
+      }
+    },
+    "_Z17qsb_ranked_finishPK12epoch_desc_tPKmS3_PK10ulonglong2S3_S3_iPjS7_Ph": {
+      "control": {
+        "registers": 80,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 4685
+      },
+      "variant": {
+        "registers": 80,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 4691
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 12,
+        "LDG.E.EF.128": 8,
+        "LDG.E.EF.64": 4,
+        "LDG.E.U8": 6,
+        "STG.E": 1,
+        "STG.E.U8": 9
+      }
+    },
+    "_Z26qsb_ranked_prepare_compactPK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+      "control": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 8428
+      },
+      "variant": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 8433
+      },
+      "memory_opcodes": {
+        "CCTL.E.PF2": 4,
+        "LDG.E": 34,
+        "LDG.E.128": 12,
+        "LDG.E.64": 4,
+        "LDG.E.EF.128": 8,
+        "STG.E.64": 4,
+        "STG.E.EF.128": 8,
+        "STG.E.EF.64": 4
+      }
+    },
+    "_Z18qsb_ranked_preparePK12epoch_desc_tPKhS3_PKmP10ulonglong2PmS8_i": {
+      "control": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 8430
+      },
+      "variant": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 8424
+      },
+      "memory_opcodes": {
+        "CCTL.E.PF2": 4,
+        "LDG.E": 34,
+        "LDG.E.128": 16,
+        "LDG.E.64": 4,
+        "STG.E.64": 4,
+        "STG.E.EF.128": 8,
+        "STG.E.EF.64": 4
+      }
+    },
+    "_Z21qsb_root_group_finishPmiPKmS1_": {
+      "control": {
+        "registers": 44,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 409
+      },
+      "variant": {
+        "registers": 44,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 415
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 8,
+        "LDG.E.EF.64": 4,
+        "STG.E.64": 4
+      }
+    },
+    "_Z22qsb_root_group_preparePKmiPmS1_": {
+      "control": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 244
+      },
+      "variant": {
+        "registers": 44,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 238
+      },
+      "memory_opcodes": {
+        "LDG.E.64": 4,
+        "STG.E.64": 4,
+        "STG.E.EF.64": 4
+      }
+    }
+  },
+  "gpu_executed": false,
+  "limits": "CPU helper paths use ordinary loads/stores and do not simulate cache; native report establishes emitted64/128bit evict-first forms and static resources only. No throughput or cache residency measurement.",
+  "decision": "Retain geometry+policy comparison candidate. Neither variant has sufficient evidence for a substantial expected lead over current/pending submissions. Do not pursue further tiny cache variants without new evidence."
+}

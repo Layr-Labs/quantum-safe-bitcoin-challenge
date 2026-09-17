@@ -1,0 +1,1060 @@
+{
+  "ours": "b27ad8e4-c4fa-4611-a27a-56ae1d5e5c3f",
+  "status": "failed",
+  "score": null,
+  "original_comparison_score": 477182283,
+  "promoted_frontier_score": 488210159,
+  "earlier_pending": [],
+  "later_completed_before_ours": [],
+  "notified_events": [
+    "subset-65fb673d-submitted",
+    "subset-frontier-41dd77a6-promoted-440270249",
+    "subset-65fb673d-promoted-451135044",
+    "subset-frontier-80a850f0-promoted-477182283",
+    "subset-b27ad8e4-submitted-PR86",
+    "subset-frontier-9c914db3-promoted-488210159",
+    "subset-b27ad8e4-failed-early-no-score"
+  ],
+  "earlier_completed": {
+    "54918fb4-7e8e-4b7e-b958-68c2700394a0": {
+      "status": "rejected",
+      "score": 131027832
+    },
+    "7bf15b2f-c085-4be4-865a-c2ee0a857691": {
+      "status": "rejected",
+      "score": 130687084
+    },
+    "41dd77a6-9b18-4e88-a3bf-3cf05f5ef985": {
+      "status": "accepted",
+      "score": 440270249
+    },
+    "5f72864e-52fc-48a9-801a-1c334f050ad3": {
+      "status": "rejected",
+      "score": 424023018
+    },
+    "2a1d050c-e1d1-4983-b141-c24787e08788": {
+      "status": "cancelled",
+      "score": null
+    },
+    "37aeaf70-1aea-404f-9f88-c1b23dd03f2d": {
+      "status": "rejected",
+      "score": 168579851
+    },
+    "5605ad84-dd72-4aed-9e6d-60a6bb64a61b": {
+      "status": "cancelled",
+      "score": null
+    },
+    "3b1bba4b-5095-4dc5-a072-1589c5589107": {
+      "status": "rejected",
+      "score": 438769398
+    },
+    "4924be1f-f4e0-47e9-8540-a268b6eb8b25": {
+      "status": "rejected",
+      "score": 452720843,
+      "pr": 68
+    },
+    "fa6e0a34-1277-4856-b139-cf3c2e50c56f": {
+      "status": "cancelled",
+      "score": null,
+      "pr": 85
+    },
+    "8339d955": {
+      "status": "rejected",
+      "score": 441645545,
+      "pr": 72,
+      "id_is_prefix": true
+    },
+    "60c21768-9c1d-4b52-8c64-71bff99f6385": {
+      "status": "rejected",
+      "score": 449042960,
+      "observed_at": "2026-09-16T23:23:12.165569+00:00"
+    },
+    "9c914db3-2c29-4621-a2d5-eb8335a4d619": {
+      "status": "accepted",
+      "score": 488210159,
+      "observed_at": "2026-09-16T23:23:12.165569+00:00"
+    },
+    "a4ab6a2a-8706-4d4f-bd1b-8737e0261989": {
+      "status": "rejected",
+      "score": 447210771
+    }
+  },
+  "submission_order_status": "Terminal result; no later scored completion preceded it in our observations.",
+  "successor_status": "Small48guarded14windowcontrolandcapacity-checkedL2variantpassCPU/nativechecks. Stilloldfrontend; expectedleadunestablished,no upload.",
+  "submitted_source_fingerprint": "6bfe0e61fbbcabce237877c95e238f0bd22914ed6ceade6baf97e058c5e51ac6",
+  "submitted_note": "submission-adaptive-mixed.md",
+  "submitted_note_sha256": "1a65cbaa39ce370dd371cffb212d949eef5f8136cd051a5d1ff66b7496e5d3b2",
+  "pr": 86,
+  "validation_commit": "086890a057d87c9d56cbbec38f24e1243b15bbc9",
+  "submission_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/86",
+  "local_cuda_check": {
+    "status": "PASS",
+    "gpu_executed": false,
+    "compiler": "CUDA12.8.93 ARM Linux on this Mac",
+    "reports": "research/adaptive_mixed/validation-summary.json",
+    "source_fingerprint": "6bfe0e61fbbcabce237877c95e238f0bd22914ed6ceade6baf97e058c5e51ac6"
+  },
+  "promoted_frontier_submission": "9c914db3-2c29-4621-a2d5-eb8335a4d619",
+  "promoted_frontier_commit": "d2772418e0f372767b4c59f7382d71f9142585fe",
+  "visible_gpu_progress": {
+    "observed_at": "2026-09-16T21:41:57.822786+00:00",
+    "status": "newly queued; no GPU progress yet inspected"
+  },
+  "successor_artifacts": "research/resident_projective/",
+  "latest_public_note_review": {
+    "id": "558d022f-f30e-475b-ad06-f8935f03a57c",
+    "status": "rejected",
+    "score": 485809327,
+    "head": "4398abd989e176005e725dc2b3f54a538b3eb9e4",
+    "source_reviewed": false
+  },
+  "created_at": "2026-09-16T21:40:30Z",
+  "historical_observations": {
+    "80a850f0-3bd5-484b-b890-70faec8a39d0": {
+      "status": "accepted",
+      "score": 477182283,
+      "head": "099c7d515baec9936c7ef16ecbc149a8a0438487",
+      "created_at": "2026-09-16T18:19:31.988Z",
+      "updated_at": "2026-09-16T21:02:23.915Z",
+      "solver": "welttowelt"
+    },
+    "78c7e7d9-85f4-402d-9aec-ad484d64a8fb": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T18:31:13.301Z",
+      "updated_at": "2026-09-16T19:10:44.727Z",
+      "solver": "AbdelStark"
+    },
+    "8185e838-5109-47bb-b500-65859bf376bb": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T19:11:14.170Z",
+      "updated_at": "2026-09-16T20:19:18.772Z",
+      "solver": "AbdelStark"
+    },
+    "4924be1f-f4e0-47e9-8540-a268b6eb8b25": {
+      "status": "rejected",
+      "score": 452720843,
+      "head": "470f7c7fea98d91fbfb2f4d12ad7f25a1c99f858",
+      "created_at": "2026-09-16T19:07:35.136Z",
+      "updated_at": "2026-09-16T21:53:38.964Z",
+      "solver": "jacklightChen"
+    },
+    "03818d8e-f137-4fee-be6f-adc9b5622ddf": {
+      "status": "rejected",
+      "score": 470825789,
+      "head": "f2c722ac36615ab1b2d584d8eb1a2aedab9bd231",
+      "created_at": "2026-09-16T19:04:35.710Z",
+      "updated_at": "2026-09-16T21:28:01.083Z",
+      "solver": "DPZZxlz"
+    },
+    "8339d955-c7c6-49de-8fc8-8159091bc071": {
+      "status": "rejected",
+      "score": 441645545,
+      "head": "6aba26674a8feca0d094e87921f79fc3c8222d57",
+      "created_at": "2026-09-16T19:19:19.611Z",
+      "updated_at": "2026-09-16T22:19:33.627Z",
+      "solver": "fkiene"
+    },
+    "60c21768-9c1d-4b52-8c64-71bff99f6385": {
+      "status": "rejected",
+      "score": 449042960,
+      "head": "951640ec1d29c7c29517a5caeaae4c485cd3f2b2",
+      "created_at": "2026-09-16T19:45:20.774Z",
+      "updated_at": "2026-09-16T22:45:09.403Z",
+      "solver": "tekkac"
+    },
+    "9c914db3-2c29-4621-a2d5-eb8335a4d619": {
+      "status": "accepted",
+      "score": 488210159,
+      "head": "e3a95b0f07e426443d5801b71588e469b3670bb3",
+      "created_at": "2026-09-16T20:10:00.701Z",
+      "updated_at": "2026-09-16T23:11:29.495Z",
+      "solver": "alvaroborras"
+    },
+    "a4ab6a2a-8706-4d4f-bd1b-8737e0261989": {
+      "status": "rejected",
+      "score": 447210771,
+      "head": "0da7df8803c2a86e20c40b40adb8f123f37124b7",
+      "created_at": "2026-09-16T20:13:14.399Z",
+      "updated_at": "2026-09-16T23:37:02.243Z",
+      "solver": "Meganpark980320"
+    },
+    "4182c646-cebb-42a9-b344-6ebf92184f7f": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T20:19:23.028Z",
+      "updated_at": "2026-09-16T20:56:28.583Z",
+      "solver": "AbdelStark"
+    },
+    "6af05251-dc83-4238-a2ab-19905bef184b": {
+      "status": "rejected",
+      "score": 445827085,
+      "head": "6bf63e6a3538c3ffb0337c28a6907afde5f4c57e",
+      "created_at": "2026-09-16T20:58:50.754Z",
+      "updated_at": "2026-09-17T00:02:45.491Z",
+      "solver": "AbdelStark"
+    },
+    "0909fa48-2f1a-493b-b38b-c6fcc210d30c": {
+      "status": "accepted",
+      "score": 103339004,
+      "head": "8c728db9e4355d6243b5b7d81d9d88a09a92fa17",
+      "created_at": "2026-09-15T19:07:13.784Z",
+      "updated_at": "2026-09-15T19:29:23.133Z",
+      "solver": "mpjunior92"
+    },
+    "b7bdbf1c-a819-4c02-ad21-660c1f16f0da": {
+      "status": "accepted",
+      "score": 126688029,
+      "head": "a040c21c12306610bf53c718304ad1c93c360b65",
+      "created_at": "2026-09-16T15:02:26.711Z",
+      "updated_at": "2026-09-16T15:24:41.382Z",
+      "solver": "Meganpark980320"
+    },
+    "c691d3da-07dd-4372-a6bc-1d39d3d2035a": {
+      "status": "accepted",
+      "score": 129574439,
+      "head": "56fc682cd90e21764438fc67d30909bf976e35b1",
+      "created_at": "2026-09-16T15:26:38.891Z",
+      "updated_at": "2026-09-16T15:50:52.610Z",
+      "solver": "Meganpark980320"
+    },
+    "873ed724-9815-4e13-a02f-072f21e3f992": {
+      "status": "accepted",
+      "score": 433346795,
+      "head": "b733504088873a409baff306a2633ec63e6e5762",
+      "created_at": "2026-09-16T15:37:42.244Z",
+      "updated_at": "2026-09-16T16:18:48.347Z",
+      "solver": "nullforest8200"
+    },
+    "7fdc8ed5-8364-402a-8231-6c689466b60c": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T15:38:54.625Z",
+      "updated_at": "2026-09-16T16:36:51.735Z",
+      "solver": "welttowelt"
+    },
+    "b2ede54e-dd48-448a-a36c-8f30b47d9de3": {
+      "status": "failed",
+      "score": null,
+      "head": "7197efd185efe4061385c190d8a7588478d90684",
+      "created_at": "2026-09-16T15:44:01.425Z",
+      "updated_at": "2026-09-16T16:39:13.601Z",
+      "solver": "fkiene"
+    },
+    "dfb66e9f-9301-49c8-8e32-2744ca2847cc": {
+      "status": "failed",
+      "score": null,
+      "head": "bc0b54aacf44f6552cd5a0414819debf3f5f85d2",
+      "created_at": "2026-09-16T15:45:29.008Z",
+      "updated_at": "2026-09-16T16:39:53.349Z",
+      "solver": "newjordan"
+    },
+    "ef833e43-f898-4022-8c75-3c82c0ceef4d": {
+      "status": "failed",
+      "score": null,
+      "head": "4432deeea1508d095ac696c387666ea435b3a168",
+      "created_at": "2026-09-16T15:47:11.580Z",
+      "updated_at": "2026-09-16T16:40:47.442Z",
+      "solver": "pepedesigner"
+    },
+    "54918fb4-7e8e-4b7e-b958-68c2700394a0": {
+      "status": "rejected",
+      "score": 131027832,
+      "head": "23fb01a9d34a7e5d30c6f0be9842181e6a828336",
+      "created_at": "2026-09-16T15:48:22.970Z",
+      "updated_at": "2026-09-16T17:08:01.808Z",
+      "solver": "anamdongparkjinhyeong"
+    },
+    "c9a85a87-e2b8-4ab8-8d4f-c79d96546d03": {
+      "status": "rejected",
+      "score": 418504460,
+      "head": "e5820d032d53123f558ea533546520373eeea2a6",
+      "created_at": "2026-09-16T15:53:12.959Z",
+      "updated_at": "2026-09-16T17:35:37.998Z",
+      "solver": "hybridnoise"
+    },
+    "dcfcc858-7309-4c1b-b856-7f1d4f76cf02": {
+      "status": "rejected",
+      "score": 433564114,
+      "head": "d03c1fc50d4d0983ca206718cdf8537374a085a4",
+      "created_at": "2026-09-16T15:53:56.112Z",
+      "updated_at": "2026-09-16T18:01:25.979Z",
+      "solver": "Meganpark980320"
+    },
+    "7bf15b2f-c085-4be4-865a-c2ee0a857691": {
+      "status": "rejected",
+      "score": 130687084,
+      "head": "912b82c307d2e353a55d09f20f345ba48457cc37",
+      "created_at": "2026-09-16T16:12:50.271Z",
+      "updated_at": "2026-09-16T18:24:58.789Z",
+      "solver": "AbdelStark"
+    },
+    "41dd77a6-9b18-4e88-a3bf-3cf05f5ef985": {
+      "status": "accepted",
+      "score": 440270249,
+      "head": "472b536106d2e2aae2b927cbf217678a58bebb73",
+      "created_at": "2026-09-16T16:31:02.498Z",
+      "updated_at": "2026-09-16T18:53:16.925Z",
+      "solver": "jacklightChen"
+    },
+    "5f72864e-52fc-48a9-801a-1c334f050ad3": {
+      "status": "rejected",
+      "score": 424023018,
+      "head": "c67f910bfb53668fd37f5d578fa3013c5e4f990b",
+      "created_at": "2026-09-16T16:39:31.040Z",
+      "updated_at": "2026-09-16T19:18:39.597Z",
+      "solver": "fkiene"
+    },
+    "2a1d050c-e1d1-4983-b141-c24787e08788": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T16:42:26.803Z",
+      "updated_at": "2026-09-16T18:55:10.393Z",
+      "solver": "DPZZxlz"
+    },
+    "37aeaf70-1aea-404f-9f88-c1b23dd03f2d": {
+      "status": "rejected",
+      "score": 168579851,
+      "head": "991290d2e3440b05aea633978e15710198ea6583",
+      "created_at": "2026-09-16T16:48:05.257Z",
+      "updated_at": "2026-09-16T19:42:26.004Z",
+      "solver": "newjordan"
+    },
+    "3b1bba4b-5095-4dc5-a072-1589c5589107": {
+      "status": "rejected",
+      "score": 438769398,
+      "head": "f128e29308c775940d9cd91341739cec3e085438",
+      "created_at": "2026-09-16T18:03:44.630Z",
+      "updated_at": "2026-09-16T20:10:04.143Z",
+      "solver": "Meganpark980320"
+    },
+    "5605ad84-dd72-4aed-9e6d-60a6bb64a61b": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T18:07:42.715Z",
+      "updated_at": "2026-09-16T19:37:32.081Z",
+      "solver": "nullforest8200"
+    },
+    "65fb673d-5014-4ee8-866d-97d972e7b1f0": {
+      "status": "accepted",
+      "score": 451135044,
+      "head": "f31dcba6b5a3de04a28e9dcf47b336bad8278fa2",
+      "created_at": "2026-09-16T18:12:15.880Z",
+      "updated_at": "2026-09-16T20:36:11.487Z",
+      "solver": "hybridnoise"
+    },
+    "fa6e0a34-1277-4856-b139-cf3c2e50c56f": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T21:31:01.900Z",
+      "updated_at": "2026-09-16T21:56:43.305Z",
+      "solver": "DPZZxlz"
+    },
+    "b27ad8e4-c4fa-4611-a27a-56ae1d5e5c3f": {
+      "status": "failed",
+      "score": null,
+      "head": "086890a057d87c9d56cbbec38f24e1243b15bbc9",
+      "created_at": "2026-09-16T21:40:09.599Z",
+      "updated_at": "2026-09-17T00:05:28.776Z",
+      "solver": "hybridnoise"
+    },
+    "41d1f2b8-60ae-4b07-9f67-d733e4ecd783": {
+      "status": "rejected",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T21:41:16.185Z",
+      "updated_at": "2026-09-16T21:41:22.426Z",
+      "solver": "jungjipdo"
+    },
+    "56e5f8ef-c2b0-4aa1-ac14-16df2171318d": {
+      "status": "cancelled",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-16T21:56:59.018Z",
+      "updated_at": "2026-09-16T23:12:00.204Z",
+      "solver": "DPZZxlz"
+    },
+    "edba0bd0-d2ec-40af-84fd-f378824a9ce3": {
+      "status": "rejected",
+      "score": 480398167,
+      "head": "87f058c765fdbd95d903ccf4c60e69aafdb80862",
+      "created_at": "2026-09-16T22:07:11.524Z",
+      "updated_at": "2026-09-17T00:29:37.340Z",
+      "solver": "jungjipdo"
+    },
+    "49a79608-9e30-4565-b2b4-d4f5a72242b6": {
+      "status": "rejected",
+      "score": 473302249,
+      "head": "9b941f00e93558c24f218ec4030741b836848f2b",
+      "created_at": "2026-09-16T22:20:49.762Z",
+      "updated_at": "2026-09-17T00:55:35.754Z",
+      "solver": "fkiene"
+    },
+    "3e7fa41d-0b2a-4c98-9b40-e2582a8df7ed": {
+      "status": "rejected",
+      "score": 482838666,
+      "head": "7e414b986efde1ad75e03c7041fcbb44ea97f96b",
+      "created_at": "2026-09-16T22:21:11.873Z",
+      "updated_at": "2026-09-17T01:21:23.551Z",
+      "solver": "gunboatsss"
+    },
+    "3d7df1d4-5328-457d-8a1b-a44dd5febc99": {
+      "status": "rejected",
+      "score": 443427609,
+      "head": "a742e5c7ea855258981f3dd688dedd7d61adf6f2",
+      "created_at": "2026-09-16T23:11:35.419Z",
+      "updated_at": "2026-09-17T01:47:17.546Z",
+      "solver": "alvaroborras"
+    },
+    "558d022f-f30e-475b-ad06-f8935f03a57c": {
+      "status": "rejected",
+      "score": 485809327,
+      "head": "4398abd989e176005e725dc2b3f54a538b3eb9e4",
+      "created_at": "2026-09-16T23:20:22.168Z",
+      "updated_at": "2026-09-17T02:13:18.070Z",
+      "solver": "DPZZxlz"
+    },
+    "c657b8a3-1716-499b-aef1-37fec75df3f4": {
+      "status": "rejected",
+      "score": 451306976,
+      "head": "2d5eba297f8d9823ca0f5a552d3d1788fbe3031c",
+      "created_at": "2026-09-16T23:38:50.537Z",
+      "updated_at": "2026-09-17T02:38:57.002Z",
+      "solver": "Meganpark980320"
+    },
+    "2cffb791-c101-49b1-ae44-92e6da21291f": {
+      "status": "rejected",
+      "score": 485729621,
+      "head": "0a135e95db5defae9c96f92049f2166d2421d379",
+      "created_at": "2026-09-17T00:55:49.322Z",
+      "updated_at": "2026-09-17T03:05:10.324Z",
+      "solver": "fkiene"
+    },
+    "573dcdb7-9e8d-48dd-83c5-34c4ecd520fc": {
+      "status": "rejected",
+      "score": 431581421,
+      "head": "f4f7e75b8a4558f20e1acf72b4461ecbe87b962d",
+      "created_at": "2026-09-17T01:07:46.362Z",
+      "updated_at": "2026-09-17T03:30:37.973Z",
+      "solver": "pepedesigner"
+    },
+    "2710d54a-cc23-4a17-abc9-21b905c92a74": {
+      "status": "rejected",
+      "score": 433955249,
+      "head": "ae75530e394ebc16d61e01a5421e6e5759e67685",
+      "created_at": "2026-09-17T01:19:22.459Z",
+      "updated_at": "2026-09-17T03:56:22.887Z",
+      "solver": "anamdongparkjinhyeong"
+    },
+    "f5358114-2c33-4046-bc3a-5f68f779dcef": {
+      "status": "rejected",
+      "score": 463588734,
+      "head": "cb4e69676d0e8d8a389a8c450dfbbba82a6459d4",
+      "created_at": "2026-09-17T02:13:30.531Z",
+      "updated_at": "2026-09-17T04:22:17.596Z",
+      "solver": "dun999"
+    },
+    "4b011485-4405-4c50-854c-90d917005689": {
+      "status": "rejected",
+      "score": 487315447,
+      "head": "bc2613322e6af0da783af7f333ebea1d3d94a853",
+      "created_at": "2026-09-17T02:18:20.464Z",
+      "updated_at": "2026-09-17T04:48:09.752Z",
+      "solver": "DPZZxlz"
+    },
+    "667c5b42-ddfc-4188-90cc-7450c2b1f116": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T03:05:32.230Z",
+      "updated_at": "2026-09-17T03:05:32.230Z",
+      "solver": "fkiene"
+    },
+    "84576d6a-7772-4bbb-8d92-20091d9b9b90": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T03:43:08.631Z",
+      "updated_at": "2026-09-17T03:43:08.631Z",
+      "solver": "ercumentyildirim"
+    },
+    "82d63f35-0769-4401-a8ac-10c01a2f7d3a": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T03:57:22.225Z",
+      "updated_at": "2026-09-17T03:57:22.225Z",
+      "solver": "anamdongparkjinhyeong"
+    },
+    "ca80f857-523d-490f-aedb-8a53238e2fc9": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T04:02:23.001Z",
+      "updated_at": "2026-09-17T04:02:23.001Z",
+      "solver": "gunboatsss"
+    },
+    "4927b11a-21c6-4a11-b0bb-0209626be46c": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T04:27:19.060Z",
+      "updated_at": "2026-09-17T04:27:19.060Z",
+      "solver": "pepedesigner"
+    },
+    "99ce8411-5d19-453e-8a4c-9fd9bb14b445": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T04:28:05.097Z",
+      "updated_at": "2026-09-17T04:28:05.097Z",
+      "solver": "i34-9"
+    },
+    "487499da-e2fa-4f11-bd0d-fb226ce88a72": {
+      "status": "validating",
+      "score": null,
+      "head": null,
+      "created_at": "2026-09-17T04:56:16.572Z",
+      "updated_at": "2026-09-17T04:56:16.572Z",
+      "solver": "DPZZxlz"
+    }
+  },
+  "later_observed": {
+    "56e5f8ef-c2b0-4aa1-ac14-16df2171318d": {
+      "status": "cancelled",
+      "score": null,
+      "pr": 88,
+      "head": "677af09763361aa6b920ce98166a0e11f2fd9681",
+      "created_at": "2026-09-16T21:57:13Z",
+      "note_reviewed": true,
+      "source_reviewed": false
+    },
+    "3e7fa41d-0b2a-4c98-9b40-e2582a8df7ed": {
+      "status": "rejected",
+      "score": 482838666,
+      "pr": 93,
+      "head": "7e414b986efde1ad75e03c7041fcbb44ea97f96b",
+      "created_at": "2026-09-16T22:21:25Z",
+      "note_reviewed": true,
+      "source_reviewed": false,
+      "mechanism": "Rankedkerneltemplate+constantrecoverypoint, bothknown. Claimedper-candidateSHAremovalconfusesstaticdeadcodewiththealready-runtime-skippedsecondhash. Native/GPUresourcesunmeasured; exactnewsourceunreviewed."
+    },
+    "49a79608-9e30-4565-b2b4-d4f5a72242b6": {
+      "status": "rejected",
+      "score": 473302249,
+      "pr": 92,
+      "head": "9b941f00e93558c24f218ec4030741b836848f2b",
+      "created_at": "2026-09-16T22:21:03Z",
+      "note_reviewed": true,
+      "source_reviewed": false,
+      "mechanism": "RestorepriorPR60composedblockinverse ontoPR62. Notesmisstatebasegeometry32MiB/16 versus64MiB/15; actualnaivebasealready765multiplies, not1023. Exactnewsourceunreviewed. Ourcurrentrankedpathexternalizesinverse."
+    },
+    "edba0bd0-d2ec-40af-84fd-f378824a9ce3": {
+      "status": "rejected",
+      "score": 480398167,
+      "pr": 90,
+      "head": "87f058c765fdbd95d903ccf4c60e69aafdb80862",
+      "created_at": "2026-09-16T22:07:34Z",
+      "note_reviewed": true,
+      "source_reviewed": false,
+      "mechanism": "SmallhostdiagnosticI/Oremoval; GPUsourcesunchanged pernote. NoCUDAorGPUtest. No newlarge mechanism."
+    },
+    "3d7df1d4-5328-457d-8a1b-a44dd5febc99": {
+      "status": "rejected",
+      "score": 443427609,
+      "pr": 96,
+      "head": "a742e5c7ea855258981f3dd688dedd7d61adf6f2",
+      "note_reviewed": true,
+      "source_reviewed": "Relevant tree, schedule helpers and ranked pipeline diff; not complete source audit"
+    },
+    "558d022f-f30e-475b-ad06-f8935f03a57c": {
+      "status": "rejected",
+      "score": 485809327,
+      "pr": 97,
+      "head": "4398abd989e176005e725dc2b3f54a538b3eb9e4",
+      "note_reviewed": true,
+      "source_reviewed": false,
+      "mechanism": "Paired recovery SHA from PR59 on promoted PR77. No local CUDA build or GPU timing; no new large architecture."
+    },
+    "c657b8a3-1716-499b-aef1-37fec75df3f4": {
+      "status": "rejected",
+      "score": 451306976,
+      "pr": 98,
+      "head": "2d5eba297f8d9823ca0f5a552d3d1788fbe3031c",
+      "note_reviewed": true,
+      "source_reviewed": "Exact checkpoint helper source independently fetched and pinning port CPU/native/TSan checked."
+    },
+    "2cffb791-c101-49b1-ae44-92e6da21291f": {
+      "status": "validating",
+      "score": null,
+      "pr": 102,
+      "head": "0a135e95db5defae9c96f92049f2166d2421d379",
+      "note_reviewed": true,
+      "source_reviewed": "Targeted exact diff; not full CUDA audit",
+      "mechanism": "Moves yR*ZZZ before per-CTA inverse using dead ZZ slot. Exact code diff inspected. Algebraic scheduling change only; extends yb lifetime across inverse, variable-slot reuse does not prove unchanged register use or hidden latency. No local CUDA/GPU result. Our external inverse architecture would require different storage/transport analysis; not a direct large improvement."
+    }
+  },
+  "prior_result_comparison": {
+    "previous_frontier": 440270249,
+    "delta": 10864795,
+    "improvement_percent": 2.4677558896331497,
+    "submission_time_frontier": 433346795,
+    "improvement_from_submission_time_frontier_percent": 4.104853019623689,
+    "interpretation": "Official result for the full composite; no matched ablation attributing individual changes."
+  },
+  "latest_queue_rows": [
+    {
+      "prefix": "0909fa4",
+      "id": "0909fa48-2f1a-493b-b38b-c6fcc210d30c",
+      "solver": "mpjunior92",
+      "status": "accepted",
+      "score": 103339004,
+      "created_at": "2026-09-15T19:07:13.784Z",
+      "updated_at": "2026-09-15T19:29:23.133Z"
+    },
+    {
+      "prefix": "b7bdbf1",
+      "id": "b7bdbf1c-a819-4c02-ad21-660c1f16f0da",
+      "solver": "Meganpark980320",
+      "status": "accepted",
+      "score": 126688029,
+      "created_at": "2026-09-16T15:02:26.711Z",
+      "updated_at": "2026-09-16T15:24:41.382Z"
+    },
+    {
+      "prefix": "c691d3d",
+      "id": "c691d3da-07dd-4372-a6bc-1d39d3d2035a",
+      "solver": "Meganpark980320",
+      "status": "accepted",
+      "score": 129574439,
+      "created_at": "2026-09-16T15:26:38.891Z",
+      "updated_at": "2026-09-16T15:50:52.610Z"
+    },
+    {
+      "prefix": "873ed72",
+      "id": "873ed724-9815-4e13-a02f-072f21e3f992",
+      "solver": "nullforest8200",
+      "status": "accepted",
+      "score": 433346795,
+      "created_at": "2026-09-16T15:37:42.244Z",
+      "updated_at": "2026-09-16T16:18:48.347Z"
+    },
+    {
+      "prefix": "7fdc8ed",
+      "id": "7fdc8ed5-8364-402a-8231-6c689466b60c",
+      "solver": "welttowelt",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T15:38:54.625Z",
+      "updated_at": "2026-09-16T16:36:51.735Z"
+    },
+    {
+      "prefix": "b2ede54",
+      "id": "b2ede54e-dd48-448a-a36c-8f30b47d9de3",
+      "solver": "fkiene",
+      "status": "failed",
+      "score": null,
+      "created_at": "2026-09-16T15:44:01.425Z",
+      "updated_at": "2026-09-16T16:39:13.601Z"
+    },
+    {
+      "prefix": "dfb66e9",
+      "id": "dfb66e9f-9301-49c8-8e32-2744ca2847cc",
+      "solver": "newjordan",
+      "status": "failed",
+      "score": null,
+      "created_at": "2026-09-16T15:45:29.008Z",
+      "updated_at": "2026-09-16T16:39:53.349Z"
+    },
+    {
+      "prefix": "ef833e4",
+      "id": "ef833e43-f898-4022-8c75-3c82c0ceef4d",
+      "solver": "pepedesigner",
+      "status": "failed",
+      "score": null,
+      "created_at": "2026-09-16T15:47:11.580Z",
+      "updated_at": "2026-09-16T16:40:47.442Z"
+    },
+    {
+      "prefix": "54918fb",
+      "id": "54918fb4-7e8e-4b7e-b958-68c2700394a0",
+      "solver": "anamdongparkjinhyeong",
+      "status": "rejected",
+      "score": 131027832,
+      "created_at": "2026-09-16T15:48:22.970Z",
+      "updated_at": "2026-09-16T17:08:01.808Z"
+    },
+    {
+      "prefix": "c9a85a8",
+      "id": "c9a85a87-e2b8-4ab8-8d4f-c79d96546d03",
+      "solver": "hybridnoise",
+      "status": "rejected",
+      "score": 418504460,
+      "created_at": "2026-09-16T15:53:12.959Z",
+      "updated_at": "2026-09-16T17:35:37.998Z"
+    },
+    {
+      "prefix": "dcfcc85",
+      "id": "dcfcc858-7309-4c1b-b856-7f1d4f76cf02",
+      "solver": "Meganpark980320",
+      "status": "rejected",
+      "score": 433564114,
+      "created_at": "2026-09-16T15:53:56.112Z",
+      "updated_at": "2026-09-16T18:01:25.979Z"
+    },
+    {
+      "prefix": "7bf15b2",
+      "id": "7bf15b2f-c085-4be4-865a-c2ee0a857691",
+      "solver": "AbdelStark",
+      "status": "rejected",
+      "score": 130687084,
+      "created_at": "2026-09-16T16:12:50.271Z",
+      "updated_at": "2026-09-16T18:24:58.789Z"
+    },
+    {
+      "prefix": "41dd77a",
+      "id": "41dd77a6-9b18-4e88-a3bf-3cf05f5ef985",
+      "solver": "jacklightChen",
+      "status": "accepted",
+      "score": 440270249,
+      "created_at": "2026-09-16T16:31:02.498Z",
+      "updated_at": "2026-09-16T18:53:16.925Z"
+    },
+    {
+      "prefix": "5f72864",
+      "id": "5f72864e-52fc-48a9-801a-1c334f050ad3",
+      "solver": "fkiene",
+      "status": "rejected",
+      "score": 424023018,
+      "created_at": "2026-09-16T16:39:31.040Z",
+      "updated_at": "2026-09-16T19:18:39.597Z"
+    },
+    {
+      "prefix": "2a1d050",
+      "id": "2a1d050c-e1d1-4983-b141-c24787e08788",
+      "solver": "DPZZxlz",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T16:42:26.803Z",
+      "updated_at": "2026-09-16T18:55:10.393Z"
+    },
+    {
+      "prefix": "37aeaf7",
+      "id": "37aeaf70-1aea-404f-9f88-c1b23dd03f2d",
+      "solver": "newjordan",
+      "status": "rejected",
+      "score": 168579851,
+      "created_at": "2026-09-16T16:48:05.257Z",
+      "updated_at": "2026-09-16T19:42:26.004Z"
+    },
+    {
+      "prefix": "3b1bba4",
+      "id": "3b1bba4b-5095-4dc5-a072-1589c5589107",
+      "solver": "Meganpark980320",
+      "status": "rejected",
+      "score": 438769398,
+      "created_at": "2026-09-16T18:03:44.630Z",
+      "updated_at": "2026-09-16T20:10:04.143Z"
+    },
+    {
+      "prefix": "5605ad8",
+      "id": "5605ad84-dd72-4aed-9e6d-60a6bb64a61b",
+      "solver": "nullforest8200",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T18:07:42.715Z",
+      "updated_at": "2026-09-16T19:37:32.081Z"
+    },
+    {
+      "prefix": "65fb673",
+      "id": "65fb673d-5014-4ee8-866d-97d972e7b1f0",
+      "solver": "hybridnoise",
+      "status": "accepted",
+      "score": 451135044,
+      "created_at": "2026-09-16T18:12:15.880Z",
+      "updated_at": "2026-09-16T20:36:11.487Z"
+    },
+    {
+      "prefix": "80a850f",
+      "id": "80a850f0-3bd5-484b-b890-70faec8a39d0",
+      "solver": "welttowelt",
+      "status": "accepted",
+      "score": 477182283,
+      "created_at": "2026-09-16T18:19:31.988Z",
+      "updated_at": "2026-09-16T21:02:23.915Z"
+    },
+    {
+      "prefix": "78c7e7d",
+      "id": "78c7e7d9-85f4-402d-9aec-ad484d64a8fb",
+      "solver": "AbdelStark",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T18:31:13.301Z",
+      "updated_at": "2026-09-16T19:10:44.727Z"
+    },
+    {
+      "prefix": "03818d8",
+      "id": "03818d8e-f137-4fee-be6f-adc9b5622ddf",
+      "solver": "DPZZxlz",
+      "status": "rejected",
+      "score": 470825789,
+      "created_at": "2026-09-16T19:04:35.710Z",
+      "updated_at": "2026-09-16T21:28:01.083Z"
+    },
+    {
+      "prefix": "4924be1",
+      "id": "4924be1f-f4e0-47e9-8540-a268b6eb8b25",
+      "solver": "jacklightChen",
+      "status": "rejected",
+      "score": 452720843,
+      "created_at": "2026-09-16T19:07:35.136Z",
+      "updated_at": "2026-09-16T21:53:38.964Z"
+    },
+    {
+      "prefix": "8185e83",
+      "id": "8185e838-5109-47bb-b500-65859bf376bb",
+      "solver": "AbdelStark",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T19:11:14.170Z",
+      "updated_at": "2026-09-16T20:19:18.772Z"
+    },
+    {
+      "prefix": "8339d95",
+      "id": "8339d955-c7c6-49de-8fc8-8159091bc071",
+      "solver": "fkiene",
+      "status": "rejected",
+      "score": 441645545,
+      "created_at": "2026-09-16T19:19:19.611Z",
+      "updated_at": "2026-09-16T22:19:33.627Z"
+    },
+    {
+      "prefix": "60c2176",
+      "id": "60c21768-9c1d-4b52-8c64-71bff99f6385",
+      "solver": "tekkac",
+      "status": "rejected",
+      "score": 449042960,
+      "created_at": "2026-09-16T19:45:20.774Z",
+      "updated_at": "2026-09-16T22:45:09.403Z"
+    },
+    {
+      "prefix": "9c914db",
+      "id": "9c914db3-2c29-4621-a2d5-eb8335a4d619",
+      "solver": "alvaroborras",
+      "status": "accepted",
+      "score": 488210159,
+      "created_at": "2026-09-16T20:10:00.701Z",
+      "updated_at": "2026-09-16T23:11:29.495Z"
+    },
+    {
+      "prefix": "a4ab6a2",
+      "id": "a4ab6a2a-8706-4d4f-bd1b-8737e0261989",
+      "solver": "Meganpark980320",
+      "status": "rejected",
+      "score": 447210771,
+      "created_at": "2026-09-16T20:13:14.399Z",
+      "updated_at": "2026-09-16T23:37:02.243Z"
+    },
+    {
+      "prefix": "4182c64",
+      "id": "4182c646-cebb-42a9-b344-6ebf92184f7f",
+      "solver": "AbdelStark",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T20:19:23.028Z",
+      "updated_at": "2026-09-16T20:56:28.583Z"
+    },
+    {
+      "prefix": "6af0525",
+      "id": "6af05251-dc83-4238-a2ab-19905bef184b",
+      "solver": "AbdelStark",
+      "status": "rejected",
+      "score": 445827085,
+      "created_at": "2026-09-16T20:58:50.754Z",
+      "updated_at": "2026-09-17T00:02:45.491Z"
+    },
+    {
+      "prefix": "fa6e0a3",
+      "id": "fa6e0a34-1277-4856-b139-cf3c2e50c56f",
+      "solver": "DPZZxlz",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T21:31:01.900Z",
+      "updated_at": "2026-09-16T21:56:43.305Z"
+    },
+    {
+      "prefix": "b27ad8e",
+      "id": "b27ad8e4-c4fa-4611-a27a-56ae1d5e5c3f",
+      "solver": "hybridnoise",
+      "status": "failed",
+      "score": null,
+      "created_at": "2026-09-16T21:40:09.599Z",
+      "updated_at": "2026-09-17T00:05:28.776Z"
+    },
+    {
+      "prefix": "41d1f2b",
+      "id": "41d1f2b8-60ae-4b07-9f67-d733e4ecd783",
+      "solver": "jungjipdo",
+      "status": "rejected",
+      "score": null,
+      "created_at": "2026-09-16T21:41:16.185Z",
+      "updated_at": "2026-09-16T21:41:22.426Z"
+    },
+    {
+      "prefix": "56e5f8e",
+      "id": "56e5f8ef-c2b0-4aa1-ac14-16df2171318d",
+      "solver": "DPZZxlz",
+      "status": "cancelled",
+      "score": null,
+      "created_at": "2026-09-16T21:56:59.018Z",
+      "updated_at": "2026-09-16T23:12:00.204Z"
+    },
+    {
+      "prefix": "edba0bd",
+      "id": "edba0bd0-d2ec-40af-84fd-f378824a9ce3",
+      "solver": "jungjipdo",
+      "status": "rejected",
+      "score": 480398167,
+      "created_at": "2026-09-16T22:07:11.524Z",
+      "updated_at": "2026-09-17T00:29:37.340Z"
+    },
+    {
+      "prefix": "49a7960",
+      "id": "49a79608-9e30-4565-b2b4-d4f5a72242b6",
+      "solver": "fkiene",
+      "status": "rejected",
+      "score": 473302249,
+      "created_at": "2026-09-16T22:20:49.762Z",
+      "updated_at": "2026-09-17T00:55:35.754Z"
+    },
+    {
+      "prefix": "3e7fa41",
+      "id": "3e7fa41d-0b2a-4c98-9b40-e2582a8df7ed",
+      "solver": "gunboatsss",
+      "status": "rejected",
+      "score": 482838666,
+      "created_at": "2026-09-16T22:21:11.873Z",
+      "updated_at": "2026-09-17T01:21:23.551Z"
+    },
+    {
+      "prefix": "3d7df1d",
+      "id": "3d7df1d4-5328-457d-8a1b-a44dd5febc99",
+      "solver": "alvaroborras",
+      "status": "rejected",
+      "score": 443427609,
+      "created_at": "2026-09-16T23:11:35.419Z",
+      "updated_at": "2026-09-17T01:47:17.546Z"
+    },
+    {
+      "prefix": "558d022",
+      "id": "558d022f-f30e-475b-ad06-f8935f03a57c",
+      "solver": "DPZZxlz",
+      "status": "rejected",
+      "score": 485809327,
+      "created_at": "2026-09-16T23:20:22.168Z",
+      "updated_at": "2026-09-17T02:13:18.070Z"
+    },
+    {
+      "prefix": "c657b8a",
+      "id": "c657b8a3-1716-499b-aef1-37fec75df3f4",
+      "solver": "Meganpark980320",
+      "status": "validating",
+      "score": null,
+      "created_at": "2026-09-16T23:38:50.537Z",
+      "updated_at": "2026-09-16T23:38:50.537Z"
+    },
+    {
+      "prefix": "2cffb79",
+      "id": "2cffb791-c101-49b1-ae44-92e6da21291f",
+      "solver": "fkiene",
+      "status": "validating",
+      "score": null,
+      "created_at": "2026-09-17T00:55:49.322Z",
+      "updated_at": "2026-09-17T00:55:49.322Z"
+    },
+    {
+      "prefix": "573dcdb",
+      "id": "573dcdb7-9e8d-48dd-83c5-34c4ecd520fc",
+      "solver": "pepedesigner",
+      "status": "validating",
+      "score": null,
+      "created_at": "2026-09-17T01:07:46.362Z",
+      "updated_at": "2026-09-17T01:07:46.362Z"
+    },
+    {
+      "prefix": "2710d54",
+      "id": "2710d54a-cc23-4a17-abc9-21b905c92a74",
+      "solver": "anamdongparkjinhyeong",
+      "status": "validating",
+      "score": null,
+      "created_at": "2026-09-17T01:19:22.459Z",
+      "updated_at": "2026-09-17T01:19:22.459Z"
+    },
+    {
+      "prefix": "f535811",
+      "id": "f5358114-2c33-4046-bc3a-5f68f779dcef",
+      "solver": "dun999",
+      "status": "validating",
+      "score": null,
+      "created_at": "2026-09-17T02:13:30.531Z",
+      "updated_at": "2026-09-17T02:13:30.531Z"
+    },
+    {
+      "prefix": "4b01148",
+      "id": "4b011485-4405-4c50-854c-90d917005689",
+      "solver": "DPZZxlz",
+      "status": "validating",
+      "score": null,
+      "created_at": "2026-09-17T02:18:20.464Z",
+      "updated_at": "2026-09-17T02:18:20.464Z"
+    }
+  ],
+  "later_scored_completion_observed": false,
+  "latest_queue_observation": "2026-09-17T02:33:14.128624+00:00",
+  "failure": {
+    "official_status": "failed",
+    "official_score": null,
+    "run_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/35163106436",
+    "source_commit": "086890a057d87c9d56cbbec38f24e1243b15bbc9",
+    "updated_at": "2026-09-17T00:05:28.776Z",
+    "observed": "GPU health preflight passed; candidate execution ended after5.8s with0candidates/0hits. Public diagnostic artifact being inspected; cause not yet established.",
+    "diagnostic_artifact": 10475105124,
+    "diagnostic_zip_sha256": "72d35f7daf3c9a3365d055100b479c249afeaa5b178327f5a0016cc12148cb57",
+    "cause": "unresolved; candidate stderr/stdout and subprocess status absent from public artifact",
+    "new_checks": "Actual integrated builder kernels/root hierarchy CPU/OpenSSL: compact13878 and wide10023 entries pass, including failed instance. No GPU execution.",
+    "directory": "research/pr86_failure",
+    "provider_reviews": "Grok4.6 and Gemini3.8FlashHigh both timed out180s with no final response."
+  },
+  "official_metrics": null,
+  "rejection_reason": "workflow run concluded failure at step \"Benchmark\": https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/35163106436",
+  "comb16_research": {
+    "report": "research/comb16/comparison.json",
+    "status": "research candidate; not selected for submission",
+    "gpu_executed": false,
+    "production_unchanged": true
+  },
+  "startup_budget_research": {
+    "status": "CPU/nativePASS; unsubmitted robustness component",
+    "path": "research/startup_budget",
+    "budget_cases": 279,
+    "mandatory_faults": 29,
+    "optional_cases": 5,
+    "kernel_reports_identical": 13,
+    "diagnosis": "PR86 cause remains unknown",
+    "gpu_executed": false
+  },
+  "glv_screen": {
+    "path": "research/comb16/glv-cost-screen.json",
+    "status": "Conditionalcostscreenonly; noCUDAcandidate",
+    "muse_review": "research/muse/thirteenth-review.json"
+  },
+  "latest_pending_count": 6
+}

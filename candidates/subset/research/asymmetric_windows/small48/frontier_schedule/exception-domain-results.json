@@ -1,0 +1,102 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "140133ddb7a0408750a5396ce20658a1b48591422b5974315c8b76110de3117c",
+  "actual_helper_cases": {
+    "equal": 159,
+    "opposite": 159,
+    "ordinary": 159,
+    "unguarded_doubling_failures_detected": 159
+  },
+  "prefix_bounds": [
+    {
+      "window": 0,
+      "end_bit": 17,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffffffffffffe0001",
+      "max_signed_difference": "0xfffffffffffff00000000000000000000000000000000000000000000001ffff"
+    },
+    {
+      "window": 1,
+      "end_bit": 34,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffffffffc00000001",
+      "max_signed_difference": "0xfffffffffffff0000000000000000000000000000000000000000003ffffffff"
+    },
+    {
+      "window": 2,
+      "end_bit": 51,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffff8000000000001",
+      "max_signed_difference": "0xfffffffffffff000000000000000000000000000000000000007ffffffffffff"
+    },
+    {
+      "window": 3,
+      "end_bit": 68,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffff00000000000000001",
+      "max_signed_difference": "0xfffffffffffff0000000000000000000000000000000000fffffffffffffffff"
+    },
+    {
+      "window": 4,
+      "end_bit": 85,
+      "min_signed_difference": "0xfffffffffffffffffffffffffffffe000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff000000000000000000000000000001fffffffffffffffffffff"
+    },
+    {
+      "window": 5,
+      "end_bit": 102,
+      "min_signed_difference": "0xfffffffffffffffffffffffffc0000000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff00000000000000000000000003fffffffffffffffffffffffff"
+    },
+    {
+      "window": 6,
+      "end_bit": 119,
+      "min_signed_difference": "0xfffffffffffffffffffff800000000000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff0000000000000000000007fffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 7,
+      "end_bit": 136,
+      "min_signed_difference": "0xfffffffffffffffff0000000000000000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff00000000000000000ffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 8,
+      "end_bit": 153,
+      "min_signed_difference": "0xffffffffffffe00000000000000000000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff0000000000001ffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 9,
+      "end_bit": 170,
+      "min_signed_difference": "0xffffffffc000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff000000003ffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 10,
+      "end_bit": 187,
+      "min_signed_difference": "0xffff80000000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xfffffffffffff00007ffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ],
+  "added_chain_scalar_cases": 214,
+  "whole_chain_report": "guarded-curve-results.json",
+  "geometry_widths": [
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    26,
+    26
+  ],
+  "small_bits": 204,
+  "derivation": "For odd1<=M<=n, C=((M>>204)|1)*2^204; low prefix L=M-((M>>S)|1)*2^S. Bounds exclude equal/opposite/infinite prefixes through window10. Final helper handles both remaining cases.",
+  "negative_controls": "Actual inherited incomplete final helper, tested above; old52MiB whole-chain controls are separately retained in cold_seed/.",
+  "audit_sha256": "56d632037a7ccc721b3110a78725cd024bac9ef561db2ea1d78b18c46e5470ed",
+  "gpu_executed": false,
+  "limits": "Check the actual final-add helper, cold-prefix bounds and constructed scalars.\n\nOpenSSL executes field operations; a separate Python affine law is the oracle.\nThe prefix argument assumes a valid nonzero order-n runtime base and the stated\nregular odd recoding identity. This is not GPU execution or an exhaustive CUDA\nverification of all input hashes.\n"
+}

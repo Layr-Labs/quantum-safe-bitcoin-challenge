@@ -1,0 +1,78 @@
+{
+  "selected_at": "2026-09-17T05:27:16.620914+00:00",
+  "source_fingerprint": "140133ddb7a0408750a5396ce20658a1b48591422b5974315c8b76110de3117c",
+  "status": "SELECTED_FOR_SUBMISSION",
+  "rationale": "Strongest prepared structural contender; lower point arithmetic plus48MiBpriorityprefix andpromotedfrontend mayoffsettwo coldlookups/checkpoints/startup. Crediblefirst-placechance,unmeasured.",
+  "reports": {
+    "frontend-results.json": {
+      "sha256": "ccf35112c88280037ced48a03bb61c241eddfdaedd5a864512ea7f89470ed05e",
+      "status": "PASS",
+      "binding": "exact complete production/audit fingerprint"
+    },
+    "guarded-curve-results.json": {
+      "sha256": "2c3ae608aa84bf9dd02d9e192eb268178029dd48a9df11e334b799dce6e4a45c",
+      "status": "PASS",
+      "binding": "exact complete production/audit fingerprint"
+    },
+    "exception-domain-results.json": {
+      "sha256": "00f67a990f499de82e94d8a73b2d509c4a42335a7ea57ab9e7f9a31e7fdc8fdc",
+      "status": "PASS",
+      "binding": "exact complete production/audit fingerprint"
+    },
+    "pipeline-results.json": {
+      "sha256": "2df15cb9fe03c1016c2c247233fc8171875d0db7831b13dfa7ffaf4d6eb30252",
+      "status": "PASS",
+      "binding": "exact complete production/audit fingerprint"
+    },
+    "field-results.json": {
+      "sha256": "b4482ee3a9ffb2d95525e629f5fe0c3b559644b16498e3a7ac1a42c29fc624ca",
+      "status": "PASS",
+      "binding": "exact complete production/audit fingerprint"
+    },
+    "native-results.json": {
+      "sha256": "b9ee49805948b90d71d4191ca6c16948a83df4b898c2768db8e9b31f38acdadc",
+      "status": "PASS",
+      "binding": "exact compiled include closure"
+    },
+    "audit-native-results.json": {
+      "sha256": "013e9c8aedac6f6f0fadbf70e29a3d51298b05bf25260db976145baa344d6483",
+      "status": "PASS",
+      "binding": "exact compiled include closure"
+    },
+    "../builder-results.json": {
+      "status": "PASS",
+      "binding": "unchanged component source only; original full-source fingerprint retained",
+      "compared_files": [
+        "compact_geometry.cuh",
+        "compact_table_kernels.cuh",
+        "compact_table_host.cuh"
+      ]
+    },
+    "../builder-pipeline-results.json": {
+      "status": "PASS",
+      "binding": "unchanged component source only; original full-source fingerprint retained",
+      "compared_files": [
+        "compact_geometry.cuh",
+        "compact_table_kernels.cuh"
+      ]
+    },
+    "../policy-host-results.json": {
+      "status": "PASS",
+      "binding": "unchanged component source only; original full-source fingerprint retained",
+      "compared_files": [
+        "compact_geometry.cuh",
+        "l2_policy.cuh"
+      ]
+    }
+  },
+  "gpu_executed": false,
+  "measured_throughput": null,
+  "setup": "PASS verifier smoke",
+  "benchmark_attempt": "Could not launch official privileged bridge on Mac; no GPU measurements.",
+  "coauthors": [
+    "alvaroborras",
+    "MakiRH4",
+    "jacklightChen",
+    "ercumentyildirim"
+  ]
+}

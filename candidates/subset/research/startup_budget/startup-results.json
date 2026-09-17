@@ -1,0 +1,367 @@
+{
+  "budget_scenarios": 279,
+  "mandatory_faults": 29,
+  "optional_policy_cases": 5,
+  "old_ignored_failure_scenarios": 47,
+  "old_stop_new_safe_scenarios": 30,
+  "mandatory_persistent_bytes": 1489169674,
+  "example_23GiB": {
+    "old_stop": "d_pipe_tree",
+    "new_wide_selected": true,
+    "new_remaining_bytes": 5423043318
+  },
+  "status": "PASS",
+  "gpu_executed": false,
+  "validation": "CPU source-call projection / mocked CUDA API / UBSan; actual optional policy body",
+  "source_sha256": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "2025be571e25b67a9afe9a3531a47d08f0a22b2e95ca1dc91c18a62aa0530459",
+    "square32.cuh": "34f62cd4e19f317c39a3d240386641dc1adcc6f8f74d66b93571e87e2dfc3914",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/compact_geometry.cuh": "a26eb088152e767330fd859906c25db793be875083cfd1e573cf508a4cc00acb",
+    "tests/gpu_epochs/compact_table_device.cuh": "deab69057fd47be26ed6df0bdbe09303f5dd48bd2e432ff358fadc85aa3a3ebc",
+    "tests/gpu_epochs/compact_table_host.cuh": "284725a7c4b492d194da72f4edd1f8bb80aac8a5338225576c55c22eab16d6b3",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "d250c236f449e120a00616ddc8c922e53fa1f811cc7e717dd10b09bd3e3c9c01",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/ranked_pipeline.cuh": "162a65baa455d170f5e8f923769db9cd9839f09f8a712d9b3a5f73d85d0cbd4a",
+    "tests/gpu_epochs/table_policy.cuh": "8695b8cb021cdb33dc569b870ea8b33817adefa605f398de38ce18d0f89bf7e7",
+    "tests/gpu_epochs/table_resources.cuh": "630368b93cf643efbc8fbaed8ed2a7637420d48ef6b649da65a0cd186eb10686",
+    "tests/gpu_epochs/table_tuner.cuh": "d1531eb3f103a14c96c818e022d75d13f7faf476eb7d6de8d7b2f72cba8d272a",
+    "tests/gpu_epochs/tree.cu": "5698dbb2ff788d5ee8083a670161c07609b478c396446b3cff73a2f72fc33878",
+    "tests/gpu_epochs/tree_audit.cu": "c6015b15d7a3b7728d85492504836677ad082dc0b641d3debc40105c3d14ac66",
+    "tests/gpu_epochs/tree_inverse.cuh": "67103970f3761c1be263b7df114bd5a6d3b63e48be36e423892a2f68efa91b41",
+    "tests/gpu_epochs/wide_geometry.cuh": "985e935e371842eceabe05245b8d28237bfd19e2987c75894c59e389766eabbb",
+    "tests/gpu_epochs/wide_table_host.cuh": "ac27e68bbc52f7cb8d9c00faba61f96f75545af0aa22d2a8d0adf4ffd41e8e4b",
+    "tests/gpu_epochs/wide_table_kernels.cuh": "811668b4a00b8fb35716392b7c60d79e952c511eeb3f08a5a6c9321b4057c8d2",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "57dede3365f0d87bfa5307bd73440f9ae25773d913c96b46a3316363fd734cb8"
+  },
+  "projection_sha256": "ee68c9778284da9f211afd021657bd8034cad5f751ed4be454a432cc52c628a3",
+  "original_events": [
+    {
+      "name": "compact",
+      "call": "compact_build_table(&d_gtX,&d_gtY,dp.neg_r_inv)",
+      "api_error_checked": true
+    },
+    {
+      "name": "optional",
+      "call": "qsb_optional_wide_table(se_mode,dp.neg_r_inv)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_mid",
+      "call": "cudaMalloc(&d_mid,32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_prem",
+      "call": "cudaMalloc(&d_prem, 64)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_early",
+      "call": "cudaMalloc(&d_early, MAX_T)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_const_words",
+      "call": "cudaMalloc(&d_const_words, (n_const_words ? n_const_words : 1) * sizeof(uint32_t))",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_dsigs",
+      "call": "cudaMalloc(&d_dsigs, n_pool*SIG_PUSH_SIZE)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_tail",
+      "call": "cudaMalloc(&d_tail, dp.tail_section_len)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_suf",
+      "call": "cudaMalloc(&d_suf, dp.tx_suffix_len)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_epochs",
+      "call": "cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t))",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_nri",
+      "call": "cudaMalloc(&d_nri,32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_u2rx",
+      "call": "cudaMalloc(&d_u2rx,32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_u2ry",
+      "call": "cudaMalloc(&d_u2ry,32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_neg2u2rx",
+      "call": "cudaMalloc(&d_neg2u2rx,32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_neg2u2ry",
+      "call": "cudaMalloc(&d_neg2u2ry,32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "stack",
+      "call": "cudaDeviceSetLimit(cudaLimitStackSize, 32768)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_cnt",
+      "call": "cudaMalloc(&d_hit_cnt,4)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_idx",
+      "call": "cudaMalloc(&d_hit_idx,1024*4)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_combos",
+      "call": "cudaMalloc(&d_hit_combos, 1024 * MAX_T)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_sighash",
+      "call": "cudaMalloc(&d_hit_sighash, 1024 * 32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_keynonce",
+      "call": "cudaMalloc(&d_hit_keynonce, 1024 * 33)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_pubhash",
+      "call": "cudaMalloc(&d_hit_pubhash, 1024 * 32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_qx",
+      "call": "cudaMalloc(&d_hit_qx, 1024 * 32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_hit_qy",
+      "call": "cudaMalloc(&d_hit_qy, 1024 * 32)",
+      "api_error_checked": false
+    },
+    {
+      "name": "d_pipe_state",
+      "call": "cudaMalloc(&d_pipe_state, blocks*256u*8u*sizeof(ulonglong2))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_roots",
+      "call": "cudaMalloc(&d_pipe_roots, blocks*4u*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_tree",
+      "call": "cudaMalloc(&d_pipe_tree, blocks*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_super",
+      "call": "cudaMalloc(&d_pipe_super, groups*4u*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_root_tree",
+      "call": "cudaMalloc(&d_pipe_root_tree, groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_combos",
+      "call": "cudaMalloc(&d_combos, BATCH * t_sel)",
+      "api_error_checked": false
+    }
+  ],
+  "revised_events": [
+    {
+      "name": "stack",
+      "call": "cudaDeviceSetLimit(cudaLimitStackSize,se_mode?4096:32768)",
+      "api_error_checked": true
+    },
+    {
+      "name": "compact",
+      "call": "compact_build_table(&d_gtX,&d_gtY,dp.neg_r_inv)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_mid",
+      "call": "cudaMalloc(&d_mid,32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_prem",
+      "call": "cudaMalloc(&d_prem, 64)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_early",
+      "call": "cudaMalloc(&d_early, MAX_T)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_const_words",
+      "call": "cudaMalloc(&d_const_words, (n_const_words ? n_const_words : 1) * sizeof(uint32_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_dsigs",
+      "call": "cudaMalloc(&d_dsigs, n_pool*SIG_PUSH_SIZE)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_tail",
+      "call": "cudaMalloc(&d_tail, dp.tail_section_len)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_suf",
+      "call": "cudaMalloc(&d_suf, dp.tx_suffix_len)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_epochs",
+      "call": "cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_nri",
+      "call": "cudaMalloc(&d_nri,32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_u2rx",
+      "call": "cudaMalloc(&d_u2rx,32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_u2ry",
+      "call": "cudaMalloc(&d_u2ry,32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_neg2u2rx",
+      "call": "cudaMalloc(&d_neg2u2rx,32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_neg2u2ry",
+      "call": "cudaMalloc(&d_neg2u2ry,32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_cnt",
+      "call": "cudaMalloc(&d_hit_cnt,4)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_idx",
+      "call": "cudaMalloc(&d_hit_idx,1024*4)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_combos",
+      "call": "cudaMalloc(&d_hit_combos, 1024 * MAX_T)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_sighash",
+      "call": "cudaMalloc(&d_hit_sighash, 1024 * 32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_keynonce",
+      "call": "cudaMalloc(&d_hit_keynonce, 1024 * 33)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_pubhash",
+      "call": "cudaMalloc(&d_hit_pubhash, 1024 * 32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_qx",
+      "call": "cudaMalloc(&d_hit_qx, 1024 * 32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_hit_qy",
+      "call": "cudaMalloc(&d_hit_qy, 1024 * 32)",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_state",
+      "call": "cudaMalloc(&d_pipe_state, blocks*256u*8u*sizeof(ulonglong2))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_roots",
+      "call": "cudaMalloc(&d_pipe_roots, blocks*4u*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_tree",
+      "call": "cudaMalloc(&d_pipe_tree, blocks*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_super",
+      "call": "cudaMalloc(&d_pipe_super, groups*4u*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_pipe_root_tree",
+      "call": "cudaMalloc(&d_pipe_root_tree, groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))",
+      "api_error_checked": true
+    },
+    {
+      "name": "d_combos",
+      "call": "cudaMalloc(&d_combos, BATCH * t_sel)",
+      "api_error_checked": true
+    },
+    {
+      "name": "optional",
+      "call": "qsb_optional_wide_table(se_mode,dp.neg_r_inv)",
+      "api_error_checked": true
+    }
+  ],
+  "mutation_caught": "unchecked final mandatory d_combos allocation",
+  "native_kernel_resource_and_opcode_reports_identical": 13,
+  "assumptions": {
+    "initial_stack_bytes": 1024,
+    "resident_thread_counts": [
+      65536,
+      98304,
+      196608
+    ],
+    "initial_free_GiB_range": [
+      1,
+      24
+    ],
+    "step_GiB": 0.25,
+    "fixture_seed": 1454376870
+  },
+  "limitations": [
+    "No GPU execution or proof of the PR86 failure cause.",
+    "Pinned ranked branch only, not a whole-program execution.",
+    "Compact builder persistent allocation included; temporary buffers/kernel launches omitted.",
+    "No allocation granularity, automatic stack growth, context overhead or other-process interference modeled.",
+    "Kernel report equality means equal resource/opcode counts; not a bytewise SASS comparison."
+  ]
+}
