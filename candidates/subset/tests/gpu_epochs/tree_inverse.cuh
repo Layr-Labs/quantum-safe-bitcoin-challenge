@@ -30,7 +30,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     __syncthreads();
     #pragma unroll 1
-    for(int width=1;width<n;width<<=1){
+    for(int width=1;width<(n>=4 ? n>>2 : n);width<<=1){
         if(tid<width){
             int node=width+tid;
             uint64_t parent[5]={0,0,0,0,0},left[5]={0,0,0,0,0},right[5]={0,0,0,0,0};
@@ -45,7 +45,35 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
                 tree[k][2*node]=right[k];tree[k][2*node+1]=left[k];
             }
         }
-        if((width<<1)>32)__syncthreads();else __syncwarp();
+        int next=width<<1;
+        if(next>32)__syncthreads();else __syncwarp();
+    }
+
+    // Fuse the last two down-sweep levels. Each owner reads the four original
+    // leaf products before replacing them; neighboring owners never access
+    // this subtree. The intermediate pair inverses stay in registers.
+    if(n>=4){
+        if(tid<(n>>2)){
+            int node=(n>>2)+tid,leaf=4*node;
+            uint64_t parent[5]={},left[5]={},right[5]={},other[5]={};
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                parent[k]=tree[k][node];left[k]=tree[k][2*node];right[k]=tree[k][2*node+1];
+            }
+            qsb_field_mul(right,parent,right); // inverse of the left pair
+            qsb_field_mul(left,parent,left);   // inverse of the right pair
+            #pragma unroll
+            for(int k=0;k<4;k++){parent[k]=tree[k][leaf];other[k]=tree[k][leaf+1];}
+            qsb_field_mul(other,right,other);qsb_field_mul(parent,right,parent);
+            #pragma unroll
+            for(int k=0;k<4;k++){tree[k][leaf]=other[k];tree[k][leaf+1]=parent[k];}
+            #pragma unroll
+            for(int k=0;k<4;k++){parent[k]=tree[k][leaf+2];other[k]=tree[k][leaf+3];}
+            qsb_field_mul(other,left,other);qsb_field_mul(parent,left,parent);
+            #pragma unroll
+            for(int k=0;k<4;k++){tree[k][leaf+2]=other[k];tree[k][leaf+3]=parent[k];}
+        }
+        if(n>32)__syncthreads();else __syncwarp();
     }
     #pragma unroll
     for(int k=0;k<4;k++)value[k]=tree[k][n+tid];

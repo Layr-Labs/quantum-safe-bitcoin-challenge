@@ -122,9 +122,14 @@ After the last level, each lane reads its own leaf inverse and explicitly
 clears value[4].
 
 For n=256, the up sweep uses 255 field multiplications and the down sweep
-uses 510, for 765 multiplications plus one modular inverse. There are 18
-block barriers including the initial leaf publication and root-inverse
-publication. These are source-level counts, not a promise about machine
+uses 510, for 765 multiplications plus one modular inverse. HEAD already
+replaces block barriers with `__syncwarp` once a level fits in a warp.
+This candidate also fuses the last two down-sweep levels: sixty-four owners
+expand four leaves from one parent inverse in registers, so those two
+levels never rewrite pair inverses into shared memory. Source-level
+synchronization is then 16 instead of 18 (leaf publication, six up-sweep
+joins, root-inverse publication, five ordinary down-sweep joins, one fused
+join). These are source-level counts, not a promise about machine
 instruction counts or elapsed time. The shared array is in addition to the
 base's 8 KiB first-block SHA state cache.
 
