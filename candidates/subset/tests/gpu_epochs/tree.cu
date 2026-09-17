@@ -362,7 +362,11 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
-    #pragma unroll 1
+    /* Unroll by two so the next chunk's 64-byte table read can be issued while
+     * the previous point addition is still draining: the two loads are
+     * independent, the (256,2) budget leaves registers free for the second one,
+     * and the dependent adder chain itself is unchanged. */
+    #pragma unroll 2
     for (int c=2;c<GT_CHUNKS;c++){
         ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
