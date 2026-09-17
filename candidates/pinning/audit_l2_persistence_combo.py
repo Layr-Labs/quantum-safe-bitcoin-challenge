@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind exact 1a source plus the exact e2 default-stream L2 policy block."""
+"""Bind exact CBA plus branchless 0c6 recovery and the e2 L2 policy block."""
 
 import hashlib
 from pathlib import Path
@@ -10,7 +10,7 @@ E2_HEAD = "d87de9fb5cfb4840f29a29de511d455d25562f79"
 ONE_A_GPUMATH_SHA256 = "835b061d1a0b158778c0b576ebce23a9f1663f616a4a292ed7afe103ff6afecd"
 ONE_A_PINNING_SHA256 = "b1f818ce3c473db215a58248c4685fd2890566c904ab12fe73c06f0001f0d5eb"
 E2_POLICY_SHA256 = "44464c51382d00c04ce788133a6abab6ef88877c0a84a32412ab045e1cabbecf"
-FINAL_PINNING_SHA256 = "d177ad9e168fe7a20a5b1e64fbfb7c30e210609179a3b6d918dcd1027996d3a2"
+FINAL_PINNING_SHA256 = "8b0460e4aa427584fbdefc6a19f2a98341178f9149be0c32e4af7ec7b118b84f"
 
 
 def digest(data):
