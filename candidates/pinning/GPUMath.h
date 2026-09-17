@@ -325,6 +325,11 @@ __device__ void _ModNeg256(uint64_t *r)
 
 __device__ void _ModAdd256(uint64_t *r, uint64_t *a, uint64_t *b)
 {
+    /* Same 5-limb add-then-conditionally-subtract-P as before, but the
+     * nonnegativity test is a mask rather than a data-dependent branch.
+     * _ModSub256 already uses the borrow word as a mask; a warp of mixed
+     * field adds no longer splits on rr[4] >= 0. Algebra: rr = a+b,
+     * orig = rr[0..3], rr -= P, r = (rr[4] as signed >= 0) ? rr : orig. */
     uint64_t rr[5];
 
     UADDO(rr[0], a[0], b[0]);
@@ -333,13 +338,13 @@ __device__ void _ModAdd256(uint64_t *r, uint64_t *a, uint64_t *b)
     UADDC(rr[3], a[3], b[3]);
     UADD(rr[4], 0UL, 0UL);
 
-    Load256(r, rr);
-
+    uint64_t o0 = rr[0], o1 = rr[1], o2 = rr[2], o3 = rr[3];
     SubP(rr);
-
-    if(_IsPositive(rr)) {
-        Load256(r, rr);
-    }
+    uint64_t ge = ~((uint64_t)((int64_t)rr[4] >> 63));
+    r[0] = (rr[0] & ge) | (o0 & ~ge);
+    r[1] = (rr[1] & ge) | (o1 & ~ge);
+    r[2] = (rr[2] & ge) | (o2 & ~ge);
+    r[3] = (rr[3] & ge) | (o3 & ~ge);
 }
 
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
