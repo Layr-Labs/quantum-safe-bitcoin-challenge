@@ -333,13 +333,20 @@ __device__ void _ModAdd256(uint64_t *r, uint64_t *a, uint64_t *b)
     UADDC(rr[3], a[3], b[3]);
     UADD(rr[4], 0UL, 0UL);
 
-    Load256(r, rr);
-
     SubP(rr);
-
-    if(_IsPositive(rr)) {
-        Load256(r, rr);
-    }
+    /* rr[4] is negative exactly when subtracting P underflowed.  Restore P
+     * under that all-ones mask instead of preserving the four original sum
+     * limbs and selecting between two 256-bit values.  This is the same
+     * add-back construction used by _ModSub256, remains alias-safe, and
+     * removes the data-dependent branch without extending four live ranges. */
+    uint64_t restore = (uint64_t)((int64_t)rr[4] >> 63);
+    uint64_t p0 = 0xFFFFFFFEFFFFFC2FULL & restore;
+    uint64_t p1 = 0xFFFFFFFFFFFFFFFFULL & restore;
+    UADDO1(rr[0], p0);
+    UADDC1(rr[1], p1);
+    UADDC1(rr[2], p1);
+    UADD1(rr[3], p1);
+    Load256(r, rr);
 }
 
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
