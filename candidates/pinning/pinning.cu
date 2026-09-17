@@ -97,7 +97,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_SPARSE_D 0        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
 #endif
 #ifndef QSB_SYM_FINISH
-#define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
+#define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): 6-plane SYM; F=2u(u-c)+xR, c=3xR^2/(2yR) */
 #endif
 #define QSB_STATE_PLANES (QSB_SYM_FINISH ? 6u : 8u)
 #ifndef QSB_PROBE_MASK
@@ -1352,17 +1352,19 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
-__device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2 (delta E) */
+__device__ __constant__ uint64_t pin_u2rc_words[4];   /* c = 3*xR^2/(2*yR) (sqfree F) */
 
 /* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
  * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
  * K=3*xR^2 is fixed for the entire problem. The shared x base is
- * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
- * coordinates are anchored at R. Returns their parities in bits 0,1.
- * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+ * F=2*u*(u-c)+xR with c=3*xR^2/(2*yR), identical to 2*u^2-K*t+xR
+ * (audit_sym_sqfree.py) and one square cheaper; H=2*u*v gives
+ * x_plus=F-H, x_minus=F+H. Both y coordinates are anchored at R.
+ * Returns their parities in bits 0,1. Only Y, ZZZ and W cross the
+ * kernel boundary (six planes). */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
-    uint64_t *xR, uint64_t *yR, uint64_t *K,
+    uint64_t *xR, uint64_t *yR, uint64_t *C,
     uint64_t *x_plus, uint64_t *x_minus
 ) {
     uint64_t h[4], u[4], v[4], f[4];
@@ -1371,17 +1373,11 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(u, yR, V);          /* u = yR*t */
     _ModMult(v, Y, h);           /* v = Y*h */
 
-    /* GPUMath's square drops a final carry for some near-p operands. For
-     * upper-half u, square the equivalent negative representative; keep u
-     * unchanged for H and y. */
-    qsb_field_normalize(u);
-    if(u[3] >> 63) _ModNeg256(h, u);
-    else Load256(h, u);
-    _ModSqr(f, h);
+    /* F = 2*u*(u-c)+xR. Avoids _ModSqr(u) and the near-p square workaround. */
+    _ModSub256(h, u, C);
+    _ModMult(f, u, h);
     _ModAdd256(f, f, f);
-    _ModMult(h, K, V);           /* h becomes K*t */
-    _ModSub256(f, h);
-    _ModAdd256(f, f, xR);        /* F = 2*u^2-K*t+xR */
+    _ModAdd256(f, f, xR);
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
@@ -1629,10 +1625,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                       pin_u2ry_words[2],pin_u2ry_words[3]};
     uint64_t q1x[4],q2x[4];
 #if QSB_SYM_FINISH
-    uint64_t u2rk[4]={pin_u2rk_words[0],pin_u2rk_words[1],
-                      pin_u2rk_words[2],pin_u2rk_words[3]};
+    uint64_t u2rc[4]={pin_u2rc_words[0],pin_u2rc_words[1],
+                      pin_u2rc_words[2],pin_u2rc_words[3]};
     uint32_t y_parities = qsb_xyzz_finish_symmetric(
-        qy,qzzz,prod,u2rx,u2ry,u2rk,
+        qy,qzzz,prod,u2rx,u2ry,u2rc,
         q1x,q2x);
 #else
     uint32_t y_parities = qsb_xyzz_finish_precomputed(
@@ -2244,25 +2240,29 @@ int main(int argc, char **argv) {
         uint8_t be[32];
         for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
         for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
-        {   /* K=3*xR^2 is invariant across all candidates in this problem (delta E). */
-            BIGNUM *field=BN_new(),*bk=BN_new();
-            if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
-               !BN_mod_sqr(bk,bx,field,ctx) || !BN_mul_word(bk,3) ||
-               !BN_nnmod(bk,bk,field,ctx)) {
-                fprintf(stderr,"Failed to precompute recovery K\n");
+        {   /* c=3*xR^2/(2*yR) is invariant across all candidates (SYM sqfree F). */
+            BIGNUM *field=BN_new(),*bc=BN_new(),*b2y=BN_new();
+            if(!field || !bc || !b2y ||
+               !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
+               !BN_mod_sqr(bc,bx,field,ctx) || !BN_mul_word(bc,3) ||
+               !BN_nnmod(bc,bc,field,ctx) ||
+               !BN_mod_add(b2y,by,by,field,ctx) ||
+               BN_mod_inverse(b2y,b2y,field,ctx)==NULL ||
+               !BN_mod_mul(bc,bc,b2y,field,ctx)) {
+                fprintf(stderr,"Failed to precompute recovery c\n");
                 return 1;
             }
-            uint8_t kb[32]={0};
-            BN_bn2bin(bk,kb+(32-BN_num_bytes(bk)));
-            uint64_t kw[4]={0,0,0,0};
+            uint8_t cb[32]={0};
+            BN_bn2bin(bc,cb+(32-BN_num_bytes(bc)));
+            uint64_t cw[4]={0,0,0,0};
             for(int i=0;i<4;i++)for(int b=0;b<8;b++)
-                kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
-            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
+                cw[i]|=(uint64_t)cb[31-i*8-b]<<(b*8);
+            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rc_words,cw,sizeof(cw));
             if(kerr!=cudaSuccess){
-                fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
+                fprintf(stderr,"Failed to upload recovery c: %s\n",cudaGetErrorString(kerr));
                 return 1;
             }
-            BN_free(field); BN_free(bk);
+            BN_free(field); BN_free(bc); BN_free(b2y);
         }
         EC_POINT *pt=EC_POINT_new(grp);
         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);

@@ -1752,3 +1752,32 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Official frontier `d93b4cd` / 677,121,678; `db5767e` cancelled
+
+Live record is `0xCramJam` `d93b4cd`, commit `f0f4256`: 128-thread trees,
+QSB_LAZY mixed-add, xlib `QSB_SYM_FINISH` 6-plane recovery. Official RTX 4090
+**677,121,678**. +1% bar = **683,892,895**. Local HEAD is that crown.
+
+`db5767e` odinfree (squaring-free finish on the old 8-plane `240f329` tree)
+is **cancelled with no 4090 score**. Do not resubmit that archive: it does
+not start from this crown, and its rented-4090 ~+1.8% vs 667.6M projects
+to ~679–681M, below 683.9M. `0227bc3` (Saviour1001) scored **679,373,443**
+and was rejected (+0.33% vs live). No odinfree job is validating or queued.
+Do not `yukon cancel`. Do not submit without a 4090-quality stack that can
+clear 683.9M.
+
+## SYM sqfree F (prep, not a submit)
+
+Crown SYM still squared `u` for `F=2*u^2-K*t+xR` (`K=3*xR^2`) plus a
+normalize/neg workaround for GPUMath's near-p square hole. The subset
+on-curve identity uses `c=3*xR^2/(2*yR)` and `F=2*u*(u-c)+xR`. Because
+`2*u*c=K*t`, the two F formulas match; 6-plane Y/ZZZ/W is unchanged.
+This is not `db5767e`'s 8-plane `W=ZZZ*d` port and not `QSB_FINAL_TEMPLATE`
+(already −0.9% on this lineage).
+
+Production `qsb_xyzz_finish_symmetric` now uses the identity. Host uploads
+`pin_u2rc_words` only. `audit_sym_sqfree.py`: source shape plus 12,518
+exact affine matches (6 singular `xP=xR` skipped). No 4090 A/B yet; a
+single remaining square is unlikely to clear +1% vs 677.1M, so this stays
+prep. No 5090 knob rematch.
