@@ -2180,6 +2180,12 @@ int main(int argc, char **argv) {
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
+#ifndef QSB_SLOTS
+#define QSB_SLOTS 2
+#endif
+    epoch_desc_t *d_epochs_slot[QSB_SLOTS];
+    cudaStream_t se_stream[QSB_SLOTS];
+    cudaEvent_t se_done[QSB_SLOTS];
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2208,8 +2214,12 @@ int main(int argc, char **argv) {
         }
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
-        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
-        if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
+        for (int qs = 0; qs < QSB_SLOTS; qs++) {
+            cudaMalloc(&d_epochs_slot[qs], (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
+            if (!d_epochs_slot[qs]) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
+            cudaStreamCreateWithFlags(&se_stream[qs], cudaStreamNonBlocking);
+            cudaEventCreateWithFlags(&se_done[qs], cudaEventDisableTiming);
+        }
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -2440,73 +2450,33 @@ int main(int argc, char **argv) {
 #if ZLAB_HITPATH
         /* One device buffer: [u32 count][record 0 ...], record p = u32 tag at
          * 4+16p and 9 combo bytes at 8+16p. */
-        uint8_t *d_hitbuf = NULL;
-        cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC);
-        if (!d_hitbuf) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
-        uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
-        uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
-        uint8_t *zh_combos = d_hitbuf + 8;
+        uint8_t *d_hitbuf_slot[QSB_SLOTS];
+        for (int qs = 0; qs < QSB_SLOTS; qs++) {
+            cudaMalloc(&d_hitbuf_slot[qs], 4 + (size_t)1024 * ZLAB_HIT_REC);
+            if (!d_hitbuf_slot[qs]) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
+        }
+        uint8_t *zh_host_pinned;
+        cudaHostAlloc((void**)&zh_host_pinned, (size_t)QSB_SLOTS * (4 + 64 * ZLAB_HIT_REC), cudaHostAllocDefault);
         mkdir("results", 0755);
         char zh_fname[256];
         if (calibrate) snprintf(zh_fname, sizeof(zh_fname), "results/digest_calibrate_%d.txt", gpu_index);
         else snprintf(zh_fname, sizeof(zh_fname), "results/digest_hit_%d.txt", gpu_index);
         int zh_fd = open(zh_fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
-        uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
-        while (1) {
-            uint64_t epochs_left = n_epochs - epoch_base;
-            int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
-                       ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
-            int batch_pos = nblk * QSB_SE_PER_EPOCH;
-            uint32_t h_hit = 0;
-#if ZLAB_HITPATH
-            kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
-                epoch_base, n_epochs, window_start, s_early,
-                d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs, zh_cnt);
-#else
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
-                epoch_base, n_epochs, window_start, s_early,
-                d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs);
-#endif
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, 0,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-#if ZLAB_HITPATH
-                zh_cnt, zh_idx,
-                zh_combos, d_hit_sighash,
-#else
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-#endif
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
+        uint64_t slot_epoch_base[QSB_SLOTS], slot_batch_pos[QSB_SLOTS];
+        int slot_busy[QSB_SLOTS] = {0};
+        uint64_t se_batch_no = 0;
+        auto se_drain = [&](int qs) -> int {
+            if (!slot_busy[qs]) return 0;
+            cudaEventSynchronize(se_done[qs]);
+            slot_busy[qs] = 0;
             cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += batch_pos;
-            g_total_searched = total_searched;
-            epoch_base += nblk;
-#if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
-            memcpy(&h_hit, zh_host, 4);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); exit(1); }
+            uint8_t *zh_host = zh_host_pinned + (size_t)qs * (4 + 64 * ZLAB_HIT_REC);
+            uint32_t h_hit; memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
-                if (nh > ZLAB_HIT_FIRST)
-                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               d_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
-                /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
                 int wl = 0;
                 for (int h = 0; h < nh; h++) {
@@ -2519,61 +2489,60 @@ int main(int argc, char **argv) {
                 const char *wp = wb;
                 while (wl > 0) {
                     ssize_t k = write(zh_fd, wp, (size_t)wl);
-                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); exit(1); }
                     wp += k; wl -= (int)k;
                 }
                 hit_counter += (uint64_t)nh;
                 g_hit_counter = hit_counter;
             }
-            if (0) {
-#else
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-#endif
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                printf("\n  *** DIGEST HIT! ***\n");
-                mkdir("results", 0755);
-                char fname[256];
-                if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
-                else snprintf(fname, sizeof(fname), "results/digest_hit_%d.txt", gpu_index);
-                FILE *ff = fopen(fname, "a");
-                if (ff) {
-                    uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        int combo_idx = raw & 0x3FFFFFFF;
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        uint8_t *combo = all_combos + h * MAX_T;
-                        fprintf(ff, "indices=");
-                        printf("  indices=");
-                        for (int j = 0; j < t_sel; j++) {
-                            fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
-                        }
-                        /* The bridge reads `indices=` and `recid=`; the
-                         * diagnostic fields the kernel used to carry are gone. */
-                        fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d\n", hc, ri);
-                        hit_counter++;
-                        g_hit_counter = hit_counter;
-                        if (summary_f) {
-                            time_t now_epoch = time(NULL);
-                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
-                            for (int j = 0; j < t_sel; j++)
-                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
-                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
-                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
-                            fflush(summary_f);
-                            /* Preserve visibility without a disk barrier per hit. */
-                        }
-                    }
-                    fclose(ff);
-                }
+            return (int)slot_batch_pos[qs];
+        };
+        while (1) {
+            uint64_t epochs_left = n_epochs - epoch_base;
+            int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
+                       ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
+            int batch_pos = nblk * QSB_SE_PER_EPOCH;
+            int qs = (int)(se_batch_no % QSB_SLOTS);
+            se_batch_no++;
+            total_searched += se_drain(qs);
+            g_total_searched = total_searched;
+            cudaStream_t st = se_stream[qs];
+            epoch_desc_t *d_ep = d_epochs_slot[qs];
+            uint8_t *d_hb = d_hitbuf_slot[qs];
+            uint32_t *zh_cnt = (uint32_t *)d_hb;
+            uint32_t *zh_idx = (uint32_t *)(d_hb + 4);
+            uint8_t *zh_combos = d_hb + 8;
+            cudaMemsetAsync(zh_cnt, 0, 4, st);
+            kernel_build_epochs<<<(nblk + 255) / 256, 256, 0, st>>>(
+                epoch_base, n_epochs, window_start, s_early,
+                d_mid, d_prem, (int)dp.prefix_remainder_len,
+                d_dsigs, d_ep, zh_cnt);
+            kernel_digest<<<nblk, QSB_SE_PER_EPOCH, 0, st>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_ep);
+            {
+                uint8_t *zh_host_out = zh_host_pinned + (size_t)qs * (4 + 64 * ZLAB_HIT_REC);
+                cudaMemcpyAsync(zh_host_out, d_hb, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost, st);
+                cudaMemcpyAsync(zh_host_out + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                                 d_hb + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                                 (size_t)(64 - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost, st);
             }
+            cudaEventRecord(se_done[qs], st);
+            slot_busy[qs] = 1;
+            slot_epoch_base[qs] = epoch_base;
+            slot_batch_pos[qs] = batch_pos;
+            epoch_base += nblk;
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
@@ -2600,6 +2569,8 @@ int main(int argc, char **argv) {
             }
             if (epoch_base >= n_epochs) break;
         }
+        for (int qs = 0; qs < QSB_SLOTS; qs++) total_searched += se_drain(qs);
+        g_total_searched = total_searched;
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
