@@ -72,11 +72,17 @@ def nested_inverse(values):
         saved.append((leaves, internal))
         roots.append(root)
 
-    super_leaves = roots + [1] * (WIDTH - groups)
-    super_leaves, super_internal, super_root = tree_up(super_leaves)
-    assert normalize(super_root) != 0
-    super_inverse = pow(normalize(super_root), P - 2, P)
-    root_inverses = tree_down(super_leaves, super_internal, super_inverse)
+    root_inverses = []
+    for start in range(0, groups, WIDTH):
+        chunk = roots[start:start + WIDTH]
+        n = len(chunk)
+        super_leaves = chunk + [1] * (WIDTH - n)
+        super_leaves, super_internal, super_root = tree_up(super_leaves)
+        assert normalize(super_root) != 0
+        super_inverse = pow(normalize(super_root), P - 2, P)
+        root_inverses.extend(
+            tree_down(super_leaves, super_internal, super_inverse)[:n]
+        )
 
     output = []
     for group, (leaves, internal) in enumerate(saved):
@@ -98,7 +104,7 @@ def main():
     audit_source()
     rng = random.Random(0x524157524F4F5453)
     edge = [1, 2, P - 2, P - 1, P + 1, P + 2, M - 2, M - 1]
-    for count in (1, 2, 255, 256, 257, 511, 512, 513, 12055, 65536):
+    for count in (1, 2, 255, 256, 257, 511, 512, 513, 12055, 65536, 131072):
         values = []
         for i in range(count):
             value = edge[i % len(edge)] if i < 2 * len(edge) else rng.randrange(1, M)
