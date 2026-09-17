@@ -52,6 +52,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
+#include "dual_sha.cuh"
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -1089,56 +1090,29 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
 
-    int v=0, hash_choice=0, recid=0;
-    for(int ri=0;ri<2&&!v;ri++){
-        uint64_t sx0=ri ? q2x[0] : q1x[0];
-        uint64_t sx1=ri ? q2x[1] : q1x[1];
-        uint64_t sx2=ri ? q2x[2] : q1x[2];
-        uint64_t sx3=ri ? q2x[3] : q1x[3];
-        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
-                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-        uint32_t pb[16];
-        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
-        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
-        /* Ranked gate reads the state words. Only the easy/calibrate
-         * diagnostics need the digest as bytes, so only they build it. */
-        int vv;
-        if (calibrate_flag || easy_flag) {
-            uint8_t h[32];
-            for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
-                h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-            vv = calibrate_flag ? gpu_is_der_relaxed(h,32) : gpu_is_der_easy(h,32);
-        } else {
-            vv = gpu_bench_valid_words(hs);
-        }
-        if(vv){ v=1;hash_choice=0;recid=ri; break; }
-        /* Config A hashes once, so everything below is dead work on every
-         * candidate. Leave BEFORE building the 64-byte padded block, not
-         * after it: the memset/memcpy used to run unconditionally. */
-        if (single_hash_flag) continue;
-        uint8_t h[32];
-        for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
-            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
-        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
-            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
-        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
-        if (calibrate_flag || easy_flag) {
-            uint8_t h2[32];
-            for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
-                h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
-            vv = calibrate_flag ? gpu_is_der_relaxed(h2,32) : gpu_is_der_easy(h2,32);
-        } else {
-            vv = gpu_bench_valid_words(h2s);
-        }
-        if(vv){ v=1;hash_choice=1;recid=ri; break; }
+    /* Both recovery IDs are mandatory in the ranked contract. Interleave their
+     * independent compressed-key transforms so the scheduler can hide the long
+     * dependent SHA chains without increasing the number of rounds. */
+    uint32_t *x0=(uint32_t*)q1x,*x1=(uint32_t*)q2x;
+    uint32_t w0[16],w1[16];
+    w0[0]=__byte_perm(x0[7],0x2+(uint8_t)(y_parities&1u),0x4321);
+    w1[0]=__byte_perm(x1[7],0x2+(uint8_t)((y_parities>>1)&1u),0x4321);
+    #pragma unroll
+    for(int j=1;j<8;j++){
+        w0[j]=__byte_perm(x0[8-j],x0[7-j],0x0765);
+        w1[j]=__byte_perm(x1[8-j],x1[7-j],0x0765);
     }
+    w0[8]=__byte_perm(x0[0],0x80,0x0456);
+    w1[8]=__byte_perm(x1[0],0x80,0x0456);
+    #pragma unroll
+    for(int j=9;j<15;j++){w0[j]=0;w1[j]=0;}
+    w0[15]=0x108;w1[15]=0x108;
+    uint32_t hs0[8],hs1[8];
+    _SHA256Initialize(hs0);_SHA256Initialize(hs1);
+    qsb_sha256_dual_recid(hs0,hs1,w0,w1);
+    int v=0,hash_choice=0,recid=0;
+    if(gpu_bench_valid_words(hs0)){v=1;recid=0;}
+    else if(gpu_bench_valid_words(hs1)){v=1;recid=1;}
 
     /* The bridge parses only `indices=` and `recid=` out of the hit file
      * (harness/gpu_wrap.py), so the kernel no longer carries the diagnostic
@@ -1916,17 +1890,9 @@ int main(int argc, char **argv) {
                     cnt++;
                 }
         if(cnt!=QSB_SE_PER_EPOCH)return 1;
-        /* Keep the same 256 candidates, but group lanes whose second message
-         * block is identical so warp loads from QSB_WINDOW_SECOND coalesce. */
-        for(int i=1;i<QSB_SE_PER_EPOCH;i++){
-            uint8_t w[3];memcpy(w,h_win3[i],3);
-            uint32_t second=qsb_window_second_key(w),first=qsb_window_first_key(w);int j=i;
-            while(j>0 && (qsb_window_second_key(h_win3[j-1])>second ||
-                  (qsb_window_second_key(h_win3[j-1])==second && qsb_window_first_key(h_win3[j-1])>first))){
-                memcpy(h_win3[j],h_win3[j-1],3);j--;
-            }
-            memcpy(h_win3[j],w,3);
-        }
+        /* Keep all 256 candidates, and pack whole second-block schedule
+         * classes into warps so no class is fetched by two warps. */
+        if(qsb_pack_second_classes(h_win3))return 1;
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
@@ -2141,7 +2107,8 @@ int main(int argc, char **argv) {
                        ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaError_t err = cudaMemset(d_hit_cnt, 0, sizeof(h_hit));
+            if(err!=cudaSuccess){fprintf(stderr,"Hit reset failed: %s\n",cudaGetErrorString(err));return 1;}
             kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
@@ -2160,13 +2127,15 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
+            /* The blocking count copy below is the completion boundary; an
+             * extra device-wide synchronization only adds a host round trip. */
+            err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             epoch_base += nblk;
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            err = cudaMemcpy(&h_hit,d_hit_cnt,sizeof(h_hit),cudaMemcpyDeviceToHost);
+            if(err!=cudaSuccess){fprintf(stderr,"Hit read failed: %s\n",cudaGetErrorString(err));return 1;}
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
