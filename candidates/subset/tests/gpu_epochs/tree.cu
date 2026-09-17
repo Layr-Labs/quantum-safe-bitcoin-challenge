@@ -2241,6 +2241,21 @@ int main(int argc, char **argv) {
     }
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    /* Keep the fixed-base table resident across launches when L2 supports it. */
+    int max_persist=0, max_window=0;
+    cudaDeviceGetAttribute(&max_persist,cudaDevAttrMaxPersistingL2CacheSize,gpu_index);
+    cudaDeviceGetAttribute(&max_window,cudaDevAttrMaxAccessPolicyWindowSize,gpu_index);
+    size_t persist=gt_sz<(size_t)max_persist?gt_sz:(size_t)max_persist;
+    if(persist && max_window>0){
+        cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize,persist);
+        cudaStreamAttrValue av={};
+        av.accessPolicyWindow.base_ptr=d_gt;
+        av.accessPolicyWindow.num_bytes=persist<(size_t)max_window?persist:(size_t)max_window;
+        av.accessPolicyWindow.hitRatio=1.0f;
+        av.accessPolicyWindow.hitProp=cudaAccessPropertyPersisting;
+        av.accessPolicyWindow.missProp=cudaAccessPropertyStreaming;
+        cudaStreamSetAttribute(0,cudaStreamAttributeAccessPolicyWindow,&av);
+    }
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
