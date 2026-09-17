@@ -108,8 +108,15 @@ int main(){
         audit_inverses<<<(ni+threads-1)/threads,threads>>>(di,dr,ni);CHECK(cudaDeviceSynchronize());
         CHECK(cudaMemcpy(results.data(),dr,ni*5*8,cudaMemcpyDeviceToHost));
         int bad=0;
-        for(int i=0;i<ni;i++)if(memcmp(results.data()+5*i,expected.data()+5*i,40))bad++;
-        printf("Block inverse (%d threads, partial tail): %d/%d exact matches\n",threads,ni-bad,ni);
+        int noncanon=0;
+        for(int i=0;i<ni;i++)if(memcmp(results.data()+5*i,expected.data()+5*i,40)){
+            /* ZLAB_TREE>=1 returns exact residues below 2^256: accept r == expected + p. */
+            BN_lebin2bn((unsigned char*)(results.data()+5*i),32,a);
+            BN_lebin2bn((unsigned char*)(expected.data()+5*i),32,b);
+            BN_add(r,b,p);
+            if(results[5*i+4]==0 && BN_cmp(a,r)==0) noncanon++; else bad++;
+        }
+        printf("Block inverse (%d threads, partial tail): %d/%d exact, %d congruent non-canonical, %d wrong\n",threads,ni-bad-noncanon,ni,noncanon,bad);
         failures+=bad;
     }
     cudaFree(di);cudaFree(dr);
