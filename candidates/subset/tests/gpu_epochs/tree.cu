@@ -433,6 +433,28 @@ __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigne
     uint64_t hi = li == 0 ? m[1] : li == 1 ? m[2] : li == 2 ? m[3] : 0ULL;
     return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
 }
+/* Same field, but with the limb pair carried by the caller. `pos` advances by a fixed
+ * width per chunk and is a loop-index function, not data, so the limb index changes on a
+ * uniform branch every ~3.7 chunks instead of costing a four-way select every chunk. */
+__device__ __forceinline__ uint32_t gt_field_bits_p(uint64_t lo, uint64_t hi, unsigned sh) {
+    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
+}
+__device__ __forceinline__ void gt_window_advance(const uint64_t m[4], unsigned pos,
+                                                  unsigned *li, uint64_t *lo, uint64_t *hi) {
+    const unsigned nli = pos >> 6;
+    if (nli != *li) {                       /* uniform across the warp: pos is loop state */
+        *li = nli; *lo = *hi;
+        *hi = nli == 0 ? m[1] : nli == 1 ? m[2] : nli == 2 ? m[3] : 0ULL;
+    }
+}
+__device__ __forceinline__ void gt_direct_digit_p(uint64_t lo, uint64_t hi, unsigned sh,
+                                                  uint64_t sflag, unsigned w, bool last,
+                                                  uint32_t *idx, uint64_t *neg) {
+    uint32_t f = gt_field_bits_p(lo, hi, sh) & ((1u << w) - 1u);
+    uint32_t t = f >> (w - 1);
+    *idx = last ? (f & ((1u << (w - 1)) - 1u)) : ((f ^ (t - 1u)) & ((1u << (w - 1)) - 1u));
+    *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
+}
 /* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
 __host__ __device__ __forceinline__ unsigned gt_width(int c) {
     return c == GT_CHUNKS-1 ? (unsigned)(gt_shift(c) - gt_shift(c-1))
@@ -509,10 +531,14 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
+    unsigned wli=pos>>6;
+    uint64_t wlo=wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
+    uint64_t whi=wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c++){
-        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
         pos+=gt_width(2);
+        gt_window_advance(M,pos,&wli,&wlo,&whi);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
@@ -689,9 +715,9 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_PER_EPOCH 256
 /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 65536   /* 16.8M candidates per launch (measured +0.3%) */
+#define ZLAB_LAUNCH_BLOCKS 131072  /* 33.6M candidates per launch */
 #endif
-#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
+#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 33.6M candidates/launch */
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -779,10 +805,17 @@ __global__ void kernel_build_epochs(
             cur_pos = 0;
         }
     }
-    int sel = 0;
-    for (int i = 0; i < window_start; i++) {
-        if (sel < s_early && (int)early[sel] == i) { sel++; continue; }
-        const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
+    /* Iterate over OUTPUT pushes, not source indices. Every epoch keeps exactly
+     * window_start - s_early pushes, so with this loop shape the 64-byte boundary
+     * (and therefore every _SHA256Transform) falls at the same iteration in every
+     * lane; the source-push loop fired the transform at a lane-dependent iteration,
+     * which made the whole producer warp-divergent. Same byte stream, same
+     * midstates, bit for bit -- only the schedule changes. */
+    const int kept = window_start - s_early;
+    for (int j = 0; j < kept; j++) {
+        int src = j;
+        for (int k = 0; k < s_early; k++) src += ((int)early[k] <= src) ? 1 : 0;
+        const uint8_t *row = d_dummy_sigs + (size_t)src * SIG_PUSH_SIZE;
         for (int b = 0; b < SIG_PUSH_SIZE; b++) {
             cur[cur_pos++] = row[b];
             if (cur_pos == 64) {
@@ -800,6 +833,34 @@ __global__ void kernel_build_epochs(
     d->remW[0] = bswap32(curW[0]);
     d->remW[1] = bswap32(curW[1]);
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
+}
+
+/* Short-epoch producer stage 2 (sub_prod2): one block per epoch, one thread
+ * per distinct first-block message class (QSB_FIRST_COUNT, live value 54).
+ * Runs between kernel_build_epochs and kernel_digest on the same stream, so
+ * every state is visible to the consumer without any extra synchronisation.
+ *
+ * This is the SAME total arithmetic the digest block used to do in its leader
+ * lanes (one SHA-256 compression per class per epoch); it is moved out so the
+ * digest block no longer has 202 of 256 lanes idling at a __syncthreads().
+ *
+ * d_first is class-major: epoch e, class c, word j lives at
+ *   d_first[(size_t)e*first_stride + c*8 + j],  first_stride = 8*first_count.
+ * Both the store here and the consumer load are 16-byte aligned by
+ * construction (every record starts on a 32-byte boundary). */
+__global__ void kernel_build_first(
+    uint64_t epoch_base, uint64_t n_epochs, int first_count,
+    const epoch_desc_t * __restrict__ d_epochs,
+    uint32_t * __restrict__ d_first)
+{
+    const int cls = threadIdx.x;
+    if (cls >= first_count) return;              /* blockDim.x == first_count */
+    const uint64_t e = epoch_base + (uint64_t)blockIdx.x;
+    if (e >= n_epochs) return;                   /* matches kernel_build_epochs */
+    uint32_t out[8];
+    qsb_first_state_class(d_epochs + blockIdx.x, cls, out);
+    qsb_store_first_state(d_first + (size_t)blockIdx.x * (first_count * 8)
+                                  + (size_t)cls * 8, out);
 }
 
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
@@ -1136,7 +1197,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int window_start, uint64_t enum_base,
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
     int fast_inc, const uint32_t * __restrict__ d_const_words,
-    const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
+    const epoch_desc_t * __restrict__ d_epochs,  /* short-epoch mode: one per block, else NULL */
+    const uint32_t * __restrict__ d_first,       /* short-epoch mode: kernel_build_first output */
+    int first_stride                             /* 8 * QSB_FIRST_COUNT words per epoch */
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
@@ -1158,8 +1221,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if ZLAB_TRIM
     const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
     uint32_t state[8];
-    for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+    qsb_scheduled_window_hash(state, d_first + (size_t)blockIdx.x * first_stride,
+                              threadIdx.x);
 #else
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
@@ -1193,7 +1256,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
 
   if (fast_inc == QSB_SE_N_INC) {
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+    qsb_scheduled_window_hash(state, d_first + (size_t)blockIdx.x * first_stride,
+                              threadIdx.x);
   } else if (fast_inc == QSB_FAST_N_INC) {
     // Cached states are rebuilt from this batch's midstate and public input.
     // Legacy combo launches and unsupported shapes retain the full emitter.
@@ -2180,6 +2244,8 @@ int main(int argc, char **argv) {
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
+    uint32_t *d_first = NULL;      /* kernel_build_first output, one record per epoch */
+    int qsb_first_stride = 0;      /* 8 * QSB_FIRST_COUNT words */
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2210,6 +2276,12 @@ int main(int argc, char **argv) {
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
+        /* Producer-stage buffer: 8 words per first-block class per epoch.
+         * 131072 epochs x 54 classes x 32 B = 216 MiB. */
+        if (qsb_first_class_count <= 0) { fprintf(stderr, "ERROR: no first classes\n"); return 1; }
+        qsb_first_stride = qsb_first_class_count * 8;
+        cudaMalloc(&d_first, (size_t)QSB_SE_LAUNCH_BLOCKS * qsb_first_stride * sizeof(uint32_t));
+        if (!d_first) { fprintf(stderr, "OOM: first-block state buffer\n"); return 1; }
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -2472,6 +2544,8 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
+            kernel_build_first<<<nblk, qsb_first_class_count>>>(
+                epoch_base, n_epochs, qsb_first_class_count, d_epochs, d_first);
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -2490,7 +2564,8 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,
+                d_first, qsb_first_stride);
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -2666,7 +2741,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
-                t_win, s_early, d_early, fast_inc, d_const_words, NULL);
+                t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, 0);
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -2866,7 +2941,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
-                t_sel, 0, d_early, 0, d_const_words, NULL);
+                t_sel, 0, d_early, 0, d_const_words, NULL, NULL, 0);
             cudaDeviceSynchronize();
 
             cudaError_t err = cudaGetLastError();
