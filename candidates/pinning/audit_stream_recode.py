@@ -137,6 +137,16 @@ def audit_table() -> None:
         table_base += 1 << 16
     assert table_base == TOTAL
 
+    # Production carries the arithmetic sign mask directly into branchless
+    # table-Y negation. Check the complete signed digit domain against abs/sign.
+    for ec in range(-(1 << 17) + 1, 1 << 17, 2):
+        mask = -1 if ec < 0 else 0
+        ae = (((ec & 0xFFFFFFFF) ^ (mask & 0xFFFFFFFF))
+              - (mask & 0xFFFFFFFF)) & 0xFFFFFFFF
+        assert ae == abs(ec)
+        assert ((ae - 1) >> 1) == ((abs(ec) - 1) >> 1)
+        assert (mask & ((1 << 64) - 1)) == (0xFFFFFFFFFFFFFFFF if ec < 0 else 0)
+
 
 def audit_source() -> None:
     source = Path(__file__).resolve().with_name("pinning.cu").read_text()
@@ -145,8 +155,8 @@ def audit_source() -> None:
         "#define GT_TOTAL_ENTRIES (1u << 20)",
         "int32_t ec=gt_mixed_step<18>(M,sign);",
         "ec=gt_mixed_step<17>(M,sign);",
-        "for (int c=2;c<GT_CHUNKS;c++)",
-        "ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];",
+        "for (int c=2;c<GT_CHUNKS-1;c++)",
+        "ec=sign*(int32_t)M[0];",
         "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);",
         "return c == 0 ? 0 : 17*c+1;",
         "return c == 0 ? 0u : (unsigned)(c+1) << 16;",
