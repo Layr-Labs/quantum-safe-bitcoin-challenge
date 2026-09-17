@@ -1752,3 +1752,217 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Measured stage profile (RunPod RTX 4090, 2026-09-17)
+
+### Why this measurement exists
+
+Nsight Compute cannot run on this pod (`ERR_NVGPUCTRPERM`). Nsight Systems
+is not installed. The previous research log therefore had compiler/SASS
+guesses and short A/B rates, but **no kernel-resolved time** for the current
+five-launch pipeline. This section is the first hardware-timed breakdown of
+the synced frontier kernel.
+
+### Checkout and method
+
+- Yukon `sync` to source `d277241`, editable paths from promoted submission
+  `6ce23203` / commit `4d39b5f`, official score **644,546,620**.
+- Host: RunPod PyTorch 2.4 image, **RTX 4090 24 GB**, driver 570.169,
+  `nvcc` 12.4.131, 450 W limit, 128 SMs.
+- Device kernels were not changed. A host-only CUDA-event timer
+  (`QSB_STAGE_TIMING=1`) records one event on the default stream before and
+  after each of the five launches in `launch_pinning_pipeline`. Ranked SASS
+  is identical when the env var is unset.
+- Binary: `nvcc -O3 -DQSB_ZEROS_N=24` (the harness line). That emits
+  **sm_52 cubin + PTX**; the driver JITs to Ada. Resource numbers below are
+  ptxas `sm_52`. Instruction mix is Maxwell SASS (`XMAD`), a proxy for the
+  JIT'd Ada code, not a cycle-accurate Ada disassembly.
+- Problem: existing ranked-style instance
+  `benchmark-results/problem/pinning.bin`, `single_hash`, N=24.
+- One full locktime sweep of `seq=0x80000000` produced **75 batches**
+  (74×16,777,216 plus a short tail). Statistics below drop batch 1 and the
+  partial last batch: **73 full batches**.
+
+A previous 1,200 s harness run of the same architecture on this GPU (before
+sync, seed `293663825`) independently verified **93,289 / 93,289** hits at
+**651,276,147** verified candidates/s. That is a scored number. This section
+is a stage breakdown, not a replacement score.
+
+### End-to-end context
+
+| Item | Value |
+|---|---|
+| G-table build (cold, includes builder JIT) | **2.11 s**, 1,048,576 points, 64 MiB, spot check passed |
+| Pipeline buffers | 2048 MiB state + 512 MiB tree + 2 MiB roots + 2.01 MiB root tree |
+| SHA path | per-sequence host midstate + one static 11-byte tail block |
+| One-sequence wall | 1.2446e9 candidates in 1.845 s → printed **674.7 M/s** |
+| Host wall vs GPU event sum (75 batches) | 1840.588 ms vs 1840.087 ms |
+| Hit-count D2H | 0.009 ms/batch |
+
+Host launch/sync overhead is about **7 µs/batch**. It is not the score.
+Table construction is 2.11 s once per process; it matters for 15 s A/Bs and
+is <0.2% of a 1,200 s ranked window.
+
+### Stage times, 73 full 16,777,216-candidate batches
+
+| Stage | kernel | mean | median | min | max | % of GPU |
+|---|---|---:|---:|---:|---:|---:|
+| prepare | `kernel_pinning_pipeline<true,0>` | **20.537 ms** | 20.340 | 19.950 | 21.390 | **82.75%** |
+| group_prep | `qsb_root_group_prepare` | 0.010 ms | 0.010 | 0.010 | 0.010 | 0.04% |
+| invert | `qsb_invert_super_roots` | 0.028 ms | 0.030 | 0.020 | 0.030 | 0.11% |
+| group_fin | `qsb_root_group_finish` | 0.010 ms | 0.010 | 0.010 | 0.010 | 0.04% |
+| finish | `kernel_pinning_pipeline<true,2>` | **4.232 ms** | 4.190 | 4.110 | 4.390 | **17.05%** |
+| GPU sum | five launches | **24.817 ms** | | | | 100% |
+
+Implied rates for a 16,777,216-candidate batch:
+
+| If this were the only cost | Rate |
+|---|---:|
+| Measured GPU-only (all five) | **676.0 M/s** |
+| Prepare only (hard cap if finish+tree vanished) | **816.9 M/s** |
+| Finish only | 3964 M/s |
+| Inverse hierarchy (three kernels) | ~350,000 M/s |
+
+The hierarchical product-tree inverse — the large architectural bet in this
+source — is **0.19% of GPU time**. It is finished. Further inverse-tree
+work cannot move the ranked number.
+
+Prepare is **4.85×** finish. A 10% prepare cut is a **8.3%** end-to-end
+cut. A 10% finish cut is a **1.7%** end-to-end cut, which is near the 1%
+promotion line and easy to lose in runner noise.
+
+### What prepare actually does per candidate
+
+From `kernel_pinning_pipeline<FAST_TAIL,0>`:
+
+1. Two SHA-256 compressions: one 11-byte locktime tail on the hoisted
+   midstate, then SHA-256 of that 32-byte digest → `z`.
+2. Joye–Tunstall recode of `z` into 15 signed odd digits (18+14×17).
+3. Fixed-base XYZZ sum against the 64 MiB `A = (-r^{-1})G` table,
+   deferred-y form, **95 field muls + 28 squares** in the source comment.
+4. Shared-denominator recovery prepare (`C = ZZ·d²`, `W = ZZ²·d`).
+5. Eight 16-byte SoA stores (128 bytes) into the 2 GiB checkpoint.
+6. 256-lane product-tree checkpoint into `roots`/`tree`.
+
+### What finish does per candidate
+
+Reload 128 bytes, expand the block inverse from the tree, form both
+`P±u2R` x-coordinates and y-parities, SHA-256 each 33-byte compressed
+pubkey, test 24 leading zeros, optionally emit a hit. The first-hit
+`return` only fires on a 2^{-24} event.
+
+### Occupancy and compiler resources (ptxas sm_52)
+
+AD102: 128 SMs, 1536 threads/SM, 65536 regs/SM, ~100 KiB shared.
+
+| Kernel | regs | stack | spill | smem | launch_bounds | resident CTAs | thread occ. |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| fast prepare | 107 | 0 | 0 | 16 KiB | 2 | 2 (reg-bound: 107×256×2=54784) | **33%** (512/1536) |
+| fast finish | 80 | 16 B | 12 B | 24 KiB | 3 | 3 (reg-bound: 80×256×3=61440) | **50%** (768/1536) |
+| fallback prepare | 107 | 192 B | 0 | 16 KiB | 2 | 2 | 33% |
+| fallback finish | 80 | 16 B | 12 B | 24 KiB | 3 | 3 | 50% |
+| group prepare | 56 | 0 | 0 | 16 KiB | 2 | n/a (tiny grid) | |
+| invert super-roots | 115 | 120 B | 0 | 24 KiB | 1 | 1 block total | |
+| group finish | 56 | 0 | 0 | 24 KiB | 2 | n/a | |
+| build gtable | 122 | 120 B | 0 | 0 | — | startup only | |
+
+Prepare is **register-bound at 2 CTAs/SM**. `__launch_bounds__(256,3)` on
+prepare was previously rejected for spills. That rejection now has a
+measured cost: 33% occupancy on the 83% kernel.
+
+Finish already has a 12-byte local spill. Unrolling the two-pubkey loop
+was previously rejected because it grew the finish from ~3.1k to 4.4k
+slots. Finish is only 17%; do not spend the next experiment there unless
+a change is also tiny and risk-free.
+
+### sm_52 SASS mix (Maxwell cubin; JIT to Ada)
+
+Opcode parse of `cuobjdump -sass` (`/*addr*/ OPCODE`):
+
+| Kernel | inst | XMAD | IADD+IADD3 | LDG | STG | STL | LDS | BAR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| fast prepare | 18184 | 9408 (51.7%) | 5708 | 20 | 12 | 0 | 12 | 1 |
+| fast finish | 9833 | 5154 (52.4%) | 3079 | 8 | 1 | 3 | 16 | 2 |
+| group prepare | 847 | 506 | 257 | 0 | 4 | 0 | 12 | 1 |
+| invert | 5170 | 2672 | 1648 | 0 | 4 | 54 | 28 | 3 |
+| group finish | 1642 | 1011 | 512 | 0 | 4 | 0 | 16 | 2 |
+
+XMAD is the Maxwell 16-bit multiply used for the 8×32 field implementation.
+On Ada the JIT turns this into `IMAD`/`IMAD.WIDE`. The **share** is the
+signal: more than half of prepare and finish instructions are field
+multiplies. Fast prepare has **no STL** (no local spill). The 20 LDG are
+the table + midstate path; 15 table points × a few 128-bit loads is the
+right order of magnitude.
+
+This sm_52 listing is **not** the 5,976-slot sm_89 count in earlier notes.
+Do not compare slot counts across those ISAs.
+
+### Memory traffic implied by the times
+
+Per candidate, prepare reads ~15×64 B table points (960 B, effectively
+random in a 64 MiB table) and writes 128 B of coalesced state.
+
+At the measured 20.537 ms prepare:
+
+- Table reads: 16,777,216 × 960 B / 20.537 ms ≈ **784 GB/s**
+- State writes: 16,777,216 × 128 B / 20.537 ms ≈ **105 GB/s**
+- Finish state reads: 16,777,216 × 128 B / 4.232 ms ≈ **507 GB/s**
+
+4090 DRAM peak is ~1008 GB/s. L2 is 72 MiB; the 64 MiB table can
+*reside* in L2, but 15 random 64 B gathers per thread still hammer
+cache associativity. An earlier synthetic probe in this log saw 32 MiB
+random reads at 1185 GiB/s vs 64 MiB at 611 GiB/s. That is consistent
+with prepare being both ALU-heavy (52% XMAD) **and** table-sensitive.
+We still cannot split those two inside the 20.5 ms without either
+counters or a one-factor table-geometry A/B.
+
+Finish's 507 GB/s coalesced 128 B reads of a 2 GiB buffer are DRAM
+streaming, not the limiter (17%).
+
+### Cross-check against the 1,200 s scored run
+
+Same GPU, same pipeline shape, N=24, 1,200 s:
+
+- Self-reported 674.4 M/s, 809.39e9 candidates
+- Verified 93,289 hits → 782.56e9 hit-implied candidates → **651.28 M/s**
+- Ratio self/verified ≈ 1.034, matching the wrapper's known habit of
+  extrapolating a peak printed rate across startup
+
+The 676 M/s GPU-only number from events agrees with the kernel's own
+674–675 M/s printer. The official-style score is lower because the
+harness clock includes table build, process bring-up, and uses verified
+hits rather than the printer.
+
+Promoted frontier is **644.55 M/s**. Local 651.28 is **+1.04%**. Several
+public submissions at 646–648 M/s were rejected. Do not submit this
+timer-only tree; the device code is unchanged and the margin is inside
+runner noise.
+
+### Conclusions that should change what we do next
+
+1. **Profile the prepare kernel, not the inverse tree.** The tree is 0.19%.
+2. **A finish-only project is a 17% slice.** Only take it if the patch is
+   tiny (the existing 12 B spill, dead stores) and measured.
+3. **Prepare is simultaneously field-ALU bound and table-bound.** The next
+   experiment must change **one** of: (a) field-mul count in the 15-point
+   deferred chain, (b) table geometry/footprint (64 MiB / 15-window vs
+   32 MiB / 16-window, now that inversion is off the critical path),
+   (c) prepare occupancy (107 → ≤85 regs for 3 CTAs). Do not combine them.
+4. **Occupancy experiment is high-risk.** Historical 3-CTA prepare spilled
+   and lost. If tried, it needs a ptxas-spill gate before any GPU time.
+5. **Counters are still blocked** on this pod. CUDA events + one-factor
+   A/B remain the measurement system.
+6. Short A/Bs must exclude the 2.11 s cold table+JIT or they lie.
+
+### Next experiment (single factor)
+
+Re-measure **64 MiB / 15-window vs 32 MiB / 16-window** on *this* pipeline.
+The last 64 MiB rejection (−1.26%) predates hierarchical inversion,
+streamed recoding, and deferred-y (95M+28S). Inversion is now free, so
+the only remaining cost of the extra window is table pressure versus one
+saved XYZZ add. That is exactly the 82.8% kernel. Matched 180 s pair,
+same seed, JIT-warmed, CUDA-event stage times on both arms. Accept only
+if prepare ms drops enough to clear +1% verified throughput.
+
+Host timer lives in `pinning.cu` (`QSB_STAGE_TIMING`, `QSB_PROFILE_BATCHES`).
+Keep it off for ranked builds.
