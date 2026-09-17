@@ -67,7 +67,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS (768/QSB_TREE_N)    /* keep 768 threads per SM at 80 registers */
+#define QSB_S2_BLOCKS (512/QSB_TREE_N)    /* allow more registers to avoid finish-stage spills */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
@@ -228,12 +228,12 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
 template<int BITS>
 __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
     int32_t digit=(int32_t)(M[0]&((1u<<(BITS+1))-1))-(1<<BITS);
-    uint64_t r0=(M[0]>>(BITS+1))|(M[1]<<(63-BITS));
-    uint64_t r1=(M[1]>>(BITS+1))|(M[2]<<(63-BITS));
-    uint64_t r2=(M[2]>>(BITS+1))|(M[3]<<(63-BITS));
-    uint64_t r3=M[3]>>(BITS+1);
-    M[0]=(r0<<1)|1ULL; M[1]=(r1<<1)|(r0>>63);
-    M[2]=(r2<<1)|(r1>>63); M[3]=(r3<<1)|(r2>>63);
+    /* 2*floor(M/2^(BITS+1))+1 == (M>>BITS)|1.  Shift the
+     * multi-limb state once instead of shifting it right and then left. */
+    M[0]=(M[0]>>BITS)|(M[1]<<(64-BITS))|1ULL;
+    M[1]=(M[1]>>BITS)|(M[2]<<(64-BITS));
+    M[2]=(M[2]>>BITS)|(M[3]<<(64-BITS));
+    M[3]>>=BITS;
     return sign*digit;
 }
 __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
@@ -1929,7 +1929,12 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            /* Ordered on the same default stream as the pipeline. */
+            cudaError_t clear_err = cudaMemsetAsync(d_hit_cnt, 0, 4);
+            if (clear_err != cudaSuccess) {
+                fprintf(stderr, "Hit counter reset failed: %s\n", cudaGetErrorString(clear_err));
+                return 1;
+            }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1956,14 +1961,14 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
+            /* The blocking result copy also waits for all preceding default-
+             * stream work. Check both launch and asynchronous execution errors. */
             cudaError_t err = cudaGetLastError();
+            if (err == cudaSuccess)
+                err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
