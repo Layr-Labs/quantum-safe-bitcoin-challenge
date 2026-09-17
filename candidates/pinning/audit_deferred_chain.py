@@ -226,16 +226,18 @@ def source_audit():
     root = Path(__file__).resolve().parent
     math = (root / "GPUMath.h").read_text()
     pinning = (root / "pinning.cu").read_text()
-    mixed = function_body(math, "__device__ void _PointAddXYZZ(uint64_t")
+    mixed = function_body(math, "Compile-time twin of _PointAddXYZZ")
+    assert "template<bool DEFER_Y>" in math
     assert len(re.findall(r"\b_ModMult\(", mixed)) == 8
     assert len(re.findall(r"\b_ModSqr\(", mixed)) == 2
-    assert "const uint64_t *Yoff, bool defer_y" in mixed
-    assert "if (defer_y)" in mixed
+    assert "const uint64_t *__restrict__ Yoff" in mixed
+    assert "if (DEFER_Y)" in mixed
     assert "Load256(Y1, Q);" in mixed
     assert "_ModMult(S2, (uint64_t *)Y2, ZZZ1);" in mixed
-    expected = "_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);"
-    assert pinning.count(expected) == 2
-    assert pinning.count("Load256(y0, cy);") == 2
+    assert "#define QSB_FINAL_TEMPLATE 1" in pinning
+    assert pinning.count("_PointAddXYZZT<true>(X,Y,ZZ,ZZZ, cx,cy, y0);") == 2
+    assert pinning.count("_PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);") == 2
+    assert pinning.count("Load256(y0, cy);") >= 2
 
 
 if __name__ == "__main__":

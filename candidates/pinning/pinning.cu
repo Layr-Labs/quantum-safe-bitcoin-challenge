@@ -88,10 +88,10 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
 #endif
 #ifndef QSB_SPARSE_TAIL
-#define QSB_SPARSE_TAIL 0     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
+#define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
 #endif
 #ifndef QSB_FINAL_TEMPLATE
-#define QSB_FINAL_TEMPLATE 0  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
+#define QSB_FINAL_TEMPLATE 1  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
 #endif
 #ifndef QSB_SPARSE_D
 #define QSB_SPARSE_D 0        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
@@ -320,10 +320,10 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  * Production consumes the raw XYZZ output directly. This avoids the three
  * field multiplications formerly used to convert it to homogeneous projective
  * form before recovery. */
-__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
-                                      uint64_t *ZZ, uint64_t *ZZZ,
-                                      const int32_t e[GT_CHUNKS],
-                                      const uint8_t *gTable) {
+__device__ void _FixedBaseSignedXYZZ(
+    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
+    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
+    const int32_t *__restrict__ e, const uint8_t *__restrict__ gTable) {
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
     gt_digit_idx(e[0], &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -335,11 +335,14 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
+    for (int c=2;c<GT_CHUNKS-1;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZT<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
     }
+    gt_digit_idx(e[GT_CHUNKS-1], &idx, &neg);
+    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 #if QSB_EARLY_LOAD
@@ -391,11 +394,11 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
-__device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
-                                            uint64_t *ZZ, uint64_t *ZZZ,
-                                            const uint64_t k[4],
-                                            const uint8_t *gTable,
-                                            uint64_t (*scratch)[2*QSB_TREE_N]) {
+__device__ void _FixedBaseSignedXYZZScalar(
+    uint64_t *__restrict__ X, uint64_t *__restrict__ Y,
+    uint64_t *__restrict__ ZZ, uint64_t *__restrict__ ZZZ,
+    const uint64_t *__restrict__ k, const uint8_t *__restrict__ gTable,
+    uint64_t (*scratch)[2*QSB_TREE_N]) {
 #if QSB_S0_SHM
     /* Cold per-thread state lives in the (currently unused) tree buffer:
      * limb-major, lane-contiguous, so each access is one 8-byte shared op.
@@ -2463,7 +2466,7 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -2505,8 +2508,6 @@ int main(int argc, char **argv) {
                 const uint32_t *hits = hit_report + 1;
                 int nh = (h_hit > 64) ? 64 : h_hit;
 #else
-            cudaDeviceSynchronize();
-
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
@@ -2519,7 +2520,6 @@ int main(int argc, char **argv) {
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 #endif
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -2532,7 +2532,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
@@ -2553,7 +2552,7 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
-        if (seqs_done % 10 == 0 || found) {
+        if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;

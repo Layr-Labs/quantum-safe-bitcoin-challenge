@@ -1254,8 +1254,10 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // ---------------------------------------------------------------------------------------
 template<bool DEFER_Y>
 __device__ __forceinline__ void _PointAddXYZZT(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff);
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff);
 
 __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
                               const uint64_t *X2, const uint64_t *Y2,
@@ -1311,8 +1313,10 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // once for the resolving final addition, so no defer_y branch is in the loop.
 template<bool DEFER_Y>
 __device__ __forceinline__ void _PointAddXYZZT(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
