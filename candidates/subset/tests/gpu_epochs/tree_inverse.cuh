@@ -145,7 +145,11 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     value[4]=0;
 }
 #else
-__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+// Compile away the unused inversion in split consumers: retaining a runtime
+// nullable-root branch raises register pressure even when the root is supplied.
+template<bool EXTERNAL=false, bool PREPARE=false>
+__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value,
+        uint64_t *roots=nullptr){
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
     const int tid=threadIdx.x,n=blockDim.x;
@@ -171,14 +175,28 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if(half>32)__syncthreads();else __syncwarp();
     }
     // offset == 2n-4: the two root children.
+    if constexpr(PREPARE){
+        if(tid==0){
+            uint64_t a[5],b[5],root[5];
+            for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+            a[4]=b[4]=0;
+            qsb_field_mul_raw(root,a,b);
+            for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=root[k];
+        }
+        return;
+    }
     if(tid==0){
         uint64_t a[5],b[5],root[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
         a[4]=b[4]=0;
-        qsb_field_mul_raw(root,a,b);
-        qsb_field_normalize(root);
-        _ModInv(root);
+        if constexpr(EXTERNAL){
+            for(int k=0;k<4;k++)root[k]=roots[(size_t)blockIdx.x*4+k];
+        }else{
+            qsb_field_mul_raw(root,a,b);
+            qsb_field_normalize(root);
+            _ModInv(root);
+        }
         root[4]=0;
         qsb_field_mul_raw(a,root,a);   /* 1/b */
         qsb_field_mul_raw(b,root,b);   /* 1/a */

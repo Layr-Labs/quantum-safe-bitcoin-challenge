@@ -40,11 +40,19 @@ __global__ void audit_products(const uint64_t *inputs,uint64_t *results,int n){
 #endif
 }
 
-__global__ void __launch_bounds__(256,2) audit_inverses(const uint64_t *inputs,uint64_t *results,int n){
+template<int MODE=0>
+__global__ void __launch_bounds__(256,2) audit_inverses(const uint64_t *inputs,uint64_t *results,int n,
+        uint64_t *roots=nullptr){
     int i=blockIdx.x*blockDim.x+threadIdx.x;
     uint64_t value[5]={1,0,0,0,0};
     if(i<n)for(int k=0;k<4;k++)value[k]=inputs[i*8+k];
+#if ZLAB_TREE == 2
+    if constexpr(MODE==0)qsb_block_inverse_tree(value);
+    else qsb_block_inverse_tree<true,MODE==1>(value,roots);
+#else
     qsb_block_inverse_tree(value);
+#endif
+    if constexpr(MODE==1)return;
     if(i<n)for(int k=0;k<5;k++)results[i*5+k]=value[k];
 }
 
@@ -104,8 +112,16 @@ int main(){
         BN_mod_inverse(r,a,p,ctx);BN_bn2lebinpad(r,(unsigned char*)(expected.data()+5*i),32);
     }
     CHECK(cudaMemcpy(di,inputs.data(),inputs.size()*8,cudaMemcpyHostToDevice));
-    for(int threads=32;threads<=256;threads*=2){
-        audit_inverses<<<(ni+threads-1)/threads,threads>>>(di,dr,ni);CHECK(cudaDeviceSynchronize());
+    uint64_t *roots;CHECK(cudaMalloc(&roots,((ni+31)/32)*4*sizeof(uint64_t)));
+    for(int split=0;split<(ZLAB_TREE==2?2:1);split++)for(int threads=32;threads<=256;threads*=2){
+        int blocks=(ni+threads-1)/threads;
+        if(split){
+            audit_inverses<1><<<blocks,threads>>>(di,dr,ni,roots);
+            qsb_invert_epoch_roots<<<(blocks+255)/256,256>>>(roots,blocks);
+        }
+        if(split)audit_inverses<2><<<blocks,threads>>>(di,dr,ni,roots);
+        else audit_inverses<0><<<blocks,threads>>>(di,dr,ni);
+        CHECK(cudaDeviceSynchronize());
         CHECK(cudaMemcpy(results.data(),dr,ni*5*8,cudaMemcpyDeviceToHost));
         int bad=0;
         int noncanon=0;
@@ -116,10 +132,10 @@ int main(){
             BN_add(r,b,p);
             if(results[5*i+4]==0 && BN_cmp(a,r)==0) noncanon++; else bad++;
         }
-        printf("Block inverse (%d threads, partial tail): %d/%d exact, %d congruent non-canonical, %d wrong\n",threads,ni-bad-noncanon,ni,noncanon,bad);
+        printf("Block inverse (split=%d, %d threads, partial tail): %d/%d exact, %d congruent non-canonical, %d wrong\n",split,threads,ni-bad-noncanon,ni,noncanon,bad);
         failures+=bad;
     }
-    cudaFree(di);cudaFree(dr);
+    cudaFree(di);cudaFree(dr);cudaFree(roots);
     for(auto v:edges)BN_free(v);
     BN_free(a);BN_free(b);BN_free(r);BN_free(p);BN_CTX_free(ctx);
     return failures?1:0;

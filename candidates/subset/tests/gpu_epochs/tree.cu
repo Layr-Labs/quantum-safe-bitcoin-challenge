@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <type_traits>
 /* ZLAB_HITPATH (kill switch): 1 = short-epoch host loop without per-launch
  * hit-count H2D (the producer kernel zeroes the device counter), one combined
  * D2H of count + first records per launch, and hit records appended with one
@@ -1074,6 +1075,9 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare(
  *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
  * 8M+0S (was 7M+2S here plus 1M+1S for C in the caller).
  * Returns the two y parities in bits 0 and 1; ZZ is reused as scratch. */
+// SCALED checkpoints Y*ZZ and ZZZ*ZZ, saving one 32-byte coordinate.
+// It costs one extra multiplication overall but cuts checkpoint traffic 25%.
+template<bool SCALED=false>
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
     uint64_t *inv, uint64_t *xR, uint64_t *yR,
@@ -1083,7 +1087,8 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
 
     _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZ, inv);           /* h = A/(B*d), kept in ZZ */
+    if constexpr(SCALED){Load256(ZZ,inv);}
+    else _ModMult(ZZ, inv);      /* h = A/(B*d), kept in ZZ */
 
     _ModSub256(m1, yb, Y);
     _ModMult(m1, ZZ);            /* lambda1 = (yR*B-Y)*h */
@@ -1112,7 +1117,17 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+__global__ void qsb_invert_epoch_roots(uint64_t *roots, int count){
+    int i=blockIdx.x*blockDim.x+threadIdx.x;
+    uint64_t v[5]={1,0,0,0,0};
+    if(i<count)for(int k=0;k<4;k++)v[k]=roots[(size_t)i*4+k];
+    qsb_block_inverse_tree(v);
+    if(i<count)for(int k=0;k<4;k++)roots[(size_t)i*4+k]=v[k];
+}
+
+// 0: legacy single kernel; 1: prepare/checkpoint roots; 2: recover and hash.
+template<int STAGE=0>
+__global__ void __launch_bounds__(256, STAGE==2 ? 3 : 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -1136,7 +1151,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int window_start, uint64_t enum_base,
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
     int fast_inc, const uint32_t * __restrict__ d_const_words,
-    const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
+    const epoch_desc_t * __restrict__ d_epochs,  /* short-epoch mode: one per block, else NULL */
+    uint64_t *saved=nullptr, uint64_t *roots=nullptr
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
@@ -1144,6 +1160,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // All tail lanes remain present through the block inverse.
     if(blockIdx.x*blockDim.x>=batch_size)return;
     int active=idx<batch_size;
+    uint64_t qy[4],qzz[4],qzzz[4],prod[5];
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    const epoch_desc_t *se_desc = d_epochs ? d_epochs + blockIdx.x : nullptr;
+#if !ZLAB_TRIM
+    uint8_t skip[MAX_T];
+#endif
+    if constexpr(STAGE!=2){
 
     /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
@@ -1156,13 +1180,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
 #if ZLAB_TRIM
-    const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
     uint32_t state[8];
     for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
     qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
 #else
-    uint8_t skip[MAX_T];
-    const epoch_desc_t *se_desc = NULL;
+    se_desc = NULL;
     if (fast_inc == QSB_SE_N_INC) {
         /* Short-epoch mode: blockIdx.x selects the epoch descriptor, which
          * supplies the 6 early skips (already folded into the epoch midstate);
@@ -1297,24 +1319,46 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
     /* u1*G as raw XYZZ via the signed-digit 32 MiB A-table: digits streamed
      * from the recode state, Y anchor-deferred through the chain. */
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    uint64_t qx[4];
     _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
 
-    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
      * W = ZZZ*d with d = xR*ZZ - X; the block inverts W. */
-    uint64_t prod[5];
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W = ZZZ*d */
+    if constexpr(STAGE==1){
+        _ModMult(qy,qzz);
+        _ModMult(qzzz,qzz);
+        // Limb-major state is coalesced; save zero W to preserve the unusable guard.
+        if(active)for(int k=0;k<4;k++){
+            __stcs((unsigned long long*)saved+(size_t)k*batch_size+idx,(unsigned long long)qy[k]);
+            __stcs((unsigned long long*)saved+(size_t)(4+k)*batch_size+idx,(unsigned long long)qzzz[k]);
+            __stcs((unsigned long long*)saved+(size_t)(8+k)*batch_size+idx,(unsigned long long)prod[k]);
+        }
+    }
+    }else{
+        for(int k=0;k<4;k++){
+            qy[k]=active?__ldcs((unsigned long long*)saved+(size_t)k*batch_size+idx):0;
+            qzz[k]=0;
+            qzzz[k]=active?__ldcs((unsigned long long*)saved+(size_t)(4+k)*batch_size+idx):0;
+            prod[k]=active?__ldcs((unsigned long long*)saved+(size_t)(8+k)*batch_size+idx):0;
+        }
+        prod[4]=0;
+    }
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
     /* d and W are not needed after the inverse: the finish derives both
      * x-coordinates from the two slopes and the constant QSB_U2R_C. */
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+#if ZLAB_TREE == 2
+    if constexpr(STAGE==0)qsb_block_inverse_tree(prod);
+    else qsb_block_inverse_tree<true,STAGE==1>(prod,roots);
+#else
     qsb_block_inverse_tree(prod);
+#endif
+    if constexpr(STAGE==1)return;
     if(!usable)return;
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint32_t y_parities = qsb_xyzz_finish_precomputed<STAGE!=0>(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
 
     int v=0, hash_choice=0, recid=0;
 #if ZLAB_PAIRSHA
@@ -2148,6 +2192,26 @@ int main(int argc, char **argv) {
         free(chk_table);
     }
 
+    // Keep the table resident while the split pipeline streams candidate state.
+    {
+        int max_persist=0,max_window=0;
+        cudaDeviceGetAttribute(&max_persist,cudaDevAttrMaxPersistingL2CacheSize,gpu_index);
+        cudaDeviceGetAttribute(&max_window,cudaDevAttrMaxAccessPolicyWindowSize,gpu_index);
+        size_t want=gt_sz<(size_t)max_persist?gt_sz:(size_t)max_persist;
+        if(want>0 && max_window>0){
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize,want);
+            cudaStreamAttrValue av={};
+            av.accessPolicyWindow.base_ptr=d_gt;
+            av.accessPolicyWindow.num_bytes=want<(size_t)max_window?want:(size_t)max_window;
+            av.accessPolicyWindow.hitRatio=1.0f;
+            av.accessPolicyWindow.hitProp=cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp=cudaAccessPropertyStreaming;
+            cudaError_t pe=cudaStreamSetAttribute(0,cudaStreamAttributeAccessPolicyWindow,&av);
+            printf("  Pipeline L2 persistence: %.0f MiB %s\n",av.accessPolicyWindow.num_bytes/1048576.0,cudaGetErrorString(pe));
+        }
+        cudaGetLastError(); // Advisory cache policy must not poison kernel error checks.
+    }
+
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
     cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
@@ -2434,6 +2498,12 @@ int main(int argc, char **argv) {
     if (se_mode) {
         printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
                QSB_SE_LAUNCH_BLOCKS);
+        uint64_t *saved=nullptr,*roots=nullptr;
+#if ZLAB_TREE == 2
+        cudaError_t alloc=cudaMalloc(&saved,(size_t)QSB_SE_LAUNCH_BLOCKS*256*12*sizeof(uint64_t));
+        if(alloc==cudaSuccess)alloc=cudaMalloc(&roots,(size_t)QSB_SE_LAUNCH_BLOCKS*4*sizeof(uint64_t));
+        if(alloc!=cudaSuccess){fprintf(stderr,"Pipeline allocation: %s\n",cudaGetErrorString(alloc));return 1;}
+#endif
         fflush(stdout);
         uint64_t epoch_base = 0;
         struct timespec t_last_se = t0;
@@ -2472,7 +2542,8 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            auto launch_stage = [&](auto stage){
+            kernel_digest<decltype(stage)::value><<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -2490,7 +2561,15 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,saved,roots);
+            };
+#if ZLAB_TREE == 2
+            launch_stage(std::integral_constant<int,1>{});
+            qsb_invert_epoch_roots<<<(nblk+255)/256,256>>>(roots,nblk);
+            launch_stage(std::integral_constant<int,2>{});
+#else
+            launch_stage(std::integral_constant<int,0>{});
+#endif
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -2613,6 +2692,7 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+        cudaFree(saved);cudaFree(roots);
         free(h_combos);
         return 0;
     }
