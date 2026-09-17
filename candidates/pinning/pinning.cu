@@ -99,7 +99,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_SYM_FINISH
 #define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
 #endif
-#define QSB_STATE_PLANES (QSB_SYM_FINISH ? 6u : 8u)
+#define QSB_STATE_PLANES 4u // packed v*R and t*R
 #ifndef QSB_PROBE_MASK
 #define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
 #endif
@@ -1122,6 +1122,7 @@ __device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
     return products;
 }
 
+#include "cofactor_checkpoint.h"
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -1291,14 +1292,13 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
  * inverts W=ZZ^2*d. X is dead after d is formed, so overwrite it with d and
  * keep only four field elements live across the block-wide inverse. */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *V, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
     _ModMult(t, xR, ZZ);
     _ModSub256(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    _ModSqr(W, ZZ);
-    _ModMult(W, X_D);            /* W = ZZ^2*d */
+    _ModMult(W, V, X_D);      /* D = V*d; avoid forming ZZ squared */
     W[4] = 0;
 }
 
@@ -1366,10 +1366,11 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *x_plus, uint64_t *x_minus
 ) {
     uint64_t h[4], u[4], v[4], f[4];
-    _ModMult(h, V, inv);         /* h = V*I */
-    _ModMult(V, h);              /* V becomes t = V*h */
-    _ModMult(u, yR, V);          /* u = yR*t */
-    _ModMult(v, Y, h);           /* v = Y*h */
+    // Inputs are v*R and t*R. Only the block root inverse is required.
+    uint64_t tmp[5];
+    qsb_field_mul(tmp,V,inv);Load256(V,tmp);
+    qsb_field_mul(tmp,Y,inv);Load256(v,tmp);
+    _ModMult(u,yR,V);
 
     /* GPUMath's square drops a final carry for some near-p operands. For
      * upper-half u, square the equivalent negative representative; keep u
@@ -1524,105 +1525,39 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     {
         uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                              pin_u2rx_words[2],pin_u2rx_words[3]};
-        qsb_xyzz_finish_prepare(qx,qzz,prep_xR,prod);
+        qsb_xyzz_finish_prepare(qx,qzz,qzzz,prep_xR,prod);
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-#if QSB_SYM_FINISH
-    /* Delta E: only Y, ZZZ and W cross the kernel boundary (W stays in
-     * planes 4-5 so the tree kernels are unchanged). */
-    Load256(qzz,prod);           /* qzz becomes W */
-    if (!usable) {
-        prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
-    }
-    if(active){
-        size_t state_plane_stride=(size_t)batch_size;
-        size_t state_idx=(size_t)idx;
-        qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qy[0],qy[1]);
-        qsb_st_v2(&saved[1u*state_plane_stride+state_idx],qy[2],qy[3]);
-        qsb_st_v2(&saved[2u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
-        qsb_st_v2(&saved[3u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
-        qsb_st_v2(&saved[4u*state_plane_stride+state_idx],qzz[0],qzz[1]);
-        qsb_st_v2(&saved[5u*state_plane_stride+state_idx],qzz[2],qzz[3]);
-    }
-#else
-    /* Preserve exactly four fields across the kernel boundary.  The finish
-     * needs C=ZZ*d^2 and W=ZZ^2*d, but no longer needs d or ZZ separately. */
-    if(usable){
-        _ModSqr(qx,qx);
-        _ModMult(qx,qzz);        /* qx becomes C */
-    }
-    Load256(qzz,prod);           /* qzz becomes W */
-    if (!usable) {
-        prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
-    }
-    if(active){
-        /* Eight vector planes retain SoA coalescing while pairing adjacent
-         * limbs into naturally aligned 128-bit stores. */
-        size_t state_plane_stride=(size_t)batch_size;
-        size_t state_idx=(size_t)idx;
-        qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qx[0],qx[1]);
-        qsb_st_v2(&saved[1u*state_plane_stride+state_idx],qx[2],qx[3]);
-        qsb_st_v2(&saved[2u*state_plane_stride+state_idx],qy[0],qy[1]);
-        qsb_st_v2(&saved[3u*state_plane_stride+state_idx],qy[2],qy[3]);
-        qsb_st_v2(&saved[4u*state_plane_stride+state_idx],qzz[0],qzz[1]);
-        qsb_st_v2(&saved[5u*state_plane_stride+state_idx],qzz[2],qzz[3]);
-        qsb_st_v2(&saved[6u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
-        qsb_st_v2(&saved[7u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
-    }
+#if !QSB_SYM_FINISH || QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2 || QSB_S0_THREADS != QSB_TREE_N || QSB_S2_THREADS != QSB_TREE_N
+#error "Cofactor prototype requires symmetric finish, matched blocks, and no tree offload"
 #endif
-#if QSB_TREE_OFFLOAD
-    /* The leaf product tree is built by qsb_leaf_tree_prepare from the saved
-     * W plane, so this kernel has no shared memory and no barriers. */
-    (void)prod; (void)roots; (void)tree;
-#else
-    qsb_block_product_checkpoint<QSB_TREE_N>(prod,roots,tree,qsb_prepare_scratch());
-#endif
+    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+    __shared__ uint64_t excluded[4][QSB_TREE_N];
+    qsb_cofactor_prepare<QSB_TREE_N>(prod,roots,qsb_prepare_scratch(),excluded);
+    if(active) {
+        uint64_t hc[5],vbar[5],tbar[5];
+        qsb_field_mul(hc,qzz,prod); // hc = ZZ * R/(V*d)
+        qsb_field_mul(vbar,qy,hc);
+        qsb_field_mul(tbar,qzzz,hc);
+        if(!usable)for(int k=0;k<4;++k){vbar[k]=0;tbar[k]=0;}
+        size_t s=(size_t)batch_size,i=(size_t)idx;
+        qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);qsb_st_v2(&saved[1*s+i],vbar[2],vbar[3]);
+        qsb_st_v2(&saved[2*s+i],tbar[0],tbar[1]);qsb_st_v2(&saved[3*s+i],tbar[2],tbar[3]);
+    }
+    (void)tree;
     return;
     } else {
 
-    bool usable = false;
-    if(active){
-        size_t state_plane_stride=(size_t)batch_size;
-        size_t state_idx=(size_t)idx;
-#if QSB_SYM_FINISH
-        ulonglong2 qy01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
-        ulonglong2 qy23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz23=qsb_ld_v2(&saved[3u*state_plane_stride+state_idx]);
-        ulonglong2 qzz01=qsb_ld_v2(&saved[4u*state_plane_stride+state_idx]);
-        ulonglong2 qzz23=qsb_ld_v2(&saved[5u*state_plane_stride+state_idx]);
-        (void)qx;
-#else
-        ulonglong2 qx01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
-        ulonglong2 qx23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
-        ulonglong2 qy01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
-        ulonglong2 qy23=qsb_ld_v2(&saved[3u*state_plane_stride+state_idx]);
-        ulonglong2 qzz01=qsb_ld_v2(&saved[4u*state_plane_stride+state_idx]);
-        ulonglong2 qzz23=qsb_ld_v2(&saved[5u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz01=qsb_ld_v2(&saved[6u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz23=qsb_ld_v2(&saved[7u*state_plane_stride+state_idx]);
-        qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
-#endif
-        qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
-        qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
-        qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
-        usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
-    }
-#if QSB_TREE_OFFLOAD2
-    /* qsb_leaf_tree_finish replaced the W plane by the canonical leaf inverse
-     * (zero for unusable lanes), so qzz already holds 1/W. */
-    if (!usable) return;
-    Load256(prod,qzz); prod[4]=0;
-    (void)roots; (void)tree;
-#else
-    /* qzz carries the original, pre-identity-substitution W, so this exactly
-     * recreates the promoted kernel's usability decision without a flag. */
-    #pragma unroll
-    for(int limb=0;limb<4;limb++)prod[limb]=usable?qzz[limb]:(limb==0?1ULL:0ULL);
+    if(!active)return;
+    size_t s=(size_t)batch_size,i=(size_t)idx;
+    ulonglong2 a=qsb_ld_v2(&saved[0*s+i]),b=qsb_ld_v2(&saved[1*s+i]);
+    ulonglong2 c=qsb_ld_v2(&saved[2*s+i]),d=qsb_ld_v2(&saved[3*s+i]);
+    qy[0]=a.x;qy[1]=a.y;qy[2]=b.x;qy[3]=b.y;
+    qzzz[0]=c.x;qzzz[1]=c.y;qzzz[2]=d.x;qzzz[3]=d.y;
+    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+    for(int k=0;k<4;++k)prod[k]=roots[(size_t)blockIdx.x*4+k];
     prod[4]=0;
-    qsb_block_inverse_checkpoint<QSB_TREE_N>(prod,roots,tree);
-    if (!usable) return;
-#endif
+    (void)tree;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
@@ -2367,14 +2302,13 @@ int main(int argc, char **argv) {
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CAND_STRIDE*sizeof(uint64_t);
+    size_t pipeline_tree_bytes=0; // Candidate tree no longer crosses kernels.
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
+    // d_pipeline_tree remains null; neither candidate stage dereferences it.
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
     if(pipeline_err==cudaSuccess)
