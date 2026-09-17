@@ -2461,12 +2461,13 @@ int main(int argc, char **argv) {
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH
+            cudaMemset(zh_cnt, 0, 4);
             kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
 #else
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
             kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
@@ -2491,14 +2492,13 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             epoch_base += nblk;
 #if ZLAB_HITPATH
             cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
@@ -2528,12 +2528,13 @@ int main(int argc, char **argv) {
             if (0) {
 #else
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
 #endif
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
                 char fname[256];
                 if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
@@ -2549,15 +2550,12 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         uint8_t *combo = all_combos + h * MAX_T;
                         fprintf(ff, "indices=");
-                        printf("  indices=");
                         for (int j = 0; j < t_sel; j++) {
                             fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
                         }
                         /* The bridge reads `indices=` and `recid=`; the
                          * diagnostic fields the kernel used to carry are gone. */
                         fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d\n", hc, ri);
                         hit_counter++;
                         g_hit_counter = hit_counter;
                         if (summary_f) {
@@ -2649,7 +2647,7 @@ int main(int argc, char **argv) {
             }
             int batch_pos = (int)((span - enum_base < (uint64_t)BATCH) ? span - enum_base : BATCH);
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
@@ -2667,18 +2665,16 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
                 t_win, s_early, d_early, fast_inc, d_const_words, NULL);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             enum_base += batch_pos;
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
                 char fname[256];
                 if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
@@ -2694,15 +2690,12 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         uint8_t *combo = all_combos + h * MAX_T;
                         fprintf(ff, "indices=");
-                        printf("  indices=");
                         for (int j = 0; j < t_sel; j++) {
                             fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
                         }
                         /* The bridge reads `indices=` and `recid=`; the
                          * diagnostic fields the kernel used to carry are gone. */
                         fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d\n", hc, ri);
                         hit_counter++;
                         g_hit_counter = hit_counter;
                         if (summary_f) {
@@ -2850,7 +2843,7 @@ int main(int argc, char **argv) {
             /* Upload and run */
             cudaMemcpy(d_combos, h_combos, batch_pos * t_sel, cudaMemcpyHostToDevice);
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
             kernel_digest<<<grdsz, BLKSZ>>>(
@@ -2867,22 +2860,17 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
                 t_sel, 0, d_early, 0, d_const_words, NULL);
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-
             total_searched += batch_pos;
             g_total_searched = total_searched;
             batch_pos = 0;
 
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-
-                printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
                 char fname[256];
                 if (calibrate) {
@@ -2905,15 +2893,12 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         uint8_t *combo = all_combos + h * MAX_T;
                         fprintf(ff, "indices=");
-                        printf("  indices=");
                         for (int j = 0; j < t_sel; j++) {
                             fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
                         }
                         /* The bridge reads `indices=` and `recid=`; the
                          * diagnostic fields the kernel used to carry are gone. */
                         fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d combo_idx=%d\n", hc, ri, combo_idx);
                     }
                     fclose(ff);
 
