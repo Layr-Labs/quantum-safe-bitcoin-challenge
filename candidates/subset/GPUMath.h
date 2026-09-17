@@ -325,21 +325,43 @@ __device__ void _ModNeg256(uint64_t *r)
 
 __device__ void _ModAdd256(uint64_t *r, uint64_t *a, uint64_t *b)
 {
-    uint64_t rr[5];
+    // fv_lazysub: incomplete (lazy) reduction. Compute a+b, then a SINGLE sparse-prime
+    // 2^256-fold on the add carry: 2^256 == 2^32+977 (mod p), so on a carry we add
+    // 0x1000003D1 into limb 0 and ripple. Output is in [0,2^256) and congruent mod p --
+    // the SAME loosely-reduced contract as _ModMultCore (the final 2^256 carry is dropped).
+    // This replaces the canonicalising `SubP + conditional select` (a full p-subtract plus a
+    // data-dependent 4-word predicated move) with 5 adds + 1 fold constant + a 4-word ripple,
+    // and removes the conditional select.
+    //
+    // Divergence from the old form (exact): identical output on every pair EXCEPT when
+    // a+b lies in [p, 2^256), where the old form returns the canonical a+b-p and this
+    // returns a+b. Both are congruent mod p. For a+b >= 2^256 the two agree bit-for-bit.
+    //
+    // CALLER SAFETY (re-verified against THIS frontier, not the base it was built on):
+    //  * _ModInv exposure is UNCHANGED. Every _ModInv(root) site in tree_inverse.cuh takes a
+    //    root that is either built by qsb_field_mul -- which ends in qsb_field_normalize
+    //    (tree.cu:983) -- or explicitly qsb_field_normalize'd on the preceding line. (No line
+    //    numbers here: tree_inverse.cuh differs between frontier revisions; tree.cu does not.)
+    //    tree.cu:1492 inverts pz from _PointAddSecp256k1, where p1z is a _ModMult output, not
+    //    an _ModAdd256 output. No add result reaches _ModInv.
+    //  * NEW, and accepted: tree.cu:1096/1104 make q1x/q2x with _ModAdd256, and tree.cu:1317
+    //    serialises them straight into SHA-256 with no normalize. Under the old form those
+    //    were canonical; here they are non-canonical when the sum lands in [p,2^256) --
+    //    probability ~2^-224 per call. The failure mode is a MISSED hit (a wrong preimage
+    //    fails the filter), never a false positive, and at ~2^-224 it cannot occur in a run.
+    //  * Every other consumer (_ModMult/_ModSqr/_ModSub256/_ModAdd256) accepts [0,2^256).
+    uint64_t c;
+    UADDO(r[0], a[0], b[0]);
+    UADDC(r[1], a[1], b[1]);
+    UADDC(r[2], a[2], b[2]);
+    UADDC(r[3], a[3], b[3]);
+    UADD(c, 0ULL, 0ULL);                 // c = 2^256 carry (0 or 1)
 
-    UADDO(rr[0], a[0], b[0]);
-    UADDC(rr[1], a[1], b[1]);
-    UADDC(rr[2], a[2], b[2]);
-    UADDC(rr[3], a[3], b[3]);
-    UADD(rr[4], 0UL, 0UL);
-
-    Load256(r, rr);
-
-    SubP(rr);
-
-    if(_IsPositive(rr)) {
-        Load256(r, rr);
-    }
+    uint64_t fold = c * 0x1000003D1ULL;  // c*(2^32+977)
+    UADDO1(r[0], fold);
+    UADDC1(r[1], 0ULL);
+    UADDC1(r[2], 0ULL);
+    UADD1(r[3], 0ULL);                    // final 2^256 carry dropped (loose-reduction contract)
 }
 
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
