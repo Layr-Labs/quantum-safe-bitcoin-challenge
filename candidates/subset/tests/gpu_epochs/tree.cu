@@ -349,26 +349,56 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  *    resolves the exact Y. 3M+2S + 13*(7M+2S) + 8M+2S = 102M+30S for the
  *    16-point sum, versus 4M+2S + 14*(8M+2S) = 116M+30S before, and the
  *    caller consumes XYZZ directly (no 3M homogeneous conversion). */
+/* Direct regular-digit extraction (see the pinning track's audit_direct_digits.py):
+ * chunk c's signed odd digit is 2f+1-2^w for the w-bit field f of the setup
+ * value starting at bit 17c+2 (bit 1 for chunk 0); index (f^(t-1))&(2^(w-1)-1)
+ * with t the field's top bit, negative iff t==0 XOR the global sign; the last
+ * chunk is the positive remainder. Limbs are selected by value. */
+__device__ __forceinline__ uint32_t gt_field_bits_v(uint64_t m0, uint64_t m1, uint64_t m2,
+                                                  uint64_t m3, unsigned pos) {
+    unsigned li = pos >> 6, sh = pos & 63u;
+    uint64_t lo = li == 0 ? m0 : li == 1 ? m1 : li == 2 ? m2 : m3;
+    uint64_t hi = li == 0 ? m1 : li == 1 ? m2 : li == 2 ? m3 : 0ULL;
+    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
+}
+
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
+    uint64_t sflag = (uint64_t)(sign < 0);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    {
+        uint32_t f = gt_field_bits_v(M[0],M[1],M[2],M[3], 1u) & 0x3ffffu;
+        uint32_t t = f >> 17;
+        idx = (f ^ (t - 1u)) & 0x1ffffu;
+        neg = (uint64_t)(t ^ 1u) ^ sflag;
+        gt_load_signed_flat(gTable, 0u, idx, neg, x0, y0);
+    }
+    {
+        uint32_t f = gt_field_bits_v(M[0],M[1],M[2],M[3], 19u) & 0x1ffffu;
+        uint32_t t = f >> 16;
+        idx = (f ^ (t - 1u)) & 0xffffu;
+        neg = (uint64_t)(t ^ 1u) ^ sflag;
+        gt_load_signed_flat(gTable, 2u << 16, idx, neg, x1, y1);
+    }
     _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
+    unsigned pos = 36u;
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        uint32_t f = gt_field_bits_v(M[0],M[1],M[2],M[3], pos) & 0x1ffffu;
+        uint32_t t = f >> 16;
+        bool last = (c == GT_CHUNKS-1);
+        idx = last ? (f & 0xffffu) : ((f ^ (t - 1u)) & 0xffffu);
+        neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
+        pos += 17u;
     }
 }
 
@@ -891,6 +921,294 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+
+/* ---- Split short-epoch pipeline (ported from the pinning track) ----------
+ * Prepare computes the digest, fixed-base point and shared recovery
+ * denominator, saves C, Y, W and ZZZ, builds each block's product tree and
+ * publishes the raw root. Roots are batch-inverted outside the 256-lane search
+ * blocks (256 per group, one scalar inversion per launch), then finish expands
+ * the checkpointed tree and recovers, hashes and reports each candidate.
+ * No lane waits on another lane's _ModInv. */
+__device__ __forceinline__ void qsb_field_normalize(uint64_t *r) {
+    if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
+        r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
+        r[0] -= 0xFFFFFFFEFFFFFC2FULL;
+        r[1] = r[2] = r[3] = 0;
+    }
+}
+
+#define QSB_CHECKPOINT_NODES 254
+#define QSB_CHECKPOINT_STRIDE 256
+
+__device__ __forceinline__ void qsb_block_product_checkpoint(
+    uint64_t *value, uint64_t *roots, uint64_t *checkpoint
+) {
+    __shared__ uint64_t products[4][512];
+    int tid=threadIdx.x;
+    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+
+    #pragma unroll
+    for(int k=0;k<4;k++)products[k][tid]=value[k];
+    __syncthreads();
+
+    int offset=0;
+    #pragma unroll 1
+    for(int count=256;count>1;count>>=1){
+        int half=count>>1;
+        if(tid<half){
+            uint64_t a[5],b[5],out[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                a[k]=products[k][offset+tid];
+                b[k]=products[k][offset+half+tid];
+            }
+            a[4]=b[4]=0;
+            qsb_field_mul(out,a,b);
+            int node=offset+count+tid;
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                products[k][node]=out[k];
+                if(node<510)
+                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256]=out[k];
+            }
+        }
+        offset+=count;
+        /* Writers are tid<count/2; up to 64 nodes they all sit in warp zero. */
+        if(count>64)__syncthreads();
+        else if(count>2)__syncwarp();
+    }
+
+    if(tid==0){
+        #pragma unroll
+        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][510];
+    }
+}
+
+__device__ __forceinline__ void qsb_block_inverse_checkpoint(
+    uint64_t *value, const uint64_t *roots, const uint64_t *checkpoint
+) {
+    __shared__ uint64_t products[4][512];
+    __shared__ uint64_t inverses[4][256];
+    int tid=threadIdx.x;
+    size_t block_base=(size_t)blockIdx.x*4u*QSB_CHECKPOINT_STRIDE;
+
+    #pragma unroll
+    for(int k=0;k<4;k++){
+        products[k][tid]=value[k];
+        if(tid<QSB_CHECKPOINT_NODES)
+            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
+        if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
+    }
+    __syncthreads();
+
+    int offset=508;
+    #pragma unroll 1
+    for(int count=2;count<256;count<<=1){
+        int half=count>>1;
+        if(tid<count){
+            int local_parent=tid&(half-1);
+            uint64_t parent_inv[5],sibling[5],child_inv[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                parent_inv[k]=inverses[k][offset+count-256+local_parent];
+                sibling[k]=products[k][offset+(tid^half)];
+            }
+            parent_inv[4]=sibling[4]=0;
+            qsb_field_mul(child_inv,parent_inv,sibling);
+            #pragma unroll
+            for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
+        }
+        offset-=count<<1;
+        /* The next level is read by tid<2*count; up to 32 lanes is warp zero. */
+        if((count<<1)>32)__syncthreads();
+        else __syncwarp();
+    }
+
+    uint64_t parent_inv[5],sibling[5];
+    #pragma unroll
+    for(int k=0;k<4;k++){
+        parent_inv[k]=inverses[k][tid&127];
+        sibling[k]=products[k][tid^128];
+    }
+    parent_inv[4]=sibling[4]=0;
+    qsb_field_mul(value,parent_inv,sibling);
+    qsb_field_normalize(value);
+}
+
+__global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
+    const uint64_t *roots, int count, uint64_t *super_roots,
+    uint64_t *root_checkpoint
+) {
+    int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    bool active=i<count;
+    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
+                   active?roots[(size_t)i*4u+1]:0ULL,
+                   active?roots[(size_t)i*4u+2]:0ULL,
+                   active?roots[(size_t)i*4u+3]:0ULL,0};
+    qsb_block_product_checkpoint(r,super_roots,root_checkpoint);
+}
+
+__global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
+    uint64_t *super_roots, int count
+) {
+    int tid=(int)threadIdx.x;
+    bool active=tid<count;
+    uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
+                   active?super_roots[(size_t)tid*4u+1]:0ULL,
+                   active?super_roots[(size_t)tid*4u+2]:0ULL,
+                   active?super_roots[(size_t)tid*4u+3]:0ULL,0};
+    qsb_field_normalize(r);
+    qsb_block_inverse_tree(r);
+    if(active){
+        #pragma unroll
+        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
+    }
+}
+
+__global__ void __launch_bounds__(256,2) qsb_root_group_finish(
+    uint64_t *roots, int count, const uint64_t *super_roots,
+    const uint64_t *root_checkpoint
+) {
+    int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    bool active=i<count;
+    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
+                   active?roots[(size_t)i*4u+1]:0ULL,
+                   active?roots[(size_t)i*4u+2]:0ULL,
+                   active?roots[(size_t)i*4u+3]:0ULL,0};
+    qsb_block_inverse_checkpoint(r,super_roots,root_checkpoint);
+    if(active){
+        #pragma unroll
+        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+    }
+}
+
+template<int STAGE>
+__global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 4) kernel_digest_se(
+    const epoch_desc_t * __restrict__ d_epochs,
+    uint8_t * __restrict__ d_gt,
+    uint32_t *d_hit_cnt, uint32_t *d_hit_idx, uint8_t *d_hit_combos,
+    int batch_size, ulonglong2 *saved, uint64_t *roots, uint64_t *tree
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(blockIdx.x*blockDim.x>=batch_size)return;
+    int active=idx<batch_size;
+    const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4],prod[5];
+    size_t state_plane_stride=(size_t)batch_size;
+    size_t state_idx=(size_t)idx;
+    if (STAGE == 0) {
+        uint32_t state[8];
+        #pragma unroll
+        for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
+        qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+        uint32_t b2[16];
+        #pragma unroll
+        for (int i=0;i<8;i++) b2[i]=state[i];
+        b2[8]=0x80000000;
+        #pragma unroll
+        for (int i=9;i<15;i++) b2[i]=0;
+        b2[15]=0x00000100;
+        uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                        0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+        _SHA256Transform(s2, b2);
+        uint64_t z[4];
+        z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+        z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+        z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+        z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+        _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+        {
+            uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+            qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod);    /* qx -> d, prod -> W */
+        }
+        bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
+        if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C */
+        Load256(qzz,prod);                                /* qzz -> W */
+        if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+        if(active){
+            saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
+            saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
+            saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
+            saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
+            saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
+            saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
+            saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
+            saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
+        }
+        qsb_block_product_checkpoint(prod,roots,tree);
+        return;
+    }
+
+    bool usable=false;
+    if(active){
+        ulonglong2 w01=saved[4u*state_plane_stride+state_idx];
+        ulonglong2 w23=saved[5u*state_plane_stride+state_idx];
+        qzz[0]=w01.x; qzz[1]=w01.y; qzz[2]=w23.x; qzz[3]=w23.y;
+        usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
+    }
+    #pragma unroll
+    for(int limb=0;limb<4;limb++)prod[limb]=usable?qzz[limb]:(limb==0?1ULL:0ULL);
+    prod[4]=0;
+    qsb_block_inverse_checkpoint(prod,roots,tree);
+    if(!usable)return;
+    {
+        ulonglong2 c01=saved[0u*state_plane_stride+state_idx];
+        ulonglong2 c23=saved[1u*state_plane_stride+state_idx];
+        ulonglong2 y01=saved[2u*state_plane_stride+state_idx];
+        ulonglong2 y23=saved[3u*state_plane_stride+state_idx];
+        ulonglong2 z01=saved[6u*state_plane_stride+state_idx];
+        ulonglong2 z23=saved[7u*state_plane_stride+state_idx];
+        qx[0]=c01.x; qx[1]=c01.y; qx[2]=c23.x; qx[3]=c23.y;
+        qy[0]=y01.x; qy[1]=y01.y; qy[2]=y23.x; qy[3]=y23.y;
+        qzzz[0]=z01.x; qzzz[1]=z01.y; qzzz[2]=z23.x; qzzz[3]=z23.y;
+    }
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    /* Low-liveness finish: fold yR*B and Y into the two slope numerators and
+     * multiply both by h before the loop; only the slopes and xs stay live. */
+    uint64_t n1[4], n2[4];
+    _ModMult(n1, u2ry, qzzz);    /* yR*B */
+    _ModMult(qzzz, prod);        /* h */
+    _ModMult(qx, prod);          /* delta */
+    _ModAdd256(qzz, u2rx, u2rx);
+    _ModSub256(qzz, qx);         /* xs */
+    _ModAdd256(n2, n1, qy);
+    _ModSub256(n1, qy);
+    _ModMult(n1, qzzz);          /* lambda1 */
+    _ModMult(n2, qzzz);          /* m2 = -lambda2 */
+    #pragma unroll
+    for(int ri=0;ri<2;ri++){
+        uint64_t m[4], xk[4], t[4];
+        uint64_t sel = 0ULL - (uint64_t)ri;
+        #pragma unroll
+        for (int k=0;k<4;k++) m[k]=(n1[k]&~sel)|(n2[k]&sel);
+        _ModSqr(xk, m);
+        _ModSub256(xk, qzz);
+        _ModSub256(t, u2rx, xk);
+        _ModMult(t, m);
+        _ModSub256(t, u2ry);
+        uint32_t par = (uint32_t)(t[0] & 1ULL) ^ (uint32_t)ri;
+        uint32_t x32[8]={(uint32_t)xk[0],(uint32_t)(xk[0]>>32),(uint32_t)xk[1],(uint32_t)(xk[1]>>32),
+                         (uint32_t)xk[2],(uint32_t)(xk[2]>>32),(uint32_t)xk[3],(uint32_t)(xk[3]>>32)};
+        uint32_t pb[16];
+        pb[0]=__byte_perm(x32[7],0x2+(uint8_t)par,0x4321);
+        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        if(gpu_bench_valid_words(hs)){
+            uint32_t pos=atomicAdd(d_hit_cnt,1);
+            if(pos<1024){
+                d_hit_idx[pos]=((uint32_t)idx)|((uint32_t)ri<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pos*MAX_T+i]=se_desc->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pos*MAX_T+6+i]=WIN3[threadIdx.x][i];
+            }
+            return;
+        }
+    }
+}
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
@@ -2129,6 +2447,18 @@ int main(int argc, char **argv) {
      * the 1352-byte epoch prefix into a midstate + 8-byte remainder; the
      * consumer hashes 6 blocks per candidate from there. Per launch:
      * QSB_SE_LAUNCH_BLOCKS epochs x 256 candidates = 8M candidates. */
+    ulonglong2 *d_se_state=NULL; uint64_t *d_se_roots=NULL,*d_se_tree=NULL,*d_se_super=NULL,*d_se_rootck=NULL;
+    if (se_mode) {
+        size_t se_batch=(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_SE_PER_EPOCH;
+        size_t se_groups=(QSB_SE_LAUNCH_BLOCKS+255)/256;
+        if(cudaMalloc(&d_se_state,se_batch*8u*sizeof(ulonglong2))!=cudaSuccess||
+           cudaMalloc(&d_se_roots,(size_t)QSB_SE_LAUNCH_BLOCKS*4u*sizeof(uint64_t))!=cudaSuccess||
+           cudaMalloc(&d_se_tree,(size_t)QSB_SE_LAUNCH_BLOCKS*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))!=cudaSuccess||
+           cudaMalloc(&d_se_super,se_groups*4u*sizeof(uint64_t))!=cudaSuccess||
+           cudaMalloc(&d_se_rootck,se_groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))!=cudaSuccess){
+            fprintf(stderr,"ERROR: split pipeline allocation failed\n"); return 1;
+        }
+    }
     if (se_mode) {
         printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
                QSB_SE_LAUNCH_BLOCKS);
@@ -2146,20 +2476,18 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, 0,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+            kernel_digest_se<0><<<nblk, QSB_SE_PER_EPOCH>>>(
+                d_epochs, d_gt, d_hit_cnt, d_hit_idx, d_hit_combos,
+                batch_pos, d_se_state, d_se_roots, d_se_tree);
+            {
+                int root_groups=(nblk+255)/256;
+                qsb_root_group_prepare<<<root_groups,256>>>(d_se_roots,nblk,d_se_super,d_se_rootck);
+                qsb_invert_super_roots<<<1,256>>>(d_se_super,root_groups);
+                qsb_root_group_finish<<<root_groups,256>>>(d_se_roots,nblk,d_se_super,d_se_rootck);
+            }
+            kernel_digest_se<2><<<nblk, QSB_SE_PER_EPOCH>>>(
+                d_epochs, d_gt, d_hit_cnt, d_hit_idx, d_hit_combos,
+                batch_pos, d_se_state, d_se_roots, d_se_tree);
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
