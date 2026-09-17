@@ -2277,6 +2277,31 @@ int main(int argc, char **argv) {
     }
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+
+    /* Keep the fixed-base table in L2. The 64 MiB signed table is sized to be
+     * L2-resident on AD102's 72 MB L2; marking its range persisting means no
+     * other traffic can displace it. Advisory: both device attributes are
+     * checked and a refusal leaves the run exactly as it was. */
+    {
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        if (want > 0 && max_window > 0) {
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av = {};
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persistence: %.0f MiB pinned %s\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   pe==cudaSuccess?"ok":cudaGetErrorString(pe));
+            fflush(stdout);
+        }
+    }
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
@@ -2452,7 +2477,21 @@ int main(int argc, char **argv) {
         else snprintf(zh_fname, sizeof(zh_fname), "results/digest_hit_%d.txt", gpu_index);
         int zh_fd = open(zh_fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
-        uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
+        /* Two pinned staging buffers and two events. The launch loop used to
+         * end every batch with cudaDeviceSynchronize() followed by a blocking
+         * D2H of the hit header -- the device idles for the whole round trip
+         * plus whatever the host then does with the records. Draining one
+         * batch late keeps the host a batch ahead of the device instead. The
+         * full 64-record window is copied unconditionally (1 KiB) so the
+         * conditional second copy disappears too. */
+        uint8_t *zh_host_p[2] = {NULL, NULL};
+        cudaEvent_t zh_ev[2];
+        for (int e_ = 0; e_ < 2; e_++) {
+            cudaHostAlloc((void**)&zh_host_p[e_], 4 + 64 * ZLAB_HIT_REC, cudaHostAllocDefault);
+            if (!zh_host_p[e_]) { fprintf(stderr, "OOM: pinned hit staging\n"); return 1; }
+            cudaEventCreateWithFlags(&zh_ev[e_], cudaEventDisableTiming);
+        }
+        int zh_cur = 0, zh_have_prev = 0;
 #endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
@@ -2491,21 +2530,22 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
+#if ZLAB_HITPATH
+            cudaMemcpyAsync(zh_host_p[zh_cur], d_hitbuf,
+                            4 + 64 * ZLAB_HIT_REC, cudaMemcpyDeviceToHost, 0);
+            cudaEventRecord(zh_ev[zh_cur], 0);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             epoch_base += nblk;
-#if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
-            memcpy(&h_hit, zh_host, 4);
+            const uint8_t *zh_host = zh_host_p[zh_cur ^ 1];
+            int zh_ready = zh_have_prev;
+            if (zh_ready) cudaEventSynchronize(zh_ev[zh_cur ^ 1]);
+            zh_cur ^= 1; zh_have_prev = 1;
+            if (zh_ready) memcpy(&h_hit, zh_host, 4); else h_hit = 0;
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
-                if (nh > ZLAB_HIT_FIRST)
-                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               d_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
                 int wl = 0;
@@ -2527,6 +2567,12 @@ int main(int argc, char **argv) {
             }
             if (0) {
 #else
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            total_searched += batch_pos;
+            g_total_searched = total_searched;
+            epoch_base += nblk;
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
 #endif
