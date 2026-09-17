@@ -1080,7 +1080,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t *x1, uint64_t *x2
 ) {
     uint64_t yb[4], m1[4], m2[4], t[4], s[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    /* c is read straight from the __constant__ QSB_U2R_C symbol (warp-
+     * uniform, constant-cache broadcast) instead of a 4-register local
+     * copy: _ModSub256 only reads its b operand. Saves 4 regs/thread. */
 
     _ModMult(yb, yR, ZZZ);       /* yR*B */
     _ModMult(ZZ, inv);           /* h = A/(B*d), kept in ZZ */
@@ -1091,7 +1093,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModMult(m2, ZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
     _ModAdd256(s, m1, m2);       /* lambda1+m2 = 2*yR/(xR-xP) */
 
-    _ModSub256(t, m1, cc);
+    _ModSub256(t, m1, QSB_U2R_C);
     _ModMult(x1, s, t);
     _ModAdd256(x1, x1, xR);      /* x1 = (lambda1+m2)*(lambda1-c) + xR */
     _ModSub256(t, xR, x1);
@@ -1099,7 +1101,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModSub256(t, yR);           /* y1 = lambda1*(xR-x1) - yR */
     uint32_t parities = (uint32_t)(t[0] & 1ULL);
 
-    _ModSub256(t, m2, cc);
+    _ModSub256(t, m2, QSB_U2R_C);
     _ModMult(x2, s, t);
     _ModAdd256(x2, x2, xR);      /* x2 = (lambda1+m2)*(m2-c) + xR */
     _ModSub256(t, xR, x2);
