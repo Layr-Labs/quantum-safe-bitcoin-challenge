@@ -42,6 +42,33 @@
 #endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
+/* ZLAB_HIERARCH (kill switch, default on): two-level epoch producer. The
+ * flat producer hashes the whole 1352-byte below-cut prefix (21 transforms)
+ * once per epoch. The hierarchical split factors the epoch's 6 early skips
+ * as {s1..s5} (a 5-subset of [0,window_start)) plus a sixth skip j > s5:
+ * every 6-subset arises exactly once this way, because j is its largest
+ * element. kernel_build_epoch_groups hashes the group prefix (everything
+ * before push s5, with s1..s4 omitted) once per GROUP (~18 transforms for
+ * ~22 epochs); kernel_build_epoch_members resumes from the group midstate
+ * and hashes only pushes s5+1..136 minus j (~3.4 transforms). Same output
+ * descriptors, same candidate universe, same order-independent set; only
+ * the enumeration ORDER changes (grouped by {s1..s5} instead of flat lex).
+ * Total producer work drops from 21.1 to ~4.2 transforms per epoch. */
+#ifndef ZLAB_HIERARCH
+#define ZLAB_HIERARCH 1
+#endif
+/* ZLAB_ASYNC (kill switch, default on): depth-2 ping-pong launch pipeline.
+ * The flat loop enqueues producer+consumer then cudaDeviceSynchronize()s and
+ * copies the hit buffer back before enqueueing the next launch, so the GPU
+ * idles for the launch-to-launch gap every batch. Two epochs/hit/group
+ * buffers on two streams keep one batch executing while the host retires the
+ * previous one; hit readback and the host-side group walk overlap GPU work.
+ * Buffers are reused only after their batch's event has been synchronized
+ * and its hits read back, so the packed hit counter reset (kernel A, t==0)
+ * can never race a live consumer. */
+#ifndef ZLAB_ASYNC
+#define ZLAB_ASYNC 1
+#endif
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
 
@@ -706,6 +733,16 @@ typedef struct {
 } epoch_desc_t;
 static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
 
+/* Group descriptor: midstate after the group prefix (prefix_remainder plus
+ * every kept push before s5), the staging bytes of its partial block, and
+ * the 5 group skips (early[4] == s5, the largest). */
+typedef struct {
+    uint32_t mid[8];
+    uint8_t  rem[64];
+    uint8_t  rem_len;
+    uint8_t  early[5];
+} group_desc_t;
+
 /* The first 256 lexicographic 3-from-13 window omission sets, stored as actual
  * push indices (QSB_SE_CUT + 0..12). Filled by the host once per run. Keeping
  * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
@@ -800,6 +837,121 @@ __global__ void kernel_build_epochs(
     d->remW[0] = bswap32(curW[0]);
     d->remW[1] = bswap32(curW[1]);
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
+}
+/* Level 1: one thread per group. Hashes prefix_remainder + kept pushes
+ * [0, s5) (s1..s4 omitted) from the problem base midstate. The staging
+ * buffer holds the partial-block remainder, whose length varies per group
+ * (42 + 10*(s5-4) mod 64); rem[64] carries it to the member kernel. */
+__global__ void kernel_build_epoch_groups(
+    uint64_t group_base, uint32_t n_groups,
+    int window_start, int s_early_total,
+    const uint32_t * __restrict__ d_midstate,
+    const uint8_t * __restrict__ d_prefix_remainder, int prefix_remainder_len,
+    const uint8_t * __restrict__ d_dummy_sigs,
+    group_desc_t * __restrict__ d_groups
+#if ZLAB_HITPATH
+    , uint32_t *d_hit_reset
+#endif
+    )
+{
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+#if ZLAB_HITPATH
+    /* Runs before this launch's member + digest kernels on the same stream. */
+    if (t == 0) *d_hit_reset = 0;
+#endif
+    if (t >= (int)n_groups) return;
+    uint64_t g = group_base + (uint64_t)t;
+    uint8_t early[5];
+    unrank_combo(g, (int)window_start, (int)s_early_total - 1, early);
+    uint32_t state[8];
+    for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
+    uint32_t curW[16];
+    uint8_t *cur = (uint8_t *)curW;
+    int cur_pos = 0;
+    for (int i = 0; i < prefix_remainder_len; i++) {
+        cur[cur_pos++] = d_prefix_remainder[i];
+        if (cur_pos == 64) {
+            uint32_t blk[16];
+            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
+    }
+    /* Only s1..s4 can precede s5, so the skip scan stops after 4 matches. */
+    int sel = 0;
+    const int s5 = (int)early[4];
+    for (int i = 0; i < s5; i++) {
+        if (sel < s_early_total - 1 && (int)early[sel] == i) { sel++; continue; }
+        const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
+        for (int b = 0; b < SIG_PUSH_SIZE; b++) {
+            cur[cur_pos++] = row[b];
+            if (cur_pos == 64) {
+                uint32_t blk[16];
+                for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+                _SHA256Transform(state, blk);
+                cur_pos = 0;
+            }
+        }
+    }
+    group_desc_t *d = d_groups + t;
+    for (int i = 0; i < 8; i++) d->mid[i] = state[i];
+    for (int i = 0; i < cur_pos; i++) d->rem[i] = cur[i];
+    d->rem_len = (uint8_t)cur_pos;
+    for (int i = 0; i < 5; i++) d->early[i] = early[i];
+}
+
+/* Level 2: one thread per member slot t (local to the launch). d_slot_start
+ * is the host-built cumulative member count over this launch's groups; the
+ * binary search finds the group, then j = s5 + 1 + (t - slot_start[group]).
+ * Resumes the group midstate/staging and hashes pushes s5+1..136 minus j.
+ * The finished stream is byte-identical to the flat producer's: 42 +
+ * 10*(s5-4) + 10*(135-s5) = 1352 bytes, so cur_pos lands on 8 and the
+ * descriptor matches the pinned shape exactly. */
+__global__ void kernel_build_epoch_members(
+    int n_slots, int n_groups,
+    const uint32_t * __restrict__ d_slot_start,
+    const uint8_t * __restrict__ d_dummy_sigs,
+    const group_desc_t * __restrict__ d_groups,
+    epoch_desc_t * __restrict__ d_epochs
+    )
+{
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n_slots) return;
+    int lo = 0, hi = n_groups;          /* d_slot_start[0] == 0 */
+    while (lo + 1 < hi) {
+        int mid = (lo + hi) >> 1;
+        if ((int)d_slot_start[mid] <= t) lo = mid; else hi = mid;
+    }
+    const group_desc_t *gd = d_groups + lo;
+    const int s5 = (int)gd->early[4];
+    const int j = s5 + 1 + (t - (int)d_slot_start[lo]);
+    uint32_t state[8];
+    for (int i = 0; i < 8; i++) state[i] = gd->mid[i];
+    uint32_t curW[16];
+    uint8_t *cur = (uint8_t *)curW;
+    int cur_pos = (int)gd->rem_len;
+    for (int i = 0; i < cur_pos; i++) cur[i] = gd->rem[i];
+    for (int p = s5 + 1; p < 137; p++) {
+        if (p == j) continue;
+        const uint8_t *row = d_dummy_sigs + (size_t)p * SIG_PUSH_SIZE;
+        for (int b = 0; b < SIG_PUSH_SIZE; b++) {
+            cur[cur_pos++] = row[b];
+            if (cur_pos == 64) {
+                uint32_t blk[16];
+                for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+                _SHA256Transform(state, blk);
+                cur_pos = 0;
+            }
+        }
+    }
+    epoch_desc_t *d = d_epochs + t;
+    for (int i = 0; i < 8; i++) d->mid[i] = state[i];
+    d->remW[0] = bswap32(curW[0]);
+    d->remW[1] = bswap32(curW[1]);
+    d->early[0] = gd->early[0]; d->early[1] = gd->early[1];
+    d->early[2] = gd->early[2]; d->early[3] = gd->early[3];
+    d->early[4] = (uint8_t)s5;
+    d->early[5] = (uint8_t)j;
 }
 
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
@@ -2454,6 +2606,173 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if ZLAB_HIERARCH && ZLAB_ASYNC && ZLAB_HITPATH
+        /* Depth-2 ping-pong pipeline over the hierarchical producer. Two
+         * epochs/group/hit buffer sets on two streams: batch i is enqueued
+         * on stream i&1 (slot table H2D, group midstates, member
+         * descriptors, digest, event) and retires only after its event
+         * synchronizes, so the GPU never waits on the host between launches
+         * and the hit readback plus the next launch's host-side group walk
+         * overlap GPU work. Buffer i&1 is reused only once batch i-2 has
+         * been fully retired, so the packed hit counter reset at the head of
+         * kernel A can never race a live consumer or an unread record. */
+        {
+            const int ZH_MAX_G = QSB_SE_LAUNCH_BLOCKS + 2;
+            uint64_t n_groups_total = binom_u64(QSB_SE_CUT, QSB_SE_EARLY - 1);
+            uint64_t group_base = 0, slots_retired = 0;
+            uint32_t *h_slot[2] = {NULL, NULL};
+            if (cudaHostAlloc((void **)&h_slot[0], (ZH_MAX_G + 1) * sizeof(uint32_t),
+                              cudaHostAllocDefault) != cudaSuccess
+             || cudaHostAlloc((void **)&h_slot[1], (ZH_MAX_G + 1) * sizeof(uint32_t),
+                              cudaHostAllocDefault) != cudaSuccess) {
+                fprintf(stderr, "OOM: pinned slot tables\n"); return 1;
+            }
+            uint8_t *hitbuf[2] = {NULL, NULL};
+            epoch_desc_t *d_ep2[2] = {NULL, NULL};
+            group_desc_t *d_gr2[2] = {NULL, NULL};
+            uint32_t *d_slot2[2] = {NULL, NULL};
+            cudaStream_t zstream[2];
+            cudaEvent_t zdone[2];
+            for (int b = 0; b < 2; b++) {
+                if (cudaMalloc(&hitbuf[b], 4 + (size_t)1024 * ZLAB_HIT_REC) != cudaSuccess
+                 || cudaMalloc(&d_ep2[b], ((size_t)QSB_SE_LAUNCH_BLOCKS + 256) * sizeof(epoch_desc_t)) != cudaSuccess
+                 || cudaMalloc(&d_gr2[b], (size_t)ZH_MAX_G * sizeof(group_desc_t)) != cudaSuccess
+                 || cudaMalloc(&d_slot2[b], (size_t)(ZH_MAX_G + 1) * sizeof(uint32_t)) != cudaSuccess
+                 || cudaStreamCreate(&zstream[b]) != cudaSuccess
+                 || cudaEventCreate(&zdone[b]) != cudaSuccess) {
+                    fprintf(stderr, "ERROR: pipeline allocation failed\n"); return 1;
+                }
+            }
+            int n_inflight = 0, next_enq = 0, next_ret = 0, done_enq = 0;
+            uint32_t batch_pos_of[2] = {0, 0};
+            while (!(done_enq && n_inflight == 0)) {
+                while (!done_enq && n_inflight < 2) {
+                    const int buf = next_enq & 1;
+                    cudaStream_t st = zstream[buf];
+                    uint64_t slots_left = n_epochs - epoch_base;
+                    int want = (slots_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
+                               ? (int)slots_left : QSB_SE_LAUNCH_BLOCKS;
+                    /* Take whole groups only: the last group may overshoot
+                     * the launch size by up to 130 member slots, which keeps
+                     * the member enumeration gapless across launches (every
+                     * member slot of every group is consumed exactly once).
+                     * acc can never pass the true total: the member slots of
+                     * all C(137,5) groups sum to exactly C(137,6). */
+                    uint32_t *slot_tab = h_slot[buf];
+                    int g = 0; uint32_t acc = 0; slot_tab[0] = 0;
+                    while (acc < (uint32_t)want
+                           && group_base + (uint64_t)g < n_groups_total
+                           && g < ZH_MAX_G - 1) {
+                        uint8_t gset[5];
+                        unrank_combo_host(group_base + (uint64_t)g, QSB_SE_CUT,
+                                          QSB_SE_EARLY - 1, gset);
+                        acc += (uint32_t)(QSB_SE_CUT - 1 - (int)gset[QSB_SE_EARLY - 2]);
+                        g++;
+                        slot_tab[g] = acc;
+                    }
+                    int n_slots = (int)acc;
+                    if (n_slots <= 0) { done_enq = 1; break; }
+                    cudaMemcpyAsync(d_slot2[buf], slot_tab, (size_t)(g + 1) * sizeof(uint32_t),
+                                    cudaMemcpyHostToDevice, st);
+                    kernel_build_epoch_groups<<<(g + 255) / 256, 256, 0, st>>>(
+                        group_base, (uint32_t)g, window_start, s_early,
+                        d_mid, d_prem, (int)dp.prefix_remainder_len,
+                        d_dsigs, d_gr2[buf], (uint32_t *)hitbuf[buf]);
+                    kernel_build_epoch_members<<<(n_slots + 255) / 256, 256, 0, st>>>(
+                        n_slots, g, d_slot2[buf], d_dsigs, d_gr2[buf], d_ep2[buf]);
+                    kernel_digest<<<n_slots, QSB_SE_PER_EPOCH, 0, st>>>(
+                        (const uint8_t*)NULL, n_pool, t_sel,
+                        d_mid,
+                        d_prem, 0,
+                        d_dsigs, d_tail, dp.tail_section_len,
+                        d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                        d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                        d_gt,
+                        (uint32_t *)hitbuf[buf], (uint32_t *)(hitbuf[buf] + 4),
+                        hitbuf[buf] + 8, d_hit_sighash,
+                        d_hit_keynonce, d_hit_pubhash,
+                        d_hit_qx, d_hit_qy,
+                        n_slots * QSB_SE_PER_EPOCH, easy, single_hash, calibrate,
+                        window_start, (uint64_t)0,
+                        t_win, s_early, d_early, fast_inc, d_const_words, d_ep2[buf]);
+                    cudaEventRecord(zdone[buf], st);
+                    group_base += (uint64_t)g;
+                    epoch_base += (uint64_t)n_slots;
+                    batch_pos_of[buf] = (uint32_t)(n_slots * QSB_SE_PER_EPOCH);
+                    next_enq++; n_inflight++;
+                }
+                if (n_inflight == 0) break;
+                const int buf = next_ret & 1;
+                uint8_t *zh_buf = hitbuf[buf];
+                cudaEventSynchronize(zdone[buf]);
+                cudaError_t perr = cudaGetLastError();
+                if (perr != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(perr)); return 1; }
+                total_searched += batch_pos_of[buf];
+                g_total_searched = total_searched;
+                slots_retired += batch_pos_of[buf] / QSB_SE_PER_EPOCH;
+                {
+                    uint32_t h_hit = 0;
+                    cudaMemcpy(zh_host, zh_buf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                    memcpy(&h_hit, zh_host, 4);
+                    if (h_hit > 0) {
+                        int nh = (h_hit > 64) ? 64 : (int)h_hit;
+                        if (nh > ZLAB_HIT_FIRST)
+                            cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                                       zh_buf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                                       (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                        /* Complete records only; one write() per launch. */
+                        char wb[64 * 96];
+                        int wl = 0;
+                        for (int h = 0; h < nh; h++) {
+                            uint32_t raw; memcpy(&raw, zh_host + 4 + h * ZLAB_HIT_REC, 4);
+                            const uint8_t *combo = zh_host + 8 + h * ZLAB_HIT_REC;
+                            wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n",
+                                           combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
+                                           (int)((raw >> 31) & 1), (int)((raw >> 30) & 1), (int)(raw & 0x3FFFFFFF));
+                        }
+                        const char *wp = wb;
+                        while (wl > 0) {
+                            ssize_t k = write(zh_fd, wp, (size_t)wl);
+                            if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                            wp += k; wl -= (int)k;
+                        }
+                        hit_counter += (uint64_t)nh;
+                        g_hit_counter = hit_counter;
+                    }
+                }
+                struct timespec t_now;
+                clock_gettime(CLOCK_MONOTONIC, &t_now);
+                double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
+                    + (t_now.tv_nsec - t_last_se.tv_nsec) / 1e9;
+                if (secs_since >= 15.0) {
+                    double elapsed_total = (t_now.tv_sec - t0.tv_sec)
+                        + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
+                    double rate = total_searched / elapsed_total;
+                    printf("  [GPU %d] epoch=%llu/%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
+                           gpu_index,
+                           (unsigned long long)slots_retired, (unsigned long long)n_epochs,
+                           (unsigned long long)(total_searched / 1000000),
+                           (unsigned long long)(global_total / 1000000),
+                           rate / 1e6, elapsed_total);
+                    fflush(stdout);
+                    if (summary_f) {
+                        time_t now_epoch = time(NULL);
+                        fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                                (long)now_epoch, (unsigned long long)total_searched,
+                                rate / 1e6, elapsed_total, (unsigned long long)hit_counter);
+                        fflush(summary_f);
+                    }
+                    t_last_se = t_now;
+                }
+                next_ret++; n_inflight--;
+            }
+            for (int b = 0; b < 2; b++) {
+                cudaStreamDestroy(zstream[b]); cudaEventDestroy(zdone[b]);
+                cudaFree(hitbuf[b]); cudaFree(d_ep2[b]); cudaFree(d_gr2[b]); cudaFree(d_slot2[b]);
+            }
+            cudaHostFree(h_slot[0]); cudaHostFree(h_slot[1]);
+        }
+#else
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
@@ -2600,6 +2919,7 @@ int main(int argc, char **argv) {
             }
             if (epoch_base >= n_epochs) break;
         }
+#endif
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
