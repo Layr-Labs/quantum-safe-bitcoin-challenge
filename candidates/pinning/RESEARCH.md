@@ -1752,3 +1752,50 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Slotted two-stream host pipeline (draheemking, Claude Opus 5 / Claude Code)
+
+The promoted host loop was fully serial per 16M batch: a blocking counter reset,
+five launches on the legacy default stream, `cudaDeviceSynchronize`, then a
+blocking hit readback. Between the prepare kernel's last wave and the next
+batch's first wave the GPU ran only the root phase — `qsb_root_group_prepare`
+(512 CTAs), `qsb_invert_super_roots` (**one** CTA executing one scalar
+`_ModInv` on lane zero) and `qsb_root_group_finish` — plus the finish kernel's
+tail, the host round trips and the launch latency of the next batch. None of
+that overlapped useful prepare work.
+
+This change keeps the device code byte-identical and only restructures the
+host loop. Batch `k` runs on slot `k % QSB_SLOTS` (default 2). Each slot owns a
+non-blocking stream, its own state/tree/root/super-root buffers, hit counter
+and index buffer, a 32-byte per-sequence midstate buffer, and pinned host
+staging for the midstate upload and the hit readback. Before a slot is reused
+the host waits on that slot's completion event, drains its hits from pinned
+memory into `results/`, then enqueues the next batch: async midstate copy,
+`cudaMemsetAsync` of the counter, the five kernels, two async D2H copies and an
+event record. The host therefore never synchronizes the device; the next
+batch's prepare kernel is always queued behind the current batch's root phase
+and finish kernel, so the single-CTA inversion, kernel tails and host latency
+are hidden by prepare CTAs of the other slot. The persisting-L2 access-policy
+window for the table is applied to both slot streams. Memory grows by one
+extra state set (about 2.0 GiB).
+
+Hit records are unchanged (`sequence=`, `locktime=`, `hash_choice=`, `recid=`),
+tagged with the slot's sequence and batch base locktime. At most `QSB_SLOTS`
+in-flight batches (about 50 ms of work) are lost when the harness timeout
+fires, the same order as the serial loop's single in-flight batch.
+
+Measured on a rented RTX 4090 (Secure Cloud, host CUDA 13.2, CUDA 12.8 nvcc,
+default-PTX build exactly as the harness builds it), seed 12345 problem, 30 s
+warm runs in ABBA order, every hit re-verified by `harness/verify.py`:
+
+| run | variant | verified hits | hit-derived rate |
+|-----|---------|---------------|------------------|
+| 1 | promoted (serial loop) | 2216 | 616.5M/s |
+| 2 | slotted, 2 streams | 2355 | 655.6M/s |
+| 3 | slotted, 2 streams | 2364 | 658.1M/s |
+| 4 | promoted (serial loop) | 2195 | 611.4M/s |
+
+Geometric-mean verified-hit-rate ratio **1.0699**; every (sequence, locktime,
+recid) found by the serial runs is contained in the slotted runs, whose search
+frontier is 1.4 sequences further after the same 30 s. A third slot changes
+nothing (ratio 0.997 on hit rate), so the default stays at two.
