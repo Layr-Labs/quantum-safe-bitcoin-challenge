@@ -1158,6 +1158,320 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 }
 
 /* ============================================================
+ * Ranked short-epoch external inversion pipeline.
+ *
+ * kernel_digest above batch-inverts one 256-lane denominator tree per CTA
+ * (32768 _ModInv per 8M launch) while keeping every lane resident through
+ * SHA, the fixed-base chain, and recovery. This pipeline ends the producer
+ * before its inversion: qsb_sub_prepare checkpoints its product tree and
+ * publishes one root per CTA; two group levels reduce all roots to one
+ * scalar _ModInv per launch; qsb_sub_finish expands the inverses and runs
+ * recovery plus the ranked gate. Only the ranked short-epoch path uses it;
+ * generic/enum/tiles/debug launches keep kernel_digest.
+ *
+ * The collective machinery (checkpointed product/inverse trees, root
+ * grouping, super-root inversion) mirrors the promoted pinning pipeline;
+ * subset's qsb_field_mul already returns canonical residues, so the extra
+ * leaf/root normalization pinning applies is a no-op here and is omitted.
+ * The SHA frontend, streamed fixed-base chain, XYZZ recovery, and hit
+ * records are the subset ranked path moved verbatim. Per 8M launch the
+ * pipeline performs one _ModInv instead of 32768, at the cost of 128 bytes
+ * of checkpoint traffic per candidate plus root/group traffic.
+ * ============================================================ */
+
+#define QSB_PIPE_CKPT_NODES 254
+#define QSB_PIPE_CKPT_STRIDE 256
+#define QSB_PIPE_MAX_GROUPS 256
+
+/* Split form of the block inverse. The prepare kernel checkpoints the 254
+ * internal non-root product-tree nodes to global memory and publishes the
+ * raw root. A small intervening kernel inverts each root. The finish kernel
+ * restores the immutable product tree, expands the supplied root inverse,
+ * and returns canonical leaf inverses. The packed node numbering is the
+ * same work-efficient binary tree; leaves come from the saved W field and
+ * node 510 is omitted because roots owns it. */
+__device__ __forceinline__ void qsb_sub_product_checkpoint(
+    uint64_t *value, uint64_t *roots, uint64_t *checkpoint
+) {
+    __shared__ uint64_t products[4][512];
+    int tid=threadIdx.x;
+    size_t block_base=(size_t)blockIdx.x*4u*QSB_PIPE_CKPT_STRIDE;
+
+    #pragma unroll
+    for(int k=0;k<4;k++)products[k][tid]=value[k];
+    __syncthreads();
+
+    int offset=0;
+    #pragma unroll 1
+    for(int count=256;count>1;count>>=1){
+        int half=count>>1;
+        if(tid<half){
+            uint64_t a[5],b[5],out[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                a[k]=products[k][offset+tid];
+                b[k]=products[k][offset+half+tid];
+            }
+            a[4]=b[4]=0;
+            qsb_field_mul(out,a,b);
+            int node=offset+count+tid;
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                products[k][node]=out[k];
+                if(node<510)
+                    checkpoint[block_base+(size_t)k*QSB_PIPE_CKPT_STRIDE+node-256]=out[k];
+            }
+        }
+        offset+=count;
+        if(count>2)__syncthreads();
+    }
+
+    if(tid==0){
+        #pragma unroll
+        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][510];
+    }
+}
+
+__device__ __forceinline__ void qsb_sub_inverse_checkpoint(
+    uint64_t *value, const uint64_t *roots, const uint64_t *checkpoint
+) {
+    __shared__ uint64_t products[4][512];
+    __shared__ uint64_t inverses[4][256];
+    int tid=threadIdx.x;
+    size_t block_base=(size_t)blockIdx.x*4u*QSB_PIPE_CKPT_STRIDE;
+
+    /* Each lane supplies its saved W leaf and all but the last two lanes
+     * restore one internal node. Lane zero also publishes the external root inverse.
+     * One barrier makes both immutable inputs visible to the downward pass. */
+    #pragma unroll
+    for(int k=0;k<4;k++){
+        products[k][tid]=value[k];
+        if(tid<QSB_PIPE_CKPT_NODES)
+            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_PIPE_CKPT_STRIDE+tid];
+        if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
+    }
+    __syncthreads();
+
+    int offset=508;
+    #pragma unroll 1
+    for(int count=2;count<256;count<<=1){
+        int half=count>>1;
+        if(tid<count){
+            int local_parent=tid&(half-1);
+            uint64_t parent_inv[5],sibling[5],child_inv[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                parent_inv[k]=inverses[k][offset+count-256+local_parent];
+                sibling[k]=products[k][offset+(tid^half)];
+            }
+            parent_inv[4]=sibling[4]=0;
+            qsb_field_mul(child_inv,parent_inv,sibling);
+            #pragma unroll
+            for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
+        }
+        offset-=count<<1;
+        __syncthreads();
+    }
+
+    uint64_t parent_inv[5],sibling[5];
+    #pragma unroll
+    for(int k=0;k<4;k++){
+        parent_inv[k]=inverses[k][tid&127];
+        sibling[k]=products[k][tid^128];
+    }
+    parent_inv[4]=sibling[4]=0;
+    qsb_field_mul(value,parent_inv,sibling);
+}
+
+/* Batch the per-search-CTA roots one level further. Groups of 256 roots use
+ * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
+ * group roots. An 8M-candidate launch (32768 search CTAs) therefore executes
+ * one _ModInv instead of 32768 independent inversions. Inactive lanes of a
+ * partial last group supply the multiplicative identity. */
+__global__ void __launch_bounds__(256,2) qsb_sub_group_prepare(
+    const uint64_t *roots, int count, uint64_t *super_roots,
+    uint64_t *root_checkpoint
+) {
+    int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    bool active=i<count;
+    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
+                   active?roots[(size_t)i*4u+1]:0ULL,
+                   active?roots[(size_t)i*4u+2]:0ULL,
+                   active?roots[(size_t)i*4u+3]:0ULL,0};
+    qsb_sub_product_checkpoint(r,super_roots,root_checkpoint);
+}
+
+__global__ void __launch_bounds__(256,1) qsb_sub_invert_super(
+    uint64_t *super_roots, int count
+) {
+    /* Always a full 256-lane tree; lanes past count contribute identity
+     * factors, so any count in [1,256] inverts correctly. */
+    int tid=(int)threadIdx.x;
+    bool active=tid<count;
+    uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
+                   active?super_roots[(size_t)tid*4u+1]:0ULL,
+                   active?super_roots[(size_t)tid*4u+2]:0ULL,
+                   active?super_roots[(size_t)tid*4u+3]:0ULL,0};
+    qsb_block_inverse_tree(r);
+    if(active){
+        #pragma unroll
+        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
+    }
+}
+
+__global__ void __launch_bounds__(256,2) qsb_sub_group_finish(
+    uint64_t *roots, int count, const uint64_t *super_roots,
+    const uint64_t *root_checkpoint
+) {
+    int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    bool active=i<count;
+    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
+                   active?roots[(size_t)i*4u+1]:0ULL,
+                   active?roots[(size_t)i*4u+2]:0ULL,
+                   active?roots[(size_t)i*4u+3]:0ULL,0};
+    qsb_sub_inverse_checkpoint(r,super_roots,root_checkpoint);
+    if(active){
+        #pragma unroll
+        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+    }
+}
+
+// Eight aligned SoA vector planes; stride is this launch's candidate count.
+__device__ __forceinline__ void qsb_sub_save_state(ulonglong2 *state, int stride, int idx,
+    const uint64_t *C, const uint64_t *Y, const uint64_t *W, const uint64_t *ZZZ) {
+    state[(size_t)0*stride+idx]=make_ulonglong2(C[0],C[1]);
+    state[(size_t)1*stride+idx]=make_ulonglong2(C[2],C[3]);
+    state[(size_t)2*stride+idx]=make_ulonglong2(Y[0],Y[1]);
+    state[(size_t)3*stride+idx]=make_ulonglong2(Y[2],Y[3]);
+    state[(size_t)4*stride+idx]=make_ulonglong2(W[0],W[1]);
+    state[(size_t)5*stride+idx]=make_ulonglong2(W[2],W[3]);
+    state[(size_t)6*stride+idx]=make_ulonglong2(ZZZ[0],ZZZ[1]);
+    state[(size_t)7*stride+idx]=make_ulonglong2(ZZZ[2],ZZZ[3]);
+}
+
+__device__ __forceinline__ void qsb_sub_load_state(const ulonglong2 *state, int stride, int idx,
+    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ) {
+    ulonglong2 a=state[(size_t)0*stride+idx],b=state[(size_t)1*stride+idx];
+    C[0]=a.x;C[1]=a.y;C[2]=b.x;C[3]=b.y;
+    a=state[(size_t)2*stride+idx];b=state[(size_t)3*stride+idx];
+    Y[0]=a.x;Y[1]=a.y;Y[2]=b.x;Y[3]=b.y;
+    a=state[(size_t)4*stride+idx];b=state[(size_t)5*stride+idx];
+    W[0]=a.x;W[1]=a.y;W[2]=b.x;W[3]=b.y;
+    a=state[(size_t)6*stride+idx];b=state[(size_t)7*stride+idx];
+    ZZZ[0]=a.x;ZZZ[1]=a.y;ZZZ[2]=b.x;ZZZ[3]=b.y;
+}
+
+__global__ void __launch_bounds__(256,2) qsb_sub_prepare(
+    const epoch_desc_t *epochs, const uint8_t *gT,
+    ulonglong2 *state, uint64_t *roots, uint64_t *tree, int count) {
+    int idx=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    /* The host dispatches whole 256-candidate epochs, so every lane is a
+     * live candidate; only the inherited zero-denominator singularity
+     * (xP == xR, vanishingly rare in the benchmark stream) substitutes the
+     * identity factor, exactly as kernel_digest does. */
+    const epoch_desc_t *desc=epochs+blockIdx.x;
+    uint32_t first[8];
+    #pragma unroll
+    for(int i=0;i<8;i++)first[i]=desc->mid[i];
+    qsb_scheduled_window_hash(first,desc,threadIdx.x);
+    uint32_t b2[16];
+    #pragma unroll
+    for(int i=0;i<8;i++)b2[i]=first[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for(int i=9;i<15;i++)b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2,b2);
+    uint64_t z[4];
+    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    uint64_t C[4],Y[4],ZZ[4],ZZZ[4],W[5],xR[4];
+    _FixedBaseSignedXYZZStream(C,Y,ZZ,ZZZ,z,gT);
+    Load256(xR,QSB_U2R);
+    qsb_xyzz_finish_prepare(C,ZZ,xR,W); // C now d; W = ZZ^2*d.
+    _ModSqr(C,C); _ModMult(C,ZZ);     // C = ZZ*d^2.
+    qsb_sub_save_state(state,count,idx,C,Y,W,ZZZ);
+    if(!(W[0]|W[1]|W[2]|W[3]))W[0]=1; // singular lane cannot poison its batch.
+    qsb_sub_product_checkpoint(W,roots,tree);
+}
+
+__global__ void __launch_bounds__(256,3) qsb_sub_finish(
+    const epoch_desc_t *epochs,
+    const ulonglong2 *state, const uint64_t *roots, const uint64_t *tree,
+    int count, uint32_t *hit_count, uint32_t *hit_idx, uint8_t *hit_combos) {
+    int idx=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    uint64_t C[4],Y[4],W[4],ZZZ[4],inv[5];
+    qsb_sub_load_state(state,count,idx,C,Y,W,ZZZ);
+    bool usable=(W[0]|W[1]|W[2]|W[3])!=0;
+    Load256(inv,W);inv[4]=0;
+    if(!usable)inv[0]=1;
+    qsb_sub_inverse_checkpoint(inv,roots,tree);
+    if(!usable)return; // Collective is complete before any lane returns.
+    uint64_t xR[4],yR[4],q1x[4],q2x[4];
+    Load256(xR,QSB_U2R);Load256(yR,QSB_U2R+4);
+    uint32_t y_parities=qsb_xyzz_finish_precomputed(C,Y,W,ZZZ,inv,xR,yR,q1x,q2x);
+    /* Ranked single-hash gate only: the host selects this pipeline exactly
+     * for single_hash && !easy && !calibrate, so the second public-key
+     * hash and the diagnostic DER paths of kernel_digest are omitted here
+     * rather than kept dead. Both recovery IDs are still tried. */
+    int v=0, hash_choice=0, recid=0;
+    for(int ri=0;ri<2&&!v;ri++){
+        uint64_t sx0=ri ? q2x[0] : q1x[0];
+        uint64_t sx1=ri ? q2x[1] : q1x[1];
+        uint64_t sx2=ri ? q2x[2] : q1x[2];
+        uint64_t sx3=ri ? q2x[3] : q1x[3];
+        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+        uint32_t pb[16];
+        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        int vv = gpu_bench_valid_words(hs);
+        if(vv){ v=1;hash_choice=0;recid=ri; break; }
+        continue;
+    }
+    if(v){uint32_t p=atomicAdd(hit_count,1);
+        if(p<1024) {
+            hit_idx[p]=((uint32_t)idx)|((uint32_t)recid<<30)|((uint32_t)hash_choice<<31);
+            const epoch_desc_t *se_desc=epochs+blockIdx.x;
+            for(int i=0;i<6;i++)hit_combos[p*MAX_T+i]=se_desc->early[i];
+            for(int i=0;i<3;i++)hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
+        }
+    }
+}
+
+static cudaError_t qsb_launch_sub_pipeline(int nblk, int count,
+    const epoch_desc_t *epochs, const uint8_t *gT,
+    ulonglong2 *state, uint64_t *roots, uint64_t *tree,
+    uint64_t *super_roots, uint64_t *root_tree,
+    uint32_t *hit_count, uint32_t *hit_idx, uint8_t *hit_combos) {
+    if(nblk<1 || nblk>QSB_SE_LAUNCH_BLOCKS || count!=nblk*QSB_SE_PER_EPOCH)
+        return cudaErrorInvalidValue;
+    int groups=(nblk+255)/256;
+    if(groups<1 || groups>QSB_PIPE_MAX_GROUPS) return cudaErrorInvalidValue;
+    cudaError_t e;
+    qsb_sub_prepare<<<nblk,256>>>(epochs,gT,state,roots,tree,count);
+    if((e=cudaGetLastError())!=cudaSuccess)return e;
+    qsb_sub_group_prepare<<<groups,256>>>(roots,nblk,super_roots,root_tree);
+    if((e=cudaGetLastError())!=cudaSuccess)return e;
+    qsb_sub_invert_super<<<1,256>>>(super_roots,groups);
+    if((e=cudaGetLastError())!=cudaSuccess)return e;
+    qsb_sub_group_finish<<<groups,256>>>(roots,nblk,super_roots,root_tree);
+    if((e=cudaGetLastError())!=cudaSuccess)return e;
+    qsb_sub_finish<<<nblk,256>>>(epochs,state,roots,tree,count,hit_count,hit_idx,hit_combos);
+    return cudaGetLastError();
+}
+
+/* ============================================================
  * Fixed-base table construction on the GPU (signed-digit table)
  *
  * Entry (ch, d) is (2d+1) * 2^(16*ch) * (G/2) in affine form, limbs little-
@@ -1986,6 +2300,42 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_qx, 1024 * 32);
     cudaMalloc(&d_hit_qy, 1024 * 32);
 
+    /* Ranked pipeline scratch: 128 bytes of checkpoint state per candidate
+     * plus one product-tree root per search CTA, one tree node plane per
+     * CTA, and the small second-level group hierarchy. Sized for a full
+     * 8M-candidate launch; smaller last launches reuse the same buffers
+     * with their own stride. If allocation fails the search still runs
+     * through the monolithic kernel. */
+    ulonglong2 *d_pipe_state = NULL;
+    uint64_t *d_pipe_roots = NULL, *d_pipe_tree = NULL;
+    uint64_t *d_pipe_super = NULL, *d_pipe_root_tree = NULL;
+    int use_pipeline = 1;
+    if (cudaMalloc(&d_pipe_state,
+            (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_SE_PER_EPOCH * 8 * sizeof(ulonglong2)) != cudaSuccess)
+        use_pipeline = 0;
+    if (use_pipeline && cudaMalloc(&d_pipe_roots,
+            (size_t)QSB_SE_LAUNCH_BLOCKS * 4 * sizeof(uint64_t)) != cudaSuccess)
+        use_pipeline = 0;
+    if (use_pipeline && cudaMalloc(&d_pipe_tree,
+            (size_t)QSB_SE_LAUNCH_BLOCKS * 4 * QSB_PIPE_CKPT_STRIDE * sizeof(uint64_t)) != cudaSuccess)
+        use_pipeline = 0;
+    if (use_pipeline && cudaMalloc(&d_pipe_super,
+            (size_t)QSB_PIPE_MAX_GROUPS * 4 * sizeof(uint64_t)) != cudaSuccess)
+        use_pipeline = 0;
+    if (use_pipeline && cudaMalloc(&d_pipe_root_tree,
+            (size_t)QSB_PIPE_MAX_GROUPS * 4 * QSB_PIPE_CKPT_STRIDE * sizeof(uint64_t)) != cudaSuccess)
+        use_pipeline = 0;
+    if (!use_pipeline) {
+        fprintf(stderr, "WARN: pipeline scratch unavailable; using monolithic kernel\n");
+        if (d_pipe_state) cudaFree(d_pipe_state);
+        if (d_pipe_roots) cudaFree(d_pipe_roots);
+        if (d_pipe_tree) cudaFree(d_pipe_tree);
+        if (d_pipe_super) cudaFree(d_pipe_super);
+        if (d_pipe_root_tree) cudaFree(d_pipe_root_tree);
+        d_pipe_state = NULL; d_pipe_roots = d_pipe_tree = NULL;
+        d_pipe_super = d_pipe_root_tree = NULL;
+    }
+
     int BATCH = 8388608;  /* 8M: launch/sync overhead under 1%; enum mode has no host fill cost */
     int BLKSZ = 256;
 
@@ -2146,7 +2496,18 @@ int main(int argc, char **argv) {
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            /* The ranked short-epoch configuration (single hash, no
+             * diagnostics) runs the external-inversion pipeline; every
+             * other mode keeps the monolithic kernel with identical
+             * hit semantics. */
+            cudaError_t launch_error;
+            if (use_pipeline && single_hash && !easy && !calibrate)
+                launch_error = qsb_launch_sub_pipeline(nblk, batch_pos, d_epochs,
+                    d_gt, d_pipe_state, d_pipe_roots, d_pipe_tree,
+                    d_pipe_super, d_pipe_root_tree,
+                    d_hit_cnt, d_hit_idx, d_hit_combos);
+            else {
+                kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -2160,6 +2521,13 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+                launch_error = cudaGetLastError();
+            }
+            if (launch_error != cudaSuccess) {
+                fprintf(stderr, "Ranked launch failed: %s\n",
+                        cudaGetErrorString(launch_error));
+                return 1;
+            }
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
