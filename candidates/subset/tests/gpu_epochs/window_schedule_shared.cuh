@@ -2,6 +2,7 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
+#define QSB_FIRST_SLOTS 64   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][256];
 __device__ uint32_t QSB_WINDOW_SECOND[64][256];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
@@ -67,6 +68,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     }
     printf("Window schedule classes: first=%d second=%d of 256\n",first_distinct,distinct);
     qsb_first_class_count=first_distinct;
+    if(first_distinct>QSB_FIRST_SLOTS)return 1;
     for(int slot=0;slot<first_distinct;slot++)
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
     if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
@@ -77,25 +79,33 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
-__device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
-        const epoch_desc_t *epoch, int lane) {
-    // Every lane in this epoch's block reaches the shared-memory barrier.
-    __shared__ uint32_t first_states[8][256];
-    if(lane<QSB_FIRST_COUNT) {
-        uint32_t initial[8],W[16];
-        #pragma unroll
-        for(int j=0;j<8;j++)initial[j]=epoch->mid[j];
-        W[0]=epoch->remW[0];W[1]=epoch->remW[1];
-        #pragma unroll
-        for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][lane];
-        _SHA256Transform(initial,W);
-        #pragma unroll
-        for(int j=0;j<8;j++)first_states[j][lane]=initial[j];
-    }
-    __syncthreads();
-    int first_slot=QSB_FIRST_CLASS[lane];
+/* First-block states for every (epoch, class) of a launch, computed as its own
+ * producer stage: one block per epoch, one thread per first-block class. The
+ * consumer used to spend a thread barrier plus one compression of block time
+ * per epoch while 54 leader lanes built these states and the other lanes
+ * waited; now each lane reads its class state (32 bytes). */
+__global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
+        uint32_t * __restrict__ d_first) {
+    const epoch_desc_t *ep = d_epochs + blockIdx.x;
+    const int c = threadIdx.x;
+    uint32_t st[8], W[16];
     #pragma unroll
-    for(int j=0;j<8;j++)state[j]=first_states[j][first_slot];
+    for(int j=0;j<8;j++)st[j]=ep->mid[j];
+    W[0]=ep->remW[0];W[1]=ep->remW[1];
+    #pragma unroll
+    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+    _SHA256Transform(st,W);
+    const size_t base=((size_t)blockIdx.x*QSB_FIRST_SLOTS+(size_t)c)*8;
+    #pragma unroll
+    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+}
+
+__device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
+        const epoch_desc_t *epoch, int lane, const uint32_t *first) {
+    (void)epoch;
+    const int first_slot=QSB_FIRST_CLASS[lane];
+    #pragma unroll
+    for(int j=0;j<8;j++)state[j]=first[first_slot*8+j];
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
