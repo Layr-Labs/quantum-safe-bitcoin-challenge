@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "context": {
+    "benchmark_id": "subset",
+    "target": "trusted-nvcc-default-sm52-jit-sm89",
+    "accepted_base_id": "db248c65-44ef-4aba-b20c-c244a4cd334a",
+    "accepted_promotion_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+    "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+    "selected_pending_base": "1a3af597-93d6-4667-9903-590ec573cb96",
+    "pending_frontier_ids": [
+      "PR200",
+      "1a3af597-93d6-4667-9903-590ec573cb96",
+      "3ac33245-a32d-4f91-927c-f84b00cc3b06",
+      "b25340d4-8233-406a-a0ea-a290cda248aa"
+    ],
+    "reviewed_pending_heads": {
+      "1a3af597-93d6-4667-9903-590ec573cb96": "5b4a5054ab494586dded4806c72f025784ea8da4",
+      "3ac33245-a32d-4f91-927c-f84b00cc3b06": "d1c5d7cba08bf8f6c67e67fbea51a84bed98cfd3",
+      "b25340d4-8233-406a-a0ea-a290cda248aa": "8c99d934cf67f29e7ba010853d7ea27f2cda78e6"
+    },
+    "current_source_fingerprint": "24e96b567aa1662aa941e582ca4928cf393c9fcaf22161ee3a2b6355b0827199",
+    "frontier_receipt": null,
+    "own_slot": {
+      "status": "validating",
+      "submission_id": "PR200",
+      "observed_at": null,
+      "frontier_receipt_id": null
+    },
+    "already_submitted_fingerprints": [
+      "a36071b7a5b06c22d16172f8f29ec0d86eb1cd90620e3716526b40349a890047"
+    ],
+    "notes": "Parent-supplied historical labels, not a fresh official receipt. Replace with exact IDs/heads and live receipts; pending-head integration still under review."
+  },
+  "records": [
+    {
+      "id": "compileiq-fixed-flags",
+      "source_fingerprint": null,
+      "base_id": "db248c65-44ef-4aba-b20c-c244a4cd334a",
+      "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+      "mechanism_id": "compiler-flag-search",
+      "mechanism_revision": "initial-screen",
+      "hypothesis": "Search compiler choices for lower device cost. Current challenge keeps trusted compiler flags fixed.",
+      "benchmark_id": "subset",
+      "target": "trusted-nvcc-default-sm52-jit-sm89",
+      "correctness": "unknown",
+      "compatibility": {
+        "target": "pass",
+        "compiler": "pass",
+        "fixed_flags": "fail"
+      },
+      "evidence": [],
+      "prior_failures": [
+        {
+          "id": "trusted-fixed-flags",
+          "resolved": false,
+          "detail": "Compiler-flag tuning is not an eligible source-only change under current harness. Parent compatibility finding, not a local build."
+        }
+      ],
+      "qualification": {
+        "required": [],
+        "receipts": {}
+      }
+    },
+    {
+      "id": "cuda13-shared-spilling",
+      "source_fingerprint": null,
+      "base_id": "db248c65-44ef-4aba-b20c-c244a4cd334a",
+      "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+      "mechanism_id": "ptxas-shared-memory-spilling",
+      "mechanism_revision": "initial-screen",
+      "hypothesis": "Move compiler spills to shared memory using CUDA13 support.",
+      "benchmark_id": "subset",
+      "target": "trusted-nvcc-default-sm52-jit-sm89",
+      "correctness": "unknown",
+      "compatibility": {
+        "target": "pass",
+        "compiler": "fail",
+        "fixed_flags": "pass"
+      },
+      "evidence": [],
+      "prior_failures": [
+        {
+          "id": "cuda13-toolchain-required",
+          "resolved": false,
+          "detail": "Parent reports feature requires CUDA13; current native toolchain is CUDA12.8. Do not replace trusted compiler to admit this proposal."
+        }
+      ],
+      "qualification": {
+        "required": [],
+        "receipts": {}
+      }
+    },
+    {
+      "id": "rust-local-memory",
+      "source_fingerprint": null,
+      "base_id": "db248c65-44ef-4aba-b20c-c244a4cd334a",
+      "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+      "mechanism_id": "cuda-oxide-field",
+      "mechanism_revision": "initial-screen",
+      "hypothesis": "Remove local arrays with compile-time unrolling before reconsidering Rust device arithmetic.",
+      "benchmark_id": "subset",
+      "target": "trusted-nvcc-default-sm52-jit-sm89",
+      "correctness": "unknown",
+      "compatibility": {
+        "target": "pass",
+        "compiler": "unknown",
+        "fixed_flags": "pass"
+      },
+      "evidence": [],
+      "prior_failures": [
+        {
+          "id": "rust-host-toolchain",
+          "resolved": false,
+          "detail": "Device PTX assembles, but host embedding/runner is incomplete; local-array traffic remains."
+        }
+      ],
+      "qualification": {
+        "required": [],
+        "receipts": {}
+      },
+      "inherited_component_reports": [
+        "research/oxide_experiment/results.json",
+        "research/oxide_experiment/native-results.json"
+      ],
+      "notes": "20170 CPU operand pairs and sm89 native report are component evidence, not a qualified candidate closure. Rust has 96B stack and 17/21 static LDL/STL sites despite zero reported spills; no GPU measurement. Source fingerprint intentionally absent."
+    },
+    {
+      "id": "pending-source-integration",
+      "source_fingerprint": null,
+      "base_id": "1a3af597-93d6-4667-9903-590ec573cb96",
+      "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+      "mechanism_id": "pending-frontier-source-composition",
+      "mechanism_revision": "awaiting-exact-source-review",
+      "hypothesis": "Rebase on independently reviewed pending source while retaining only compatible, correct mechanisms.",
+      "benchmark_id": "subset",
+      "target": "trusted-nvcc-default-sm52-jit-sm89",
+      "correctness": "unknown",
+      "compatibility": {
+        "target": "pass",
+        "compiler": "pass",
+        "fixed_flags": "pass"
+      },
+      "evidence": [],
+      "prior_failures": [],
+      "qualification": {
+        "required": [],
+        "receipts": {}
+      },
+      "base_head": "5b4a5054ab494586dded4806c72f025784ea8da4",
+      "notes": "Exact PR217 head is now source-reviewed. Guard-only integration is separate below; all complete qualification/package gates remain pending."
+    },
+    {
+      "id": "weak-ordinary-native-rejected",
+      "source_fingerprint": "5f4bc59e84820d9c114f249ec09a853f67610842270e1e561983cd2fec3d3093",
+      "base_id": "1a3af597-93d6-4667-9903-590ec573cb96",
+      "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+      "mechanism_id": "weak-ordinary-region",
+      "mechanism_revision": "pending217-v1",
+      "hypothesis": "Port full-W ordinary arithmetic to corrected pending217.",
+      "benchmark_id": "subset",
+      "target": "trusted-nvcc-default-sm52-jit-sm89",
+      "correctness": "unknown",
+      "compatibility": {
+        "target": "pass",
+        "compiler": "pass",
+        "fixed_flags": "pass"
+      },
+      "evidence": [
+        {
+          "id": "weak-native",
+          "kind": "native",
+          "status": "pass",
+          "source_fingerprint": "5f4bc59e84820d9c114f249ec09a853f67610842270e1e561983cd2fec3d3093",
+          "artifact": "research/frontier_rebase_sep17/candidate-native.json",
+          "measurement": "static"
+        }
+      ],
+      "prior_failures": [
+        {
+          "id": "native-common-path-regression",
+          "resolved": false,
+          "detail": "Parent review: +38 static sites and100\u2192119 registers; preserve exact rejected snapshot."
+        }
+      ],
+      "qualification": {
+        "required": [],
+        "receipts": {}
+      },
+      "base_head": "5b4a5054ab494586dded4806c72f025784ea8da4",
+      "notes": "Parent source-bound native review rejects current port: common path adds38 static sites; registers100\u2192119. This is a local native-screen decision, not measured GPU performance."
+    },
+    {
+      "id": "pending217-final-guard",
+      "source_fingerprint": "24e96b567aa1662aa941e582ca4928cf393c9fcaf22161ee3a2b6355b0827199",
+      "base_id": "1a3af597-93d6-4667-9903-590ec573cb96",
+      "frontier_id": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634",
+      "mechanism_id": "guarded-final-mixed-add",
+      "mechanism_revision": "canonical-15-v1",
+      "hypothesis": "Preserve corrected pending217 canonical ordinary path; guard only the final mixed add against equal/opposite exceptional inputs.",
+      "benchmark_id": "subset",
+      "target": "trusted-nvcc-default-sm52-jit-sm89",
+      "correctness": "unknown",
+      "compatibility": {
+        "target": "pass",
+        "compiler": "pass",
+        "fixed_flags": "pass"
+      },
+      "evidence": [],
+      "prior_failures": [],
+      "qualification": {
+        "required": [],
+        "receipts": {
+          "startup_policy": {
+            "status": "pass",
+            "source_fingerprint": "24e96b567aa1662aa941e582ca4928cf393c9fcaf22161ee3a2b6355b0827199",
+            "artifact": "research/frontier_rebase_sep17/guard-startup-results.json",
+            "artifact_sha256": "db8b701dc52f8a019a548a2cc375464466d423148c7522694de1e13287772a2f",
+            "scope": "L2 policy not applicable; unchanged actual startup decision projection passed, unchecked inherited CUDA statuses disclosed."
+          }
+        }
+      },
+      "base_head": "5b4a5054ab494586dded4806c72f025784ea8da4",
+      "notes": "Parent selected isolated guard-only source for qualification; source has no L2 policy. Startup projection bound; native/full-chain/package readiness not asserted here."
+    }
+  ]
+}

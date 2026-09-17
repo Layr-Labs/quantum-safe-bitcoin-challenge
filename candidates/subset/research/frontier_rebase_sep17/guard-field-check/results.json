@@ -1,0 +1,93 @@
+{
+  "status": "PASS_ACTUAL_PR217_HOST_AND_DEVICE_COLD_CORRECTION_MODEL",
+  "source_fingerprint": "24e96b567aa1662aa941e582ca4928cf393c9fcaf22161ee3a2b6355b0827199",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "dca2ce45dbd03b17beecbdde979877462d87dd5e89594948d987189d91b45ebd",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/tree.cu": "5e47943722495372b33c16989b4bcd1b72c418517491fa9ce4e08e52564cefb0",
+    "tests/gpu_epochs/tree_audit.cu": "6f52a9eaec26c1151293eb08b484d74d075b533a27ef17ef79be6f8c20d2f6b5",
+    "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+  },
+  "checker_sha256": "c8c8457e57f09f58142b977fd2fd95701b07c86ff89793e34de7afaf0cc882a0",
+  "compiled": true,
+  "counts": {
+    "host_M": 6750,
+    "host_S": 4500,
+    "PTX_M_with_cold": 2250,
+    "PTX_S_with_cold": 2250
+  },
+  "branches": {
+    "carry_repair": 74,
+    "normalization": 140,
+    "prefilter_false_positive": 258
+  },
+  "witnesses": [
+    {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2e",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2e",
+      "M": "0x100020001",
+      "S": "0x100020001",
+      "expected_M": "0x100020001",
+      "expected_S": "0x100020001"
+    },
+    {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffefffffffefffffc2f",
+      "M": "0x10000000000000000",
+      "S": "0x1",
+      "expected_M": "0x10000000000000000",
+      "expected_S": "0x1"
+    },
+    {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "b": "0x1",
+      "M": "0x0",
+      "S": "0x0",
+      "expected_M": "0x0",
+      "expected_S": "0x0"
+    },
+    {
+      "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "M": "0x1000007a0000e8900",
+      "S": "0x1000007a0000e8900",
+      "expected_M": "0x1000007a0000e8900",
+      "expected_S": "0x1000007a0000e8900"
+    },
+    {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2e",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2e",
+      "M": "0x100020001",
+      "S": "0x100020001",
+      "expected_M": "0x100020001",
+      "expected_S": "0x100020001"
+    }
+  ],
+  "mutation_controls": {
+    "drop_carry_trigger_canonical_witness_detected": true,
+    "drop_canonicalization_p_times_one_detected": true
+  },
+  "function_sha256": {
+    "_ModMultCore": "f90f7b9cc6f7bca09ef4b8839a104ba6e712395cc53c31d0376f6218393f433e",
+    "_ModSqr": "cf0034c243c37469954070f66d4709fe6a4225e34a98816e2f16c53d10a3a3a6",
+    "qsb_field_cold_correction": "118b96c3c2d5d46fa9dcba2a981e5a7e4bf94a006e00c7e9d961b4d362a111d3"
+  },
+  "ptx_model_sha256": "0aef5e92c85599f1d029e1b1dbf72aa6838e2f349cf25a6a662569bc898d12b3",
+  "adapted_ABI_model_sha256": "053d89741cf9105427db9f98a041bb4aad7e48e255dad4944916852caea7556d",
+  "actual_device_programs_sha256": [
+    "510f8451ccf0e049ae46257e9892fddd58095f875ad802ff33283739d85e831c",
+    "033ce3b0dc40ee2a3bdd9b8b4359cad129099a0f9f5392eb3ea52662d5c4b0cf",
+    "af6db06f094b8acc37db9409f5338395b3fc367f95bcdbd41b13056ebfe8d8e1"
+  ],
+  "scope": "Actual selected host M/S compiled with alias cases; unchanged actual device PTX with five-output ABI model plus actual cold-helper PTX; source-exact C++ branch predicates modeled in Python. Not CUDA execution or complete kernel validation.",
+  "proof": "Second fold S <=2^256\u22121+C\u00b2. Carry implies low<C\u00b2<2^65, hence top32=0. No carry and low>=p implies top32=0xffffffff. Prefilter covers both. Required cold path addsC modulo2^256, producing canonical residue. False positives return original words.",
+  "gpu_executed": false
+}

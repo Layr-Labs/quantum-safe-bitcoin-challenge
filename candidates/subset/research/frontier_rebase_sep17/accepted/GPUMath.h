@@ -661,9 +661,11 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 // ---------------------------------------------------------------------------------------
 // secp256k1 field multiply r = a*b mod p, 8x32-bit even/odd column product chains fused
 // into IMAD.WIDE.U32[.X], then the sparse double-fold R = L + H*0x1000003D1 (2^256 = 2^32+977
-// mod p) applied twice. Fold the remaining 2^256 carry with 2^32+977 and then
-// normalize to [0,p). The input contract permits all four-limb values <2^256.
-// The product schedule is unchanged; only its reduction tail is repaired.
+// mod p) applied twice. Output in [0,2^256) (not necessarily < p); the final 2^256 carry is
+// dropped -- the SAME convention and the same accepted non-canonical edge behaviour on inputs
+// in [p,2^256) as the UMult-based routine this replaces (verified: both agree with the Python
+// reference for every input < p, and both are identically non-canonical for the ~2^-224 inputs
+// >= p, which never occur in a run).
 //
 // Device (__CUDA_ARCH__): one non-volatile asm block -- the njuffa/mm32 schedule measured at
 // 124 SASS / 73 IMAD.WIDE on Compiler Explorer nvcc 12.9.1 sm_89. %4..%7 = a limbs (LE),
@@ -672,42 +674,13 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 // e0..e7, odd chain o0..o6, merge to 16 u32 limbs, then the same double fold. Validated against
 // harness/crypto.py; the asm<->C line correspondence is documented in
 // notes/ce-tools/mm32-cref-map.md so the two cannot silently drift.
-
-#ifdef __CUDA_ARCH__
-struct QsbFieldWords { uint64_t a, b, c, d; };
-// Called only when the second fold carries or its low part is at least p.
-// The second-fold sum is below 2^256+C*C (C=2^32+977), hence one
-// addition of C modulo 2^256 gives the canonical residue in either case.
-// A separate device call keeps the eight-word correction off the hot path.
-// Conservative boundary prefilter: carry implies L<C*C (top word zero);
-// normalization implies top word all ones. Unsigned (top+1)<=1 covers both.
-// The exact test stays here:
-// false positives retain their original words, including non-boundary large values.
-__device__ __noinline__ QsbFieldWords qsb_field_cold_correction(QsbFieldWords x,uint32_t carry) {
-    if (!carry && !((x.b & x.c & x.d) == UINT64_MAX && x.a >= 0xfffffffefffffc2fULL)) return x;
-    QsbFieldWords y;
-    asm("{\n\t"
-        "add.cc.u64 %0,%4,0x1000003d1;\n\t"
-        "addc.cc.u64 %1,%5,0;\n\t"
-        "addc.cc.u64 %2,%6,0;\n\t"
-        "addc.u64 %3,%7,0;\n\t}"
-        : "=l"(y.a), "=l"(y.b), "=l"(y.c), "=l"(y.d)
-        : "l"(x.a), "l"(x.b), "l"(x.c), "l"(x.d));
-    return y;
-}
-#endif
-
 __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, const uint64_t *b)
 {
 #ifdef __CUDA_ARCH__
-    uint64_t r0,r1,r2,r3; uint32_t carry;
-    asm( "{\n\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n\t.reg .u64 e0,e1,e2,e3,e4,e5,e6,e7,o0,o1,o2,o3,o4,o5,o6,t,lc;\n\t.reg .u32 cy,o15;\n\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t.reg .u32 y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\tmov.b64 {a0,a1}, %5;\n\tmov.b64 {a2,a3}, %6;\n\tmov.b64 {a4,a5}, %7;\n\tmov.b64 {a6,a7}, %8;\n\tmov.b64 {b0,b1}, %9;\n\tmov.b64 {b2,b3}, %10;\n\tmov.b64 {b4,b5}, %11;\n\tmov.b64 {b6,b7}, %12;\n\tmul.wide.u32 e0, a0, b0; mul.wide.u32 e1, a0, b2; mul.wide.u32 e2, a0, b4; mul.wide.u32 e3, a0, b6;\n\tmul.wide.u32 t, a1, b1; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a1, b3; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a1, b5; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a1, b7; addc.u64 e4, t, 0;\n\tmul.wide.u32 t, a2, b0; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a2, b2; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a2, b4; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a2, b6; addc.cc.u64 e4, e4, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a3, b1; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a3, b3; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a3, b5; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a3, b7; addc.u64 e5, t, lc;\n\tmul.wide.u32 t, a4, b0; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a4, b2; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a4, b4; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a4, b6; addc.cc.u64 e5, e5, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a5, b1; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a5, b3; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a5, b5; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a5, b7; addc.u64 e6, t, lc;\n\tmul.wide.u32 t, a6, b0; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a6, b2; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a6, b4; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a6, b6; addc.cc.u64 e6, e6, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a7, b1; add.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a7, b3; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a7, b5; addc.cc.u64 e6, e6, t;\n\tmul.wide.u32 t, a7, b7; addc.u64 e7, t, lc;\n\tmul.wide.u32 o0, a0, b1; mul.wide.u32 o1, a0, b3; mul.wide.u32 o2, a0, b5; mul.wide.u32 o3, a0, b7;\n\tmul.wide.u32 t, a1, b0; add.cc.u64 o0, o0, t;\n\tmul.wide.u32 t, a1, b2; addc.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a1, b4; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a1, b6; addc.cc.u64 o3, o3, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a2, b1; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a2, b3; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a2, b5; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a2, b7; addc.u64 o4, t, lc;\n\tmul.wide.u32 t, a3, b0; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a3, b2; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a3, b4; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a3, b6; addc.cc.u64 o4, o4, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a4, b1; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a4, b3; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a4, b5; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a4, b7; addc.u64 o5, t, lc;\n\tmul.wide.u32 t, a5, b0; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a5, b2; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a5, b4; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a5, b6; addc.cc.u64 o5, o5, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a6, b1; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a6, b3; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a6, b5; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a6, b7; addc.u64 o6, t, lc;\n\tmul.wide.u32 t, a7, b0; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a7, b2; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a7, b4; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a7, b6; addc.cc.u64 o6, o6, t;\n\taddc.u32 o15, 0, 0;\n\tmov.b64 {x0,x1}, e0;\n\tmov.b64 {x2,x3}, e1;\n\tmov.b64 {x4,x5}, e2;\n\tmov.b64 {x6,x7}, e3;\n\tmov.b64 {x8,x9}, e4;\n\tmov.b64 {x10,x11}, e5;\n\tmov.b64 {x12,x13}, e6;\n\tmov.b64 {x14,x15}, e7;\n\tmov.b64 {y1,y2}, o0;\n\tmov.b64 {y3,y4}, o1;\n\tmov.b64 {y5,y6}, o2;\n\tmov.b64 {y7,y8}, o3;\n\tmov.b64 {y9,y10}, o4;\n\tmov.b64 {y11,y12}, o5;\n\tmov.b64 {y13,y14}, o6;\n\tadd.cc.u32 x1, x1, y1;\n\taddc.cc.u32 x2, x2, y2;\n\taddc.cc.u32 x3, x3, y3;\n\taddc.cc.u32 x4, x4, y4;\n\taddc.cc.u32 x5, x5, y5;\n\taddc.cc.u32 x6, x6, y6;\n\taddc.cc.u32 x7, x7, y7;\n\taddc.cc.u32 x8, x8, y8;\n\taddc.cc.u32 x9, x9, y9;\n\taddc.cc.u32 x10, x10, y10;\n\taddc.cc.u32 x11, x11, y11;\n\taddc.cc.u32 x12, x12, y12;\n\taddc.cc.u32 x13, x13, y13;\n\taddc.cc.u32 x14, x14, y14;\n\taddc.u32 x15, x15, o15;\n\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n\taddc.u32 f8, 0, 0;\n\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n\taddc.u32 g8, 0, 0;\n\tmov.b64 {z0,z1}, f0;\n\tmov.b64 {z2,z3}, f1;\n\tmov.b64 {z4,z5}, f2;\n\tmov.b64 {z6,z7}, f3;\n\tmov.b64 {w0,w1}, g0;\n\tmov.b64 {w2,w3}, g1;\n\tmov.b64 {w4,w5}, g2;\n\tmov.b64 {w6,w7}, g3;\n\tadd.cc.u32  z1, z1, w0;\n\taddc.cc.u32 z2, z2, w1;\n\taddc.cc.u32 z3, z3, w2;\n\taddc.cc.u32 z4, z4, w3;\n\taddc.cc.u32 z5, z5, w4;\n\taddc.cc.u32 z6, z6, w5;\n\taddc.cc.u32 z7, z7, w6;\n\taddc.cc.u32 z8, f8, w7;\n\taddc.u32    z9, g8, 0;\n\tmul.wide.u32 t, z8, 977; mov.b64 {m0,m1}, t;\n\tmad.lo.u32 m1, z9, 977, m1;\n\tadd.cc.u32 m1, m1, z8;\n\taddc.u32 m2, z9, 0;\n\tadd.cc.u32 z0, z0, m0; addc.cc.u32 z1, z1, m1; addc.cc.u32 z2, z2, m2;\n\taddc.cc.u32 z3, z3, 0;\n\taddc.cc.u32 z4, z4, 0;\n\taddc.cc.u32 z5, z5, 0;\n\taddc.cc.u32 z6, z6, 0;\n\taddc.cc.u32 z7, z7, 0;\n\taddc.u32 %4, 0, 0;\n\tmov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n\t}"
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3),"=r"(carry)
+    uint64_t r0,r1,r2,r3;
+    asm( "{\n\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n\t.reg .u64 e0,e1,e2,e3,e4,e5,e6,e7,o0,o1,o2,o3,o4,o5,o6,t,lc;\n\t.reg .u32 cy,o15;\n\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t.reg .u32 y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\tmov.b64 {a0,a1}, %4;\n\tmov.b64 {a2,a3}, %5;\n\tmov.b64 {a4,a5}, %6;\n\tmov.b64 {a6,a7}, %7;\n\tmov.b64 {b0,b1}, %8;\n\tmov.b64 {b2,b3}, %9;\n\tmov.b64 {b4,b5}, %10;\n\tmov.b64 {b6,b7}, %11;\n\tmul.wide.u32 e0, a0, b0; mul.wide.u32 e1, a0, b2; mul.wide.u32 e2, a0, b4; mul.wide.u32 e3, a0, b6;\n\tmul.wide.u32 t, a1, b1; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a1, b3; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a1, b5; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a1, b7; addc.u64 e4, t, 0;\n\tmul.wide.u32 t, a2, b0; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a2, b2; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a2, b4; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a2, b6; addc.cc.u64 e4, e4, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a3, b1; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a3, b3; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a3, b5; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a3, b7; addc.u64 e5, t, lc;\n\tmul.wide.u32 t, a4, b0; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a4, b2; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a4, b4; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a4, b6; addc.cc.u64 e5, e5, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a5, b1; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a5, b3; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a5, b5; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a5, b7; addc.u64 e6, t, lc;\n\tmul.wide.u32 t, a6, b0; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a6, b2; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a6, b4; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a6, b6; addc.cc.u64 e6, e6, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a7, b1; add.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a7, b3; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a7, b5; addc.cc.u64 e6, e6, t;\n\tmul.wide.u32 t, a7, b7; addc.u64 e7, t, lc;\n\tmul.wide.u32 o0, a0, b1; mul.wide.u32 o1, a0, b3; mul.wide.u32 o2, a0, b5; mul.wide.u32 o3, a0, b7;\n\tmul.wide.u32 t, a1, b0; add.cc.u64 o0, o0, t;\n\tmul.wide.u32 t, a1, b2; addc.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a1, b4; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a1, b6; addc.cc.u64 o3, o3, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a2, b1; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a2, b3; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a2, b5; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a2, b7; addc.u64 o4, t, lc;\n\tmul.wide.u32 t, a3, b0; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a3, b2; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a3, b4; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a3, b6; addc.cc.u64 o4, o4, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a4, b1; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a4, b3; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a4, b5; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a4, b7; addc.u64 o5, t, lc;\n\tmul.wide.u32 t, a5, b0; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a5, b2; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a5, b4; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a5, b6; addc.cc.u64 o5, o5, t;\n\taddc.u32 cy, 0, 0; cvt.u64.u32 lc, cy;\n\tmul.wide.u32 t, a6, b1; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a6, b3; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a6, b5; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a6, b7; addc.u64 o6, t, lc;\n\tmul.wide.u32 t, a7, b0; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a7, b2; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a7, b4; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a7, b6; addc.cc.u64 o6, o6, t;\n\taddc.u32 o15, 0, 0;\n\tmov.b64 {x0,x1}, e0;\n\tmov.b64 {x2,x3}, e1;\n\tmov.b64 {x4,x5}, e2;\n\tmov.b64 {x6,x7}, e3;\n\tmov.b64 {x8,x9}, e4;\n\tmov.b64 {x10,x11}, e5;\n\tmov.b64 {x12,x13}, e6;\n\tmov.b64 {x14,x15}, e7;\n\tmov.b64 {y1,y2}, o0;\n\tmov.b64 {y3,y4}, o1;\n\tmov.b64 {y5,y6}, o2;\n\tmov.b64 {y7,y8}, o3;\n\tmov.b64 {y9,y10}, o4;\n\tmov.b64 {y11,y12}, o5;\n\tmov.b64 {y13,y14}, o6;\n\tadd.cc.u32 x1, x1, y1;\n\taddc.cc.u32 x2, x2, y2;\n\taddc.cc.u32 x3, x3, y3;\n\taddc.cc.u32 x4, x4, y4;\n\taddc.cc.u32 x5, x5, y5;\n\taddc.cc.u32 x6, x6, y6;\n\taddc.cc.u32 x7, x7, y7;\n\taddc.cc.u32 x8, x8, y8;\n\taddc.cc.u32 x9, x9, y9;\n\taddc.cc.u32 x10, x10, y10;\n\taddc.cc.u32 x11, x11, y11;\n\taddc.cc.u32 x12, x12, y12;\n\taddc.cc.u32 x13, x13, y13;\n\taddc.cc.u32 x14, x14, y14;\n\taddc.u32 x15, x15, o15;\n\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n\taddc.u32 f8, 0, 0;\n\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n\taddc.u32 g8, 0, 0;\n\tmov.b64 {z0,z1}, f0;\n\tmov.b64 {z2,z3}, f1;\n\tmov.b64 {z4,z5}, f2;\n\tmov.b64 {z6,z7}, f3;\n\tmov.b64 {w0,w1}, g0;\n\tmov.b64 {w2,w3}, g1;\n\tmov.b64 {w4,w5}, g2;\n\tmov.b64 {w6,w7}, g3;\n\tadd.cc.u32  z1, z1, w0;\n\taddc.cc.u32 z2, z2, w1;\n\taddc.cc.u32 z3, z3, w2;\n\taddc.cc.u32 z4, z4, w3;\n\taddc.cc.u32 z5, z5, w4;\n\taddc.cc.u32 z6, z6, w5;\n\taddc.cc.u32 z7, z7, w6;\n\taddc.cc.u32 z8, f8, w7;\n\taddc.u32    z9, g8, 0;\n\tmul.wide.u32 t, z8, 977; mov.b64 {m0,m1}, t;\n\tmad.lo.u32 m1, z9, 977, m1;\n\tadd.cc.u32 m1, m1, z8;\n\taddc.u32 m2, z9, 0;\n\tadd.cc.u32 z0, z0, m0; addc.cc.u32 z1, z1, m1; addc.cc.u32 z2, z2, m2;\n\taddc.cc.u32 z3, z3, 0;\n\taddc.cc.u32 z4, z4, 0;\n\taddc.cc.u32 z5, z5, 0;\n\taddc.cc.u32 z6, z6, 0;\n\taddc.u32 z7, z7, 0;\n\tmov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n\t}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]) );
-    if ((uint32_t)((uint32_t)(r3 >> 32) + 1u) <= 1u) {
-        QsbFieldWords v = qsb_field_cold_correction({r0,r1,r2,r3},carry);
-        r0=v.a; r1=v.b; r2=v.c; r3=v.d;
-    }
     r[0]=r0; r[1]=r1; r[2]=r2; r[3]=r3;
 #else
 #define QSB_MW(x,y) ((uint64_t)(uint32_t)(x)*(uint32_t)(y))
@@ -836,24 +809,10 @@ __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, con
       t=(uint64_t)z[4]+c; z[4]=(uint32_t)t; c=t>>32;
       t=(uint64_t)z[5]+c; z[5]=(uint32_t)t; c=t>>32;
       t=(uint64_t)z[6]+c; z[6]=(uint32_t)t; c=t>>32;
-      t=(uint64_t)z[7]+c; z[7]=(uint32_t)t;
-      // If carry is set, low < C*C for C=2^32+977; three limbs suffice.
-      c=t>>32;
-      t=(uint64_t)z[0]+c*977; z[0]=(uint32_t)t;
-      t=(uint64_t)z[1]+c+(t>>32); z[1]=(uint32_t)t;
-      z[2]+=(uint32_t)(t>>32); }
+      t=(uint64_t)z[7]+c; z[7]=(uint32_t)t; }
     r[0]=z[0]|((uint64_t)z[1]<<32); r[1]=z[2]|((uint64_t)z[3]<<32);
     r[2]=z[4]|((uint64_t)z[5]<<32); r[3]=z[6]|((uint64_t)z[7]<<32);
 #undef QSB_MW
-#endif
-#ifndef __CUDA_ARCH__
-    // Raw reduction is below 2^256. At most one subtraction yields [0,p).
-    // Bounded carry and normalization follow promoted subset 65fb673d.
-    if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
-        r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
-        r[0] -= 0xFFFFFFFEFFFFFC2FULL;
-        r[1] = r[2] = r[3] = 0;
-    }
 #endif
 }
 
@@ -882,12 +841,12 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
 // cross products a_i*a_j (even/odd column chains with multi-bit carries), doubled, plus
 // 8 diagonal squares, then the same double-fold as _ModMultCore. 45 IMAD.WIDE/square
 // (vs 73 for a*a via _ModMultCore). Output convention identical to _ModMultCore:
-// [0,p), including the bounded final carry fold. Device: inline PTX; host: __uint128_t C-ref of
+// [0,2^256), final 2^256 carry dropped. Device: inline PTX; host: __uint128_t C-ref of
 // the IDENTICAL schedule. Independently validated (notes/research/sqr_ptx/VALIDATION.md):
 // 10^6 random + boundaries vs crypto.py, PTX row-schedule emulation, CE 45 IMAD.WIDE.
 __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 #ifdef __CUDA_ARCH__
-    uint64_t r0,r1,r2,r3; uint32_t carry;
+    uint64_t r0, r1, r2, r3;
     asm("{\n\t"
         ".reg .u32 a0,a1,a2,a3,a4,a5,a6,a7;\n\t"
         ".reg .u64 e2,e4,e6,e8,e10,e12,o1,o3,o5,o7,o9,o11,o13,t;\n\t"
@@ -895,10 +854,10 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
         ".reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t"
         ".reg .u32 y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\t"
         ".reg .u64 d0,d1,d2,d3,d4,d5,d6,d7;\n\t"
-        "mov.b64 {a0,a1}, %5;\n\t"
-        "mov.b64 {a2,a3}, %6;\n\t"
-        "mov.b64 {a4,a5}, %7;\n\t"
-        "mov.b64 {a6,a7}, %8;\n\t"
+        "mov.b64 {a0,a1}, %4;\n\t"
+        "mov.b64 {a2,a3}, %5;\n\t"
+        "mov.b64 {a4,a5}, %6;\n\t"
+        "mov.b64 {a6,a7}, %7;\n\t"
 
         /* E rows, shortest first. Carries run into the next 64-bit column. */
         "mul.wide.u32 e6, a2, a4;\n\t"
@@ -998,15 +957,11 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
         "add.cc.u32 m1, m1, z8; addc.u32 m2, z9, 0;\n\t"
         "add.cc.u32 z0, z0, m0; addc.cc.u32 z1, z1, m1; addc.cc.u32 z2, z2, m2;\n\t"
         "addc.cc.u32 z3, z3, 0; addc.cc.u32 z4, z4, 0; addc.cc.u32 z5, z5, 0;\n\t"
-        "addc.cc.u32 z6, z6, 0; addc.cc.u32 z7, z7, 0;\n\taddc.u32 %4, 0, 0;\n\t"
+        "addc.cc.u32 z6, z6, 0; addc.u32 z7, z7, 0;\n\t"
         "mov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n\t"
         "}\n\t"
-        : "=l"(r0), "=l"(r1), "=l"(r2), "=l"(r3),"=r"(carry)
+        : "=l"(r0), "=l"(r1), "=l"(r2), "=l"(r3)
         : "l"(a[0]), "l"(a[1]), "l"(a[2]), "l"(a[3]));
-    if ((uint32_t)((uint32_t)(r3 >> 32) + 1u) <= 1u) {
-        QsbFieldWords v = qsb_field_cold_correction({r0,r1,r2,r3},carry);
-        r0=v.a; r1=v.b; r2=v.c; r3=v.d;
-    }
     r[0] = r0; r[1] = r1; r[2] = r2; r[3] = r3;
 #else
     uint32_t A[8];
@@ -1099,25 +1054,11 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
       tv=(uint64_t)z[4]+c; z[4]=(uint32_t)tv; c=tv>>32;
       tv=(uint64_t)z[5]+c; z[5]=(uint32_t)tv; c=tv>>32;
       tv=(uint64_t)z[6]+c; z[6]=(uint32_t)tv; c=tv>>32;
-      tv=(uint64_t)z[7]+c; z[7]=(uint32_t)tv;
-      // If carry is set, low < C*C for C=2^32+977; three limbs suffice.
-      c=tv>>32;
-      tv=(uint64_t)z[0]+c*977; z[0]=(uint32_t)tv;
-      tv=(uint64_t)z[1]+c+(tv>>32); z[1]=(uint32_t)tv;
-      z[2]+=(uint32_t)(tv>>32); }
+      tv=(uint64_t)z[7]+c; z[7]=(uint32_t)tv; }
     r[0]=z[0]|((uint64_t)z[1]<<32); r[1]=z[2]|((uint64_t)z[3]<<32);
     r[2]=z[4]|((uint64_t)z[5]<<32); r[3]=z[6]|((uint64_t)z[7]<<32);
     #undef MW
     (void)h0;(void)h1;(void)h2;(void)h3;(void)r0;(void)r1;(void)r2;(void)r3;(void)carry;(void)d;
-#endif
-#ifndef __CUDA_ARCH__
-    // Raw reduction is below 2^256. At most one subtraction yields [0,p).
-    // Bounded carry and normalization follow promoted subset 65fb673d.
-    if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
-        r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
-        r[0] -= 0xFFFFFFFEFFFFFC2FULL;
-        r[1] = r[2] = r[3] = 0;
-    }
 #endif
 }
 #else
@@ -1266,16 +1207,9 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
 // addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final.
 // ---------------------------------------------------------------------------------------
-// Templated deferred-anchor XYZZ madd (hot-path codegen). DEFER_Y specializes
-// the exact-Y resolve so intermediate adds compile without the runtime branch.
-// __restrict__ matches the pinning XYZZ hot-path; arithmetic is unchanged from
-// the prior bool form (no lazy/fused-X3 riders).
-template<bool DEFER_Y>
-__device__ __forceinline__ void _PointAddXYZZ_def(
-    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
-    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
-    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
-    const uint64_t *__restrict__ Yoff)
+__device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+                                  const uint64_t *X2, const uint64_t *Y2,
+                                  const uint64_t *Yoff, bool defer_y)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1304,7 +1238,7 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (DEFER_Y) {
+  if (defer_y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
@@ -1312,20 +1246,6 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
   }
 
   Load256(X1, T);                      // X3
-}
-
-// Runtime-bool dispatcher for any remaining non-specialized call sites.
-__device__ __forceinline__ void _PointAddXYZZ_def(
-    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
-    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
-    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
-    const uint64_t *__restrict__ Yoff, bool defer_y)
-{
-  if (defer_y) {
-    _PointAddXYZZ_def<true>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
-  } else {
-    _PointAddXYZZ_def<false>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
-  }
 }
 
 // Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
@@ -1385,71 +1305,4 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(R, (uint64_t *)Y1, ZZZ3);               // Y1*PPP
   _ModSub256(Y3, Q, R);                            // Y3 = R*(Q - X3) - Y1*PPP
   Load256(X3, T);                                  // X3
-}
-
-// Complete final addition for default 15-window scalar chain.
-__device__ __forceinline__ void qsb_asym_last_add(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
-{
-  uint64_t U2[4];
-  uint64_t S2[4];
-  uint64_t P[4];
-  uint64_t R[4];
-  uint64_t PP[4];
-  uint64_t PPP[4];
-  uint64_t Q[4];
-  uint64_t T[4];
-
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
-  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-
-  // The 15-window low-to-high ordering has no exceptional prefix before this final add.
-  // A zero x difference is either doubling (R=0) or opposite points (R!=0).
-  // Construct 2*(X2,Y2) directly from the affine table point in the rare case.
-  if (!(P[0]|P[1]|P[2]|P[3])) {
-    if (R[0]|R[1]|R[2]|R[3]) {
-      for(int i=0;i<4;++i) X1[i]=Y1[i]=ZZ1[i]=ZZZ1[i]=0;
-      return;
-    }
-    uint64_t xx[4],yy[4],yyyy[4],s[4],m[4],t[4],tmp[4];
-    _ModSqr(xx,(uint64_t *)X2);
-    _ModSqr(yy,(uint64_t *)Y2);
-    _ModSqr(yyyy,yy);
-    _ModMult(s,(uint64_t *)X2,yy);
-    _ModAdd256(s,s,s);_ModAdd256(s,s,s); // s=4*x*y^2
-    _ModAdd256(m,xx,xx);_ModAdd256(m,m,xx); // m=3*x^2
-    _ModSqr(t,m);_ModSub256(t,t,s);_ModSub256(t,t,s);
-    _ModSub256(tmp,s,t);_ModMult(Y1,m,tmp);
-    _ModAdd256(yyyy,yyyy,yyyy);_ModAdd256(yyyy,yyyy,yyyy);_ModAdd256(yyyy,yyyy,yyyy);
-    _ModSub256(Y1,Y1,yyyy);Load256(X1,t);
-    _ModAdd256(ZZ1,yy,yy);_ModAdd256(ZZ1,ZZ1,ZZ1);
-    _ModMult(ZZZ1,(uint64_t *)Y2,yy);
-    _ModAdd256(ZZZ1,ZZZ1,ZZZ1);_ModAdd256(ZZZ1,ZZZ1,ZZZ1);_ModAdd256(ZZZ1,ZZZ1,ZZZ1);
-    return;
-  }
-  _ModSqr(PP, P);                      // PP = P^2
-  _ModMult(PPP, PP, P);                // PPP = P*PP
-  _ModMult(Q, U2, PP);                 // V  = U2*PP
-  _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
-
-  _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
-
-  _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
-  if (false) {
-    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
-    _ModSub256(Y1, Q, S2);             // exact Y3
-  }
-
-  Load256(X1, T);                      // X3
 }

@@ -1,0 +1,101 @@
+{
+  "status": "PASS_BOUNDED_CHAIN_AND_FIELD_REVIEW",
+  "source_fingerprint": "24e96b567aa1662aa941e582ca4928cf393c9fcaf22161ee3a2b6355b0827199",
+  "reports_sha256": {
+    "guard-chain-check/results.json": "a02799e0737eb2be4ca8ccfdf9c95cb2168be7d305039236216d4e8d5a0a7408",
+    "guard-negative-final/results.json": "a98f7a5bb2fa50f1f6a0d2bc718e9b471565a60925151f9085b97fbaba3b69d2",
+    "pending217-chain-check/results.json": "8436bc3a96feff9d65ae4fcf54a285b7fe54effd3cb6eb88e343c841611fedde",
+    "guard-field-check/results.json": "a34ce83e067b93ad4bcb21fb1e3287a198ac222a43409a6adc071cbadaa9a960",
+    "chain-check/results.json": "43c965fe2ac451c8a34ea9ea09702f386a0931c2586e19c3f75e438e06d47c6f",
+    "chain-negative-final/results.json": "75d13d7f2d55b44092ad2ecf742014bb955b13ef598a627c9cd77eee217efb18",
+    "chain-negative-zz/results.json": "f16ad5804fc5ca3d33eb38dbdc05650b28d3c4fb4a50fc4e379aeed64499c13c"
+  },
+  "exact_selected_field_transfer": {
+    "__device__ __forceinline__ void _ModMultCore(": {
+      "identical_to_pending217": true,
+      "sha256": "f90f7b9cc6f7bca09ef4b8839a104ba6e712395cc53c31d0376f6218393f433e"
+    },
+    "__device__ __forceinline__ void _ModSqr(": {
+      "identical_to_pending217": true,
+      "sha256": "cf0034c243c37469954070f66d4709fe6a4225e34a98816e2f16c53d10a3a3a6"
+    },
+    "__device__ __noinline__ QsbFieldWords qsb_field_cold_correction(": {
+      "identical_to_pending217": true,
+      "sha256": "118b96c3c2d5d46fa9dcba2a981e5a7e4bf94a006e00c7e9d961b4d362a111d3"
+    }
+  },
+  "witnesses": {
+    "H": "0xffff800000000000000000000000000000000000000000000000000000000000",
+    "n_minus_H": "0x7ffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+    "delta": "0x14551231950b75fc4402da1732fc9bebf",
+    "M_for_H": "0xffff00000000000000000000000000014551231950b75fc4402da1732fc9bebf",
+    "preceding_sum_for_H": "-883423532389192164791648750371458825493355382778152626639936705678164289",
+    "final_term_for_H": "0xffff800000000000000000000000000000000000000000000000000000000000",
+    "preceding_minus_final": "-115792089237316195423570985008687907852837564279074904382605163141518161494337",
+    "zero_or_order_final_sum": "\u00b1n"
+  },
+  "default_geometry": {
+    "widths": [
+      18,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17
+    ],
+    "order": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "bytes": 67108864
+  },
+  "proof_domain": "All uint256 raw scalars; any nonzero runtime base in the secp256k1 order-n group; selected default 15-window low-to-high chain only.",
+  "ordinary_additions": "c1 seed and c2..13 ordinary cannot have equal/opposite operands modulo n; final c14 requires complete guard.",
+  "validation": {
+    "recoder_cases": 12771,
+    "prefix_checks": 332046,
+    "curve_chains": 316,
+    "recovered_keys": 628,
+    "field_counts": {
+      "host_M": 6750,
+      "host_S": 4500,
+      "PTX_M_with_cold": 2250,
+      "PTX_S_with_cold": 2250
+    },
+    "field_branch_counts": {
+      "carry_repair": 74,
+      "normalization": 140,
+      "prefilter_false_positive": 258
+    }
+  },
+  "limits": [
+    "No CUDA execution, timing or synchronization claim.",
+    "Canonical chain field operations use OpenSSL; selected production M/S host and PTX semantic paths tested separately.",
+    "Full-domain exception statement is algebraic proof, not exhaustive uint256 execution.",
+    "Zero/order scalars validate chain infinity sentinel; rare downstream W=0 handling is inherited and not qualified by this chain checker.",
+    "Default ZLAB_T14=0, ZLAB_DIRDIG=1 executed; optional nondefault variants not newly qualified."
+  ],
+  "source_modified": false
+}

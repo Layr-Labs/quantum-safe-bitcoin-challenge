@@ -534,7 +534,7 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_asym_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
@@ -555,7 +555,7 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_asym_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #endif
 #endif

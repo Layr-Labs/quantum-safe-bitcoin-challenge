@@ -1,0 +1,895 @@
+{
+  "status": "SOURCE_BOUND_NATIVE_COMPARISON_COMPLETE",
+  "gpu_executed": false,
+  "candidate_modified": false,
+  "compiler": "CUDA12.8.93 sm89 via existing parent builds",
+  "images": {
+    "accepted": {
+      "report_sha256": "b7143bdb9141f8afd9287d43967717584a096041293bf12dc92b9605ec5b15a2",
+      "source_sha256": {
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "GPUMath.h": "91a0671621f8da434e57074ca06125f3fbbe8ad470b833924d40596e0264a3b9",
+        "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+        "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+        "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+        "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+        "tests/gpu_epochs/hm43_warp_inverse.cuh": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+        "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+        "tests/gpu_epochs/tree.cu": "e1f3c93f6dd736c1625f8e0136d0fef712345c00cd712c441e644468330bd4d7",
+        "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+      },
+      "source_hashes_verified": true,
+      "default_compile_pass": true,
+      "sass_sha256": "212f72067bfa6cd4dee4b84494e8c0fb30abb59368c3d9ffd76565e43807b3dc",
+      "ptx_sha256": "7e1acebe5a3d13593160248c1ee5d4fac94da5cebaaef9bd91e95450459be8d6",
+      "resources": {
+        "registers": 126,
+        "shared_bytes": 32768,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "instruction_slots": 10192,
+        "non_nop": 10175
+      },
+      "loop": {
+        "start": "0xf8d0",
+        "end": "0x15340",
+        "static_sites": 1448,
+        "local_sites": [],
+        "global_load_sites": [
+          {
+            "pc": "0xfaf0",
+            "instruction": "LDG.E.128.CONSTANT R28, [R74.64]"
+          },
+          {
+            "pc": "0xfb00",
+            "instruction": "LDG.E.128.CONSTANT R32, [R74.64+0x10]"
+          },
+          {
+            "pc": "0xfb10",
+            "instruction": "LDG.E.128.CONSTANT R36, [R74.64+0x20]"
+          },
+          {
+            "pc": "0xfb20",
+            "instruction": "LDG.E.128.CONSTANT R40, [R74.64+0x30]"
+          }
+        ],
+        "cold_bypasses": [],
+        "cold_bypass_site_sum": 0,
+        "no_cold_inline_region_sites_before_digit_skips": 1448,
+        "control_evidence": [
+          {
+            "pc": "0xf850",
+            "instruction": "IADD3.X R6, P0, RZ, R22, RZ, P0, !PT"
+          },
+          {
+            "pc": "0xf860",
+            "instruction": "LOP3.LUT R17, R30, R34, R19.reuse, 0xf8, !PT"
+          },
+          {
+            "pc": "0xf870",
+            "instruction": "LOP3.LUT R18, R21, R75, R18, 0xf8, !PT"
+          },
+          {
+            "pc": "0xf880",
+            "instruction": "IMAD.MOV.U32 R21, RZ, RZ, 0x2"
+          },
+          {
+            "pc": "0xf890",
+            "instruction": "LOP3.LUT R19, R20, R33, R19, 0xf8, !PT"
+          },
+          {
+            "pc": "0xf8a0",
+            "instruction": "IMAD.MOV.U32 R20, RZ, RZ, 0x24"
+          },
+          {
+            "pc": "0xf8b0",
+            "instruction": "IMAD.X R22, RZ, RZ, R28, P0"
+          },
+          {
+            "pc": "0xf8c0",
+            "instruction": "UMOV UR4, 0x30000"
+          },
+          {
+            "pc": "0xfa30",
+            "instruction": "ISETP.NE.AND P6, PT, R21, 0xe, PT"
+          },
+          {
+            "pc": "0x148a0",
+            "instruction": "ISETP.NE.AND P3, PT, R21, 0xe, PT"
+          },
+          {
+            "pc": "0x152b0",
+            "instruction": "ISETP.GE.U32.AND P0, PT, R21, 0xf, PT"
+          },
+          {
+            "pc": "0x152c0",
+            "instruction": "IMAD.MOV.U32 R59, RZ, RZ, R90"
+          },
+          {
+            "pc": "0x152d0",
+            "instruction": "IMAD.MOV.U32 R65, RZ, RZ, R96"
+          },
+          {
+            "pc": "0x152e0",
+            "instruction": "IMAD.MOV.U32 R63, RZ, RZ, R98"
+          },
+          {
+            "pc": "0x152f0",
+            "instruction": "IMAD.MOV.U32 R69, RZ, RZ, R92"
+          },
+          {
+            "pc": "0x15300",
+            "instruction": "IMAD.MOV.U32 R67, RZ, RZ, R94"
+          },
+          {
+            "pc": "0x15310",
+            "instruction": "IMAD.MOV.U32 R73, RZ, RZ, R30"
+          },
+          {
+            "pc": "0x15320",
+            "instruction": "IMAD.MOV.U32 R71, RZ, RZ, R32"
+          },
+          {
+            "pc": "0x15330",
+            "instruction": "@P0 CALL.REL.NOINC 0x15350"
+          },
+          {
+            "pc": "0x15340",
+            "instruction": "BRA 0xf8d0"
+          }
+        ],
+        "opcodes": {
+          "SHF.R.U32.HI": 2,
+          "IMAD.MOV.U32": 75,
+          "LOP3.LUT": 29,
+          "ISETP.NE.AND": 5,
+          "BRA": 4,
+          "IMAD.SHL.U32": 1,
+          "SHF.R.U64": 1,
+          "SHF.L.U32": 1,
+          "IADD3": 62,
+          "SEL": 104,
+          "IMAD.X": 49,
+          "LEA": 1,
+          "LEA.HI.X": 1,
+          "LDG.E.128.CONSTANT": 4,
+          "IMAD.WIDE.U32": 234,
+          "IMAD.WIDE.U32.X": 440,
+          "IADD3.X": 388,
+          "IMAD": 10,
+          "ISETP.GT.U32.AND": 2,
+          "ISETP.GT.AND.EX": 2,
+          "SHF.L.W.U32.HI": 30,
+          "UIADD3": 1,
+          "ISETP.GE.U32.AND": 1,
+          "CALL.REL.NOINC": 1
+        }
+      },
+      "producer_sha256": "44852a5f20bf5f7dc4ec3d44aefdf451c735f88c22beeaf9b207fd2acfde3239"
+    },
+    "pending217": {
+      "report_sha256": "070940018cc709bf7ab8a71f2c8d53b8fc38a8f80c344b9696696a93df166e95",
+      "source_sha256": {
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "GPUMath.h": "4826599005bcb07bc1efccab8308cfa67168a1ae636f9c33fb632b8ddc27005e",
+        "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+        "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+        "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+        "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+        "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+        "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+        "tests/gpu_epochs/tree.cu": "f31dda37ef2ea6952c64904c95fdb200ee4185233b8b6df9306a6575aa331261",
+        "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+      },
+      "source_hashes_verified": true,
+      "default_compile_pass": true,
+      "sass_sha256": "674aa6b6c97a051fa1b340c5987834b1eb70bfeb0ed0b57d1fb119f137c61a0b",
+      "ptx_sha256": "afb358e60a8b5b710caf52473c87dc8575cb1d49501d8ad8ea7833050de84838",
+      "resources": {
+        "registers": 100,
+        "shared_bytes": 32768,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "instruction_slots": 12816,
+        "non_nop": 12800
+      },
+      "loop": {
+        "start": "0xff90",
+        "end": "0x15db0",
+        "static_sites": 1507,
+        "local_sites": [],
+        "global_load_sites": [
+          {
+            "pc": "0x10160",
+            "instruction": "LDG.E.128.CONSTANT R20, [R68.64]"
+          },
+          {
+            "pc": "0x10170",
+            "instruction": "LDG.E.128.CONSTANT R24, [R68.64+0x10]"
+          },
+          {
+            "pc": "0x10180",
+            "instruction": "LDG.E.128.CONSTANT R28, [R68.64+0x20]"
+          },
+          {
+            "pc": "0x10190",
+            "instruction": "LDG.E.128.CONSTANT R32, [R68.64+0x30]"
+          }
+        ],
+        "cold_bypasses": [
+          {
+            "branch_pc": "0x10af0",
+            "join_pc": "0x10c20",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x10b90",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x115f0",
+            "join_pc": "0x116e0",
+            "skipped_inline_sites": 14,
+            "calls": [
+              {
+                "pc": "0x11670",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x12040",
+            "join_pc": "0x12170",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x120e0",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x12970",
+            "join_pc": "0x12aa0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x12a10",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x13290",
+            "join_pc": "0x133c0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x13330",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x13bb0",
+            "join_pc": "0x13ce0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x13c50",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x143c0",
+            "join_pc": "0x144b0",
+            "skipped_inline_sites": 14,
+            "calls": [
+              {
+                "pc": "0x14440",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x15100",
+            "join_pc": "0x15230",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x151a0",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x15b70",
+            "join_pc": "0x15ca0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x15c10",
+                "instruction": "CALL.REL.NOINC 0x31e40"
+              }
+            ]
+          }
+        ],
+        "cold_bypass_site_sum": 154,
+        "no_cold_inline_region_sites_before_digit_skips": 1353,
+        "control_evidence": [
+          {
+            "pc": "0xff10",
+            "instruction": "IMAD.MOV.U32 R19, RZ, RZ, R77"
+          },
+          {
+            "pc": "0xff20",
+            "instruction": "BSYNC B0"
+          },
+          {
+            "pc": "0xff30",
+            "instruction": "PLOP3.LUT P0, PT, PT, PT, PT, 0x80, 0x0"
+          },
+          {
+            "pc": "0xff40",
+            "instruction": "IMAD.MOV.U32 R73, RZ, RZ, 0x2"
+          },
+          {
+            "pc": "0xff50",
+            "instruction": "UMOV UR4, 0x30000"
+          },
+          {
+            "pc": "0xff60",
+            "instruction": "IMAD.MOV.U32 R23, RZ, RZ, RZ"
+          },
+          {
+            "pc": "0xff70",
+            "instruction": "UMOV UR5, 0x24"
+          },
+          {
+            "pc": "0xff80",
+            "instruction": "UMOV UR6, 0x24"
+          },
+          {
+            "pc": "0x15cf0",
+            "instruction": "ISETP.GE.U32.AND P1, PT, R73, 0xe, PT"
+          },
+          {
+            "pc": "0x15d30",
+            "instruction": "IMAD.U32 R23, RZ, RZ, UR7"
+          },
+          {
+            "pc": "0x15d40",
+            "instruction": "IMAD.MOV.U32 R62, RZ, RZ, R69"
+          },
+          {
+            "pc": "0x15d50",
+            "instruction": "IMAD.MOV.U32 R61, RZ, RZ, R70"
+          },
+          {
+            "pc": "0x15d60",
+            "instruction": "IMAD.MOV.U32 R60, RZ, RZ, R71"
+          },
+          {
+            "pc": "0x15d70",
+            "instruction": "IMAD.MOV.U32 R59, RZ, RZ, R72"
+          },
+          {
+            "pc": "0x15d80",
+            "instruction": "IMAD.MOV.U32 R58, RZ, RZ, R75"
+          },
+          {
+            "pc": "0x15d90",
+            "instruction": "IMAD.MOV.U32 R57, RZ, RZ, R74"
+          },
+          {
+            "pc": "0x15da0",
+            "instruction": "@P1 CALL.REL.NOINC 0x15dc0"
+          },
+          {
+            "pc": "0x15db0",
+            "instruction": "BRA 0xff90"
+          }
+        ],
+        "opcodes": {
+          "ULOP3.LUT": 2,
+          "IMAD.MOV.U32": 204,
+          "BRA": 12,
+          "ISETP.NE.AND": 2,
+          "IMAD.SHL.U32": 1,
+          "SHF.R.U64": 1,
+          "SHF.L.U32": 1,
+          "LOP3.LUT": 24,
+          "SHF.R.U32.HI": 1,
+          "IADD3": 64,
+          "IMAD.X": 35,
+          "LEA": 1,
+          "LEA.HI.X": 1,
+          "LDG.E.128.CONSTANT": 4,
+          "UIADD3": 2,
+          "BSSY": 9,
+          "IMAD.WIDE.U32": 209,
+          "IMAD.WIDE.U32.X": 392,
+          "IADD3.X": 356,
+          "SEL": 102,
+          "IMAD": 9,
+          "ISETP.GT.U32.AND": 11,
+          "MOV": 9,
+          "CALL.REL.NOINC": 10,
+          "BSYNC": 9,
+          "ISETP.GT.AND.EX": 2,
+          "SHF.L.W.U32.HI": 30,
+          "USHF.R.U32.HI": 1,
+          "ISETP.GE.U32.AND": 1,
+          "ISETP.EQ.AND": 1,
+          "IMAD.U32": 1
+        }
+      },
+      "producer_sha256": "44852a5f20bf5f7dc4ec3d44aefdf451c735f88c22beeaf9b207fd2acfde3239",
+      "postloop_through_first_tree_barrier": {
+        "start": "0x15dc0",
+        "end_inclusive": "0x1d7d0",
+        "static_sites": 1954,
+        "limitation": "Combined final point/guard/normalization/recovery-prepare/tree-leaf region; conditional paths, not ordinary executed work."
+      }
+    },
+    "candidate": {
+      "report_sha256": "d304e2d0e015bbc35d716f4707d83edbc5303780268e76653578a15e38ee6aa7",
+      "source_sha256": {
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "GPUMath.h": "7e9e17e3c53bb7d58db4efeaf3640e056428fc88b4b5144cad34346b143ef57a",
+        "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+        "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+        "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+        "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+        "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+        "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+        "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+        "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+        "tests/gpu_epochs/tree.cu": "5af670a388136d8a95e1daffb0e56365553a52f14aa480d0b0232ebe0779d174",
+        "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+      },
+      "source_hashes_verified": true,
+      "default_compile_pass": true,
+      "sass_sha256": "d824df35b73a3652a5e13efa60c245ee9a2817d42612f5c1776e81f3a77a35cb",
+      "ptx_sha256": "fa7937ce97f535280d0ddde7f01237611b02ecb6b5735d7cdfcad3a1380b213d",
+      "resources": {
+        "registers": 119,
+        "shared_bytes": 32768,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "instruction_slots": 14200,
+        "non_nop": 14187
+      },
+      "loop": {
+        "start": "0xff50",
+        "end": "0x15630",
+        "static_sites": 1391,
+        "local_sites": [],
+        "global_load_sites": [
+          {
+            "pc": "0x10120",
+            "instruction": "LDG.E.128.CONSTANT R48, [R6.64]"
+          },
+          {
+            "pc": "0x10130",
+            "instruction": "LDG.E.128.CONSTANT R56, [R6.64+0x10]"
+          },
+          {
+            "pc": "0x10140",
+            "instruction": "LDG.E.128.CONSTANT R40, [R6.64+0x20]"
+          },
+          {
+            "pc": "0x10150",
+            "instruction": "LDG.E.128.CONSTANT R28, [R6.64+0x30]"
+          }
+        ],
+        "cold_bypasses": [],
+        "cold_bypass_site_sum": 0,
+        "no_cold_inline_region_sites_before_digit_skips": 1391,
+        "control_evidence": [
+          {
+            "pc": "0xfed0",
+            "instruction": "IMAD.MOV.U32 R39, RZ, RZ, R51"
+          },
+          {
+            "pc": "0xfee0",
+            "instruction": "BSYNC B0"
+          },
+          {
+            "pc": "0xfef0",
+            "instruction": "PLOP3.LUT P0, PT, PT, PT, PT, 0x80, 0x0"
+          },
+          {
+            "pc": "0xff00",
+            "instruction": "IMAD.MOV.U32 R22, RZ, RZ, 0x2"
+          },
+          {
+            "pc": "0xff10",
+            "instruction": "UMOV UR4, 0x30000"
+          },
+          {
+            "pc": "0xff20",
+            "instruction": "IMAD.MOV.U32 R30, RZ, RZ, RZ"
+          },
+          {
+            "pc": "0xff30",
+            "instruction": "UMOV UR5, 0x24"
+          },
+          {
+            "pc": "0xff40",
+            "instruction": "UMOV UR6, 0x24"
+          },
+          {
+            "pc": "0x15310",
+            "instruction": "ISETP.GE.U32.AND P4, PT, R22, 0xe, PT"
+          },
+          {
+            "pc": "0x155b0",
+            "instruction": "IMAD.MOV.U32 R36, RZ, RZ, R35"
+          },
+          {
+            "pc": "0x155c0",
+            "instruction": "IMAD.MOV.U32 R38, RZ, RZ, R45"
+          },
+          {
+            "pc": "0x155d0",
+            "instruction": "IMAD.X R34, RZ, RZ, R41, P1"
+          },
+          {
+            "pc": "0x155e0",
+            "instruction": "IMAD.X R44, RZ, RZ, R49, P3"
+          },
+          {
+            "pc": "0x155f0",
+            "instruction": "IMAD.MOV.U32 R35, RZ, RZ, R29"
+          },
+          {
+            "pc": "0x15600",
+            "instruction": "IMAD.MOV.U32 R39, RZ, RZ, R50"
+          },
+          {
+            "pc": "0x15610",
+            "instruction": "IMAD.MOV.U32 R45, RZ, RZ, R40"
+          },
+          {
+            "pc": "0x15620",
+            "instruction": "@P4 CALL.REL.NOINC 0x15640"
+          },
+          {
+            "pc": "0x15630",
+            "instruction": "BRA 0xff50"
+          }
+        ],
+        "opcodes": {
+          "ULOP3.LUT": 2,
+          "IMAD.MOV.U32": 94,
+          "BRA": 3,
+          "ISETP.NE.AND": 2,
+          "IMAD.SHL.U32": 1,
+          "SHF.R.U64": 1,
+          "SHF.L.U32": 1,
+          "LOP3.LUT": 34,
+          "SHF.R.U32.HI": 1,
+          "IADD3": 70,
+          "IMAD.X": 65,
+          "LEA": 1,
+          "LEA.HI.X": 1,
+          "LDG.E.128.CONSTANT": 4,
+          "UIADD3": 2,
+          "USHF.R.U32.HI": 1,
+          "IMAD.WIDE.U32": 239,
+          "IMAD.WIDE.U32.X": 362,
+          "IADD3.X": 369,
+          "SEL": 112,
+          "IMAD": 20,
+          "ISETP.GT.U32.AND": 1,
+          "ISETP.GT.AND.EX": 1,
+          "ISETP.GE.U32.AND": 1,
+          "IMAD.U32": 1,
+          "ISETP.EQ.AND": 1,
+          "CALL.REL.NOINC": 1
+        }
+      },
+      "producer_sha256": "44852a5f20bf5f7dc4ec3d44aefdf451c735f88c22beeaf9b207fd2acfde3239",
+      "postloop_through_first_tree_barrier": {
+        "start": "0x15640",
+        "end_inclusive": "0x22d30",
+        "static_sites": 3440,
+        "limitation": "Combined final point/guard/normalization/recovery-prepare/tree-leaf region; conditional paths, not ordinary executed work."
+      }
+    },
+    "guard": {
+      "report_sha256": "a13bb66cc77de86defdf1a0ef815752745f79c7e8025f0142ab687b57338f073",
+      "source_sha256": {
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "GPUMath.h": "dca2ce45dbd03b17beecbdde979877462d87dd5e89594948d987189d91b45ebd",
+        "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+        "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+        "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+        "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+        "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+        "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+        "tests/gpu_epochs/tree.cu": "5e47943722495372b33c16989b4bcd1b72c418517491fa9ce4e08e52564cefb0",
+        "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+      },
+      "source_hashes_verified": true,
+      "default_compile_pass": true,
+      "sass_sha256": "eb2f5ec8c4c65772a0d595061207470165235fc49b991e04bd7ab7062d359883",
+      "ptx_sha256": "9c043fa7f8b6e8c7379c8a0d09161fd8b38515776b3e364516b3513ac02544e1",
+      "resources": {
+        "registers": 104,
+        "shared_bytes": 32768,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "instruction_slots": 14208,
+        "non_nop": 14197
+      },
+      "loop": {
+        "start": "0xff80",
+        "end": "0x15d80",
+        "static_sites": 1505,
+        "local_sites": [],
+        "cold_bypasses": [
+          {
+            "branch_pc": "0x10ae0",
+            "join_pc": "0x10c10",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x10b80",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x115e0",
+            "join_pc": "0x116e0",
+            "skipped_inline_sites": 15,
+            "calls": [
+              {
+                "pc": "0x11680",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x12040",
+            "join_pc": "0x12170",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x120e0",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x12970",
+            "join_pc": "0x12aa0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x12a10",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x13290",
+            "join_pc": "0x133c0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x13330",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x13bb0",
+            "join_pc": "0x13ce0",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x13c50",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x143c0",
+            "join_pc": "0x14480",
+            "skipped_inline_sites": 11,
+            "calls": [
+              {
+                "pc": "0x14430",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x150d0",
+            "join_pc": "0x15200",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x15170",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          },
+          {
+            "branch_pc": "0x15b40",
+            "join_pc": "0x15c70",
+            "skipped_inline_sites": 18,
+            "calls": [
+              {
+                "pc": "0x15be0",
+                "instruction": "CALL.REL.NOINC 0x37560"
+              }
+            ]
+          }
+        ],
+        "cold_bypass_site_sum": 152,
+        "no_cold_inline_region_sites_before_digit_skips": 1353,
+        "control_evidence": [
+          {
+            "pc": "0xff00",
+            "instruction": "IMAD.MOV.U32 R50, RZ, RZ, R78"
+          },
+          {
+            "pc": "0xff10",
+            "instruction": "BSYNC B0"
+          },
+          {
+            "pc": "0xff20",
+            "instruction": "PLOP3.LUT P0, PT, PT, PT, PT, 0x80, 0x0"
+          },
+          {
+            "pc": "0xff30",
+            "instruction": "IMAD.MOV.U32 R73, RZ, RZ, 0x2"
+          },
+          {
+            "pc": "0xff40",
+            "instruction": "UMOV UR4, 0x30000"
+          },
+          {
+            "pc": "0xff50",
+            "instruction": "IMAD.MOV.U32 R23, RZ, RZ, RZ"
+          },
+          {
+            "pc": "0xff60",
+            "instruction": "UMOV UR5, 0x24"
+          },
+          {
+            "pc": "0xff70",
+            "instruction": "UMOV UR6, 0x24"
+          },
+          {
+            "pc": "0x15d00",
+            "instruction": "IMAD.U32 R23, RZ, RZ, UR7"
+          },
+          {
+            "pc": "0x15d10",
+            "instruction": "IMAD.MOV.U32 R62, RZ, RZ, R69"
+          },
+          {
+            "pc": "0x15d20",
+            "instruction": "IMAD.MOV.U32 R61, RZ, RZ, R70"
+          },
+          {
+            "pc": "0x15d30",
+            "instruction": "IMAD.MOV.U32 R60, RZ, RZ, R71"
+          },
+          {
+            "pc": "0x15d40",
+            "instruction": "IMAD.MOV.U32 R59, RZ, RZ, R72"
+          },
+          {
+            "pc": "0x15d50",
+            "instruction": "IMAD.MOV.U32 R58, RZ, RZ, R75"
+          },
+          {
+            "pc": "0x15d60",
+            "instruction": "IMAD.MOV.U32 R57, RZ, RZ, R74"
+          },
+          {
+            "pc": "0x15d70",
+            "instruction": "@P1 CALL.REL.NOINC 0x15d90"
+          },
+          {
+            "pc": "0x15d80",
+            "instruction": "BRA 0xff80"
+          }
+        ],
+        "opcodes": {
+          "ULOP3.LUT": 2,
+          "IMAD.MOV.U32": 202,
+          "BRA": 12,
+          "ISETP.NE.AND": 2,
+          "IMAD.SHL.U32": 1,
+          "SHF.R.U64": 1,
+          "SHF.L.U32": 1,
+          "LOP3.LUT": 24,
+          "SHF.R.U32.HI": 1,
+          "IADD3": 64,
+          "IMAD.X": 35,
+          "LEA": 1,
+          "LEA.HI.X": 1,
+          "LDG.E.128.CONSTANT": 4,
+          "UIADD3": 2,
+          "BSSY": 9,
+          "IMAD.WIDE.U32": 209,
+          "IMAD.WIDE.U32.X": 392,
+          "IADD3.X": 356,
+          "SEL": 102,
+          "IMAD": 9,
+          "ISETP.GT.U32.AND": 11,
+          "MOV": 9,
+          "CALL.REL.NOINC": 10,
+          "BSYNC": 9,
+          "ISETP.GT.AND.EX": 2,
+          "SHF.L.W.U32.HI": 30,
+          "USHF.R.U32.HI": 1,
+          "ISETP.GE.U32.AND": 1,
+          "ISETP.EQ.AND": 1,
+          "IMAD.U32": 1
+        }
+      },
+      "producer_sha256": "44852a5f20bf5f7dc4ec3d44aefdf451c735f88c22beeaf9b207fd2acfde3239"
+    }
+  },
+  "producer_identical_all_three": true,
+  "assessment": "Weak candidate rejected by native screen; canonical guard preferred. No GPU performance conclusion. See guard_selection and separate weak comparisons.",
+  "comparisons": {
+    "ordinary_iterations": 12,
+    "candidate_static_loop_delta": -116,
+    "candidate_no_correction_region_delta": 38,
+    "candidate_no_correction_region_delta_12adds": 456,
+    "same_digit_selection_branches": true,
+    "digit_skip_note": "Equivalent17site selector and positions36+17*i, i0..11: word0 skips12sites twice; word1 skips7sites fourtimes; others0. Total52sites skipped in either. Predicated-false sites remain traversed instruction sites.",
+    "no_correction_loop_traversed_sites_including_one_exit_call_excluding_final_backedge": {
+      "pending217": 16183,
+      "candidate": 16639
+    },
+    "registers_delta": 19,
+    "all_three_nominal_register_CTA_limit_256threads": 2,
+    "register_limit_note": "100 rounds104regs/thread perwarp;119 rounds120;126 rounds128 with256register/warp granularity. All permit2CTAs, not3, under65536regs. Static legality, not measured occupancy.",
+    "postloop_static_delta": 1486
+  },
+  "limitations": [
+    "Static sites are not cycles or throughput; scheduling, predicates, rare correction divergence and root convergence affect runtime",
+    "Cold bypass analysis conditions on all active lanes avoiding conservative cold prefilter; no sampled frequency assumed",
+    "Default flags compiled, but counts are sm89 native image, not benchmark driver-JIT image",
+    "AcceptedPR189 has defective inherited hot field and unboundedHM43; official performance reference, not full-domain correctness oracle",
+    "Candidate adds guarded final handling absent baseline; total image growth is not executed by every candidate",
+    "No GPU execution or profiler data"
+  ],
+  "guard_selection": {
+    "recommendation": "Prefer canonical guard variant over weak-region candidate for further correctness/package qualification. Native screen preserves PR217 common-path count and register allocation; no performance gain established.",
+    "loop_static_delta_vs217": -2,
+    "normal_path_region_delta_vs217": 0,
+    "register_count_delta_vs217": 4,
+    "allocated_registers_per_thread_equivalent": 104,
+    "local_B": 0,
+    "producer_identical_vs217": true,
+    "whole_image_nonNOP_delta_vs217": 1397,
+    "weak_candidate_rejected_reason": "No common-path loop saving; more register allocation and same absence of local spills. Guard candidate adds final-point correctness without weak-region overhead.",
+    "limit": "Guard final paths enlarge image; their executed overhead is not measured. Correctness proof/tests remain separate."
+  }
+}

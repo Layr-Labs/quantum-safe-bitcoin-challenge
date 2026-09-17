@@ -1,0 +1,98 @@
+{
+  "status": "PASS_UNCHANGED_STARTUP_PROJECTION_POLICY_NOT_APPLICABLE",
+  "source_fingerprint": "24e96b567aa1662aa941e582ca4928cf393c9fcaf22161ee3a2b6355b0827199",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "dca2ce45dbd03b17beecbdde979877462d87dd5e89594948d987189d91b45ebd",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/tree.cu": "5e47943722495372b33c16989b4bcd1b72c418517491fa9ce4e08e52564cefb0",
+    "tests/gpu_epochs/tree_audit.cu": "6f52a9eaec26c1151293eb08b484d74d075b533a27ef17ef79be6f8c20d2f6b5",
+    "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+  },
+  "base_identity": {
+    "source_fingerprint": "416f45a447c495633c719f2655cb3e35f5dc1b69ce8040c65262d83618629be8",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "4826599005bcb07bc1efccab8308cfa67168a1ae636f9c33fb632b8ddc27005e",
+      "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+      "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+      "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+      "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/tree.cu": "f31dda37ef2ea6952c64904c95fdb200ee4185233b8b6df9306a6575aa331261",
+      "tests/gpu_epochs/tree_audit.cu": "6f52a9eaec26c1151293eb08b484d74d075b533a27ef17ef79be6f8c20d2f6b5",
+      "tests/gpu_epochs/tree_inverse.cuh": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+    }
+  },
+  "policy_gate_applicable": false,
+  "actual_after_build_call_verified": false,
+  "policy_capacity_cases": 0,
+  "policy_injected_failures": 0,
+  "startup_geometry_byte_identical_to_base": true,
+  "host_startup_byte_identical_to_base": true,
+  "component_sha256": {
+    "geometry": "058840fd525920063e279e4834aeb434ad8ed9a11a6f069ac5528c0ac00de156",
+    "host_startup": "65381b5591900694bf735ee0e38a288e25db744cf0a0cc0bd53bf6cbcb3d1263"
+  },
+  "startup_decision_cases": 15,
+  "unchecked_status_cases": 8,
+  "execution": "startup_decision_cases=15 unchecked_status_cases=8",
+  "negative_controls": {
+    "missing-host-fallback": {
+      "compiled": true,
+      "rejected": true,
+      "returncode": -6
+    },
+    "wrong-first-width": {
+      "compiled": true,
+      "rejected": true,
+      "returncode": -6
+    }
+  },
+  "geometry": {
+    "widths": [
+      18,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17,
+      17
+    ],
+    "table_bytes": 67108864,
+    "low_ladder_bytes": 245760,
+    "high_ladder_bytes": 983040,
+    "host_spot_samples": 252
+  },
+  "limits": [
+    "No L2 policy exists, so no 180+30 policy matrix or after-policy-build call can truthfully be claimed.",
+    "Actual extracted startup decisions execute with mocked CUDA, allocation and curve-builder APIs; GPU kernels and curve construction are not executed.",
+    "Source ignores cudaMalloc/cudaMemcpy/cudaDeviceSynchronize return values at this startup site; injected ignored errors expose that inherited limitation.",
+    "Policy gate absence is not proof of safe CUDA error handling.",
+    "Main preflight CLI binds its own directory; use source_identity(root) for isolated snapshots, or copy preflight to actual staged candidates/subset before package checks."
+  ],
+  "audit_commands": [
+    "nvcc -O3 -DQSB_ZEROS_N=24 -o /tmp/qsb-frontier-audit \"$SRC/tests/gpu_epochs/tree_audit.cu\" -lcrypto -lm",
+    "nvcc -O3 -arch=sm_89 -DQSB_ZEROS_N=24 -o /tmp/qsb-frontier-audit-sm89 \"$SRC/tests/gpu_epochs/tree_audit.cu\" -lcrypto -lm"
+  ],
+  "gpu_executed": false,
+  "cuda_compile_executed_by_this_checker": false
+}

@@ -55,16 +55,7 @@ __device__ __forceinline__ uint64_t hm43_multiple_p(uint64_t m,int word){
     return 0;
 }
 
-// Bound the new signed-accumulator argument explicitly. The cap/fallback
-// concern was identified in hybridnoise's public PR200; the scalar Fermat
-// fallback here is independent and uses this candidate's corrected field code.
-#ifndef QSB_ROOT_MAX_BATCHES
-#define QSB_ROOT_MAX_BATCHES 16
-#endif
-#if QSB_ROOT_MAX_BATCHES < 0 || QSB_ROOT_MAX_BATCHES > 16
-#error QSB_ROOT_MAX_BATCHES must lie in [0,16]
-#endif
-__device__ __forceinline__ bool hm43_warp_inverse_bounded(uint64_t result[5],int lane){
+__device__ __forceinline__ void hm43_warp_inverse(uint64_t result[5],int lane){
     const int group=lane>>3,word=lane&7,base=lane&~7;
     uint64_t state=0;
     #pragma unroll
@@ -78,12 +69,7 @@ __device__ __forceinline__ bool hm43_warp_inverse_bounded(uint64_t result[5],int
     }
     if(group==3 && word==0)state=1;
     uint32_t nonzero=0;
-    unsigned batches=0;
     while(true){
-        // The condition and return are uniform across all participating lanes.
-        // The caller result has not been modified on this path.
-        if(batches==QSB_ROOT_MAX_BATCHES)return false;
-        ++batches;
         uint32_t nz=hm43_ballot(word<5 && state!=0);
         uint32_t uv=(nz&31u)|((nz>>8)&31u);
         int pos=63-__clzll((uint64_t)uv);
@@ -140,37 +126,6 @@ __device__ __forceinline__ bool hm43_warp_inverse_bounded(uint64_t result[5],int
             while(!_IsNegative(result))SubP(result);
             AddP(result);
         }
-    }
-    #pragma unroll
-    for(int j=0;j<5;j++)result[j]=hm43_exchange(result[j],0);
-    return true;
-}
-
-// x^(p-2), p=2^256-2^32-977. This fixed-work fallback terminates for every
-// input. It returns the canonical inverse for x!=0 (mod p), and zero for zero.
-// Its arithmetic has no dependence on the divstep iteration count or estimates.
-struct QsbInverseWords {uint64_t a,b,c,d;};
-__device__ __noinline__ QsbInverseWords qsb_root_fermat(QsbInverseWords input){
-    uint64_t x[4]={input.a,input.b,input.c,input.d};
-    uint64_t result[4]={input.a,input.b,input.c,input.d};
-    #pragma unroll 1
-    for(int bit=254;bit>=64;--bit){
-        _ModSqr(result,result);
-        _ModMultCore(result,result,x);
-    }
-    const uint64_t low_exponent=0xfffffffefffffc2dULL;
-    #pragma unroll 1
-    for(int bit=63;bit>=0;--bit){
-        _ModSqr(result,result);
-        if((low_exponent>>bit)&1ULL)_ModMultCore(result,result,x);
-    }
-    return {result[0],result[1],result[2],result[3]};
-}
-__device__ __forceinline__ void hm43_warp_inverse(uint64_t result[5],int lane){
-    if(hm43_warp_inverse_bounded(result,lane))return;
-    if(lane==0){
-        QsbInverseWords inverse=qsb_root_fermat({result[0],result[1],result[2],result[3]});
-        result[0]=inverse.a;result[1]=inverse.b;result[2]=inverse.c;result[3]=inverse.d;result[4]=0;
     }
     #pragma unroll
     for(int j=0;j<5;j++)result[j]=hm43_exchange(result[j],0);

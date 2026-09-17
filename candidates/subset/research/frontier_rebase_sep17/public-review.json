@@ -1,0 +1,182 @@
+{
+  "status": "COMPLETE_BOUNDED_SOURCE_REVIEW",
+  "queue_file": "/tmp/qsb-frontier-refresh.json",
+  "queue_sha256": "901e8cdc3624021324cbd92fc5e9af603182a12bcff6425b668af4b003f7c8bd",
+  "official_frontier": {
+    "id": "db248c65-44ef-4aba-b20c-c244a4cd334a",
+    "status": "accepted",
+    "officialScore": 512865536,
+    "officialMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1201.1285,
+      "candidates": 616017428480,
+      "hits_per_s": 61.138338,
+      "problem_seed": 1804088185,
+      "verified_hits": 73435,
+      "throughput_Mps": 512.865536,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.00369,
+      "candidates_self_reported": 696766445602
+    },
+    "submissionCommitSha": "3c3d748e7e46bbf68fcd22d179c44b231eaa15de",
+    "promotedSourceRef": "df2fb8b8f5f3e47ff7a6a1848ccebf40e902f634"
+  },
+  "heads": {
+    "217": "5b4a5054ab494586dded4806c72f025784ea8da4",
+    "220": "d1c5d7cba08bf8f6c67e67fbea51a84bed98cfd3",
+    "216": "8c99d934cf67f29e7ba010853d7ea27f2cda78e6"
+  },
+  "source_files": {
+    "217": {
+      "candidates/subset/square32.cuh": {
+        "sha256": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "bytes": 9893
+      },
+      "candidates/subset/GPUMath.h": {
+        "sha256": "4826599005bcb07bc1efccab8308cfa67168a1ae636f9c33fb632b8ddc27005e",
+        "bytes": 58850
+      },
+      "candidates/subset/tests/gpu_epochs/tree.cu": {
+        "sha256": "f31dda37ef2ea6952c64904c95fdb200ee4185233b8b6df9306a6575aa331261",
+        "bytes": 151954
+      },
+      "candidates/subset/tests/gpu_epochs/hm43_warp_inverse.cuh": {
+        "sha256": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+        "bytes": 7479
+      },
+      "candidates/subset/tests/gpu_epochs/tree_inverse.cuh": {
+        "sha256": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+        "bytes": 10740
+      }
+    },
+    "220": {
+      "candidates/subset/square32.cuh": {
+        "sha256": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "bytes": 9893
+      },
+      "candidates/subset/GPUMath.h": {
+        "sha256": "91a0671621f8da434e57074ca06125f3fbbe8ad470b833924d40596e0264a3b9",
+        "bytes": 55433
+      },
+      "candidates/subset/tests/gpu_epochs/tree.cu": {
+        "sha256": "eea30c48a67872d4ba658e7f47772512637913b3c872b1cd8b2cc40b59007ade",
+        "bytes": 154841
+      },
+      "candidates/subset/tests/gpu_epochs/hm43_warp_inverse.cuh": {
+        "sha256": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+        "bytes": 5491
+      },
+      "candidates/subset/tests/gpu_epochs/tree_inverse.cuh": {
+        "sha256": "5f5d7a0d424cae0f7db67114a4062f51e53c23d6d84d185c1e0d499306a91594",
+        "bytes": 10740
+      }
+    },
+    "216": {
+      "candidates/subset/square32.cuh": {
+        "sha256": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+        "bytes": 9893
+      },
+      "candidates/subset/GPUMath.h": {
+        "sha256": "91a0671621f8da434e57074ca06125f3fbbe8ad470b833924d40596e0264a3b9",
+        "bytes": 55433
+      },
+      "candidates/subset/tests/gpu_epochs/tree.cu": {
+        "sha256": "e1f3c93f6dd736c1625f8e0136d0fef712345c00cd712c441e644468330bd4d7",
+        "bytes": 150387
+      },
+      "candidates/subset/tests/gpu_epochs/tree_inverse.cuh": {
+        "sha256": "afa07a330119b2bd55c01de275b1a78766e9d2026113acb8f658be7c9311d1a6",
+        "bytes": 9481
+      },
+      "candidates/subset/tests/gpu_epochs/zinv32.cuh": {
+        "sha256": "86b52456b9f7f5f7ec20018b38ad75279ba97a37e762915c8bca31eec30436db",
+        "bytes": 7332
+      }
+    }
+  },
+  "recommendation": "PR217 exact head is the strongest correctness-oriented pending base; preserve accepted PR189 as performance control and pending own PR200. Qualify selected source independently before reuse. Port weak ordinary arithmetic as isolated change; geometry is mixed15/64MiB, not regular16/32MiB.",
+  "candidates": [
+    {
+      "pr": 217,
+      "submission": "1a3af597-93d6-4667-9903-590ec573cb96",
+      "status": "validating",
+      "official_score": null,
+      "author_local_measurement": {
+        "control": "PR150",
+        "seconds": 1200,
+        "control_verified_cps": 572237097.246,
+        "candidate_verified_cps": 581990635.931,
+        "relative_percent": 1.7044576,
+        "independently_reproduced": false
+      },
+      "source_confirmed": [
+        "Default mixed15 geometry [18]+[17]*14, 64MiB",
+        "Corrected canonical selected _ModMultCore/_ModSqr with carry and cold correction",
+        "Bounded HM43 cap16 leaves result untouched on false; scalar fixed-exponent Fermat fallback and broadcast",
+        "PR150 squaring-free 10M0S recovery",
+        "PR201 template deferred-add, __ldg loads, rare scalar reduction, default-stream checked blocking drain"
+      ],
+      "risks": [
+        "Author device/audit evidence not independently rerun here; local result compares PR150, not accepted PR189",
+        "Dormant square32.cuh still defective a973: default pinning square selected; do not activate alternate without repair",
+        "Changing geometry or weak arithmetic requires explicit canonical boundaries, alias/restrict review, full-chain and hit qualification",
+        "No guarantee native/JIT register numbers transfer to modified candidate"
+      ]
+    },
+    {
+      "pr": 220,
+      "submission": "3ac33245-a32d-4f91-927c-f84b00cc3b06",
+      "official_score": null,
+      "mechanism": "two candidates/thread, paired denominator tree, halve inverse/tree frequency per candidate",
+      "source_confirmed": [
+        "QSB_PAIR_N default2; 256thread launch covers512 candidate owners",
+        "volatile savedA16 + savedB4 + savedBf12 words park 256B/thread across pair",
+        "one denominator product plus two inverse split multiplies per pair",
+        "uniform candidate-loop retirement barrier and odd-tail descriptor clamp present"
+      ],
+      "risks": [
+        "Selected field GPUMath91a067 remains defective; HM43 unbounded inherited",
+        "Author claims 128regs/200Bstack/8Bspill each direction from Compiler Explorer, not independently confirmed; 8B spill is not total local traffic",
+        "No measured speedup; pre-HM43 root-free ablation is not current inverse fraction",
+        "Own inverse batching/spill tradeoff requires measured resource and timing qualification"
+      ],
+      "disposition": "substantial orthogonal mechanism for later controlled port onto corrected base; not initial combined change"
+    },
+    {
+      "pr": 216,
+      "submission": "b25340d4-8233-406a-a0ea-a290cda248aa",
+      "official_score": null,
+      "mechanism": "four lane 30bit delayed divstep using9x32 signed state",
+      "source_confirmed": [
+        "4lane mask0xF, paired state exchanges, sparse modulus correction",
+        "Unbounded outer while and zi_canon assumes abs state<2^261",
+        "Selected field GPUMath91a067 remains defective"
+      ],
+      "risks": [
+        "Author root microbenchmark39851\u219228155 cycles compares scalar root, not accepted HM43; no whole-workload score",
+        "No cap/fallback or full-domain state-range proof established by this review",
+        "Replacement root is alternative to boundedHM43, not automatically additive"
+      ],
+      "disposition": "retain research alternative; prioritize PR217 bounded/corrected base"
+    }
+  ],
+  "other_note_triage": {
+    "PR223": "host drain only, mostly overlaps PR217; no substantial independent arithmetic mechanism",
+    "PR224": "rebased PR201 codegen/host drain; already integrated by PR217, no demonstrated incremental gain",
+    "PR212": "external first-block producer and larger launches with author attempted-throughput +2.63%; separate global-state/extra-launch tradeoff, not verified-score result",
+    "PR211": "hierarchical inverse checkpoints; previously reviewed family, competing memory/launch cost",
+    "PR215": "144MiB14term table; fewer point adds but known memory-pressure risk, no reason to override64/32MiB controls",
+    "PR204/208": "direct constant argument register-relief probe/copied artifact; unsupported zero-register or occupancy guarantee"
+  },
+  "attribution": "If reusing unpromoted PR217 or PR220/216, retain authorship and required coauthor disposition; PR217 incorporates PR201 and credits PR200 cap concern. Accepted frontier provenance does not erase donor credit.",
+  "limitations": [
+    "Read-only source review; no CUDA compilation, device execution, runtime profiling, throughput reproduction or formal proof performed",
+    "Latest queue is supplied snapshot, not a fresh status query",
+    "No production/candidate/stage files changed; no submissions cancelled or uploaded"
+  ]
+}

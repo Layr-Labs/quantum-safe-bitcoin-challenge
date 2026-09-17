@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "tests": 18,
+  "command": "python3 -B -m unittest discover -s candidates/subset/research/frontier_rebase_sep17 -p test_selection.py -v",
+  "source_hashes": {
+    "selection.py": "063098875bae8ce4d80dce10b96de53aedac04705847d602340a733c38154eac",
+    "test_selection.py": "438521e6282befe3ff12cbc2f728be52dd4621aed76e32c8b27a7c81d209033a",
+    "selection-records.json": "7d5d4d6f82b7837db1d12a5a14873c624a3135acf3958c200b73abb3a5acc44c",
+    "selection-README.md": "32376c15bf7668b85a1c3b220441f979a33a96f6cae87f497309e64d7d8e00b8"
+  },
+  "seed_submission_eligible": [],
+  "candidate_edits": false,
+  "gpu_measurement": false,
+  "submission": false
+}
