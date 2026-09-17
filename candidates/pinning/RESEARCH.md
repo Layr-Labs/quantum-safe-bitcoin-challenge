@@ -1752,3 +1752,487 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Host drain cleanup on the 644.5M frontier
+
+The promoted kernel inserted `cudaDeviceSynchronize()` immediately before a
+synchronous four-byte hit-count copy. The copy already waits for the default
+stream, so the extra wait is redundant (public note `57f2ec8` identified the
+same pattern). The counter reset is now `cudaMemset` instead of a host-to-device
+copy of a zero word. Hits are still appended to `results/pinning_hit_*.txt` in
+the original `sequence=/locktime=/hash_choice=/recid=` form; the per-hit stdout
+line is omitted so the host gap after each 16M pipeline is only the required
+counter copy plus a short fwrite. Progress remains every ten sequences.
+
+Arithmetic, table, recoding, launch geometry, and hit encoding are unchanged.
+A sequence-wide grouped readback and a forced-inline SHA transform were
+measured locally on an RTX 5090 and rejected: grouping produced duplicate
+records and lower verified throughput, and SHA inlining collapsed occupancy.
+Those trials are not in this archive.
+
+## Dual-stream double-buffered pipeline (local experiment)
+
+Two complete pipeline allocations (state, tree, roots, super-roots, group
+checkpoints) and two `cudaStreamNonBlocking` streams so batch N+1 prepare can
+overlap batch N finish. Each slot has its own hit counter and 1024-entry index
+buffer. Counters reset per batch with `cudaMemsetAsync` on that slot's stream.
+Hits still encode `idx|(ri<<30)` and are drained when that slot is reused, not
+after the whole locktime range. Midstate uploads record an event on stream 0
+that stream 1 waits on, so non-blocking streams observe the new sequence.
+Device arithmetic, the 64 MiB table, and the unique-hit file format are
+unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique verified hits only:
+
+| kernel | verified | unique | M/s | vs host-drain |
+|---|---:|---:|---:|---:|
+| host-drain | 3963/3963 | 3963 | 826.0 | — |
+| dual-stream, unconstrained | 2692/2692 | 2692 | 560.9 | −32% |
+| dual-stream, prepare-ordered | 1926/1926 | 1926 | 401.3 | −51% |
+
+Both dual-stream hit sets were subsets of host-drain (no extras, no duplicate
+keys). Unconstrained overlap let two 16M prepares contend for the device;
+prepare-done events stopped that fight but left a larger bubble. The dual-stream
+host loop was reverted so this archive stays on the host-drain control. Do not
+resubmit dual complete 2.5 GiB pipeline slots.
+
+## Montgomery product-tree inverse in `kernel_build_gtable` (local experiment)
+
+Startup is inside the harness clock, so the 1,048,576-entry affine table was
+a plausible one-time cost. The mixed-add kernel already had a per-thread
+`_ModInv(Z)`. The trial replaced that with the live search-pipeline helper
+`qsb_block_inverse`: every 256-thread CTA product-tree inverts its Z vector
+(identity Z=1 for `hi==0` and inactive lanes; a zero-Z lane would substitute
+1 so it cannot poison the block product). Affine layout, `gt_spot_check`, and
+the host-drain search loop were unchanged.
+
+`sm_120` ptxas for the builder: 128 registers, 120-byte stack, 1 barrier,
+24,576 bytes shared (the packed product tree). Spot check passed. GTable wall
+time on this 5090 is **0.20 s vs 0.21 s** for the per-thread inverse, including
+OpenSSL ladders and the 252-point host check. That 10 ms is 0.0008% of a
+1,200 s ranked window.
+
+Local RTX 5090, 45 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra vs host-drain | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| host-drain | 4430/4430 | 4430 | 0 | — | — | **821.49** |
+| gtable batch inverse | 4449/4449 | 4449 | 0 | 19 (all last seq `0x8000001D`) | 0 | 824.86 (+0.41%) |
+
+Both runs covered the same 30 sequences. The 19 extras are additional locktimes
+in the timeout-truncated last sequence (117 vs 136 hits there), not new keys.
+A prior 50 s A/B on the same host went the other way (821.97 vs 825.07, −0.38%).
+The search kernels are instruction-identical; the ±0.4% is last-batch noise.
+The table-build change was reverted. Do not rematch CTA batch inverse for
+`kernel_build_gtable` unless the host OpenSSL ladder/spot-check path is also
+replaced by a new mechanism.
+
+## 32M single-pipeline batch with a third inverse level
+
+The live two-level inverse rejects `root_groups>256`, so a naive `BATCH=32M`
+(131,072 search CTAs → 512 group-roots) cannot launch. The old 8M/16M/32M
+screen on the pre-hierarchy XYZZ kernel is therefore not a rematch: enabling
+32M here needs a new inverse shape.
+
+This trial keeps **one** pipeline (not dual 2.5 GiB slots) and adds a third
+product-tree level: 256 search-CTA roots → one group-root, 256 group-roots →
+one mega-root, then the existing 256-lane `qsb_invert_super_roots` inverts the
+two mega-roots of a full 32M batch (254 identity lanes). Mega prepare/finish
+reuse `qsb_root_group_prepare` / `qsb_root_group_finish`. Host-drain, affine
+64 MiB table, hit encoding `idx|(ri<<30)`, and the 1,024-entry hit buffer are
+unchanged. `idx` for 32M-1 still fits in 30 bits.
+
+Working set on the 5090: 4096 MiB state + 1024 MiB tree + 4 MiB roots +
+4.02 MiB root tree + 0.02 MiB mega tree. Ranked 4090 has 24 GiB. Fast prepare
+stays 126 registers / 16 KiB smem / 0 spills on `sm_120`. GTable spot check
+passed in 0.20 s. `audit_vector_state_layout.py` now binds the 4 GiB production
+allocation.
+
+Local RTX 5090, 45 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra vs host-drain | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| host-drain 16M | 4463/4463 | 4463 | 0 | — | — | **827.57** |
+| 32M + 3-level inverse | 4561/4561 | 4561 | 0 | 98 (all last seq `0x8000001E`) | 0 | 845.48 (**+2.17%**) |
+
+Completed sequences match exactly (4,450 keys, symmetric difference 0). The
+98 extras are additional locktimes in the timeout-truncated last sequence
+(host 13 hits, max lt 617,404,244; 32M 111 hits, max lt 1,638,592,511).
+Self-reported candidates 38.00B vs 39.01B (**+2.65%**). That is extra search
+progress from fewer host round-trips, not new keys inside finished sequences.
+
+Do not submit while ranked host-drain `36d4266d` is validating. Keep this
+tree locally. If that job is cancelled or rejected with no better frontier,
+this archive is the next candidate: unique verified hits improved on the
+same host with no duplicates, and +2% is in range of the official +1% gate
+(4090 1,200 s still required). Do not rematch dual 2.5 GiB slots.
+
+## 64M single-pipeline batch on the same three-level inverse
+
+32M already used the third product-tree level (`mega_groups=2`). This trial
+only doubles `BATCH` to 67,108,864. Geometry: 262,144 search CTAs → 1,024
+group-roots → **4 mega-roots**. `qsb_invert_super_roots<<<1,256>>>` still
+does one `_ModInv` per full batch. Hit encoding `idx|(ri<<30)` still fits
+(26-bit idx). Host-drain loop, affine 64 MiB table, and `COPYING` unchanged.
+Not a rematch of dual 2.5 GiB slots.
+
+Working set: 8192 MiB state + 2048 MiB tree + 8 MiB roots + 8.03 MiB root
+tree + 0.03 MiB mega tree. 12 s probe on the 5090: **no OOM**. nvidia-smi
+during search: 18724 / 32607 MiB used. Ranked 4090 24 GiB still has headroom
+vs that wall measurement. Fast prepare stays 126 registers / 16 KiB smem /
+0 spills on `sm_120`. GTable spot check passed in 0.20 s.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits,
+same-session vs the saved 32M binary:
+
+| kernel | verified | unique | dup | extra vs 32M | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| 32M + 3-level | 4136/4136 | 4136 | 0 | — | — | **862.15** |
+| 64M + 3-level | 4207/4207 | 4207 | 0 | 71 | 0 | 876.09 (**+1.62%**) |
+
+Completed sequences `0x80000000`–`0x8000001A` match exactly. The 71 extras
+are additional locktimes in `0x8000001B` (32M truncated at 96 hits / max lt
+1,327,180,824; 64M 140 hits / max lt 1,739,984,266) plus 27 hits in
+`0x8000001C` which 32M never reached. Self-reported candidates 35.109B vs
+35.719B (**+1.74%**). Noise `1/√4136` ≈ 1.555%; the gap is just outside
+that band.
+
+Keep 64M locally. Do not submit while `36d4266d` validates. Do not rematch
+dual-stream, inline SHA, GTable batch inverse, fused X3, GLV, or grouped
+locktime. A further naive doubling to 128M would be ~16 GiB state + 4 GiB
+tree and is likely too large for the ranked 4090.
+
+## Dual hit-slot drain on the 64M pipeline (reverted)
+
+Dual-stream 2.5 GiB slots lost because two prepares split the device. This
+trial kept **one** 64M pipeline and only doubled the tiny hit state: two
+4-byte counters, two 1024-entry index buffers, and two `cudaEvent_t`. After
+launching batch N on the default stream, the host waits the previous slot's
+event and copies those hits while N runs. Sequence boundaries still drain
+before the next SHA midstate upload so `d_mid` is not overwritten under an
+in-flight batch. Hit encoding, 64M geometry, three-level inverse, affine
+table, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits,
+same-session vs the 64M host-drain control:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| 64M host-drain | 4249/4249 | 4249 | 0 | — | — | **884.83** |
+| 64M + dual hit slots | 4207/4207 | 4207 | 0 | 0 | 42 | 876.21 (**−0.97%**) |
+
+The dual-hit set is a subset of the control (same 29 sequences). The 42
+missing keys are extra locktimes the faster control reached. At 64M the
+GPU work per batch is ~70 ms; a 4-byte D2H plus a short fwrite does not
+repay `cudaEventRecord`/`cudaEventSynchronize`. Reverted to single-slot
+host-drain. Do not rematch dual hit slots unless D2H uses a **second
+stream** so the wait is not on the default pipeline stream.
+
+## Partial unroll of `_FixedBaseSignedXYZZScalar` (reverted)
+
+The production window loop is `#pragma unroll 1` because a full unroll
+inlines the field-mul asm past ptxas' budget. This trial used `#pragma
+unroll 2` on the live scalar-entry path only (13 mixed adds become ~7
+doubled bodies). Dead `_FixedBaseSignedXYZZ` stayed unroll-1. 64M batch,
+three-level inverse, host-drain, and `COPYING` were unchanged.
+
+`sm_120` FAST prepare: 128 registers / 16 KiB smem / 0 stack / 0 spills
+(control 126 regs). FAST finish unchanged (80 regs / 8 B stack / 4 B spill).
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| 64M unroll-1 | 4243/4243 | 4243 | 0 | — | — | **883.87** |
+| 64M unroll-2 | 4234/4234 | 4234 | 0 | 0 | 9 | 881.87 (**−0.23%**) |
+
+Same 29 sequences; unroll-2 is a subset. The −0.23% is inside `1/√4243` ≈
+1.54% hit noise and on the slow side. The extra two registers did not buy
+a measurable loop-overhead cut. Reverted to `#pragma unroll 1`. Do not
+rematch partial unroll without a measured SASS/occupancy win on the live
+prepare kernel (for example a 124-register compile).
+
+## Side-stream hit D2H on the 64M pipeline (kept)
+
+The earlier dual-hit trial issued a **blocking** `cudaMemcpy` of slot N-1 on
+the default stream after queueing batch N, so the copy waited for N as well
+and paid `cudaEventSynchronize` for nothing (−0.97%). This trial keeps two
+tiny hit slots (two 4-byte counters, two 1024-entry index buffers) but moves
+the copy to a `cudaStreamNonBlocking` drain stream: `cudaStreamWaitEvent` on
+the previous batch's default-stream event, then `cudaMemcpyAsync` of the
+count (and indices if nonzero) into pinned host memory, then
+`cudaStreamSynchronize` on **only** the drain stream. The default pipeline
+can run batch N while the host drains N-1. Sequence boundaries still drain
+before the next SHA midstate upload. 64M geometry, three-level inverse,
+affine table, hit encoding, and `COPYING` are unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra vs 64M | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| 64M host-drain | 4243/4243 | 4243 | 0 | — | — | **883.99** |
+| 64M + side-stream D2H | 4302/4302 | 4302 | 0 | 59 (all last seq `0x8000001C`) | 0 | 896.02 (**+1.36%**) |
+
+Completed sequences match exactly (symmetric difference 0). Last sequence
+63 vs 122 hits (max lt 1,035,848,168 vs 1,634,097,540). Self-reported
+candidates 36.085B vs 36.770B (**+1.90%**). Keep this host loop. Do not
+submit while `36d4266d` validates.
+
+## Coalesced one-sync drain D2H (reverted)
+
+Almost every 64M batch has hits, so the side-stream drain did two
+`cudaStreamSynchronize` calls (count, then indices). This trial queued both
+copies (4 + 256 bytes) and waited once. 64M geometry, two hit slots, and
+the non-blocking drain stream were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4340/4340 | 4340 | 0 | — | — | **904.14** |
+| one-sync always-256B | 4297/4297 | 4297 | 0 | 0 | 43 | 895.12 (**−1.00%**) |
+
+One-sync is a subset (29 vs 30 sequences). Copying 64 indices on empty and
+hit batches alike added drain-stream traffic without removing a default-
+stream wait. Reverted to two-phase copy. Do not rematch coalesced drain
+D2H unless the index buffer is packed with the counter in one device
+allocation so a single memcpy is actually smaller, not larger.
+
+## Sampled GTable D2H instead of a 64 MiB copy (reverted)
+
+Startup is inside the harness clock. The GPU table builder then copied the
+whole 64 MiB affine table to the host for a 252-point OpenSSL spot check
+(`GT_CHUNKS*4+192`). This trial kept those 252 OpenSSL comparisons but
+copied only the sampled 64-byte entries from device memory (about 16 KiB
+total) and allocated the host fallback table only on failure.
+
+Probe: GTable **0.16 s** vs the previous 0.20 s full-table copy (spot check
+still passed). Local RTX 5090, 40 s, seed 20260916, unique independently
+verified hits vs the side-stream 64M control:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| 64 MiB table D2H | 4323/4323 | 4323 | 0 | — | — | **900.53** |
+| 252×64 B samples | 4297/4297 | 4297 | 0 | 0 | 26 | 895.06 (**−0.61%**) |
+
+Subset of the control (29 vs 30 sequences). The 40 ms startup cut is 0.1%
+of a 40 s run and 0.003% of 1,200 s; 252 synchronous tiny D2Hs did not
+beat one 64 MiB copy. Reverted. Do not rematch sampled GTable D2H without
+a packed gather (one copy of the 252 entries) or dropping OpenSSL from
+the success path.
+
+## Sequence-boundary midstate overlap (reverted)
+
+The side-stream drain already overlaps batch N-1 hits with batch N inside a
+sequence, but the **next sequence** still host-waited for the previous
+sequence's last event before `cudaMemcpy` of the new SHA midstate. This
+trial dropped that boundary drain, used `cudaMemcpyAsync` of the midstate
+on the default stream (two host slots so the SHA buffer cannot be
+overwritten in flight), and let the first inner launch of seq S+1 queue
+behind seq S's last kernels. The leftover hit slot drained on the side
+stream as usual.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream seq drain | 4340/4340 | 4340 | 0 | — | — | **903.69** |
+| async midstate, no seq drain | 4302/4302 | 4302 | 0 | 0 | 38 | 896.02 (**−0.85%**) |
+
+Subset of the control (29 vs 30 sequences). Default-stream `memcpyAsync`
+still waits behind the last 64M kernels before the next prepare can start;
+removing the host drain did not hide that dependency. Reverted. A later
+trial added the second device `d_mid` (see below) and still lost.
+
+## Dual device midstate prefetch (reverted)
+
+The previous seq-boundary trial used one `d_mid`, so seq S+1's H2D could
+overwrite seq S's in-flight prepare. This trial allocated two 32-byte
+device buffers plus pinned host slots and a `cudaStreamNonBlocking`
+midstate stream. Seq S+1's SHA midstate is uploaded into the idle slot
+after the inner drain of seq S (that drain waits for S's last prepare).
+The seq-boundary blocking `cudaMemcpy` and extra drain were removed:
+seq S+1's first prepare is queued on the default stream behind S, using
+the other buffer. Hit drain, 64M geometry, three-level inverse, and
+`COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4340/4340 | 4340 | 0 | — | — | **904.12** |
+| dual `d_mid` prefetch | 4302/4302 | 4302 | 0 | 0 | 38 | 896.17 (**−0.88%**) |
+
+Subset of the control (same 38 missing keys as the earlier no-second-buffer
+trial). One 64M pipeline still serializes S finish → S+1 prepare on the
+default stream; a distinct midstate pointer does not let prepare S+1 run
+under finish S. Reverted. Do not rematch dual `d_mid` unless S+1 prepare
+can actually execute concurrently with S finish (a second ~10 GiB pipeline
+already lost on occupancy).
+
+## CUDA graph of the 7-kernel pipeline (reverted)
+
+Full 64M batches launch seven kernels (~70 ms GPU work). This trial captured
+that chain once (`cudaStreamBeginCapture` on a non-blocking stream,
+instantiate, identify prepare/finish as the unique in-degree-0 / out-degree-0
+kernel nodes) and replayed with `cudaGraphExecKernelNodeSetParams` for
+`seq`, `start_lt`, and the two hit-slot pointers. Inverse nodes stay fixed at
+BATCH. Remainder batches (`batch_sz != 64M`) still used ordinary launches.
+Hit drain, 64M geometry, three-level inverse, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4333/4333 | 4333 | 0 | — | — | **902.54** |
+| 7-kernel CUDA graph | 4297/4297 | 4297 | 0 | 0 | 36 | 895.10 (**−0.82%**) |
+
+Subset of the control. Graph instantiate succeeded (`Pipeline graph: 7
+kernels`). Launch overhead of seven kernels is tiny vs ~70 ms of 64M work;
+`SetParams` twice per batch did not repay. Reverted. Do not rematch CUDA
+graphs on this pipeline without fusing work so the captured chain is many
+short kernels, not two 64M grids.
+
+## Persisting L2 window on the 64 MiB GTable (reverted)
+
+Prepare loads 15 affine points from a 64 MiB table while the pipeline
+streams ~8 GiB of XYZZ state. This trial reserved half the table in L2
+(`cudaLimitPersistingL2CacheSize` = 32 MiB, `cudaStreamAttributeAccessPolicyWindow`
+on the default stream, `hitRatio` 0.5, `hitProp=Persisting`,
+`missProp=Streaming`). Probe on the 5090: L2=96 MiB, maxPersist=60 MiB,
+maxWindow=128 MiB, window applied. Occupancy unchanged (FAST prepare 126
+regs / 0 stack). 64M geometry, three-level inverse, side-stream two-phase
+D2H, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4333/4333 | 4333 | 0 | — | — | **902.73** |
+| GTable L2 persist 32 MiB | 4125/4125 | 4125 | 0 | 0 | 208 | 859.11 (**−4.83%**) |
+
+Subset of the control (same sequences; 208 missing keys are extra
+locktimes the faster control reached). Carving 32 MiB of L2 for the table
+starves the 8 GiB streaming working set by more than it helps random
+gathers. Reverted. Do not rematch a stream persist window on `d_gt`
+without a different policy (for example instruction-level L2 eviction
+hints on `gt_load_signed_flat` only, with no persist-capacity carve-out).
+
+## L2::evict_last on GTable loads (reverted)
+
+Stream persist reserved L2 and lost 4.83%. This trial applied only
+`ld.global.L2::evict_last.v4.b64` (32-byte) inside `gt_load_signed_flat`
+so table lines prefer to stay in L2 without a persist-capacity carve-out.
+sm_120 rejected `.v2.u64` with that modifier. Stack limit unchanged; not
+`__ldg`. FAST prepare went 126→128 regs, 0 stack / 0 spills (occupancy
+still two 256-thread blocks). 64M geometry, three-level inverse,
+side-stream two-phase D2H, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4333/4333 | 4333 | 0 | — | — | **902.64** |
+| GTable `L2::evict_last` | 4313/4313 | 4313 | 0 | 0 | 20 | 898.40 (**−0.47%**) |
+
+Subset of the control. The −0.47% is inside `1/√4313` ≈ 1.52% hit noise
+and on the slow side. Reverted. Do not rematch GTable load cache operators
+without a measured SASS/occupancy win that stays at 126 registers.
+
+## Streaming `.cs` stores on 8 GiB `saved[]` (reverted)
+
+`L2::evict_first` on 16-byte ops is illegal on sm_120 (same 32-byte
+vector requirement as `L2::evict_last`). This trial kept the 8-plane SoA
+layout and used `st.cs.global.v2.u64` for the eight checkpoint stores so
+XYZZ traffic is first-to-evict without a persist carve-out. Finish still
+used ordinary loads. FAST prepare stayed 126 regs / 0 stack / 0 spills.
+64M geometry, three-level inverse, side-stream two-phase D2H, and
+`COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4323/4323 | 4323 | 0 | — | — | **900.64** |
+| `st.cs` on `saved[]` | 4297/4297 | 4297 | 0 | 0 | 26 | 895.15 (**−0.61%**) |
+
+Subset of the control. Streaming the checkpoint did not free enough L2
+for the table to repay the weaker write-cache policy. Reverted. Do not
+rematch cache operators on `saved[]` without a layout that makes 32-byte
+`L2::evict_first` stores legal without breaking warp coalescing.
+
+## cudaMemAdviseSetReadMostly on GTable (inapplicable, reverted)
+
+`cudaMemAdvise` requires managed memory, so this trial allocated `d_gt`
+with `cudaMallocManaged` and after the GPU builder + spot check applied
+`cudaMemAdviseSetReadMostly` plus `cudaMemPrefetchAsync` to device 0.
+FAST prepare occupancy unchanged (host-only). 12 s probe: GTable built
+in 0.40 s (vs ~0.18 s on `cudaMalloc`) then **prefetch failed**
+`invalid device ordinal`. Device query: `managed=1`,
+`concurrentManagedAccess=0`, `pageableMemoryAccess=0`. GeForce 5090
+(WSL) and the ranked 4090 cannot create a GPU read-duplicated copy, so
+ReadMostly cannot help the 64 MiB table. Reverted without a 40 s A/B.
+Do not rematch UM/`cudaMemAdvise` on `d_gt` without
+`ConcurrentManagedAccess`.
+
+## PreferL1 + MaxL1 carveout on prepare (reverted)
+
+Prepare uses 16 KiB smem and loads the 64 MiB GTable. This trial set
+`cudaFuncCachePreferL1` and `cudaSharedmemCarveoutMaxL1` on
+`kernel_pinning_pipeline<*,0>` only (finish unchanged). FAST prepare
+stayed 126 regs / 0 stack / 16 KiB smem. 64M geometry, three-level
+inverse, side-stream two-phase D2H, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4340/4340 | 4340 | 0 | — | — | **904.14** |
+| PreferL1 + MaxL1 carveout | 3850/3850 | 3850 | 0 | 0 | 490 | 801.74 (**−11.33%**) |
+
+Subset of the control. Forcing the L1-max carve-out starves the 16 KiB
+smem path far more than it helps table hits. Reverted. Do not rematch
+prepare cache-config/carveout without a measured occupancy win that
+keeps default shared reservation.
+
+## L2 fetch granularity 128 (reverted)
+
+Default L2 fetch is 32 B; each GTable point is 64 B. This trial set
+`cudaLimitMaxL2FetchGranularity` to 128 after `cudaSetDevice`. Probe
+reported `L2 fetch granularity: 128 B`. Occupancy unchanged (FAST
+prepare 126 regs / 0 stack). 64M geometry, three-level inverse,
+side-stream two-phase D2H, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4333/4333 | 4333 | 0 | — | — | **902.71** |
+| L2 fetch 128 B | 4297/4297 | 4297 | 0 | 0 | 36 | 894.91 (**−0.86%**) |
+
+Subset of the control. A 128 B fetch on random 64 B table gathers and
+16 B SoA checkpoint stores pulls unused neighbors. Reverted. Do not
+rematch this device limit without a layout whose natural access is
+already 128 B.
+
+## Four 32-byte SoA planes for `saved[]` (reverted)
+
+Packed the 8 GiB checkpoint as four `pin_field32` planes (qx, qy, qzz,
+qzzz) with `st.global.v4.b64` / `ld.global.v4.b64`. Warp stores stay
+contiguous (32×32 B); total traffic still 128 B/candidate. FAST prepare
+stayed 126 regs / 0 stack / 0 spills. 64M geometry, three-level inverse,
+side-stream two-phase D2H, and `COPYING` were unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique independently verified hits:
+
+| kernel | verified | unique | dup | extra | missing | M/s |
+|---|---:|---:|---:|---:|---:|---:|
+| side-stream two-phase | 4323/4323 | 4323 | 0 | — | — | **900.48** |
+| 4×32-byte SoA `saved[]` | 4297/4297 | 4297 | 0 | 0 | 26 | 895.15 (**−0.59%**) |
+
+Subset of the control. Wider vector stores did not beat the 8-plane
+16-byte layout. Reverted (including `audit_vector_state_layout.py`).
+Do not rematch 32-byte checkpoint SoA without a measured occupancy or
+SASS win. Next untried local hypothesis: packed GTable spot-check
+gather (one device kernel copies 252 entries, one D2H) instead of a
+64 MiB copy or 252 tiny copies.
