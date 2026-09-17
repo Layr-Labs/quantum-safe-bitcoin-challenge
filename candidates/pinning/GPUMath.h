@@ -1150,16 +1150,20 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 //   V = U2*PP, X3 = R^2 + PPP - 2V,
 //   Y3 = R*(V-X3) - Y2*ZZZ3, ZZ3 = ZZ1*PP, ZZZ3 = ZZZ1*PPP.
 // Y1 may be an affine-anchor-deferred ordinate: Yactual=Y1-Yoff*ZZZ1.
-// Adding Yoff to Y2 only for the slope restores the ordinary numerator. If
-// defer_y is true, return Ycore=R*(V-X3), making Y2 the next affine anchor;
-// otherwise subtract Y2*ZZZ3 and return the exact XYZZ ordinate.
+// Adding Yoff to Y2 only for the slope restores the ordinary numerator.
+// DEFER_Y is a compile-time identity of that split: true returns Ycore=R*(V-X3)
+// and makes Y2 the next affine anchor (7M+2S); false subtracts Y2*ZZZ3 and
+// returns the exact XYZZ ordinate (8M+2S). The production chain instantiates
+// <true> for the twelve intermediate table points and <false> once at the end,
+// so the hot loop does not carry the resolving multiply or a runtime predicate.
 // P == 0 (x1 == x2) gives ZZ3 == ZZZ3 == 0: the point at infinity for P1 == -P2 and, as
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
                               const uint64_t *X2, const uint64_t *Y2,
-                              const uint64_t *Yoff, bool defer_y)
+                              const uint64_t *Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1188,7 +1192,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
+  if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3

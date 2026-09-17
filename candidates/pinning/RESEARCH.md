@@ -1752,3 +1752,46 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Host drain cleanup on the 644.5M frontier
+
+The promoted kernel inserted `cudaDeviceSynchronize()` immediately before a
+synchronous four-byte hit-count copy. The copy already waits for the default
+stream, so the extra wait is redundant (public note `57f2ec8` identified the
+same pattern). The counter reset is now `cudaMemset` instead of a host-to-device
+copy of a zero word. Hits are still appended to `results/pinning_hit_*.txt` in
+the original `sequence=/locktime=/hash_choice=/recid=` form; the per-hit stdout
+line is omitted so the host gap after each 16M pipeline is only the required
+counter copy plus a short fwrite. Progress remains every ten sequences.
+
+Arithmetic, table, recoding, launch geometry, and hit encoding are unchanged.
+A sequence-wide grouped readback and a forced-inline SHA transform were
+measured locally on an RTX 5090 and rejected: grouping produced duplicate
+records and lower verified throughput, and SHA inlining collapsed occupancy.
+Those trials are not in this archive.
+
+## Dual-stream double-buffered pipeline (local experiment)
+
+Two complete pipeline allocations (state, tree, roots, super-roots, group
+checkpoints) and two `cudaStreamNonBlocking` streams so batch N+1 prepare can
+overlap batch N finish. Each slot has its own hit counter and 1024-entry index
+buffer. Counters reset per batch with `cudaMemsetAsync` on that slot's stream.
+Hits still encode `idx|(ri<<30)` and are drained when that slot is reused, not
+after the whole locktime range. Midstate uploads record an event on stream 0
+that stream 1 waits on, so non-blocking streams observe the new sequence.
+Device arithmetic, the 64 MiB table, and the unique-hit file format are
+unchanged.
+
+Local RTX 5090, 40 s, seed 20260916, unique verified hits only:
+
+| kernel | verified | unique | M/s | vs host-drain |
+|---|---:|---:|---:|---:|
+| host-drain | 3963/3963 | 3963 | 826.0 | — |
+| dual-stream, unconstrained | 2692/2692 | 2692 | 560.9 | −32% |
+| dual-stream, prepare-ordered | 1926/1926 | 1926 | 401.3 | −51% |
+
+Both dual-stream hit sets were subsets of host-drain (no extras, no duplicate
+keys). Unconstrained overlap let two 16M prepares contend for the device;
+prepare-done events stopped that fight but left a larger bubble. Do not
+submit this archive. Next host-side try should not double the 2.5 GiB
+working set.
