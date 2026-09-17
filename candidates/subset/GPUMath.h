@@ -832,7 +832,7 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
 
 #include "square32.cuh"
 
-__device__ void _ModSqr(uint64_t *rp, const uint64_t *up)
+__device__ __forceinline__ void _ModSqr(uint64_t *rp, const uint64_t *up)
 {
     qsb_square32(rp, up);
 }
