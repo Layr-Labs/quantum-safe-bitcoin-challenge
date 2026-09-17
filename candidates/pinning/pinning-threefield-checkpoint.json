@@ -1,0 +1,77 @@
+{
+  "schema": "pinning-threefield-reconstruction-v1",
+  "status": "ready-for-authoritative-server-validation",
+  "candidate": {
+    "base_commit": "372a3251e707616011ff6dc0c961cf944d565149",
+    "pinning_source_sha256": "8eddc93c23cc3ab4f27bd026f691e1d986dc37e8d436880ca76b419c6ec11621",
+    "gpumath_sha256": "96095f7de7fc87ebc6f0a72598cdc25dff9f197e033c58941c1a80d606cc7153",
+    "public_note_sha256": "5ed294797735e10e28e3fde80d6d6ea2fed60b3824a0df5d01d65ab232b1ba7c"
+  },
+  "mechanism": {
+    "candidate_tree_leaves": 128,
+    "candidate_tree_threads": 128,
+    "root_tree_leaves": 256,
+    "root_groups_per_super_tree": 256,
+    "fixed_base_chunks": 15,
+    "fixed_base_table_bytes": 67108864,
+    "l2_policy": "skip first gt_entries(0)*64 chunk only when requested persistence fits after it",
+    "recovery_fields": [
+      "Y",
+      "V=ZZZ",
+      "W"
+    ],
+    "state_planes": 6,
+    "state_bytes_per_candidate_per_direction": 96,
+    "full_batch_state_bytes": 1610612736,
+    "normal_recovery": "10M+2S symmetric Y/V/W recovery (M=field multiply, S=field square) with fixed K=3*xR^2",
+    "cold_mapping": "P infinity -> both +/-R; P=R -> +2R only; P=-R -> -2R only"
+  },
+  "evidence": {
+    "tree_audit": "PASS: 52 partial/mixed batches; 353 candidate checkpoints; 52 root checkpoints",
+    "external_audit": "PASS: 210 split trees; 4018 on-curve baseline/affine/compressed recovery comparisons; 7 singular skips; 10M+2S recovery",
+    "superbatch_audit": "PASS: 137492 roots across 12 boundary sizes",
+    "vector_layout_audit": "PASS: 3 fields, 6 planes, 1.5 GiB full batch",
+    "fast_tail_audit": "PASS: 20 host selection cases",
+    "sha_tail_audit": "PASS: 2320 SHA256d comparisons across sequence and locktime boundaries",
+    "header_receipt": "HOST_PASS cases=656 squares=276 aliases=3 doubles=5 symmetric=82; 106 extracted PTX vectors per multiply/square congruent; known (p-65537)^2 exact 0x100020001; canonical host branches and extracted production recovery compiled",
+    "cuda_runtime": "unmeasured",
+    "official_score": "unmeasured",
+    "field_source_audit": "PASS: exact cold-carry header/source binding; HOST_PASS includes 82 extracted production symmetric recovery cases (64 random, 18 boundary), plus 3 cold mappings",
+    "field_ptx_audit": "PASS: 106 vectors per multiply/square congruent; 3 self-test representative mismatches remain congruent and are post-asm canonicalized by the production wrapper",
+    "header_sha256": "96095f7de7fc87ebc6f0a72598cdc25dff9f197e033c58941c1a80d606cc7153",
+    "pinning_source_sha256": "8eddc93c23cc3ab4f27bd026f691e1d986dc37e8d436880ca76b419c6ec11621",
+    "field_source_audit_sha256": "e1147ff042981170e525dce364e7183d8835b9dc1be01beeef63370fb8c67e61",
+    "field_ptx_audit_sha256": "6ba191ab5cc452c6bbb51f9f720341e877b7cb6e254917ade505e09b9df66060",
+    "external_audit_sha256": "af351de5a2cc42c460fff29880c07d1fc685a8d46be6c6778987236031e813e6",
+    "public_note_sha256": "5ed294797735e10e28e3fde80d6d6ea2fed60b3824a0df5d01d65ab232b1ba7c",
+    "operation_ledger": "105 field multiplies + 30 field squares = 135 field calls per candidate; static source ledger, not GPU throughput"
+  },
+  "provenance": {
+    "implementation_model": "GPT-5.6-Luna (Luna Max), max effort",
+    "architecture_review": "Astra High",
+    "parent_planning_review": "Astra XHigh",
+    "harness": "HarnessYukon",
+    "threefield_public_commit": "3bccced9abdbf4fe89f8f8218782ec8c0d112f39",
+    "tree_public_commit": "5c85ae053bc0effa27db4df76fcbf09ee4aaa1b2",
+    "shifted_l2_public_pr": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/142"
+  },
+  "bindings": {
+    "frontier_score": 653505529,
+    "rule_hash": "f8294dedf2e96f106dfe9a64b94617fa2875dceeb932af812212a5bbfe3c9fe7",
+    "verifier_hash": "e8ce7a446d8092000cd219d598e8bd89370fb754b4f2990bbe67734e2d0ba76d"
+  },
+  "limitations": [
+    "No local NVIDIA GPU or CUDA runtime measurement",
+    "Hosted build, verifier, resource behavior, hit production, and promotion remain authoritative",
+    "Conditional analytical forecast 660832934 candidates/s; no GPU or official measurement. Sensitivity can fall below promotion."
+  ],
+  "analytical_forecast": {
+    "score": 660832933.9589081,
+    "basis": "conditional instruction-throughput model",
+    "measured": false,
+    "common_work": 48306,
+    "added_work": 1636,
+    "header_sha256": "96095f7de7fc87ebc6f0a72598cdc25dff9f197e033c58941c1a80d606cc7153",
+    "source_sha256": "8eddc93c23cc3ab4f27bd026f691e1d986dc37e8d436880ca76b419c6ec11621"
+  }
+}

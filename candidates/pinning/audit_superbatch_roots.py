@@ -75,16 +75,16 @@ def audit_source():
     super_inverse = source.index("qsb_invert_super_roots(", prepare)
     finish = source.index("qsb_root_group_finish(", super_inverse)
     recovery = source.index("/* Shared-denominator recovery", finish)
-    assert "qsb_block_product_checkpoint(r,super_roots,root_checkpoint);" in source[prepare:super_inverse]
+    assert "qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);" in source[prepare:super_inverse]
     assert "qsb_block_inverse(r);" in source[super_inverse:finish]
-    assert "qsb_block_inverse_checkpoint(r,super_roots,root_checkpoint);" in source[finish:recovery]
+    assert "qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);" in source[finish:recovery]
     launch_begin = source.index("static void launch_pinning_pipeline(")
     launch_end = source.index(" * Fixed-base table construction", launch_begin)
     launches = source[launch_begin:launch_end]
     names = (
         "kernel_pinning_pipeline<FAST_TAIL,0>",
         "qsb_root_group_prepare<<<root_groups,256>>>",
-        "qsb_invert_super_roots<<<1,256>>>",
+        "qsb_invert_super_roots<<<(root_groups+255)/256,256>>>",
         "qsb_root_group_finish<<<root_groups,256>>>",
         "kernel_pinning_pipeline<FAST_TAIL,2>",
     )
