@@ -242,7 +242,6 @@ def source_audit():
     assert pinning.count("Load256(y0, cy);") == 3
     assert pinning.count("_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);") == 1
 
-
 if __name__ == "__main__":
     source_audit()
     af = arbitrary_field_audit()
