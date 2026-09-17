@@ -49,28 +49,27 @@ __device__ __constant__ uint32_t I[] = {
 	0x5be0cd19ul,
 };
 
-//#define ASSEMBLY_SIGMA
+#define ASSEMBLY_SIGMA
 #ifdef ASSEMBLY_SIGMA
+
+/* SHA-256 Σ0/Σ1/σ0/σ1 via wrap funnel-shift. The 32-bit rotate
+ * (x >>> n) is SHF.R.WRAP of (x:x) by n; the σ SHR terms stay SHR.B32.
+ * This is the sm_89 form of the VanitySearch ASSEMBLY_SIGMA path: the
+ * 64-bit duplicate-and-shift sequence is Maxwell-era and expands to
+ * extra CVT/OR on Ada, where SHF.R.WRAP is a single-cycle op. */
 
 __device__ __forceinline__ uint32_t S0(uint32_t x)
 {
 
-	uint32_t y;
+	uint32_t y, t;
 	asm("{\n\t"
-		" .reg .u64 r1,r2,r3;\n\t"
-		" cvt.u64.u32 r1, %1;\n\t"
-		" mov.u64 r2, r1;\n\t"
-		" shl.b64 r2, r2,32;\n\t"
-		" or.b64  r1, r1,r2;\n\t"
-		" shr.b64 r3, r1, 2;\n\t"
-		" mov.u64 r2, r3;\n\t"
-		" shr.b64 r3, r1, 13;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" shr.b64 r3, r1, 22;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" cvt.u32.u64 %0,r2;\n\t"
+		" shf.r.wrap.b32 %0, %2, %2, 2;\n\t"
+		" shf.r.wrap.b32 %1, %2, %2, 13;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
+		" shf.r.wrap.b32 %1, %2, %2, 22;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
 		"}\n\t"
-		: "=r"(y) : "r"(x));
+		: "=&r"(y), "=&r"(t) : "r"(x));
 	return y;
 
 }
@@ -78,22 +77,15 @@ __device__ __forceinline__ uint32_t S0(uint32_t x)
 __device__ __forceinline__ uint32_t S1(uint32_t x)
 {
 
-	uint32_t y;
+	uint32_t y, t;
 	asm("{\n\t"
-		" .reg .u64 r1,r2,r3;\n\t"
-		" cvt.u64.u32 r1, %1;\n\t"
-		" mov.u64 r2, r1;\n\t"
-		" shl.b64 r2, r2,32;\n\t"
-		" or.b64  r1, r1,r2;\n\t"
-		" shr.b64 r3, r1, 6;\n\t"
-		" mov.u64 r2, r3;\n\t"
-		" shr.b64 r3, r1, 11;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" shr.b64 r3, r1, 25;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" cvt.u32.u64 %0,r2;\n\t"
+		" shf.r.wrap.b32 %0, %2, %2, 6;\n\t"
+		" shf.r.wrap.b32 %1, %2, %2, 11;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
+		" shf.r.wrap.b32 %1, %2, %2, 25;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
 		"}\n\t"
-		: "=r"(y) : "r"(x));
+		: "=&r"(y), "=&r"(t) : "r"(x));
 	return y;
 
 }
@@ -101,21 +93,15 @@ __device__ __forceinline__ uint32_t S1(uint32_t x)
 __device__ __forceinline__ uint32_t s0(uint32_t x)
 {
 
-	uint32_t y;
+	uint32_t y, t;
 	asm("{\n\t"
-		" .reg .u64 r1,r2,r3;\n\t"
-		" cvt.u64.u32 r1, %1;\n\t"
-		" mov.u64 r2, r1;\n\t"
-		" shl.b64 r2, r2,32;\n\t"
-		" or.b64  r1, r1,r2;\n\t"
-		" shr.b64 r2, r2, 35;\n\t"
-		" shr.b64 r3, r1, 18;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" shr.b64 r3, r1, 7;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" cvt.u32.u64 %0,r2;\n\t"
+		" shf.r.wrap.b32 %0, %2, %2, 7;\n\t"
+		" shf.r.wrap.b32 %1, %2, %2, 18;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
+		" shr.b32 %1, %2, 3;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
 		"}\n\t"
-		: "=r"(y) : "r"(x));
+		: "=&r"(y), "=&r"(t) : "r"(x));
 	return y;
 
 }
@@ -123,21 +109,15 @@ __device__ __forceinline__ uint32_t s0(uint32_t x)
 __device__ __forceinline__ uint32_t s1(uint32_t x)
 {
 
-	uint32_t y;
+	uint32_t y, t;
 	asm("{\n\t"
-		" .reg .u64 r1,r2,r3;\n\t"
-		" cvt.u64.u32 r1, %1;\n\t"
-		" mov.u64 r2, r1;\n\t"
-		" shl.b64 r2, r2,32;\n\t"
-		" or.b64  r1, r1,r2;\n\t"
-		" shr.b64 r2, r2, 42;\n\t"
-		" shr.b64 r3, r1, 19;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" shr.b64 r3, r1, 17;\n\t"
-		" xor.b64 r2, r2, r3;\n\t"
-		" cvt.u32.u64 %0,r2;\n\t"
+		" shf.r.wrap.b32 %0, %2, %2, 17;\n\t"
+		" shf.r.wrap.b32 %1, %2, %2, 19;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
+		" shr.b32 %1, %2, 10;\n\t"
+		" xor.b32 %0, %0, %1;\n\t"
 		"}\n\t"
-		: "=r"(y) : "r"(x));
+		: "=&r"(y), "=&r"(t) : "r"(x));
 	return y;
 
 }
