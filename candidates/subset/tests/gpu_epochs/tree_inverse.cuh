@@ -148,6 +148,10 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
+    /* Lane 0 inverts the root in place in shared memory. A stack array whose
+     * address reaches the __noinline__ _ModInv, plus the two root children held
+     * live across the call, cost every lane 120 bytes of STACK (sm_89 res-usage). */
+    __shared__ uint64_t root_inv[5];
     const int tid=threadIdx.x,n=blockDim.x;
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
@@ -172,19 +176,30 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     // offset == 2n-4: the two root children.
     if(tid==0){
-        uint64_t a[5],b[5],root[5];
-        #pragma unroll
-        for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
-        a[4]=b[4]=0;
-        qsb_field_mul_raw(root,a,b);
-        qsb_field_normalize(root);
-        _ModInv(root);
-        root[4]=0;
-        qsb_field_mul_raw(a,root,a);   /* 1/b */
-        qsb_field_mul_raw(b,root,b);   /* 1/a */
-        // inverse index = product index - n
-        #pragma unroll
-        for(int k=0;k<4;k++){inverses[k][offset-n]=b[k];inverses[k][offset-n+1]=a[k];}
+        {
+            uint64_t a[5],b[5],root[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+            a[4]=b[4]=0;
+            qsb_field_mul_raw(root,a,b);
+            qsb_field_normalize(root);
+            #pragma unroll
+            for(int k=0;k<4;k++)root_inv[k]=root[k];
+            root_inv[4]=0;
+        }
+        _ModInv(root_inv);
+        {
+            // Reload both children after the call: nothing is live across it.
+            uint64_t a[5],b[5],root[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){root[k]=root_inv[k];a[k]=products[k][offset];b[k]=products[k][offset+1];}
+            root[4]=a[4]=b[4]=0;
+            qsb_field_mul_raw(a,root,a);   /* 1/b */
+            qsb_field_mul_raw(b,root,b);   /* 1/a */
+            // inverse index = product index - n
+            #pragma unroll
+            for(int k=0;k<4;k++){inverses[k][offset-n]=b[k];inverses[k][offset-n+1]=a[k];}
+        }
     }
     __syncwarp();
     // Level count (4..n/2): lanes < count read parent inverses written by
