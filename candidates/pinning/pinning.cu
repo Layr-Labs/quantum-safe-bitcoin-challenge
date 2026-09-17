@@ -149,8 +149,9 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
-    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    /* Random access over the 64 MiB table: L1 cannot hold it, so cache at
+     * L2 only and keep the per-SM L1 from filling with dead lines. */
+    ulonglong2 x0=__ldcg(&tx[0]),x1=__ldcg(&tx[1]),y0=__ldcg(&ty[0]),y1=__ldcg(&ty[1]);
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
@@ -281,6 +282,187 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #endif
     return ok;
 }
+
+/* === sparse-pad SHA-256 specializations (begin) === */
+/* The ranked fast path hashes four structurally sparse 64-byte blocks per
+ * candidate: the 11-byte locktime tail (W[3..14]=0, W[15]=9995*8), the outer
+ * z digest (W[8]=0x80000000, W[9..14]=0, W[15]=256), and two compressed
+ * pubkeys (W[9..14]=0, W[15]=0x108). Substituting those constant limbs into
+ * the first sixteen rounds and the first in-place WMIX removes the sigma
+ * evaluations and adds of words that are provably zero. Rounds 16..63 and
+ * the remaining mixes are the unchanged generic macros, so any mistake in a
+ * folded limb would desynchronize the schedule and fail independent hit
+ * verification rather than silently dropping work. The substitutions follow
+ * WMIX's sequential in-place order: later lines read the already-updated
+ * earlier limbs, and w[0] is the mixed value in lines 7 and 15.
+ * audit_sparse_sha_words.py derives every fold independently and anchors the
+ * whole chain to hashlib, including full double-SHA preimage comparisons. */
+__device__ __forceinline__ void _SHA256TransformTail3(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t B = 9995u * 8u;
+    uint32_t w[16];
+    uint32_t t1;
+    uint32_t t2;
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+    uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
+    S2Round(a, b, c, d, e, f, g, h, K[0], w0);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w1);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w2);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], B);
+    w[0] = w0 + s0(w1);
+    w[1] = w1 + s1(B) + s0(w2);
+    w[2] = w2 + s1(w[0]);
+    w[3] = s1(w[1]);
+    w[4] = s1(w[2]);
+    w[5] = s1(w[3]);
+    w[6] = s1(w[4]) + B;
+    w[7] = s1(w[5]) + w[0];
+    w[8] = s1(w[6]) + w[1];
+    w[9] = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(B);
+    w[15] = B + s1(w[13]) + w[8] + s0(w[0]);
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
+__device__ __forceinline__ void _SHA256TransformPad32(
+    uint32_t output[8], const uint32_t v[8])
+{
+    uint32_t w[16];
+    uint32_t t1;
+    uint32_t t2;
+    uint32_t a = output[0], b = output[1], c = output[2], d = output[3];
+    uint32_t e = output[4], f = output[5], g = output[6], h = output[7];
+    S2Round(a, b, c, d, e, f, g, h, K[0], v[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], v[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], v[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], v[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], v[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], v[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], v[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], v[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0x80000000u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 256u);
+    w[0] = v[0] + s0(v[1]);
+    w[1] = v[1] + s1(256u) + s0(v[2]);
+    w[2] = v[2] + s1(w[0]) + s0(v[3]);
+    w[3] = v[3] + s1(w[1]) + s0(v[4]);
+    w[4] = v[4] + s1(w[2]) + s0(v[5]);
+    w[5] = v[5] + s1(w[3]) + s0(v[6]);
+    w[6] = v[6] + s1(w[4]) + 256u + s0(v[7]);
+    w[7] = v[7] + s1(w[5]) + w[0] + s0(0x80000000u);
+    w[8] = 0x80000000u + s1(w[6]) + w[1];
+    w[9] = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(256u);
+    w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+    output[0] += a;
+    output[1] += b;
+    output[2] += c;
+    output[3] += d;
+    output[4] += e;
+    output[5] += f;
+    output[6] += g;
+    output[7] += h;
+}
+
+__device__ __forceinline__ void _SHA256TransformPk33(
+    uint32_t output[8], const uint32_t in[9])
+{
+    uint32_t w[16];
+    uint32_t t1;
+    uint32_t t2;
+    uint32_t a = output[0], b = output[1], c = output[2], d = output[3];
+    uint32_t e = output[4], f = output[5], g = output[6], h = output[7];
+    S2Round(a, b, c, d, e, f, g, h, K[0], in[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], in[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], in[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], in[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], in[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], in[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], in[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], in[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], in[8]);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
+    w[0] = in[0] + s0(in[1]);
+    w[1] = in[1] + s1(0x108u) + s0(in[2]);
+    w[2] = in[2] + s1(w[0]) + s0(in[3]);
+    w[3] = in[3] + s1(w[1]) + s0(in[4]);
+    w[4] = in[4] + s1(w[2]) + s0(in[5]);
+    w[5] = in[5] + s1(w[3]) + s0(in[6]);
+    w[6] = in[6] + s1(w[4]) + 0x108u + s0(in[7]);
+    w[7] = in[7] + s1(w[5]) + w[0] + s0(in[8]);
+    w[8] = in[8] + s1(w[6]) + w[1];
+    w[9] = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(0x108u);
+    w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+    output[0] += a;
+    output[1] += b;
+    output[2] += c;
+    output[3] += d;
+    output[4] += e;
+    output[5] += f;
+    output[6] += g;
+    output[7] += h;
+}
+/* === sparse-pad SHA-256 specializations (end) === */
 
 
 /* ============================================================
@@ -604,7 +786,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             for(int k=0;k<4;k++){
                 products[k][node]=out[k];
                 if(node<510)
-                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256]=out[k];
+                    __stcs(&checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256], out[k]);
             }
         }
         offset+=count;
@@ -632,7 +814,7 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     for(int k=0;k<4;k++){
         products[k][tid]=value[k];
         if(tid<QSB_CHECKPOINT_NODES)
-            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
+            products[k][256+tid]=__ldcs(&checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid]);
         if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
     }
     __syncthreads();
@@ -821,16 +1003,15 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-        uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
-            pin_tail_words[2],
-            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
-        };
-        _SHA256Transform(state,blk);
+        /* Three live words: the fixed suffix bytes with locktime patched in.
+         * W[3..14] are zero and W[15]=9995*8; _SHA256TransformTail3 folds
+         * those constants out of the first mix and the first sixteen rounds. */
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
+        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        uint32_t w2 = pin_tail_words[2];
+        _SHA256TransformTail3(state, w0, w1, w2);
     } else {
-        /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
         for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
         buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
@@ -859,17 +1040,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
 
     }
 
-    /* Second SHA-256: the first digest is already in big-endian words. */
-    uint32_t b2[16];
-    #pragma unroll
-    for(int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000u;
-    #pragma unroll
-    for(int i=9;i<15;i++) b2[i]=0;
-    b2[15]=256;
+    /* Second SHA-256: the first digest is already in big-endian words.
+     * W[8]=0x80000000, W[9..14]=0, W[15]=256 are folded into the first mix
+     * and the first sixteen rounds by _SHA256TransformPad32. */
     uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2,b2);
+    _SHA256TransformPad32(s2, state);
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
     uint64_t z[4];
@@ -904,17 +1080,20 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     }
     if(active){
         /* Eight vector planes retain SoA coalescing while pairing adjacent
-         * limbs into naturally aligned 128-bit stores. */
+         * limbs into naturally aligned 128-bit stores. The state is written
+         * once here and read once by stage 2: streaming stores mark the
+         * lines evict-first so the 2 GiB of pass-through traffic does not
+         * evict the 64 MiB fixed-base table from L2. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
-        saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
-        saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
+        __stcs(&saved[0u*state_plane_stride+state_idx], make_ulonglong2(qx[0],qx[1]));
+        __stcs(&saved[1u*state_plane_stride+state_idx], make_ulonglong2(qx[2],qx[3]));
+        __stcs(&saved[2u*state_plane_stride+state_idx], make_ulonglong2(qy[0],qy[1]));
+        __stcs(&saved[3u*state_plane_stride+state_idx], make_ulonglong2(qy[2],qy[3]));
+        __stcs(&saved[4u*state_plane_stride+state_idx], make_ulonglong2(qzz[0],qzz[1]));
+        __stcs(&saved[5u*state_plane_stride+state_idx], make_ulonglong2(qzz[2],qzz[3]));
+        __stcs(&saved[6u*state_plane_stride+state_idx], make_ulonglong2(qzzz[0],qzzz[1]));
+        __stcs(&saved[7u*state_plane_stride+state_idx], make_ulonglong2(qzzz[2],qzzz[3]));
     }
     qsb_block_product_checkpoint(prod,roots,tree);
     return;
@@ -924,14 +1103,14 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
-        ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
-        ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
+        ulonglong2 qx01=__ldcs(&saved[0u*state_plane_stride+state_idx]);
+        ulonglong2 qx23=__ldcs(&saved[1u*state_plane_stride+state_idx]);
+        ulonglong2 qy01=__ldcs(&saved[2u*state_plane_stride+state_idx]);
+        ulonglong2 qy23=__ldcs(&saved[3u*state_plane_stride+state_idx]);
+        ulonglong2 qzz01=__ldcs(&saved[4u*state_plane_stride+state_idx]);
+        ulonglong2 qzz23=__ldcs(&saved[5u*state_plane_stride+state_idx]);
+        ulonglong2 qzzz01=__ldcs(&saved[6u*state_plane_stride+state_idx]);
+        ulonglong2 qzzz23=__ldcs(&saved[7u*state_plane_stride+state_idx]);
         qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
@@ -964,14 +1143,15 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
         uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
         uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
-        uint32_t pb[16];
+        /* Nine data words; W[9..14]=0 and W[15]=0x108 are folded into the
+         * first mix and the first sixteen rounds by _SHA256TransformPk33. */
+        uint32_t pb[9];
         pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
         pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256TransformPk33(hs,pb);
         int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];

@@ -1752,3 +1752,80 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Sparse-pad SHA folds and streaming cache policy (production cycle 1)
+
+Starting point is the production promotion of the 650.6M development tree
+(`6ce2320`, 644,546,620 verified candidates/s on the production runner). This
+workstation has no CUDA and no GPU, so every retained change is one whose
+correctness is fully derivable on the CPU and whose performance claim is a
+projection to be measured by the ranked validator.
+
+Four SHA-256 compressions run per candidate: the 11-byte locktime tail block
+in prepare (W[3..14]=0, W[15]=9995*8), the outer z digest block in prepare
+(W[8]=0x80000000, W[9..14]=0, W[15]=256), and two 33-byte compressed-key
+blocks in finish (W[9..14]=0, W[15]=0x108). Public rejected submission
+`437253c` (fkiene) proved the compressed-key substitution alone is worth
+about +0.39% officially (646,395,221) and explicitly left the two prepare
+sites "on the table on purpose". This cycle folds all three sites:
+
+- `_SHA256TransformTail3`: the twelve zero limbs and the 79960 bit-length
+  constant are substituted out of rounds 3..14, round 15, and the first
+  in-place WMIX. The folded mix keeps WMIX's sequential semantics: line 0
+  drops s1(w[14])+w[9]; line 1 keeps s1(79960); lines 3..5 keep only one
+  sigma; line 6 re-adds the bit length; lines 7..8 use the updated w[0]/w[1];
+  lines 9..14 become pure s1-of-previous plus one data limb; line 14 keeps
+  s0(79960); line 15 keeps the += against the original constant.
+- `_SHA256TransformPad32`: same treatment for W[8]=0x80000000, W[9..14]=0,
+  W[15]=256; s0(0x80000000) and s1(256) fold to compile-time constants.
+- `_SHA256TransformPk33`: the identity published by fkiene's rejected note,
+  reimplemented from the WMIX substitution rather than copied: rounds 0..8
+  live, 9..14 zero, 15 constant 0x108 plus the folded first mix including
+  s0(in[8]) on line 7 and the 0x108 addend on lines 6, 14, and 15.
+
+Rounds 16..63 and the second/third mixes stay the unchanged generic macros in
+all three functions, so a wrong folded limb desynchronizes the schedule and
+fails independent hit verification instead of silently dropping work.
+
+Cache-policy hints, all semantics-free:
+
+- The four fixed-base table loads use `__ldcg` (L2 only). The table is
+  randomly addressed over 64 MiB, so L1 cannot retain it; skipping the L1
+  fill avoids dead-line churn. This adapts the read-only-load direction
+  measured locally by rejected submission `072d9b8` (alvaroborras).
+- The eight 128-bit pipeline state stores use `__stcs` and the stage-2
+  reloads use `__ldcs`; the per-CTA checkpoint stores/loads do the same.
+  That traffic is 320 bytes/candidate of write-once/read-once pass-through
+  (2 GiB state + 512 MiB tree per 16M batch) which otherwise evicts the
+  64 MiB table from the 4090's 72 MiB L2. Marking it evict-first protects
+  table residency; the earlier ranked L2-persistence failure (554,754,810)
+  tried to pin the table instead of protecting it from streaming pollution
+  and bundled host-stream changes.
+
+Verification without a GPU:
+
+- `audit_sparse_sha_words.py` (new): derives every fold independently in
+  Python, anchors the generic macro model to hashlib, checks folded ==
+  generic over 4,000 random and edge cases per site (plus hashlib anchors
+  through the kernel's own `__byte_perm` packing and the 32-byte-message
+  identity), and reproduces full 9,995-byte preimage double-SHA through
+  midstate + Tail3 + Pad32 against hashlib, locktime boundaries included.
+  A first-draft anchor bug (64-byte messages need two blocks) was found by
+  this audit before any kernel edit.
+- Host cross-compile of the shipped text: the exact source between the
+  `(begin)/(end)` markers is extracted from pinning.cu, compiled as host
+  C++ with the GPUHash.h macros, and compared against an independent
+  FIPS-form reference plus OpenSSL: 150,200 cases pass, including 200 full
+  end-to-end preimages. Two harness-side packing bugs (word offset in the
+  pubkey case, suffix pointer in the end-to-end case) were caught this way
+  and were bugs of the harness, not of the shipped text.
+- All inherited audits pass unchanged on the edited tree, including
+  audit_fast_tail_contract (the second-hash guard position), the vector
+  state layout counts, the external pipeline and superbatch root bindings,
+  the streamed recode schedule, and check_tail_words (host tail packing).
+
+Expected effect: the finish-site fold alone measured +0.39% officially; the
+two prepare sites touch the kernel that owns ~83% of GPU time; the cache
+hints target the measured 38% DRAM / 7.2% long-scoreboard profile. The bundle
+is submitted as one candidate; the validator is the only throughput oracle
+available to a GPU-less solver.
