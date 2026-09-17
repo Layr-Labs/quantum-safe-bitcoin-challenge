@@ -283,6 +283,155 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 }
 
 
+
+
+/* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block.
+ * Pad shape (matches check_tail_words.py): W[0..2] live, W[3..14]=0,
+ * W[15]=9995*8=79960. Continues from an existing midstate (unlike the
+ * fresh-IV Pk33 / SHA256d32 helpers). First 16 rounds and the first
+ * in-place WMIX drop zero addends; later 48 rounds use the generic
+ * SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on that
+ * padded block. */
+__device__ __forceinline__ void _SHA256TransformFastTail11(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t L = 9995u * 8u; /* 79960 */
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = state[0];
+    uint32_t b = state[1];
+    uint32_t c = state[2];
+    uint32_t d = state[3];
+    uint32_t e = state[4];
+    uint32_t f = state[5];
+    uint32_t g = state[6];
+    uint32_t h = state[7];
+
+    uint32_t w[16];
+    w[0] = w0;
+    w[1] = w1;
+    w[2] = w2;
+#pragma unroll
+    for (int i = 3; i < 15; i++) w[i] = 0;
+    w[15] = L;
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], L);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(L) + s0(w[2]);
+        w[2] += s1(w[0]);
+        w[3]  = s1(w[1]);
+        w[4]  = s1(w[2]);
+        w[5]  = s1(w[3]);
+        w[6]  = s1(w[4]) + L;
+        w[7]  = s1(w[5]) + w[0];
+        w[8]  = s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(L);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
+
+/* SHA-256 of a 33-byte compressed pubkey: W[9..14] are zero and W[15]=264.
+ * First sixteen rounds and the first message-schedule mix drop the zero-word
+ * sigmas. Later mixes are the generic WMIX. Bit-identical to _SHA256Transform
+ * on that padded block. Fresh IV (unlike FastTail11 midstate continuation). */
+__device__ __forceinline__ void _SHA256TransformPk33(uint32_t output[8], const uint32_t in[9])
+{
+    uint32_t w[16];
+    #pragma unroll
+    for (int i = 0; i < 9; i++) w[i] = in[i];
+    #pragma unroll
+    for (int i = 9; i < 15; i++) w[i] = 0;
+    w[15] = 0x108u;
+
+    uint32_t t1, t2;
+    uint32_t a = I[0], b = I[1], c = I[2], d = I[3];
+    uint32_t e = I[4], f = I[5], g = I[6], h = I[7];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], w[8]);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
+
+    w[0] += s0(w[1]);
+    w[1] += s1(0x108u) + s0(w[2]);
+    w[2] += s1(w[0]) + s0(w[3]);
+    w[3] += s1(w[1]) + s0(w[4]);
+    w[4] += s1(w[2]) + s0(w[5]);
+    w[5] += s1(w[3]) + s0(w[6]);
+    w[6] += s1(w[4]) + 0x108u + s0(w[7]);
+    w[7] += s1(w[5]) + w[0] + s0(w[8]);
+    w[8] += s1(w[6]) + w[1];
+    w[9]  = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(0x108u);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    output[0] = I[0] + a; output[1] = I[1] + b;
+    output[2] = I[2] + c; output[3] = I[3] + d;
+    output[4] = I[4] + e; output[5] = I[5] + f;
+    output[6] = I[6] + g; output[7] = I[7] + h;
+}
+
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
  * ============================================================ */
@@ -821,14 +970,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-        uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
-            pin_tail_words[2],
-            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
-        };
-        _SHA256Transform(state,blk);
+        /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
+        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        uint32_t w2 = pin_tail_words[2];
+        _SHA256TransformFastTail11(state, w0, w1, w2);
     } else {
         /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
@@ -964,14 +1111,13 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
         uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
         uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
-        uint32_t pb[16];
+        uint32_t pb[9];
         pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
         pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        uint32_t hs[8]; _SHA256TransformPk33(hs,pb);
         int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];
@@ -1615,7 +1761,7 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1642,7 +1788,6 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
 
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -1655,7 +1800,6 @@ int main(int argc, char **argv) {
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -1668,7 +1812,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
@@ -1689,7 +1832,7 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
-        if (seqs_done % 10 == 0 || found) {
+        if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;
