@@ -1,7 +1,7 @@
 // One work-efficient binary product tree per block. The caller supplies
 // a power-of-two block size at most 256 and identity factors for inactive lanes.
 #pragma once
-/* ZLAB_TREE (kill switch):
+/* Block inverse tree:
  *  0 = promoted heap tree: every product canonical, 18 barriers.
  *  1 = same heap layout, lazy canonicalization (internal nodes stay exact but
  *      possibly non-canonical residues in [0,2^256); only the root is
@@ -16,135 +16,6 @@
  *      writers sit in warp 0).
  * Leaves are returned as exact residues below 2^256, the same contract as
  * every _ModMult output that feeds the finish. */
-#ifndef ZLAB_TREE
-#define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
-#endif
-#if ZLAB_TREE == 0
-__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-    __shared__ uint64_t tree[4][512];
-    const int tid=threadIdx.x,n=blockDim.x;
-    #pragma unroll
-    for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
-    __syncthreads();
-    #pragma unroll 1
-    for(int width=n>>1;width>0;width>>=1){
-        if(tid<width){
-            int node=width+tid;
-            uint64_t a[5]={0,0,0,0,0},b[5]={0,0,0,0,0};
-            #pragma unroll
-            for(int k=0;k<4;k++){a[k]=tree[k][2*node];b[k]=tree[k][2*node+1];}
-            qsb_field_mul(a,a,b);
-            #pragma unroll
-            for(int k=0;k<4;k++)tree[k][node]=a[k];
-        }
-        if(width>32)__syncthreads();else __syncwarp();
-    }
-    if(tid==0){
-        uint64_t root[5]={0,0,0,0,0};
-        #pragma unroll
-        for(int k=0;k<4;k++)root[k]=tree[k][1];
-        _ModInv(root);
-        #pragma unroll
-        for(int k=0;k<4;k++)tree[k][1]=root[k];
-    }
-    __syncthreads();
-    #pragma unroll 1
-    for(int width=1;width<n;width<<=1){
-        if(tid<width){
-            int node=width+tid;
-            uint64_t parent[5]={0,0,0,0,0},left[5]={0,0,0,0,0},right[5]={0,0,0,0,0};
-            #pragma unroll
-            for(int k=0;k<4;k++){
-                parent[k]=tree[k][node];
-                left[k]=tree[k][2*node];right[k]=tree[k][2*node+1];
-            }
-            qsb_field_mul(right,parent,right);qsb_field_mul(left,parent,left);
-            #pragma unroll
-            for(int k=0;k<4;k++){
-                tree[k][2*node]=right[k];tree[k][2*node+1]=left[k];
-            }
-        }
-        if((width<<1)>32)__syncthreads();else __syncwarp();
-    }
-    #pragma unroll
-    for(int k=0;k<4;k++)value[k]=tree[k][n+tid];
-    value[4]=0;
-}
-#elif ZLAB_TREE == 1
-__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-    __shared__ uint64_t tree[4][512];
-    const int tid=threadIdx.x,n=blockDim.x;
-    #pragma unroll
-    for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
-    __syncthreads();
-    // Upward levels with at least two writers; the readers of level `width`
-    // are its writers' low half, so a warp barrier suffices once width<=32.
-    #pragma unroll 1
-    for(int width=n>>1;width>1;width>>=1){
-        if(tid<width){
-            int node=width+tid;
-            uint64_t a[5],b[5];
-            #pragma unroll
-            for(int k=0;k<4;k++){a[k]=tree[k][2*node];b[k]=tree[k][2*node+1];}
-            a[4]=b[4]=0;
-            qsb_field_mul_raw(a,a,b);
-            #pragma unroll
-            for(int k=0;k<4;k++)tree[k][node]=a[k];
-        }
-        if(width>32)__syncthreads();else __syncwarp();
-    }
-    if(tid==0){
-        // Root product, normalization, inversion and the first downward level
-        // are all lane 0's own reads and writes: no barrier in between.
-        uint64_t a[5],b[5],root[5];
-        #pragma unroll
-        for(int k=0;k<4;k++){a[k]=tree[k][2];b[k]=tree[k][3];}
-        a[4]=b[4]=0;
-        qsb_field_mul_raw(root,a,b);
-        qsb_field_normalize(root);
-        _ModInv(root);
-        root[4]=0;
-        qsb_field_mul_raw(a,root,a);   /* 1/right */
-        qsb_field_mul_raw(b,root,b);   /* 1/left  */
-        #pragma unroll
-        for(int k=0;k<4;k++){tree[k][2]=b[k];tree[k][3]=a[k];}
-    }
-    __syncwarp();
-    // Remaining internal downward levels: level `width` is read by lanes < 2*width.
-    #pragma unroll 1
-    for(int width=2;width<(n>>1);width<<=1){
-        if(tid<width){
-            int node=width+tid;
-            uint64_t parent[5],left[5],right[5];
-            #pragma unroll
-            for(int k=0;k<4;k++){
-                parent[k]=tree[k][node];
-                left[k]=tree[k][2*node];right[k]=tree[k][2*node+1];
-            }
-            parent[4]=left[4]=right[4]=0;
-            qsb_field_mul_raw(right,parent,right);qsb_field_mul_raw(left,parent,left);
-            #pragma unroll
-            for(int k=0;k<4;k++){
-                tree[k][2*node]=right[k];tree[k][2*node+1]=left[k];
-            }
-        }
-        // Level `width` is read by lanes < 2*width, except the last internal
-        // level (width == n/4), which every lane reads for its own leaf.
-        if((width<<1)>32 || (width<<2)==n)__syncthreads();else __syncwarp();
-    }
-    // Leaf level: every lane multiplies its parent inverse by its sibling's
-    // (never overwritten) leaf product. No shared write, no barrier.
-    {
-        uint64_t parent[5],sibling[5];
-        const int leaf=n+tid;
-        #pragma unroll
-        for(int k=0;k<4;k++){parent[k]=tree[k][leaf>>1];sibling[k]=tree[k][leaf^1];}
-        parent[4]=sibling[4]=0;
-        qsb_field_mul_raw(value,parent,sibling);
-    }
-    value[4]=0;
-}
-#else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
@@ -222,4 +93,3 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
-#endif

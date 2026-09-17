@@ -18,30 +18,21 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-/* ZLAB_HITPATH (kill switch): 1 = short-epoch host loop without per-launch
+/* Short-epoch host loop without per-launch
  * hit-count H2D (the producer kernel zeroes the device counter), one combined
  * D2H of count + first records per launch, and hit records appended with one
  * write() per launch to a hit file opened once (no per-hit stdout/summary I/O).
  * 0 = promoted host loop. */
-#ifndef ZLAB_HITPATH
-#define ZLAB_HITPATH 1
-#endif
-/* ZLAB_TRIM (kill switch): 1 = compile only the ranked short-epoch consumer
+/* Compile only the ranked short-epoch consumer
  * into kernel_digest and drop the legacy enum/tile host paths (and with them
  * the prefix-cache kernel) from the PTX the driver JITs inside the window; a
  * non-ranked problem shape exits with an error. 0 = promoted code. */
-#ifndef ZLAB_TRIM
-#define ZLAB_TRIM 1
-#endif
-/* ZLAB_PAIRSHA (kill switch, default off): hash both recovery public keys with
+/* (removed) hash both recovery public keys with
  * one interleaved pair of one-block SHA-256 compressions (idea: paired recovery
  * SHA from unpromoted 5605ad8 by @nullforest8200, isolated in 558d022 by
  * @DPZZxlz; this is an independent implementation). 0 = sequential loop. */
-#ifndef ZLAB_PAIRSHA
-#define ZLAB_PAIRSHA 0
-#endif
-#define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
-#define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
+#define QSB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
+#define QSB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
 
@@ -78,6 +69,10 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
+/* c = 3*xR^2 / (2*yR) mod p for R = u2R: the constant that lets the recovery
+ * finish derive both x-coordinates from the two slopes alone (see
+ * qsb_xyzz_finish_precomputed). Uploaded next to QSB_U2R. */
+__device__ __constant__ uint64_t QSB_U2R_C[4];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -235,32 +230,11 @@ __device__ uint64_t BINOM_C[151][10];
  * record. Every digit is odd and nonzero; the reconstruction is 2*k modulo
  * the group order, as in the original regular recoder. First chunk has 2^17
  * entries, others 2^16: 2^20 points, 64 MiB total. */
-/* ZLAB_T14 (kill switch, default off): 14-term signed table, widths
+/* (removed) 14-term signed table, widths
  * [19,19,19,19,18 x 10] = 256 bits, 2^18 entries for the first four chunks and
  * 2^17 for the rest (2,359,296 64-byte records = 144 MiB). One fewer table load
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
-#ifndef ZLAB_T14
-#define ZLAB_T14 0
-#endif
-#if ZLAB_T14
-#define GT_CHUNKS 14
-#define GT_BIG 4
-#define GT_TOTAL_ENTRIES (GT_BIG * (1u << 18) + (GT_CHUNKS - GT_BIG) * (1u << 17))
-#define GT_LO 256
-#define GT_HI 2048
-__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    return c < GT_BIG ? (1u << 18) : (1u << 17);
-}
-__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return c <= GT_BIG ? (unsigned)c << 18 : ((unsigned)GT_BIG << 18) + ((unsigned)(c - GT_BIG) << 17);
-}
-__host__ __device__ __forceinline__ int gt_shift(int c) {
-    return c <= GT_BIG ? 19*c : 19*GT_BIG + 18*(c - GT_BIG);
-}
-static_assert(GT_TOTAL_ENTRIES*64ULL == 144ULL*1024*1024,
-              "14-term table must contain exactly 144 MiB");
-#else
 #define GT_CHUNKS 15
 #define GT_TOTAL_ENTRIES (1u << 20)
 #define GT_LO 256
@@ -276,7 +250,6 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
               "mixed table must contain exactly 64 MiB");
-#endif
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -341,16 +314,9 @@ __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
 }
 __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
     uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
-#if ZLAB_T14
-    #pragma unroll
-    for(int c=0;c<GT_BIG;c++)e[c]=gt_mixed_step<19>(M,sign);
-    #pragma unroll
-    for(int c=GT_BIG;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<18>(M,sign);
-#else
     e[0]=gt_mixed_step<18>(M,sign);
     #pragma unroll
     for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<17>(M,sign);
-#endif
     e[GT_CHUNKS-1]=sign*(int32_t)M[0];
 }
 
@@ -409,7 +375,7 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  *    resolves the exact Y. 3M+2S + 13*(7M+2S) + 8M+2S = 102M+30S for the
  *    16-point sum, versus 4M+2S + 14*(8M+2S) = 116M+30S before, and the
  *    caller consumes XYZZ directly (no 3M homogeneous conversion). */
-/* ZLAB_DIRDIG (kill switch): read each chunk's signed odd digit straight out of
+/* Read each chunk's signed odd digit straight out of
  * the Joye-Tunstall setup value instead of running the 4-limb peel recurrence
  * once per chunk. Mechanism from dun999's subset submission f535811
  * (gt_field_bits_v / audit_direct_digits.py); this is a re-derivation for the
@@ -419,10 +385,6 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  *   t = f >> (w-1):  digit = 2f+1-2^w,  |digit|/2 index = (f ^ (t-1)) & (2^(w-1)-1),
  *   negative iff t == 0, XOR the global recode sign. The last chunk is the
  *   positive remainder, index f & (entries-1). */
-#ifndef ZLAB_DIRDIG
-#define ZLAB_DIRDIG 1
-#endif
-#if ZLAB_DIRDIG
 __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigned pos) {
     unsigned li = pos >> 6, sh = pos & 63u;
     uint64_t lo = li == 0 ? m[0] : li == 1 ? m[1] : li == 2 ? m[2] : m[3];
@@ -442,60 +404,12 @@ __device__ __forceinline__ void gt_direct_digit(const uint64_t M[4], uint64_t sf
     *idx = last ? (f & ((1u << (w - 1)) - 1u)) : ((f ^ (t - 1u)) & ((1u << (w - 1)) - 1u));
     *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
 }
-#endif
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-#if ZLAB_T14
-#if ZLAB_DIRDIG
-    uint64_t sflag=(uint64_t)(sign<0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
-    gt_load_signed(gTable,0,idx,neg,x0,y0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
-    gt_load_signed(gTable,1,idx,neg,x1,y1);
-#else
-    int32_t ec=gt_mixed_step<19>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<19>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-#endif
-    _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
-    uint64_t cx[4],cy[4];
-    uint32_t table_base=gt_offset(2);
-#if ZLAB_DIRDIG
-    unsigned pos=(unsigned)gt_shift(2)+1u;
-#endif
-    #pragma unroll 1
-    for (int c=2;c<GT_BIG;c++){
-#if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg); pos+=gt_width(2);
-#else
-        ec=gt_mixed_step<19>(M,sign);
-        gt_digit_idx(ec, &idx, &neg);
-#endif
-        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, true);
-        Load256(y0, cy);
-        table_base += 1u << 18;
-    }
-    #pragma unroll 1
-    for (int c=GT_BIG;c<GT_CHUNKS;c++){
-#if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),c==GT_CHUNKS-1,&idx,&neg); pos+=gt_width(GT_BIG);
-#else
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<18>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg);
-#endif
-        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
-        Load256(y0, cy);
-        table_base += 1u << 17;
-    }
-#else
-#if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
     gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -510,24 +424,10 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
         gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
         pos+=gt_width(2);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#else
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-    _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
-    uint64_t cx[4],cy[4];
-    uint32_t table_base=gt_offset(2);
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#endif
         _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
-#endif
 }
 
 /* _FixedBaseSignedAffine: removed -- dead on the ranked path. It is still a __device__/
@@ -610,34 +510,6 @@ __device__ int gpu_bench_valid(const uint8_t *h) {
  * big-endian order, so "the first QSB_ZEROS_N bits are zero" is a test on the
  * top bits of hs[0], hs[1], ... The ranked path therefore never materialises
  * the 32-byte digest or walks it a byte at a time. */
-#if ZLAB_PAIRSHA
-/* Two independent SHA-256 compressions from the IV, rounds interleaved. */
-#define ZP_RND2(k) { \
-  for (int zr = 0; zr < 16; zr++) { \
-    S2RoundZ(a0,b0,c0,d0,e0,f0,g0,h0,x0,K[k+zr],w0[zr]); \
-    S2RoundZ(a1,b1,c1,d1,e1,f1,g1,h1,x1,K[k+zr],w1[zr]); \
-  } }
-#define S2RoundZ(a,b,c,d,e,f,g,h,x,k,w) { \
-    uint32_t zt1 = h + S1(e) + Ch(e,f,g) + (k) + (w); \
-    uint32_t zt2 = S0(a) + Maj(a,b,c); \
-    d += zt1; x = zt1 + zt2; \
-    h=g; g=f; f=e; e=d; d=c; c=b; b=a; a=x; }
-#define ZP_WMIX(w) { \
-    for (int zi = 0; zi < 16; zi++) w[zi] += s1(w[(zi+14)&15]) + w[(zi+9)&15] + s0(w[(zi+1)&15]); }
-__device__ __forceinline__ void zlab_sha256_pair_h0(uint32_t *w0, uint32_t *w1, uint32_t *out0, uint32_t *out1) {
-    uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7],x0;
-    uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7],x1;
-    #pragma unroll 1
-    for (int blk = 0; blk < 64; blk += 16) {
-        if (blk) { ZP_WMIX(w0); ZP_WMIX(w1); }
-        ZP_RND2(blk);
-    }
-    out0[0]=I[0]+a0;out0[1]=I[1]+b0;out0[2]=I[2]+c0;out0[3]=I[3]+d0;
-    out0[4]=I[4]+e0;out0[5]=I[5]+f0;out0[6]=I[6]+g0;out0[7]=I[7]+h0;
-    out1[0]=I[0]+a1;out1[1]=I[1]+b1;out1[2]=I[2]+c1;out1[3]=I[3]+d1;
-    out1[4]=I[4]+e1;out1[5]=I[5]+f1;out1[6]=I[6]+g1;out1[7]=I[7]+h1;
-}
-#endif
 __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     int ok = 1;
     #pragma unroll
@@ -683,11 +555,8 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_TWIN      3
 #define QSB_SE_CUT       137
 #define QSB_SE_PER_EPOCH 256
-/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
-#ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 65536   /* 16.8M candidates per launch (measured +0.3%) */
-#endif
-#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
+/* Epochs per launch (16.8M candidates); the base tree used 32768. */
+#define QSB_SE_LAUNCH_BLOCKS 65536   /* x 256 threads = 16.8M candidates per launch */
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -747,16 +616,12 @@ __global__ void kernel_build_epochs(
     const uint8_t * __restrict__ d_prefix_remainder, int prefix_remainder_len,
     const uint8_t * __restrict__ d_dummy_sigs,
     epoch_desc_t * __restrict__ d_epochs
-#if ZLAB_HITPATH
     , uint32_t *d_hit_reset
-#endif
     )
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
-#if ZLAB_HITPATH
     /* Runs before this launch's digest kernel on the same stream. */
     if (t == 0) *d_hit_reset = 0;
-#endif
     uint64_t e = epoch_base + (uint64_t)t;
     if (e >= n_epochs) return;
     uint8_t early[MAX_T];
@@ -800,8 +665,8 @@ __global__ void kernel_build_epochs(
 
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
 // Preserve the final reduction carry and canonicalize before _ModInv.
-/* ZLAB: the asm body is shared by the canonical multiply (qsb_field_mul, tree
- * audit) and the lazy tree multiply (qsb_field_mul_raw, ZLAB_TREE>=1), whose
+/* The asm body is shared by the canonical multiply (qsb_field_mul, tree
+ * audit) and the lazy tree multiply (qsb_field_mul_raw, the lazy tree), whose
  * result is an exact residue in [0,2^256) that may be non-canonical. */
 __device__ __forceinline__ void qsb_field_mul_raw(uint64_t *out,uint64_t *a,uint64_t *b){
     uint64_t r0,r1,r2,r3;
@@ -1044,56 +909,65 @@ __device__ __forceinline__ void qsb_affine_finish(uint64_t *X, uint64_t *Y, uint
 }
 
 /* XYZZ shared-denominator recovery (transplanted from the promoted pinning
- * frontier). Stage 1: d = xR*ZZ - X (kept in X_D), W = ZZ^2*d. */
+ * frontier). Stage 1: d = xR*ZZ - X (kept in X_D), W = ZZZ*d (2M+0S; the
+ * promoted W = ZZ^2*d cost 2M+1S). Both vanish exactly when d = 0 or P is the
+ * point at infinity (ZZ = 0 <=> ZZZ = 0), so the usable guard is unchanged. */
 __device__ __forceinline__ void qsb_xyzz_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *xR, uint64_t *W
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
     _ModMult(t, xR, ZZ);
     _ModSub256(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    _ModSqr(W, ZZ);
-    _ModMult(W, X_D);            /* W = ZZ^2*d */
+    _ModMult(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
 }
 
-/* Stage 2. C=ZZ*d^2, W=ZZ^2*d, inv=1/W. h=inv*ZZZ=A/(B*d) is the common slope
- * scale and delta=inv*C=d/ZZ=xR-xP, so xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R (no affine yP is reconstructed):
+/* Stage 2. W=ZZZ*d, inv=1/W. h=inv*ZZ=A/(B*d) is the common slope scale:
+ *   lambda1 = (yR*B-Y)*h = (yR-yP)/(xR-xP),   m2 = (yR*B+Y)*h = -lambda2.
+ * The x-coordinates no longer need delta=xR-xP (so C=ZZ*d^2 and its post-
+ * inverse product are gone) nor any squaring. With both P and R on the curve
+ * (yR^2-yP^2 = xR^3-xP^3) and c = 3*xR^2/(2*yR) (QSB_U2R_C):
+ *   lambda1*m2 - c*(lambda1+m2) = (xR^2+xR*xP+xP^2 - 3*xR^2)/(xR-xP) = -(xP+2*xR)
+ * hence  x1 = lambda1^2 - xP - xR = (lambda1+m2)*(lambda1-c) + xR
+ *        x2 = m2^2     - xP - xR = (lambda1+m2)*(m2-c)      + xR.
+ * The y formulas stay anchored at R (no affine yP is reconstructed):
  *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
- * Returns the two y parities in bits 0 and 1; C, W and ZZZ are reused. */
+ * 8M+0S (was 7M+2S here plus 1M+1S for C in the caller).
+ * Returns the two y parities in bits 0 and 1; ZZ is reused as scratch. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
-    uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
+    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
     uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t yb[4], m[4], t[4], s[4];
+    uint64_t yb[4], m1[4], m2[4], t[4], s[4];
+    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
 
     _ModMult(yb, yR, ZZZ);       /* yR*B */
-    _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
+    _ModMult(ZZ, inv);           /* h = A/(B*d), kept in ZZ */
 
-    _ModMult(C, inv);            /* delta = C/W = d/ZZ */
-    _ModAdd256(W, xR, xR);
-    _ModSub256(W, C);            /* xs = xP+xR = 2*xR-delta */
+    _ModSub256(m1, yb, Y);
+    _ModMult(m1, ZZ);            /* lambda1 = (yR*B-Y)*h */
+    _ModAdd256(m2, yb, Y);
+    _ModMult(m2, ZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
+    _ModAdd256(s, m1, m2);       /* lambda1+m2 = 2*yR/(xR-xP) */
 
-    _ModSub256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* lambda1 = (yR*B-Y)*h */
-    _ModSqr(x1, m);
-    _ModSub256(x1, W);
+    _ModSub256(t, m1, cc);
+    _ModMult(x1, s, t);
+    _ModAdd256(x1, x1, xR);      /* x1 = (lambda1+m2)*(lambda1-c) + xR */
     _ModSub256(t, xR, x1);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    uint32_t parities = (uint32_t)(s[0] & 1ULL);
+    _ModMult(t, m1);
+    _ModSub256(t, yR);           /* y1 = lambda1*(xR-x1) - yR */
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
 
-    _ModAdd256(m, yb, Y);
-    _ModMult(m, ZZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
-    _ModSqr(x2, m);
-    _ModSub256(x2, W);
+    _ModSub256(t, m2, cc);
+    _ModMult(x2, s, t);
+    _ModAdd256(x2, x2, xR);      /* x2 = (lambda1+m2)*(m2-c) + xR */
     _ModSub256(t, xR, x2);
-    _ModMult(s, m, t);
-    _ModSub256(s, yR);
-    /* y2=-s. Since p is odd, field negation flips its parity. */
-    parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
+    _ModMult(t, m2);
+    _ModSub256(t, yR);           /* y2 = -(m2*(xR-x2) - yR) */
+    /* y2=-t. Since p is odd, field negation flips its parity. */
+    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
 
@@ -1142,121 +1016,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * sees exactly the same convention as before. Non-enum launches pass
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
-#if ZLAB_TRIM
     const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
     uint32_t state[8];
     for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
     qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
-#else
-    uint8_t skip[MAX_T];
-    const epoch_desc_t *se_desc = NULL;
-    if (fast_inc == QSB_SE_N_INC) {
-        /* Short-epoch mode: blockIdx.x selects the epoch descriptor, which
-         * supplies the 6 early skips (already folded into the epoch midstate);
-         * threadIdx.x selects one of the 256 window omission sets from WIN3.
-         * The full skip array is sorted by construction: early < cut <=
-         * window, so hits report storage indices exactly as before. */
-        se_desc = d_epochs + blockIdx.x;
-        // The scheduled hash needs no skip array. Materialize indices only on a hit.
-    } else if (d_combos == NULL) {
-        unrank_combo(enum_base + (uint64_t)(active?idx:0), n_pool - window_start, t_win, skip + s_early);
-        for (int i = 0; i < t_win; ++i) skip[s_early + i] += window_start;
-        for (int i = 0; i < s_early; ++i) skip[i] = d_early[i];
-    } else {
-        for (int i = 0; i < t_sel; i++)
-            skip[i] = d_combos[(active ? idx : 0) * t_sel + i];
-    }
-
-    /* Build suffix streaming directly into SHA-256 blocks (no 8KB stack).
-     * Variable section is ~1.7KB; materializing it cost 8688B stack + 168 regs.
-     * Instead emit bytes into a 64B window and transform full blocks on the fly.
-     * Byte sources in order: prefix_remainder, included dummy_sigs (skip-aware),
-     * tail, tx_suffix. Equivalent to the original suffix[] construction. */
-    uint32_t state[8];
-    if (se_desc) {
-        for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
-    } else {
-        for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
-    }
-
-  if (fast_inc == QSB_SE_N_INC) {
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
-  } else if (fast_inc == QSB_FAST_N_INC) {
-    // Cached states are rebuilt from this batch's midstate and public input.
-    // Legacy combo launches and unsupported shapes retain the full emitter.
-    bool cached=d_combos==NULL && qsb_prefix_eligible(n_pool,window_start,t_win,
-                                                     fast_inc,prefix_remainder_len);
-    qsb_fast_window_hash(state,skip,t_win,s_early,window_start,cached,d_const_words);
-  } else {
-    uint32_t curW[16];  /* 4-aligned window; cur aliases it for byte emits */
-    uint8_t *cur = (uint8_t *)curW;
-    uint32_t blk[16];
-    int cur_pos = 0;
-    /* Emit helper inlined manually to avoid lambda capture overhead. */
-    for (int i = 0; i < prefix_remainder_len; i++) {
-        cur[cur_pos++] = d_prefix_remainder[i];
-        if (cur_pos == 64) {
-            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
-            _SHA256Transform(state, blk);
-            cur_pos = 0;
-        }
-    }
-    {
-        /* The first s_early skips precede the window and are already accounted
-         * for in the midstate, so start matching at skip[s_early]. */
-        int sel = s_early;
-        for (int i = window_start; i < n_pool; i++) {
-            if (sel < t_sel && skip[sel] == i) { sel++; continue; }
-            const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
-            for (int b = 0; b < SIG_PUSH_SIZE; b++) {
-                cur[cur_pos++] = row[b];
-                if (cur_pos == 64) {
-                    for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
-                    _SHA256Transform(state, blk);
-                    cur_pos = 0;
-                }
-            }
-        }
-    }
-    for (int i = 0; i < tail_len; i++) {
-        cur[cur_pos++] = d_tail[i];
-        if (cur_pos == 64) {
-            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
-            _SHA256Transform(state, blk);
-            cur_pos = 0;
-        }
-    }
-    for (int i = 0; i < tx_suffix_len; i++) {
-        cur[cur_pos++] = d_tx_suffix[i];
-        if (cur_pos == 64) {
-            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
-            _SHA256Transform(state, blk);
-            cur_pos = 0;
-        }
-    }
-
-    /* Final block with padding; rem = bytes in partial window. */
-    uint32_t lastW[32];
-    uint8_t *last_block = (uint8_t *)lastW;
-    int rem = cur_pos;
-    memset(last_block, 0, 128);
-    memcpy(last_block, cur, rem);
-    last_block[rem] = 0x80;
-    int nblk = (rem < 56) ? 1 : 2;
-    uint64_t bit_len = (uint64_t)total_preimage_len * 8;
-    int last = nblk * 64 - 8;
-    last_block[last]=(bit_len>>56)&0xFF; last_block[last+1]=(bit_len>>48)&0xFF;
-    last_block[last+2]=(bit_len>>40)&0xFF; last_block[last+3]=(bit_len>>32)&0xFF;
-    last_block[last+4]=(bit_len>>24)&0xFF; last_block[last+5]=(bit_len>>16)&0xFF;
-    last_block[last+6]=(bit_len>>8)&0xFF; last_block[last+7]=bit_len&0xFF;
-
-    for (int b = 0; b < nblk; b++) {
-        uint32_t blk2[16];
-        for (int i = 0; i < 16; i++) blk2[i] = bswap32(lastW[b*16+i]);
-        _SHA256Transform(state, blk2);
-    }
-  }
-#endif
 
     /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
      * the state words themselves in big-endian order, followed by standard
@@ -1290,45 +1053,20 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
-     * W = ZZ^2*d with d = xR*ZZ - X; the block inverts W. */
+     * W = ZZZ*d with d = xR*ZZ - X; the block inverts W. */
     uint64_t prod[5];
-    qsb_xyzz_finish_prepare(qx,qzz,u2rx,prod);        /* qx -> d, prod -> W */
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W = ZZZ*d */
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
-    uint64_t Wsave[4]; Load256(Wsave,prod);
-    if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C = ZZ*d^2 */
+    /* d and W are not needed after the inverse: the finish derives both
+     * x-coordinates from the two slopes and the constant QSB_U2R_C. */
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
     if(!usable)return;
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
 
     int v=0, hash_choice=0, recid=0;
-#if ZLAB_PAIRSHA
-    {
-        uint32_t pw[2][16];
-        for(int ri=0;ri<2;ri++){
-            uint64_t sx0=ri ? q2x[0] : q1x[0];
-            uint64_t sx1=ri ? q2x[1] : q1x[1];
-            uint64_t sx2=ri ? q2x[2] : q1x[2];
-            uint64_t sx3=ri ? q2x[3] : q1x[3];
-            uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
-                             (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-            uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
-            uint32_t *pb=pw[ri];
-            pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-            pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-            pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-            pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-            pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-            pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        }
-        uint32_t hs0[8],hs1[8];
-        zlab_sha256_pair_h0(pw[0],pw[1],hs0,hs1);
-        if(gpu_bench_valid_words(hs0)){v=1;recid=0;}
-        else if(gpu_bench_valid_words(hs1)){v=1;recid=1;}
-    }
-#else
     for(int ri=0;ri<2&&!v;ri++){
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
@@ -1378,7 +1116,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
         if(vv){ v=1;hash_choice=1;recid=ri; break; }
     }
-#endif
 
     /* The bridge parses only `indices=` and `recid=` out of the hit file
      * (harness/gpu_wrap.py), so the kernel no longer carries the diagnostic
@@ -1386,35 +1123,13 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * bytes of local memory written for every candidate, hit or not. */
     if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
         if(p<1024) {
-#if ZLAB_HITPATH
           if(se_desc) {
             /* Packed record p at d_hit_idx[4p] (tag) and d_hit_combos[16p..] (9 indices). */
             d_hit_idx[p*4]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            for(int i=0;i<6;i++)d_hit_combos[p*ZLAB_HIT_REC+i]=se_desc->early[i];
-            for(int i=0;i<3;i++)d_hit_combos[p*ZLAB_HIT_REC+6+i]=WIN3[threadIdx.x][i];
+            for(int i=0;i<6;i++)d_hit_combos[p*QSB_HIT_REC+i]=se_desc->early[i];
+            for(int i=0;i<3;i++)d_hit_combos[p*QSB_HIT_REC+6+i]=WIN3[threadIdx.x][i];
           } else
-#endif
-#if ZLAB_TRIM
-#if ZLAB_HITPATH
           {}
-#else
-          {
-            d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
-            for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
-          }
-#endif
-#else
-          {
-            d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            if(se_desc) {
-                for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
-                for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
-            } else {
-                for(int i=0;i<t_sel;i++)d_hit_combos[p*MAX_T+i]=skip[i];
-            }
-          }
-#endif
         }
     }
 }
@@ -1454,11 +1169,7 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-#if ZLAB_T14
-    int ch=t<((uint64_t)GT_BIG<<18)?(int)(t>>18):GT_BIG+(int)((t-((uint64_t)GT_BIG<<18))>>17);
-#else
     int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
-#endif
     int d=(int)(t-gt_offset(ch));
     int m  = 2*d + 1;                        /* odd multiple below 2^18 */
     int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 1024 */
@@ -2210,6 +1921,29 @@ int main(int argc, char **argv) {
     if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
+    /* QSB_U2R_C = 3*xR^2 * (2*yR)^-1 mod p (recovery finish constant). */
+    {
+        static const uint8_t p_be[32]={
+            0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+            0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFE,0xFF,0xFF,0xFC,0x2F};
+        BN_CTX *ctx=BN_CTX_new();
+        BIGNUM *bp=BN_new(),*bx=BN_new(),*by=BN_new(),*bc=BN_new(),*b3=BN_new();
+        BN_bin2bn(p_be,32,bp);
+        BN_lebin2bn(dp.u2r_x,32,bx);
+        BN_lebin2bn(dp.u2r_y,32,by);
+        BN_mod_add(by,by,by,bp,ctx);                 /* 2*yR */
+        if(BN_mod_inverse(by,by,bp,ctx)==NULL){fprintf(stderr,"ERROR: QSB_U2R_C inverse failed\n");return 1;}
+        BN_mod_sqr(bc,bx,bp,ctx);                     /* xR^2 */
+        BN_set_word(b3,3);
+        BN_mod_mul(bc,bc,b3,bp,ctx);                  /* 3*xR^2 */
+        BN_mod_mul(bc,bc,by,bp,ctx);                  /* 3*xR^2/(2*yR) */
+        uint64_t h_c[4];
+        if(BN_bn2lebinpad(bc,(uint8_t*)h_c,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_C encode failed\n");return 1;}
+        if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
+            fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
+        }
+        BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
+    }
 
     /* Compute neg_2u2R */
     {
@@ -2401,11 +2135,10 @@ int main(int argc, char **argv) {
         fflush(stdout);
         uint64_t epoch_base = 0;
         struct timespec t_last_se = t0;
-#if ZLAB_HITPATH
         /* One device buffer: [u32 count][record 0 ...], record p = u32 tag at
          * 4+16p and 9 combo bytes at 8+16p. */
         uint8_t *d_hitbuf = NULL;
-        cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC);
+        cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * QSB_HIT_REC);
         if (!d_hitbuf) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
         uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
         uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
@@ -2416,26 +2149,17 @@ int main(int argc, char **argv) {
         else snprintf(zh_fname, sizeof(zh_fname), "results/digest_hit_%d.txt", gpu_index);
         int zh_fd = open(zh_fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
-        uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
-#endif
+        uint8_t zh_host[4 + 64 * QSB_HIT_REC];
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
                        ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
-#if ZLAB_HITPATH
             kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
-#else
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
-                epoch_base, n_epochs, window_start, s_early,
-                d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs);
-#endif
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -2444,13 +2168,8 @@ int main(int argc, char **argv) {
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gt,
-#if ZLAB_HITPATH
                 zh_cnt, zh_idx,
                 zh_combos, d_hit_sighash,
-#else
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-#endif
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
@@ -2461,21 +2180,20 @@ int main(int argc, char **argv) {
             total_searched += batch_pos;
             g_total_searched = total_searched;
             epoch_base += nblk;
-#if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            cudaMemcpy(zh_host, d_hitbuf, 4 + QSB_HIT_FIRST * QSB_HIT_REC, cudaMemcpyDeviceToHost);
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
-                if (nh > ZLAB_HIT_FIRST)
-                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               d_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                if (nh > QSB_HIT_FIRST)
+                    cudaMemcpy(zh_host + 4 + QSB_HIT_FIRST * QSB_HIT_REC,
+                               d_hitbuf + 4 + QSB_HIT_FIRST * QSB_HIT_REC,
+                               (size_t)(nh - QSB_HIT_FIRST) * QSB_HIT_REC, cudaMemcpyDeviceToHost);
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
                 int wl = 0;
                 for (int h = 0; h < nh; h++) {
-                    uint32_t raw; memcpy(&raw, zh_host + 4 + h * ZLAB_HIT_REC, 4);
-                    const uint8_t *combo = zh_host + 8 + h * ZLAB_HIT_REC;
+                    uint32_t raw; memcpy(&raw, zh_host + 4 + h * QSB_HIT_REC, 4);
+                    const uint8_t *combo = zh_host + 8 + h * QSB_HIT_REC;
                     wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n",
                                    combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
                                    (int)((raw >> 31) & 1), (int)((raw >> 30) & 1), (int)(raw & 0x3FFFFFFF));
@@ -2490,10 +2208,6 @@ int main(int argc, char **argv) {
                 g_hit_counter = hit_counter;
             }
             if (0) {
-#else
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-#endif
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
@@ -2580,437 +2294,6 @@ int main(int argc, char **argv) {
         free(h_combos);
         return 0;
     }
-#if ZLAB_TRIM
-    fprintf(stderr, "ERROR: ZLAB_TRIM build supports only the ranked short-epoch shape\n");
+    fprintf(stderr, "ERROR: this build supports only the ranked short-epoch problem shape\n");
     return 1;
-#else
-
-    /* GPU-enum fast path: single GPU, no tiles (the ranked benchmark case).
-     * Unrank combos on-GPU from a linear base, eliminating CPU fill + HtoD.
-     * Covers C(n,t) in lex order; runs until killed by harness timeout. */
-    if (tile_path == NULL && effective_total == 1) {
-        printf("  Using GPU-enum fast path (no CPU fill, base-linear)\n");
-        fflush(stdout);
-        uint64_t enum_base = 0;
-        uint64_t epoch = 0;
-        uint64_t span = epoch_mode ? per_epoch : global_total;
-        int prem_len_now = (int)dp.prefix_remainder_len;
-        int need_epoch = epoch_mode;
-        struct timespec t_last_enum = t0;
-        while (!found) {
-            if (need_epoch) {
-                /* New epoch: fix its early omissions, fold the constant prefix
-                 * they produce into a midstate, and hand both to the GPU. */
-                unrank_combo_host(epoch, window_start, s_early, epoch_skip);
-                build_epoch_prefix(&dp, window_start, s_early, epoch_skip, epoch_prefix,
-                                   epoch_mid, epoch_rem, &epoch_rem_len);
-                cudaMemcpy(d_mid, epoch_mid, 32, cudaMemcpyHostToDevice);
-                if (epoch_rem_len > 0)
-                    cudaMemcpy(d_prem, epoch_rem, epoch_rem_len, cudaMemcpyHostToDevice);
-                cudaMemcpy(d_early, epoch_skip, s_early, cudaMemcpyHostToDevice);
-                prem_len_now = epoch_rem_len;
-                need_epoch = 0;
-            }
-            int batch_pos = (int)((span - enum_base < (uint64_t)BATCH) ? span - enum_base : BATCH);
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
-                qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
-            kernel_digest<<<grdsz, BLKSZ>>>(
-                (const uint8_t*)NULL, n_pool, t_sel,
-                d_mid,
-                d_prem, prem_len_now,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, window_start, enum_base,
-                t_win, s_early, d_early, fast_inc, d_const_words, NULL);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += batch_pos;
-            g_total_searched = total_searched;
-            enum_base += batch_pos;
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-                printf("\n  *** DIGEST HIT! ***\n");
-                mkdir("results", 0755);
-                char fname[256];
-                if (calibrate) snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
-                else snprintf(fname, sizeof(fname), "results/digest_hit_%d.txt", gpu_index);
-                FILE *ff = fopen(fname, "a");
-                if (ff) {
-                    uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        int combo_idx = raw & 0x3FFFFFFF;
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        uint8_t *combo = all_combos + h * MAX_T;
-                        fprintf(ff, "indices=");
-                        printf("  indices=");
-                        for (int j = 0; j < t_sel; j++) {
-                            fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
-                        }
-                        /* The bridge reads `indices=` and `recid=`; the
-                         * diagnostic fields the kernel used to carry are gone. */
-                        fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d\n", hc, ri);
-                        hit_counter++;
-                        g_hit_counter = hit_counter;
-                        if (summary_f) {
-                            time_t now_epoch = time(NULL);
-                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
-                            for (int j = 0; j < t_sel; j++)
-                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
-                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
-                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n", combo_idx, calibrate);
-                            fflush(summary_f);
-                            /* Preserve visibility without a disk barrier per hit. */
-                        }
-                    }
-                    fclose(ff);
-                }
-            }
-            struct timespec t_now;
-            clock_gettime(CLOCK_MONOTONIC, &t_now);
-            double secs_since = (t_now.tv_sec - t_last_enum.tv_sec)
-                + (t_now.tv_nsec - t_last_enum.tv_nsec) / 1e9;
-            if (secs_since >= 15.0) {
-                double elapsed_total = (t_now.tv_sec - t0.tv_sec)
-                    + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
-                double rate = total_searched / elapsed_total;
-                printf("  [GPU %d] enum_base=%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
-                       gpu_index, (unsigned long long)enum_base,
-                       (unsigned long long)(total_searched/1000000),
-                       (unsigned long long)(global_total/1000000),
-                       rate/1e6, elapsed_total);
-                fflush(stdout);
-                if (summary_f) {
-                    time_t now_epoch = time(NULL);
-                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
-                            (long)now_epoch, (unsigned long long)total_searched,
-                            rate/1e6, elapsed_total, (unsigned long long)hit_counter);
-                    fflush(summary_f);
-                }
-                t_last_enum = t_now;
-            }
-            if (enum_base >= span) {
-                if (!epoch_mode) break;
-                enum_base = 0;
-                epoch++;
-                need_epoch = 1;
-                if (epoch >= n_epochs) {
-                    /* Family exhausted. The next family -- one more omission
-                     * before the cut, one fewer inside the window -- is disjoint
-                     * from every family already searched, so roll into it rather
-                     * than stopping or repeating candidates. It costs at most one
-                     * extra SHA-256 block per candidate. In a ranked window this
-                     * is insurance: the first family alone holds far more
-                     * candidates than the run can reach. */
-                    if (s_early + 1 < t_sel) {
-                        s_early += 1;
-                        t_win = t_sel - s_early;
-                        // The kept-push count and prefix remainder changed.
-                        // The original specialized SHA geometry no longer applies.
-                        fast_inc = 0;
-                        per_epoch = binom_u64(n_pool - window_start, t_win);
-                        n_epochs  = binom_u64(window_start, s_early);
-                        span = per_epoch;
-                        epoch = 0;
-                        global_total += per_epoch * n_epochs;
-                        printf("  Family exhausted; advancing to %d fixed early omissions "
-                               "(%llu epochs x %llu per epoch)\n",
-                               s_early, (unsigned long long)n_epochs,
-                               (unsigned long long)per_epoch);
-                        fflush(stdout);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-        double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
-        printf("\n  [GPU %d] Done enum: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
-               (unsigned long long)(total_searched/1000000), elapsed,
-               total_searched/elapsed/1e6);
-        if (summary_f) {
-            time_t now_epoch = time(NULL);
-            fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
-                    (long)now_epoch, (unsigned long long)total_searched,
-                    elapsed, (unsigned long long)hit_counter);
-            fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
-            g_summary_f = NULL;
-        }
-        free(h_combos);
-        return 0;
-    }
-
-    /* Enumerate combos.
-     * If --tiles was supplied, walk the assigned tile list (balanced LPT partition).
-     * Otherwise, fall back to mod-N partition by first-index (unbalanced but simple).
-     */
-    int tile_idx = 0;
-    int first;
-    int second_lo, second_hi;  /* tile boundary on second-index */
-    while (!found) {
-        if (tile_path) {
-            if (tile_idx >= num_tiles) break;
-            first = (int)tile_first[tile_idx];
-            second_lo = (int)tile_lo[tile_idx];
-            second_hi = (int)tile_hi[tile_idx];
-            tile_idx++;
-        } else {
-            /* mod-N fallback */
-            if (tile_idx == 0) {
-                first = effective_id;
-            } else {
-                first += effective_total;
-            }
-            tile_idx++;
-            if (first > n_pool - t_sel) break;
-            second_lo = first + 1;
-            second_hi = n_pool - t_sel + 2;  /* exclusive: max second is n_pool - t_sel + 1 */
-        }
-
-        /* For this (first, [second_lo, second_hi)), enumerate combos */
-        int sub[MAX_T];
-        sub[0] = second_lo;
-        for (int i = 1; i < t_sel - 1; i++) sub[i] = sub[i-1] + 1;
-        int batch_pos = 0;
-        int exhausted = 0;
-
-        while (!exhausted && !found) {
-            /* Fill batch */
-            while (batch_pos < BATCH && !exhausted) {
-                /* Stop if we've crossed the tile's second_hi boundary */
-                if (sub[0] >= second_hi) { exhausted = 1; break; }
-                h_combos[batch_pos * t_sel] = (uint8_t)first;
-                for (int i = 0; i < t_sel - 1; i++)
-                    h_combos[batch_pos * t_sel + 1 + i] = (uint8_t)sub[i];
-                batch_pos++;
-
-                /* Next combo (lexicographic) within this tile */
-                int i = t_sel - 2;
-                while (i >= 0 && sub[i] == n_pool - (t_sel - 1) + i) i--;
-                if (i < 0) { exhausted = 1; break; }
-                sub[i]++;
-                for (int j = i + 1; j < t_sel - 1; j++) sub[j] = sub[j-1] + 1;
-            }
-            if (batch_pos == 0) break;
-
-            /* Upload and run */
-            cudaMemcpy(d_combos, h_combos, batch_pos * t_sel, cudaMemcpyHostToDevice);
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-
-            int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
-                d_combos, n_pool, t_sel,
-                d_mid,
-                d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_tail, dp.tail_section_len,
-                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
-                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
-                d_hit_cnt, d_hit_idx,
-                d_hit_combos, d_hit_sighash,
-                d_hit_keynonce, d_hit_pubhash,
-                d_hit_qx, d_hit_qy,
-                batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
-                t_sel, 0, d_early, 0, d_const_words, NULL);
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-
-            total_searched += batch_pos;
-            g_total_searched = total_searched;
-            batch_pos = 0;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-
-                printf("\n  *** DIGEST HIT! ***\n");
-                mkdir("results", 0755);
-                char fname[256];
-                if (calibrate) {
-                    snprintf(fname, sizeof(fname), "results/digest_calibrate_%d.txt", gpu_index);
-                } else {
-                    snprintf(fname, sizeof(fname), "results/digest_hit_%d.txt", gpu_index);
-                }
-                /* Hits are appended in every mode: the benchmark runs for a fixed
-                 * window ended by the harness's timeout and needs every hit from
-                 * every batch. */
-                FILE *ff = fopen(fname, "a");
-                if (ff) {
-                    uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
-
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        int combo_idx = raw & 0x3FFFFFFF;
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        uint8_t *combo = all_combos + h * MAX_T;
-                        fprintf(ff, "indices=");
-                        printf("  indices=");
-                        for (int j = 0; j < t_sel; j++) {
-                            fprintf(ff, "%s%d", j?",":"", combo[j]);
-                            printf("%s%d", j?",":"", combo[j]);
-                        }
-                        /* The bridge reads `indices=` and `recid=`; the
-                         * diagnostic fields the kernel used to carry are gone. */
-                        fprintf(ff, "\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n", hc, ri, combo_idx);
-                        printf(" hc=%d recid=%d combo_idx=%d\n", hc, ri, combo_idx);
-                    }
-                    fclose(ff);
-
-                    /* Also append each hit to the summary file with fsync, so a
-                     * crash/sleep mid-run can't lose hits. The hit file (above)
-                     * is the primary record; the summary is the always-exists
-                     * proof-of-life record. Fields match so downstream tools
-                     * can rely on either. */
-                    if (summary_f) {
-                        time_t now_epoch = time(NULL);
-                        for (int h = 0; h < nh; h++) {
-                            uint32_t raw = hits[h];
-                            int combo_idx = raw & 0x3FFFFFFF;
-                            int ri = (raw >> 30) & 1;
-                            int hc = (raw >> 31) & 1;
-                            uint8_t *combo = all_combos + h * MAX_T;
-                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
-                            for (int j = 0; j < t_sel; j++)
-                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
-                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
-                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n",
-                                    combo_idx, calibrate);
-                            hit_counter++;
-                            g_hit_counter = hit_counter;
-                        }
-                        fflush(summary_f);
-                        fsync(fileno(summary_f));   /* immediate, on every hit */
-                    }
-                }
-            }
-
-            /* Check if another GPU found it */
-            if ((total_searched % 1000000) < (uint64_t)BATCH) {
-                for (int g = 0; g < num_gpus; g++) {
-                    if (g == gpu_index) continue;
-                    char check[256];
-                    snprintf(check, sizeof(check), "results/digest_hit_%d.txt", g);
-                    FILE *cf = fopen(check, "r");
-                    if (cf) { fclose(cf); printf("  GPU %d found hit\n", g); found = 1; break; }
-                }
-            }
-
-            /* Periodic progress: print every ~60 seconds rather than only
-             * at first-boundary. For t=9 with first=0 that boundary is
-             * hours away, so without this we'd never see progress. */
-            {
-                struct timespec t_now;
-                clock_gettime(CLOCK_MONOTONIC, &t_now);
-                double secs_since_report = (t_now.tv_sec - t_last_report.tv_sec)
-                    + (t_now.tv_nsec - t_last_report.tv_nsec) / 1e9;
-                if (secs_since_report >= 60.0) {
-                    double elapsed_total = (t_now.tv_sec - t0.tv_sec)
-                        + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
-                    double rate = total_searched / elapsed_total;
-                    double pct = (my_slice_total > 0) ? 100.0 * total_searched / (double)my_slice_total : 0.0;
-                    double remaining_sec = (rate > 0 && my_slice_total > total_searched)
-                        ? (double)(my_slice_total - total_searched) / rate : 0.0;
-                    int eta_h = (int)(remaining_sec / 3600);
-                    int eta_m = (int)((remaining_sec - eta_h*3600) / 60);
-                    printf("  [GPU %d] first=%d/%d  %.4f%% (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs  ETA=%dh%02dm\n",
-                           gpu_index, first, n_pool - t_sel,
-                           pct,
-                           (unsigned long long)(total_searched/1000000),
-                           (unsigned long long)(my_slice_total/1000000),
-                           rate/1e6, elapsed_total, eta_h, eta_m);
-                    fflush(stdout);
-                    if (summary_f) {
-                        time_t now_epoch = time(NULL);
-                        fprintf(summary_f,
-                                "PROGRESS %ld first=%d attempts=%llu pct=%.4f rate_M_per_s=%.1f elapsed_s=%.0f eta=%dh%02dm hits_so_far=%llu\n",
-                                (long)now_epoch, first,
-                                (unsigned long long)total_searched, pct,
-                                rate/1e6, elapsed_total, eta_h, eta_m,
-                                (unsigned long long)hit_counter);
-                        fflush(summary_f);
-                        /* fsync is expensive : only every ~5 minutes for progress.
-                         * (Hits get fsync'd immediately, that's the critical path.) */
-                        static double last_fsync = 0;
-                        if (elapsed_total - last_fsync > 300) {
-                            fsync(fileno(summary_f));
-                            last_fsync = elapsed_total;
-                        }
-                    }
-                    t_last_report = t_now;
-                }
-            }
-        }
-
-        /* Progress (end of first value) */
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-        double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
-        {
-            double rate = total_searched / elapsed;
-            double pct = (my_slice_total > 0) ? 100.0 * total_searched / (double)my_slice_total : 0.0;
-            double remaining_sec = (rate > 0 && my_slice_total > total_searched)
-                ? (double)(my_slice_total - total_searched) / rate : 0.0;
-            int eta_h = (int)(remaining_sec / 3600);
-            int eta_m = (int)((remaining_sec - eta_h*3600) / 60);
-            printf("  [GPU %d] first=%d/%d DONE  %.2f%% (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs  ETA=%dh%02dm\n",
-                   gpu_index, first, n_pool - t_sel,
-                   pct,
-                   (unsigned long long)(total_searched/1000000),
-                   (unsigned long long)(my_slice_total/1000000),
-                   rate/1e6, elapsed, eta_h, eta_m);
-        }
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
-    printf("\n  [GPU %d] Done: %lluM (of %lluM slice) in %.0fs (%.1fM/s), found=%d\n",
-           gpu_index,
-           (unsigned long long)(total_searched/1000000),
-           (unsigned long long)(my_slice_total/1000000),
-           elapsed, total_searched/elapsed/1e6, found);
-
-    /* Write final STATUS line to summary so any later check unambiguously sees
-     * "FOUND" vs "EXHAUSTED". hit_counter > 0 means we wrote at least one HIT
-     * line earlier. */
-    if (summary_f) {
-        time_t now_epoch = time(NULL);
-        const char *status = found ? "FOUND" : "EXHAUSTED";
-        fprintf(summary_f,
-                "STATUS=%s %ld total_attempts=%llu slice_total=%llu elapsed_s=%.0f hits=%llu\n",
-                status, (long)now_epoch,
-                (unsigned long long)total_searched,
-                (unsigned long long)my_slice_total,
-                elapsed, (unsigned long long)hit_counter);
-        fflush(summary_f);
-        fsync(fileno(summary_f));
-        fclose(summary_f);
-    }
-
-    free(h_combos);
-    return 0;
-#endif
 }

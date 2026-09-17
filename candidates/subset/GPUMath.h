@@ -830,12 +830,8 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
     _ModMultCore(r, a, bb);
 }
 
-/* ZLAB_MODSQR (kill switch): 1 = dedicated triangular square ported from the
+/* Dedicated triangular square ported from the
  * promoted pinning candidate (GPUMath.h, same tip d277241), 0 = square32.cuh. */
-#ifndef ZLAB_MODSQR
-#define ZLAB_MODSQR 1
-#endif
-#if ZLAB_MODSQR
 // ---------------------------------------------------------------------------------------
 // Dedicated secp256k1 square r = a^2 mod p. Triangular 8x32 schedule: 28 off-diagonal
 // cross products a_i*a_j (even/odd column chains with multi-bit carries), doubled, plus
@@ -1061,14 +1057,6 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
     (void)h0;(void)h1;(void)h2;(void)h3;(void)r0;(void)r1;(void)r2;(void)r3;(void)carry;(void)d;
 #endif
 }
-#else
-#include "square32.cuh"
-
-__device__ void _ModSqr(uint64_t *rp, const uint64_t *up)
-{
-    qsb_square32(rp, up);
-}
-#endif
 //Very efficient way of finding 8-byte target value in global memory buffer (Buffer must be ordered in ascending order)
 //Each step it does fast division by half: mid = (hi + lo) >> 1; and checks resulting value
 //Worst-case performance is O(log n), and we don't need to calculate any hashes by using this method.

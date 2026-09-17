@@ -110,7 +110,7 @@ int main(){
         int bad=0;
         int noncanon=0;
         for(int i=0;i<ni;i++)if(memcmp(results.data()+5*i,expected.data()+5*i,40)){
-            /* ZLAB_TREE>=1 returns exact residues below 2^256: accept r == expected + p. */
+            /* the lazy tree returns exact residues below 2^256: accept r == expected + p. */
             BN_lebin2bn((unsigned char*)(results.data()+5*i),32,a);
             BN_lebin2bn((unsigned char*)(expected.data()+5*i),32,b);
             BN_add(r,b,p);

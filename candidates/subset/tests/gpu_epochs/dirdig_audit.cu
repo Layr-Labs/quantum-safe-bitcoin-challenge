@@ -1,7 +1,7 @@
-/* ZLAB audit: direct regular-digit extraction (ZLAB_DIRDIG) must reproduce the
+/* Audit: direct regular-digit extraction must reproduce the
  * peel recurrence's signed odd digits -- table index and negation -- for every
  * chunk of the active geometry. Build:
- *   nvcc -O3 -DQSB_ZEROS_N=24 [-DZLAB_T14=1] -o dirdig_audit dirdig_audit.cu -lcrypto -lm */
+ *   nvcc -O3 -DQSB_ZEROS_N=24 -o dirdig_audit dirdig_audit.cu -lcrypto -lm */
 #define main qsb_grinder_main
 #include "tree.cu"
 #undef main
