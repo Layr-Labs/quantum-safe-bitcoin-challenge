@@ -1807,8 +1807,17 @@ int main(int argc, char **argv) {
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
             cudaStreamAttrValue av = {};
-            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            /* Skip chunk 0. gt_entries(0) is 2^17 against 2^16 for the other
+             * fourteen, but every chunk is read exactly once per candidate, so
+             * a byte in chunk 0 is half as hot as a byte anywhere else. With
+             * only `want` bytes of persisting L2 available, starting the window
+             * past it covers 12.5 of the 15 reads per candidate instead of
+             * 11.5. Worth +0.79% officially on an earlier base (21d45a53). */
+            size_t cold = (size_t)(1u << 17) * 64;
+            size_t skip = (gt_sz > cold + want) ? cold : 0;
+            av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+            size_t avail = gt_sz - skip, nb = want < avail ? want : avail;
+            av.accessPolicyWindow.num_bytes = nb < (size_t)max_window ? nb : (size_t)max_window;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
@@ -1906,6 +1915,35 @@ int main(int argc, char **argv) {
     /* Benchmark runs for a fixed window ended by the harness's timeout.
      * The loop no longer stops at the first hit; hits are appended per batch.
      */
+    /* Hoisted hit sink and pinned staging. The launch loop ends every batch
+     * with cudaDeviceSynchronize() and a blocking counter copy, and on a
+     * hit-bearing batch (~85% of them at E[hits/batch]=1.9) a second blocking
+     * copy plus a stdout line, mkdir, fopen and fclose -- all with the device
+     * drained. The harness pre-creates results/, so the directory and the
+     * handle are hoisted; hits ride back on the batch's own async copies and
+     * are drained one batch late, keeping the host a batch ahead of the
+     * device. */
+    mkdir("results", 0755);
+    char pin_fname[256];
+    snprintf(pin_fname, sizeof(pin_fname), "results/pinning_hit_%d.txt", gpu_index);
+    FILE *pin_ff = fopen(pin_fname, "a");
+    if (!pin_ff) { fprintf(stderr, "cannot open %s\n", pin_fname); return 1; }
+    uint32_t *h_pin_cnt[2] = {NULL, NULL};
+    uint32_t *h_pin_idx[2] = {NULL, NULL};
+    uint32_t *h_pin_mid[2] = {NULL, NULL};
+    cudaEvent_t pin_ev[2];
+    for (int e_ = 0; e_ < 2; e_++) {
+        cudaHostAlloc((void**)&h_pin_cnt[e_], sizeof(uint32_t), cudaHostAllocDefault);
+        cudaHostAlloc((void**)&h_pin_idx[e_], 64 * sizeof(uint32_t), cudaHostAllocDefault);
+        cudaHostAlloc((void**)&h_pin_mid[e_], 8 * sizeof(uint32_t), cudaHostAllocDefault);
+        if (!h_pin_cnt[e_] || !h_pin_idx[e_] || !h_pin_mid[e_]) {
+            fprintf(stderr, "OOM: pinned staging\n"); return 1; }
+        cudaEventCreateWithFlags(&pin_ev[e_], cudaEventDisableTiming);
+    }
+    int pin_cur = 0, pin_have_prev = 0;
+    uint32_t pin_prev_seq = 0, pin_prev_lt = 0;
+    int pin_midslot = 0;
+
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -1915,7 +1953,14 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
-            cudaError_t copy_err = cudaMemcpy(d_mid,ctx.h,32,cudaMemcpyHostToDevice);
+            /* Async from a pinned ring: a synchronous copy here drains the
+             * queue the batch loop just built. Stream order still places this
+             * upload after the previous sequence's kernels, which read d_mid. */
+            uint32_t *mslot = h_pin_mid[pin_midslot];
+            pin_midslot ^= 1;
+            for (int i = 0; i < 8; i++) mslot[i] = ctx.h[i];
+            cudaError_t copy_err = cudaMemcpyAsync(d_mid, mslot, 32,
+                                                   cudaMemcpyHostToDevice, 0);
             if (copy_err != cudaSuccess) {
                 fprintf(stderr, "Failed to upload per-sequence SHA state: %s\n",
                         cudaGetErrorString(copy_err));
@@ -1928,8 +1973,7 @@ int main(int argc, char **argv) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemsetAsync(d_hit_cnt, 0, 4, 0);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1956,38 +2000,37 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
+            cudaMemcpyAsync(h_pin_cnt[pin_cur], d_hit_cnt, 4,
+                            cudaMemcpyDeviceToHost, 0);
+            cudaMemcpyAsync(h_pin_idx[pin_cur], d_hit_idx, 64 * 4,
+                            cudaMemcpyDeviceToHost, 0);
+            cudaEventRecord(pin_ev[pin_cur], 0);
 
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
-                mkdir("results", 0755);
-                char fname[256];
-                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-                FILE *f = fopen(fname, "a");
-                if (f) {
+            if (pin_have_prev) {
+                int pv = pin_cur ^ 1;
+                cudaEventSynchronize(pin_ev[pv]);
+                uint32_t h_hit = *h_pin_cnt[pv];
+                if (h_hit > 0) {
+                    int nh = (h_hit > 64) ? 64 : (int)h_hit;
                     for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
+                        uint32_t raw = h_pin_idx[pv][h];
+                        uint32_t lt = pin_prev_lt + (raw & 0x3FFFFFFF);
                         int ri = (raw >> 30) & 1;
                         int hc = (raw >> 31) & 1;
-                        fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
-                                seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
+                        fprintf(pin_ff, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                                pin_prev_seq, lt, hc, ri);
                     }
-                    fclose(f);
+                    fflush(pin_ff);
+                    found = 1;
                 }
-                found = 1;
             }
+            pin_prev_seq = seq; pin_prev_lt = batch_lt;
+            pin_cur ^= 1; pin_have_prev = 1;
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
