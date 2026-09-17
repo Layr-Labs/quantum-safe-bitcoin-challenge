@@ -22,6 +22,53 @@
 static_assert(sizeof(ulonglong2) == 16, "pipeline vector must be 128 bits");
 static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligned");
 
+/* The mixed A-table is a 64 MiB random-read working set. The pipeline
+ * checkpoints are 2 GiB of write-once / read-once scratch. Ada L2 is 72 MiB,
+ * so default write-back stores of the scratch evict the table. Table loads
+ * use the non-coherent path (the table is immutable after build). Scratch
+ * uses streaming operators so those lines are the first eviction victims. */
+__device__ __forceinline__ ulonglong2 ld_table_u2(const ulonglong2 *p) {
+#ifdef __CUDA_ARCH__
+    return __ldg(p);
+#else
+    return *p;
+#endif
+}
+__device__ __forceinline__ ulonglong2 ld_cs_u2(const ulonglong2 *p) {
+    ulonglong2 v;
+#ifdef __CUDA_ARCH__
+    asm volatile("ld.global.cs.v2.u64 {%0, %1}, [%2];"
+                 : "=l"(v.x), "=l"(v.y) : "l"(p));
+#else
+    v = *p;
+#endif
+    return v;
+}
+__device__ __forceinline__ void st_cs_u2(ulonglong2 *p, ulonglong2 v) {
+#ifdef __CUDA_ARCH__
+    asm volatile("st.global.cs.v2.u64 [%0], {%1, %2};"
+                 :: "l"(p), "l"(v.x), "l"(v.y) : "memory");
+#else
+    *p = v;
+#endif
+}
+__device__ __forceinline__ uint64_t ld_cs_u64(const uint64_t *p) {
+    uint64_t v;
+#ifdef __CUDA_ARCH__
+    asm volatile("ld.global.cs.u64 %0, [%1];" : "=l"(v) : "l"(p));
+#else
+    v = *p;
+#endif
+    return v;
+}
+__device__ __forceinline__ void st_cs_u64(uint64_t *p, uint64_t v) {
+#ifdef __CUDA_ARCH__
+    asm volatile("st.global.cs.u64 [%0], %1;" :: "l"(p), "l"(v) : "memory");
+#else
+    *p = v;
+#endif
+}
+
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
 #define AFFIX_IS_SUFFIX true
@@ -149,7 +196,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=ld_table_u2(tx),x1=ld_table_u2(tx+1),y0=ld_table_u2(ty),y1=ld_table_u2(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -604,7 +651,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             for(int k=0;k<4;k++){
                 products[k][node]=out[k];
                 if(node<510)
-                    checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256]=out[k];
+                    st_cs_u64(checkpoint+block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+node-256,out[k]);
             }
         }
         offset+=count;
@@ -613,7 +660,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
 
     if(tid==0){
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][510];
+        for(int k=0;k<4;k++)st_cs_u64(roots+(size_t)blockIdx.x*4u+k,products[k][510]);
     }
 }
 
@@ -632,8 +679,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     for(int k=0;k<4;k++){
         products[k][tid]=value[k];
         if(tid<QSB_CHECKPOINT_NODES)
-            products[k][256+tid]=checkpoint[block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid];
-        if(tid==0)inverses[k][254]=roots[(size_t)blockIdx.x*4u+k];
+            products[k][256+tid]=ld_cs_u64(checkpoint+block_base+(size_t)k*QSB_CHECKPOINT_STRIDE+tid);
+        if(tid==0)inverses[k][254]=ld_cs_u64(roots+(size_t)blockIdx.x*4u+k);
     }
     __syncthreads();
 
@@ -907,14 +954,14 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
          * limbs into naturally aligned 128-bit stores. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
-        saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
-        saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
+        st_cs_u2(saved+0u*state_plane_stride+state_idx,make_ulonglong2(qx[0],qx[1]));
+        st_cs_u2(saved+1u*state_plane_stride+state_idx,make_ulonglong2(qx[2],qx[3]));
+        st_cs_u2(saved+2u*state_plane_stride+state_idx,make_ulonglong2(qy[0],qy[1]));
+        st_cs_u2(saved+3u*state_plane_stride+state_idx,make_ulonglong2(qy[2],qy[3]));
+        st_cs_u2(saved+4u*state_plane_stride+state_idx,make_ulonglong2(qzz[0],qzz[1]));
+        st_cs_u2(saved+5u*state_plane_stride+state_idx,make_ulonglong2(qzz[2],qzz[3]));
+        st_cs_u2(saved+6u*state_plane_stride+state_idx,make_ulonglong2(qzzz[0],qzzz[1]));
+        st_cs_u2(saved+7u*state_plane_stride+state_idx,make_ulonglong2(qzzz[2],qzzz[3]));
     }
     qsb_block_product_checkpoint(prod,roots,tree);
     return;
@@ -924,14 +971,14 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
-        ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
-        ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
+        ulonglong2 qx01=ld_cs_u2(saved+0u*state_plane_stride+state_idx);
+        ulonglong2 qx23=ld_cs_u2(saved+1u*state_plane_stride+state_idx);
+        ulonglong2 qy01=ld_cs_u2(saved+2u*state_plane_stride+state_idx);
+        ulonglong2 qy23=ld_cs_u2(saved+3u*state_plane_stride+state_idx);
+        ulonglong2 qzz01=ld_cs_u2(saved+4u*state_plane_stride+state_idx);
+        ulonglong2 qzz23=ld_cs_u2(saved+5u*state_plane_stride+state_idx);
+        ulonglong2 qzzz01=ld_cs_u2(saved+6u*state_plane_stride+state_idx);
+        ulonglong2 qzzz23=ld_cs_u2(saved+7u*state_plane_stride+state_idx);
         qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
@@ -1422,6 +1469,23 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
     }
+#if CUDART_VERSION >= 11000
+    if (prop.persistingL2CacheMaxSize > 0) {
+        size_t persist = gt_sz;
+        if (persist > prop.persistingL2CacheMaxSize)
+            persist = prop.persistingL2CacheMaxSize;
+        if (cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persist) == cudaSuccess) {
+            cudaStreamAttrValue window;
+            memset(&window, 0, sizeof(window));
+            window.accessPolicyWindow.base_ptr = d_gt;
+            window.accessPolicyWindow.num_bytes = persist;
+            window.accessPolicyWindow.hitRatio = 1.0f;
+            window.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+            window.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+            cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &window);
+        }
+    }
+#endif
 
     /* Upload midstate */
     uint32_t *d_mid; cudaMalloc(&d_mid, 32);
