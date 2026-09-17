@@ -85,13 +85,25 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
-#define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#define QSB_HOST_READBACK 1   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch.
+                                * Officially scored 647,064,073 (+1.72%) on submission a91746ca; rejected only
+                                * because a larger unrelated promotion (ercumentyildirim, e2fd8093) landed while
+                                * it was queued, not because the change itself regressed. Enabled by default here. */
 #endif
 #ifndef QSB_SPARSE_TAIL
-#define QSB_SPARSE_TAIL 0     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
+#define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block.
+                                * Officially scored 647,553,774 (+2.06%) on submission 7f965b4d; rejected for the
+                                * same reason as delta A (leapfrogged in the queue, not a regression). Enabled by
+                                * default here; it touches only the Fast-path SHA tail, disjoint from delta A's
+                                * host readback loop. */
 #endif
 #ifndef QSB_FINAL_TEMPLATE
-#define QSB_FINAL_TEMPLATE 0  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
+#define QSB_FINAL_TEMPLATE 1  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition.
+                                * Officially scored 645,336,311 (+0.54%) on submission e582bda4 -- real and
+                                * positive but under the 1% promotion bar alone. Enabled by default here to
+                                * stack with deltas A/B. _PointAddXYZZT<DEFER_Y> is a byte-for-byte mechanical
+                                * copy of the already-proven _PointAddXYZZ with defer_y promoted from a runtime
+                                * bool to a template parameter (confirmed by direct comparison). */
 #endif
 #ifndef QSB_SPARSE_D
 #define QSB_SPARSE_D 0        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
