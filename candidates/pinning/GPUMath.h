@@ -1157,9 +1157,10 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                              const uint64_t *X2, const uint64_t *Y2,
-                              const uint64_t *Yoff, bool defer_y)
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZ(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1188,7 +1189,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
+  if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3

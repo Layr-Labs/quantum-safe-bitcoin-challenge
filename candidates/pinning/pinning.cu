@@ -200,11 +200,14 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
+    for (int c=2;c<GT_CHUNKS-1;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
     }
+    gt_digit_idx(e[GT_CHUNKS-1], &idx, &neg);
+    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
@@ -225,13 +228,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+    ec=sign*(int32_t)M[0];
+    gt_digit_idx(ec, &idx, &neg);
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
@@ -282,6 +289,248 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     return ok;
 }
 
+
+
+
+/* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block.
+ * Pad shape (matches check_tail_words.py): W[0..2] live, W[3..14]=0,
+ * W[15]=9995*8=79960. Continues from an existing midstate (unlike the
+ * fresh-IV Pk33 / SHA256d32 helpers). First 16 rounds and the first
+ * in-place WMIX drop zero addends; later 48 rounds use the generic
+ * SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on that
+ * padded block. */
+__device__ __forceinline__ void _SHA256TransformFastTail11(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t L = 9995u * 8u; /* 79960 */
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = state[0];
+    uint32_t b = state[1];
+    uint32_t c = state[2];
+    uint32_t d = state[3];
+    uint32_t e = state[4];
+    uint32_t f = state[5];
+    uint32_t g = state[6];
+    uint32_t h = state[7];
+
+    uint32_t w[16];
+    w[0] = w0;
+    w[1] = w1;
+    w[2] = w2;
+#pragma unroll
+    for (int i = 3; i < 15; i++) w[i] = 0;
+    w[15] = L;
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], L);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(L) + s0(w[2]);
+        w[2] += s1(w[0]);
+        w[3]  = s1(w[1]);
+        w[4]  = s1(w[2]);
+        w[5]  = s1(w[3]);
+        w[6]  = s1(w[4]) + L;
+        w[7]  = s1(w[5]) + w[0];
+        w[8]  = s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(L);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
+/* Sparse-schedule SHA-256 for the SHA256d second compression: a 32-byte
+ * message (the first digest as eight big-endian words) with the fixed pad
+ * W[8]=0x80000000, W[9..14]=0, W[15]=256, starting from the SHA-256 IV.
+ * IV literals let the compiler fold round 0 entirely; rounds 8-15 fold
+ * K[i]+W[i]; the first in-place WMIX drops zero sigma and zero addend terms
+ * while preserving update order. Bit-identical to _SHA256Initialize +
+ * _SHA256Transform on that padded block. */
+__device__ __forceinline__ void _SHA256TransformDigest32(
+    uint32_t out[8], const uint32_t m[8])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = 0x6a09e667u;
+    uint32_t b = 0xbb67ae85u;
+    uint32_t c = 0x3c6ef372u;
+    uint32_t d = 0xa54ff53au;
+    uint32_t e = 0x510e527fu;
+    uint32_t f = 0x9b05688cu;
+    uint32_t g = 0x1f83d9abu;
+    uint32_t h = 0x5be0cd19u;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 8; i++) w[i] = m[i];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0x80000000u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 256u);
+
+    {
+        /* First schedule expansion; w[9..14]=0 and w[8]/w[15] are the fixed
+         * pad words. s0(0)=s1(0)=0, so zero terms vanish. */
+        w[0] += s0(w[1]);
+        w[1] += s1(256u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 256u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
+        w[8]  = 0x80000000u + s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(256u);
+        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    out[0] = 0x6a09e667u + a;
+    out[1] = 0xbb67ae85u + b;
+    out[2] = 0x3c6ef372u + c;
+    out[3] = 0xa54ff53au + d;
+    out[4] = 0x510e527fu + e;
+    out[5] = 0x9b05688cu + f;
+    out[6] = 0x1f83d9abu + g;
+    out[7] = 0x5be0cd19u + h;
+}
+
+/* Sparse-schedule SHA-256 for the compressed public key: a 33-byte message
+ * whose live words are pb[0..8] (parity byte, 32 x bytes, 0x80 pad start)
+ * with W[9..14]=0 and W[15]=0x108, starting from the SHA-256 IV. Same
+ * constant-folding structure as _SHA256TransformDigest32. Bit-identical to
+ * _SHA256Initialize + _SHA256Transform on that padded block. */
+__device__ __forceinline__ void _SHA256TransformPubkey33(
+    uint32_t out[8], const uint32_t m[9])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = 0x6a09e667u;
+    uint32_t b = 0xbb67ae85u;
+    uint32_t c = 0x3c6ef372u;
+    uint32_t d = 0xa54ff53au;
+    uint32_t e = 0x510e527fu;
+    uint32_t f = 0x9b05688cu;
+    uint32_t g = 0x1f83d9abu;
+    uint32_t h = 0x5be0cd19u;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 9; i++) w[i] = m[i];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], w[8]);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
+
+    {
+        /* First schedule expansion; w[9..14]=0 and w[15]=0x108 is fixed. */
+        w[0] += s0(w[1]);
+        w[1] += s1(0x108u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(w[8]);
+        w[8] += s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(0x108u);
+        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    out[0] = 0x6a09e667u + a;
+    out[1] = 0xbb67ae85u + b;
+    out[2] = 0x3c6ef372u + c;
+    out[3] = 0xa54ff53au + d;
+    out[4] = 0x510e527fu + e;
+    out[5] = 0x9b05688cu + f;
+    out[6] = 0x1f83d9abu + g;
+    out[7] = 0x5be0cd19u + h;
+}
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -821,14 +1070,12 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-        uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
-            pin_tail_words[2],
-            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
-        };
-        _SHA256Transform(state,blk);
+        /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
+        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        uint32_t w2 = pin_tail_words[2];
+        _SHA256TransformFastTail11(state, w0, w1, w2);
     } else {
         /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
@@ -859,17 +1106,10 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
 
     }
 
-    /* Second SHA-256: the first digest is already in big-endian words. */
-    uint32_t b2[16];
-    #pragma unroll
-    for(int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000u;
-    #pragma unroll
-    for(int i=9;i<15;i++) b2[i]=0;
-    b2[15]=256;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2,b2);
+    /* Second SHA-256: the first digest is already in big-endian words; the
+     * 32-byte message pad is fixed, so use the sparse-schedule transform. */
+    uint32_t s2[8];
+    _SHA256TransformDigest32(s2, state);
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
     uint64_t z[4];
@@ -964,14 +1204,14 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
         uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
         uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
         uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
-        uint32_t pb[16];
+        uint32_t pb[9];
         pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
         pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        /* pb[9..14]=0, pb[15]=0x108 are folded into the sparse transform. */
+        uint32_t hs[8];_SHA256TransformPubkey33(hs,pb);
         int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];
@@ -1162,6 +1402,28 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
+/* PR46's batch-affine startup idea, applied only to the small runtime
+ * ladders used by the GPU table builder. The point sequence is unchanged. */
+static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
+                            uint64_t *out, BIGNUM *x, BIGNUM *y, BN_CTX *ctx) {
+    EC_POINT *points[GT_HI];
+    if(count<1 || count>=GT_HI) { fprintf(stderr,"Invalid ladder size\n");exit(2); }
+    for(int i=0;i<count;i++) {
+        points[i]=EC_POINT_new(grp);
+        if(!points[i]) { fprintf(stderr,"Ladder allocation failed\n");exit(2); }
+        int ok=i==0 ? EC_POINT_copy(points[i],step)
+                    : EC_POINT_add(grp,points[i],points[i-1],step,ctx);
+        if(!ok) { fprintf(stderr,"Ladder addition failed\n");exit(2); }
+    }
+    if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+        fprintf(stderr,"Ladder batch normalization failed\n");exit(2);
+    }
+    for(int i=0;i<count;i++) {
+        gt_point_to_limbs(grp,points[i],x,y,ctx,out+(size_t)(i+1)*8);
+        EC_POINT_free(points[i]);
+    }
+}
+
 /* The two ladders the GPU builder needs: L[ch][lo] = lo * base_ch and
  * H[ch][hi] = hi * 256 * base_ch. Index 0 of each is the identity and is
  * left zeroed; the kernel treats it as such. 12,002 real points, against the
@@ -1176,7 +1438,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
            *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp), *acc = EC_POINT_new(grp);
+    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp);
     /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
@@ -1187,22 +1449,16 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        EC_POINT_copy(acc, base);
-        for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
-            gt_point_to_limbs(grp, acc, x, y, ctx, hL + ((size_t)ch * GT_LO + lo) * 8);
-            EC_POINT_add(grp, acc, acc, base, ctx);
-        }
+        gt_batch_ladder(grp,base,GT_LO-1,
+            hL+(size_t)ch*GT_LO*8,x,y,ctx);
         BN_set_word(shift, 256);                             /* step = 256 * B */
         EC_POINT_mul(grp, step, NULL, base, shift, ctx);
-        EC_POINT_copy(acc, step);
-        for (int hi = 1; hi < (ch==0?1024:512); hi++) {                 /* H[hi] = hi * 256 * B */
-            gt_point_to_limbs(grp, acc, x, y, ctx, hH + ((size_t)ch * GT_HI + hi) * 8);
-            EC_POINT_add(grp, acc, acc, step, ctx);
-        }
+        gt_batch_ladder(grp,step,(ch==0?1024:512)-1,
+            hH+(size_t)ch*GT_HI*8,x,y,ctx);
     }
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
     BN_free(nri); BN_free(bscal);
-    EC_POINT_free(base); EC_POINT_free(step); EC_POINT_free(acc);
+    EC_POINT_free(base); EC_POINT_free(step);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
 }
 
@@ -1507,34 +1763,19 @@ int main(int argc, char **argv) {
     }
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
-
-    /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
-     * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
-     * per-candidate state through the same cache every 16M batch, which evicts
-     * it. Advisory: if the device or driver refuses, the run is unaffected. */
-    {
-        int max_persist = 0, max_window = 0;
-        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
-        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
-        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        if (want > 0 && max_window > 0) {
-            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
-            cudaStreamAttrValue av = {};
-            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
-            av.accessPolicyWindow.hitRatio  = 1.0f;
-            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
-            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
-            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
-            printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
-                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
-                   (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
-                   pe==cudaSuccess?"ok":cudaGetErrorString(pe));
-            fflush(stdout);
-        }
-    }
     uint32_t *d_hit_cnt, *d_hit_idx;
-    cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
+    /* Keep the counter and indices contiguous for one batch-result readback. */
+    cudaError_t hit_err = cudaMalloc(&d_hit_cnt, (1 + 1024)*sizeof(uint32_t));
+    if (hit_err != cudaSuccess) {
+        fprintf(stderr, "Hit buffer allocation failed: %s\n", cudaGetErrorString(hit_err));
+        return 1;
+    }
+    d_hit_idx = d_hit_cnt + 1;
+    hit_err = cudaMemset(d_hit_cnt, 0, (1 + 1024)*sizeof(uint32_t));
+    if (hit_err != cudaSuccess) {
+        fprintf(stderr, "Hit buffer initialization failed: %s\n", cudaGetErrorString(hit_err));
+        return 1;
+    }
 
     int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
@@ -1641,7 +1882,11 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            hit_err = cudaMemcpy(d_hit_cnt, &h_hit, sizeof(h_hit), cudaMemcpyHostToDevice);
+            if (hit_err != cudaSuccess) {
+                fprintf(stderr, "Hit counter reset failed: %s\n", cudaGetErrorString(hit_err));
+                return 1;
+            }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1668,18 +1913,19 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
+            /* The blocking default-stream copy waits for all five kernels and
+             * returns the counter plus the same first 64 indices reported below. */
+            uint32_t hit_report[1 + 64];
+            cudaError_t err = cudaMemcpy(hit_report, d_hit_cnt, sizeof(hit_report),
+                                         cudaMemcpyDeviceToHost);
+            if (err == cudaSuccess) err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            h_hit = hit_report[0];
             if (h_hit > 0) {
-                uint32_t hits[64];
+                const uint32_t *hits = hit_report + 1;
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
