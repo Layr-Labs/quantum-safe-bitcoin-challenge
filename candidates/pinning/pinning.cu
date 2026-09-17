@@ -16,6 +16,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <cuda_runtime.h>
+#include "RecoveryConstant.h"
 
 #include "GPUMath.h"
 
@@ -785,7 +786,7 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
 __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
-    int tid=(int)threadIdx.x;
+    int tid=(int)(blockIdx.x*blockDim.x+threadIdx.x);
     bool active=tid<count;
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
@@ -884,9 +885,12 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
+__device__ __constant__ uint64_t pin_recovery_c[4];
+
+#include "LeafRecovery.cuh"
 
 template<bool FAST_TAIL, int STAGE>
-__global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeline(
+__global__ void __launch_bounds__(QSB_RECOVERY_N, STAGE == 0 ? 512/QSB_RECOVERY_N : 768/QSB_RECOVERY_N) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -983,34 +987,24 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     {
         uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                              pin_u2rx_words[2],pin_u2rx_words[3]};
-        qsb_xyzz_finish_prepare(qx,qzz,prep_xR,prod);
+        qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-    /* Preserve exactly four fields across the kernel boundary.  The finish
-     * needs C=ZZ*d^2 and W=ZZ^2*d, but no longer needs d or ZZ separately. */
-    if(usable){
-        _ModSqr(qx,qx);
-        _ModMult(qx,qzz);        /* qx becomes C */
-    }
-    Load256(qzz,prod);           /* qzz becomes W */
     if (!usable) {
         prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
+        qzz[0]=qzz[1]=qzz[2]=qzz[3]=0; // H=0 is the saved unusable marker.
     }
     if(active){
-        /* Eight vector planes retain SoA coalescing while pairing adjacent
-         * limbs into naturally aligned 128-bit stores. */
+        /* Store Y,V now so neither must remain live across the tree.
+         * The product helper writes H into the remaining two planes. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qx[0],qx[1]);
-        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qx[2],qx[3]);
-        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
-        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
-        saved[4u*state_plane_stride+state_idx]=make_ulonglong2(qzz[0],qzz[1]);
-        saved[5u*state_plane_stride+state_idx]=make_ulonglong2(qzz[2],qzz[3]);
-        saved[6u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
-        saved[7u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
+        saved[0u*state_plane_stride+state_idx]=make_ulonglong2(qy[0],qy[1]);
+        saved[1u*state_plane_stride+state_idx]=make_ulonglong2(qy[2],qy[3]);
+        saved[2u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[0],qzzz[1]);
+        saved[3u*state_plane_stride+state_idx]=make_ulonglong2(qzzz[2],qzzz[3]);
     }
-    qsb_block_product_checkpoint(prod,roots,tree);
+    qsb_recovery_product_checkpoint(prod,qzz,saved,batch_size,active,roots,tree);
     return;
     } else {
 
@@ -1018,35 +1012,30 @@ __global__ void __launch_bounds__(256, STAGE == 0 ? 2 : 3) kernel_pinning_pipeli
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-        ulonglong2 qx01=saved[0u*state_plane_stride+state_idx];
-        ulonglong2 qx23=saved[1u*state_plane_stride+state_idx];
-        ulonglong2 qy01=saved[2u*state_plane_stride+state_idx];
-        ulonglong2 qy23=saved[3u*state_plane_stride+state_idx];
+        ulonglong2 qy01=saved[0u*state_plane_stride+state_idx];
+        ulonglong2 qy23=saved[1u*state_plane_stride+state_idx];
+        ulonglong2 qzzz01=saved[2u*state_plane_stride+state_idx];
+        ulonglong2 qzzz23=saved[3u*state_plane_stride+state_idx];
         ulonglong2 qzz01=saved[4u*state_plane_stride+state_idx];
         ulonglong2 qzz23=saved[5u*state_plane_stride+state_idx];
-        ulonglong2 qzzz01=saved[6u*state_plane_stride+state_idx];
-        ulonglong2 qzzz23=saved[7u*state_plane_stride+state_idx];
-        qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
         usable = ((qzz[0] | qzz[1] | qzz[2] | qzz[3]) != 0);
     }
-    /* qzz carries the original, pre-identity-substitution W, so this exactly
-     * recreates the promoted kernel's usability decision without a flag. */
-    #pragma unroll
-    for(int limb=0;limb<4;limb++)prod[limb]=usable?qzz[limb]:(limb==0?1ULL:0ULL);
-    prod[4]=0;
-    qsb_block_inverse_checkpoint(prod,roots,tree);
+    /* qzz now carries H. Every lane participates, including the unused tail;
+     * inverse expansion stops at pairs and needs no saved leaf denominators. */
+    qsb_recovery_pair_inverse(prod,roots,tree);
     if (!usable) return;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
                       pin_u2ry_words[2],pin_u2ry_words[3]};
+    uint64_t recovery_c[4]={pin_recovery_c[0],pin_recovery_c[1],
+                            pin_recovery_c[2],pin_recovery_c[3]};
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(
-        qx,qy,qzz,qzzz,prod,u2rx,u2ry,
-        q1x,q2x);
+    uint32_t y_parities = qsb_recovery_finish(
+        qy,qzzz,qzz,prod,u2rx,u2ry,recovery_c,q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
     for(int ri=0;ri<2;ri++){
@@ -1118,8 +1107,8 @@ static void launch_pinning_pipeline(
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
     uint64_t *super_roots, uint64_t *root_checkpoint
 ) {
-    int blocks=(batch_size+255)/256;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
+    int blocks=(batch_size+QSB_RECOVERY_N-1)/QSB_RECOVERY_N;
+    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,QSB_RECOVERY_N>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -1130,10 +1119,6 @@ static void launch_pinning_pipeline(
         exit(2);
     }
     int root_groups=(blocks+255)/256;
-    if(root_groups>256){
-        fprintf(stderr,"Pipeline batch exceeds two-level inverse capacity\n");
-        exit(2);
-    }
     qsb_root_group_prepare<<<root_groups,256>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
@@ -1141,7 +1126,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<1,256>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+255)/256,256>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
@@ -1154,7 +1139,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks,256>>>(
+    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks,QSB_RECOVERY_N>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -1551,6 +1536,12 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
     cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
+    uint64_t recovery_c[4];
+    if (!qsb_make_recovery_constant(recovery_c,pp.u2r_x,pp.u2r_y) ||
+        cudaMemcpyToSymbol(pin_recovery_c,recovery_c,sizeof(recovery_c))!=cudaSuccess) {
+        fprintf(stderr,"Failed to prepare squaring-free recovery constant\n");
+        return 1;
+    }
 
     /* Compute neg_2u2R */
     {
@@ -1631,15 +1622,15 @@ int main(int argc, char **argv) {
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
 
     int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
-    int BLKSZ = 256;
+    int BLKSZ = QSB_RECOVERY_N;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
     int ROOT_GRDSZ=(GRDSZ+255)/256;
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
-    size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
+    size_t pipeline_state_bytes=(size_t)BATCH*6u*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+    size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_RECOVERY_N*sizeof(uint64_t);
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);

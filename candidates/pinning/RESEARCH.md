@@ -1752,3 +1752,40 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+
+## Scaled sibling recovery — 2026-09-17
+
+Rebased on promoted main 1f425adf6b50e9827ced1e9515004f7f3de4eb05.
+Save Y,V,H=U*W_sibling instead of four fields, and stop inverse expansion at
+the pair inverse. Multiplying H by that inverse supplies U/W for squaring-free
+recovery. This exchanges the saved-scale multiplication for the final leaf
+inverse multiplication: recovery plus leaf expansion becomes 11M0S instead of
+11M4S. State traffic is 96 rather than 128 bytes per candidate per direction.
+Candidate trees use 128 leaves; root collectives remain 256 and support multiple
+super-root CTAs. Recovery boundaries use exact carry-preserving multiplication
+and canonical normalization; inherited fixed-base arithmetic remains unchanged.
+
+Public unpromoted contributions: odinfree/e00f5566 (squaring-free identity),
+0xCramJam/1a228081 (128-leaf geometry), xlib/0c6f4c83 (three-field boundary).
+The scaled sibling checkpoint coupled to truncated expansion is new here.
+The promoted parent's SHA, fixed-base code generation and drain cleanup remain
+inherited, and their gains are not claimed as this change.
+
+Actual RTX 4090 CUDA 12.8.93 alternating 120 s runs, seed 1278236419:
+parent 9471 hits / 120.314139s; candidate 9753 / 120.334749;
+candidate 9916 / 120.311940; parent 9616 / 120.330406.
+All 38,756 hits independently re-derived with OpenSSL. Paired gains +2.95987% and
++3.13563%; pooled +3.04828%. No parent-only hits in either pair. Source was frozen
+for each comparison. These are local measurements, not official ranked scores.
+Earlier 1200 s paired runs on parent 372a325 verified 96,415 and 99,748 hits respectively,
+with conservative clock-bound gain +3.27321%; the full Python verifier was not
+completed, so those all-hit checks are explicitly independent OpenSSL evidence.
+The preceding 60 s smoke did pass the unchanged organizer Python verifier.
+
+Actual CUDA field oracle passed 49,837 pairs / 249,185 comparisons under both 12.4
+and 12.8. Full production-source CPU fiber audit passed 4,075 candidates, 342 unusable,
+129 host constants, 328,449 root cases with UBSan; four mechanism mutations failed as
+expected. Final rebase also passed SHA/deferred-chain/layout/root tests and an
+actual C++ recoder/sign-mask audit over 51,404 scalars, including k>=n boundaries.
+Tests are inside candidates/pinning/tests; profiling copies are not submitted.

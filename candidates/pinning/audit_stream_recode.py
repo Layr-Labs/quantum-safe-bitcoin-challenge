@@ -3,6 +3,9 @@
 
 from pathlib import Path
 import random
+import struct
+import subprocess
+import tempfile
 
 N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 MASK64 = (1 << 64) - 1
@@ -79,13 +82,11 @@ def streamed(k: int) -> list[int]:
     out.append(digit)
     words, digit = source_step(words, sign, 17)
     out.append(digit)
-    for chunk in range(2, CHUNKS):
-        if chunk < CHUNKS - 1:
-            words, digit = source_step(words, sign, 17)
-        else:
-            assert words[1:] == [0, 0, 0]
-            digit = sign * words[0]
+    for chunk in range(2, CHUNKS - 1):
+        words, digit = source_step(words, sign, 17)
         out.append(digit)
+    assert words[1:] == [0, 0, 0]
+    out.append(sign * words[0])
     return out
 
 
@@ -145,8 +146,10 @@ def audit_source() -> None:
         "#define GT_TOTAL_ENTRIES (1u << 20)",
         "int32_t ec=gt_mixed_step<18>(M,sign);",
         "ec=gt_mixed_step<17>(M,sign);",
-        "for (int c=2;c<GT_CHUNKS;c++)",
-        "ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];",
+        "for (int c=2;c<GT_CHUNKS-1;c++)",
+        "ec=sign*(int32_t)M[0];",
+        "_PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);",
+        "_PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);",
         "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);",
         "return c == 0 ? 0 : 17*c+1;",
         "return c == 0 ? 0u : (unsigned)(c+1) << 16;",
@@ -159,6 +162,69 @@ def audit_source() -> None:
     assert source.count("__device__ void _FixedBaseSignedXYZZScalar") == 1
     assert source.count("_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);") == 1
     assert "int32_t gte[GT_CHUNKS]" not in source
+
+
+def audit_compiled_source(cases: list[int]) -> None:
+    """Execute the actual scalar setup, step and sign-mask source with UBSan.
+
+    The integer oracle retains the full subtraction path, so values near and
+    above n test the production rare branch independently of its predicate.
+    CUDA attributes alone are removed; no arithmetic is translated or replaced.
+    """
+    source = Path(__file__).resolve().with_name("pinning.cu").read_text()
+
+    def function(anchor: str) -> str:
+        start = source.index(anchor)
+        opening = source.index("{", start)
+        depth = 1
+        end = opening + 1
+        while depth:
+            depth += (source[end] == "{") - (source[end] == "}")
+            end += 1
+        return source[start:end]
+
+    start = source.index("__device__ __constant__ uint64_t GT_ORDER_N")
+    constant = source[start:source.index("};", start) + 2]
+    pieces = [constant] + [function(anchor) for anchor in (
+        "__device__ __forceinline__ void gt_recode_setup(",
+        "template<int BITS>",
+        "__device__ __forceinline__ void gt_recode_signed(",
+        "__device__ __forceinline__ void gt_digit_idx(",
+    )]
+    program = """#include <cstdint>
+#include <cstdio>
+#define __device__
+#define __constant__
+#define __forceinline__ inline
+#define GT_CHUNKS 15
+""" + "\n".join(pieces) + """
+int main() {
+    uint64_t k[4], neg[15]; uint32_t idx[15]; int32_t e[15];
+    while (fread(k, sizeof(k), 1, stdin) == 1) {
+        gt_recode_signed(k, e);
+        for (int i=0; i<15; ++i) gt_digit_idx(e[i], &idx[i], &neg[i]);
+        if (fwrite(e, sizeof(e), 1, stdout) != 1 ||
+            fwrite(idx, sizeof(idx), 1, stdout) != 1 ||
+            fwrite(neg, sizeof(neg), 1, stdout) != 1) return 2;
+    }
+    return ferror(stdin) ? 2 : 0;
+}
+"""
+    with tempfile.TemporaryDirectory(prefix="qsb-recode-audit-") as directory:
+        cpp = Path(directory) / "recode.cpp"
+        exe = Path(directory) / "recode"
+        cpp.write_text(program)
+        subprocess.run(["g++", "-std=c++17", "-O2", "-fsanitize=undefined",
+                        "-fno-sanitize-recover=all", str(cpp), "-o", str(exe)], check=True)
+        result = subprocess.run([str(exe)], input=b"".join(
+            k.to_bytes(32, "little") for k in cases), capture_output=True, check=True)
+    assert not result.stderr, result.stderr
+    assert len(result.stdout) == len(cases) * 240
+    for k, actual in zip(cases, struct.iter_unpack("<15i15I15Q", result.stdout)):
+        digits = materialized(k)
+        expected = tuple(digits + [(abs(e)-1)//2 for e in digits] +
+                         [MASK64 if e < 0 else 0 for e in digits])
+        assert actual == expected, (hex(k), actual, expected)
 
 
 def main() -> None:
@@ -178,9 +244,11 @@ def main() -> None:
     cases.update(rng.getrandbits(256) for _ in range(50_000))
     for scalar in cases:
         audit_scalar(scalar)
+    audit_compiled_source(sorted(cases))
     print(
         f"PASS: streamed mixed recode equals materialized reference; "
-        f"{len(cases)} scalars; {TOTAL} table slots; exact production schedule"
+        f"{len(cases)} scalars; {TOTAL} table slots; peeled production schedule; "
+        f"actual C++ recoder and sign masks pass UBSan"
     )
 
 

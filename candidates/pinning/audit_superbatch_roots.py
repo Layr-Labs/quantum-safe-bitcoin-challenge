@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the two-level 256x256 batch inversion of search-CTA roots."""
+"""Audit 256x256 root groups, including multiple super-root CTAs."""
 
 from pathlib import Path
 import random
@@ -46,7 +46,7 @@ def tree_down(leaves, internal, root_inverse):
 
 def nested_inverse(values):
     count = len(values)
-    assert 0 < count <= WIDTH * WIDTH
+    assert count > 0
     groups = (count + WIDTH - 1) // WIDTH
     saved = []
     group_roots = []
@@ -58,10 +58,13 @@ def nested_inverse(values):
         saved.append((leaves, internal))
         group_roots.append(root)
 
-    super_leaves = group_roots + [1] * (WIDTH - groups)
-    super_leaves, super_internal, super_root = tree_up(super_leaves)
-    super_inverse = pow(super_root, P - 2, P)
-    group_inverses = tree_down(super_leaves, super_internal, super_inverse)
+    group_inverses = []
+    for start in range(0, groups, WIDTH):
+        super_leaves = group_roots[start:start + WIDTH]
+        super_leaves += [1] * (WIDTH - len(super_leaves))
+        super_leaves, super_internal, super_root = tree_up(super_leaves)
+        super_inverse = pow(super_root, P - 2, P)
+        group_inverses.extend(tree_down(super_leaves, super_internal, super_inverse))
 
     result = []
     for group, (leaves, internal) in enumerate(saved):
@@ -77,6 +80,7 @@ def audit_source():
     recovery = source.index("/* Shared-denominator recovery", finish)
     assert "qsb_block_product_checkpoint(r,super_roots,root_checkpoint);" in source[prepare:super_inverse]
     assert "qsb_block_inverse(r);" in source[super_inverse:finish]
+    assert "blockIdx.x*blockDim.x+threadIdx.x" in source[super_inverse:finish]
     assert "qsb_block_inverse_checkpoint(r,super_roots,root_checkpoint);" in source[finish:recovery]
     launch_begin = source.index("static void launch_pinning_pipeline(")
     launch_end = source.index(" * Fixed-base table construction", launch_begin)
@@ -84,7 +88,7 @@ def audit_source():
     names = (
         "kernel_pinning_pipeline<FAST_TAIL,0>",
         "qsb_root_group_prepare<<<root_groups,256>>>",
-        "qsb_invert_super_roots<<<1,256>>>",
+        "qsb_invert_super_roots<<<(root_groups+255)/256,256>>>",
         "qsb_root_group_finish<<<root_groups,256>>>",
         "kernel_pinning_pipeline<FAST_TAIL,2>",
     )
@@ -97,7 +101,8 @@ def audit_source():
 def main():
     audit_source()
     rng = random.Random(0x5355504552524F4F)
-    counts = (1, 2, 17, 255, 256, 257, 511, 512, 513, 4097, 65535, 65536)
+    counts = (1, 2, 17, 255, 256, 257, 511, 512, 513, 4097,
+              65535, 65536, 65537, 131071, 131072)
     checked = 0
     for count in counts:
         values = []
