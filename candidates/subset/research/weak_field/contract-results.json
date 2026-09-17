@@ -1,0 +1,133 @@
+{
+  "status": "PASS_CONTRACT_MODELS_AND_ACTUAL_RAW_PTX_SEMANTICS",
+  "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "fde5b39af85cc293805454d808d553dff1830ddb88ee74ac852d4e966f8f71b2",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "checker_sha256": "4f9b60bb5bbbeeced787355976b866994e479cc153acc5084d5a518a23d3e1e7",
+  "ptx_model_sha256": "0aef5e92c85599f1d029e1b1dbf72aa6838e2f349cf25a6a662569bc898d12b3",
+  "counts": {
+    "add": 4809,
+    "sub": 4809,
+    "neg": 4809,
+    "raw_multiply_PTX": 4809,
+    "raw_square_PTX": 4809,
+    "second_add_carries": 10,
+    "second_sub_borrows": 19,
+    "multiply_final_carries": 306
+  },
+  "toy_exhaustive_pairs": 262144,
+  "source_PTX_ops": {
+    "multiply": 236,
+    "square": 252
+  },
+  "witnesses": {
+    "old_add_weak_inputs": {
+      "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "wrong": "0x1000003cf",
+      "expected": "0x2000007a0"
+    },
+    "old_sub_weak_inputs": {
+      "a": "0x0",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "wrong": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85f"
+    },
+    "old_neg_weak_input": {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "wrong": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e"
+    },
+    "omitted_second_add_carry": {
+      "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "wrong": "0x1000003cf",
+      "expected": "0x2000007a0"
+    },
+    "omitted_second_sub_borrow": {
+      "a": "0x0",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "wrong": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85f"
+    },
+    "raw_zero_test": {
+      "weak": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "raw_nonzero": "0x1",
+      "field_nonzero": "0x0"
+    },
+    "raw_parity": {
+      "weak": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "raw_parity": "0x0",
+      "canonical_parity": "0x1"
+    },
+    "serialization": {
+      "weak_x": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "canonical_x": "0x1"
+    },
+    "canonical_inputs_produce_weak_output": {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
+      "weak_product": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "canonical_product": "0x1"
+    },
+    "old_add_on_two_actual_weak_squares": {
+      "canonical_square_input": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffefc2f",
+      "weak_square": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc2f",
+      "wrong": "0xfffffc2f",
+      "expected": "0x200000000"
+    },
+    "old_sub_on_actual_weak_square": {
+      "canonical_square_input": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
+      "weak_square": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "wrong": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e"
+    },
+    "full_carry_must_remain": {
+      "a": "0x7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "stale_cc_must_remain_rejected": {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
+      "b": "0xfffffffefffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"
+    }
+  },
+  "ordinary_helper_source_counts": {
+    "_ModMult": 7,
+    "_ModSqr": 2,
+    "_ModAdd256": 2,
+    "_ModSub256": 5
+  },
+  "narrow_prototype_budget": {
+    "iterations": 13,
+    "M_S_canonical_tails_removed": 117,
+    "end_normalizations_added": 4,
+    "weak_add_calls": 13,
+    "weak_sub_calls": 65,
+    "canonical_affine_Y_adds_retained": 13,
+    "persistent_field_words_before_after": [
+      8,
+      8
+    ]
+  },
+  "scope": "Exact unchanged source raw multiply/square PTX interpreted on CPU; independent integer weak add/sub/neg models and exhaustive toy-domain checks. No implemented CUDA weak add/sub, candidate mutation, GPU run, or full weak-circuit executable test.",
+  "prior_distinction": "No new radix, no fifth limb or magnitude tracking, no raw product fusion. Remove only final canonical selection; all sparse-prime overflow folds remain.",
+  "gpu_executed": false,
+  "candidate_modified": false,
+  "original_report_sha256": "c8bd53b6f69f3354cb47da90167ddc47ff8f31ebfe91dbe2a6ffb300d665e0c9"
+}

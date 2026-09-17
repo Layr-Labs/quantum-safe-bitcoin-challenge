@@ -1,0 +1,87 @@
+{
+  "status": "PASS_ACTUAL_COOPERATIVE_HOST_HM43_AND_COMPILED_MUTATIONS",
+  "header_sha256": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+  "corrected_dependency_source_sha256": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+  "field_projection_sha256": "52e4e1817c0baef4c64c5348f03a2b749a6c27c51f30db58e3f0fa86e4fa2cc2",
+  "host_warp_sha256": "3111f2ec44d1102188a755779377bd5110b4fa8163efc1aeb44c3bd99fdf2000",
+  "host_support_sha256": "6e1bedc84a1a1fd9c043af4f76782cc8ead6a635508d94acb06317d5d4d9343a",
+  "checker_sha256": "4a343073cd533f94321078efa14521163c86a5da586e202ec5e6a7260c7604b0",
+  "generated_cpp_sha256": "a18605af5cdd987366d21645facb51476388c18e385e5b6205d1c57264bd5810",
+  "fixture_sha256": "4bf42a18e7d8d9e4380d7a436e4722b5cfdc9b9ebfca4e0f39128ccec4c01682",
+  "case_counts": {
+    "six_word_add": 857,
+    "six_word_negate": 160,
+    "signed_coefficient_product": 160,
+    "sparse_m_times_p": 160,
+    "complete_inverse": 115
+  },
+  "inverse_outputs_checked": 3680,
+  "reports": {
+    "positive": {
+      "compiled": true,
+      "exit_code": 0,
+      "timeout": false,
+      "elapsed_host_seconds_not_performance_proxy": 3.371,
+      "source_sha256": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+      "result": {
+        "status": "PASS_ACTUAL_COOPERATIVE_HOST_HM43",
+        "cases": 1452,
+        "checked_words": 51768,
+        "collectives": 25164,
+        "exchanges": 10832,
+        "ballots": 11428,
+        "harness_joins": 2904,
+        "participation_mask": "ffffffff",
+        "all32_lane_counts_equal": true
+      },
+      "diagnostic": null,
+      "stdout_sha256": "78b739055ef061b9dfdf22be478cbdad9b2b3e8d75978a5d4a96f47be79b3b82",
+      "stderr_sha256": "68496ef525b92f3f5d395d20a8042580db012171d6180138853ab12623dc32b7"
+    },
+    "carry_dropped": {
+      "compiled": true,
+      "exit_code": 2,
+      "timeout": false,
+      "elapsed_host_seconds_not_performance_proxy": 0.515,
+      "source_sha256": "e311cc37e517950bd3c4d0a0389e76847d7e7079a0a8a5a6565d75c1b0e25fc2",
+      "result": null,
+      "diagnostic": "NUMERIC_MISMATCH case=6 kind=0 lane=13 word=0 expected=0000000000000001 actual=0000000000000000",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "46d284db70b03e8a08d8b9752b10ed183666e26ce9b30b6bc50fbf131224ed08"
+    },
+    "negate_word5_omitted": {
+      "compiled": true,
+      "exit_code": 2,
+      "timeout": false,
+      "elapsed_host_seconds_not_performance_proxy": 0.787,
+      "source_sha256": "34b3dc638b7903633e0bf6a064033ddd2d2b8efa45fa4b1bc7fb60020d8b43da",
+      "result": null,
+      "diagnostic": "NUMERIC_MISMATCH case=857 kind=1 lane=21 word=0 expected=ffffffffffffffff actual=0000000000000000",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a100fe1a75c5e7664b84dbff2390c3694372e1afb95a57d295fde5f21cb58af0"
+    },
+    "guard_propagation_leak": {
+      "compiled": true,
+      "exit_code": 2,
+      "timeout": false,
+      "elapsed_host_seconds_not_performance_proxy": 0.427,
+      "source_sha256": "dbd5cf26c5550668d547a0ce174295ace16ab74e8ee9db68d1b18fb52cf71f75",
+      "result": null,
+      "diagnostic": "NUMERIC_MISMATCH case=2 kind=0 lane=24 word=0 expected=0000000000000000 actual=0000000000000001",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "fc0ce7f527c87d74b3e0fb161c18ddf575ee4f2c6fde317ef63b6d9cef8dcf41"
+    }
+  },
+  "sanitizers": "AddressSanitizer and UndefinedBehaviorSanitizer, all4 successfully compiled executables",
+  "collective_contract": "32hostthreads; full participation and identical collective kind per ordinal; every lane has same total count;10s per-rendezvous timeout includes epoch/arrival mask,180s process limit and persistent progress logs. Guard lanes participate.",
+  "arithmetic_projection": "Actual immutable HM43 header uses HM43_HOST_ORACLE __uint128 mulhi; actual AddP/SubP/macros from corrected3ac, their UADD/USUB primitives and CTZ/clz are scalar semantic replacements. Expected results from independent Python bigint.",
+  "limits": [
+    "No CUDA/PTX execution or device scheduling proof",
+    "Finite cases do not prove universal delayed-divstep signed bounds",
+    "No GPU throughput or native resource qualification",
+    "Helper only; EC192 tree integration belongs to separate check"
+  ],
+  "candidate_modified": false,
+  "gpu_executed": false,
+  "native_cuda_built": false
+}

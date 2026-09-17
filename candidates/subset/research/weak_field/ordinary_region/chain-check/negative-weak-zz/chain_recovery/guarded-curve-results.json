@@ -1,0 +1,11 @@
+{
+  "status": "FAIL",
+  "validation_level": "CPU-extracted point chain versus independent OpenSSL scalar multiplication",
+  "case_index": 0,
+  "scalar_hex": "0xffffffff0000fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+  "runtime_base_scalar_hex": "0x1",
+  "source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "gpu_executed": false,
+  "reason": "Extracted chain does not represent the required finite/infinite point.",
+  "original_report_sha256": "966fc11688afb426beace1d743e4334e70b884921dfa84c989f79302cea94985"
+}

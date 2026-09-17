@@ -1,0 +1,246 @@
+{
+  "status": "CPU_AND_NATIVE_COMPOSITE_QUALIFIED_PACKAGE_AND_NOTE_PENDING",
+  "source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "base_source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "qualifier_sha256": "63e1a52b92c5d68ce3cb8083bcd0a6ad741bddec7f9809c7d9c4facf9de6f532",
+  "source_delta_proof": {
+    "old_files_byte_identical": [
+      "GPUHash.h",
+      "GPUMath.h",
+      "square32.cuh",
+      "subset.cu",
+      "tests/gpu_epochs/builder_checkpoint.cuh",
+      "tests/gpu_epochs/compact_geometry.cuh",
+      "tests/gpu_epochs/compact_table_host.cuh",
+      "tests/gpu_epochs/compact_table_kernels.cuh",
+      "tests/gpu_epochs/l2_policy.cuh",
+      "tests/gpu_epochs/prefix_cache.cuh",
+      "tests/gpu_epochs/startup_check.cuh",
+      "tests/gpu_epochs/tree.cu",
+      "tests/gpu_epochs/tree_audit.cu",
+      "tests/gpu_epochs/tree_inverse.cuh",
+      "tests/gpu_epochs/window_schedule_shared.cuh"
+    ],
+    "old_compact_header_exactly_reconstructed": true,
+    "weak_helper_reverse_replacements_equal_original": true,
+    "canonical_affine_Y_sum_preserved": true,
+    "raw_product_ptx_equal_corrected_base": {
+      "multiply": "3b76643dd4a9446e9842a19ff1896993b7ae3efc60c3bc8eea99dff8a0b93541",
+      "square": "cef8e91f0a24af4538a331ff3aab8a2d3373e7c36146b8e12f4b07c2e2687207"
+    },
+    "new_headers": [
+      "qsb_weak_addsub.cuh",
+      "qsb_weak_product.cuh"
+    ],
+    "COPYING_preserved": true
+  },
+  "native_production_audit_union_files": 18,
+  "both_entries_sm89_and_default_pass": true,
+  "reports": {
+    "research/weak_field/ordinary_region/production-default-results.json": {
+      "sha256": "631e4d43912f4e85144dcf7cb18d0056acc47d7be7b1b903d0b7b7739f4d4e5c",
+      "status": "PASS",
+      "fresh_current_closure": false
+    },
+    "research/weak_field/ordinary_region/audit-native-results.json": {
+      "sha256": "398508030742ec1dff0753cdc1197cd67c055fa56f100b3d4e5e6490f6eb73b9",
+      "status": "PASS",
+      "fresh_current_closure": false
+    },
+    "research/weak_field/ordinary_region/product-results.json": {
+      "sha256": "7ec15f75af5061c811e5eaf62085a5b5f40d7362bb25a6ceb44f583e85d7f5b2",
+      "status": "PASS",
+      "fresh_current_closure": true
+    },
+    "research/weak_field/ordinary_region/helper-results.json": {
+      "sha256": "4745564e5f0c63221ed55d1baec28e882697ec27f2d8627ac918346f37310009",
+      "status": "PASS_ACTUAL_HOST_WEAK_HELPER_SYNTHETIC_POLYNOMIAL",
+      "fresh_current_closure": true
+    },
+    "research/weak_field/ordinary_region/chain-check/results.json": {
+      "sha256": "737b277cf75c8b9262ff6e94918289c7f462c2ba09a91ccea1515334e4597424",
+      "status": "PASS_ACTUAL_WEAK_HOST_CHAIN_AND_CANONICAL_BOUNDARIES",
+      "fresh_current_closure": true
+    },
+    "research/weak_field/ordinary_region/chain-check/negative-weak-zz/result.json": {
+      "sha256": "f8fd4f7c2625e52ed3dd99050e02ec1fb58bd26957ad955d91b1be63c1446774",
+      "status": "COMPILED_WEAK_HELPER_MUTATION_REJECTED",
+      "fresh_current_closure": true
+    },
+    "research/weak_field/ordinary_region/policy-host-results.json": {
+      "sha256": "eb3470e6ec60aa5ed92c53d56acde19408686eb7ffd4525cfc6f73153861ba7d",
+      "status": "PASS",
+      "fresh_current_closure": true
+    },
+    "research/weak_field/ordinary_region/chain-check/exception-domain-bound.json": {
+      "sha256": "245c3d3d386532e9a4f486581667f437d4844b5264d7f78af25e657416012973",
+      "status": null,
+      "fresh_current_closure": true
+    },
+    "research/weak_field/primitive/proof.json": {
+      "sha256": "aeed9b809ff90e013907c4738040593d4d17ae23f00d85175a0963ae18fc7474",
+      "status": "FULL_INPUT_RANGE_ALGEBRA_AND_FINITE_SOURCE_CHECKS_PASS",
+      "fresh_current_closure": false
+    },
+    "research/weak_field/primitive/test-artifacts/results.json": {
+      "sha256": "be0b2e2580cf4c0fd8af4bcb4fe3a772ed81b5a1a6beb384cd04ab168a10e76d",
+      "status": "PASS_HOST_AND_EXTRACTED_PTX_SEMANTICS",
+      "fresh_current_closure": false
+    },
+    "research/weak_field/ordinary_region/native-review.json": {
+      "sha256": "6213ad91a7d0f9f05267fe143c45cebe874710a05ec8be43b2fe2ed60ca47c4e",
+      "status": "SOURCE_BOUND_SM89_NATIVE_REVIEW_COMPLETE",
+      "fresh_current_closure": false
+    },
+    "research/weak_field/ordinary_region/native-results.json": {
+      "sha256": "58fdd12c43d1addbf6e248b0f27085546b02a101ba1e7ee8f0ff194d4d61d879",
+      "status": "PASS",
+      "fresh_current_closure": false
+    },
+    "research/specialist_warps/resident_tables/packed_digits/scoped_load/qualification.json": {
+      "sha256": "018ca43d67a7fed38a99245396b6d44b17660edb0bcc7a6c9051703339c3efbd",
+      "status": "CPU_AND_NATIVE_COMPOSITE_QUALIFIED_PENDING_PACKAGE_REVIEW",
+      "fresh_current_closure": false
+    },
+    "research/specialist_warps/resident_tables/packed_digits/scoped_load/control-check-results.json": {
+      "sha256": "863caca118503d32ccee72931f502e3832cc377ac29ddfbf7cc7eb826167fcc6",
+      "status": "PASS",
+      "fresh_current_closure": false
+    },
+    "research/specialist_warps/resident_tables/small32/builder-results/summary.json": {
+      "sha256": "58c5531341b5e3f210ef6763ec774065c7dbd1e7c9b0e2acd41348138c60b8c6",
+      "status": "PASS",
+      "fresh_current_closure": false
+    },
+    "research/specialist_warps/two_six_ring/sha-check-results.json": {
+      "sha256": "0600a4eb7c76c769c414ec0f9f9083364ffc6fc9797cf54f9e08731690431ca3",
+      "status": "PASS",
+      "fresh_current_closure": false
+    },
+    "research/specialist_warps/two_six_ring/inverse-check-results.json": {
+      "sha256": "e5502bd149bcde03f29a0d8bd815e59921dc1e5731b95c243b88a06b19b3d6a2",
+      "status": "PASS_ACTUAL_SOURCE_COOPERATIVE_CPU_INVERSE",
+      "fresh_current_closure": false
+    },
+    "research/specialist_warps/resident_tables/packed_digits/digits-results/results.json": {
+      "sha256": "6f4f8a555ba7db51440c9f80c9f88f6e73cc4b705269f1a5d1df7609071e663d",
+      "status": "PASS",
+      "fresh_current_closure": false
+    }
+  },
+  "transferred_component_evidence": {
+    "protocol": {
+      "fresh_run": false,
+      "report": "research/specialist_warps/resident_tables/packed_digits/scoped_load/control-check-results.json",
+      "sha256": "863caca118503d32ccee72931f502e3832cc377ac29ddfbf7cc7eb826167fcc6",
+      "binding": "Whole tree.cu, tree_inverse.cuh, window_schedule_shared.cuh unchanged; compact header exactly restored outside ordinary arithmetic and its canonical boundary. Math is mocked in this prior control test."
+    },
+    "builder": {
+      "fresh_run": false,
+      "report": "research/specialist_warps/resident_tables/small32/builder-results/summary.json",
+      "sha256": "58c5531341b5e3f210ef6763ec774065c7dbd1e7c9b0e2acd41348138c60b8c6",
+      "base_binding": "All builder headers and complete old device prefix unchanged; tree differs only by packed search handoff and comments.",
+      "current_binding": "Builder headers unchanged; all old compact-header bodies restored byte-for-byte; whole tree.cu unchanged from cd3d qualified transfer."
+    },
+    "sha-check-results.json": {
+      "fresh_run": false,
+      "report": "research/specialist_warps/two_six_ring/sha-check-results.json",
+      "sha256": "0600a4eb7c76c769c414ec0f9f9083364ffc6fc9797cf54f9e08731690431ca3",
+      "base_binding": "window_schedule_shared.cuh exact unchanged bytes"
+    },
+    "inverse-check-results.json": {
+      "fresh_run": false,
+      "report": "research/specialist_warps/two_six_ring/inverse-check-results.json",
+      "sha256": "e5502bd149bcde03f29a0d8bd815e59921dc1e5731b95c243b88a06b19b3d6a2",
+      "base_binding": "tree_inverse.cuh exact unchanged bytes"
+    },
+    "digits": {
+      "fresh_run": false,
+      "report": "research/specialist_warps/resident_tables/packed_digits/digits-results/results.json",
+      "sha256": "6f4f8a555ba7db51440c9f80c9f88f6e73cc4b705269f1a5d1df7609071e663d",
+      "base_binding": "Exact unchanged pack/unpack/setup helper bodies; current full kernel protocol and curve separately rerun.",
+      "current_binding": "Exact original packed scalar/digest/extract bodies plus unchanged whole tree.cu; full header reconstruction excludes any other changes."
+    }
+  },
+  "fresh_checks": {
+    "product_counts": {
+      "host_mul": 60540,
+      "host_square": 40360,
+      "ptx_mul": 2180,
+      "ptx_square": 2180
+    },
+    "helper_calls": 7682,
+    "helper_weak_output_calls": 694,
+    "curve_chains": 628,
+    "recovered_keys": 1242,
+    "boundary_normalizations": 2512,
+    "final_guard_cases": {
+      "equal": 159,
+      "opposite": 159,
+      "ordinary": 159,
+      "unguarded_doubling_failures_detected": 159
+    },
+    "compiled_weak_ZZ_chain_mutation_rejected": true,
+    "policy_cases": [
+      180,
+      30,
+      8
+    ],
+    "primitive_binary_cases": 13024,
+    "primitive_overlap_cases": 17824
+  },
+  "native_resources": {
+    "registers": 80,
+    "shared_bytes": 32832,
+    "stack_bytes": 352,
+    "spill_store_bytes": 552,
+    "spill_load_bytes": 384,
+    "instruction_slots": 15488,
+    "non_nop": 15455
+  },
+  "native_loop": {
+    "iterations": 13,
+    "slot_delta": -167,
+    "slot_change_percent": -10.476787954830613,
+    "local_read_write_B_per_candidate": [
+      0,
+      0
+    ],
+    "baseline_local_read_write_B_per_candidate": [
+      104,
+      104
+    ]
+  },
+  "qualification_scope": "Fresh CPU weak host helper and whole chain with OpenSSL canonical seed/final/recovery; actual host primitives and extracted PTX semantics; static native compilation/review. Prior control/SHA/inverse/digits/builder transferred through unchanged components, not freshly executed whole control.",
+  "remaining": [
+    "No GPU execution, runtime scheduling/race check, occupancy or throughput evidence.",
+    "Package and public note checks are separate and pending.",
+    "Prepared-source and candidate prototype marker preserve historical prequalification state; this source-bound aggregation supersedes qualification status only."
+  ],
+  "gpu_executed": false,
+  "staging_performed": false,
+  "submission_performed": false,
+  "candidate_modified": false,
+  "cd3d_source_verified_preserved": true,
+  "original_report_sha256": "02486fed687f0f574ecfaf2dea5f5a3ca31644b56d44345ce3d403dcb350417e"
+}

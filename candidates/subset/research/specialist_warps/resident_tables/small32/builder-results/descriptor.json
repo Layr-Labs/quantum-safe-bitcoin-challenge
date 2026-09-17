@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "scope": "Actual geometry/declaration/decoder source on CPU; independent exact16bit geometry oracle.",
+  "descriptor_windows": 16,
+  "decode_cases": 524288,
+  "boundary_sentinel_checked": true,
+  "runs": [
+    {
+      "mutation": null,
+      "projection_sha256": "f1765d2d9b1a91b3c8689181e906fb0c54bc936ee6ef23ca17627b4df14d91e4",
+      "compile_pass": true,
+      "exit_code": 0,
+      "stdout": "DESCRIPTOR_AND_ALL524288_DECODES_PASS\n",
+      "stderr": ""
+    },
+    {
+      "mutation": "hi shift8 to9",
+      "projection_sha256": "393bf22c88fad30945f26d34ab1534f9aa75512f24aedd9444ee4e983fc20751",
+      "compile_pass": true,
+      "exit_code": 3,
+      "stdout": "",
+      "stderr": "DECODE_MISMATCH t=128 expected_hi=1 got_hi=0\n"
+    }
+  ],
+  "original_report_sha256": "660884005128a8989862bd21713ac9f2388eabfb0912aec4ced2a74a5748d9c0",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

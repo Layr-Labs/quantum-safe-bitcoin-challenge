@@ -1,0 +1,286 @@
+{
+  "status": "CPU_AND_NATIVE_COMPOSITE_QUALIFIED_PACKAGE_AND_NOTE_PENDING",
+  "source_fingerprint": "a36071b7a5b06c22d16172f8f29ec0d86eb1cd90620e3716526b40349a890047",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "054bc2fa8f1bd08a22d9e0eabf73dcc545170ea1db93e746f45f1008f0aae4a7",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "0225c1d72a84ad3975c7cfd242c240307f4009821f3a90dd6ec69e2880871ba4",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "qualifier_sha256": "511582f3ca4cf26ff8ccfd731fd957d1880a8747e739cc737bb239a4178d494f",
+  "bounded_source_fingerprint": "f47ad8241adac7aac14e63ad947735ada3bf3565ae60266fa7153b6744d5583a",
+  "ready_source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "source_equality": {
+    "only_qualifier_differs_from_bounded": true,
+    "all_other18_files_equal_bounded": true,
+    "root_body_and_caller_identical_bounded": true,
+    "ready3ac_nonroot_tree_reconstructed_exactly": true,
+    "other17_ready_files_equal": [
+      "GPUHash.h",
+      "GPUMath.h",
+      "qsb_weak_addsub.cuh",
+      "qsb_weak_product.cuh",
+      "square32.cuh",
+      "subset.cu",
+      "tests/gpu_epochs/builder_checkpoint.cuh",
+      "tests/gpu_epochs/compact_geometry.cuh",
+      "tests/gpu_epochs/compact_table_device.cuh",
+      "tests/gpu_epochs/compact_table_host.cuh",
+      "tests/gpu_epochs/compact_table_kernels.cuh",
+      "tests/gpu_epochs/l2_policy.cuh",
+      "tests/gpu_epochs/prefix_cache.cuh",
+      "tests/gpu_epochs/startup_check.cuh",
+      "tests/gpu_epochs/tree.cu",
+      "tests/gpu_epochs/tree_audit.cu",
+      "tests/gpu_epochs/window_schedule_shared.cuh"
+    ],
+    "COPYING_preserved": true
+  },
+  "reports": {
+    "research/warp_root/bounded/helper-results.json": {
+      "sha256": "5a864c6aeb051697424c0514e129081c5ef262ef4e4803c1120208da1c6882d0",
+      "status": "PASS_ACTUAL_BOUNDED_HM43_HOST_SUCCESS_FAILURE_AND_MUTATIONS"
+    },
+    "research/warp_root/bounded/tree-check/results.json": {
+      "sha256": "7890d554c03603f44a6f598fbb49612c226d5de95c5c36dd27530b4a14922312",
+      "status": "PASS_BOUNDED_HM43_TREE_AND_ACTUAL_LEGACY_FALLBACK_PROJECTION"
+    },
+    "research/warp_root/range-review.json": {
+      "sha256": "2587841249d819da310aa7c82ef81bcfa852b0ec6d0ba8a69f13e80d80b1685c",
+      "status": "BOUNDED16_RANGE_PROOF_AND_FALLBACK_PLAN_APPROVED_WITH_IMPLEMENTATION_OBLIGATIONS"
+    },
+    "research/warp_root/bounded/outlined/production-native-results.json": {
+      "sha256": "dbc67d655426400444cf046245eacd1d06fd58311fdb600493e30a092fc37abc",
+      "status": "PASS"
+    },
+    "research/warp_root/bounded/outlined/audit-native-results.json": {
+      "sha256": "065540b93eb87b6a7e6dcd0889ca81dad139b84dc188290880d6d65c8834406c",
+      "status": "PASS"
+    },
+    "research/warp_root/bounded/outlined/policy-host-results.json": {
+      "sha256": "e2e7e60fd09c1def8b09bcbb7ff3b777932ace2f9edbdd224e7b2a4c1a76ac66",
+      "status": "PASS"
+    },
+    "research/warp_root/bounded/outlined/native-review.json": {
+      "sha256": "235213993ac204851dd8425a899bfab413898adec5f9d7b1411c17f9da96162c",
+      "status": "SOURCE_BOUND_OUTLINED_HM43_NATIVE_REVIEW_COMPLETE"
+    },
+    "research/weak_field/ordinary_region/qualification.json": {
+      "sha256": "02486fed687f0f574ecfaf2dea5f5a3ca31644b56d44345ce3d403dcb350417e",
+      "status": "CPU_AND_NATIVE_COMPOSITE_QUALIFIED_PACKAGE_AND_NOTE_PENDING"
+    },
+    "research/weak_field/ordinary_region/production-default-results.json": {
+      "sha256": "631e4d43912f4e85144dcf7cb18d0056acc47d7be7b1b903d0b7b7739f4d4e5c",
+      "status": "PASS"
+    },
+    "research/weak_field/ordinary_region/audit-native-results.json": {
+      "sha256": "398508030742ec1dff0753cdc1197cd67c055fa56f100b3d4e5e6490f6eb73b9",
+      "status": "PASS"
+    },
+    "research/weak_field/ordinary_region/product-results.json": {
+      "sha256": "7ec15f75af5061c811e5eaf62085a5b5f40d7362bb25a6ceb44f583e85d7f5b2",
+      "status": "PASS"
+    },
+    "research/weak_field/ordinary_region/helper-results.json": {
+      "sha256": "4745564e5f0c63221ed55d1baec28e882697ec27f2d8627ac918346f37310009",
+      "status": "PASS_ACTUAL_HOST_WEAK_HELPER_SYNTHETIC_POLYNOMIAL"
+    },
+    "research/weak_field/ordinary_region/chain-check/results.json": {
+      "sha256": "737b277cf75c8b9262ff6e94918289c7f462c2ba09a91ccea1515334e4597424",
+      "status": "PASS_ACTUAL_WEAK_HOST_CHAIN_AND_CANONICAL_BOUNDARIES"
+    },
+    "research/weak_field/ordinary_region/chain-check/negative-weak-zz/result.json": {
+      "sha256": "f8fd4f7c2625e52ed3dd99050e02ec1fb58bd26957ad955d91b1be63c1446774",
+      "status": "COMPILED_WEAK_HELPER_MUTATION_REJECTED"
+    },
+    "research/weak_field/ordinary_region/policy-host-results.json": {
+      "sha256": "eb3470e6ec60aa5ed92c53d56acde19408686eb7ffd4525cfc6f73153861ba7d",
+      "status": "PASS"
+    },
+    "research/weak_field/ordinary_region/chain-check/exception-domain-bound.json": {
+      "sha256": "245c3d3d386532e9a4f486581667f437d4844b5264d7f78af25e657416012973",
+      "status": null
+    },
+    "research/weak_field/primitive/proof.json": {
+      "sha256": "aeed9b809ff90e013907c4738040593d4d17ae23f00d85175a0963ae18fc7474",
+      "status": "FULL_INPUT_RANGE_ALGEBRA_AND_FINITE_SOURCE_CHECKS_PASS"
+    },
+    "research/weak_field/primitive/test-artifacts/results.json": {
+      "sha256": "be0b2e2580cf4c0fd8af4bcb4fe3a772ed81b5a1a6beb384cd04ab168a10e76d",
+      "status": "PASS_HOST_AND_EXTRACTED_PTX_SEMANTICS"
+    },
+    "research/weak_field/ordinary_region/native-review.json": {
+      "sha256": "6213ad91a7d0f9f05267fe143c45cebe874710a05ec8be43b2fe2ed60ca47c4e",
+      "status": "SOURCE_BOUND_SM89_NATIVE_REVIEW_COMPLETE"
+    },
+    "research/weak_field/ordinary_region/native-results.json": {
+      "sha256": "58fdd12c43d1addbf6e248b0f27085546b02a101ba1e7ee8f0ff194d4d61d879",
+      "status": "PASS"
+    },
+    "research/specialist_warps/resident_tables/packed_digits/scoped_load/qualification.json": {
+      "sha256": "018ca43d67a7fed38a99245396b6d44b17660edb0bcc7a6c9051703339c3efbd",
+      "status": "CPU_AND_NATIVE_COMPOSITE_QUALIFIED_PENDING_PACKAGE_REVIEW"
+    },
+    "research/specialist_warps/resident_tables/packed_digits/scoped_load/control-check-results.json": {
+      "sha256": "863caca118503d32ccee72931f502e3832cc377ac29ddfbf7cc7eb826167fcc6",
+      "status": "PASS"
+    },
+    "research/specialist_warps/resident_tables/small32/builder-results/summary.json": {
+      "sha256": "58c5531341b5e3f210ef6763ec774065c7dbd1e7c9b0e2acd41348138c60b8c6",
+      "status": "PASS"
+    },
+    "research/specialist_warps/two_six_ring/sha-check-results.json": {
+      "sha256": "0600a4eb7c76c769c414ec0f9f9083364ffc6fc9797cf54f9e08731690431ca3",
+      "status": "PASS"
+    },
+    "research/specialist_warps/two_six_ring/inverse-check-results.json": {
+      "sha256": "e5502bd149bcde03f29a0d8bd815e59921dc1e5731b95c243b88a06b19b3d6a2",
+      "status": "PASS_ACTUAL_SOURCE_COOPERATIVE_CPU_INVERSE"
+    },
+    "research/specialist_warps/resident_tables/packed_digits/digits-results/results.json": {
+      "sha256": "6f4f8a555ba7db51440c9f80c9f88f6e73cc4b705269f1a5d1df7609071e663d",
+      "status": "PASS"
+    }
+  },
+  "native_production_audit_union_files": 19,
+  "native_summary": {
+    "resources": {
+      "registers": 80,
+      "shared_bytes": 32832,
+      "stack_bytes": 344,
+      "spill_store_bytes": 552,
+      "spill_load_bytes": 388,
+      "instruction_slots": 16672,
+      "non_nop": 16642
+    },
+    "ordinary_loop_slots": 1427,
+    "ordinary_loop_local_instructions": 0,
+    "root_cost_limit": "First EC warp materializes40B per lane; root matrix includes a4B context reload per traversed outer batch, plus root/canonicalization/call costs. Static counts are not timings."
+  },
+  "production_and_audit_default_and_sm89_pass": true,
+  "fresh_current_startup_policy": {
+    "cases": 180,
+    "injected_failures": 30,
+    "extra_paths": 8,
+    "all5_mutations_detected": true
+  },
+  "bounded_actual_host_evidence": {
+    "fresh_outlined_run": false,
+    "transfer": "Exact unchanged helperbody/caller; the only root declaration qualifier change affects codegen, separatelynativechecked.",
+    "cap16_helper_cases": 1452,
+    "forced_failure_returns": 7296,
+    "unchanged_failure_words": 36480,
+    "natural_tree_outputs": 4032,
+    "fault_injected_positive_outputs": 2688,
+    "tree_canaries": 13440,
+    "tail_sizes": [
+      0,
+      1,
+      31,
+      32,
+      33,
+      191,
+      192
+    ],
+    "root_participants": 32,
+    "tree_multiply_count": 669,
+    "subgroup_joins": 5,
+    "scalar_fallback": "Actual legacy source/functions with scalar carry projections, independently520roots perrun; not OpenSSL replacement.",
+    "fault_injection_limit": "Private state poison tests defensive reload/reset/publication; naturalfalsecontract leavesprivateinputunchanged."
+  },
+  "transferred_ready_components": {
+    "weak_products": {
+      "report": "research/weak_field/ordinary_region/product-results.json",
+      "sha256": "7ec15f75af5061c811e5eaf62085a5b5f40d7362bb25a6ceb44f583e85d7f5b2",
+      "fresh_outlined_run": false,
+      "binding": "Compact helper, weak primitives, canonical math and complete tree.cu/recovery are byte-identical3ac. Inverse-tree root is separately checked onboundedf47, samebody/callerhere."
+    },
+    "weak_helper": {
+      "report": "research/weak_field/ordinary_region/helper-results.json",
+      "sha256": "4745564e5f0c63221ed55d1baec28e882697ec27f2d8627ac918346f37310009",
+      "fresh_outlined_run": false,
+      "binding": "Compact helper, weak primitives, canonical math and complete tree.cu/recovery are byte-identical3ac. Inverse-tree root is separately checked onboundedf47, samebody/callerhere."
+    },
+    "point_chain_recovery": {
+      "report": "research/weak_field/ordinary_region/chain-check/results.json",
+      "sha256": "737b277cf75c8b9262ff6e94918289c7f462c2ba09a91ccea1515334e4597424",
+      "fresh_outlined_run": false,
+      "binding": "Compact helper, weak primitives, canonical math and complete tree.cu/recovery are byte-identical3ac. Inverse-tree root is separately checked onboundedf47, samebody/callerhere."
+    },
+    "ready_protocol": {
+      "fresh_outlined_run": false,
+      "inherited_receipt": {
+        "fresh_run": false,
+        "report": "research/specialist_warps/resident_tables/packed_digits/scoped_load/control-check-results.json",
+        "sha256": "863caca118503d32ccee72931f502e3832cc377ac29ddfbf7cc7eb826167fcc6",
+        "binding": "Whole tree.cu, tree_inverse.cuh, window_schedule_shared.cuh unchanged; compact header exactly restored outside ordinary arithmetic and its canonical boundary. Math is mocked in this prior control test."
+      },
+      "current_binding": "Outer tree.cu/arena protocol unchanged; nonroot inverse/barrier reconstructed exactly, newroot separately checked. Prior wholecontrol was mocked and is not a freshoutlinedrun."
+    },
+    "ready_builder": {
+      "fresh_outlined_run": false,
+      "inherited_receipt": {
+        "fresh_run": false,
+        "report": "research/specialist_warps/resident_tables/small32/builder-results/summary.json",
+        "sha256": "58c5531341b5e3f210ef6763ec774065c7dbd1e7c9b0e2acd41348138c60b8c6",
+        "base_binding": "All builder headers and complete old device prefix unchanged; tree differs only by packed search handoff and comments.",
+        "current_binding": "Builder headers unchanged; all old compact-header bodies restored byte-for-byte; whole tree.cu unchanged from cd3d qualified transfer."
+      },
+      "current_binding": "Ready3ac component source unchanged; inverse-root modification is outside this component evidence."
+    },
+    "ready_sha-check-results.json": {
+      "fresh_outlined_run": false,
+      "inherited_receipt": {
+        "fresh_run": false,
+        "report": "research/specialist_warps/two_six_ring/sha-check-results.json",
+        "sha256": "0600a4eb7c76c769c414ec0f9f9083364ffc6fc9797cf54f9e08731690431ca3",
+        "base_binding": "window_schedule_shared.cuh exact unchanged bytes"
+      },
+      "current_binding": "Ready3ac component source unchanged; inverse-root modification is outside this component evidence."
+    },
+    "ready_digits": {
+      "fresh_outlined_run": false,
+      "inherited_receipt": {
+        "fresh_run": false,
+        "report": "research/specialist_warps/resident_tables/packed_digits/digits-results/results.json",
+        "sha256": "6f4f8a555ba7db51440c9f80c9f88f6e73cc4b705269f1a5d1df7609071e663d",
+        "base_binding": "Exact unchanged pack/unpack/setup helper bodies; current full kernel protocol and curve separately rerun.",
+        "current_binding": "Exact original packed scalar/digest/extract bodies plus unchanged whole tree.cu; full header reconstruction excludes any other changes."
+      },
+      "current_binding": "Ready3ac component source unchanged; inverse-root modification is outside this component evidence."
+    },
+    "inverse_root": {
+      "fresh_outlined_run": false,
+      "supersedes_old_inverse_whole_header_transfer": true,
+      "report": "research/warp_root/bounded/tree-check/results.json",
+      "sha256": "7890d554c03603f44a6f598fbb49612c226d5de95c5c36dd27530b4a14922312",
+      "current_binding": "Actual tree helper and cap/fallbackcaller byte-identicalboundedf47; only HM43 declarationqualifier differs."
+    }
+  },
+  "qualification_scope": "Exact source composition plus finite actual CPU helper/tree arithmetic and legacyfallback, fresh currentpolicy, native19fileunion andsourceboundreview. No fresh wholeoutlinedkernel/protocol execution.",
+  "remaining": [
+    "No CUDA/GPU execution, runtime race/scheduling/occupancy or throughput measurement.",
+    "Package/public note/selection are separate pending decisions.",
+    "Source preparation markers remain historical; this receipt supersedes only qualification status."
+  ],
+  "gpu_executed": false,
+  "source_modified": false,
+  "stage_modified": false,
+  "submission_performed": false,
+  "coauthor_if_used": "AbdelStark"
+}

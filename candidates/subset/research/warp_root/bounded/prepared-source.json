@@ -1,0 +1,56 @@
+{
+  "status": "ISOLATED_BOUNDED_HM43_PROTOTYPE_NOT_QUALIFIED",
+  "source_directory": "candidate",
+  "source_fingerprint": "f47ad8241adac7aac14e63ad947735ada3bf3565ae60266fa7153b6744d5583a",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "675d2b4cca914de576113b1013bac320610ce968c5bc873bf5fc2caeb205dc27",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "0225c1d72a84ad3975c7cfd242c240307f4009821f3a90dd6ec69e2880871ba4",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "control_source_fingerprint": "6cb9b00606f541cd0894a48308fa9771dd68efe4bb269f49515e1f8e14d4435d",
+  "ready_source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "default_complete_matrix_batch_cap": 16,
+  "test_cap_macro": "HM43_WARP_MAX_BATCHES",
+  "allowed_cap_values": [
+    0,
+    16
+  ],
+  "helper_interface": "bool hm43_warp_inverse(uint64_t result[5],int lane)",
+  "return_contract": "Uniform true for completed arithmetic, false for cap. False leaves every caller result array untouched. True returns inverse/zero by original contract.",
+  "fallback": "Onlyecid0 reloadstree[0..3][1],clearsroot[4],runsunchanged_ModInv,thenpublishes4words. Sharedoriginalroot remainsuntouched untilpublication.",
+  "changed_files": [
+    "tests/gpu_epochs/hm43_warp_inverse.cuh",
+    "tests/gpu_epochs/tree_inverse.cuh"
+  ],
+  "header_reverse_patch_exact_control": true,
+  "tree_reverse_patch_exact_control": true,
+  "inherited_provenance": {
+    "donor_head": "3c3d748e7e46bbf68fcd22d179c44b231eaa15de",
+    "donor_header_sha256": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+    "coauthor": "AbdelStark",
+    "original_algorithm": "JeanLucPons/VanitySearch GPUMath.h, GPL-3.0-only notice retained"
+  },
+  "range_review_sha256": "2587841249d819da310aa7c82ef81bcfa852b0ec6d0ba8a69f13e80d80b1685c",
+  "generator_sha256": "c3bc0ff02655da7664407b1a3bce5ebee02c102595c36fa31ec3eb700dc8a96a",
+  "control_and_ready_hashes_preserved": true,
+  "cpu_helper_or_tree_tested": false,
+  "native_compiled": false,
+  "gpu_executed": false,
+  "submission_performed": false
+}

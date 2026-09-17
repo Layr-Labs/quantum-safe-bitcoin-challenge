@@ -1,0 +1,124 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "validation_level": "Actual compact chain to cubic recovery with OpenSSL fields; actual runtime host constant helper with checked mocked CUDA symbol upload",
+  "actual_field_call_arities": {
+    "_ModAdd256": [
+      3
+    ],
+    "_ModSub256": [
+      2,
+      3
+    ],
+    "_ModMult": [
+      2,
+      3
+    ],
+    "_ModSqr": [
+      2
+    ]
+  },
+  "recoding_cases": 12769,
+  "curve_chains": 628,
+  "recovered_keys_compared": 1242,
+  "actual_loader_cases": 608,
+  "prefetch_next_load_checks": 8792,
+  "geometry_bits": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+  ],
+  "checked_chain_order": [
+    14,
+    15,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "actual_helper_cases": {
+    "equal": 159,
+    "opposite": 159,
+    "ordinary": 159,
+    "unguarded_doubling_failures_detected": 159
+  },
+  "prefix_bound_cases": 13,
+  "added_chain_scalar_cases": 214,
+  "extracted_actual_function_sha256": {
+    "compact_ec192_fixed_xyzz_packed_shared": "31ee6175679dfb667acc659ac823941a42abdbc1a9fcb71a0c4b007fc83541ed",
+    "gt_field_bits_v": "6aeb908a93de6d1a4e28d20f41d39838a1ee1cb96e0306826c9f3702cc27f90b",
+    "gt_direct_digit": "c291852d21658448963484bc6974568f3dec63b79530b46143ca74b2058081fa",
+    "qsb_prepare_cubic_constant": "e07e9e752890cc98922b5d61192f0611af88992e0ef1963659f18aec207104d2",
+    "compact_load_signed": "74ffa3e9768040b0e00567606e524d653e32a879a09e68f50909c065d6507aff",
+    "qsb_asym_last_add": "b56ee3e6b8a90566d9ef5773d10014dfc29f724380c0749157f8851a924fc4f7",
+    "_PointAddXYZZ_def": "484301cd7e1cd98f390315a58ee9cce15c9f9531f921e08c04157725c081b2af",
+    "_PointAddXYZZ_mm_def": "e55a81dabdd1862d2b067cc8aaaba513659c15fc7e48a24a1210270d7b7d5225",
+    "qsb_xyzz_finish_prepare": "7003f8091ece85a08923bc5bd8c34376f6effedc2657cf8d050af67463f98ea2",
+    "qsb_xyzz_finish_precomputed": "749a0fcebaa98207b7d1548fe1f2621229e290671c41e2adece8ca443c94a30d"
+  },
+  "checker_original_sha256": {
+    "check_wide.py": "cf6b5916da80c984293bd2603b68e5626311968a3fbc08da00e17a29562c5c6c",
+    "check_exceptions.py": "2cdc85128ff217e78d89d7655cbbe6d8755dbf4bb51e3f52027aa6f1e9cc667d"
+  },
+  "checker_adapted_sha256": {
+    "check_wide.py": "99e2cbc137afc45e7b6b75b5bd64eee31469855ebe594f9c61bc8c58bdea6c87",
+    "check_exceptions.py": "86fb96a12dc0755bcba24b3654e269d514ddc6d4e4eb946fcbc1ad99a359764b"
+  },
+  "adapter_sha256": "8a131051204113266cc106455cd18dcfcb74d06a7b312953fb8cb6459003d1a3",
+  "projection_changes": [
+    "Read direct recovery from actual fused tree.cu; do not read old ranked_pipeline.cuh.",
+    "Extract actual fused _PointAddXYZZ_def and _PointAddXYZZ_mm_def instead of old template/seed.",
+    "Use actual fused _PointAddXYZZ_def(...,false) as exceptional negative control.",
+    "Retain legacy independent scalar, geometry, order, loader, prefetch and affine oracles unchanged.",
+    "Pass actual chain ZZZ into new prepare ABI and unchanged chain ZZ into new finish ABI; remove obsolete C construction.",
+    "Extract actual OpenSSL runtime constant helper; replace only CUDA symbol upload with checked CPU memory copy.",
+    "Include actual source-exact direct-digit helpers used by the selected point chain."
+  ],
+  "gpu_executed": false,
+  "production_modified": false,
+  "limits": "Check the actual guarded compact chain followed by cubic direct recovery.\n\nOnly checker extraction is adapted, in memory. Production source is never\nrewritten to satisfy a legacy test. Actual fused recoding, vector loads, cold\ndigits, deferred seed/intermediate/final point helpers, cubic recovery, and the\nactual host constant helper run against OpenSSL field operations and independent\ncurve multiplication. The chain table entries come from the independent curve\noracle; actual vector memory loads are checked separately with sparse memory. This is\nnot native field/PTX execution, a complete fused-kernel audit, or a GPU test.\n",
+  "original_report_sha256": "41934d834798b73b867616cf9ddc01bfd351344ce870cf001730aa975379b33c"
+}

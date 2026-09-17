@@ -1,0 +1,70 @@
+{
+  "status": "SOURCE_PREPARED_FOR_NATIVE_OUTLINING_SCREEN_NOT_QUALIFIED",
+  "source_fingerprint": "a36071b7a5b06c22d16172f8f29ec0d86eb1cd90620e3716526b40349a890047",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "054bc2fa8f1bd08a22d9e0eabf73dcc545170ea1db93e746f45f1008f0aae4a7",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "0225c1d72a84ad3975c7cfd242c240307f4009821f3a90dd6ec69e2880871ba4",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "base_source_fingerprint": "f47ad8241adac7aac14e63ad947735ada3bf3565ae60266fa7153b6744d5583a",
+  "ready_source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "changed_files": [
+    "tests/gpu_epochs/hm43_warp_inverse.cuh"
+  ],
+  "exact_reversible_change": {
+    "before": "__device__ __forceinline__ bool hm43_warp_inverse(uint64_t result[5],int lane){",
+    "after": "__device__ __noinline__ bool hm43_warp_inverse(uint64_t result[5],int lane){"
+  },
+  "all_other18_files_byte_identical": true,
+  "helper_body_byte_identical": true,
+  "caller_cap_fallback_and_barriers_byte_identical": true,
+  "baseline_evidence": {
+    "helper-results.json": {
+      "sha256": "5a864c6aeb051697424c0514e129081c5ef262ef4e4803c1120208da1c6882d0",
+      "status": "PASS_ACTUAL_BOUNDED_HM43_HOST_SUCCESS_FAILURE_AND_MUTATIONS",
+      "transfer_scope": "Arithmetic/control source unchanged; no fresh outlined host/native execution claimed."
+    },
+    "tree-check/results.json": {
+      "sha256": "7890d554c03603f44a6f598fbb49612c226d5de95c5c36dd27530b4a14922312",
+      "status": "PASS_BOUNDED_HM43_TREE_AND_ACTUAL_LEGACY_FALLBACK_PROJECTION",
+      "transfer_scope": "Arithmetic/control source unchanged; no fresh outlined host/native execution claimed."
+    }
+  },
+  "generator_sha256": "2c3a2f01577435a6f978c2efb58895f4ddacf9c0b4e6fff0f7529767030b39aa",
+  "qualification_needed": [
+    "Verify compiler emitted actual out-of-line device call in sm89 and official default builds.",
+    "Compare wholekernel80register launch bound, call stack/caller-save/root[5] ABI traffic and actual13-add loop locals.",
+    "Use host __noinline__ projection only if rerunning arithmetic; attribute-only source equality transfers algorithm evidence, not CUDA codegen.",
+    "Audit build and exact include closure, then package checks separately if selected."
+  ],
+  "hypothesis": "A separate root allocation/scheduling region may avoid repeated EC-loop local spills caused by fully inlined root code. noinline does not allocate registers per warp or guarantee reduction.",
+  "risk": "Direct device call can materialize40B root array per participating thread, incur parameter/caller-save/return stack traffic, or raise propagated register needs. Fullmask collectives still require every physical64..95lane.",
+  "gpu_executed": false,
+  "native_compiled": false,
+  "submission_performed": false,
+  "base_and_ready_preserved": true,
+  "coauthor_if_used": "AbdelStark",
+  "license": "Existing GPL-3.0-only header and COPYING preserved",
+  "original_COPYING_preserved": true,
+  "design_review_sha256": "3bf0185ad078ca3730d1cca8a3e6978181417adac6c864e29181a7628da25865",
+  "primary_references": [
+    "https://docs.nvidia.com/cuda/archive/12.8.1/cuda-c-programming-guide/index.html#noinline-and-forceinline",
+    "https://developer.nvidia.com/blog/programming-efficiently-with-the-cuda-11-3-compiler-toolchain/"
+  ]
+}

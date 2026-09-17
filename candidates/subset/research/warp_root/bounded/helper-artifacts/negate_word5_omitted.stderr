@@ -1,0 +1,15 @@
+PROGRESS completed=1/1452 collectives=4
+PROGRESS completed=65/1452 collectives=260
+PROGRESS completed=129/1452 collectives=516
+PROGRESS completed=193/1452 collectives=772
+PROGRESS completed=257/1452 collectives=1028
+PROGRESS completed=321/1452 collectives=1284
+PROGRESS completed=385/1452 collectives=1540
+PROGRESS completed=449/1452 collectives=1796
+PROGRESS completed=513/1452 collectives=2052
+PROGRESS completed=577/1452 collectives=2308
+PROGRESS completed=641/1452 collectives=2564
+PROGRESS completed=705/1452 collectives=2820
+PROGRESS completed=769/1452 collectives=3076
+PROGRESS completed=833/1452 collectives=3332
+NUMERIC_MISMATCH case=857 kind=1 lane=29 word=0 expected=0000000000000000 actual=ffffffffffffffff

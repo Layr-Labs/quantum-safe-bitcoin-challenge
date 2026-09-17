@@ -1,0 +1,148 @@
+{
+  "status": "CPU_AND_NATIVE_COMPOSITE_QUALIFIED_PENDING_PACKAGE_REVIEW",
+  "checked_at_utc": "2026-09-17T14:07:37.015107+00:00",
+  "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "fde5b39af85cc293805454d808d553dff1830ddb88ee74ac852d4e966f8f71b2",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "reports": {
+    "field-check/results.json": {
+      "sha256": "0c71e3f9e329ad97dec30113eb4e96d14187ed2b9107b4949d6bc21db86edf44",
+      "status": "PASS",
+      "source_binding": "Exact full closure fingerprint"
+    },
+    "control-check-results.json": {
+      "sha256": "863caca118503d32ccee72931f502e3832cc377ac29ddfbf7cc7eb826167fcc6",
+      "status": "PASS",
+      "source_binding": "Exact full closure fingerprint"
+    },
+    "policy-host-results.json": {
+      "sha256": "04fd6c3e9350c944bf24db2d3ec94a5f081da7d27beb4b20d623fdea8128da83",
+      "status": "PASS",
+      "source_binding": "Exact full closure fingerprint"
+    },
+    "field-check/exception-domain-bound.json": {
+      "sha256": "18aec4e1ff32d9e261df1fec6ae926d278de3602130f457cf1139bd020b5c38e",
+      "status": "SOURCE_BOUND_DOMAIN_ARGUMENT_CHECKED",
+      "source_binding": "Exact closure fingerprint, positive bounds and complete final exception witnesses"
+    },
+    "native-results.json": {
+      "sha256": "566e0ece98e47458ea16dba3f81d83ebe8a27571b652b27f6f6f6f67943b3693",
+      "status": "PASS",
+      "source_files": 15
+    },
+    "audit-native-results.json": {
+      "sha256": "d893c201174ee00c138ad91834b8e559759d8d29ab2c4dc16ac1e01b7f360922",
+      "status": "PASS",
+      "source_files": 15
+    },
+    "sass-review.json": {
+      "sha256": "204f7887b6c60a5e843c90ebd8f8fcdc97bf54236459bca9e822e1e6c50c181d",
+      "status": "SOURCE_BOUND_NATIVE_REVIEW_COMPLETE",
+      "source_binding": "Exact closure and native report hash"
+    }
+  },
+  "native_all16_union": true,
+  "default_and_sm89_builds": true,
+  "resources": {
+    "registers": 80,
+    "shared_bytes": 32832,
+    "stack_bytes": 320,
+    "spill_store_bytes": 496,
+    "spill_load_bytes": 312,
+    "non_nop": 15530
+  },
+  "reused_component_evidence": {
+    "builder": {
+      "report": "../../small32/builder-results/summary.json",
+      "sha256": "58c5531341b5e3f210ef6763ec774065c7dbd1e7c9b0e2acd41348138c60b8c6",
+      "binding": "All builder headers and complete old device prefix unchanged; tree differs only by packed search handoff and comments.",
+      "fresh_full_closure_run": false
+    },
+    "sha-check-results.json": {
+      "report": "research/specialist_warps/two_six_ring/sha-check-results.json",
+      "sha256": "0600a4eb7c76c769c414ec0f9f9083364ffc6fc9797cf54f9e08731690431ca3",
+      "binding": "window_schedule_shared.cuh exact unchanged bytes",
+      "fresh_full_closure_run": false
+    },
+    "inverse-check-results.json": {
+      "report": "research/specialist_warps/two_six_ring/inverse-check-results.json",
+      "sha256": "e5502bd149bcde03f29a0d8bd815e59921dc1e5731b95c243b88a06b19b3d6a2",
+      "binding": "tree_inverse.cuh exact unchanged bytes",
+      "fresh_full_closure_run": false
+    },
+    "digits": {
+      "report": "../digits-results/results.json",
+      "sha256": "6f4f8a555ba7db51440c9f80c9f88f6e73cc4b705269f1a5d1df7609071e663d",
+      "binding": "Exact unchanged pack/unpack/setup helper bodies; current full kernel protocol and curve separately rerun.",
+      "input_cases": 145004,
+      "fresh_full_closure_run": false
+    }
+  },
+  "hot_loop": {
+    "iterations": 13,
+    "static_slot_delta_per_region": 15,
+    "local_load_bytes_per_iteration_active_lane": 8,
+    "local_store_bytes_per_iteration_active_lane": 8,
+    "local_load_bytes_per_active_candidate": 104,
+    "local_store_bytes_per_active_candidate": 104,
+    "baseline_local_load_bytes_per_active_candidate": 156,
+    "baseline_local_store_bytes_per_active_candidate": 156,
+    "local_load_saving_bytes": 52,
+    "local_store_saving_bytes": 52,
+    "naive_region_slots_times_iterations": 20722,
+    "baseline_naive_region_slots_times_iterations": 20527,
+    "interpretation": "All local sites unpredicated and visited13times. Logical operand bytes, not memory transactions. Static-region products include skipped final backedge, not cycle counts."
+  },
+  "native_prefetch": {
+    "hint_pcs": [
+      "0xa700",
+      "0xa710"
+    ],
+    "baseline_hint_pcs": [
+      "0xa5c0",
+      "0xa5d0"
+    ],
+    "source_order": "Next hint call appears before EC add in source.",
+    "native_order": "Both hints occur near loop tail, after shared-Z and local carry stores, despite early source placement.",
+    "actual_early_hint_preserved": false,
+    "instruction_sites_between_last_hint_and_next_first_table_load": 24,
+    "baseline_instruction_sites_between_last_hint_and_next_first_table_load": 17,
+    "final_window": "Last loop hint is forwindow13, which is loaded by guarded final code after a fresh packed-cell load.",
+    "interpretation": "The+7 intervening instruction sites come from fresh current decoding and altered tail; they do not imply more time or superior memory overlap. No cycle/latency/prefetch effectiveness claim."
+  },
+  "curve_chains": 628,
+  "recovered_keys": 1242,
+  "exception_domain_status": "SOURCE_BOUND_DOMAIN_ARGUMENT_CHECKED",
+  "control": "CONTROL_PASS candidates=26624 hits=2642 ctas=23",
+  "policy_cases": [
+    180,
+    30,
+    8
+  ],
+  "architecture": "32 MiB runtime table; sixteen16-bit windows; two SHA/six EC warp ring; packed32-byte digits; short consumer temporary lifetimes.",
+  "remaining": [
+    "Package and public note review are separate receipts.",
+    "No GPU execution, runtime occupancy, race sanitizer or throughput measurement.",
+    "Prepare successor only; preserve pending PR179."
+  ],
+  "gpu_executed": false,
+  "submission_performed": false,
+  "original_report_sha256": "018ca43d67a7fed38a99245396b6d44b17660edb0bcc7a6c9051703339c3efbd",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

@@ -1,0 +1,188 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "fde5b39af85cc293805454d808d553dff1830ddb88ee74ac852d4e966f8f71b2",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "actual_pack_source_sha256": "8c818ff5625e76f2278a3e81b58d3fb41f2b7d347fa3d2f75edf5ee370c354e7",
+  "independent_packet_table_sha256": "4626ec087aed7e1377ad62f348b0e05995c10eefa8b04de5187cdf937c29185d",
+  "independent_packet_identities": 8192,
+  "actual_pack_functions": [
+    "gt_recode_setup",
+    "qsb_pack_scalar16",
+    "qsb_pack_digest16",
+    "qsb_ec192_packed_digit"
+  ],
+  "actual_kernel_sha256": "7bdc8335b8eb0b6fbe96aa3ea7cf891085716013e9dbcd8cadaaf3d03f010a34",
+  "generated_cpu_sha256": "bbd3df05046b0f557fb96181c57730688da47a7aaf247e5527a293b3a318ca96",
+  "positive": "CONTROL_PASS candidates=26624 hits=2642 ctas=23",
+  "cases": "CASE_BEGIN epochs=1\nCTA_BEGIN block=0 epochs=1\nCASE_PASS epochs=1 candidates=256 hits=26\nCASE_BEGIN epochs=2\nCTA_BEGIN block=0 epochs=2\nCASE_PASS epochs=2 candidates=512 hits=51\nCASE_BEGIN epochs=3\nCTA_BEGIN block=0 epochs=3\nCASE_PASS epochs=3 candidates=768 hits=76\nCASE_BEGIN epochs=4\nCTA_BEGIN block=0 epochs=4\nCASE_PASS epochs=4 candidates=1024 hits=101\nCASE_BEGIN epochs=5\nCTA_BEGIN block=0 epochs=5\nCASE_PASS epochs=5 candidates=1280 hits=127\nCASE_BEGIN epochs=6\nCTA_BEGIN block=0 epochs=6\nCASE_PASS epochs=6 candidates=1536 hits=153\nCASE_BEGIN epochs=7\nCTA_BEGIN block=0 epochs=7\nCTA_BEGIN block=1 epochs=7\nCASE_PASS epochs=7 candidates=1792 hits=178\nCASE_BEGIN epochs=8\nCTA_BEGIN block=0 epochs=8\nCTA_BEGIN block=1 epochs=8\nCASE_PASS epochs=8 candidates=2048 hits=203\nCASE_BEGIN epochs=11\nCTA_BEGIN block=0 epochs=11\nCTA_BEGIN block=1 epochs=11\nCASE_PASS epochs=11 candidates=2816 hits=280\nCASE_BEGIN epochs=12\nCTA_BEGIN block=0 epochs=12\nCTA_BEGIN block=1 epochs=12\nCASE_PASS epochs=12 candidates=3072 hits=305\nCASE_BEGIN epochs=13\nCTA_BEGIN block=0 epochs=13\nCTA_BEGIN block=1 epochs=13\nCTA_BEGIN block=2 epochs=13\nCASE_PASS epochs=13 candidates=3328 hits=330\nCASE_BEGIN epochs=32\nCTA_BEGIN block=0 epochs=32\nCTA_BEGIN block=1 epochs=32\nCTA_BEGIN block=2 epochs=32\nCTA_BEGIN block=3 epochs=32\nCTA_BEGIN block=4 epochs=32\nCTA_BEGIN block=5 epochs=32\nCASE_PASS epochs=32 candidates=8192 hits=812",
+  "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+  "actual_producer_barrier_sha256": "8a26de278ea9bb59c97ee6a8f471546e9ccd68ff013df1b635d313517d969885",
+  "actual_ticket_acquire_sha256": "6c587b0173f14b10bcbaece18459ace4b38071f6036c62398bd2f51fc073e2ac",
+  "actual_ticket_release_sha256": "eca13c2ff7ac0b1ee20a102d04ba4170f05b75ee4690b1abb6fb6a7d34edac04",
+  "actual_ticket_wait_sha256": "a2b43dea493b27a70a07e83265e6160157684fe76c3aeb9b8bea8144ed9f8ece",
+  "run_summaries": {
+    "positive": {
+      "label": "positive",
+      "exit_code": 0,
+      "elapsed_seconds": 3.0933877089992166,
+      "stdout_log": "positive.stdout.log",
+      "stderr_log": "positive.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "bbd3df05046b0f557fb96181c57730688da47a7aaf247e5527a293b3a318ca96",
+      "poll_delay_us": 500
+    },
+    "producer_omits_pack": {
+      "label": "producer_omits_pack",
+      "exit_code": 86,
+      "elapsed_seconds": 0.15067100001033396,
+      "stdout_log": "producer_omits_pack.stdout.log",
+      "stderr_log": "producer_omits_pack.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "870d43051c78413e3bad45dfef67d926e3c396bb0e8908d5f4b99929edb5ecb7",
+      "poll_delay_us": 500
+    },
+    "producer_wrong_word_order": {
+      "label": "producer_wrong_word_order",
+      "exit_code": 86,
+      "elapsed_seconds": 0.14766320801572874,
+      "stdout_log": "producer_wrong_word_order.stdout.log",
+      "stderr_log": "producer_wrong_word_order.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "60a2d6f59344e266406f6b6bc0431bfe60a95de007a3caa1f8d77916c225484f",
+      "poll_delay_us": 500
+    },
+    "producer_wrong_sign_bit": {
+      "label": "producer_wrong_sign_bit",
+      "exit_code": 86,
+      "elapsed_seconds": 0.14302695804508403,
+      "stdout_log": "producer_wrong_sign_bit.stdout.log",
+      "stderr_log": "producer_wrong_sign_bit.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "1e751a0812b7b9fae7e712860c2a576556931f949de6fe7c58556a1f94a468d8",
+      "poll_delay_us": 500
+    },
+    "consumer_wrong_limb_order": {
+      "label": "consumer_wrong_limb_order",
+      "exit_code": 86,
+      "elapsed_seconds": 0.15068770799553022,
+      "stdout_log": "consumer_wrong_limb_order.stdout.log",
+      "stderr_log": "consumer_wrong_limb_order.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "5a00e937defd13a3d17cdc9865c1860bfd93abf455d064880a5bbbb387086351",
+      "poll_delay_us": 500
+    },
+    "consumer_wrong_cell_sign": {
+      "label": "consumer_wrong_cell_sign",
+      "exit_code": 86,
+      "elapsed_seconds": 0.14939749997574836,
+      "stdout_log": "consumer_wrong_cell_sign.stdout.log",
+      "stderr_log": "consumer_wrong_cell_sign.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "d8efcadb82b1f02c3e8a32f436394a9303264e61a5a6ea482476d06c6962de2a",
+      "poll_delay_us": 500
+    },
+    "consumer_uses_physical_thread_choice": {
+      "label": "consumer_uses_physical_thread_choice",
+      "exit_code": 86,
+      "elapsed_seconds": 0.19329675001790747,
+      "stdout_log": "consumer_uses_physical_thread_choice.stdout.log",
+      "stderr_log": "consumer_uses_physical_thread_choice.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "7937842ed932c77fc3583e8dbf0d6b919dd73ba1baef92c553b03dd1e6778f9b",
+      "poll_delay_us": 500
+    },
+    "inactive_warp_returns_before_inverse": {
+      "label": "inactive_warp_returns_before_inverse",
+      "exit_code": 90,
+      "elapsed_seconds": 8.18813125003362,
+      "stdout_log": "inactive_warp_returns_before_inverse.stdout.log",
+      "stderr_log": "inactive_warp_returns_before_inverse.stderr.log",
+      "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+      "generated_cpp_sha256": "c855310f2df17d3ddf69939b429a66dd362b7eb7090128b33744245fee237f1f",
+      "poll_delay_us": 500
+    }
+  },
+  "negative_controls": {
+    "producer_omits_pack": {
+      "exit_code": 86,
+      "compilation_completed": true,
+      "diagnostic": "CONTROL_MISMATCH thread=111 candidate=0\nCONTROL_MISMATCH thread=98 candidate=0",
+      "generated_cpp_sha256": "870d43051c78413e3bad45dfef67d926e3c396bb0e8908d5f4b99929edb5ecb7"
+    },
+    "producer_wrong_word_order": {
+      "exit_code": 86,
+      "compilation_completed": true,
+      "diagnostic": "CONTROL_MISMATCH thread=94 candidate=0\nCONTROL_MISMATCH thread=95 candidate=0\nCONTROL_MISMATCH thread=69 candidate=0",
+      "generated_cpp_sha256": "60a2d6f59344e266406f6b6bc0431bfe60a95de007a3caa1f8d77916c225484f"
+    },
+    "producer_wrong_sign_bit": {
+      "exit_code": 86,
+      "compilation_completed": true,
+      "diagnostic": "CONTROL_MISMATCH thread=77 candidate=0\nCONTROL_MISMATCH thread=83 candidate=0\nCONTROL_MISMATCH thread=81 candidate=0\nCONTROL_MISMATCH thread=74 candidate=0",
+      "generated_cpp_sha256": "1e751a0812b7b9fae7e712860c2a576556931f949de6fe7c58556a1f94a468d8"
+    },
+    "consumer_wrong_limb_order": {
+      "exit_code": 86,
+      "compilation_completed": true,
+      "diagnostic": "CONTROL_MISMATCH thread=155 candidate=0\nCONTROL_MISMATCH thread=141 candidate=0\nCONTROL_MISMATCH thread=149 candidate=0\nCONTROL_MISMATCH thread=64 candidate=0\nCONTROL_MISMATCH thread=136 candidate=0\nCONTROL_MISMATCH thread=128 candidate=0\nCONTROL_MISMATCH thread=129 candidate=0\nCONTROL_MISMATCH thread=130 candidate=0\nCONTROL_MISMATCH thread=131 candidate=0",
+      "generated_cpp_sha256": "5a00e937defd13a3d17cdc9865c1860bfd93abf455d064880a5bbbb387086351"
+    },
+    "consumer_wrong_cell_sign": {
+      "exit_code": 86,
+      "compilation_completed": true,
+      "diagnostic": "CONTROL_MISMATCH thread=68 candidate=4\nCONTROL_MISMATCH thread=77 candidate=13\nCONTROL_MISMATCH thread=64 candidate=0",
+      "generated_cpp_sha256": "d8efcadb82b1f02c3e8a32f436394a9303264e61a5a6ea482476d06c6962de2a"
+    },
+    "consumer_uses_physical_thread_choice": {
+      "exit_code": 86,
+      "compilation_completed": true,
+      "diagnostic": "CONTROL_MISMATCH thread=0 candidate=0",
+      "generated_cpp_sha256": "7937842ed932c77fc3583e8dbf0d6b919dd73ba1baef92c553b03dd1e6778f9b"
+    },
+    "inactive_warp_returns_before_inverse": {
+      "exit_code": 90,
+      "compilation_completed": true,
+      "diagnostic": "BARRIER_TIMEOUT target=32 arrived=31 thread=110",
+      "generated_cpp_sha256": "c855310f2df17d3ddf69939b429a66dd362b7eb7090128b33744245fee237f1f"
+    }
+  },
+  "requested_epoch_cases": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    11,
+    12,
+    13,
+    32
+  ],
+  "host_poll_delay_us": 500,
+  "checker_sha256": "cf6c224d157385cc950c5d3f2be6daa9051e72dfe58ec61a0ab46f1f55eac657",
+  "ticket_projection": "Actual ticket helpers and EC192/producer64 barriers execute through host legacy atomics, sequential fences and warp joins. Host atomics sleep the reported configurable delay after polling to provide scheduling opportunities under256-thread oversubscription; no target sleep introduced.",
+  "host_accounting": "Launch ceil(nblk/6), nblk epoch bound, counts only after checked synchronization; source order audited.",
+  "scope": "Actual kernel role/packet/cohort/tail/hit-control and ring statements. Hash,field,inverse,gating primitives mocked with independent identity tokens. Actual producer recode/pack and consumer packed-digit extraction execute. Expected packet identities come from independent Python big-integer scalar reduction and signed-odd peeling. Actual numerical curve helpers have separate source-bound tests.",
+  "gpu_executed": false,
+  "original_report_sha256": "863caca118503d32ccee72931f502e3832cc377ac29ddfbf7cc7eb826167fcc6",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

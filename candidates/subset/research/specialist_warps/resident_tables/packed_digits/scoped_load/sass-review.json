@@ -1,0 +1,1285 @@
+{
+  "status": "SOURCE_BOUND_NATIVE_REVIEW_COMPLETE",
+  "source": {
+    "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+      "tests/gpu_epochs/compact_table_device.cuh": "fde5b39af85cc293805454d808d553dff1830ddb88ee74ac852d4e966f8f71b2",
+      "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+      "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+    }
+  },
+  "baseline_source": {
+    "source_fingerprint": "790949f20f5d888a32ee24042b1ac4f805ed52bba009cfab474228ec5e686c2e",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+      "tests/gpu_epochs/compact_table_device.cuh": "19ab9aa6866eb278ad8a4d392a591e77f11389f1f4249d38e144cbfe3694c86f",
+      "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+      "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+    }
+  },
+  "native_report_sha256": "566e0ece98e47458ea16dba3f81d83ebe8a27571b652b27f6f6f6f67943b3693",
+  "baseline_native_report_sha256": "d7a29f512c0e2321344d3c8f6352706e17f6de0e6ed2648655dccfd025295f1a",
+  "baseline_review_sha256": "e47598434b523c35ca886632bb1d8aa99e7bfcb681d00a8dc06dd68a60919643",
+  "native_production_files_verified": 15,
+  "sass_sha256": "cdf1188cb0e31f100bc0cbc925ba7388dcd529d492f183eeb855087b4d45228e",
+  "baseline_sass_sha256": "a3df7a3a3ffc4909c625b2cdf4f937f046090a806bcce80801c43214d2aa5f09",
+  "script_sha256": "9446cdbd067e194bca2784284a2d835d02e1d8be8c4b22c33a8b2f7c2db98d5b",
+  "parser_sha256": "b37e08eadd744de7aa215544ef80f45477a178d84238148946b3614d1dd0e06d",
+  "kernel": "_Z24kernel_digest_specialistPhPjS0_S_iPK12epoch_desc_t",
+  "resources": {
+    "registers": 80,
+    "shared_bytes": 32832,
+    "stack_bytes": 320,
+    "spill_store_bytes": 496,
+    "spill_load_bytes": 312,
+    "instruction_slots": 15560,
+    "non_nop": 15530
+  },
+  "baseline_resources": {
+    "registers": 80,
+    "shared_bytes": 32832,
+    "stack_bytes": 312,
+    "spill_store_bytes": 492,
+    "spill_load_bytes": 316,
+    "instruction_slots": 15536,
+    "non_nop": 15500
+  },
+  "resource_delta": {
+    "registers": 0,
+    "shared_bytes": 0,
+    "stack_bytes": 8,
+    "spill_store_bytes": 4,
+    "spill_load_bytes": -4,
+    "instruction_slots": 24,
+    "non_nop": 30
+  },
+  "hot_loop": {
+    "pc_range": [
+      "0x4430",
+      "0xa7c0"
+    ],
+    "instruction_slots": 1594,
+    "non_nop": 1594,
+    "opcodes": {
+      "BRA": 1,
+      "CALL.REL.NOINC": 1,
+      "CCTL.E.PF2": 2,
+      "IADD3": 74,
+      "IADD3.X": 394,
+      "IMAD": 20,
+      "IMAD.MOV.U32": 86,
+      "IMAD.SHL.U32": 5,
+      "IMAD.WIDE.U32": 239,
+      "IMAD.WIDE.U32.X": 362,
+      "IMAD.X": 53,
+      "ISETP.EQ.AND.EX": 3,
+      "ISETP.EQ.U32.AND": 3,
+      "ISETP.GE.U32.AND": 1,
+      "ISETP.GT.AND.EX": 2,
+      "ISETP.GT.U32.AND": 11,
+      "ISETP.GT.U32.AND.EX": 9,
+      "ISETP.NE.AND.EX": 6,
+      "ISETP.NE.U32.AND": 6,
+      "LDG.E.128": 4,
+      "LDL.LU": 2,
+      "LDS.64": 22,
+      "LEA": 2,
+      "LEA.HI.X": 2,
+      "LOP3.LUT": 70,
+      "S2R": 4,
+      "SEL": 190,
+      "SHF.R.U32.HI": 2,
+      "SHF.R.U64": 3,
+      "STL": 2,
+      "STS.64": 12,
+      "YIELD": 1
+    },
+    "static_local_load_instruction_bytes": 8,
+    "static_local_store_instruction_bytes": 8,
+    "local_instructions": [
+      {
+        "pc": "0x4440",
+        "instruction": "LDL.LU R74, [R1+0x7c]"
+      },
+      {
+        "pc": "0x5830",
+        "instruction": "LDL.LU R62, [R1+0x84]"
+      },
+      {
+        "pc": "0xa6d0",
+        "instruction": "STL [R1+0x7c], R55"
+      },
+      {
+        "pc": "0xa6e0",
+        "instruction": "STL [R1+0x84], R73"
+      }
+    ],
+    "control_edges": [
+      {
+        "pc": "0xa7b0",
+        "instruction": "@P1 CALL.REL.NOINC 0xa7d0"
+      },
+      {
+        "pc": "0xa7c0",
+        "instruction": "BRA 0x4430"
+      }
+    ],
+    "instructions_sha256": "929d9f88ea28399cbca253ea6177b51e38d4138717be16a6a4488641386baa00"
+  },
+  "baseline_hot_loop": {
+    "pc_range": [
+      "0x4400",
+      "0xa6a0"
+    ],
+    "instruction_slots": 1579,
+    "non_nop": 1579,
+    "opcodes": {
+      "BRA": 1,
+      "CALL.REL.NOINC": 1,
+      "CCTL.E.PF2": 2,
+      "IADD3": 74,
+      "IADD3.X": 395,
+      "IMAD": 19,
+      "IMAD.MOV.U32": 79,
+      "IMAD.SHL.U32": 3,
+      "IMAD.WIDE.U32": 240,
+      "IMAD.WIDE.U32.X": 362,
+      "IMAD.X": 53,
+      "ISETP.EQ.AND.EX": 3,
+      "ISETP.EQ.U32.AND": 3,
+      "ISETP.GE.U32.AND": 1,
+      "ISETP.GT.AND.EX": 2,
+      "ISETP.GT.U32.AND": 11,
+      "ISETP.GT.U32.AND.EX": 9,
+      "ISETP.NE.AND.EX": 6,
+      "ISETP.NE.U32.AND": 6,
+      "LDG.E.128": 4,
+      "LDL.LU": 1,
+      "LDL.LU.64": 1,
+      "LDS.64": 21,
+      "LEA": 2,
+      "LEA.HI.X": 1,
+      "LOP3.LUT": 66,
+      "S2R": 5,
+      "SEL": 190,
+      "SHF.R.U32.HI": 1,
+      "SHF.R.U64": 2,
+      "STL": 1,
+      "STL.64": 1,
+      "STS.64": 12,
+      "YIELD": 1
+    },
+    "static_local_load_instruction_bytes": 12,
+    "static_local_store_instruction_bytes": 12,
+    "local_instructions": [
+      {
+        "pc": "0x4740",
+        "instruction": "STL.64 [R1+0x78], R4"
+      },
+      {
+        "pc": "0x5880",
+        "instruction": "LDL.LU R69, [R1+0x80]"
+      },
+      {
+        "pc": "0x78a0",
+        "instruction": "LDL.LU.64 R62, [R1+0x78]"
+      },
+      {
+        "pc": "0xa5e0",
+        "instruction": "STL [R1+0x80], R44"
+      }
+    ],
+    "control_edges": [
+      {
+        "pc": "0xa690",
+        "instruction": "@P1 CALL.REL.NOINC 0xa6b0"
+      },
+      {
+        "pc": "0xa6a0",
+        "instruction": "BRA 0x4400"
+      }
+    ],
+    "instructions_sha256": "a8890e22b19d4d991f47c849e84631e9e3174853f9607a3e5e6da502dabd49a7"
+  },
+  "loop_comparison": {
+    "iterations": 13,
+    "static_slot_delta_per_region": 15,
+    "local_load_bytes_per_iteration_active_lane": 8,
+    "local_store_bytes_per_iteration_active_lane": 8,
+    "local_load_bytes_per_active_candidate": 104,
+    "local_store_bytes_per_active_candidate": 104,
+    "baseline_local_load_bytes_per_active_candidate": 156,
+    "baseline_local_store_bytes_per_active_candidate": 156,
+    "local_load_saving_bytes": 52,
+    "local_store_saving_bytes": 52,
+    "naive_region_slots_times_iterations": 20722,
+    "baseline_naive_region_slots_times_iterations": 20527,
+    "interpretation": "All local sites unpredicated and visited13times. Logical operand bytes, not memory transactions. Static-region products include skipped final backedge, not cycle counts."
+  },
+  "shared_comparison": {
+    "LDS64_sites_per_iteration": 22,
+    "baseline_LDS64_sites_per_iteration": 21,
+    "STS64_sites_per_iteration": 12,
+    "baseline_STS64_sites_per_iteration": 12,
+    "logical_shared_load_bytes_per_candidate_loop": 2288,
+    "baseline_logical_shared_load_bytes_per_candidate_loop": 2184,
+    "extra_shared_load_bytes_loop": 104,
+    "logical_shared_store_bytes_per_candidate_loop": 1248,
+    "extra_final_packed_limb_load_bytes": 8,
+    "current_packed_load_pc": "0x4490",
+    "next_hint_packed_load_pc": "0x4640",
+    "final_packed_load_pc": "0xa7e0",
+    "evidence": [
+      {
+        "pc": "0x4430",
+        "instruction": "S2R R0, SR_TID.X"
+      },
+      {
+        "pc": "0x4440",
+        "instruction": "LDL.LU R74, [R1+0x7c]"
+      },
+      {
+        "pc": "0x4450",
+        "instruction": "IMAD.SHL.U32 R28, R0, 0x8, RZ"
+      },
+      {
+        "pc": "0x4460",
+        "instruction": "SHF.R.U32.HI R0, RZ, 0x2, R64"
+      },
+      {
+        "pc": "0x4470",
+        "instruction": "IMAD R8, R0, 0x1800, R28"
+      },
+      {
+        "pc": "0x4480",
+        "instruction": "IMAD.SHL.U32 R0, R64, 0x10, RZ"
+      },
+      {
+        "pc": "0x4490",
+        "instruction": "LDS.64 R4, [R8+-0x200]"
+      },
+      {
+        "pc": "0x44a0",
+        "instruction": "LOP3.LUT R3, R0, 0x30, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0x44b0",
+        "instruction": "IMAD.SHL.U32 R0, R64, 0x8000, RZ"
+      },
+      {
+        "pc": "0x44c0",
+        "instruction": "SHF.R.U64 R3, R4, R3, R5"
+      },
+      {
+        "pc": "0x44d0",
+        "instruction": "LOP3.LUT R0, R0, 0x7fff, R3, 0xf8, !PT"
+      },
+      {
+        "pc": "0x44e0",
+        "instruction": "LEA R10, P0, R0, c[0x0][0x160], 0x6"
+      },
+      {
+        "pc": "0x44f0",
+        "instruction": "LEA.HI.X R11, R0, c[0x0][0x164], RZ, 0x6, P0"
+      },
+      {
+        "pc": "0x4500",
+        "instruction": "LDG.E.128 R12, [R10.64+0x20]"
+      },
+      {
+        "pc": "0x4510",
+        "instruction": "LDG.E.128 R16, [R10.64+0x30]"
+      },
+      {
+        "pc": "0x4520",
+        "instruction": "LDG.E.128 R4, [R10.64]"
+      },
+      {
+        "pc": "0x4530",
+        "instruction": "LDG.E.128 R20, [R10.64+0x10]"
+      },
+      {
+        "pc": "0x4540",
+        "instruction": "LOP3.LUT R8, R3, 0x8000, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0x4550",
+        "instruction": "IADD3 R64, R64, 0x1, RZ"
+      },
+      {
+        "pc": "0x4560",
+        "instruction": "S2R R46, SR_TID.X"
+      },
+      {
+        "pc": "0x4570",
+        "instruction": "SHF.R.U64 R8, R8, 0xf, RZ"
+      },
+      {
+        "pc": "0x4580",
+        "instruction": "SHF.R.U32.HI R0, RZ, 0x2, R64"
+      },
+      {
+        "pc": "0x4590",
+        "instruction": "IADD3 R25, P0, R8, -0x1, RZ"
+      },
+      {
+        "pc": "0x45a0",
+        "instruction": "IMAD.X R3, RZ, RZ, -0x1, P0"
+      },
+      {
+        "pc": "0x45b0",
+        "instruction": "IMAD.MOV.U32 R41, RZ, RZ, RZ"
+      },
+      {
+        "pc": "0x45c0",
+        "instruction": "IADD3 R24, P0, RZ, -R12, RZ"
+      },
+      {
+        "pc": "0x45d0",
+        "instruction": "LOP3.LUT R50, RZ, R14, RZ, 0x33, !PT"
+      },
+      {
+        "pc": "0x45e0",
+        "instruction": "LOP3.LUT R51, R14, R25, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0x45f0",
+        "instruction": "IADD3 RZ, P1, R24, -0x3d1, RZ"
+      },
+      {
+        "pc": "0x4600",
+        "instruction": "IMAD R24, R0, 0x1800, R28"
+      },
+      {
+        "pc": "0x4610",
+        "instruction": "IADD3 R14, P3, -R12, -0x3d1, RZ"
+      },
+      {
+        "pc": "0x4620",
+        "instruction": "LOP3.LUT R26, RZ, R15, RZ, 0x33, !PT"
+      },
+      {
+        "pc": "0x4630",
+        "instruction": "LOP3.LUT R29, R15, R3, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0x4640",
+        "instruction": "LDS.64 R72, [R24+-0x200]"
+      },
+      {
+        "pc": "0xa7d0",
+        "instruction": "BSYNC B1"
+      },
+      {
+        "pc": "0xa7e0",
+        "instruction": "LDS.64 R16, [R75.X8+0x4600]"
+      },
+      {
+        "pc": "0xa7f0",
+        "instruction": "LDS.64 R20, [R75.X8+0x400]"
+      },
+      {
+        "pc": "0xa800",
+        "instruction": "LDS.64 R18, [R75.X8+0x1c00]"
+      },
+      {
+        "pc": "0xa810",
+        "instruction": "SHF.R.U64 R0, R16, 0xa, R17"
+      },
+      {
+        "pc": "0xa820",
+        "instruction": "LOP3.LUT R0, R0, 0x1fffc0, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0xa830",
+        "instruction": "IADD3 R0, P0, R0, c[0x0][0x160], RZ"
+      },
+      {
+        "pc": "0xa840",
+        "instruction": "IADD3 R10, P1, R0, 0x2000000, RZ"
+      },
+      {
+        "pc": "0xa850",
+        "instruction": "IMAD.X R0, RZ, RZ, c[0x0][0x164], P0"
+      },
+      {
+        "pc": "0xa860",
+        "instruction": "IMAD.X R11, RZ, RZ, R0, P1"
+      },
+      {
+        "pc": "0xa870",
+        "instruction": "LDG.E.128 R12, [R10.64+-0x5fffe0]"
+      },
+      {
+        "pc": "0xa880",
+        "instruction": "LDG.E.128 R4, [R10.64+-0x5fffd0]"
+      },
+      {
+        "pc": "0xa890",
+        "instruction": "SHF.R.U64 R23, R16, 0x1f, R17"
+      }
+    ],
+    "limit": "Counts assume ordinary active13-add chain; logical per-lane operands rather than bank transactions or latency. Final8B load is outside repeated-loop comparison."
+  },
+  "spill_roles": {
+    "removed_next_limb_local_roundtrip": true,
+    "remaining_slots": [
+      {
+        "offset": "0x7c",
+        "load_pc": "0x4440",
+        "register": "R74",
+        "use_pc": "0x67a0",
+        "store_pc": "0xa6d0",
+        "role_inferred": "DeferredY word6,bits192..223"
+      },
+      {
+        "offset": "0x84",
+        "load_pc": "0x5830",
+        "register": "R62",
+        "use_pc": "0x67d0",
+        "store_pc": "0xa6e0",
+        "role_inferred": "DeferredY word7,bits224..255"
+      }
+    ],
+    "carry_chain": [
+      {
+        "pc": "0x6630",
+        "instruction": "IADD3 R65, P1, -R60, R65, RZ"
+      },
+      {
+        "pc": "0x6640",
+        "instruction": "SEL R38, R38, RZ, !P2"
+      },
+      {
+        "pc": "0x6650",
+        "instruction": "IADD3.X R66, P0, ~R68, R29, RZ, P1, !PT"
+      },
+      {
+        "pc": "0x6660",
+        "instruction": "LOP3.LUT R26, R22, R35, R24, 0x80, !PT"
+      },
+      {
+        "pc": "0x6670",
+        "instruction": "SEL R29, R20, RZ, !P2"
+      },
+      {
+        "pc": "0x6680",
+        "instruction": "IADD3.X R69, P0, ~R69, R38, RZ, P0, !PT"
+      },
+      {
+        "pc": "0x6690",
+        "instruction": "ISETP.NE.U32.AND P1, PT, R26, -0x1, PT"
+      },
+      {
+        "pc": "0x66a0",
+        "instruction": "LOP3.LUT R20, R23, R25, R17, 0x80, !PT"
+      },
+      {
+        "pc": "0x66b0",
+        "instruction": "IADD3.X R70, P4, ~R70, R29, RZ, P0, !PT"
+      },
+      {
+        "pc": "0x66c0",
+        "instruction": "SEL R48, R48, RZ, !P2"
+      },
+      {
+        "pc": "0x66d0",
+        "instruction": "ISETP.NE.AND.EX P0, PT, R20, -0x1, PT, P1"
+      },
+      {
+        "pc": "0x66e0",
+        "instruction": "IADD3 R29, P5, R28.reuse, 0x3d1, RZ"
+      },
+      {
+        "pc": "0x66f0",
+        "instruction": "ISETP.GT.U32.AND P3, PT, R28, -0x3d2, PT"
+      },
+      {
+        "pc": "0x6700",
+        "instruction": "IADD3.X R77, P1, ~R77, R48, RZ, P4, !PT"
+      },
+      {
+        "pc": "0x6710",
+        "instruction": "SEL R20, R21, RZ, !P2"
+      },
+      {
+        "pc": "0x6720",
+        "instruction": "IADD3.X R21, R34, 0x1, RZ, P5, !PT"
+      },
+      {
+        "pc": "0x6730",
+        "instruction": "ISETP.GT.U32.AND.EX P0, PT, R34, -0x2, !P0, P3"
+      },
+      {
+        "pc": "0x6740",
+        "instruction": "IADD3.X R71, P1, ~R71, R20, RZ, P1, !PT"
+      },
+      {
+        "pc": "0x6750",
+        "instruction": "SEL R20, R21, R34, P0"
+      },
+      {
+        "pc": "0x6760",
+        "instruction": "SEL R26, R19, RZ, !P2"
+      },
+      {
+        "pc": "0x6770",
+        "instruction": "SEL R68, R18, RZ, !P2"
+      },
+      {
+        "pc": "0x6780",
+        "instruction": "IMAD.WIDE.U32 R32, R20, R15, RZ"
+      },
+      {
+        "pc": "0x6790",
+        "instruction": "SEL R18, R29, R28, P0"
+      },
+      {
+        "pc": "0x67a0",
+        "instruction": "IADD3.X RZ, P2, ~R74, R26, RZ, P1, !PT"
+      },
+      {
+        "pc": "0x67b0",
+        "instruction": "IMAD.WIDE.U32 R28, R20, R14, RZ"
+      },
+      {
+        "pc": "0x67c0",
+        "instruction": "SEL R19, R35, RZ, !P0"
+      },
+      {
+        "pc": "0x67d0",
+        "instruction": "IADD3.X RZ, P2, ~R62, R68, RZ, P2, !PT"
+      }
+    ],
+    "tail": [
+      {
+        "pc": "0xa680",
+        "instruction": "SEL R55, R19, RZ, !P0"
+      },
+      {
+        "pc": "0xa690",
+        "instruction": "SEL R73, R42, RZ, !P0"
+      },
+      {
+        "pc": "0xa6a0",
+        "instruction": "STS.64 [R75.X8+0x2800], R14"
+      },
+      {
+        "pc": "0xa6b0",
+        "instruction": "STS.64 [R75.X8+0x4000], R50"
+      },
+      {
+        "pc": "0xa6c0",
+        "instruction": "STS.64 [R75.X8+0x5800], R10"
+      },
+      {
+        "pc": "0xa6d0",
+        "instruction": "STL [R1+0x7c], R55"
+      },
+      {
+        "pc": "0xa6e0",
+        "instruction": "STL [R1+0x84], R73"
+      },
+      {
+        "pc": "0xa6f0",
+        "instruction": "ISETP.GE.U32.AND P1, PT, R64, 0xd, PT"
+      },
+      {
+        "pc": "0xa700",
+        "instruction": "CCTL.E.PF2 [R4]"
+      },
+      {
+        "pc": "0xa710",
+        "instruction": "CCTL.E.PF2 [R4+0x20]"
+      },
+      {
+        "pc": "0xa720",
+        "instruction": "YIELD"
+      },
+      {
+        "pc": "0xa730",
+        "instruction": "IADD3 R5, P2, R60, 0x3d1, RZ"
+      },
+      {
+        "pc": "0xa740",
+        "instruction": "IADD3.X R68, R3, 0x1, RZ, P2, !PT"
+      },
+      {
+        "pc": "0xa750",
+        "instruction": "SEL R60, R5, R60, P0"
+      },
+      {
+        "pc": "0xa760",
+        "instruction": "SEL R68, R68, R3, P0"
+      },
+      {
+        "pc": "0xa770",
+        "instruction": "SEL R69, R17, RZ, !P0"
+      },
+      {
+        "pc": "0xa780",
+        "instruction": "SEL R70, R16, RZ, !P0"
+      },
+      {
+        "pc": "0xa790",
+        "instruction": "SEL R77, R56, RZ, !P0"
+      },
+      {
+        "pc": "0xa7a0",
+        "instruction": "SEL R71, R71, RZ, !P0"
+      }
+    ],
+    "next_hint_limb": "Loaded intoR72/R73 at0x4640 and retained through register moves, instead of8B local roundtrip. Source scope does not prove this temporary dies before EC arithmetic.",
+    "limit": "Exact stack flow observed; Y word labels inferred from source/native eight-word subtraction and canonical tail."
+  },
+  "prefetch": {
+    "hint_pcs": [
+      "0xa700",
+      "0xa710"
+    ],
+    "baseline_hint_pcs": [
+      "0xa5c0",
+      "0xa5d0"
+    ],
+    "source_order": "Next hint call appears before EC add in source.",
+    "native_order": "Both hints occur near loop tail, after shared-Z and local carry stores, despite early source placement.",
+    "actual_early_hint_preserved": false,
+    "instruction_sites_between_last_hint_and_next_first_table_load": 24,
+    "baseline_instruction_sites_between_last_hint_and_next_first_table_load": 17,
+    "final_window": "Last loop hint is forwindow13, which is loaded by guarded final code after a fresh packed-cell load.",
+    "interpretation": "The+7 intervening instruction sites come from fresh current decoding and altered tail; they do not imply more time or superior memory overlap. No cycle/latency/prefetch effectiveness claim."
+  },
+  "producer_region": {
+    "pc_range": [
+      "0x29950",
+      "0x37630"
+    ],
+    "instruction_slots": 3535,
+    "non_nop": 3529,
+    "opcodes": {
+      "ATOMS.ADD": 7,
+      "ATOMS.EXCH": 3,
+      "ATOMS.POPC.INC.32": 2,
+      "BRA": 19,
+      "BRA.CONV": 6,
+      "BSSY": 12,
+      "BSYNC": 12,
+      "CALL.REL.NOINC": 9,
+      "EXIT": 2,
+      "FLO.U32": 6,
+      "IADD3": 560,
+      "IADD3.X": 28,
+      "IMAD": 5,
+      "IMAD.HI": 1,
+      "IMAD.IADD": 280,
+      "IMAD.MOV.U32": 29,
+      "IMAD.SHL.U32": 21,
+      "IMAD.U32": 9,
+      "IMAD.WIDE": 2,
+      "IMAD.WIDE.U32": 2,
+      "IMAD.X": 17,
+      "ISETP.EQ.U32.AND": 6,
+      "ISETP.GE.AND": 3,
+      "ISETP.GE.U32.AND": 4,
+      "ISETP.NE.AND": 8,
+      "LDC.64": 4,
+      "LDG.E": 24,
+      "LDG.E.CONSTANT": 10,
+      "LDS": 8,
+      "LEA": 6,
+      "LEA.HI": 2,
+      "LEA.HI.X": 2,
+      "LEA.HI.X.SX32": 1,
+      "LOP3.LUT": 905,
+      "MEMBAR.SC.CTA": 9,
+      "MOV": 6,
+      "NOP": 6,
+      "PLOP3.LUT": 1,
+      "POPC": 4,
+      "S2R": 4,
+      "SHF.L.U64.HI": 4,
+      "SHF.R.S32.HI": 4,
+      "SHF.R.U32.HI": 207,
+      "SHF.R.U64": 1236,
+      "SHFL.IDX": 6,
+      "STS": 16,
+      "UISETP.GE.AND": 1,
+      "ULDC": 1,
+      "ULDC.64": 1,
+      "ULOP3.LUT": 3,
+      "VOTEU.ANY": 6,
+      "YIELD": 5
+    },
+    "static_local_load_instruction_bytes": 0,
+    "static_local_store_instruction_bytes": 0,
+    "local_instructions": [],
+    "control_edges": [
+      {
+        "pc": "0x29b50",
+        "instruction": "@!P0 BRA 0x29e40"
+      },
+      {
+        "pc": "0x29b70",
+        "instruction": "BRA.CONV ~URZ, 0x29ba0"
+      },
+      {
+        "pc": "0x29b90",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x29bc0",
+        "instruction": "@P0 BRA 0x29df0"
+      },
+      {
+        "pc": "0x29cf0",
+        "instruction": "@!P0 BRA 0x29dc0"
+      },
+      {
+        "pc": "0x29d80",
+        "instruction": "@!P0 BRA 0x29d10"
+      },
+      {
+        "pc": "0x29db0",
+        "instruction": "BRA 0x29df0"
+      },
+      {
+        "pc": "0x29e00",
+        "instruction": "BRA.CONV ~URZ, 0x29e30"
+      },
+      {
+        "pc": "0x29e20",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x29e80",
+        "instruction": "@P0 BRA 0x2f7e0"
+      },
+      {
+        "pc": "0x2f7c0",
+        "instruction": "@P0 CALL.REL.NOINC 0x2f7e0"
+      },
+      {
+        "pc": "0x2f7d0",
+        "instruction": "BRA 0x29fd0"
+      },
+      {
+        "pc": "0x2f7f0",
+        "instruction": "BRA.CONV ~URZ, 0x2f820"
+      },
+      {
+        "pc": "0x2f810",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x2f840",
+        "instruction": "@P1 BRA 0x2fa70"
+      },
+      {
+        "pc": "0x2f970",
+        "instruction": "@!P0 BRA 0x2fa40"
+      },
+      {
+        "pc": "0x2fa00",
+        "instruction": "@!P0 BRA 0x2f990"
+      },
+      {
+        "pc": "0x2fa30",
+        "instruction": "BRA 0x2fa70"
+      },
+      {
+        "pc": "0x2fa80",
+        "instruction": "BRA.CONV ~URZ, 0x2fab0"
+      },
+      {
+        "pc": "0x2faa0",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x304c0",
+        "instruction": "@!P0 BRA 0x2fce0"
+      },
+      {
+        "pc": "0x30dd0",
+        "instruction": "@!P0 BRA 0x30650"
+      },
+      {
+        "pc": "0x30e90",
+        "instruction": "@!P0 BRA 0x305b0"
+      },
+      {
+        "pc": "0x361a0",
+        "instruction": "@P1 BRA 0x36210"
+      },
+      {
+        "pc": "0x36200",
+        "instruction": "@P0 BRA 0x361c0"
+      },
+      {
+        "pc": "0x36df0",
+        "instruction": "BRA.CONV ~URZ, 0x36e20"
+      },
+      {
+        "pc": "0x36e10",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x37520",
+        "instruction": "BRA.CONV ~URZ, 0x37550"
+      },
+      {
+        "pc": "0x37540",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x37570",
+        "instruction": "@P1 BRA 0x375b0"
+      },
+      {
+        "pc": "0x375c0",
+        "instruction": "@P2 CALL.REL.NOINC 0x375e0"
+      },
+      {
+        "pc": "0x375d0",
+        "instruction": "BRA 0x2faf0"
+      },
+      {
+        "pc": "0x37610",
+        "instruction": "@P0 CALL.REL.NOINC 0x37630"
+      },
+      {
+        "pc": "0x37620",
+        "instruction": "BRA 0x29b20"
+      }
+    ],
+    "instructions_sha256": "e16c80be1d9fa8256b6566a010704b351904e40f9283999ac60e2e9e7964ce37"
+  },
+  "baseline_producer_region": {
+    "pc_range": [
+      "0x29770",
+      "0x37450"
+    ],
+    "instruction_slots": 3535,
+    "non_nop": 3529,
+    "opcodes": {
+      "ATOMS.ADD": 7,
+      "ATOMS.EXCH": 3,
+      "ATOMS.POPC.INC.32": 2,
+      "BRA": 19,
+      "BRA.CONV": 6,
+      "BSSY": 12,
+      "BSYNC": 12,
+      "CALL.REL.NOINC": 9,
+      "EXIT": 2,
+      "FLO.U32": 6,
+      "IADD3": 560,
+      "IADD3.X": 28,
+      "IMAD": 5,
+      "IMAD.HI": 1,
+      "IMAD.IADD": 280,
+      "IMAD.MOV.U32": 29,
+      "IMAD.SHL.U32": 21,
+      "IMAD.U32": 9,
+      "IMAD.WIDE": 2,
+      "IMAD.WIDE.U32": 2,
+      "IMAD.X": 17,
+      "ISETP.EQ.U32.AND": 6,
+      "ISETP.GE.AND": 3,
+      "ISETP.GE.U32.AND": 4,
+      "ISETP.NE.AND": 8,
+      "LDC.64": 4,
+      "LDG.E": 24,
+      "LDG.E.CONSTANT": 10,
+      "LDS": 8,
+      "LEA": 6,
+      "LEA.HI": 2,
+      "LEA.HI.X": 2,
+      "LEA.HI.X.SX32": 1,
+      "LOP3.LUT": 905,
+      "MEMBAR.SC.CTA": 9,
+      "MOV": 6,
+      "NOP": 6,
+      "PLOP3.LUT": 1,
+      "POPC": 4,
+      "S2R": 4,
+      "SHF.L.U64.HI": 4,
+      "SHF.R.S32.HI": 4,
+      "SHF.R.U32.HI": 207,
+      "SHF.R.U64": 1236,
+      "SHFL.IDX": 6,
+      "STS": 16,
+      "UISETP.GE.AND": 1,
+      "ULDC": 1,
+      "ULDC.64": 1,
+      "ULOP3.LUT": 3,
+      "VOTEU.ANY": 6,
+      "YIELD": 5
+    },
+    "static_local_load_instruction_bytes": 0,
+    "static_local_store_instruction_bytes": 0,
+    "local_instructions": [],
+    "control_edges": [
+      {
+        "pc": "0x29970",
+        "instruction": "@!P0 BRA 0x29c60"
+      },
+      {
+        "pc": "0x29990",
+        "instruction": "BRA.CONV ~URZ, 0x299c0"
+      },
+      {
+        "pc": "0x299b0",
+        "instruction": "CALL.REL.NOINC 0x3c9d0"
+      },
+      {
+        "pc": "0x299e0",
+        "instruction": "@P0 BRA 0x29c10"
+      },
+      {
+        "pc": "0x29b10",
+        "instruction": "@!P0 BRA 0x29be0"
+      },
+      {
+        "pc": "0x29ba0",
+        "instruction": "@!P0 BRA 0x29b30"
+      },
+      {
+        "pc": "0x29bd0",
+        "instruction": "BRA 0x29c10"
+      },
+      {
+        "pc": "0x29c20",
+        "instruction": "BRA.CONV ~URZ, 0x29c50"
+      },
+      {
+        "pc": "0x29c40",
+        "instruction": "CALL.REL.NOINC 0x3c9d0"
+      },
+      {
+        "pc": "0x29ca0",
+        "instruction": "@P0 BRA 0x2f600"
+      },
+      {
+        "pc": "0x2f5e0",
+        "instruction": "@P0 CALL.REL.NOINC 0x2f600"
+      },
+      {
+        "pc": "0x2f5f0",
+        "instruction": "BRA 0x29df0"
+      },
+      {
+        "pc": "0x2f610",
+        "instruction": "BRA.CONV ~URZ, 0x2f640"
+      },
+      {
+        "pc": "0x2f630",
+        "instruction": "CALL.REL.NOINC 0x3c9d0"
+      },
+      {
+        "pc": "0x2f660",
+        "instruction": "@P1 BRA 0x2f890"
+      },
+      {
+        "pc": "0x2f790",
+        "instruction": "@!P0 BRA 0x2f860"
+      },
+      {
+        "pc": "0x2f820",
+        "instruction": "@!P0 BRA 0x2f7b0"
+      },
+      {
+        "pc": "0x2f850",
+        "instruction": "BRA 0x2f890"
+      },
+      {
+        "pc": "0x2f8a0",
+        "instruction": "BRA.CONV ~URZ, 0x2f8d0"
+      },
+      {
+        "pc": "0x2f8c0",
+        "instruction": "CALL.REL.NOINC 0x3c9d0"
+      },
+      {
+        "pc": "0x302e0",
+        "instruction": "@!P0 BRA 0x2fb00"
+      },
+      {
+        "pc": "0x30bf0",
+        "instruction": "@!P0 BRA 0x30470"
+      },
+      {
+        "pc": "0x30cb0",
+        "instruction": "@!P0 BRA 0x303d0"
+      },
+      {
+        "pc": "0x35fc0",
+        "instruction": "@P1 BRA 0x36030"
+      },
+      {
+        "pc": "0x36020",
+        "instruction": "@P0 BRA 0x35fe0"
+      },
+      {
+        "pc": "0x36c10",
+        "instruction": "BRA.CONV ~URZ, 0x36c40"
+      },
+      {
+        "pc": "0x36c30",
+        "instruction": "CALL.REL.NOINC 0x3c9d0"
+      },
+      {
+        "pc": "0x37340",
+        "instruction": "BRA.CONV ~URZ, 0x37370"
+      },
+      {
+        "pc": "0x37360",
+        "instruction": "CALL.REL.NOINC 0x3c9d0"
+      },
+      {
+        "pc": "0x37390",
+        "instruction": "@P1 BRA 0x373d0"
+      },
+      {
+        "pc": "0x373e0",
+        "instruction": "@P2 CALL.REL.NOINC 0x37400"
+      },
+      {
+        "pc": "0x373f0",
+        "instruction": "BRA 0x2f910"
+      },
+      {
+        "pc": "0x37430",
+        "instruction": "@P0 CALL.REL.NOINC 0x37450"
+      },
+      {
+        "pc": "0x37440",
+        "instruction": "BRA 0x29940"
+      }
+    ],
+    "instructions_sha256": "868e0fd75791078a12c7b8c4598164be62c4c1340855bf2d85f69822d9d47a1b"
+  },
+  "producer_identical_after_control_target_rebase": true,
+  "producer_normalized_sha256": "4c86c7d7a3ec6ac4c0657e89c2d358e5ad1ca82f09b31457eb625587c6a7ad30",
+  "polling": {
+    "consumer": [
+      {
+        "pc": "0x4b0",
+        "instruction": "S2R R0, SR_TID.X"
+      },
+      {
+        "pc": "0x4c0",
+        "instruction": "BSSY B1, 0x570"
+      },
+      {
+        "pc": "0x4d0",
+        "instruction": "LOP3.LUT P0, RZ, R0, 0x1f, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0x4e0",
+        "instruction": "@P0 BRA 0x560"
+      },
+      {
+        "pc": "0x4f0",
+        "instruction": "LDL R0, [R1+0x110]"
+      },
+      {
+        "pc": "0x500",
+        "instruction": "YIELD"
+      },
+      {
+        "pc": "0x510",
+        "instruction": "ATOMS.ADD R0, [R0.X4+0x8018], RZ"
+      },
+      {
+        "pc": "0x520",
+        "instruction": "MEMBAR.SC.CTA"
+      },
+      {
+        "pc": "0x530",
+        "instruction": "LDL R2, [R1+0x104]"
+      },
+      {
+        "pc": "0x540",
+        "instruction": "ISETP.NE.AND P1, PT, R0, R2, PT"
+      },
+      {
+        "pc": "0x550",
+        "instruction": "@P1 BRA 0x4f0"
+      },
+      {
+        "pc": "0x560",
+        "instruction": "BSYNC B1"
+      },
+      {
+        "pc": "0x570",
+        "instruction": "BRA.CONV ~URZ, 0x5a0"
+      },
+      {
+        "pc": "0x580",
+        "instruction": "MOV R4, 0x5a0"
+      },
+      {
+        "pc": "0x590",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x5a0",
+        "instruction": "LDL R2, [R1+0x110]"
+      },
+      {
+        "pc": "0x5b0",
+        "instruction": "S2R R0, SR_TID.X"
+      },
+      {
+        "pc": "0x5c0",
+        "instruction": "IMAD.SHL.U32 R0, R0, 0x4, RZ"
+      },
+      {
+        "pc": "0x5d0",
+        "instruction": "LOP3.LUT R0, R0, 0x7c, RZ, 0xc0, !PT"
+      },
+      {
+        "pc": "0x5e0",
+        "instruction": "NOP"
+      },
+      {
+        "pc": "0x5f0",
+        "instruction": "IMAD R0, R2, 0x400, R0"
+      },
+      {
+        "pc": "0x600",
+        "instruction": "MEMBAR.SC.CTA"
+      },
+      {
+        "pc": "0x610",
+        "instruction": "LDS R13, [R0+0x6800]"
+      }
+    ],
+    "producer": [
+      {
+        "pc": "0x361a0",
+        "instruction": "@P1 BRA 0x36210"
+      },
+      {
+        "pc": "0x361b0",
+        "instruction": "LEA R4, R13, 0x8000, 0x2"
+      },
+      {
+        "pc": "0x361c0",
+        "instruction": "YIELD"
+      },
+      {
+        "pc": "0x361d0",
+        "instruction": "ATOMS.ADD R15, [R4], RZ"
+      },
+      {
+        "pc": "0x361e0",
+        "instruction": "ISETP.NE.AND P0, PT, R15, R12, PT"
+      },
+      {
+        "pc": "0x361f0",
+        "instruction": "MEMBAR.SC.CTA"
+      },
+      {
+        "pc": "0x36200",
+        "instruction": "@P0 BRA 0x361c0"
+      },
+      {
+        "pc": "0x36210",
+        "instruction": "BSYNC B1"
+      },
+      {
+        "pc": "0x36220",
+        "instruction": "IADD3 R22, P0, R29, -c[0x3][0x7b0], RZ"
+      }
+    ],
+    "producer_join": [
+      {
+        "pc": "0x36df0",
+        "instruction": "BRA.CONV ~URZ, 0x36e20"
+      },
+      {
+        "pc": "0x36e00",
+        "instruction": "MOV R4, 0x36e20"
+      },
+      {
+        "pc": "0x36e10",
+        "instruction": "CALL.REL.NOINC 0x3cbb0"
+      },
+      {
+        "pc": "0x36e20",
+        "instruction": "IADD3 R26, R47, -0x1, RZ"
+      }
+    ],
+    "producer_acquire_before_payload": [
+      {
+        "pc": "0x373b0",
+        "instruction": "MEMBAR.SC.CTA"
+      },
+      {
+        "pc": "0x373c0",
+        "instruction": "IMAD.U32 R32, R32, 0x10000, RZ"
+      },
+      {
+        "pc": "0x373d0",
+        "instruction": "STS [R17.X4+0x6800], R5"
+      }
+    ],
+    "fullwarp_helper": [
+      {
+        "pc": "0x3cbb0",
+        "instruction": "IMAD.MOV.U32 R5, RZ, RZ, -0x1"
+      },
+      {
+        "pc": "0x3cbc0",
+        "instruction": "WARPSYNC R5"
+      },
+      {
+        "pc": "0x3cbd0",
+        "instruction": "IMAD.MOV.U32 R5, RZ, RZ, 0x0"
+      },
+      {
+        "pc": "0x3cbe0",
+        "instruction": "RET.REL.NODEC R4 0x0"
+      }
+    ],
+    "one_active_atomic_lane_per_spin": true,
+    "producer_proof": "Full producer sequence identical after rebasing, including lane predicate, leader bypass, join and fence.",
+    "consumer_proof": "tid&31 leader selection, single-lane wait and full-warp helper before CTA fence/payload preserved."
+  },
+  "assessment": "Scoped variant saves52B reads and52B writes/candidate from local operands versuspacked790, adds104B shared reads inside13-addloop plus8B final decode, and15static loop slots. Producer unchanged and local-free. Hints remain late; current native evidence supports a bounded traffic/lifetime tradeoff, not a GPU performance claim.",
+  "occupancy": "Same80registers/32832shared permits existing conditional3CTA resource calculation; stack320 vs312 does not itself change that arithmetic. Actual loaded JIT/occupancy unmeasured.",
+  "gpu_executed": false,
+  "source_modified": false,
+  "limits": [
+    "No measured runtime/cache/bank/atomic transactions, cycles or throughput.",
+    "ptxas496/312 aggregate spill metrics are not repeated-loop traffic.",
+    "Numerical/control/audit qualification is separate from this production sm89 review."
+  ],
+  "original_report_sha256": "204f7887b6c60a5e843c90ebd8f8fcdc97bf54236459bca9e822e1e6c50c181d",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

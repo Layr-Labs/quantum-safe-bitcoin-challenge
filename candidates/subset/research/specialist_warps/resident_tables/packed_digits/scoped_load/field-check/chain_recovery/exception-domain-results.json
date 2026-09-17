@@ -1,0 +1,118 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "actual_helper_cases": {
+    "equal": 159,
+    "opposite": 159,
+    "ordinary": 159,
+    "unguarded_doubling_failures_detected": 159
+  },
+  "prefix_bounds": [
+    {
+      "window": 0,
+      "end_bit": 16,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffffffffffffffffff0001",
+      "max_signed_difference": "0xffffffff0000000000000000000000000000000000000000000000000000ffff"
+    },
+    {
+      "window": 1,
+      "end_bit": 32,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffffffffffffff00000001",
+      "max_signed_difference": "0xffffffff000000000000000000000000000000000000000000000000ffffffff"
+    },
+    {
+      "window": 2,
+      "end_bit": 48,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffffffffff000000000001",
+      "max_signed_difference": "0xffffffff00000000000000000000000000000000000000000000ffffffffffff"
+    },
+    {
+      "window": 3,
+      "end_bit": 64,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffffffff0000000000000001",
+      "max_signed_difference": "0xffffffff0000000000000000000000000000000000000000ffffffffffffffff"
+    },
+    {
+      "window": 4,
+      "end_bit": 80,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffffffff00000000000000000001",
+      "max_signed_difference": "0xffffffff000000000000000000000000000000000000ffffffffffffffffffff"
+    },
+    {
+      "window": 5,
+      "end_bit": 96,
+      "min_signed_difference": "0xffffffffffffffffffffffffffffffff000000000000000000000001",
+      "max_signed_difference": "0xffffffff00000000000000000000000000000000ffffffffffffffffffffffff"
+    },
+    {
+      "window": 6,
+      "end_bit": 112,
+      "min_signed_difference": "0xffffffffffffffffffffffffffff0000000000000000000000000001",
+      "max_signed_difference": "0xffffffff0000000000000000000000000000ffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 7,
+      "end_bit": 128,
+      "min_signed_difference": "0xffffffffffffffffffffffff00000000000000000000000000000001",
+      "max_signed_difference": "0xffffffff000000000000000000000000ffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 8,
+      "end_bit": 144,
+      "min_signed_difference": "0xffffffffffffffffffff000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffff00000000000000000000ffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 9,
+      "end_bit": 160,
+      "min_signed_difference": "0xffffffffffffffff0000000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffff0000000000000000ffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 10,
+      "end_bit": 176,
+      "min_signed_difference": "0xffffffffffff00000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffff000000000000ffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 11,
+      "end_bit": 192,
+      "min_signed_difference": "0xffffffff000000000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffff00000000ffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "window": 12,
+      "end_bit": 208,
+      "min_signed_difference": "0xffff0000000000000000000000000000000000000000000000000001",
+      "max_signed_difference": "0xffffffff0000ffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ],
+  "added_chain_scalar_cases": 214,
+  "whole_chain_report": "guarded-curve-results.json",
+  "geometry_widths": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+  ],
+  "small_bits": 224,
+  "derivation": "For odd1<=M<=n, C=((M>>224)|1)*2^224; low prefix L=M-((M>>S)|1)*2^S. Bounds exclude equal/opposite/infinite prefixes through window12. Final window13 is guarded; all-input proof is resident_tables/exception-design.md.",
+  "negative_controls": "Actual inherited incomplete final helper, tested above; old52MiB whole-chain controls are separately retained in cold_seed/.",
+  "audit_sha256": "56d632037a7ccc721b3110a78725cd024bac9ef561db2ea1d78b18c46e5470ed",
+  "gpu_executed": false,
+  "limits": "Check the actual final-add helper, cold-prefix bounds and constructed scalars.\n\nOpenSSL executes field operations; a separate Python affine law is the oracle.\nThe prefix argument assumes a valid nonzero order-n runtime base and the stated\nregular odd recoding identity. This is not GPU execution or an exhaustive CUDA\nverification of all input hashes.\n",
+  "original_report_sha256": "dc5c38ccf5b841467e3f166cf7adbc6a6166de10bc468b129d6bc2ff3bc007fd",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

@@ -1,0 +1,21 @@
+{
+  "status": "COMPILED_WEAK_HELPER_MUTATION_REJECTED",
+  "source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "mutation": "Actual weak helper shared ZZ update replaced by self-store in CPU projection only",
+  "compiled_projection_executed": true,
+  "exit_code": 1,
+  "independent_curve_failure": {
+    "status": "FAIL",
+    "validation_level": "CPU-extracted point chain versus independent OpenSSL scalar multiplication",
+    "case_index": 0,
+    "scalar_hex": "0xffffffff0000fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+    "runtime_base_scalar_hex": "0x1",
+    "source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+    "gpu_executed": false,
+    "reason": "Extracted chain does not represent the required finite/infinite point."
+  },
+  "checker_sha256": "c3882ceae9b491d05ca510afd89115ac94361ea1da1a0ecb8e4b542565402815",
+  "candidate_modified": false,
+  "gpu_executed": false,
+  "original_report_sha256": "f8fd4f7c2625e52ed3dd99050e02ec1fb58bd26957ad955d91b1be63c1446774"
+}

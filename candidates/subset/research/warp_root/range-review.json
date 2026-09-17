@@ -1,0 +1,47 @@
+{
+  "status": "BOUNDED16_RANGE_PROOF_AND_FALLBACK_PLAN_APPROVED_WITH_IMPLEMENTATION_OBLIGATIONS",
+  "reviewed_at_utc": "2026-09-17T15:26:36.885566+00:00",
+  "review_scope": "Preservedunbounded6cbsource and proposed16batchcap; no cappedsourceimplementation reviewed.",
+  "prototype_fingerprint": "6cb9b00606f541cd0894a48308fa9771dd68efe4bb269f49515e1f8e14d4435d",
+  "header_sha256": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+  "tree_header_sha256": "6d0f6c5e1f01c22bd39b4f494acba8b1b7b7de7593185098aec23fbf5a675529",
+  "corrected_GPUMath_sha256": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+  "document_sha256": "8e338402f7456980956c726e35c26f4d0c933f8eb6772436aae42afc782121f3",
+  "production_input": "canonicalnonzero x in[1,p-1]",
+  "proof_results": {
+    "terminal_matrix_row_L1_max": "2^62",
+    "post_subtract_transient_row_bound": "2^(t+1),absorbedbynextctz>=1; subtractonlyt<=61",
+    "signed_coefficient_overflow": false,
+    "UV_state_max": "p",
+    "UV_numerator_abs_strict_upper": "2^318",
+    "RS_after_t_batches_abs_bound": "1+t*p",
+    "RS_after16_abs_strict_upper": "2^260",
+    "sixteenth_batch_row_plus_correction_abs_strict_upper": "2^322",
+    "signed_working_bits": 384,
+    "retained_state_bits": 320,
+    "modulus_coefficient_identity_verified": "C*MM64 ==1 modulo2^62",
+    "congruences": "U=R*x,V=S*x modulo p preserved by signadjustedrows,mpcorrectionandexactdivision",
+    "conditional_final_result": "IfV=0beforecap,U=gcd(p,x)=1 and canonicalR isx^-1."
+  },
+  "termination": {
+    "unconditional8batch_theorem_established": false,
+    "unconditional16batch_theorem_established": false,
+    "unbounded_helper_qualified_by_this_review": false,
+    "cap_rationale": "Establishfinitewidth/progress bound fornewcooperativephase; delegatecapcases toexistingbaselineModInv. ExactbinaryGCDterminationboundnotautomaticallyvalidforapproximatehighmatrixsimulation."
+  },
+  "implementation_obligations": [
+    "Uniformbatchcounter/false-returnforall32lanes; atmost16matrices; no17thbatchcollective.",
+    "Do notpublishtemporaryroot; originalsharedtree[1] remainscanonicaluntilsuccess/fallbackwrite.",
+    "False:ecid0reloadfouroriginalwords,root[4]=0,unchanged_ModInv,thenpublishfourwords.",
+    "ReconvergefirstECwarp and preserveexistingfiveECjoins/all192participants.",
+    "Actualcappedhelper/tree positivecontrols and forcedcap0/1fallback; mutationsmustdetectpartial-rootreuse,leader-onlyHM43andmisplacedcollective."
+  ],
+  "performance_claim": null,
+  "candidate_stage_runner_modified": false,
+  "new_builds_GPU_or_VM_actions": false,
+  "external_calls": false,
+  "artifacts_written": [
+    "range-review.md",
+    "range-review.json"
+  ]
+}

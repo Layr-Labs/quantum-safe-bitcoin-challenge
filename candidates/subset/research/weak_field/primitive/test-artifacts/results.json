@@ -1,0 +1,105 @@
+{
+  "status": "PASS_HOST_AND_EXTRACTED_PTX_SEMANTICS",
+  "header_sha256": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+  "checker_sha256": "544837da28b781656c3c30352e1f067f5275310d799dbf21c19d4c6637d2b064",
+  "base_ptx_model_sha256": "0aef5e92c85599f1d029e1b1dbf72aa6838e2f349cf25a6a662569bc898d12b3",
+  "extension_sha256": "65437069b8a49f6f2b35a067124af57a4be9c2fddd3bcc4a30287907d0d83cee",
+  "ptx_sha256": {
+    "add": "1a630ba9e685c35eece729c98c4dff52b1775e5c62ac58156dd17281967e3aee",
+    "sub": "55de8c39452e0f330ae7142d8d91cc76a149bf522e0ffcbd6fbe7dac30286194",
+    "normalize": "a86461d1331153073aa5d8edbacdb7acfe0f11017962c9eb0e4043e0769e5d72"
+  },
+  "binary_pair_cases": 13024,
+  "host_and_ptx_binary_operations_each": 26048,
+  "host_and_ptx_normalize_cases_each": 13024,
+  "host_zero_cases": 13024,
+  "host_inplace_normalize_cases": 13024,
+  "host_overlap_cases": 17824,
+  "canary_words": 283392,
+  "first_second_fold_occurrences": {
+    "add": [
+      6185,
+      6
+    ],
+    "sub": [
+      6666,
+      13
+    ]
+  },
+  "borrow_semantic_probe_cases": 288,
+  "negative_controls": {
+    "add_drop_second_fold": {
+      "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": "0x2000007a0",
+      "mutant": "0x1000003cf",
+      "residue_wrong": true
+    },
+    "sub_drop_second_fold": {
+      "a": "0x0",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85f",
+      "mutant": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "residue_wrong": true
+    },
+    "add_drop_high_first_fold": {
+      "a": "0xffffffffffffffff",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "expected": "0x10000000000000000",
+      "mutant": "0x1000000010000000000000000",
+      "residue_wrong": true
+    },
+    "sub_drop_high_first_fold": {
+      "a": "0x0",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000",
+      "expected": "0xfffffffefffffc2f",
+      "mutant": "0xffffffffffffffffffffffffffffffffffffffff00000000fffffffdfffff85e",
+      "residue_wrong": true
+    },
+    "normalize_drop_carry": {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "b": "0x0",
+      "expected": "0x0",
+      "mutant": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "residue_wrong": false
+    }
+  },
+  "compiled_host_negative_controls": {
+    "host_add_second_fold": {
+      "compilation_completed": true,
+      "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": "0x2000007a0",
+      "mutant": "0x1000003cf",
+      "mutated_header_sha256": "4f3118263a50bdcdd892dd9d4d2252b9533c21d7cbd2f224fe5f4411cab8fece"
+    },
+    "host_sub_second_fold": {
+      "compilation_completed": true,
+      "a": "0x0",
+      "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85f",
+      "mutant": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+      "mutated_header_sha256": "b84908eda36b9ab9ccc78cf36656d1102dbde3688e56bef8717d9e7a68912ffd"
+    },
+    "host_normalize_condition": {
+      "compilation_completed": true,
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "b": "0x0",
+      "expected": "0x0",
+      "mutant": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "mutated_header_sha256": "df00d953e0c66cd00defcce4a749171ef42c9d24ec44e2cfcaab4ebeb2f20b66"
+    },
+    "host_zero_omits_p": {
+      "compilation_completed": true,
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+      "b": "0x0",
+      "expected": "0x1",
+      "mutant": "0x0",
+      "mutated_header_sha256": "fad04385bc00dd587c711059a65735deff638eb529b7e2c64919ed7897ab8f3a"
+    }
+  },
+  "gpu_executed": false,
+  "native_cuda_compiled": false,
+  "limits": "CPU actual host C++ plus source-extracted straight-line PTX semantic model; not native CUDA execution, integration, timing or register allocation. Arbitrary overlaps are aligned uint64 limb ranges; no unaligned-pointer contract.",
+  "original_report_sha256": "be0b2e2580cf4c0fd8af4bcb4fe3a772ed81b5a1a6beb384cd04ab168a10e76d"
+}

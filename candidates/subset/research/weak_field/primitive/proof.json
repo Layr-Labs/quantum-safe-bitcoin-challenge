@@ -1,0 +1,37 @@
+{
+  "status": "FULL_INPUT_RANGE_ALGEBRA_AND_FINITE_SOURCE_CHECKS_PASS",
+  "header_sha256": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+  "contract": {
+    "U": "115792089237316195423570985008687907853269984665640564039457584007913129639936",
+    "C": "4294968273",
+    "p": "115792089237316195423570985008687907853269984665640564039457584007908834671663",
+    "weak_interval": "0<=x<U",
+    "abi": "four aligned little-endian uint64 limbs; eight physical32-bit PTX words",
+    "aliasing": "arbitrary overlaps of valid aligned limb ranges"
+  },
+  "add_second_fold_bound": {
+    "condition": "j=1 after full-width s+kC fold",
+    "r_min": 0,
+    "r_max": 4294968271,
+    "final_max": 8589936544,
+    "fits_low64": true
+  },
+  "sub_second_fold_bound": {
+    "condition": "j=1 after full-width s-kC fold; initial borrow implies s>=1",
+    "low64_min": 18446744069414583344,
+    "low64_min_above_C": true,
+    "final_min": "115792089237316195423570985008687907853269984665640564039457584007904539703391",
+    "final_max": "115792089237316195423570985008687907853269984665640564039457584007908834671662"
+  },
+  "normalization": "Since U<2p, a+C overflow iff a>=p selects a-p; at most one reduction",
+  "residue_zero_representatives": [
+    "0",
+    "115792089237316195423570985008687907853269984665640564039457584007908834671663"
+  ],
+  "proof_text": "README.md",
+  "proof_text_sha256": "30138ddb8f7d4af362bae8ca565f3861bc2ad42692826b17eb04ed16e28b3a6c",
+  "cpu_result": "test-artifacts/results.json",
+  "gpu_executed": false,
+  "native_cuda_compiled_by_this_component": false,
+  "original_report_sha256": "aeed9b809ff90e013907c4738040593d4d17ae23f00d85175a0963ae18fc7474"
+}

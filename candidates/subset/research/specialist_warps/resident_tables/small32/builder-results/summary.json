@@ -1,0 +1,110 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "008f904cfb385d030c15324690bbbc5d662777c4547d8db5442b3c1b509dedfd",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "6d7b7d770659b2964a49414b595bbed98d7c000f64b655e3fc779b96fabf6202",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "3db5ee39543c7c0295f9113e345cc38f28d5a409b50d9cd9504976294dc24479",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "checker_sha256": "e8658dd663b5fb6df2b202f00f8f40cbe5d45d86a6e780855b5392c01e4200d4",
+  "source_files_checked": {
+    "compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "compact_table_device.cuh": "6d7b7d770659b2964a49414b595bbed98d7c000f64b655e3fc779b96fabf6202",
+    "compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0"
+  },
+  "adaptors": {
+    "ladder_affine": {
+      "path": "research/wide_windows/check_builder.py",
+      "sha256": "cea22113adbc5008d200512037f0fbcd81b7826555dd877191a7716c9b9c83eb",
+      "projection_sha256": "4c0dc0521b245b6c40dd3a6359e1d3059f81b17ff97fffc9ffa98e85dadbc567",
+      "change": "Execute decoder exhaustively for all524288entries; actual ladder/affine functions unchanged."
+    },
+    "checkpoint_pipeline": {
+      "path": "research/pr86_failure/check_builder_pipeline.py",
+      "projection_sha256": "fc5b46ab207e069315cbe267263512431c47c7803184b99f146cba82e0618918",
+      "change": "Include only original full-CTA inverse APIs used by builder; unused search192/224subgroup bodies omitted, actual startup checkpoint algorithms unchanged."
+    }
+  },
+  "descriptor_check": {
+    "status": "PASS",
+    "scope": "Actual geometry/declaration/decoder source on CPU; independent exact16bit geometry oracle.",
+    "descriptor_windows": 16,
+    "decode_cases": 524288,
+    "boundary_sentinel_checked": true,
+    "runs": [
+      {
+        "mutation": null,
+        "projection_sha256": "f1765d2d9b1a91b3c8689181e906fb0c54bc936ee6ef23ca17627b4df14d91e4",
+        "compile_pass": true,
+        "exit_code": 0,
+        "stdout": "DESCRIPTOR_AND_ALL524288_DECODES_PASS\n",
+        "stderr": ""
+      },
+      {
+        "mutation": "hi shift8 to9",
+        "projection_sha256": "393bf22c88fad30945f26d34ab1534f9aa75512f24aedd9444ee4e983fc20751",
+        "compile_pass": true,
+        "exit_code": 3,
+        "stdout": "",
+        "stderr": "DECODE_MISMATCH t=128 expected_hi=1 got_hi=0\n"
+      }
+    ]
+  },
+  "allocation_bytes": {
+    "table": 33554432,
+    "host_L": 262144,
+    "host_H": 262144,
+    "device_L": 262144,
+    "device_H": 262144,
+    "roots": 131072,
+    "tree": 33554432,
+    "super_roots": 512,
+    "root_tree": 131072
+  },
+  "peak_device_bytes": 67895808,
+  "dispatch": {
+    "chunk_capacity_entries": 1048576,
+    "actual_table_entries": 524288,
+    "chunks": 1,
+    "root_hierarchy_counts_tested": [
+      1,
+      255,
+      256,
+      257,
+      2047,
+      2048
+    ],
+    "prepare_finish_blocks": 2048,
+    "root_groups": 8,
+    "super_root_active_lanes": 8,
+    "root_blocks_capacity": 4096,
+    "group_capacity": 16,
+    "identity_participants": "Full256thread checkpoint blocks and root-inverse block; inactive super-root lanes useidentity."
+  },
+  "bounds_proof": "For0<=t<2^19,ch=t>>15 is0..15,m=2*(t-(ch<<15))+1 isodd1..65535,hi=m>>8 is0..255,lo=m&255 isodd1..255. Lastentrywritesbytes[33554368,33554432), nooverflow. H[0]unused; otherH=hi*256base,L=lobase. Theirsum anddifference arenonzero modn becauseinteger0<hi*256\u00b1lo<65536<n andmultipliers2^(16ch),runtimecoef areinvertiblemodprimeorder.",
+  "host_review": "Highladder capacity checked. Every CUDA allocation/copy/launch/sync/free checked; device synchronization precedes scratchfree andspotcheck. Scratch remains1Mentry capacity intentionally; actual tablehalfchunk. Pointserialization andspot-check OpenSSL returns now checked. Spotcorners include127/128/129firsthigh-radixtransition.",
+  "results": {
+    "ladder_affine": "builder-results/ladder-affine.json",
+    "checkpoint_pipeline": "builder-results/checkpoint-pipeline.json"
+  },
+  "gpu_executed": false,
+  "limits": "OpenSSL host field substitutions and CPU cooperative threads, not actual PTX arithmetic/CUDA execution. Full decoder domain andfullhostladders checked; selectedtableentries/hierarchycases, notall524288GPUtableoutputs. Source-lifetime review, notCUDAfaultinjection.",
+  "original_report_sha256": "58c5531341b5e3f210ef6763ec774065c7dbd1e7c9b0e2acd41348138c60b8c6",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

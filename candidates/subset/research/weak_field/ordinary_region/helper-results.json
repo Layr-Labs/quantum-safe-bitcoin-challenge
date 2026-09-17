@@ -1,0 +1,185 @@
+{
+  "status": "PASS_ACTUAL_HOST_WEAK_HELPER_SYNTHETIC_POLYNOMIAL",
+  "source_fingerprint": "3ac276e408a4bb399ea805a56fc9e27831a7bbd6da8df5159f16e95f311c5912",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "checker_sha256": "b15dc8791c09dffa7f2f5a134210d7818efe8a7ba7fc9089f8b1c43ac074519c",
+  "actual_helper_sha256": "55cacd2fd4bf4e96083a3d8e263dc216c7f278758b95338c62ae78d498f45182",
+  "actual_header_sha256": {
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f"
+  },
+  "ordinary_cases": 1591,
+  "total_calls": 7682,
+  "owners_checked": 192,
+  "defer_modes": [
+    false,
+    true
+  ],
+  "alias_modes": {
+    "0": "separate affine/state buffers",
+    "1": "X2 aliases X",
+    "2": "Y2 aliases Y",
+    "3": "Yoff aliases Y",
+    "4": "X2/Y2 alias X/Y respectively",
+    "5": "Yoff aliases Y2"
+  },
+  "weak_output_cases": 694,
+  "results": {
+    "positive": {
+      "compile_exit": 0,
+      "cases_checked_before_failure": 7682,
+      "generated_cpp_sha256": "0f8246eeea3053017ebf5aae055db2ec3be550cd6f019953e1c5f71a3961c6b1",
+      "failure": null
+    },
+    "drop_affine_anchor": {
+      "compile_exit": 0,
+      "cases_checked_before_failure": 24,
+      "generated_cpp_sha256": "0157062fbfae108b454e1dfae7bb1ca8dfa44c5f07474d9feadaccf4ac35e66b",
+      "failure": {
+        "case": 24,
+        "diagnostic": "POLYNOMIAL_OR_BOUNDARY_MISMATCH",
+        "returncode": 0,
+        "defer": 0,
+        "alias": 0,
+        "owner": 24,
+        "input": [
+          "0x0",
+          "0x2",
+          "0x3",
+          "0x4",
+          "0x5",
+          "0x6",
+          "0x7"
+        ],
+        "expected": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffff8c4",
+          "0x201ac",
+          "0x2a3",
+          "0x34bc"
+        ],
+        "raw": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffff0e4",
+          "0xde14",
+          "0x2a3",
+          "0x34bc"
+        ],
+        "normalized": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffff0e4",
+          "0xde14",
+          "0x2a3",
+          "0x34bc"
+        ]
+      }
+    },
+    "omit_ZZ_update": {
+      "compile_exit": 0,
+      "cases_checked_before_failure": 24,
+      "generated_cpp_sha256": "017af5fefe5f47cff43dc11ef839d2ee590e06220b5d4ba7cdacb31af511269e",
+      "failure": {
+        "case": 24,
+        "diagnostic": "POLYNOMIAL_OR_BOUNDARY_MISMATCH",
+        "returncode": 0,
+        "defer": 0,
+        "alias": 0,
+        "owner": 24,
+        "input": [
+          "0x0",
+          "0x2",
+          "0x3",
+          "0x4",
+          "0x5",
+          "0x6",
+          "0x7"
+        ],
+        "expected": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffff8c4",
+          "0x201ac",
+          "0x2a3",
+          "0x34bc"
+        ],
+        "raw": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffff8c4",
+          "0x201ac",
+          "0x3",
+          "0x34bc"
+        ],
+        "normalized": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffff8c4",
+          "0x201ac",
+          "0x3",
+          "0x34bc"
+        ]
+      }
+    },
+    "omit_deferred_Y_boundary_normalization": {
+      "compile_exit": 0,
+      "cases_checked_before_failure": 0,
+      "generated_cpp_sha256": "875743be4219bc01b2b9be49a168ba4fb081a1825eb9ab41fa502b872a236780",
+      "failure": {
+        "case": 0,
+        "diagnostic": "POLYNOMIAL_OR_BOUNDARY_MISMATCH",
+        "returncode": 0,
+        "defer": 0,
+        "alias": 0,
+        "owner": 0,
+        "input": [
+          "0x0",
+          "0x1",
+          "0x0",
+          "0x0",
+          "0x0",
+          "0x0",
+          "0x0"
+        ],
+        "expected": [
+          "0x1",
+          "0x1",
+          "0x0",
+          "0x0"
+        ],
+        "raw": [
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+          "0x0",
+          "0x0"
+        ],
+        "normalized": [
+          "0x1",
+          "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+          "0x0",
+          "0x0"
+        ]
+      }
+    }
+  },
+  "actual_host_primitive_scope": "qsb_weak_product.cuh and qsb_weak_addsub.cuh included unchanged; Load256 is memmove and the one canonical affine-Y sum is weak-add+normalize. Synthetic polynomial inputs, not necessarily curve points.",
+  "boundary_scope": "Actual qsb_weak_normalize on all four returned state fields, checked against canonical polynomial values. No final guarded helper or recovery execution here.",
+  "limitations": [
+    "No CUDA/PTX primitive execution in this checker",
+    "No full curve or synchronization proof",
+    "No GPU throughput",
+    "Distinct X/Y output arrays are an ABI precondition; tested aliases concern affine input pointers only"
+  ],
+  "gpu_executed": false,
+  "candidate_modified": false,
+  "original_report_sha256": "4745564e5f0c63221ed55d1baec28e882697ec27f2d8627ac918346f37310009"
+}

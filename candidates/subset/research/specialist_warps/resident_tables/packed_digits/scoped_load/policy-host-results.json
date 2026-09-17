@@ -1,0 +1,82 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "host_cases": 180,
+  "injected_failures": 30,
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "fde5b39af85cc293805454d808d553dff1830ddb88ee74ac852d4e966f8f71b2",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "cdc8b3ad6e11791153f7cd1dbb290e7a7fc8e22a2d60ab7e4f481b363f453cd0",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "component_sha256": {
+    "compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53"
+  },
+  "independent_geometry": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+  ],
+  "actual_after_build_call_verified": true,
+  "extra_path_cases": 8,
+  "negative_controls": {
+    "old_cold_prefix_boundary": {
+      "detected": true,
+      "returncode": -6,
+      "stderr": "libc++abi: terminating due to uncaught exception of type std::runtime_error: L2 policy must cover exactly the complete32MiB table"
+    },
+    "wrong_hot_bytes_48MiB": {
+      "detected": true,
+      "returncode": -6,
+      "stderr": "libc++abi: terminating due to uncaught exception of type std::runtime_error: L2 policy must cover exactly the complete32MiB table"
+    },
+    "wrong_window_pointer": {
+      "detected": true,
+      "returncode": -6,
+      "stderr": "Assertion failed: (a->accessPolicyWindow.base_ptr==(void*)uintptr_t(0x1000)), function cudaStreamSetAttribute, file check.cpp, line 33."
+    },
+    "missing_stream_failure_restore": {
+      "detected": true,
+      "returncode": -6,
+      "stderr": "Assertion failed: (limit==initial_limit), function main, file check.cpp, line 163."
+    },
+    "missing_clamped_limit_restore": {
+      "detected": true,
+      "returncode": -6,
+      "stderr": "Assertion failed: (limit==(want?HOT:p)), function main, file check.cpp, line 154."
+    }
+  },
+  "checker_sha256": "08dbf8f24a5b41885f03c5a3154de177948bfa5b92489080f559b4185432a6cc",
+  "checks": "Exact32MiBfulltable and sentinel, independently specified sixteen16-bit windows, defaultstream/device/pointer ownership, insufficient/unsupported limits, effective limit, rollback, unrelated/fatal error visibility, after-build placement.",
+  "projection_sha256": "5e3758670613441d163662ee7a3995c0ff10fad115afcb0810257958f944756f",
+  "gpu_executed": false,
+  "limits": "Execute the actual optional cache-policy host code against a fault-injected API.\n\nChecks bounds, pointer/stream ownership, rollback and visible unexpected errors.\nThis does not simulate cache residency, CUDA runtime behavior or GPU performance.\n",
+  "original_report_sha256": "04fd6c3e9350c944bf24db2d3ec94a5f081da7d27beb4b20d623fdea8128da83",
+  "public_redaction": "Local paths omitted; original main report preserved."
+}

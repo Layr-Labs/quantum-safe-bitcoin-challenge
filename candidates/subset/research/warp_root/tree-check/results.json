@@ -1,0 +1,273 @@
+{
+  "status": "PASS_ACTUAL_EC192_TREE_WITH_COOPERATIVE_HM43_HOST_ROOT",
+  "source_fingerprint": "6cb9b00606f541cd0894a48308fa9771dd68efe4bb269f49515e1f8e14d4435d",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "qsb_weak_addsub.cuh": "31f72e474a8e42ae291b71a4f7250a3bc43c489c367a9787797f74169c52c88e",
+    "qsb_weak_product.cuh": "c4d2de1ef46fe120e52b9360642705ed5ebbc1c1581af49612600323c52d9b1f",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "8492acb4a6aaebbd09d8d10cf011bb5849f602b189e94fa1d5dbc92a341987fd",
+    "tests/gpu_epochs/compact_table_device.cuh": "b394857cfaf15a933f3f414e18085e0cabd5bafeeb9f9e1ee0cf0708319cde2e",
+    "tests/gpu_epochs/compact_table_host.cuh": "acf6a098f458dc9afa1c35efa2914b5289338bc5ad7158f536aaf3ded4040ad9",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "33d80553549b3947614f8b3ee7c90f04ed5b64020ae47be6af344a4ca43572ed",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "940f4c6ad4272a71d38533123a809c8f1affc7a9e0beca959db48380f24cd1fc",
+    "tests/gpu_epochs/l2_policy.cuh": "1bea030ad440f7f0fe721c749b0c0f2fb8969f02cf6e0d32e49f7d0f9dd37b53",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "28fbadafb3a32d4437d7cb4584d06ffc40eb33582d7d8ec2cf4b96844d902945",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "6d0f6c5e1f01c22bd39b4f494acba8b1b7b7de7593185098aec23fbf5a675529",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "577d3863fd13e74cec0952f8016d656df9623229a4246036affd7eab7bfb2fc9"
+  },
+  "support_sha256": {
+    "host_support.hpp": "6e1bedc84a1a1fd9c043af4f76782cc8ead6a635508d94acb06317d5d4d9343a",
+    "host_warp.hpp": "3111f2ec44d1102188a755779377bd5110b4fa8163efc1aeb44c3bd99fdf2000",
+    "field_projection.hpp": "52e4e1817c0baef4c64c5348f03a2b749a6c27c51f30db58e3f0fa86e4fa2cc2"
+  },
+  "checker_sha256": "d1433747fbb3edae884c9fa8c0b4b57bc4e8b8321eeab5a2e509e769f527e010",
+  "inherited_checker_sha256": "5ac04822f674144de7aae14f9765d7a99f3b8f1d3dbf89517d1093e9304ffa4f",
+  "physical_participants": [
+    64,
+    255
+  ],
+  "root_physical_participants": [
+    64,
+    95
+  ],
+  "tails": [
+    0,
+    1,
+    31,
+    32,
+    33,
+    191,
+    192
+  ],
+  "values_checked": 1344,
+  "canaries_checked": 2688,
+  "results": [
+    {
+      "actual_tree_helper_sha256": "f1a7e75275920b5ec5b844039187bee5b411e38662e62fcb04456fcdf4dcbdf5",
+      "actual_root_region_sha256": "1da0a42c9a04825a621e2cdbcff5059b8e848969d4c7695e21bdd7aeaeba32db",
+      "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+      "unchanged_nonroot_helper_bytes": true,
+      "generated_cpp_sha256": "b6ffd51dcc2251c6ed84bd3082dd6311f50e9a1df427c1691007c46f5dcb2766",
+      "mutation": "",
+      "cases": [
+        {
+          "active": 0,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 79,
+          "hm43_ballots": 65,
+          "root_collective_generations": 144
+        },
+        {
+          "active": 1,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 92,
+          "hm43_ballots": 78,
+          "root_collective_generations": 170
+        },
+        {
+          "active": 31,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 92,
+          "hm43_ballots": 78,
+          "root_collective_generations": 170
+        },
+        {
+          "active": 32,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 92,
+          "hm43_ballots": 78,
+          "root_collective_generations": 170
+        },
+        {
+          "active": 33,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 92,
+          "hm43_ballots": 78,
+          "root_collective_generations": 170
+        },
+        {
+          "active": 191,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 92,
+          "hm43_ballots": 78,
+          "root_collective_generations": 170
+        },
+        {
+          "active": 192,
+          "outputs": 192,
+          "canaries": 384,
+          "multiply": 669,
+          "cooperative_root_inverse": 1,
+          "subgroup_joins": 5,
+          "tree_warp_joins": 11,
+          "initial_limb_writes": 1536,
+          "cross_warp_reads": 1920,
+          "root_callers": 32,
+          "hm43_exchanges": 92,
+          "hm43_ballots": 78,
+          "root_collective_generations": 170
+        }
+      ],
+      "compiled": true,
+      "returncode": 0,
+      "diagnostics": []
+    },
+    {
+      "actual_tree_helper_sha256": "f1a7e75275920b5ec5b844039187bee5b411e38662e62fcb04456fcdf4dcbdf5",
+      "actual_root_region_sha256": "1da0a42c9a04825a621e2cdbcff5059b8e848969d4c7695e21bdd7aeaeba32db",
+      "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+      "unchanged_nonroot_helper_bytes": true,
+      "generated_cpp_sha256": "7b4c39cbda21c645c18719afcc74d5ea04638ae1cf6b06931555011339e1c184",
+      "mutation": "wrong-physical-argument",
+      "compiled": true,
+      "returncode": -6,
+      "diagnostics": [
+        "COLLECTIVE_BAD_LANE lane=23 source=-1",
+        "COLLECTIVE_BAD_LANE lane=31 source=-1",
+        "COLLECTIVE_BAD_LANE lane=0 source=-1",
+        "COLLECTIVE_BAD_LANE lane=30 source=-1",
+        "COLLECTIVE_BAD_LANE lane=7 source=-1",
+        "COLLECTIVE_BAD_LANE lane=22 source=-1",
+        "COLLECTIVE_BAD_LANE lane=3 source=-1",
+        "COLLECTIVE_BAD_LANE lane=15 source=-1",
+        "COLLECTIVE_BAD_LANE lane=18 source=-1",
+        "COLLECTIVE_BAD_LANE lane=6 source=-1",
+        "COLLECTIVE_BAD_LANE lane=28 source=-1",
+        "COLLECTIVE_BAD_LANE lane=10 source=-1",
+        "COLLECTIVE_BAD_LANE lane=19 source=-1",
+        "COLLECTIVE_BAD_LANE lane=14 source=-1",
+        "COLLECTIVE_BAD_LANE lane=13 source=-1",
+        "COLLECTIVE_BAD_LANE lane=5 source=-1",
+        "COLLECTIVE_BAD_LANE lane=4 source=-1",
+        "COLLECTIVE_BAD_LANE lane=12 source=-1",
+        "COLLECTIVE_BAD_LANE lane=26 source=-1",
+        "COLLECTIVE_BAD_LANE lane=24 source=-1",
+        "COLLECTIVE_BAD_LANE lane=1 source=-1",
+        "COLLECTIVE_BAD_LANE lane=25 source=-1",
+        "COLLECTIVE_BAD_LANE lane=2 source=-1",
+        "COLLECTIVE_BAD_LANE lane=8 source=-1",
+        "COLLECTIVE_BAD_LANE lane=21 source=-1",
+        "COLLECTIVE_BAD_LANE lane=27 source=-1",
+        "COLLECTIVE_BAD_LANE lane=17 source=-1",
+        "COLLECTIVE_BAD_LANE lane=9 source=-1",
+        "COLLECTIVE_BAD_LANE lane=11 source=-1",
+        "COLLECTIVE_BAD_LANE lane=29 source=-1",
+        "COLLECTIVE_BAD_LANE lane=20 source=-1",
+        "COLLECTIVE_BAD_LANE lane=16 source=-1"
+      ]
+    },
+    {
+      "actual_tree_helper_sha256": "f1a7e75275920b5ec5b844039187bee5b411e38662e62fcb04456fcdf4dcbdf5",
+      "actual_root_region_sha256": "1da0a42c9a04825a621e2cdbcff5059b8e848969d4c7695e21bdd7aeaeba32db",
+      "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+      "unchanged_nonroot_helper_bytes": true,
+      "generated_cpp_sha256": "56ded3f00c672d0f43bd97531b45268c1797a8d714e25af34d175e7a943b0f75",
+      "mutation": "leader-only-caller",
+      "compiled": true,
+      "returncode": 86,
+      "diagnostics": [
+        "QSB_EC192_FAILURE barrier_timeout",
+        "COLLECTIVE_TIMEOUT epoch=0 lane=0 kind=0 arrived=00000001 (host rendezvous timeout, not GPU evidence)"
+      ]
+    },
+    {
+      "actual_tree_helper_sha256": "f1a7e75275920b5ec5b844039187bee5b411e38662e62fcb04456fcdf4dcbdf5",
+      "actual_root_region_sha256": "1da0a42c9a04825a621e2cdbcff5059b8e848969d4c7695e21bdd7aeaeba32db",
+      "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+      "unchanged_nonroot_helper_bytes": true,
+      "generated_cpp_sha256": "a5eca8e605ed8b919915152ff681e2b252bcff43f92d3201f6ae69c0df5f5cdf",
+      "mutation": "missing-guard-lane",
+      "compiled": true,
+      "returncode": 86,
+      "diagnostics": [
+        "QSB_EC192_FAILURE barrier_timeout",
+        "COLLECTIVE_TIMEOUT epoch=0 lane=21 kind=0 arrived=7fffffff (host rendezvous timeout, not GPU evidence)"
+      ]
+    },
+    {
+      "actual_tree_helper_sha256": "f1a7e75275920b5ec5b844039187bee5b411e38662e62fcb04456fcdf4dcbdf5",
+      "actual_root_region_sha256": "1da0a42c9a04825a621e2cdbcff5059b8e848969d4c7695e21bdd7aeaeba32db",
+      "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+      "unchanged_nonroot_helper_bytes": true,
+      "generated_cpp_sha256": "2aa390859830341fdd965c2d076d039f071fbc9499c590a00bd2ffb012d09c77",
+      "mutation": "active-only-root",
+      "compiled": true,
+      "returncode": 86,
+      "diagnostics": [
+        "QSB_EC192_FAILURE barrier_timeout"
+      ]
+    },
+    {
+      "actual_tree_helper_sha256": "f1a7e75275920b5ec5b844039187bee5b411e38662e62fcb04456fcdf4dcbdf5",
+      "actual_root_region_sha256": "1da0a42c9a04825a621e2cdbcff5059b8e848969d4c7695e21bdd7aeaeba32db",
+      "actual_barrier_sha256": "5e5979a04d2f7a1e6c8bd3b5fd8b728e56aae4a345ee666f19a0ab4919427308",
+      "unchanged_nonroot_helper_bytes": true,
+      "generated_cpp_sha256": "ebb3044f83eb50385d9d0cd402e3591479fa7f988d78290bc7bf8f9696db1b62",
+      "mutation": "missing-root-publication",
+      "compiled": true,
+      "returncode": 86,
+      "diagnostics": [
+        "QSB_EC192_FAILURE join_counts"
+      ]
+    }
+  ],
+  "limits": "Actual tree and actual HM43 header execute on host threads. OpenSSL multiplies tree nodes; Python pow independently checks all results. _ModInv is a fail-only stub, never the root implementation. EC barriers abstract exact unchanged protocol as192-thread rendezvous; not CUDA memory/scheduling or GPU performance evidence. Macros/intrinsics projected by separately checked host support.",
+  "gpu_executed": false,
+  "native_cuda_compiled": false,
+  "candidate_changed": false
+}

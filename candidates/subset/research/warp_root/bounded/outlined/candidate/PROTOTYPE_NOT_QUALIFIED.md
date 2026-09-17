@@ -1,0 +1,1 @@
+Isolated bounded HM43 noinline root experiment. Only root declaration qualifier changes. Native call/register/stack effects and GPU behavior unmeasured; do not replace ready3ac from source-only evidence. See outlined/prepared-source.json.

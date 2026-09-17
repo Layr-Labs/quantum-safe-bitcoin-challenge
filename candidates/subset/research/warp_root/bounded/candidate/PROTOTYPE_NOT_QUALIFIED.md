@@ -1,0 +1,1 @@
+Isolated bounded HM43 root experiment. Default16 complete matrix batches, then original scalar-root fallback. Source-only preparation: no CPU/native/GPU qualification yet. Preserve unbounded6cb and ready3ac. See bounded/prepared-source.json and proof-obligations.md.

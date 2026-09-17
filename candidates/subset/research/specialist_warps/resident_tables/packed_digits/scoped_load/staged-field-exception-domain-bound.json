@@ -1,0 +1,232 @@
+{
+  "widths": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+  ],
+  "shifts": [
+    0,
+    16,
+    32,
+    48,
+    64,
+    80,
+    96,
+    112,
+    128,
+    144,
+    160,
+    176,
+    192,
+    208,
+    224,
+    240
+  ],
+  "order": [
+    14,
+    15,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "seed_order_reversed_also_safe": true,
+  "only_top_last_flag_window": 15,
+  "guarded_final_window": 13,
+  "intermediate_count": 13,
+  "table_bytes": 33554432,
+  "B": 224,
+  "H": 208,
+  "final_width": 16,
+  "seed_abs_bound": "115792089210356248756420345214020892766250353992003419616917011526809519390720",
+  "deficit": "432420386565659656852420866394968145599",
+  "gap_margin": "26959535291011309493156476344291570949445239081721743219742804951361",
+  "intermediate_bounds": [
+    {
+      "window": 0,
+      "end_bit": 16,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019630673637144422540572481103610183681",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250353992003419616917011526809519456255",
+      "margin_below_n": "26959946667150639794667015086587210287071484765688151614708642038082"
+    },
+    {
+      "window": 1,
+      "end_bit": 32,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019630673637144422540572481099315281921",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250353992003419616917011526813814358015",
+      "margin_below_n": "26959946667150639794667015086587210287071484765688151614704347136322"
+    },
+    {
+      "window": 2,
+      "end_bit": 48,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019630673637144422540572199628633538561",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250353992003419616917011808284496101375",
+      "margin_below_n": "26959946667150639794667015086587210287071484765688151333233665392962"
+    },
+    {
+      "window": 3,
+      "end_bit": 64,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019630673637144422522125737029900697601",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250353992003419616935458270883228942335",
+      "margin_below_n": "26959946667150639794667015086587210287071484765669704870634932552002"
+    },
+    {
+      "window": 4,
+      "end_bit": 80,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019630673637143213614752866474435543041",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250353992003420825842831141438694096895",
+      "margin_below_n": "26959946667150639794667015086587210287071483556762332000079467397442"
+    },
+    {
+      "window": 5,
+      "end_bit": 96,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019630673557916260026308143510066298881",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250353992082647779431275864403063341055",
+      "margin_below_n": "26959946667150639794667015086587210286992256603173887277115098153282"
+    },
+    {
+      "window": 6,
+      "end_bit": 112,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015087019625481340285887712943950607281029121",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766250359184300278151744640057305848610815",
+      "margin_below_n": "26959946667150639794667015086587205094774626230860523084212312883522"
+    },
+    {
+      "window": 7,
+      "end_bit": 128,
+      "min_A_plus_or_minus_Q": "26959946667150639794667015086679348306716205959077197873671842037761",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020892766590636358924358080380386134241287602175",
+      "margin_below_n": "26959946667150639794667015086246927920150546302224777007276873892162"
+    },
+    {
+      "window": 8,
+      "end_bit": 144,
+      "min_A_plus_or_minus_Q": "26959946667150639794666992786274432143014002886822299832742104268801",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345214020915066995552522626561152635284175171025371135",
+      "margin_below_n": "26959946667150639794666992785842011756448343229969878966347136123202"
+    },
+    {
+      "window": 9,
+      "end_bit": 160,
+      "min_A_plus_or_minus_Q": "26959946667150639793205513449688727755433459589824289461447677706241",
+      "max_A_plus_or_minus_Q": "115792089210356248756420345215482394403581256910207104449633294546465451933695",
+      "margin_below_n": "26959946667150639793205513449256307368867799932971868595052709560642"
+    },
+    {
+      "window": 10,
+      "end_bit": 176,
+      "min_A_plus_or_minus_Q": "26959946667150544013695710968965983276947947528216596309908473774081",
+      "max_A_plus_or_minus_Q": "115792089210356248756420440994992196884304001388692616511240987698004655865855",
+      "margin_below_n": "26959946667150544013695710968533562890382287871364175443513505628482"
+    },
+    {
+      "window": 11,
+      "end_bit": 192,
+      "min_A_plus_or_minus_Q": "26959946660873538059280334323183841250429478006438217036639575736321",
+      "max_A_plus_or_minus_Q": "115792089210356248762697446949407573530086143415211086033019366971273553903615",
+      "margin_below_n": "26959946660873538059280334322751420863863818349585796170244607590722"
+    },
+    {
+      "window": 12,
+      "end_bit": 208,
+      "min_A_plus_or_minus_Q": "26959535291011309493156476344723991336010898738574164086137773096961",
+      "max_A_plus_or_minus_Q": "115792089210356660132559675515531431508545993329629665300883419921775356542975",
+      "margin_below_n": "26959535291011309493156476344291570949445239081721743219742804951362"
+    }
+  ],
+  "exhaustive_negative_final_digits": 32768,
+  "unique_equal_representative": "0xfffffffe0001fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+  "D": "0xffff0000000000000000000000000000000000000000000000000000",
+  "complete_exception_raw_scalars": [
+    "0x0",
+    "0xffff0000000000000000000000000000000000000000000000000000",
+    "0xffffffff0000fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+    "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"
+  ],
+  "counts": {
+    "scalars": 22284,
+    "digits": 356544,
+    "seed_sum_difference": 44568,
+    "intermediate_sum_difference": 579384,
+    "equal_final": 2,
+    "opposite_final": 2,
+    "wrong_top_last_detected": 22284,
+    "wrong_sign_detected": 22284,
+    "wrong_pos_detected": 22170
+  },
+  "witnesses": [
+    {
+      "raw_scalar": "0x0",
+      "odd_M": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "sign": -1,
+      "kind": "opposite",
+      "A": "-115792089210356660132559675515531431508113572943064005644030999055380388397377",
+      "last_Q": "-26959535291011309493156476344723991336010898738574164086137773096960",
+      "last_digit": -65535
+    },
+    {
+      "raw_scalar": "0xffff0000000000000000000000000000000000000000000000000000",
+      "odd_M": "0xfffffffe0001fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "sign": -1,
+      "kind": "equal",
+      "A": "-115792089210356660132559675515531431508113572943064005644030999055380388397377",
+      "last_Q": "26959535291011309493156476344723991336010898738574164086137773096960",
+      "last_digit": 65535
+    },
+    {
+      "raw_scalar": "0xffffffff0000fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "odd_M": "0xfffffffe0001fffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "sign": 1,
+      "kind": "equal",
+      "A": "115792089210356660132559675515531431508113572943064005644030999055380388397377",
+      "last_Q": "-26959535291011309493156476344723991336010898738574164086137773096960",
+      "last_digit": -65535
+    },
+    {
+      "raw_scalar": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "odd_M": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "sign": -1,
+      "kind": "opposite",
+      "A": "-115792089210356660132559675515531431508113572943064005644030999055380388397377",
+      "last_Q": "-26959535291011309493156476344723991336010898738574164086137773096960",
+      "last_digit": -65535
+    }
+  ],
+  "unguarded_final_negative_control_exceptions": 4,
+  "source_fingerprint": "cd3d11f24e6fd42459eed3ba3a431c7f952de506cb1d22dfddc9b291e4c98667",
+  "proof_primitive_sha256": {
+    "__device__ __forceinline__ void gt_recode_setup(": "e8225e22d018eafd88b51b8572a2efb2983e9d02791d2fd093a0b9d51b4a51b4",
+    "__device__ __forceinline__ uint32_t gt_field_bits_v(": "6aeb908a93de6d1a4e28d20f41d39838a1ee1cb96e0306826c9f3702cc27f90b",
+    "__device__ __forceinline__ void gt_direct_digit(": "c291852d21658448963484bc6974568f3dec63b79530b46143ca74b2058081fa",
+    "__device__ __forceinline__ void qsb_asym_last_add(": "b56ee3e6b8a90566d9ef5773d10014dfc29f724380c0749157f8851a924fc4f7"
+  },
+  "actual_chain_sha256": "925ece061aba122956afd5f6080ad96942d2bd72c713c82284c4470d2c403109",
+  "actual_pack_and_unpack_helpers_sha256": "3f8cf2316acfa3124ba830a3e57d3ce7c83c5deed925f36cb085b66bcd0c6f8b",
+  "packing_equivalence_argument": "For window c=4k+j, f extracts bits16c+1..16c+16 of original M, with the higher-limb bit stitched at j=3. Let t=f>>15. Non-top idx=(f XOR(t-1))&32767 and neg=(t XOR1) XORglobal_sign reproduce the signed odd digit; top uses idx=f&32767 and global_sign. Cell=(idx|(neg<<15)) is recovered exactly by the consumer mask/shift. Rewriting M[k] is safe because later groups only read original M[k+1] and higher. This transfers the unchanged recoder domain theorem, supported by source-bound finite actual-chain execution; not exhaustive uint256 execution.",
+  "all_four_final_exception_scalars_executed_by_actual_chain": true,
+  "proof_script_sha256": "e4d00fefccf4ccd852512722eed8a64459e029ac9dad19ac5183b34d915b79dc",
+  "proof_scope": "Integer-domain inequalities and exhaustive final-digit equation, conditional on valid nonzero runtime base and correct field/table construction. Actual-source finite curve checks complement this proof; no GPU execution."
+}
