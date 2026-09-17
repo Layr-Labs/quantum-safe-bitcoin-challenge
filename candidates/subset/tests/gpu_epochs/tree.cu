@@ -1112,6 +1112,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 
+#include "external_inverse.cuh"
+
+#if !ZLAB_TRIM
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -1431,6 +1434,361 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
     }
 }
+
+#endif
+
+#if ZLAB_TRIM
+template<int STAGE>
+__global__ void __launch_bounds__(256, 2) kernel_subset_pipeline(
+    const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
+    int n_pool, int t_sel,
+    const uint32_t * __restrict__ d_midstate,
+    const uint8_t * __restrict__ d_prefix_remainder,
+    int prefix_remainder_len,
+    const uint8_t * __restrict__ d_dummy_sigs,   /* n_pool × SIG_PUSH_SIZE */
+    const uint8_t * __restrict__ d_tail,
+    int tail_len,
+    const uint8_t * __restrict__ d_tx_suffix,
+    int tx_suffix_len,
+    int total_preimage_len,
+    const uint64_t * __restrict__ d_nri,
+    const uint64_t * __restrict__ d_u2rx, const uint64_t * __restrict__ d_u2ry,
+    const uint64_t * __restrict__ d_neg2u2rx, const uint64_t * __restrict__ d_neg2u2ry,
+    uint8_t * __restrict__ d_gt,
+    uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
+    uint8_t *d_hit_combos, uint8_t *d_hit_sighash,
+    uint8_t *d_hit_keynonce, uint8_t *d_hit_pubhash,
+    uint8_t *d_hit_qx, uint8_t *d_hit_qy,
+    int batch_size, int easy_mode, int single_hash, int calibrate_mode,
+    int window_start, uint64_t enum_base,
+    int t_win, int s_early, const uint8_t * __restrict__ d_early,
+    int fast_inc, const uint32_t * __restrict__ d_const_words,
+    const epoch_desc_t * __restrict__ d_epochs,
+    uint64_t *saved, uint64_t *roots, uint64_t *checkpoint
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
+    const int easy_flag=0,single_hash_flag=1,calibrate_flag=0;
+    // All tail lanes remain present through the block inverse.
+    if(blockIdx.x*blockDim.x>=batch_size)return;
+    int active=idx<batch_size;
+
+    /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
+     * (no CPU fill, no HtoD), otherwise load precomputed combos. */
+    /* Epoch split: skip[0 .. s_early-1] are this epoch's FIXED early skips (they
+     * live in [0, window_start) and are already folded into the midstate the
+     * host computed for the epoch); skip[s_early .. t_sel-1] are unranked from
+     * this thread's linear index inside the window [window_start, n_pool).
+     * The reported set is still the full t_sel storage indices, so the verifier
+     * sees exactly the same convention as before. Non-enum launches pass
+     * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
+     * original whole-pool behaviour. */
+    const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
+    uint64_t qy[4],qzz[4],qzzz[4],prod[5];
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    bool usable;
+    if (STAGE == 0) {
+#if ZLAB_TRIM
+    uint32_t state[8];
+    for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+#else
+    uint8_t skip[MAX_T];
+    const epoch_desc_t *se_desc = NULL;
+    if (fast_inc == QSB_SE_N_INC) {
+        /* Short-epoch mode: blockIdx.x selects the epoch descriptor, which
+         * supplies the 6 early skips (already folded into the epoch midstate);
+         * threadIdx.x selects one of the 256 window omission sets from WIN3.
+         * The full skip array is sorted by construction: early < cut <=
+         * window, so hits report storage indices exactly as before. */
+        se_desc = d_epochs + blockIdx.x;
+        // The scheduled hash needs no skip array. Materialize indices only on a hit.
+    } else if (d_combos == NULL) {
+        unrank_combo(enum_base + (uint64_t)(active?idx:0), n_pool - window_start, t_win, skip + s_early);
+        for (int i = 0; i < t_win; ++i) skip[s_early + i] += window_start;
+        for (int i = 0; i < s_early; ++i) skip[i] = d_early[i];
+    } else {
+        for (int i = 0; i < t_sel; i++)
+            skip[i] = d_combos[(active ? idx : 0) * t_sel + i];
+    }
+
+    /* Build suffix streaming directly into SHA-256 blocks (no 8KB stack).
+     * Variable section is ~1.7KB; materializing it cost 8688B stack + 168 regs.
+     * Instead emit bytes into a 64B window and transform full blocks on the fly.
+     * Byte sources in order: prefix_remainder, included dummy_sigs (skip-aware),
+     * tail, tx_suffix. Equivalent to the original suffix[] construction. */
+    uint32_t state[8];
+    if (se_desc) {
+        for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
+    } else {
+        for (int i = 0; i < 8; i++) state[i] = d_midstate[i];
+    }
+
+  if (fast_inc == QSB_SE_N_INC) {
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+  } else if (fast_inc == QSB_FAST_N_INC) {
+    // Cached states are rebuilt from this batch's midstate and public input.
+    // Legacy combo launches and unsupported shapes retain the full emitter.
+    bool cached=d_combos==NULL && qsb_prefix_eligible(n_pool,window_start,t_win,
+                                                     fast_inc,prefix_remainder_len);
+    qsb_fast_window_hash(state,skip,t_win,s_early,window_start,cached,d_const_words);
+  } else {
+    uint32_t curW[16];  /* 4-aligned window; cur aliases it for byte emits */
+    uint8_t *cur = (uint8_t *)curW;
+    uint32_t blk[16];
+    int cur_pos = 0;
+    /* Emit helper inlined manually to avoid lambda capture overhead. */
+    for (int i = 0; i < prefix_remainder_len; i++) {
+        cur[cur_pos++] = d_prefix_remainder[i];
+        if (cur_pos == 64) {
+            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
+    }
+    {
+        /* The first s_early skips precede the window and are already accounted
+         * for in the midstate, so start matching at skip[s_early]. */
+        int sel = s_early;
+        for (int i = window_start; i < n_pool; i++) {
+            if (sel < t_sel && skip[sel] == i) { sel++; continue; }
+            const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
+            for (int b = 0; b < SIG_PUSH_SIZE; b++) {
+                cur[cur_pos++] = row[b];
+                if (cur_pos == 64) {
+                    for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+                    _SHA256Transform(state, blk);
+                    cur_pos = 0;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < tail_len; i++) {
+        cur[cur_pos++] = d_tail[i];
+        if (cur_pos == 64) {
+            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
+    }
+    for (int i = 0; i < tx_suffix_len; i++) {
+        cur[cur_pos++] = d_tx_suffix[i];
+        if (cur_pos == 64) {
+            for (int k = 0; k < 16; k++) blk[k] = bswap32(curW[k]);
+            _SHA256Transform(state, blk);
+            cur_pos = 0;
+        }
+    }
+
+    /* Final block with padding; rem = bytes in partial window. */
+    uint32_t lastW[32];
+    uint8_t *last_block = (uint8_t *)lastW;
+    int rem = cur_pos;
+    memset(last_block, 0, 128);
+    memcpy(last_block, cur, rem);
+    last_block[rem] = 0x80;
+    int nblk = (rem < 56) ? 1 : 2;
+    uint64_t bit_len = (uint64_t)total_preimage_len * 8;
+    int last = nblk * 64 - 8;
+    last_block[last]=(bit_len>>56)&0xFF; last_block[last+1]=(bit_len>>48)&0xFF;
+    last_block[last+2]=(bit_len>>40)&0xFF; last_block[last+3]=(bit_len>>32)&0xFF;
+    last_block[last+4]=(bit_len>>24)&0xFF; last_block[last+5]=(bit_len>>16)&0xFF;
+    last_block[last+6]=(bit_len>>8)&0xFF; last_block[last+7]=bit_len&0xFF;
+
+    for (int b = 0; b < nblk; b++) {
+        uint32_t blk2[16];
+        for (int i = 0; i < 16; i++) blk2[i] = bswap32(lastW[b*16+i]);
+        _SHA256Transform(state, blk2);
+    }
+  }
+#endif
+
+    /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
+     * the state words themselves in big-endian order, followed by standard
+     * 32-byte-message padding (total length 256 bits = 0x100). */
+    uint32_t b2[16];
+    for (int i=0;i<8;i++) b2[i]=state[i];
+    b2[8]=0x80000000;
+    for (int i=9;i<15;i++) b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2, b2);
+
+    /* EC recovery with both flags + ModInv + the leading-zeros gate.
+     * z is the big-endian value of the 32-byte second hash, which IS the state
+     * words, so read them directly instead of writing a byte array to local
+     * memory and reading it back a byte at a time. z[0] is the low limb. */
+    uint64_t z[4];
+    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    /* neg_r_inv is folded into the fixed base A = neg_r_inv*G, so recoding z
+     * directly gives z*A = (neg_r_inv*z mod n)*G = u1*G -- no per-candidate
+     * gpu_scalar_mulmod. (d_nri is now consumed only by the table builder.) */
+    /* u1*G as raw XYZZ via the signed-digit 32 MiB A-table: digits streamed
+     * from the recode state, Y anchor-deferred through the chain. */
+    uint64_t qx[4];
+    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+
+
+
+    /* Both recovery flags from one shared-denominator inverse, in XYZZ:
+     * W = ZZZ*d with d = xR*ZZ - X; the block inverts W. */
+
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W = ZZZ*d */
+    usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
+    /* d and W are not needed after the inverse: the finish derives both
+     * x-coordinates from the two slopes and the constant QSB_U2R_C. */
+    // Save the original denominator (including zero for unusable lanes).
+    if (active) {
+        #pragma unroll
+        for (int k=0;k<4;k++) {
+            saved[(size_t)k*batch_size+idx]=qy[k];
+            saved[(size_t)(4+k)*batch_size+idx]=qzz[k];
+            saved[(size_t)(8+k)*batch_size+idx]=qzzz[k];
+            saved[(size_t)(12+k)*batch_size+idx]=prod[k];
+        }
+    }
+    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+    qsb_block_product_checkpoint<256>(prod,roots,checkpoint);
+    return;
+    } else {
+    #pragma unroll
+    for (int k=0;k<4;k++) {
+        qy[k]=active?saved[(size_t)k*batch_size+idx]:0;
+        qzz[k]=active?saved[(size_t)(4+k)*batch_size+idx]:0;
+        qzzz[k]=active?saved[(size_t)(8+k)*batch_size+idx]:0;
+        prod[k]=active?saved[(size_t)(12+k)*batch_size+idx]:0;
+    }
+    prod[4]=0;
+    usable=active && ((prod[0]|prod[1]|prod[2]|prod[3])!=0);
+    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+    qsb_block_inverse_checkpoint<256>(prod,roots,checkpoint);
+    if(!usable)return;
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
+
+    int v=0, hash_choice=0, recid=0;
+#if ZLAB_PAIRSHA
+    {
+        uint32_t pw[2][16];
+        for(int ri=0;ri<2;ri++){
+            uint64_t sx0=ri ? q2x[0] : q1x[0];
+            uint64_t sx1=ri ? q2x[1] : q1x[1];
+            uint64_t sx2=ri ? q2x[2] : q1x[2];
+            uint64_t sx3=ri ? q2x[3] : q1x[3];
+            uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+                             (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+            uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+            uint32_t *pb=pw[ri];
+            pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+            pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+            pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+            pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+            pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+            pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        }
+        uint32_t hs0[8],hs1[8];
+        zlab_sha256_pair_h0(pw[0],pw[1],hs0,hs1);
+        if(gpu_bench_valid_words(hs0)){v=1;recid=0;}
+        else if(gpu_bench_valid_words(hs1)){v=1;recid=1;}
+    }
+#else
+    for(int ri=0;ri<2&&!v;ri++){
+        uint64_t sx0=ri ? q2x[0] : q1x[0];
+        uint64_t sx1=ri ? q2x[1] : q1x[1];
+        uint64_t sx2=ri ? q2x[2] : q1x[2];
+        uint64_t sx3=ri ? q2x[3] : q1x[3];
+        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+        uint32_t pb[16];
+        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        /* Ranked gate reads the state words. Only the easy/calibrate
+         * diagnostics need the digest as bytes, so only they build it. */
+        int vv;
+        if (calibrate_flag || easy_flag) {
+            uint8_t h[32];
+            for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+                h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+            vv = calibrate_flag ? gpu_is_der_relaxed(h,32) : gpu_is_der_easy(h,32);
+        } else {
+            vv = gpu_bench_valid_words(hs);
+        }
+        if(vv){ v=1;hash_choice=0;recid=ri; break; }
+        /* Config A hashes once, so everything below is dead work on every
+         * candidate. Leave BEFORE building the 64-byte padded block, not
+         * after it: the memset/memcpy used to run unconditionally. */
+        if (single_hash_flag) continue;
+        uint8_t h[32];
+        for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
+        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
+            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
+        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
+        if (calibrate_flag || easy_flag) {
+            uint8_t h2[32];
+            for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
+                h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
+            vv = calibrate_flag ? gpu_is_der_relaxed(h2,32) : gpu_is_der_easy(h2,32);
+        } else {
+            vv = gpu_bench_valid_words(h2s);
+        }
+        if(vv){ v=1;hash_choice=1;recid=ri; break; }
+    }
+#endif
+
+    /* The bridge parses only `indices=` and `recid=` out of the hit file
+     * (harness/gpu_wrap.py), so the kernel no longer carries the diagnostic
+     * pubkey/hash/qx/qy copies -- their zero-initialisation alone was 129
+     * bytes of local memory written for every candidate, hit or not. */
+    if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
+        if(p<1024) {
+#if ZLAB_HITPATH
+          if(se_desc) {
+            /* Packed record p at d_hit_idx[4p] (tag) and d_hit_combos[16p..] (9 indices). */
+            d_hit_idx[p*4]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
+            for(int i=0;i<6;i++)d_hit_combos[p*ZLAB_HIT_REC+i]=se_desc->early[i];
+            for(int i=0;i<3;i++)d_hit_combos[p*ZLAB_HIT_REC+6+i]=WIN3[threadIdx.x][i];
+          } else
+#endif
+#if ZLAB_TRIM
+#if ZLAB_HITPATH
+          {}
+#else
+          {
+            d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
+            for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
+            for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
+          }
+#endif
+#else
+          {
+            d_hit_idx[p]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
+            if(se_desc) {
+                for(int i=0;i<6;i++)d_hit_combos[p*MAX_T+i]=se_desc->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[p*MAX_T+6+i]=WIN3[threadIdx.x][i];
+            } else {
+                for(int i=0;i<t_sel;i++)d_hit_combos[p*MAX_T+i]=skip[i];
+            }
+          }
+#endif
+        }
+    }
+    }
+}
+
+#endif
 
 /* ============================================================
  * Fixed-base table construction on the GPU (signed-digit table)
@@ -2454,6 +2812,43 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if ZLAB_TRIM
+    /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
+     * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
+     * per-candidate state through the same cache every 16M batch, which evicts
+     * it. Advisory: if the device or driver refuses, the run is unaffected. */
+    {
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        if (want > 0 && max_window > 0) {
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av = {};
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
+                   pe==cudaSuccess?"ok":cudaGetErrorString(pe));
+            fflush(stdout);
+        }
+    }
+        // Per-batch checkpoint storage. Each epoch still covers 256 candidates.
+        uint64_t *saved=NULL,*roots=NULL,*checkpoint=NULL,*super_roots=NULL,*root_checkpoint=NULL;
+        const size_t cap=(size_t)QSB_SE_LAUNCH_BLOCKS;
+        cudaError_t alloc_err=cudaMalloc(&saved,cap*256*16*sizeof(uint64_t));
+        if(alloc_err==cudaSuccess)alloc_err=cudaMalloc(&roots,cap*4*sizeof(uint64_t));
+        if(alloc_err==cudaSuccess)alloc_err=cudaMalloc(&checkpoint,cap*4*256*sizeof(uint64_t));
+        const size_t groups=(cap+255)/256;
+        if(alloc_err==cudaSuccess)alloc_err=cudaMalloc(&super_roots,groups*4*sizeof(uint64_t));
+        if(alloc_err==cudaSuccess)alloc_err=cudaMalloc(&root_checkpoint,groups*4*256*sizeof(uint64_t));
+        if(alloc_err!=cudaSuccess){fprintf(stderr,"Checkpoint allocation: %s\n",cudaGetErrorString(alloc_err));return 1;}
+#endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
@@ -2472,6 +2867,50 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
+#if ZLAB_TRIM
+            kernel_subset_pipeline<0><<<nblk, QSB_SE_PER_EPOCH>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,saved,roots,checkpoint);
+            const int root_groups=(nblk+255)/256;
+            qsb_root_group_prepare<<<root_groups,256>>>(roots,nblk,super_roots,root_checkpoint);
+            qsb_invert_super_roots<<<(root_groups+255)/256,256>>>(super_roots,root_groups);
+            qsb_root_group_finish<<<root_groups,256>>>(roots,nblk,super_roots,root_checkpoint);
+            kernel_subset_pipeline<1><<<nblk, QSB_SE_PER_EPOCH>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,saved,roots,checkpoint);
+#else
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -2491,6 +2930,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+#endif
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
