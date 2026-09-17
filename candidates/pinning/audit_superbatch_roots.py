@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the two-level 256x256 batch inversion of search-CTA roots."""
+"""Audit the three-level 256x256x256 batch inversion of search-CTA roots."""
 
 from pathlib import Path
 import random
@@ -46,8 +46,7 @@ def tree_down(leaves, internal, root_inverse):
 
 def nested_inverse(values):
     count = len(values)
-    assert 0 < count <= WIDTH * WIDTH
-    groups = (count + WIDTH - 1) // WIDTH
+    assert 0 < count <= WIDTH * WIDTH * WIDTH
     saved = []
     group_roots = []
     for start in range(0, count, WIDTH):
@@ -57,16 +56,32 @@ def nested_inverse(values):
         leaves, internal, root = tree_up(leaves)
         saved.append((leaves, internal))
         group_roots.append(root)
+    groups = len(group_roots)
 
-    super_leaves = group_roots + [1] * (WIDTH - groups)
+    saved_mega = []
+    mega_roots = []
+    for start in range(0, groups, WIDTH):
+        leaves = [v % P for v in group_roots[start:start + WIDTH]]
+        leaves += [1] * (WIDTH - len(leaves))
+        leaves, internal, root = tree_up(leaves)
+        saved_mega.append((leaves, internal))
+        mega_roots.append(root)
+    mega_groups = len(mega_roots)
+
+    super_leaves = mega_roots + [1] * (WIDTH - mega_groups)
     super_leaves, super_internal, super_root = tree_up(super_leaves)
     super_inverse = pow(super_root, P - 2, P)
-    group_inverses = tree_down(super_leaves, super_internal, super_inverse)
+    mega_inverses = tree_down(super_leaves, super_internal, super_inverse)
+
+    group_inverses = []
+    for mega, (leaves, internal) in enumerate(saved_mega):
+        group_inverses.extend(tree_down(leaves, internal, mega_inverses[mega]))
+    group_inverses = group_inverses[:groups]
 
     result = []
     for group, (leaves, internal) in enumerate(saved):
         result.extend(tree_down(leaves, internal, group_inverses[group]))
-    return result[:count], groups
+    return result[:count], groups, mega_groups
 
 
 def audit_source():
@@ -84,20 +99,26 @@ def audit_source():
     names = (
         "kernel_pinning_pipeline<FAST_TAIL,0>",
         "qsb_root_group_prepare<<<root_groups,256>>>",
+        "qsb_root_group_prepare<<<mega_groups,256>>>",
         "qsb_invert_super_roots<<<1,256>>>",
+        "qsb_root_group_finish<<<mega_groups,256>>>",
         "qsb_root_group_finish<<<root_groups,256>>>",
         "kernel_pinning_pipeline<FAST_TAIL,2>",
     )
     positions = [launches.index(name) for name in names]
     assert positions == sorted(positions)
     assert "int root_groups=(blocks+255)/256;" in launches
+    assert "int mega_groups=(root_groups+255)/256;" in launches
+    assert "if(mega_groups>256)" in launches
     assert "ROOT_GRDSZ=(GRDSZ+255)/256" in source
+    assert "MEGA_GRDSZ=(ROOT_GRDSZ+255)/256" in source
+    assert "int BATCH = 67108864;" in source
 
 
 def main():
     audit_source()
     rng = random.Random(0x5355504552524F4F)
-    counts = (1, 2, 17, 255, 256, 257, 511, 512, 513, 4097, 65535, 65536)
+    counts = (1, 2, 17, 255, 256, 257, 511, 512, 513, 4097, 65535, 65536, 65537, 131072, 262144)
     checked = 0
     for count in counts:
         values = []
@@ -105,11 +126,12 @@ def main():
             value = rng.getrandbits(256)
             if value % P:
                 values.append(value)
-        got, groups = nested_inverse(values)
+        got, groups, mega_groups = nested_inverse(values)
         assert groups == (count + WIDTH - 1) // WIDTH
+        assert mega_groups == (groups + WIDTH - 1) // WIDTH
         assert all((value % P) * inverse % P == 1 for value, inverse in zip(values, got))
         checked += count
-    print(f"PASS: two-level root inversion; {checked} roots across {len(counts)} boundary sizes")
+    print(f"PASS: three-level root inversion; {checked} roots across {len(counts)} boundary sizes")
 
 
 if __name__ == "__main__":

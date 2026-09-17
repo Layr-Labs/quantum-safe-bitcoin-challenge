@@ -669,10 +669,11 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     qsb_field_normalize(value);
 }
 
-/* Batch the per-search-CTA roots one level further. Groups of 256 roots use
- * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
- * group roots. A full 16M candidate batch therefore executes one _ModInv
- * instead of 65,536 independent inversions. */
+/* Batch the per-search-CTA roots two levels further. Groups of 256 roots
+ * use the same checkpointed tree helpers, then groups of 256 group-roots
+ * form mega-roots. One 256-lane CTA batch-inverts those mega-roots.
+ * A full 64M candidate batch (262144 search CTAs, 1024 groups, 4 mega-roots)
+ * therefore executes one _ModInv instead of 262,144 independent inversions. */
 __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
     const uint64_t *roots, int count, uint64_t *super_roots,
     uint64_t *root_checkpoint
@@ -689,16 +690,16 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
 __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
-    int tid=(int)threadIdx.x;
-    bool active=tid<count;
-    uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
-                   active?super_roots[(size_t)tid*4u+1]:0ULL,
-                   active?super_roots[(size_t)tid*4u+2]:0ULL,
-                   active?super_roots[(size_t)tid*4u+3]:0ULL,0};
+    int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
+    bool active=i<count;
+    uint64_t r[5]={active?super_roots[(size_t)i*4u]:1ULL,
+                   active?super_roots[(size_t)i*4u+1]:0ULL,
+                   active?super_roots[(size_t)i*4u+2]:0ULL,
+                   active?super_roots[(size_t)i*4u+3]:0ULL,0};
     qsb_block_inverse(r);
     if(active){
         #pragma unroll
-        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
+        for(int k=0;k<4;k++)super_roots[(size_t)i*4u+k]=r[k];
     }
 }
 
@@ -1022,7 +1023,8 @@ static void launch_pinning_pipeline(
     uint8_t *d_gt, uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
-    uint64_t *super_roots, uint64_t *root_checkpoint
+    uint64_t *super_roots, uint64_t *root_checkpoint,
+    uint64_t *mega_roots, uint64_t *mega_checkpoint
 ) {
     int blocks=(batch_size+255)/256;
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks,256>>>(
@@ -1036,8 +1038,9 @@ static void launch_pinning_pipeline(
         exit(2);
     }
     int root_groups=(blocks+255)/256;
-    if(root_groups>256){
-        fprintf(stderr,"Pipeline batch exceeds two-level inverse capacity\n");
+    int mega_groups=(root_groups+255)/256;
+    if(mega_groups>256){
+        fprintf(stderr,"Pipeline batch exceeds three-level inverse capacity\n");
         exit(2);
     }
     qsb_root_group_prepare<<<root_groups,256>>>(
@@ -1047,10 +1050,24 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<1,256>>>(super_roots,root_groups);
+    qsb_root_group_prepare<<<mega_groups,256>>>(
+        super_roots,root_groups,mega_roots,mega_checkpoint);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Mega-group prepare launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+    qsb_invert_super_roots<<<1,256>>>(mega_roots,mega_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+    qsb_root_group_finish<<<mega_groups,256>>>(
+        super_roots,root_groups,mega_roots,mega_checkpoint);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Mega-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
     qsb_root_group_finish<<<root_groups,256>>>(
@@ -1341,6 +1358,37 @@ err:
     fclose(f); return -1;
 }
 
+/* Drain one hit slot on a non-default stream. Wait only that stream, so
+ * the default pipeline can run the next batch. Encoding idx|(ri<<30). */
+static void pinning_drain_hits_stream(cudaStream_t drain, cudaEvent_t done,
+                                      uint32_t *d_cnt, uint32_t *d_idx,
+                                      uint32_t *h_hit, uint32_t *h_idx,
+                                      uint32_t seq, uint32_t batch_lt, int gpu_index,
+                                      int *found) {
+    cudaStreamWaitEvent(drain, done, 0);
+    cudaMemcpyAsync(h_hit, d_cnt, 4, cudaMemcpyDeviceToHost, drain);
+    cudaStreamSynchronize(drain);
+    if (*h_hit == 0) return;
+    int nh = (*h_hit > 64) ? 64 : (int)(*h_hit);
+    cudaMemcpyAsync(h_idx, d_idx, nh * 4, cudaMemcpyDeviceToHost, drain);
+    cudaStreamSynchronize(drain);
+    mkdir("results", 0755);
+    char fname[256];
+    snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+    FILE *f = fopen(fname, "a");
+    if (f) {
+        for (int h = 0; h < nh; h++) {
+            uint32_t raw = h_idx[h];
+            uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
+            int ri = (raw >> 30) & 1;
+            int hc = (raw >> 31) & 1;
+            fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                    seq, lt, hc, ri);
+        }
+        fclose(f);
+    }
+    *found = 1;
+}
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -1507,21 +1555,36 @@ int main(int argc, char **argv) {
     }
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
-    uint32_t *d_hit_cnt, *d_hit_idx;
-    cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
+    uint32_t *d_hit_cnt[2], *d_hit_idx[2];
+    cudaMalloc(&d_hit_cnt[0], 4); cudaMalloc(&d_hit_cnt[1], 4);
+    cudaMalloc(&d_hit_idx[0], 1024*4); cudaMalloc(&d_hit_idx[1], 1024*4);
+    uint32_t *h_hit, *h_idx;
+    cudaHostAlloc((void**)&h_hit, 4, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_idx, 64 * 4, cudaHostAllocDefault);
+    cudaStream_t drain_stream;
+    cudaStreamCreateWithFlags(&drain_stream, cudaStreamNonBlocking);
+    cudaEvent_t hit_ev[2];
+    cudaEventCreateWithFlags(&hit_ev[0], cudaEventDisableTiming);
+    cudaEventCreateWithFlags(&hit_ev[1], cudaEventDisableTiming);
+    int hit_slot = 0, pending = 0, pend_slot = 0;
+    uint32_t pend_seq = 0, pend_lt = 0;
 
-    int BATCH = 16777216;  /* 16M: amortize launch/sync/copy overhead */
+    int BATCH = 67108864;  /* 64M: amortize launch/sync/copy; three-level inverse */
     int BLKSZ = 256;
     int GRDSZ = (BATCH+BLKSZ-1)/BLKSZ;
     int ROOT_GRDSZ=(GRDSZ+255)/256;
+    int MEGA_GRDSZ=(ROOT_GRDSZ+255)/256;
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
+    uint64_t *d_mega_roots=NULL,*d_mega_checkpoint=NULL;
     size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
     size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+    size_t mega_root_bytes=(size_t)MEGA_GRDSZ*4u*sizeof(uint64_t);
+    size_t mega_checkpoint_bytes=(size_t)MEGA_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
@@ -1531,6 +1594,10 @@ int main(int argc, char **argv) {
         pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_root_checkpoint,root_checkpoint_bytes);
+    if(pipeline_err==cudaSuccess)
+        pipeline_err=cudaMalloc(&d_mega_roots,mega_root_bytes);
+    if(pipeline_err==cudaSuccess)
+        pipeline_err=cudaMalloc(&d_mega_checkpoint,mega_checkpoint_bytes);
     if(pipeline_err!=cudaSuccess){
         fprintf(stderr,"Pipeline allocation failed: %s\n",cudaGetErrorString(pipeline_err));
         return 1;
@@ -1539,11 +1606,12 @@ int main(int argc, char **argv) {
         fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
         return 1;
     }
-    printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB tree + %.0f MiB roots + %.2f MiB root tree\n",
+    printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB tree + %.0f MiB roots + %.2f MiB root tree + %.2f MiB mega tree\n",
            (double)pipeline_state_bytes/(1024*1024),
            (double)pipeline_tree_bytes/(1024*1024),
            (double)pipeline_root_bytes/(1024*1024),
-           (double)(super_root_bytes+root_checkpoint_bytes)/(1024*1024));
+           (double)(super_root_bytes+root_checkpoint_bytes)/(1024*1024),
+           (double)(mega_root_bytes+mega_checkpoint_bytes)/(1024*1024));
 
     /* Safe ranges */
     uint32_t LT_MIN = 500000000;   /* timestamp interpretation */
@@ -1593,6 +1661,12 @@ int main(int argc, char **argv) {
      * The loop no longer stops at the first hit; hits are appended per batch.
      */
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+        if (pending) {
+            pinning_drain_hits_stream(drain_stream, hit_ev[pend_slot],
+                                      d_hit_cnt[pend_slot], d_hit_idx[pend_slot],
+                                      h_hit, h_idx, pend_seq, pend_lt, gpu_index, &found);
+            pending = 0;
+        }
         if (fast_tail) {
             uint8_t block[64];
             memcpy(block, pp.suffix, sizeof(block));
@@ -1614,8 +1688,7 @@ int main(int argc, char **argv) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemsetAsync(d_hit_cnt[hit_slot], 0, 4, 0);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1625,10 +1698,11 @@ int main(int argc, char **argv) {
                     seq, batch_lt,
                     d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
-                    d_hit_cnt, d_hit_idx,
+                    d_hit_cnt[hit_slot], d_hit_idx[hit_slot],
                     batch_sz, easy, single_hash,
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                    d_super_roots,d_root_checkpoint);
+                    d_super_roots,d_root_checkpoint,
+                    d_mega_roots,d_mega_checkpoint);
             } else {
                 launch_pinning_pipeline<false>(
                     d_mid, d_suffix, gpu_suffix_len,
@@ -1637,43 +1711,28 @@ int main(int argc, char **argv) {
                     seq, batch_lt,
                     d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
-                    d_hit_cnt, d_hit_idx,
+                    d_hit_cnt[hit_slot], d_hit_idx[hit_slot],
                     batch_sz, easy, single_hash,
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                    d_super_roots,d_root_checkpoint);
+                    d_super_roots,d_root_checkpoint,
+                    d_mega_roots,d_mega_checkpoint);
             }
-            cudaDeviceSynchronize();
-
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            cudaEventRecord(hit_ev[hit_slot], 0);
 
             total_searched += batch_sz;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
-                mkdir("results", 0755);
-                char fname[256];
-                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-                FILE *f = fopen(fname, "a");
-                if (f) {
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
-                                seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
-                    }
-                    fclose(f);
-                }
-                found = 1;
+            if (pending) {
+                pinning_drain_hits_stream(drain_stream, hit_ev[pend_slot],
+                                          d_hit_cnt[pend_slot], d_hit_idx[pend_slot],
+                                          h_hit, h_idx, pend_seq, pend_lt, gpu_index, &found);
             }
+            pend_slot = hit_slot;
+            pend_seq = seq;
+            pend_lt = batch_lt;
+            pending = 1;
+            hit_slot ^= 1;
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
@@ -1689,7 +1748,7 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
-        if (seqs_done % 10 == 0 || found) {
+        if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;

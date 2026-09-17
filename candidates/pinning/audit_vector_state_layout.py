@@ -85,9 +85,9 @@ def audit_source():
 
 
 def audit_production_batch():
-    batch_size = 16_777_216
+    batch_size = 67_108_864
     total_bytes = batch_size * VECTOR_PLANES * VECTOR_BYTES
-    assert total_bytes == 2 * 1024**3
+    assert total_bytes == 8 * 1024**3
     for plane in range(VECTOR_PLANES):
         assert plane * batch_size * VECTOR_BYTES % VECTOR_BYTES == 0
     assert vector_offset(batch_size, FIELDS - 1, LIMBS - 1, batch_size - 1) == (
@@ -111,7 +111,7 @@ def main():
         "PASS: 4x256-bit state maps bijectively to 8 ulonglong2 planes; "
         "all vector elements are 16-byte aligned, warp addresses are contiguous, "
         "traffic remains exactly 128 bytes/candidate/direction, and the "
-        "16,777,216-candidate allocation remains exactly 2 GiB"
+        "67,108,864-candidate allocation remains exactly 8 GiB"
     )
 
 
