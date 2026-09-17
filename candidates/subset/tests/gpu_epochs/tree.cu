@@ -1271,17 +1271,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
   }
 #endif
 
-    /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
-     * the state words themselves in big-endian order, followed by standard
-     * 32-byte-message padding (total length 256 bits = 0x100). */
-    uint32_t b2[16];
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
+    /* Second SHA-256 (SHA-256d): sparse FastTail last block. The message is
+     * the 32-byte first hash (the state words) plus 0x80 padding and bit
+     * length 256; W[9..14] are zero. */
+    uint32_t s2[8];
+    _SHA256TransformFast32(s2, state);
 
     /* EC recovery with both flags + ModInv + the leading-zeros gate.
      * z is the big-endian value of the 32-byte second hash, which IS the state
@@ -1349,15 +1343,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint64_t sx3=ri ? q2x[3] : q1x[3];
         uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
                          (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-        uint32_t pb[16];
+        uint32_t pb[9];
         uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
         pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
         pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
         pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
         pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
         pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        uint32_t hs[8];_SHA256TransformPk33(hs,pb);
         /* Ranked gate reads the state words. Only the easy/calibrate
          * diagnostics need the digest as bytes, so only they build it. */
         int vv;
@@ -1374,13 +1367,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
          * candidate. Leave BEFORE building the 64-byte padded block, not
          * after it: the memset/memcpy used to run unconditionally. */
         if (single_hash_flag) continue;
-        uint8_t h[32];
-        for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
-            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
-        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
-            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
-        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
+        uint32_t h2s[8];
+        _SHA256TransformFast32(h2s, hs);
         if (calibrate_flag || easy_flag) {
             uint8_t h2[32];
             for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;

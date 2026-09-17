@@ -266,6 +266,82 @@ __device__ void _SHA256Transform(uint32_t output[8], uint32_t* w)
 
 }
 
+/* Sparse last-block SHA-256 for a 32-byte SHA-256d tail (bitlen 0x100)
+ * or a 33-byte compressed public key (bitlen 0x108). The padded block
+ * has W[9..14] = 0; the first WMIX therefore drops those zeros. Rounds
+ * 16..63 reuse SHA256_RND/WMIX. Writes IV+compression into output
+ * (callers do not pre-load I[]). */
+__device__ __forceinline__ void _SHA256TransformFastTail(uint32_t output[8],
+	const uint32_t w0_8[9], uint32_t bitlen)
+{
+	uint32_t w[16];
+	w[0] = w0_8[0]; w[1] = w0_8[1]; w[2] = w0_8[2]; w[3] = w0_8[3];
+	w[4] = w0_8[4]; w[5] = w0_8[5]; w[6] = w0_8[6]; w[7] = w0_8[7];
+	w[8] = w0_8[8];
+	w[9] = 0; w[10] = 0; w[11] = 0; w[12] = 0; w[13] = 0; w[14] = 0;
+	w[15] = bitlen;
+
+	uint32_t t1;
+	uint32_t t2;
+
+	uint32_t a = 0x6a09e667u;
+	uint32_t b = 0xbb67ae85u;
+	uint32_t c = 0x3c6ef372u;
+	uint32_t d = 0xa54ff53au;
+	uint32_t e = 0x510e527fu;
+	uint32_t f = 0x9b05688cu;
+	uint32_t g = 0x1f83d9abu;
+	uint32_t h = 0x5be0cd19u;
+
+	SHA256_RND(0);
+
+	w[0] += s0(w[1]);
+	w[1] += s1(w[15]) + s0(w[2]);
+	w[2] += s1(w[0]) + s0(w[3]);
+	w[3] += s1(w[1]) + s0(w[4]);
+	w[4] += s1(w[2]) + s0(w[5]);
+	w[5] += s1(w[3]) + s0(w[6]);
+	w[6] += s1(w[4]) + w[15] + s0(w[7]);
+	w[7] += s1(w[5]) + w[0] + s0(w[8]);
+	w[8] += s1(w[6]) + w[1];
+	w[9] = s1(w[7]) + w[2];
+	w[10] = s1(w[8]) + w[3];
+	w[11] = s1(w[9]) + w[4];
+	w[12] = s1(w[10]) + w[5];
+	w[13] = s1(w[11]) + w[6];
+	w[14] = s1(w[12]) + w[7] + s0(w[15]);
+	w[15] += s1(w[13]) + w[8] + s0(w[0]);
+
+	SHA256_RND(16);
+	WMIX();
+	SHA256_RND(32);
+	WMIX();
+	SHA256_RND(48);
+
+	output[0] = 0x6a09e667u + a;
+	output[1] = 0xbb67ae85u + b;
+	output[2] = 0x3c6ef372u + c;
+	output[3] = 0xa54ff53au + d;
+	output[4] = 0x510e527fu + e;
+	output[5] = 0x9b05688cu + f;
+	output[6] = 0x1f83d9abu + g;
+	output[7] = 0x5be0cd19u + h;
+}
+
+__device__ __forceinline__ void _SHA256TransformFast32(uint32_t output[8], const uint32_t msg[8])
+{
+	uint32_t head[9];
+	head[0] = msg[0]; head[1] = msg[1]; head[2] = msg[2]; head[3] = msg[3];
+	head[4] = msg[4]; head[5] = msg[5]; head[6] = msg[6]; head[7] = msg[7];
+	head[8] = 0x80000000u;
+	_SHA256TransformFastTail(output, head, 0x100u);
+}
+
+__device__ __forceinline__ void _SHA256TransformPk33(uint32_t output[8], const uint32_t pb[9])
+{
+	_SHA256TransformFastTail(output, pb, 0x108u);
+}
+
 //Modified SHA256 function specifically for combining two wordlists (books)
 //Byte 0x80 must be placed at the end of input data
 //The last four bytes of input buffer must be the index of 0x80 byte
