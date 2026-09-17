@@ -1111,6 +1111,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+#include "ranked_pipeline.cuh"
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
@@ -2277,6 +2278,82 @@ int main(int argc, char **argv) {
     }
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    /* Ranked pipeline scratch (ranked_pipeline.cuh): 128 bytes of saved
+     * coordinates per candidate plus a 254-node checkpoint per CTA and the
+     * root hierarchy. At 16.8M candidates this is about 2.5 GiB of device
+     * memory and no host transfer. Used only for the single_hash ranked shape;
+     * everything else keeps the monolithic kernel_digest. */
+    static_assert(QSB_SE_PER_EPOCH == 256, "pipeline requires 256 lanes per epoch");
+    static_assert(QSB_SE_LAUNCH_BLOCKS <= 65536, "root hierarchy capacity");
+    int use_pipeline = se_mode && single_hash && !easy && !calibrate;
+
+    /* Pin the fixed-base table in L2 (same hint as pinning record 372a325,
+     * ercumentyildirim). The 64 MiB table fits AD102's 72 MB L2, but the
+     * pipeline streams ~2 GiB of saved state per 16.8M launch through the
+     * same cache, which can evict it. Advisory only: if the device or driver
+     * refuses, the run is unaffected. Pipeline shape only, so every other
+     * mode stays byte-for-byte the record's host path. QSB_L2_PIN=0 turns it
+     * off for A/B measurements. */
+    if (use_pipeline) {
+        const char *pin_env = getenv("QSB_L2_PIN");
+        int max_persist = 0, max_window = 0;
+        if (pin_env && pin_env[0] == '0') {
+            printf("  L2 persistence: disabled (QSB_L2_PIN=0)\n");
+        } else if (cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index) == cudaSuccess &&
+                   cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index) == cudaSuccess &&
+                   max_persist > 0 && max_window > 0) {
+            size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+            cudaError_t le = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av = {};
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persistence: %.0f MiB requested (max %.0f MiB, window %.0f MiB) limit=%s window=%s\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
+                   le==cudaSuccess?"ok":cudaGetErrorString(le),
+                   pe==cudaSuccess?"ok":cudaGetErrorString(pe));
+        } else {
+            printf("  L2 persistence: not offered by this device\n");
+        }
+        fflush(stdout);
+        cudaGetLastError();  /* a refused hint must not leave a pending error for the launch checks */
+    }
+
+    ulonglong2 *d_pipe_state = NULL;
+    uint64_t *d_pipe_roots = NULL, *d_pipe_tree = NULL;
+    uint64_t *d_pipe_super = NULL, *d_pipe_root_tree = NULL;
+    if (use_pipeline) {
+        size_t blocks = QSB_SE_LAUNCH_BLOCKS;
+        size_t groups = (blocks + 255) / 256;
+        cudaError_t pe;
+        if ((pe=cudaMalloc(&d_pipe_state, blocks*256u*8u*sizeof(ulonglong2))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_roots, blocks*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_tree, blocks*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_super, 256u*4u*sizeof(uint64_t))) != cudaSuccess ||
+            (pe=cudaMalloc(&d_pipe_root_tree, groups*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t))) != cudaSuccess ||
+            (((uintptr_t)d_pipe_state & 15u) != 0 && (pe = cudaErrorInvalidValue) != cudaSuccess)) {
+            /* Not fatal: the monolithic kernel remains a complete fallback. */
+            fprintf(stderr, "Ranked pipeline setup failed (%s); using kernel_digest\n",
+                    cudaGetErrorString(pe));
+            if (d_pipe_state) cudaFree(d_pipe_state);
+            if (d_pipe_roots) cudaFree(d_pipe_roots);
+            if (d_pipe_tree) cudaFree(d_pipe_tree);
+            if (d_pipe_super) cudaFree(d_pipe_super);
+            if (d_pipe_root_tree) cudaFree(d_pipe_root_tree);
+            d_pipe_state = NULL; d_pipe_roots = d_pipe_tree = d_pipe_super = d_pipe_root_tree = NULL;
+            cudaGetLastError();
+            use_pipeline = 0;
+        } else {
+            printf("  Ranked external-inversion pipeline enabled (%.0f MiB scratch)\n",
+                   (double)(blocks*256u*8u*sizeof(ulonglong2) + blocks*4u*QSB_CHECKPOINT_STRIDE*8u
+                            + blocks*32u + 256u*32u + groups*4u*QSB_CHECKPOINT_STRIDE*8u) / (1024.0*1024.0));
+        }
+    }
+
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
@@ -2472,6 +2549,21 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
+            if (use_pipeline) {
+                cudaError_t le = cudaGetLastError();
+                if (le == cudaSuccess)
+                    le = qsb_launch_ranked_pipeline(nblk, batch_pos, d_epochs, d_gt,
+                        d_pipe_state, d_pipe_roots, d_pipe_tree,
+                        d_pipe_super, d_pipe_root_tree,
+#if ZLAB_HITPATH
+                        zh_cnt, zh_idx, zh_combos);
+#else
+                        d_hit_cnt, d_hit_idx, d_hit_combos);
+#endif
+                if (le != cudaSuccess) {
+                    printf("CUDA error: %s\n", cudaGetErrorString(le)); return 1;
+                }
+            } else
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
