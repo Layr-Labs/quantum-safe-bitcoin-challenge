@@ -513,7 +513,8 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        // At half <= 32 every producer and next consumer is in warp zero.
+        if(count>64)__syncthreads();else if(count>2)__syncwarp();
     }
 
     if(tid==0){
@@ -549,7 +550,8 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
             for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        // The next level crosses warps once it has 64 children.
+        if(count>=32)__syncthreads();else __syncwarp();
     }
 
     // The leaf level has no shared inverse destination or following barrier.
@@ -608,7 +610,8 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             }
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        // At half <= 32 every producer and next consumer is in warp zero.
+        if(count>64)__syncthreads();else if(count>2)__syncwarp();
     }
 
     if(tid==0){
@@ -655,7 +658,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        // The next level crosses warps once it has 64 children.
+        if(count>=32)__syncthreads();else __syncwarp();
     }
 
     uint64_t parent_inv[5],sibling[5];
@@ -1615,7 +1619,8 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaError_t reset_err = cudaMemset(d_hit_cnt, 0, sizeof(h_hit));
+            if (reset_err != cudaSuccess) { fprintf(stderr, "Hit reset failed: %s\n", cudaGetErrorString(reset_err)); return 1; }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1642,20 +1647,19 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
+            // The blocking hit-count copy below waits for this default-stream pipeline.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            err = cudaMemcpy(&h_hit, d_hit_cnt, sizeof(h_hit), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -1668,7 +1672,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
