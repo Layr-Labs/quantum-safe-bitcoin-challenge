@@ -1,0 +1,119 @@
+{
+  "status": "PASS_CPU_AND_NATIVE_QUALIFICATION_NOT_GPU_BENCHMARK",
+  "checked_at": "2026-09-17T11:01:11.628795+00:00",
+  "source": {
+    "source_fingerprint": "b2fd8e8896270638268058a41150409d42a470ce228ee1962c8dcc76f7ef1170",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+      "tests/gpu_epochs/compact_table_device.cuh": "cb95bfcacf64b7ac1e889a182be99c53ca7a360d9bd9c9943536fb0158beb6e1",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+      "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+    }
+  },
+  "base": "a03c3c1ca5f07be955c32af76f34e5a58cc81237d7b9e4c685ee56cfe5353bda",
+  "difference": "Four cold point address hints, both32-byte halves, computed from the existing immutable local M before seed; no new persisted point/address state.",
+  "reports": {
+    "check-results.json": {
+      "sha256": "4ce76e76183e0da0277bee5e210b256384f253c85ec4f80edd8db3bea8c9880e",
+      "status": "PASS"
+    },
+    "frontend-inverse-results.json": {
+      "sha256": "94f9f53492e4a9c20f0f3fe4812bf1fb9f921064e411dd7ab12fb117852b894e",
+      "status": "PASS"
+    },
+    "policy-host-results.json": {
+      "sha256": "bc5f91b316239fda73cbf6f9374481902b2f337643f5bd94199e112ab005f225",
+      "status": "PASS"
+    },
+    "prefetch-negative-control.json": {
+      "sha256": "92a7715ecb879439cf09d923cbc838270f9ff3e07918fe7a9cf11cd650d870ee",
+      "status": "EXPECTED_WRONG_COLD_PREFETCH_DETECTED_AFTER_SUCCESSFUL_CPU_COMPILE"
+    },
+    "sass-review.json": {
+      "sha256": "724e5d61d622d4485c92c24f8138198a251abd748050200b049086340fe6fc28",
+      "status": "PASS_STATIC_PLACEMENT_AND_UNCHANGED_HOT_LOOP"
+    },
+    "chain_recovery/chain-recovery-results.json": {
+      "sha256": "3747477d4a6807117959abcbf48c7bdde7065ae39ce9d99c33ad3c899902ce00",
+      "status": "PASS"
+    },
+    "chain_recovery/guarded-curve-results.json": {
+      "sha256": "a7b2fdd70d91d34412f8a1447fbd7b33a097bf33fe9fa15df4c017e1956e9f68",
+      "status": "PASS"
+    }
+  },
+  "native": {
+    "compiler": "CUDA12.8.93",
+    "production_and_audit": true,
+    "sm89_and_default_flags": true,
+    "source_files": 16,
+    "resources": {
+      "registers": 80,
+      "shared_bytes": 32768,
+      "stack_bytes": 280,
+      "spill_store_bytes": 344,
+      "spill_load_bytes": 256
+    },
+    "non_nop": 14803,
+    "added_static_instructions_vs_a03": 42,
+    "hot_loop": {
+      "pc_range": [
+        "0x10910",
+        "0x16df0"
+      ],
+      "instruction_count": 1615,
+      "relocation": "0x2a0",
+      "identical_after_target_relocation": true,
+      "instructions_sha256": "3583634a6c22b2afb49037eb7ab8a2e75402cbe92fd171fd469ad504374c040e",
+      "ordinary_iterations": 10,
+      "local_load_bytes_per_lane": 40,
+      "local_store_bytes_per_lane": 0
+    },
+    "prefetches_before_seed_loads": 8,
+    "shared_and_local_opcode_counts_equal_control": true
+  },
+  "cpu_counts": {
+    "chains": 628,
+    "recovered_keys": 1242,
+    "prefetch_point_address_comparisons": 8164,
+    "guard_cases": 477,
+    "sha256d": 6144,
+    "inverse_values": 3840,
+    "recodings": 10262,
+    "unrankings": 8086,
+    "window_selections": 256,
+    "host_policy_cases": 180,
+    "host_fault_cases": 30
+  },
+  "regression": "Wrong last flag on only cold12 early hint compiles then fails a specific address mismatch; arithmetic load/chain unchanged.",
+  "gpu_executed": false,
+  "selection_note": "Next-submission selection is recorded separately in submission-ready.json. This report qualifies source/checks only.",
+  "primary_reference": "https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-prefetch-prefetchu",
+  "limits": "Prefetch placement does not guarantee completion, cache residency or useful overlap; extra requests may cost more than they save. All throughput ordering remains unmeasured.",
+  "staged_checks": {
+    "staged-check-results.json": {
+      "sha256": "57d92bd168892ebf3bb538efe7adef2addd51b89d92d02299b3e351c1ffc4d5c",
+      "status": "PASS"
+    },
+    "staged-policy-results.json": {
+      "sha256": "01f361bb4aa35bc3d6a5685e7fe299b94172f59291fb004331eeaf102ca495ac",
+      "status": "PASS"
+    },
+    "prefetch-negative-control.json": {
+      "sha256": "92a7715ecb879439cf09d923cbc838270f9ff3e07918fe7a9cf11cd650d870ee",
+      "status": "EXPECTED_WRONG_COLD_PREFETCH_DETECTED_AFTER_SUCCESSFUL_CPU_COMPILE"
+    }
+  }
+}

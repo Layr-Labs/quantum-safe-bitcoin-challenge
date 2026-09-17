@@ -1,0 +1,135 @@
+{
+  "status": "PASS_STATIC_PLACEMENT_AND_UNCHANGED_HOT_LOOP",
+  "candidate": {
+    "source_fingerprint": "b2fd8e8896270638268058a41150409d42a470ce228ee1962c8dcc76f7ef1170",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+      "tests/gpu_epochs/compact_table_device.cuh": "cb95bfcacf64b7ac1e889a182be99c53ca7a360d9bd9c9943536fb0158beb6e1",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+      "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+    }
+  },
+  "control": {
+    "source_fingerprint": "a03c3c1ca5f07be955c32af76f34e5a58cc81237d7b9e4c685ee56cfe5353bda",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+      "tests/gpu_epochs/compact_table_device.cuh": "6d94344419ad0890fdde70759e8ae3866ee540b5da643276a93ab1ae5e3dd31b",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+      "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+    }
+  },
+  "native_production_source_files_verified": 15,
+  "native_audit_source_files_verified": 15,
+  "complete_native_closure_files_verified": 16,
+  "native_report_sha256": "b2d42a6b65e8efe0ddd94f8dbb7909a6e9f1b31a61c568af685e3c470b1fe10b",
+  "audit_report_sha256": "cd7cccf1c9041990d365c2e7ee7650b2b6422cf1ad5b6952f0118e2e0c38670f",
+  "reviewer_sha256": "83caf7fa37a6dc067042a32f3636210ab5ca35f5f7607882df7a1cdf6df0d1bc",
+  "sass_sha256": "e6e4b17b94646a0d58dff24319d803533d81b84235486107ef4aece49b0fde01",
+  "control_sass_sha256": "03d0679d82b7ac682c2c0b0f17cc5e5afb3d11bb597713b7e06b02fa851e9171",
+  "resources": {
+    "registers": 80,
+    "shared_bytes": 32768,
+    "stack_bytes": 280,
+    "spill_store_bytes": 344,
+    "spill_load_bytes": 256
+  },
+  "non_nop": 14803,
+  "extra_non_nop_vs_a03": 42,
+  "added_prefetches": [
+    {
+      "pc": "0xcac0",
+      "instruction": "CCTL.E.PF2 [R2]"
+    },
+    {
+      "pc": "0xcad0",
+      "instruction": "CCTL.E.PF2 [R2+0x20]"
+    },
+    {
+      "pc": "0xcba0",
+      "instruction": "CCTL.E.PF2 [R4]"
+    },
+    {
+      "pc": "0xcbc0",
+      "instruction": "CCTL.E.PF2 [R4+0x20]"
+    },
+    {
+      "pc": "0xcce0",
+      "instruction": "CCTL.E.PF2 [R14]"
+    },
+    {
+      "pc": "0xcd20",
+      "instruction": "CCTL.E.PF2 [R14+0x20]"
+    },
+    {
+      "pc": "0xcd40",
+      "instruction": "CCTL.E.PF2 [R28+0x43000000]"
+    },
+    {
+      "pc": "0xcd50",
+      "instruction": "CCTL.E.PF2 [R28+0x43000020]"
+    }
+  ],
+  "first_seed_load": {
+    "pc": "0xcd60",
+    "instruction": "LDG.E.128 R16, [R40.64]"
+  },
+  "hot_loop": {
+    "pc_range": [
+      "0x10910",
+      "0x16df0"
+    ],
+    "instruction_count": 1615,
+    "relocation": "0x2a0",
+    "identical_after_target_relocation": true,
+    "instructions_sha256": "3583634a6c22b2afb49037eb7ab8a2e75402cbe92fd171fd469ad504374c040e",
+    "ordinary_iterations": 10,
+    "local_load_bytes_per_lane": 40,
+    "local_store_bytes_per_lane": 0
+  },
+  "same_shared_and_local_opcodes": {
+    "LDS": 11,
+    "LDS.64": 52,
+    "LDS.128": 8,
+    "STS": 8,
+    "STS.64": 44,
+    "STS.128": 4,
+    "LDL": 30,
+    "LDL.64": 15,
+    "LDL.LU": 48,
+    "LDL.LU.64": 1,
+    "STL": 104,
+    "STL.64": 51
+  },
+  "source_added_shared_read_bytes": 0,
+  "source_ec_arena_bytes": 2976,
+  "limits": [
+    "CPU address oracle validates source hints; this checks native placement, not full SASS semantic execution.",
+    "All eight hints precede seed demand loads; no completion, hit-rate, residency or speed guarantee.",
+    "Full-kernel opcode counts include other paths; repeated-loop equivalence is checked independently."
+  ],
+  "gpu_executed": false
+}

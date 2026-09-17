@@ -1,0 +1,359 @@
+{
+  "status": "PASS_CPU_AND_NATIVE_COMPILE",
+  "source_fingerprint": "e80c8d9124fdd85ab38a6079ead00969d1e60d612a5f28c72f28523d28177908",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+    "tests/gpu_epochs/compact_table_device.cuh": "6d94344419ad0890fdde70759e8ae3866ee540b5da643276a93ab1ae5e3dd31b",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+  },
+  "native_closure_files": 16,
+  "native_builds": [
+    {
+      "entry": "subset.cu",
+      "status": "PASS",
+      "default_flags_build": true,
+      "compiler": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:26:18_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+      "source_sha256": {
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+        "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+        "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+        "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+        "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+        "tests/gpu_epochs/compact_table_device.cuh": "6d94344419ad0890fdde70759e8ae3866ee540b5da643276a93ab1ae5e3dd31b",
+        "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+        "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+        "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+        "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+        "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+        "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+        "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+      },
+      "kernels": {
+        "_Z18mixed_table_finishPKmS0_PhjiS0_S0_": {
+          "target": "sm_89",
+          "registers": 60,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 1200,
+          "non_nop": 1192
+        },
+        "_Z19mixed_table_preparePKmS0_PhjiPmS2_": {
+          "target": "sm_89",
+          "registers": 44,
+          "shared_bytes": 16384,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 368,
+          "non_nop": 359
+        },
+        "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_t": {
+          "target": "sm_89",
+          "registers": 80,
+          "shared_bytes": 32768,
+          "stack_bytes": 280,
+          "spill_store_bytes": 344,
+          "spill_load_bytes": 256,
+          "instruction_slots": 14776,
+          "non_nop": 14761
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "target": "sm_89",
+          "registers": 44,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 424,
+          "non_nop": 409
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "target": "sm_89",
+          "registers": 114,
+          "shared_bytes": 16384,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 2152,
+          "non_nop": 2140
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "target": "sm_89",
+          "registers": 44,
+          "shared_bytes": 16384,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 256,
+          "non_nop": 244
+        },
+        "_Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_t": {
+          "target": "sm_89",
+          "registers": 48,
+          "shared_bytes": 0,
+          "stack_bytes": 80,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 3120,
+          "non_nop": 3106
+        },
+        "_Z24qsb_prepare_prefix_cachePKjii": {
+          "target": "sm_89",
+          "registers": 48,
+          "shared_bytes": 0,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 3168,
+          "non_nop": 3160
+        }
+      },
+      "original_development_report_sha256": "3f1eab744f60e78b0c143a1dab7ad086e79baf2e8cdd7040f90f9a35b14f0caa"
+    },
+    {
+      "entry": "tests/gpu_epochs/tree_audit.cu",
+      "status": "PASS",
+      "default_flags_build": true,
+      "compiler": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:26:18_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+      "source_sha256": {
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+        "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+        "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+        "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+        "tests/gpu_epochs/compact_table_device.cuh": "6d94344419ad0890fdde70759e8ae3866ee540b5da643276a93ab1ae5e3dd31b",
+        "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+        "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+        "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+        "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+        "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+        "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+        "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+        "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+      },
+      "kernels": {
+        "_Z14audit_inversesPKmPmi": {
+          "target": "sm_89",
+          "registers": 110,
+          "shared_bytes": 16384,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 2160,
+          "non_nop": 2150
+        },
+        "_Z14audit_productsPKmPmi": {
+          "target": "sm_89",
+          "registers": 40,
+          "shared_bytes": 0,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 352,
+          "non_nop": 343
+        },
+        "_Z18mixed_table_finishPKmS0_PhjiS0_S0_": {
+          "target": "sm_89",
+          "registers": 60,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 1200,
+          "non_nop": 1192
+        },
+        "_Z19mixed_table_preparePKmS0_PhjiPmS2_": {
+          "target": "sm_89",
+          "registers": 44,
+          "shared_bytes": 16384,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 368,
+          "non_nop": 359
+        },
+        "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_t": {
+          "target": "sm_89",
+          "registers": 80,
+          "shared_bytes": 32768,
+          "stack_bytes": 280,
+          "spill_store_bytes": 344,
+          "spill_load_bytes": 256,
+          "instruction_slots": 14776,
+          "non_nop": 14761
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "target": "sm_89",
+          "registers": 44,
+          "shared_bytes": 24576,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 424,
+          "non_nop": 409
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "target": "sm_89",
+          "registers": 114,
+          "shared_bytes": 16384,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 2152,
+          "non_nop": 2140
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "target": "sm_89",
+          "registers": 44,
+          "shared_bytes": 16384,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 256,
+          "non_nop": 244
+        },
+        "_Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_t": {
+          "target": "sm_89",
+          "registers": 48,
+          "shared_bytes": 0,
+          "stack_bytes": 80,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 3120,
+          "non_nop": 3106
+        },
+        "_Z24qsb_prepare_prefix_cachePKjii": {
+          "target": "sm_89",
+          "registers": 48,
+          "shared_bytes": 0,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "instruction_slots": 3168,
+          "non_nop": 3160
+        }
+      },
+      "original_development_report_sha256": "4930b70f56d96beb9a1e94662bcf9fde5f2c743c6ae49a0b2890cf0766874182"
+    }
+  ],
+  "staged_cpu": [
+    {
+      "file": "stage-frontend-results.json",
+      "sha256": "e7020ca3f0749511c00c1ee7ab382ecdcadeb3265277c4f074a8ec798e1690bc",
+      "source_fingerprint": "e80c8d9124fdd85ab38a6079ead00969d1e60d612a5f28c72f28523d28177908",
+      "status": "PASS"
+    },
+    {
+      "file": "stage-chain-results.json",
+      "sha256": "d4e093e3e9ffefb0b476373ba69190d4d62520c6969e005d5ed4aedc090dfdf6",
+      "source_fingerprint": "e80c8d9124fdd85ab38a6079ead00969d1e60d612a5f28c72f28523d28177908",
+      "status": "PASS"
+    }
+  ],
+  "loop_placement": {
+    "status": "PASS_SOURCE_BOUND_LOOP_PLACEMENT",
+    "source_fingerprint": "e80c8d9124fdd85ab38a6079ead00969d1e60d612a5f28c72f28523d28177908",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+      "tests/gpu_epochs/compact_table_device.cuh": "6d94344419ad0890fdde70759e8ae3866ee540b5da643276a93ab1ae5e3dd31b",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+      "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+    },
+    "kernel": {
+      "target": "sm_89",
+      "registers": 80,
+      "shared_bytes": 32768,
+      "stack_bytes": 280,
+      "spill_store_bytes": 344,
+      "spill_load_bytes": 256,
+      "instruction_slots": 14776,
+      "non_nop": 14761
+    },
+    "sass_sha256": "03d0679d82b7ac682c2c0b0f17cc5e5afb3d11bb597713b7e06b02fa851e9171",
+    "native_report_sha256": "3f1eab744f60e78b0c143a1dab7ad086e79baf2e8cdd7040f90f9a35b14f0caa",
+    "checker_sha256": "d7c91873a4c50e76b8d514520f977831c7acc7412fa866319e5b68094e7493cc",
+    "loop_pc_range": [
+      "0x10670",
+      "0x16b50"
+    ],
+    "iterations_per_lane": 10,
+    "loop_local_instructions": [
+      {
+        "pc": "0x14b40",
+        "instruction": "LDL R73, [R1+0x7c]"
+      }
+    ],
+    "loop_control_flow": [
+      {
+        "pc": "0x10aa0",
+        "instruction": "@!P2 BRA 0x10b10"
+      },
+      {
+        "pc": "0x10b00",
+        "instruction": "BRA 0x10b20"
+      },
+      {
+        "pc": "0x10d20",
+        "instruction": "@P0 BRA 0x10dc0"
+      },
+      {
+        "pc": "0x16b40",
+        "instruction": "@P1 CALL.REL.NOINC 0x16b60"
+      },
+      {
+        "pc": "0x16b50",
+        "instruction": "BRA 0x10670"
+      }
+    ],
+    "loop_logical_local_store_bytes_per_lane": 0,
+    "loop_logical_local_load_bytes_per_lane": 40,
+    "associated_once_before_loop_store": {
+      "pc": "0xe1c0",
+      "instruction": "STL [R1+0x7c], R68",
+      "bytes": 4
+    },
+    "interpretation": "The reloaded word feeds the digit-sign XOR at0x16ab0. The store occurs before the intermediate loop; it is a compiler-retained scalar, not the explicit inverse array. Every intermediate iteration executes one4-byte load, with no local stores. The ten-loop total is40bytes/lane; including its one preceding store is44bytes.",
+    "control_e575_loop_bytes_per_lane": 484,
+    "not_counted": "Other final-guard/recovery/inverse/hit-path local accesses and the inverse callee. ptxas totals include paths outside this loop; stack size is not dynamic traffic. No physical DRAM-byte or throughput inference.",
+    "native_scope": "This report inspects the production sm89 build, also compiled with default flags. Separate audit-native-results.json records the audit entry build; no GPU execution."
+  },
+  "arena_logical_bytes_per_lane": 2976,
+  "geometry_exception_proof": "../exception_domain.md",
+  "geometry_exception_proof_sha256": "ae175767243be008ca79fac5f7b12c36e84571920dcdd376cca5c06f0c5bfda9",
+  "gpu_executed": false,
+  "limits": [
+    "No GPU throughput, driver JIT, concurrent phase scheduling or achieved occupancy measurement.",
+    "Extra cold requests can offset arithmetic, explicitshared and localspill savings.",
+    "Historical controls elsewhere in this package retain their own fingerprints; only the current identity above describes the rootcandidate."
+  ]
+}

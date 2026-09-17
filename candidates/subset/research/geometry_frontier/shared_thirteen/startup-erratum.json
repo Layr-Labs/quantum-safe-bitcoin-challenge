@@ -1,0 +1,14 @@
+{
+  "status": "CONFIRMED_STARTUP_DEFECT",
+  "reason": "Actual l2_policy startup check still hardcodes mixed_offset(12)==48MiB.13geometry coldstarts9; exacte80c/5d17 would exit invalidvalue beforesearch. CPU/native checks didnot exerciseactualpolicyhostbranch. Do notupload.",
+  "affected": [
+    "5d17e5fad6cb9d632d7b8b4977751da574242488d428cfedfb455accaa21ca5b",
+    "e80c8d9124fdd85ab38a6079ead00969d1e60d612a5f28c72f28523d28177908"
+  ],
+  "expected_small_bytes": 50331648,
+  "actual_window12_offset_bytes": 3271557120,
+  "first_cold_window": 9,
+  "e575_unaffected": true,
+  "found_at": "2026-09-17T10:28:48.698478+00:00",
+  "gpu_executed": false
+}

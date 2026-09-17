@@ -1,0 +1,117 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "b832d7ba4ec2b2554aa5279e46858a5163e83e3ad7e714e9b108551165c95f7b",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+    "tests/gpu_epochs/compact_table_device.cuh": "4cb6bad8e3d61c76f250101118bbcf426d53ee142ec73e4fe1f2f27de0c26095",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "0b9aa0dcd6e4206ed43a5b3b9c44c8525b93647812c4fd34125b6e1d64e0fdf0",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "059e371b7ccedacd20c7c368a00c700e4c7f6be65a536e0b50fea58240303cd8",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+  },
+  "geometry_bits": [
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    26,
+    26
+  ],
+  "table_bytes": 4345298944,
+  "checkpoint_source": "builder_checkpoint.cuh",
+  "fused_warp_inverse": true,
+  "table_entries_checked": 13107,
+  "runtime_bases": 3,
+  "includes_failed_run_base": true,
+  "cases": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      257
+    ],
+    [
+      4095,
+      257
+    ],
+    [
+      67894783,
+      513
+    ],
+    [
+      65535,
+      257
+    ],
+    [
+      131071,
+      257
+    ],
+    [
+      196607,
+      257
+    ],
+    [
+      262143,
+      257
+    ],
+    [
+      327679,
+      257
+    ],
+    [
+      393215,
+      257
+    ],
+    [
+      458751,
+      257
+    ],
+    [
+      524287,
+      257
+    ],
+    [
+      589823,
+      257
+    ],
+    [
+      655359,
+      257
+    ],
+    [
+      720895,
+      257
+    ],
+    [
+      786431,
+      257
+    ],
+    [
+      34340863,
+      257
+    ]
+  ],
+  "projection_sha256": "2ecad465db4dbc8263da99b17d642a94e5fb9f0ca920253f7b3cbb72565eb643",
+  "gpu_executed": false,
+  "scope": "Actual prepare/finish table kernels, complete root inversion hierarchy and actual host ladders; CPU threads/OpenSSL, sparse virtual table, independent EC oracle and adjacent canaries. No native PTX/CUDA execution or full resident table. Passing does not diagnose the official early exit."
+}

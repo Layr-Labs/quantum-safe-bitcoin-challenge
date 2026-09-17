@@ -1,0 +1,10 @@
+{
+  "status": "PASS_IDENTICAL_NATIVE_DEVICE_CODE_AFTER_HOST_POLICY_FIX",
+  "old_source": "e80c8d9124fdd85ab38a6079ead00969d1e60d612a5f28c72f28523d28177908",
+  "new_source": "a03c3c1ca5f07be955c32af76f34e5a58cc81237d7b9e4c685ee56cfe5353bda",
+  "comparison": "All parsed sm89 device instruction strings and resource records equal; changedhostassert/message only.",
+  "instructions_compared": 25464,
+  "new_native_report_sha256": "371e2fcec9f3645150c550b3dd4562531db6749add4e876441316d1062510f2a",
+  "old_native_report_sha256": "3f1eab744f60e78b0c143a1dab7ad086e79baf2e8cdd7040f90f9a35b14f0caa",
+  "gpu_executed": false
+}

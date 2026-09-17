@@ -1,0 +1,116 @@
+{
+  "status": "PASS",
+  "source_commit": "103a6adc15391e07aac210a2653f8dfd7eb4d4c0",
+  "source_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/137",
+  "coauthor_if_used": "IvanLudvig",
+  "source_sha256": "58ba3bfe698dae1c8a384f322a24595672d56969776a9cb1a8571e0428e70268",
+  "actual_helper_sha256": {
+    "static uint32_t qsb_window_second_key(": "9690bd32e849691f94f3d26c9ccd8b34186039d9fd18d309b06b876ef805a17d",
+    "static int qsb_pack_second_classes(": "5b18ba41b5d44f423691b3115d2e6c0e11c75aafdc059871eca90fdf27401caa"
+  },
+  "exact_candidate_multiset_preserved": true,
+  "before": {
+    "first_classes": 54,
+    "second_classes": 56,
+    "warp_second_classes": [
+      17,
+      4,
+      15,
+      6,
+      7,
+      7,
+      4,
+      2
+    ],
+    "second_class_group_sum": 62,
+    "warp_second_32byte_sector_groups": [
+      3,
+      1,
+      3,
+      1,
+      2,
+      2,
+      1,
+      1
+    ],
+    "sector_group_sum": 14,
+    "warp_second_128byte_line_groups": [
+      1,
+      1,
+      2,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "line_group_sum": 9,
+    "first_state_worst_bank_multiplicity_per_warp": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "first_state_bank_multiplicity_sum": 8
+  },
+  "after": {
+    "first_classes": 54,
+    "second_classes": 56,
+    "warp_second_classes": [
+      2,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      12
+    ],
+    "second_class_group_sum": 56,
+    "warp_second_32byte_sector_groups": [
+      1,
+      2,
+      1,
+      1,
+      2,
+      2,
+      2,
+      2
+    ],
+    "sector_group_sum": 13,
+    "warp_second_128byte_line_groups": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      1,
+      1
+    ],
+    "line_group_sum": 9,
+    "first_state_worst_bank_multiplicity_per_warp": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "first_state_bank_multiplicity_sum": 8
+  },
+  "decision": "Supporting hypothesis only; class-group savings do not directly count physical fetches or predict throughput.",
+  "assumptions": [
+    "32-byte sector and128-byte line groups are source address group counts, not cache misses or DRAM transactions.",
+    "Static shared-bank model uses32banks with4-byte words and broadcasts identicaladdresses; not a runtime stall measure.",
+    "Assumes aligned QSB_WINDOW_SECOND[64][256] and first_states[8][256] declarations from selected source.",
+    "No paired-SHA helper or host-drain changes imported."
+  ],
+  "gpu_executed": false
+}

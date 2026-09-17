@@ -1,0 +1,31 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "9c812950d091bd60c653e98076cd676ee419410c76cf3e24053083ecbeb546ca",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+    "tests/gpu_epochs/compact_table_device.cuh": "a75997b4258e6bc80bcfcf111e9b3241341e053668a7268b29fa09d53d917350",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "c04dd7b718757f5a6df095e4f5d2e7b5f6143332f72c5b07bae055c08e85e9b6",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "96cc9c827594ea380c414260861a261644e1ceeb717b3f603148e70e0126eb5d",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "58ba3bfe698dae1c8a384f322a24595672d56969776a9cb1a8571e0428e70268"
+  },
+  "base_fingerprint": "4072fb75b8c0785f0abc0a7bc342ff9693bd45a6e3cba77d8c7d672ca6ee37d4",
+  "generic_kernel_token_equivalence": true,
+  "ranked_kernel_launch_sites": 1,
+  "ranked_hash_recovery_gate_tokens_preserved": true,
+  "early_runtime_shape_guard": true,
+  "actual_compiled_shape_predicate_cases": 140,
+  "predicate_projection_sha256": "471349309790ba4a4e832f9cd438f3459557cb68ecfeef5c65ca6bd0ff2be1e5",
+  "gpu_executed": false,
+  "limits": "Check specialization control flow and execute the actual host shape predicate.\n\nPreserved numerical helpers retain their separately source-bound evidence.\nThis is not GPU execution, a whole-program proof, or a speed measurement.\n"
+}

@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "candidate_fingerprint": "b832d7ba4ec2b2554aa5279e46858a5163e83e3ad7e714e9b108551165c95f7b",
+  "control_fingerprint": "e18e355f7d8c90452e6ad61a6cbf4be1a495b5bb7d0817a1e8d00a69d935c918",
+  "control_kernel": {
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_bytes": 352,
+    "spill_store_bytes": 16,
+    "spill_load_bytes": 16,
+    "non_nop": 26841
+  },
+  "candidate_kernel": {
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_bytes": 336,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0,
+    "non_nop": 29902
+  },
+  "static_instruction_delta": 3061,
+  "gpu_executed": false,
+  "interpretation": "Both128regs/24KiB. Candidatezero reportedspills versus16/16Bcontrol, but3061morestaticinstructions and336Bstack. Not cyclecounts, cachebehavior, occupancymeasurementorproof ofa lead."
+}

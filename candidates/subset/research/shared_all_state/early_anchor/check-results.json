@@ -1,0 +1,41 @@
+{
+  "status": "PASS",
+  "source_fingerprint": "e575d61ad2a0f4d9b65e8901e741c6bbe7514c1a6df6fc60118cfe537653124a",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+    "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+    "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+    "tests/gpu_epochs/compact_table_device.cuh": "16c6582c4cbeaa72ad07513172853efe667eb3932206be0d13dbfeb169f0628c",
+    "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+    "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+    "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+    "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+    "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+    "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+  },
+  "projection": "Actual shared helper bodies and every shared chain statement execute; only ABI gains CPU-local32KiB arena and varied owner tid. Independent OpenSSL oracle and sparse vector-loader checks unchanged. No GPU execution.",
+  "inverse_scratch_body_equal_base": true,
+  "final_guard_equal_base": true,
+  "uniform_join_audit": true,
+  "sha_scratch_body_equal_base": true,
+  "z_helper_equal_checked_z_variant_with_slot_remap": true,
+  "explicit_view_strides": [
+    256,
+    1024,
+    512
+  ],
+  "missing_join_mutation_rejected": true,
+  "missing_sha_join_mutation_rejected": true,
+  "other_lane_arena_canaries": true,
+  "checked_owner_sequence": "tid=(call_index*73)&255 covers all256lanes",
+  "actual_shared_chain_sha256": "17f4b412764b27e378c4d0659bdbfb56d8ee157a66ccd01871f4af6620d9738c",
+  "actual_shared_digit_helpers_sha256": "17ac5225e8405722fcc5b4b37fc4bace775f47eb55a142cb266883dcc73fc559",
+  "adapter_sha256": "818397e68cb3c5eb1c80514a63da11f502636bab20d07c7e51d719d2713cfa59",
+  "gpu_executed": false
+}

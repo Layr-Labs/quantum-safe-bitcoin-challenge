@@ -1,0 +1,87 @@
+{
+  "status": "PREPARED_FOR_VALIDATION",
+  "base_source": {
+    "source_fingerprint": "b832d7ba4ec2b2554aa5279e46858a5163e83e3ad7e714e9b108551165c95f7b",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+      "tests/gpu_epochs/compact_table_device.cuh": "4cb6bad8e3d61c76f250101118bbcf426d53ee142ec73e4fe1f2f27de0c26095",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+      "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "0b9aa0dcd6e4206ed43a5b3b9c44c8525b93647812c4fd34125b6e1d64e0fdf0",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "059e371b7ccedacd20c7c368a00c700e4c7f6be65a536e0b50fea58240303cd8",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+    }
+  },
+  "candidate_source": {
+    "source_fingerprint": "7afe2d8642468c1245febc0aa9d159c76e6724e44035497a1d6623b75256c37e",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+      "tests/gpu_epochs/compact_table_device.cuh": "4cb6bad8e3d61c76f250101118bbcf426d53ee142ec73e4fe1f2f27de0c26095",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+      "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "7a7a201f021de07023283908da0b96d435f86e485a60d322793231f309eb9853",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "059e371b7ccedacd20c7c368a00c700e4c7f6be65a536e0b50fea58240303cd8",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+    }
+  },
+  "changed_source_files": [
+    "tests/gpu_epochs/tree.cu"
+  ],
+  "changes": [
+    "Recovery denominator B*d replaces A^2*d; inverse tree and zero-lane contract preserved.",
+    "A is carried across the inverse instead of C=A*d^2.",
+    "Cubic curve identity replaces two slope squares and two pre-inverse squares with one alpha square.",
+    "Per-problem3*xR^2 is computed with checked OpenSSL operations and uploaded once as32constantbytes."
+  ],
+  "per_candidate_recovery_before": {
+    "M": 10,
+    "S": 4
+  },
+  "per_candidate_recovery_after": {
+    "M": 10,
+    "S": 1
+  },
+  "whole_point_chain_plus_recovery_before": {
+    "M": 98,
+    "S": 30
+  },
+  "whole_point_chain_plus_recovery_after": {
+    "M": 98,
+    "S": 27
+  },
+  "count_limits": "Counts exclude unchanged inverse-tree arithmetic, SHA and additions. One host field square/triple/reduction and32-byte constant upload per runtime problem are additional.",
+  "unchanged": [
+    "Guarded complete small48 point chain",
+    "GPUMath and square carry corrections",
+    "per-CTA inverse",
+    "table builder and policy",
+    "candidate selection/hashing",
+    "hit flags and host search loop"
+  ],
+  "generator_sha256": "6b4ddfe629b7225b578b671bff4a68315be3414a8453c5c479a7a3aad1fec979",
+  "gpu_executed": false,
+  "production_changed": false,
+  "native_compile_fix": {
+    "previous_fingerprint": "4efb34d750eff0d841f52a993aae40b6b5a2a9d5f0bee143cb85d989ae823d74",
+    "change": "_ModAdd256(W,W,xR) uses the actual three-argument interface",
+    "evidence": "failed_4efb/failure.json"
+  }
+}

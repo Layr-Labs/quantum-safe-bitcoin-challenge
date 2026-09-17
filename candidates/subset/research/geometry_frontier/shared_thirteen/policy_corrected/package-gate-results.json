@@ -1,0 +1,18 @@
+{
+  "status": "PASS_SOURCE_BOUND_POLICY_GATE",
+  "negative_controls": [
+    {
+      "case": "missing",
+      "exit_code": 2,
+      "expected_rejection": true
+    },
+    {
+      "case": "wrong_source",
+      "exit_code": 2,
+      "expected_rejection": true
+    }
+  ],
+  "correct_source_accepted": true,
+  "source_fingerprint": "a03c3c1ca5f07be955c32af76f34e5a58cc81237d7b9e4c685ee56cfe5353bda",
+  "gpu_executed": false
+}

@@ -1,0 +1,133 @@
+{
+  "control_source": {
+    "source_fingerprint": "e18e355f7d8c90452e6ad61a6cbf4be1a495b5bb7d0817a1e8d00a69d935c918",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/tree.cu": "a58c506a49aa24740c3e48846afd9f64f665275137299f1ac2b95cd35de268ec",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "059e371b7ccedacd20c7c368a00c700e4c7f6be65a536e0b50fea58240303cd8",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+    }
+  },
+  "geometry_builder_policy_donor": {
+    "source_fingerprint": "140133ddb7a0408750a5396ce20658a1b48591422b5974315c8b76110de3117c",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "2025be571e25b67a9afe9a3531a47d08f0a22b2e95ca1dc91c18a62aa0530459",
+      "square32.cuh": "34f62cd4e19f317c39a3d240386641dc1adcc6f8f74d66b93571e87e2dfc3914",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+      "tests/gpu_epochs/compact_table_device.cuh": "6fcbdf8f99c8756f9ba013b191c46e39bd4ccb2b30b3695765715c8dc2343d22",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+      "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/ranked_pipeline.cuh": "162a65baa455d170f5e8f923769db9cd9839f09f8a712d9b3a5f73d85d0cbd4a",
+      "tests/gpu_epochs/table_policy.cuh": "8695b8cb021cdb33dc569b870ea8b33817adefa605f398de38ce18d0f89bf7e7",
+      "tests/gpu_epochs/table_resources.cuh": "630368b93cf643efbc8fbaed8ed2a7637420d48ef6b649da65a0cd186eb10686",
+      "tests/gpu_epochs/table_tuner.cuh": "d1531eb3f103a14c96c818e022d75d13f7faf476eb7d6de8d7b2f72cba8d272a",
+      "tests/gpu_epochs/tree.cu": "98535a07487a676e66fab6d4ab930359dc659344286e7cff3a850eb5bb0cc7bf",
+      "tests/gpu_epochs/tree_audit.cu": "c6015b15d7a3b7728d85492504836677ad082dc0b641d3debc40105c3d14ac66",
+      "tests/gpu_epochs/tree_inverse.cuh": "67103970f3761c1be263b7df114bd5a6d3b63e48be36e423892a2f68efa91b41",
+      "tests/gpu_epochs/wide_geometry.cuh": "985e935e371842eceabe05245b8d28237bfd19e2987c75894c59e389766eabbb",
+      "tests/gpu_epochs/wide_table_host.cuh": "ac27e68bbc52f7cb8d9c00faba61f96f75545af0aa22d2a8d0adf4ffd41e8e4b",
+      "tests/gpu_epochs/wide_table_kernels.cuh": "811668b4a00b8fb35716392b7c60d79e952c511eeb3f08a5a6c9321b4057c8d2",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+    }
+  },
+  "candidate_source": {
+    "source_fingerprint": "b832d7ba4ec2b2554aa5279e46858a5163e83e3ad7e714e9b108551165c95f7b",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "cd0cfd0d33f4b9e2516c47186f18b6ce76679d6c4256ad4db96df3c20e17a4c9",
+      "tests/gpu_epochs/compact_table_device.cuh": "4cb6bad8e3d61c76f250101118bbcf426d53ee142ec73e4fe1f2f27de0c26095",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "ba3f11737ee4f7c037fe8120c372062e140ef9e2579c511a4263ba1406189310",
+      "tests/gpu_epochs/l2_policy.cuh": "d16fde56ade1f76d5d55bf54f4535df6c8a653bf6d7ab4ba2c50d6fa61d76d97",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "0b9aa0dcd6e4206ed43a5b3b9c44c8525b93647812c4fd34125b6e1d64e0fdf0",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "059e371b7ccedacd20c7c368a00c700e4c7f6be65a536e0b50fea58240303cd8",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "edce85dcd53d8827cd76962e19da4b578e1f946d31f519304a94694f011214d7"
+    }
+  },
+  "preserved_fused_functions_sha256": {
+    "__global__ void __launch_bounds__(256, 2) kernel_digest(": "f80c14ccf645f4b1039a00f82cd505c0232ffca0192ebb3a55aeb8bfb8de1db8",
+    "__global__ void kernel_build_epochs(": "d0b14ee1d95706c2e9af2ec9339dbdf5274a1ceae4b44814b28c1bfe38d2bc2e",
+    "__device__ __forceinline__ void qsb_field_mul(": "3cb159499b90512d31d3efac21e9131ac6cdedb587870882624fa0fb9751eff1",
+    "__device__ __forceinline__ void qsb_xyzz_finish_prepare(": "87d50c530b8e24819d99b3010c011ccebca6426fe60c1749e1c832dcdc7a4cb0",
+    "__device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(": "7e6f1d26917f2892e09244389e5c264387a91b9ebc8bffd5491b14d81b9c1d1b",
+    "__device__ __forceinline__ void gt_recode_setup(": "e8225e22d018eafd88b51b8572a2efb2983e9d02791d2fd093a0b9d51b4a51b4"
+  },
+  "preserved_search_tail_sha256": "f1d5ebd8cf0ef20170865c7835e30b00215df87b042964b00219a839c1268a90",
+  "changed_functions": {
+    "_FixedBaseSignedXYZZStream": "Calls guarded compact_fixed_xyzz: cold windows12,13 then small windows0..11.",
+    "compact_fixed_xyzz": "Donor body with exactly two equivalent PR77 deferred-add symbol adaptations; final guard unchanged.",
+    "gt_recode_signed": "Delegates to exact donor geometry recoder; PR77 gt_recode_setup is unchanged.",
+    "main_startup": "Checked device setup/allocations/copies; early4096-byte ranked stack; bounded mandatory table builder; optional checked48MiB L2 priority."
+  },
+  "builder_dependencies": {
+    "builder_checkpoint.cuh": "Exact donor prefix through qsb_root_group_finish; no ranked prepare, finish or search-launch functions.",
+    "qsb_field_mul": "Exact correctedPR77 function; different source from external donor, requires integrated builder verification.",
+    "qsb_block_inverse_tree": "Exact correctedPR77 per-CTA tree; also serves builder super-root inversion.",
+    "GPUMath.h": "Byte-identical correctedPR77; donor builder invokes these field primitives."
+  },
+  "startup_resources": {
+    "table_bytes": 4345298944,
+    "table_entries": 67895296,
+    "host_ladder_array_bytes": 14680064,
+    "host_ec_points_per_runtime_base": 73906,
+    "gpu_builder_chunk_entries": 1048576,
+    "gpu_builder_batches": 65,
+    "gpu_builder_temporary_bytes": 48497152,
+    "sampled_table_readback_bytes": 23552,
+    "ranked_stack_request_bytes_per_thread": 4096,
+    "external_search_checkpoint_bytes": 0,
+    "hot_path_operations_normal_chain": {
+      "multiplications": 88,
+      "squares": 26
+    },
+    "checked_standalone_startup_cuda_calls": 40,
+    "whole_table_host_fallback_or_readback": false,
+    "actual_GPU_startup_or_resource_measurement": false
+  },
+  "unmodified_control_files": [
+    "GPUHash.h",
+    "GPUMath.h",
+    "square32.cuh",
+    "subset.cu",
+    "tests/gpu_epochs/prefix_cache.cuh",
+    "tests/gpu_epochs/tree_audit.cu",
+    "tests/gpu_epochs/tree_inverse.cuh",
+    "tests/gpu_epochs/window_schedule_shared.cuh"
+  ],
+  "exact_donor_files": [
+    "GPUHash.h",
+    "subset.cu",
+    "tests/gpu_epochs/prefix_cache.cuh",
+    "tests/gpu_epochs/window_schedule_shared.cuh",
+    "tests/gpu_epochs/compact_geometry.cuh",
+    "tests/gpu_epochs/compact_table_kernels.cuh",
+    "tests/gpu_epochs/compact_table_host.cuh",
+    "tests/gpu_epochs/l2_policy.cuh"
+  ],
+  "correctness_and_performance_limits": [
+    "Generator structural assertions only; parent owns arithmetic, integrated builder, host API and native CUDA validation.",
+    "PR77 fused kernel uses its original per-CTA inverse; the cold-first helper changes register lifetimes and may spill.",
+    "Full4GiB table construction and driver-JIT startup count against the official wall clock.",
+    "Optional48MiB cache policy gives priority, not guaranteed residency; unsupported policy keeps the same table geometry.",
+    "No GPU executed and no score or additive speedup inferred from PR77 or the external-pipeline candidate."
+  ],
+  "generator_sha256": "b6c508970d3855861bed56f342e76dd769e0ce0cc40a4ead604487834d7e60ba",
+  "gpu_executed": false,
+  "production_changed": false
+}

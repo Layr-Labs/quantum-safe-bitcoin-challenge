@@ -1,0 +1,395 @@
+{
+  "status": "EXPECTED_WRONG_COLD_PREFETCH_DETECTED_AFTER_SUCCESSFUL_CPU_COMPILE",
+  "base_source": {
+    "source_fingerprint": "b2fd8e8896270638268058a41150409d42a470ce228ee1962c8dcc76f7ef1170",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+      "tests/gpu_epochs/compact_table_device.cuh": "cb95bfcacf64b7ac1e889a182be99c53ca7a360d9bd9c9943536fb0158beb6e1",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+      "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+    }
+  },
+  "mutated_source": {
+    "source_fingerprint": "b62b0092f4955ca78b1b7f2c4e37dd6f05a7bb64846c997c6edfb4f1fa683e02",
+    "source_sha256": {
+      "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+      "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+      "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+      "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+      "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+      "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+      "tests/gpu_epochs/compact_table_device.cuh": "2fa79177d90c5d418c04f9b3f423826f79666d901aaefb956d285227ce149e75",
+      "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+      "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+      "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+      "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+      "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+      "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+      "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+      "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+      "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+    }
+  },
+  "mutation": {
+    "file": "tests/gpu_epochs/compact_table_device.cuh",
+    "old": "(unsigned)mixed_shift(cold)+1u,25u,cold==12,",
+    "new": "(unsigned)mixed_shift(cold)+1u,25u,false,",
+    "changed_files": [
+      "tests/gpu_epochs/compact_table_device.cuh"
+    ],
+    "only_hint_last_flag_changed": true,
+    "actual_loads_and_chain_unchanged": true
+  },
+  "runner_sha256": "9f861679321a468fcccde014b87094173c51d4cb61c63acf348f9be5d91e1ea2",
+  "checker_sha256": {
+    "preflight.py": "39356ef21796f599119c48147913778696919b3ed440216f0e42601d7ed5305a",
+    "audit_integrated.py": "fd0faa3ae58ba41c67cd5cc5ba99407bf9e4bb86b24fbafe529d1f43cfce9fe3",
+    "research/wide_windows/audit_support.py": "4feae52aa621a948071577e3461717913f49942568bd58d2c160328bfee4dbb4",
+    "research/wide_windows/check_wide.py": "cf6b5916da80c984293bd2603b68e5626311968a3fbc08da00e17a29562c5c6c",
+    "research/asymmetric_windows/cold_seed/check_exceptions.py": "56d632037a7ccc721b3110a78725cd024bac9ef561db2ea1d78b18c46e5470ed",
+    "research/pr120_digits/check_chain_recovery.py": "8a131051204113266cc106455cd18dcfcb74d06a7b312953fb8cb6459003d1a3",
+    "research/shared_all_state/check.py": "4dfbc3740f772f9a7483f56b770261ef653c5684783d7be806ca286eb385d3d6",
+    "research/geometry_frontier/shared_thirteen/check.py": "f796aebe52acbe29a367f46c71fc9e8874d7b8983090f37d04047016623b8dc1",
+    "research/geometry_frontier/shared_thirteen/policy_corrected/cold_prefetch/check.py": "bdd6ac6b4733b15ca5fcec1f66705dd6c11f776b49038be36a8ef9c89778baa5",
+    "research/geometry_frontier/shared_thirteen/policy_corrected/cold_prefetch/local_m/check.py": "15261072c7840eb53eb68cc29f47d793172ced35fa0d040b30d2103c6b72b250"
+  },
+  "reproduce_argv": [
+    "python3",
+    "-B",
+    "candidates/subset/research/geometry_frontier/shared_thirteen/policy_corrected/cold_prefetch/run_negative.py",
+    "--source",
+    "candidates/subset",
+    "--checker",
+    "candidates/subset/research/geometry_frontier/shared_thirteen/policy_corrected/cold_prefetch/local_m/check.py",
+    "--report",
+    "candidates/subset/research/geometry_frontier/shared_thirteen/policy_corrected/cold_prefetch/local_m/prefetch-negative-control.json"
+  ],
+  "runs": {
+    "positive": {
+      "source_fingerprint": "b2fd8e8896270638268058a41150409d42a470ce228ee1962c8dcc76f7ef1170",
+      "exit_code": 0,
+      "diagnostics": [
+        "QSB_CPU_COMPILE_OK cpp_sha256=51430124e65869821d176a14203174eeec942b606fedd24cf32a508f74c3764c",
+        "QSB_CPU_COMPILE_OK cpp_sha256=2fb83445123503768af705988a11fd8a7fdf5fcab2433f259a7f475613063c03"
+      ],
+      "compilations": [
+        {
+          "exit_code": 0,
+          "generated_cpp_sha256": "51430124e65869821d176a14203174eeec942b606fedd24cf32a508f74c3764c",
+          "shared_library_created": true,
+          "flags": [
+            "-std=c++17",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-I/opt/homebrew/opt/openssl@3/include",
+            "-L/opt/homebrew/opt/openssl@3/lib",
+            "-lcrypto",
+            "-o"
+          ]
+        },
+        {
+          "exit_code": 0,
+          "generated_cpp_sha256": "2fb83445123503768af705988a11fd8a7fdf5fcab2433f259a7f475613063c03",
+          "shared_library_created": true,
+          "flags": [
+            "-std=c++17",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-I/opt/homebrew/opt/openssl@3/include",
+            "-L/opt/homebrew/opt/openssl@3/lib",
+            "-lcrypto",
+            "-o"
+          ]
+        }
+      ],
+      "generated_projections": [
+        {
+          "before_diagnostic_sha256": "c698b51ec734cf1ded55a84b7022e5db5d0d3cb0893aae32c742520e35842d3d",
+          "after_diagnostic_sha256": "2fb83445123503768af705988a11fd8a7fdf5fcab2433f259a7f475613063c03"
+        }
+      ],
+      "temporary_entry_checker_sha256": "15261072c7840eb53eb68cc29f47d793172ced35fa0d040b30d2103c6b72b250",
+      "check_results": {
+        "status": "PASS",
+        "source_fingerprint": "b2fd8e8896270638268058a41150409d42a470ce228ee1962c8dcc76f7ef1170",
+        "source_sha256": {
+          "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+          "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+          "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+          "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+          "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+          "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+          "tests/gpu_epochs/compact_table_device.cuh": "cb95bfcacf64b7ac1e889a182be99c53ca7a360d9bd9c9943536fb0158beb6e1",
+          "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+          "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+          "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+          "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+          "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+          "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+          "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+          "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+          "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+        },
+        "projection": "Actual shared helper bodies and every shared chain statement execute; only ABI gains CPU-local32KiB arena and varied owner tid. Independent OpenSSL oracle and sparse vector-loader checks unchanged. No GPU execution.",
+        "inverse_scratch_body_equal_base": true,
+        "final_guard_equal_base": true,
+        "uniform_join_audit": true,
+        "sha_scratch_body_equal_base": true,
+        "z_helper_equal_checked_z_variant_with_slot_remap": true,
+        "explicit_view_strides": [
+          256,
+          1024,
+          512
+        ],
+        "missing_join_mutation_rejected": true,
+        "missing_sha_join_mutation_rejected": true,
+        "other_lane_arena_canaries": true,
+        "checked_owner_sequence": "tid=(call_index*73)&255 covers all256lanes",
+        "actual_shared_chain_sha256": "a753a133fdddf04bab873bc2c51606d1c3c9965499f804cc81ee8a19c6fb016b",
+        "actual_shared_digit_helpers_sha256": "17ac5225e8405722fcc5b4b37fc4bace775f47eb55a142cb266883dcc73fc559",
+        "adapter_sha256": "10450c667ef22dce761f49d99fb0aca82e14a504d328d8629150e2a2b19b4efc",
+        "gpu_executed": false,
+        "geometry_adapter_sha256": "f796aebe52acbe29a367f46c71fc9e8874d7b8983090f37d04047016623b8dc1",
+        "outer_adapter_sha256": "c172c5fce95a3b04fde33f1c8e0c406d8eaebcd9eb173f1d92be66ca12624740",
+        "geometry_bits": [
+          18,
+          18,
+          18,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          25,
+          25,
+          25,
+          25
+        ],
+        "checked_chain_order": [
+          9,
+          10,
+          11,
+          12,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "geometry_adaptation": "Only independent geometry/order/prefetch expectations and prefix-bound setup changed. All actual shared chain/helper statements execute, with CPU-local arena and varied owner tid; no source mutation.",
+        "cold_prefetch_adapter_sha256": "15261072c7840eb53eb68cc29f47d793172ced35fa0d040b30d2103c6b72b250",
+        "adapted_checker_sha256": "4c66b16c50ce7aa7f0379eac75f39aae2424efd108844d22116e680d8d6557cc",
+        "expected_prefetched_windows": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "prefetch_scope": "Actual addresses/sectors checked before every later load; no device cache/timing simulation."
+      },
+      "chain_results": {
+        "status": "PASS",
+        "source_fingerprint": "b2fd8e8896270638268058a41150409d42a470ce228ee1962c8dcc76f7ef1170",
+        "source_sha256": {
+          "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+          "GPUMath.h": "d41b6db99c5fb470efc220961fad8b88fb74716921b99aa8cd2c363c9f612164",
+          "square32.cuh": "03c3ea2f7e8bea10de34c1f427e96a98599f522f1889ecbcdd8ec9d4bc8f1e81",
+          "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+          "tests/gpu_epochs/builder_checkpoint.cuh": "7585967c25050698fa7a7d76f3eecc7f7cbbc327698a9180a72a9110931f7022",
+          "tests/gpu_epochs/compact_geometry.cuh": "207b12c1a683fa3049f09d32cf830fa5e352162856c39517598f66c92bc7d9d4",
+          "tests/gpu_epochs/compact_table_device.cuh": "cb95bfcacf64b7ac1e889a182be99c53ca7a360d9bd9c9943536fb0158beb6e1",
+          "tests/gpu_epochs/compact_table_host.cuh": "c12bcb4ed39d43a76bf949d9564b44d4fbee483dbbe71655f9e2aac5cf3af35d",
+          "tests/gpu_epochs/compact_table_kernels.cuh": "5e30ae2f3c616aa59fd6f8b4aa3bfc9aaf71000a4f1cab4c19552a7cf3f978c2",
+          "tests/gpu_epochs/l2_policy.cuh": "05339e941862efca9dc715adead307f556e17dd06d10ff31becbaa60752cb525",
+          "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+          "tests/gpu_epochs/startup_check.cuh": "1ffc4883189f91bbd862e13fd981231c5401fb627ea0eb3ed3952ca8e41b595d",
+          "tests/gpu_epochs/tree.cu": "d2fd4c899f2a93da02bbad7abaf96cd1bff2ea0c581ae2d4197395f3f1d6648a",
+          "tests/gpu_epochs/tree_audit.cu": "c090eaab7bef88b0d9fe0eaa1f68ddd2fc3a30324d3e7e928416a9f13e2a25e1",
+          "tests/gpu_epochs/tree_inverse.cuh": "736b4f38125cf909c9ed38d95964b028b93a6b3ec1b46af898b66059e0038d87",
+          "tests/gpu_epochs/window_schedule_shared.cuh": "9119bbfdff8c1a37cf771997bbe8212395d0d8ef97e11c26d8eff2a4b8721ae8"
+        },
+        "validation_level": "Actual compact chain to cubic recovery with OpenSSL fields; actual runtime host constant helper with checked mocked CUDA symbol upload",
+        "actual_field_call_arities": {
+          "_ModAdd256": [
+            3
+          ],
+          "_ModSub256": [
+            2,
+            3
+          ],
+          "_ModMult": [
+            2,
+            3
+          ],
+          "_ModSqr": [
+            2
+          ]
+        },
+        "recoding_cases": 12769,
+        "curve_chains": 628,
+        "recovered_keys_compared": 1242,
+        "actual_loader_cases": 494,
+        "prefetch_next_load_checks": 8164,
+        "geometry_bits": [
+          18,
+          18,
+          18,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          25,
+          25,
+          25,
+          25
+        ],
+        "checked_chain_order": [
+          9,
+          10,
+          11,
+          12,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "actual_helper_cases": {
+          "equal": 159,
+          "opposite": 159,
+          "ordinary": 159,
+          "unguarded_doubling_failures_detected": 159
+        },
+        "prefix_bound_cases": 8,
+        "added_chain_scalar_cases": 214,
+        "extracted_actual_function_sha256": {
+          "compact_fixed_xyzz_shared": "a753a133fdddf04bab873bc2c51606d1c3c9965499f804cc81ee8a19c6fb016b",
+          "gt_field_bits_v": "6aeb908a93de6d1a4e28d20f41d39838a1ee1cb96e0306826c9f3702cc27f90b",
+          "gt_direct_digit": "c291852d21658448963484bc6974568f3dec63b79530b46143ca74b2058081fa",
+          "qsb_prepare_cubic_constant": "e07e9e752890cc98922b5d61192f0611af88992e0ef1963659f18aec207104d2",
+          "compact_load_signed": "74ffa3e9768040b0e00567606e524d653e32a879a09e68f50909c065d6507aff",
+          "qsb_asym_last_add": "b56ee3e6b8a90566d9ef5773d10014dfc29f724380c0749157f8851a924fc4f7",
+          "_PointAddXYZZ_def": "484301cd7e1cd98f390315a58ee9cce15c9f9531f921e08c04157725c081b2af",
+          "_PointAddXYZZ_mm_def": "e55a81dabdd1862d2b067cc8aaaba513659c15fc7e48a24a1210270d7b7d5225",
+          "qsb_xyzz_finish_prepare": "7003f8091ece85a08923bc5bd8c34376f6effedc2657cf8d050af67463f98ea2",
+          "qsb_xyzz_finish_precomputed": "749a0fcebaa98207b7d1548fe1f2621229e290671c41e2adece8ca443c94a30d"
+        },
+        "checker_original_sha256": {
+          "check_wide.py": "cf6b5916da80c984293bd2603b68e5626311968a3fbc08da00e17a29562c5c6c",
+          "check_exceptions.py": "fd92b9668f4dc800ebf3ffefef2ef55349a4f5def8c8730b6165a77878ef04f3"
+        },
+        "checker_adapted_sha256": {
+          "check_wide.py": "df55dc6ab0c98e8e074db769f894c199ecd449b711a82ca54b4704781808494c",
+          "check_exceptions.py": "6ce699b5101133aa0ddcb28057801718d448a7b83666633fbfd3dc69e3e99d8c"
+        },
+        "adapter_sha256": "8a131051204113266cc106455cd18dcfcb74d06a7b312953fb8cb6459003d1a3",
+        "projection_changes": [
+          "Read direct recovery from actual fused tree.cu; do not read old ranked_pipeline.cuh.",
+          "Extract actual fused _PointAddXYZZ_def and _PointAddXYZZ_mm_def instead of old template/seed.",
+          "Use actual fused _PointAddXYZZ_def(...,false) as exceptional negative control.",
+          "Retain legacy independent scalar, geometry, order, loader, prefetch and affine oracles unchanged.",
+          "Pass actual chain ZZZ into new prepare ABI and unchanged chain ZZ into new finish ABI; remove obsolete C construction.",
+          "Extract actual OpenSSL runtime constant helper; replace only CUDA symbol upload with checked CPU memory copy.",
+          "Include actual source-exact direct-digit helpers used by the selected point chain."
+        ],
+        "gpu_executed": false,
+        "production_modified": false,
+        "limits": "Check the actual guarded compact chain followed by cubic direct recovery.\n\nOnly checker extraction is adapted, in memory. Production source is never\nrewritten to satisfy a legacy test. Actual fused recoding, vector loads, cold\ndigits, deferred seed/intermediate/final point helpers, cubic recovery, and the\nactual host constant helper run against OpenSSL field operations and independent\ncurve multiplication. The chain table entries come from the independent curve\noracle; actual vector memory loads are checked separately with sparse memory. This is\nnot native field/PTX execution, a complete fused-kernel audit, or a GPU test.\n"
+      }
+    },
+    "negative": {
+      "source_fingerprint": "b62b0092f4955ca78b1b7f2c4e37dd6f05a7bb64846c997c6edfb4f1fa683e02",
+      "exit_code": 86,
+      "diagnostics": [
+        "QSB_CPU_COMPILE_OK cpp_sha256=51430124e65869821d176a14203174eeec942b606fedd24cf32a508f74c3764c",
+        "QSB_CPU_COMPILE_OK cpp_sha256=48a4a8ef3d792165ffd06c0c58716cf5bb765ce83b3a33510a7ea60c746ad51f",
+        "QSB_PREFETCH_ADDRESS_MISMATCH window=12 actual=0xc3000000 expected=0x102ffffc0 idx=16777215 halves=3 scalar=0xfffffffffffffffffffffffff00007febaaedce6af48a03bbfd25e8cd0364141"
+      ],
+      "compilations": [
+        {
+          "exit_code": 0,
+          "generated_cpp_sha256": "51430124e65869821d176a14203174eeec942b606fedd24cf32a508f74c3764c",
+          "shared_library_created": true,
+          "flags": [
+            "-std=c++17",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-I/opt/homebrew/opt/openssl@3/include",
+            "-L/opt/homebrew/opt/openssl@3/lib",
+            "-lcrypto",
+            "-o"
+          ]
+        },
+        {
+          "exit_code": 0,
+          "generated_cpp_sha256": "48a4a8ef3d792165ffd06c0c58716cf5bb765ce83b3a33510a7ea60c746ad51f",
+          "shared_library_created": true,
+          "flags": [
+            "-std=c++17",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-I/opt/homebrew/opt/openssl@3/include",
+            "-L/opt/homebrew/opt/openssl@3/lib",
+            "-lcrypto",
+            "-o"
+          ]
+        }
+      ],
+      "generated_projections": [
+        {
+          "before_diagnostic_sha256": "67b053a8926e7d905e36d2e0d1d3d4b126283890281816088dd5d5fefee44d7f",
+          "after_diagnostic_sha256": "48a4a8ef3d792165ffd06c0c58716cf5bb765ce83b3a33510a7ea60c746ad51f"
+        }
+      ],
+      "temporary_entry_checker_sha256": "de487712460052650f906dbbaf9e139d66d47594b0527ac81b8ddce4d94b5a21",
+      "mismatch": {
+        "window": "12",
+        "actual": "0xc3000000",
+        "expected": "0x102ffffc0",
+        "idx": "16777215",
+        "halves": "3",
+        "scalar": "0xfffffffffffffffffffffffff00007febaaedce6af48a03bbfd25e8cd0364141"
+      }
+    }
+  },
+  "gpu_executed": false,
+  "cuda_compiled": false,
+  "scope": "Actual source-derived prefetch offsets compared to later actual load indices in the existing OpenSSL CPU chain projection. A wrong hint is detected; this does not imply wrong arithmetic outputs or measure cache behavior.",
+  "prior_evidence": null
+}

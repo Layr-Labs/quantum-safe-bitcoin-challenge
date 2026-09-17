@@ -1,0 +1,53 @@
+{
+  "status": "PREPARED_NOT_SUBMITTED",
+  "source_fingerprint": "b832d7ba4ec2b2554aa5279e46858a5163e83e3ad7e714e9b108551165c95f7b",
+  "timestamp": "2026-09-17T05:43:27.310087+00:00",
+  "reports": {
+    "frontend-results.json": {
+      "status": "PASS",
+      "sha256": "77b337db801743a832428753ec248d37cee95c7dfdfee9d2f020d4536747cb42"
+    },
+    "fused-geometry-results.json": {
+      "status": "PASS",
+      "sha256": "a196baa535ab42a6b4e9f41e04e95b2865148d32b8045bfa92a9a89a24bd249a"
+    },
+    "builder-pipeline-results.json": {
+      "status": "PASS",
+      "sha256": "3b933fd5026f88c64e30b20a6cc36522e9e572dcdd883336bfdcc1b5086dc193"
+    },
+    "native-results.json": {
+      "status": "PASS",
+      "sha256": "ac0ede62d1b75668b7205cef0fc8016c2cae1b8e6d2c9b8383d224d5db32f10b",
+      "original_report_sha256": "8e5a502a303e217a2c9ed7e8a8dcd10af65ef133fa4e9f29a75a4b13c6164a5c"
+    },
+    "audit-native-results.json": {
+      "status": "PASS",
+      "sha256": "9c55ad61f9c97e024fcc425e286b9b13447cb282d2d011845293b51aff01605b",
+      "original_report_sha256": "385483341f3261da861406154d157733bf9ea0546f8d0e7d63a4cbfa7592b28e"
+    },
+    "projection-results.json": {
+      "status": "PASS",
+      "sha256": "be7cdb74deda1d014d25f3c455a2840fe4b072ddfe0fbb72feca4f77f084592a"
+    },
+    "tree-field-results.json": {
+      "status": "PASS",
+      "sha256": "2cfbf5021fa30b54381dff81385b6047a31d667a0dfd1f3578bc64987b97458d"
+    },
+    "independent-audit.json": {
+      "status": "PASS_READ_ONLY_REVIEW",
+      "sha256": "10aac826ecfb8e42b777ebccaaa6b2490916bcda9427a76265961f0c2ff32246"
+    }
+  },
+  "carry_math_inheritance": {
+    "control": "e18e355f7d8c90452e6ad61a6cbf4be1a495b5bb7d0817a1e8d00a69d935c918",
+    "unchanged": [
+      "GPUMath.h",
+      "square32.cuh"
+    ],
+    "evidence": "Exact hashes equal correctedPR77 control; control-field-results.json records host/PTX checks. Geometry projection usesOpenSSL fields, notdevicearithmetic."
+  },
+  "kernel_and_search": "Full originalfused kernel_digest, epochproducer, hashselection, inverse, recoveryandsearchtail bytepreserved; fixed-basehelper, builderandstartup changed. See prepared-source.json.",
+  "remaining": "GPU execution, driver startup, cache behavior and throughput unmeasured. No blocking regression in independent startup/control-flow review.",
+  "gpu_executed": false,
+  "tree_arithmetic": "Actual distinct qsb_field_mul PTX semantic model plus compiled actual C++canonicaltail passes2180fullwidth/boundarypairs anddetectsstale-carrymutation; noGPUexecution."
+}
