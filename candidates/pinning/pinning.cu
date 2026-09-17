@@ -1520,8 +1520,19 @@ int main(int argc, char **argv) {
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
             cudaStreamAttrValue av = {};
-            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            /* Skip chunk 0. It holds 2^17 entries (8 MiB) against 2^16 (4 MiB)
+             * for each of the other fourteen, yet every chunk is read exactly
+             * once per candidate -- so a byte in chunk 0 is half as hot as a
+             * byte anywhere else. With only `want` bytes of persisting L2
+             * available, spending 8 MiB of it on the coldest region is waste:
+             * starting the window past chunk 0 covers 12.5 of the 15 reads per
+             * candidate instead of 11.5. */
+            size_t cold = (size_t)(1u << 17) * 64;            /* chunk 0 */
+            size_t skip = (gt_sz > cold + want) ? cold : 0;
+            av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+            size_t avail = gt_sz - skip;
+            size_t nb = want < avail ? want : avail;
+            av.accessPolicyWindow.num_bytes = nb < (size_t)max_window ? nb : (size_t)max_window;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
