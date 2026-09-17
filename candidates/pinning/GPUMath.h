@@ -1253,66 +1253,11 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
 template<bool DEFER_Y>
-__device__ __forceinline__ void _PointAddXYZZT(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff);
-
-__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                              const uint64_t *X2, const uint64_t *Y2,
-                              const uint64_t *Yoff, bool defer_y)
-{
-  uint64_t U2[4];
-  uint64_t S2[4];
-  uint64_t P[4];
-  uint64_t R[4];
-  uint64_t PP[4];
-  uint64_t PPP[4];
-  uint64_t Q[4];
-  uint64_t T[4];
-
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-#if QSB_LAZY
-  _ModAddLazy(S2, Y2, Yoff);
-#else
-  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
-#endif
-  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-  _ModSqr(PP, P);                      // PP = P^2
-  _ModMult(PPP, PP, P);                // PPP = P*PP
-  _ModMult(Q, U2, PP);                 // V  = U2*PP
-  _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
-
-  _ModSqr(T, R);                       // R^2
-#if QSB_LAZY
-  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
-#else
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
-#endif
-
-  _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
-    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
-    _ModSub256(Y1, Q, S2);             // exact Y3
-  }
-
-  Load256(X1, T);                      // X3
-}
-
-// Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
-// production chain calls <true> twelve times in its rolled loop and <false>
-// once for the resolving final addition, so no defer_y branch is in the loop.
-template<bool DEFER_Y>
-__device__ __forceinline__ void _PointAddXYZZT(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
+__device__ __forceinline__ void _PointAddXYZZ(
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1363,12 +1308,11 @@ __device__ __forceinline__ void _PointAddXYZZT(
 // ZZ3, and ZZZ3 are the ordinary coordinates of P1+P2, while Y3 deliberately
 // holds only R*(Q-X3), omitting -Y1*ZZZ3. The caller adds Y1 only to the third
 // affine point's slope input for one affine-anchored madd. Its slope numerator
-// is then (Ythird+Y1)*ZZZ3-R*(Q-X3) = Ythird*ZZZ3-Y(P1+P2), while its final
-// affine anchor remains Ythird. The combined seed is therefore exact and costs
-// 11M+4S rather than 12M+4S.
-__device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
-                                 const uint64_t *X1, const uint64_t *Y1,
-                                 const uint64_t *X2, const uint64_t *Y2)
+__device__ __forceinline__ void _PointAddXYZZ_mm(
+    uint64_t *__restrict__ X3, uint64_t *__restrict__ Y3,
+    uint64_t *__restrict__ ZZ3, uint64_t *__restrict__ ZZZ3,
+    const uint64_t *__restrict__ X1, const uint64_t *__restrict__ Y1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2)
 {
   uint64_t P[4];
   uint64_t R[4];

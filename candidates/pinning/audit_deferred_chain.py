@@ -226,16 +226,25 @@ def source_audit():
     root = Path(__file__).resolve().parent
     math = (root / "GPUMath.h").read_text()
     pinning = (root / "pinning.cu").read_text()
-    mixed = function_body(math, "__device__ void _PointAddXYZZ(uint64_t")
+    mixed = function_body(math, "__device__ __forceinline__ void _PointAddXYZZ(")
     assert len(re.findall(r"\b_ModMult\(", mixed)) == 8
     assert len(re.findall(r"\b_ModSqr\(", mixed)) == 2
-    assert "const uint64_t *Yoff, bool defer_y" in mixed
-    assert "if (defer_y)" in mixed
+    assert "const uint64_t *__restrict__ Yoff)" in mixed
+    assert "if (DEFER_Y)" in mixed
     assert "Load256(Y1, Q);" in mixed
     assert "_ModMult(S2, (uint64_t *)Y2, ZZZ1);" in mixed
-    expected = "_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);"
-    assert pinning.count(expected) == 2
-    assert pinning.count("Load256(y0, cy);") == 2
+    # Merged truth: the two production loops use the template split (chunks
+    # 2..GT_CHUNKS-2 defer the anchor; the final chunk resolves the ordinate
+    # outside the loop and its dead anchor copy is gone). The two disabled
+    # experiment branches retained verbatim from exact 1a (QSB_PREFETCH and
+    # QSB_S0_SHM) keep the runtime-defer form, the shared-memory one through
+    # its local `ya` anchor.
+    assert pinning.count("_PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);") == 2
+    assert pinning.count("_PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);") == 2
+    assert pinning.count("_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);") == 1
+    assert pinning.count("_PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);") == 1
+    assert pinning.count("for (int c=2;c<GT_CHUNKS-1;c++){") == 2
+    assert pinning.count("Load256(y0, cy);") == 3
 
 
 if __name__ == "__main__":

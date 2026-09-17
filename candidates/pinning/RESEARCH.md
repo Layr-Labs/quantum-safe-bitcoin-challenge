@@ -1752,3 +1752,156 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Sparse-pad SHA folds and streaming cache policy (production cycle 1)
+
+Starting point is the production promotion of the 650.6M development tree
+(`6ce2320`, 644,546,620 verified candidates/s on the production runner). This
+workstation has no CUDA and no GPU, so every retained change is one whose
+correctness is fully derivable on the CPU and whose performance claim is a
+projection to be measured by the ranked validator.
+
+Four SHA-256 compressions run per candidate: the 11-byte locktime tail block
+in prepare (W[3..14]=0, W[15]=9995*8), the outer z digest block in prepare
+(W[8]=0x80000000, W[9..14]=0, W[15]=256), and two 33-byte compressed-key
+blocks in finish (W[9..14]=0, W[15]=0x108). Public rejected submission
+`437253c` (fkiene) proved the compressed-key substitution alone is worth
+about +0.39% officially (646,395,221) and explicitly left the two prepare
+sites "on the table on purpose". This cycle folds all three sites:
+
+- `_SHA256TransformTail3`: the twelve zero limbs and the 79960 bit-length
+  constant are substituted out of rounds 3..14, round 15, and the first
+  in-place WMIX. The folded mix keeps WMIX's sequential semantics: line 0
+  drops s1(w[14])+w[9]; line 1 keeps s1(79960); lines 3..5 keep only one
+  sigma; line 6 re-adds the bit length; lines 7..8 use the updated w[0]/w[1];
+  lines 9..14 become pure s1-of-previous plus one data limb; line 14 keeps
+  s0(79960); line 15 keeps the += against the original constant.
+- `_SHA256TransformPad32`: same treatment for W[8]=0x80000000, W[9..14]=0,
+  W[15]=256; s0(0x80000000) and s1(256) fold to compile-time constants.
+- `_SHA256TransformPk33`: the identity published by fkiene's rejected note,
+  reimplemented from the WMIX substitution rather than copied: rounds 0..8
+  live, 9..14 zero, 15 constant 0x108 plus the folded first mix including
+  s0(in[8]) on line 7 and the 0x108 addend on lines 6, 14, and 15.
+
+Rounds 16..63 and the second/third mixes stay the unchanged generic macros in
+all three functions, so a wrong folded limb desynchronizes the schedule and
+fails independent hit verification instead of silently dropping work.
+
+Cache-policy hints, all semantics-free:
+
+- The four fixed-base table loads use `__ldcg` (L2 only). The table is
+  randomly addressed over 64 MiB, so L1 cannot retain it; skipping the L1
+  fill avoids dead-line churn. This adapts the read-only-load direction
+  measured locally by rejected submission `072d9b8` (alvaroborras).
+- The eight 128-bit pipeline state stores use `__stcs` and the stage-2
+  reloads use `__ldcs`; the per-CTA checkpoint stores/loads do the same.
+  That traffic is 320 bytes/candidate of write-once/read-once pass-through
+  (2 GiB state + 512 MiB tree per 16M batch) which otherwise evicts the
+  64 MiB table from the 4090's 72 MiB L2. Marking it evict-first protects
+  table residency; the earlier ranked L2-persistence failure (554,754,810)
+  tried to pin the table instead of protecting it from streaming pollution
+  and bundled host-stream changes.
+
+Verification without a GPU:
+
+- `audit_sparse_sha_words.py` (new): derives every fold independently in
+  Python, anchors the generic macro model to hashlib, checks folded ==
+  generic over 4,000 random and edge cases per site (plus hashlib anchors
+  through the kernel's own `__byte_perm` packing and the 32-byte-message
+  identity), and reproduces full 9,995-byte preimage double-SHA through
+  midstate + Tail3 + Pad32 against hashlib, locktime boundaries included.
+  A first-draft anchor bug (64-byte messages need two blocks) was found by
+  this audit before any kernel edit.
+- Host cross-compile of the shipped text: the exact source between the
+  `(begin)/(end)` markers is extracted from pinning.cu, compiled as host
+  C++ with the GPUHash.h macros, and compared against an independent
+  FIPS-form reference plus OpenSSL: 150,200 cases pass, including 200 full
+  end-to-end preimages. Two harness-side packing bugs (word offset in the
+  pubkey case, suffix pointer in the end-to-end case) were caught this way
+  and were bugs of the harness, not of the shipped text.
+- All inherited audits pass unchanged on the edited tree, including
+  audit_fast_tail_contract (the second-hash guard position), the vector
+  state layout counts, the external pipeline and superbatch root bindings,
+  the streamed recode schedule, and check_tail_words (host tail packing).
+
+Expected effect: the finish-site fold alone measured +0.39% officially; the
+two prepare sites touch the kernel that owns ~83% of GPU time; the cache
+hints target the measured 38% DRAM / 7.2% long-scoreboard profile. The bundle
+is submitted as one candidate; the validator is the only throughput oracle
+available to a GPU-less solver.
+
+## Bundle 2: rebased onto the DPZZxlz crown (2026-09-17)
+
+The frontier moved twice while bundle 1 was in validation: scarletbright's
+e7a648c promoted at 660,205,756 and DPZZxlz's cba939b promoted at 667,612,737
+(commit 240f329 = promoted e2 653,505,529 + 0xCramJam's unpromoted 1a core:
+QSB_TREE_N=128 candidate trees and the QSB_LAZY lean field arithmetic). The
+1% gate is therefore 674,288,825, far above anything bundle 1 (built on the
+644,546,620 nullforest base) could reach, so this bundle is a three-way merge:
+exact crown 240f329 + bundle 1 + the alvaroborras 072d9b8 codegen port.
+
+Merge decisions, each reconciled against the crown text:
+
+- The crown ships 1a's `qsb_st_v2`/`qsb_ld_v2`/`qsb_st_u64`/`qsb_ld_u64`
+  helpers, whose PTX emits `.cs` (evict-first) stores/loads behind
+  `QSB_STREAM` — the same streaming-hint idea bundle 1 applied with direct
+  `__stcs`/`__ldcs`, generalized to any tree width. The merge keeps the
+  crown helpers everywhere and flips `QSB_STREAM` to 1: the 2 GiB/batch
+  pass-through state stops evicting the fixed-base table that e2's
+  persistence window pins. The direct `__ldcg` (L2-only) table reads stay.
+- The DEFER_Y template split of `_PointAddXYZZ` (alvaroborras item 1) fuses
+  cleanly with the crown's lazy arithmetic inside the same function:
+  `_ModAddLazy` for the slope and `_ModX3Fused` for X3 are retained, the
+  runtime `defer_y` choice is gone, and the final chunk's resolving addition
+  moved outside both production loops. 1a's two disabled experiment branches
+  (QSB_PREFETCH, QSB_S0_SHM) keep their verbatim runtime-defer text; they
+  preprocess away and are pinned as such by the audits.
+- The grouped sequence readback (alvaroborras items 7-9): the fast path
+  queues all 75 pipelines of a sequence on the default stream after one
+  async counter reset and performs exactly one blocking counter readback;
+  hit records are self-describing (absolute locktime in bits 0..30, recid in
+  bit 31 — sound because the whole canonical locktime range ends below
+  2^31). The fallback keeps per-batch readbacks with batch-relative records.
+  The multi-GPU stop check moved out of the batch loop (once per sequence).
+- Rare-branch scalar reduction (item 4): k >= n is possible only when
+  k[3] = 0xFFFFFFFF... and k[2] >= n[2], so the common path skips the
+  four-limb subtract/select entirely.
+- The sign mask flows directly from digit decode into the table loader's
+  branchless negation (item 6), and the per-thread stack limit drops to
+  4096 bytes (item 3) beside the 2.5 GiB pipeline allocations. e2's L2
+  persistence block is retained byte-for-byte ahead of the first launch.
+
+Verification on the merged tree:
+
+- audit_grouped_readback.py (new): pins both record encodings and the host
+  decode forms, proves the 75-pipeline/sequence geometry, checks 600
+  encode/decode roundtrips including partial-batch edges, and bounds the
+  grouped buffer: Poisson lambda = 74.2 expected hits per sequence at N=24,
+  P(>1024) = 3.3e-16, with the kernel's pos<1024 guard and the host cap in
+  place.
+- Host cross-compile re-run on the merged text: the exact `(begin)/(end)`
+  region plus the exact GPUHash.h compile as host C++ and match the
+  independent Python model on 150,000 cases (50,000 per transform,
+  edge-seeded).
+- The whole file preprocesses cleanly with the CUDA keywords shimmed (the
+  `#if` lattice survives the merge; 34/34 balanced), and every audit in the
+  tree passes: deferred chain (20,000 arbitrary-field accumulations through
+  the lazy arithmetic), streamed recode (51,404 scalars, all 2^20 table
+  slots, 40,011 rare-branch boundary scalars), external pipeline, fast-tail
+  contract, final carry (200,576 cases), shared tree, superbatch
+  representation/roots, vector state layout, L2 combo (rebound to this
+  tree's hashes), sparse SHA words, and check_tail_words.
+- audit_l2_persistence_combo.py is rebound: GPUMath.h is no longer
+  byte-identical to 1a (the DEFER_Y template + `__restrict__` delta); the
+  e2 policy block itself remains byte-identical and its position contract
+  (after table allocation, before the first pipeline launch) is re-pinned,
+  as are the 128-thread trees and the lazy-arithmetic markers.
+
+Pricing: the crown is 667,612,737 and the gate 674,288,825 (+1.0%).
+Officially measured deltas on the old 644.5M base: fkiene's finish-site fold
++0.39%, alvaroborras's full codegen bundle +0.38% (072d9b8 scored 647.0M).
+This stack adds the two prepare-site folds (the 83%-of-GPU-time kernel),
+the enabled streaming hints, and the grouped readback on top of both, which
+should compound to roughly +0.8% to +1.5% over the crown if interactions
+stay neutral — 673M to 678M against a 674.3M gate. That is a deliberate
+research candidate, not a sure promotion: the validator is the only oracle.

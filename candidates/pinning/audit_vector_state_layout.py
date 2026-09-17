@@ -76,9 +76,13 @@ def audit_source():
     source = Path(__file__).with_name("pinning.cu").read_text()
     assert 'static_assert(sizeof(ulonglong2) == 16' in source
     assert 'static_assert(alignof(ulonglong2) == 16' in source
-    assert source.count("ulonglong2 *saved") == 2
-    assert "BATCH*8u*sizeof(ulonglong2)" in source
-    assert "alignof(ulonglong2)-1u" in source
+    # Production kernel signature carries __restrict__ (this bundle); the
+    # launcher and the disabled tree-offload experiment kernels from exact 1a
+    # keep plain signatures. The substring count includes the offload finish
+    # kernel's `const ulonglong2 *saved` (two plain + one const).
+    assert source.count("ulonglong2 *__restrict__ saved") == 1
+    assert source.count("ulonglong2 *saved") == 3
+    assert source.count("const ulonglong2 *saved") == 1
     for plane in range(VECTOR_PLANES):
         address = f"saved[{plane}u*state_plane_stride+state_idx]"
         assert source.count(address) == 2

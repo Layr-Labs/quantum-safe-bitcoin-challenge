@@ -145,25 +145,58 @@ def audit_source() -> None:
         "#define GT_TOTAL_ENTRIES (1u << 20)",
         "int32_t ec=gt_mixed_step<18>(M,sign);",
         "ec=gt_mixed_step<17>(M,sign);",
+        # Production loop is split at the final chunk; the two disabled
+        # experiment branches keep the unsplit bound. The scalar entry takes
+        # 1a's shared scratch.
+        "for (int c=2;c<GT_CHUNKS-1;c++)",
         "for (int c=2;c<GT_CHUNKS;c++)",
-        "ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];",
-        "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);",
+        "ec=sign*(int32_t)M[0];",
+        "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());",
         "return c == 0 ? 0 : 17*c+1;",
         "return c == 0 ? 0u : (unsigned)(c+1) << 16;",
         "uint32_t table_base=gt_offset(2);",
         "gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);",
         "table_base += 1u << 16;",
+        # rare-branch reduction guard: the two-limb pre-test must fire for
+        # every k >= n (it may also fire on some k < n, which the guarded
+        # exact select handles).
+        "if (k3 == UINT64_MAX && k2 >= n2) {",
     )
     for token in required:
         assert token in source, token
     assert source.count("__device__ void _FixedBaseSignedXYZZScalar") == 1
-    assert source.count("_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);") == 1
+    assert source.count("_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());") == 1
     assert "int32_t gte[GT_CHUNKS]" not in source
+
+
+def rare_branch_sound() -> int:
+    """The two-limb pre-test must fire for every k >= n."""
+    nw = limbs(N)
+    checked = 0
+    cases = [N, N - 1, N + 1, (1 << 256) - 1, (1 << 256) - 2]
+    cases += [
+        (nw[3] << 192) | (nw[2] << 128) | v
+        for v in (0, 1, nw[1], nw[1] - 1, nw[1] + 1, nw[1] << 64)
+    ]
+    rng = random.Random(0x9E3779B9)
+    cases += [
+        ((1 << 256) - 1) - rng.getrandbits(130) for _ in range(20_000)
+    ]
+    cases += [rng.getrandbits(256) for _ in range(20_000)]
+    for k in cases:
+        if k >= (1 << 256):
+            continue
+        kw = limbs(k)
+        fires = kw[3] == nw[3] and kw[2] >= nw[2]
+        assert fires or k < N, hex(k)
+        checked += 1
+    return checked
 
 
 def main() -> None:
     audit_source()
     audit_table()
+    rare = rare_branch_sound()
     cases = {0, 1, 2, 3, N - 2, N - 1, N, N + 1, MASK256 - 1, MASK256}
     for bit in range(256):
         pivot = 1 << bit
@@ -180,7 +213,8 @@ def main() -> None:
         audit_scalar(scalar)
     print(
         f"PASS: streamed mixed recode equals materialized reference; "
-        f"{len(cases)} scalars; {TOTAL} table slots; exact production schedule"
+        f"{len(cases)} scalars; {TOTAL} table slots; exact production schedule; "
+        f"rare-branch pre-test sound on {rare} boundary scalars"
     )
 
 

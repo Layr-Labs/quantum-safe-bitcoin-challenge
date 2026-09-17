@@ -40,7 +40,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
 #endif
 #ifndef QSB_STREAM
-#define QSB_STREAM 0          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
+#define QSB_STREAM 1          /* 1: .cs (evict-first) hints on pipeline state/tree traffic;
+                               * protects the pinned fixed-base table's L2 residency from
+                               * the 2 GiB/batch pass-through state stream (bundle: on) */
 #endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
@@ -72,34 +74,6 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
 #endif
-#ifndef QSB_EARLY_LOAD
-#define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
-#endif
-#ifndef QSB_UNROLL
-#define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
-#endif
-#ifndef QSB_PK_UNROLL
-#define QSB_PK_UNROLL 0       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
-#endif
-#ifndef QSB_L2_SKIP
-#define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
-#endif
-#ifndef QSB_HOST_READBACK
-#define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
-#endif
-#ifndef QSB_SPARSE_TAIL
-#define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
-#endif
-#ifndef QSB_FINAL_TEMPLATE
-#define QSB_FINAL_TEMPLATE 1  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
-#endif
-#ifndef QSB_SPARSE_D
-#define QSB_SPARSE_D 1        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
-#endif
-#ifndef QSB_SYM_FINISH
-#define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
-#endif
-#define QSB_STATE_PLANES (QSB_SYM_FINISH ? 6u : 8u)
 #ifndef QSB_PROBE_MASK
 #define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
 #endif
@@ -220,17 +194,24 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
     __uint128_t s;
-    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
-     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
-     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
-     * < n this is a no-op. */
-    s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
-    uint64_t k0=(k[0]&~km)|(kd0&km), k1=(k[1]&~km)|(kd1&km),
-             k2=(k[2]&~km)|(kd2&km), k3=(k[3]&~km)|(kd3&km);
+    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n);
+     * k < 2^256 < 2n, so one conditional subtract suffices, and then
+     * 2*(k mod n) < 2n makes the 2k-mod-n step below (one more subtract)
+     * exact. Rare-branch form: n's top two limbs are
+     * 0xFFFFFFFFFFFFFFFF/0xFFFFFFFFFFFFFFFE, so k >= n is possible only when
+     * k[3] is all-ones and k[2] >= n[2]; testing those two limbs first keeps
+     * the common path off the four-limb subtract/select. The guarded block is
+     * the unchanged exact reduction (a no-op for k already < n). */
+    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
+    if (k3 == UINT64_MAX && k2 >= n2) {
+        s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
+        k0=(k[0]&~km)|(kd0&km); k1=(k[1]&~km)|(kd1&km);
+        k2=(k[2]&~km)|(kd2&km); k3=(k[3]&~km)|(kd3&km);
+    }
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -281,9 +262,11 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    /* Random access over the 64 MiB table: L1 cannot hold it, so cache at
+     * L2 only and keep the per-SM L1 from filling with dead lines. */
+    ulonglong2 x0=__ldcg(&tx[0]),x1=__ldcg(&tx[1]),y0=__ldcg(&ty[0]),y1=__ldcg(&ty[1]);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t m=0ULL-neg;
+    uint64_t m=neg;      /* neg arrives as the ready sign mask: 0 or all-ones */
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
     UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
@@ -303,7 +286,7 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 #if QSB_PROBE_MASK
     *idx &= (uint32_t)QSB_PROBE_MASK;
 #endif
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (ec < 0) ? ~0ULL : 0ULL;   /* sign mask, consumed directly by the loader */
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -335,59 +318,17 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
+    for (int c=2;c<GT_CHUNKS-1;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
     }
+    /* The resolving addition: chunk GT_CHUNKS-1 restores the exact ordinate
+     * and its own anchor copy is dead because the function returns after it. */
+    gt_digit_idx(e[GT_CHUNKS-1], &idx, &neg);
+    gt_load_signed(gTable,GT_CHUNKS-1,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 }
-
-#if QSB_EARLY_LOAD
-/* Mixed addition with the next record's loads issued as soon as the current
- * record is consumed: X2 dies after U2, Y2 after S2. The next digit is peeled
- * one step ahead (one register); the loaded point lands in nx/ny while the
- * remaining 5M+2S of this addition execute. */
-__device__ __forceinline__ void _PointAddXYZZ_early(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff, bool defer_y,
-    bool do_load, const uint8_t *gTable, uint32_t nbase, uint32_t nidx, uint64_t nneg,
-    uint64_t *nx, uint64_t *ny)
-{
-  uint64_t U2[4], S2[4], P[4], R[4], PP[4], PPP[4], Q[4], T[4];
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-#if QSB_LAZY
-  _ModAddLazy(S2, Y2, Yoff);
-#else
-  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
-#endif
-  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  if (do_load) gt_load_signed_flat(gTable, nbase, nidx, nneg, nx, ny);
-  _ModSub256(P, U2, X1);
-  _ModSub256(R, S2, Y1);
-  _ModSqr(PP, P);
-  _ModMult(PPP, PP, P);
-  _ModMult(Q, U2, PP);
-  _ModMult(ZZ1, PP);
-  _ModSqr(T, R);
-#if QSB_LAZY
-  _ModX3Fused(T, T, PPP, Q);
-#else
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);
-#endif
-  _ModMult(ZZZ1, PPP);
-  _ModSub256(Q, Q, T);
-  _ModMult(Q, R);
-  if (defer_y) {
-    Load256(Y1, Q);
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);
-    _ModSub256(Y1, Q, S2);
-  }
-  Load256(X1, T);
-}
-#endif
 
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
@@ -485,63 +426,20 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
     #undef QSB_M_ST
     #undef QSB_Y0_LD
     #undef QSB_Y0_ST
-#elif QSB_EARLY_LOAD
-    /* Chunk 2 is loaded up front; every later record is loaded inside the
-     * preceding addition. Two point buffers alternate roles. */
-    uint64_t nx[4],ny[4];
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c+=2){
-        /* iteration c: consume cx/cy, load c+1 into nx/ny */
-        bool more=(c+1<GT_CHUNKS);
-        uint32_t ni=0; uint64_t nn=0;
-        if (more) { ec=(c+1<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0]; gt_digit_idx(ec,&ni,&nn); }
-        _PointAddXYZZ_early(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1,
-                            more, gTable, table_base+(1u<<16), ni, nn, nx, ny);
-        Load256(y0, cy);
-        table_base += 1u << 16;
-        if (!more) break;
-        /* iteration c+1: consume nx/ny, load c+2 into cx/cy */
-        bool more2=(c+2<GT_CHUNKS);
-        ni=0; nn=0;
-        if (more2) { ec=(c+2<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0]; gt_digit_idx(ec,&ni,&nn); }
-        _PointAddXYZZ_early(X,Y,ZZ,ZZZ, nx,ny, y0, c+1 != GT_CHUNKS-1,
-                            more2, gTable, table_base+(1u<<16), ni, nn, cx, cy);
-        Load256(y0, ny);
-        table_base += 1u << 16;
-    }
-#elif QSB_FINAL_TEMPLATE
-    /* Delta C (jacklightChen e582bda4): twelve deferred additions in the
-     * rolled loop, then the resolving final addition as its own compile-time
-     * specialisation, so the loop body carries no defer_y branch. */
+#else
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
         ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZT<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+    /* Final chunk: the exact digit is the reduced 2z representative itself,
+     * and its resolving addition needs no successor anchor. */
     ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg);
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    _PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
-#else
-#if QSB_UNROLL == 2
-    #pragma unroll 2
-#elif QSB_UNROLL == 3
-    #pragma unroll 3
-#else
-    #pragma unroll 1
-#endif
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZ<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
 #endif
 }
 
@@ -593,40 +491,32 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     return ok;
 }
 
-
-/* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block
- * (delta B, scarletbright 7f965b4d). Pad shape: W[0..2] live, W[3..14]=0,
- * W[15]=9995*8=79960. Continues from an existing midstate. The first 16
- * rounds and the first in-place WMIX drop zero addends; later rounds use the
- * generic SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on
- * that padded block. */
-__device__ __forceinline__ void _SHA256TransformFastTail11(
+/* === sparse-pad SHA-256 specializations (begin) === */
+/* The ranked fast path hashes four structurally sparse 64-byte blocks per
+ * candidate: the 11-byte locktime tail (W[3..14]=0, W[15]=9995*8), the outer
+ * z digest (W[8]=0x80000000, W[9..14]=0, W[15]=256), and two compressed
+ * pubkeys (W[9..14]=0, W[15]=0x108). Substituting those constant limbs into
+ * the first sixteen rounds and the first in-place WMIX removes the sigma
+ * evaluations and adds of words that are provably zero. Rounds 16..63 and
+ * the remaining mixes are the unchanged generic macros, so any mistake in a
+ * folded limb would desynchronize the schedule and fail independent hit
+ * verification rather than silently dropping work. The substitutions follow
+ * WMIX's sequential in-place order: later lines read the already-updated
+ * earlier limbs, and w[0] is the mixed value in lines 7 and 15.
+ * audit_sparse_sha_words.py derives every fold independently and anchors the
+ * whole chain to hashlib, including full double-SHA preimage comparisons. */
+__device__ __forceinline__ void _SHA256TransformTail3(
     uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
 {
-    const uint32_t L = 9995u * 8u; /* 79960 */
+    const uint32_t B = 9995u * 8u;
+    uint32_t w[16];
     uint32_t t1;
     uint32_t t2;
-
-    uint32_t a = state[0];
-    uint32_t b = state[1];
-    uint32_t c = state[2];
-    uint32_t d = state[3];
-    uint32_t e = state[4];
-    uint32_t f = state[5];
-    uint32_t g = state[6];
-    uint32_t h = state[7];
-
-    uint32_t w[16];
-    w[0] = w0;
-    w[1] = w1;
-    w[2] = w2;
-#pragma unroll
-    for (int i = 3; i < 15; i++) w[i] = 0;
-    w[15] = L;
-
-    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
-    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
-    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+    uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
+    S2Round(a, b, c, d, e, f, g, h, K[0], w0);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w1);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w2);
     S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
     S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
     S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
@@ -639,33 +529,28 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
     S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
     S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
-    S2Round(b, c, d, e, f, g, h, a, K[15], L);
-
-    {
-        w[0] += s0(w[1]);
-        w[1] += s1(L) + s0(w[2]);
-        w[2] += s1(w[0]);
-        w[3]  = s1(w[1]);
-        w[4]  = s1(w[2]);
-        w[5]  = s1(w[3]);
-        w[6]  = s1(w[4]) + L;
-        w[7]  = s1(w[5]) + w[0];
-        w[8]  = s1(w[6]) + w[1];
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(L);
-        w[15] += s1(w[13]) + w[8] + s0(w[0]);
-    }
-
+    S2Round(b, c, d, e, f, g, h, a, K[15], B);
+    w[0] = w0 + s0(w1);
+    w[1] = w1 + s1(B) + s0(w2);
+    w[2] = w2 + s1(w[0]);
+    w[3] = s1(w[1]);
+    w[4] = s1(w[2]);
+    w[5] = s1(w[3]);
+    w[6] = s1(w[4]) + B;
+    w[7] = s1(w[5]) + w[0];
+    w[8] = s1(w[6]) + w[1];
+    w[9] = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(B);
+    w[15] = B + s1(w[13]) + w[8] + s0(w[0]);
     SHA256_RND(16);
     WMIX();
     SHA256_RND(32);
     WMIX();
     SHA256_RND(48);
-
     state[0] += a;
     state[1] += b;
     state[2] += c;
@@ -676,37 +561,22 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     state[7] += h;
 }
 
-/* Sparse-schedule SHA-256 for the SHA256d second compression (delta D,
- * preludebrace bc77eb42): 32-byte message = first digest as eight words,
- * fixed pad W[8]=0x80000000, W[9..14]=0, W[15]=256, from the SHA-256 IV.
- * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
-__device__ __forceinline__ void _SHA256TransformDigest32(
-    uint32_t out[8], const uint32_t m[8])
+__device__ __forceinline__ void _SHA256TransformPad32(
+    uint32_t output[8], const uint32_t v[8])
 {
+    uint32_t w[16];
     uint32_t t1;
     uint32_t t2;
-
-    uint32_t a = 0x6a09e667u;
-    uint32_t b = 0xbb67ae85u;
-    uint32_t c = 0x3c6ef372u;
-    uint32_t d = 0xa54ff53au;
-    uint32_t e = 0x510e527fu;
-    uint32_t f = 0x9b05688cu;
-    uint32_t g = 0x1f83d9abu;
-    uint32_t h = 0x5be0cd19u;
-
-    uint32_t w[16];
-#pragma unroll
-    for (int i = 0; i < 8; i++) w[i] = m[i];
-
-    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
-    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
-    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
-    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
-    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
-    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
-    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
-    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    uint32_t a = output[0], b = output[1], c = output[2], d = output[3];
+    uint32_t e = output[4], f = output[5], g = output[6], h = output[7];
+    S2Round(a, b, c, d, e, f, g, h, K[0], v[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], v[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], v[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], v[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], v[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], v[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], v[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], v[7]);
     S2Round(a, b, c, d, e, f, g, h, K[8], 0x80000000u);
     S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
     S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
@@ -715,75 +585,54 @@ __device__ __forceinline__ void _SHA256TransformDigest32(
     S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
     S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
     S2Round(b, c, d, e, f, g, h, a, K[15], 256u);
-
-    {
-        /* First schedule expansion; w[9..14]=0 and w[8]/w[15] are the fixed
-         * pad words. s0(0)=s1(0)=0, so zero terms vanish. */
-        w[0] += s0(w[1]);
-        w[1] += s1(256u) + s0(w[2]);
-        w[2] += s1(w[0]) + s0(w[3]);
-        w[3] += s1(w[1]) + s0(w[4]);
-        w[4] += s1(w[2]) + s0(w[5]);
-        w[5] += s1(w[3]) + s0(w[6]);
-        w[6] += s1(w[4]) + 256u + s0(w[7]);
-        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
-        w[8]  = 0x80000000u + s1(w[6]) + w[1];
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(256u);
-        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
-    }
-
+    w[0] = v[0] + s0(v[1]);
+    w[1] = v[1] + s1(256u) + s0(v[2]);
+    w[2] = v[2] + s1(w[0]) + s0(v[3]);
+    w[3] = v[3] + s1(w[1]) + s0(v[4]);
+    w[4] = v[4] + s1(w[2]) + s0(v[5]);
+    w[5] = v[5] + s1(w[3]) + s0(v[6]);
+    w[6] = v[6] + s1(w[4]) + 256u + s0(v[7]);
+    w[7] = v[7] + s1(w[5]) + w[0] + s0(0x80000000u);
+    w[8] = 0x80000000u + s1(w[6]) + w[1];
+    w[9] = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(256u);
+    w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
     SHA256_RND(16);
     WMIX();
     SHA256_RND(32);
     WMIX();
     SHA256_RND(48);
-
-    out[0] = 0x6a09e667u + a;
-    out[1] = 0xbb67ae85u + b;
-    out[2] = 0x3c6ef372u + c;
-    out[3] = 0xa54ff53au + d;
-    out[4] = 0x510e527fu + e;
-    out[5] = 0x9b05688cu + f;
-    out[6] = 0x1f83d9abu + g;
-    out[7] = 0x5be0cd19u + h;
+    output[0] += a;
+    output[1] += b;
+    output[2] += c;
+    output[3] += d;
+    output[4] += e;
+    output[5] += f;
+    output[6] += g;
+    output[7] += h;
 }
 
-/* Sparse-schedule SHA-256 for the 33-byte compressed public key (delta D):
- * live words pb[0..8], W[9..14]=0, W[15]=0x108, from the SHA-256 IV.
- * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
-__device__ __forceinline__ void _SHA256TransformPubkey33(
-    uint32_t out[8], const uint32_t m[9])
+__device__ __forceinline__ void _SHA256TransformPk33(
+    uint32_t output[8], const uint32_t in[9])
 {
+    uint32_t w[16];
     uint32_t t1;
     uint32_t t2;
-
-    uint32_t a = 0x6a09e667u;
-    uint32_t b = 0xbb67ae85u;
-    uint32_t c = 0x3c6ef372u;
-    uint32_t d = 0xa54ff53au;
-    uint32_t e = 0x510e527fu;
-    uint32_t f = 0x9b05688cu;
-    uint32_t g = 0x1f83d9abu;
-    uint32_t h = 0x5be0cd19u;
-
-    uint32_t w[16];
-#pragma unroll
-    for (int i = 0; i < 9; i++) w[i] = m[i];
-
-    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
-    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
-    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
-    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
-    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
-    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
-    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
-    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
-    S2Round(a, b, c, d, e, f, g, h, K[8], w[8]);
+    uint32_t a = output[0], b = output[1], c = output[2], d = output[3];
+    uint32_t e = output[4], f = output[5], g = output[6], h = output[7];
+    S2Round(a, b, c, d, e, f, g, h, K[0], in[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], in[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], in[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], in[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], in[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], in[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], in[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], in[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], in[8]);
     S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
     S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
     S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
@@ -791,42 +640,38 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
     S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
     S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
     S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
-
-    {
-        /* First schedule expansion; w[9..14]=0 and w[15]=0x108 is fixed. */
-        w[0] += s0(w[1]);
-        w[1] += s1(0x108u) + s0(w[2]);
-        w[2] += s1(w[0]) + s0(w[3]);
-        w[3] += s1(w[1]) + s0(w[4]);
-        w[4] += s1(w[2]) + s0(w[5]);
-        w[5] += s1(w[3]) + s0(w[6]);
-        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
-        w[7] += s1(w[5]) + w[0] + s0(w[8]);
-        w[8] += s1(w[6]) + w[1];
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(0x108u);
-        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
-    }
-
+    w[0] = in[0] + s0(in[1]);
+    w[1] = in[1] + s1(0x108u) + s0(in[2]);
+    w[2] = in[2] + s1(w[0]) + s0(in[3]);
+    w[3] = in[3] + s1(w[1]) + s0(in[4]);
+    w[4] = in[4] + s1(w[2]) + s0(in[5]);
+    w[5] = in[5] + s1(w[3]) + s0(in[6]);
+    w[6] = in[6] + s1(w[4]) + 0x108u + s0(in[7]);
+    w[7] = in[7] + s1(w[5]) + w[0] + s0(in[8]);
+    w[8] = in[8] + s1(w[6]) + w[1];
+    w[9] = s1(w[7]) + w[2];
+    w[10] = s1(w[8]) + w[3];
+    w[11] = s1(w[9]) + w[4];
+    w[12] = s1(w[10]) + w[5];
+    w[13] = s1(w[11]) + w[6];
+    w[14] = s1(w[12]) + w[7] + s0(0x108u);
+    w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
     SHA256_RND(16);
     WMIX();
     SHA256_RND(32);
     WMIX();
     SHA256_RND(48);
-
-    out[0] = 0x6a09e667u + a;
-    out[1] = 0xbb67ae85u + b;
-    out[2] = 0x3c6ef372u + c;
-    out[3] = 0xa54ff53au + d;
-    out[4] = 0x510e527fu + e;
-    out[5] = 0x9b05688cu + f;
-    out[6] = 0x1f83d9abu + g;
-    out[7] = 0x5be0cd19u + h;
+    output[0] += a;
+    output[1] += b;
+    output[2] += c;
+    output[3] += d;
+    output[4] += e;
+    output[5] += f;
+    output[6] += g;
+    output[7] += h;
 }
+/* === sparse-pad SHA-256 specializations (end) === */
+
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -1352,77 +1197,25 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
-__device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2 (delta E) */
-
-/* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
- * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
- * K=3*xR^2 is fixed for the entire problem. The shared x base is
- * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
- * coordinates are anchored at R. Returns their parities in bits 0,1.
- * Only Y, ZZZ and W cross the kernel boundary (six planes). */
-__device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
-    uint64_t *Y, uint64_t *V, uint64_t *inv,
-    uint64_t *xR, uint64_t *yR, uint64_t *K,
-    uint64_t *x_plus, uint64_t *x_minus
-) {
-    uint64_t h[4], u[4], v[4], f[4];
-    _ModMult(h, V, inv);         /* h = V*I */
-    _ModMult(V, h);              /* V becomes t = V*h */
-    _ModMult(u, yR, V);          /* u = yR*t */
-    _ModMult(v, Y, h);           /* v = Y*h */
-
-    /* GPUMath's square drops a final carry for some near-p operands. For
-     * upper-half u, square the equivalent negative representative; keep u
-     * unchanged for H and y. */
-    qsb_field_normalize(u);
-    if(u[3] >> 63) _ModNeg256(h, u);
-    else Load256(h, u);
-    _ModSqr(f, h);
-    _ModAdd256(f, f, f);
-    _ModMult(h, K, V);           /* h becomes K*t */
-    _ModSub256(f, h);
-    _ModAdd256(f, f, xR);        /* F = 2*u^2-K*t+xR */
-    _ModMult(h, u, v);
-    _ModAdd256(h, h, h);         /* H = 2*u*v */
-    _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
-    qsb_field_normalize(x_plus);
-    qsb_field_normalize(x_minus);
-
-    _ModSub256(h, u, v);
-    _ModSub256(V, xR, x_plus);
-    _ModMult(h, V);
-    _ModSub256(h, yR);
-    qsb_field_normalize(h);
-    uint32_t parities = (uint32_t)(h[0] & 1ULL);
-
-    _ModAdd256(h, u, v);
-    _ModSub256(V, xR, x_minus);
-    _ModMult(h, V);
-    _ModSub256(V, yR, h);
-    qsb_field_normalize(V);
-    parities |= (uint32_t)((V[0] & 1ULL) << 1);
-    return parities;
-}
 
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
-    const uint32_t *d_midstate,
-    const uint8_t *d_suffix,    /* suffix template */
+    const uint32_t *__restrict__ d_midstate,
+    const uint8_t *__restrict__ d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
     int seq_offset,             /* offset of sequence in suffix */
     int lt_offset,              /* offset of locktime in suffix */
     int total_preimage_len,
     uint32_t seq_value,         /* current sequence value */
     uint32_t start_lt,          /* starting locktime for this batch */
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
-    uint8_t *d_gt,
-    uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
+    const uint64_t *__restrict__ d_neg_r_inv,
+    const uint64_t *__restrict__ d_u2rx, const uint64_t *__restrict__ d_u2ry,
+    const uint64_t *__restrict__ d_neg2u2rx, const uint64_t *__restrict__ d_neg2u2ry,
+    uint8_t *__restrict__ d_gt,
+    uint32_t *__restrict__ d_hit_cnt, uint32_t *__restrict__ d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
-    ulonglong2 *saved, uint64_t *roots, uint64_t *tree
+    ulonglong2 *__restrict__ saved, uint64_t *__restrict__ roots, uint64_t *__restrict__ tree
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (blockIdx.x * blockDim.x >= batch_size) return;
@@ -1438,25 +1231,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-#if QSB_SPARSE_TAIL
-        /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
+        /* Three live words: the fixed suffix bytes with locktime patched in.
+         * W[3..14] are zero and W[15]=9995*8; _SHA256TransformTail3 folds
+         * those constants out of the first mix and the first sixteen rounds. */
         uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
         uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
                 ((lt >> 16) & 0xff00u) | pin_tail_words[1];
         uint32_t w2 = pin_tail_words[2];
-        _SHA256TransformFastTail11(state, w0, w1, w2);
-#else
-        uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
-            pin_tail_words[2],
-            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
-        };
-        _SHA256Transform(state,blk);
-#endif
+        _SHA256TransformTail3(state, w0, w1, w2);
     } else {
-        /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
         for(int i=0;i<suffix_len;i++) buf[i]=d_suffix[i];
         buf[seq_offset]=(seq_value)&0xFF; buf[seq_offset+1]=(seq_value>>8)&0xFF;
@@ -1485,26 +1268,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 
     }
 
-    /* Second SHA-256: the first digest is already in big-endian words. */
-    uint32_t s2[8];
-#if QSB_SPARSE_D
-    _SHA256TransformDigest32(s2, state);
-#else
-    {
-    uint32_t b2[16];
-    #pragma unroll
-    for(int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000u;
-    #pragma unroll
-    for(int i=9;i<15;i++) b2[i]=0;
-    b2[15]=256;
-    const uint32_t iv[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                          0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    #pragma unroll
-    for(int i=0;i<8;i++) s2[i]=iv[i];
-    _SHA256Transform(s2,b2);
-    }
-#endif
+    /* Second SHA-256: the first digest is already in big-endian words.
+     * W[8]=0x80000000, W[9..14]=0, W[15]=256 are folded into the first mix
+     * and the first sixteen rounds by _SHA256TransformPad32. */
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256TransformPad32(s2, state);
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
     uint64_t z[4];
@@ -1527,24 +1296,6 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         qsb_xyzz_finish_prepare(qx,qzz,prep_xR,prod);
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-#if QSB_SYM_FINISH
-    /* Delta E: only Y, ZZZ and W cross the kernel boundary (W stays in
-     * planes 4-5 so the tree kernels are unchanged). */
-    Load256(qzz,prod);           /* qzz becomes W */
-    if (!usable) {
-        prod[0]=1; prod[1]=prod[2]=prod[3]=prod[4]=0;
-    }
-    if(active){
-        size_t state_plane_stride=(size_t)batch_size;
-        size_t state_idx=(size_t)idx;
-        qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qy[0],qy[1]);
-        qsb_st_v2(&saved[1u*state_plane_stride+state_idx],qy[2],qy[3]);
-        qsb_st_v2(&saved[2u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
-        qsb_st_v2(&saved[3u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
-        qsb_st_v2(&saved[4u*state_plane_stride+state_idx],qzz[0],qzz[1]);
-        qsb_st_v2(&saved[5u*state_plane_stride+state_idx],qzz[2],qzz[3]);
-    }
-#else
     /* Preserve exactly four fields across the kernel boundary.  The finish
      * needs C=ZZ*d^2 and W=ZZ^2*d, but no longer needs d or ZZ separately. */
     if(usable){
@@ -1557,7 +1308,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
     if(active){
         /* Eight vector planes retain SoA coalescing while pairing adjacent
-         * limbs into naturally aligned 128-bit stores. */
+         * limbs into naturally aligned 128-bit stores. The state is written
+         * once here and read once by stage 2: streaming stores mark the
+         * lines evict-first so the 2 GiB of pass-through traffic does not
+         * evict the 64 MiB fixed-base table from L2. */
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
         qsb_st_v2(&saved[0u*state_plane_stride+state_idx],qx[0],qx[1]);
@@ -1569,7 +1323,6 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         qsb_st_v2(&saved[6u*state_plane_stride+state_idx],qzzz[0],qzzz[1]);
         qsb_st_v2(&saved[7u*state_plane_stride+state_idx],qzzz[2],qzzz[3]);
     }
-#endif
 #if QSB_TREE_OFFLOAD
     /* The leaf product tree is built by qsb_leaf_tree_prepare from the saved
      * W plane, so this kernel has no shared memory and no barriers. */
@@ -1584,15 +1337,6 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     if(active){
         size_t state_plane_stride=(size_t)batch_size;
         size_t state_idx=(size_t)idx;
-#if QSB_SYM_FINISH
-        ulonglong2 qy01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
-        ulonglong2 qy23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
-        ulonglong2 qzzz23=qsb_ld_v2(&saved[3u*state_plane_stride+state_idx]);
-        ulonglong2 qzz01=qsb_ld_v2(&saved[4u*state_plane_stride+state_idx]);
-        ulonglong2 qzz23=qsb_ld_v2(&saved[5u*state_plane_stride+state_idx]);
-        (void)qx;
-#else
         ulonglong2 qx01=qsb_ld_v2(&saved[0u*state_plane_stride+state_idx]);
         ulonglong2 qx23=qsb_ld_v2(&saved[1u*state_plane_stride+state_idx]);
         ulonglong2 qy01=qsb_ld_v2(&saved[2u*state_plane_stride+state_idx]);
@@ -1602,7 +1346,6 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         ulonglong2 qzzz01=qsb_ld_v2(&saved[6u*state_plane_stride+state_idx]);
         ulonglong2 qzzz23=qsb_ld_v2(&saved[7u*state_plane_stride+state_idx]);
         qx[0]=qx01.x; qx[1]=qx01.y; qx[2]=qx23.x; qx[3]=qx23.y;
-#endif
         qy[0]=qy01.x; qy[1]=qy01.y; qy[2]=qy23.x; qy[3]=qy23.y;
         qzz[0]=qzz01.x; qzz[1]=qzz01.y; qzz[2]=qzz23.x; qzz[3]=qzz23.y;
         qzzz[0]=qzzz01.x; qzzz[1]=qzzz01.y; qzzz[2]=qzzz23.x; qzzz[3]=qzzz23.y;
@@ -1628,24 +1371,11 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
                       pin_u2ry_words[2],pin_u2ry_words[3]};
     uint64_t q1x[4],q2x[4];
-#if QSB_SYM_FINISH
-    uint64_t u2rk[4]={pin_u2rk_words[0],pin_u2rk_words[1],
-                      pin_u2rk_words[2],pin_u2rk_words[3]};
-    uint32_t y_parities = qsb_xyzz_finish_symmetric(
-        qy,qzzz,prod,u2rx,u2ry,u2rk,
-        q1x,q2x);
-#else
     uint32_t y_parities = qsb_xyzz_finish_precomputed(
         qx,qy,qzz,qzzz,prod,u2rx,u2ry,
         q1x,q2x);
-#endif
 
     /* Check both pubkeys × 2 hashes */
-#if QSB_PK_UNROLL
-    #pragma unroll
-#else
-    #pragma unroll 1
-#endif
     for(int ri=0;ri<2;ri++){
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
@@ -1655,19 +1385,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
         uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
         uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
-        uint32_t pb[16];
+        /* Nine data words; W[9..14]=0 and W[15]=0x108 are folded into the
+         * first mix and the first sixteen rounds by _SHA256TransformPk33. */
+        uint32_t pb[9];
         pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
         pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-        uint32_t hs[8];
-#if QSB_SPARSE_D
-        _SHA256TransformPubkey33(hs,pb);   /* pb[9..14]=0, pb[15]=0x108 folded in */
-#else
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        _SHA256Initialize(hs);_SHA256Transform(hs,pb);
-#endif
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256TransformPk33(hs,pb);
         int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];
@@ -1679,7 +1405,16 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         }
         if(vv){
             uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
+            if(pos<1024){
+                /* Fast mode queues an entire sequence of pipelines before one
+                 * host readback, so each record is self-describing: absolute
+                 * locktime (start_lt+idx < 2^31 across the safe range) with
+                 * recid in bit 31. This specialization has no second hash, so
+                 * bit 31 is free. The fallback keeps the batch-relative form. */
+                d_hit_idx[pos] = FAST_TAIL
+                    ? (((uint32_t)idx + start_lt) | ((uint32_t)ri << 31))
+                    : (((uint32_t)idx) | (ri << 30));
+            }
             return;
         }
         if (FAST_TAIL || single_hash) continue;  /* Config A: only one hash iteration */
@@ -1923,29 +1658,6 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
-/* Batch-affine ladder build (delta C, jacklightChen e582bda4, after PR46):
- * the point sequence is unchanged; EC_POINTs_make_affine replaces one
- * inversion per point by one batched inversion per ladder. */
-static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
-                            uint64_t *out, BIGNUM *x, BIGNUM *y, BN_CTX *ctx) {
-    EC_POINT *points[GT_HI];
-    if(count<1 || count>=GT_HI) { fprintf(stderr,"Invalid ladder size\n");exit(2); }
-    for(int i=0;i<count;i++) {
-        points[i]=EC_POINT_new(grp);
-        if(!points[i]) { fprintf(stderr,"Ladder allocation failed\n");exit(2); }
-        int ok=i==0 ? EC_POINT_copy(points[i],step)
-                    : EC_POINT_add(grp,points[i],points[i-1],step,ctx);
-        if(!ok) { fprintf(stderr,"Ladder addition failed\n");exit(2); }
-    }
-    if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
-        fprintf(stderr,"Ladder batch normalization failed\n");exit(2);
-    }
-    for(int i=0;i<count;i++) {
-        gt_point_to_limbs(grp,points[i],x,y,ctx,out+(size_t)(i+1)*8);
-        EC_POINT_free(points[i]);
-    }
-}
-
 /* The two ladders the GPU builder needs: L[ch][lo] = lo * base_ch and
  * H[ch][hi] = hi * 256 * base_ch. Index 0 of each is the identity and is
  * left zeroed; the kernel treats it as such. 12,002 real points, against the
@@ -1960,7 +1672,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
            *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp);
+    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp), *acc = EC_POINT_new(grp);
     /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
@@ -1971,16 +1683,22 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        gt_batch_ladder(grp,base,GT_LO-1,                    /* L[lo] = lo * B */
-            hL+(size_t)ch*GT_LO*8,x,y,ctx);
+        EC_POINT_copy(acc, base);
+        for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
+            gt_point_to_limbs(grp, acc, x, y, ctx, hL + ((size_t)ch * GT_LO + lo) * 8);
+            EC_POINT_add(grp, acc, acc, base, ctx);
+        }
         BN_set_word(shift, 256);                             /* step = 256 * B */
         EC_POINT_mul(grp, step, NULL, base, shift, ctx);
-        gt_batch_ladder(grp,step,(ch==0?1024:512)-1,         /* H[hi] = hi * 256 * B */
-            hH+(size_t)ch*GT_HI*8,x,y,ctx);
+        EC_POINT_copy(acc, step);
+        for (int hi = 1; hi < (ch==0?1024:512); hi++) {                 /* H[hi] = hi * 256 * B */
+            gt_point_to_limbs(grp, acc, x, y, ctx, hH + ((size_t)ch * GT_HI + hi) * 8);
+            EC_POINT_add(grp, acc, acc, step, ctx);
+        }
     }
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
     BN_free(nri); BN_free(bscal);
-    EC_POINT_free(base); EC_POINT_free(step);
+    EC_POINT_free(base); EC_POINT_free(step); EC_POINT_free(acc);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
 }
 
@@ -2244,26 +1962,6 @@ int main(int argc, char **argv) {
         uint8_t be[32];
         for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
         for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
-        {   /* K=3*xR^2 is invariant across all candidates in this problem (delta E). */
-            BIGNUM *field=BN_new(),*bk=BN_new();
-            if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
-               !BN_mod_sqr(bk,bx,field,ctx) || !BN_mul_word(bk,3) ||
-               !BN_nnmod(bk,bk,field,ctx)) {
-                fprintf(stderr,"Failed to precompute recovery K\n");
-                return 1;
-            }
-            uint8_t kb[32]={0};
-            BN_bn2bin(bk,kb+(32-BN_num_bytes(bk)));
-            uint64_t kw[4]={0,0,0,0};
-            for(int i=0;i<4;i++)for(int b=0;b<8;b++)
-                kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
-            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
-            if(kerr!=cudaSuccess){
-                fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
-                return 1;
-            }
-            BN_free(field); BN_free(bk);
-        }
         EC_POINT *pt=EC_POINT_new(grp);
         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
         EC_POINT *dbl=EC_POINT_new(grp);
@@ -2304,7 +2002,11 @@ int main(int argc, char **argv) {
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    /* 4096 bytes of per-thread stack is far above what any ranked kernel
+     * needs (the largest declared frame is the fallback prepare's 192-byte
+     * suffix buffer); the old 32 KiB default needlessly reserved device
+     * memory beside the 2.5 GiB pipeline allocations. */
+    cudaDeviceSetLimit(cudaLimitStackSize, 4096);
 
     /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
      * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
@@ -2315,15 +2017,10 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        /* Chunk 0 holds 2^17 entries for one access per candidate, the other
-         * chunks 2^16 each: pinning the dense chunks first captures more of the
-         * 15 random reads. The window stays inside the table. */
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
-        if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
             cudaStreamAttrValue av = {};
-            av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
@@ -2337,25 +2034,7 @@ int main(int argc, char **argv) {
         }
     }
     uint32_t *d_hit_cnt, *d_hit_idx;
-#if QSB_HOST_READBACK
-    /* Delta A (jungjipdo a91746ca): counter and indices contiguous, so one
-     * blocking copy per batch replaces synchronize + two copies. */
-    {
-        cudaError_t hit_err = cudaMalloc(&d_hit_cnt, (1 + 1024)*sizeof(uint32_t));
-        if (hit_err != cudaSuccess) {
-            fprintf(stderr, "Hit buffer allocation failed: %s\n", cudaGetErrorString(hit_err));
-            return 1;
-        }
-        d_hit_idx = d_hit_cnt + 1;
-        hit_err = cudaMemset(d_hit_cnt, 0, (1 + 1024)*sizeof(uint32_t));
-        if (hit_err != cudaSuccess) {
-            fprintf(stderr, "Hit buffer initialization failed: %s\n", cudaGetErrorString(hit_err));
-            return 1;
-        }
-    }
-#else
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
-#endif
 
     int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
@@ -2365,7 +2044,7 @@ int main(int argc, char **argv) {
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
-    size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
+    size_t pipeline_state_bytes=(size_t)BATCH*8u*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
     size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CAND_STRIDE*sizeof(uint64_t);
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
@@ -2457,15 +2136,21 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Search all safe locktimes for this sequence */
-        for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
-            uint32_t batch_lt = LT_MIN + lt_off;
-            int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
-
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-
-            if (fast_tail) {
+        /* Search all safe locktimes for this sequence. The fast path queues
+         * the complete sequence (75 sixteen-million-candidate pipelines over
+         * the canonical range) before one blocking counter readback: its hit
+         * records are self-describing (absolute locktime | recid in bit 31),
+         * so decoding needs no batch context and the GPU never idles on
+         * host round trips between pipelines. At N=24 a full sequence
+         * expects ~75 hits against the 1024-entry buffer. The fallback keeps
+         * a per-batch readback with batch-relative records. Both reset the
+         * counter asynchronously in stream order; the blocking counter copy
+         * is the wait and its return code reports async kernel errors. */
+        if (fast_tail) {
+            cudaMemsetAsync(d_hit_cnt, 0, 4);
+            for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
+                uint32_t batch_lt = LT_MIN + lt_off;
+                int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (int)(lt_range - lt_off);
                 launch_pinning_pipeline<true>(
                     d_mid, d_suffix, gpu_suffix_len,
                     pp.seq_offset, pp.lt_offset,
@@ -2477,7 +2162,40 @@ int main(int argc, char **argv) {
                     batch_sz, easy, single_hash,
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
-            } else {
+                total_searched += batch_sz;
+            }
+            uint32_t h_hit = 0;
+            cudaError_t err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            if (h_hit > 0) {
+                uint32_t hits[1024];
+                int nh = (h_hit > 1024) ? 1024 : h_hit;
+                cudaMemcpy(hits, d_hit_idx, (size_t)nh*4, cudaMemcpyDeviceToHost);
+
+                printf("\n  *** HIT! seq=0x%08X (%u hits) ***\n", seq, h_hit);
+                mkdir("results", 0755);
+                char fname[256];
+                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+                FILE *f = fopen(fname, "a");
+                if (f) {
+                    for (int h = 0; h < nh; h++) {
+                        uint32_t raw = hits[h];
+                        uint32_t lt = raw & 0x7FFFFFFFu;
+                        int ri = (int)(raw >> 31);
+                        fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                                seq, lt, 0, ri);
+                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, 0, ri);
+                    }
+                    fclose(f);
+                }
+                found = 1;
+            }
+        } else {
+            for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
+                uint32_t batch_lt = LT_MIN + lt_off;
+                int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (int)(lt_range - lt_off);
+
+                cudaMemsetAsync(d_hit_cnt, 0, 4);
                 launch_pinning_pipeline<false>(
                     d_mid, d_suffix, gpu_suffix_len,
                     pp.seq_offset, pp.lt_offset,
@@ -2489,65 +2207,46 @@ int main(int argc, char **argv) {
                     batch_sz, easy, single_hash,
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
-            }
-#if QSB_HOST_READBACK
-            /* The blocking default-stream copy waits for all kernels and
-             * returns the counter plus the same first 64 indices reported below. */
-            uint32_t hit_report[1 + 64];
-            cudaError_t err = cudaMemcpy(hit_report, d_hit_cnt, sizeof(hit_report),
-                                         cudaMemcpyDeviceToHost);
-            if (err == cudaSuccess) err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+                total_searched += batch_sz;
 
-            total_searched += batch_sz;
-            h_hit = hit_report[0];
-            if (h_hit > 0) {
-                const uint32_t *hits = hit_report + 1;
-                int nh = (h_hit > 64) ? 64 : h_hit;
-#else
-            cudaDeviceSynchronize();
+                uint32_t h_hit = 0;
+                cudaError_t err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+                if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+                if (h_hit > 0) {
+                    uint32_t hits[1024];
+                    int nh = (h_hit > 1024) ? 1024 : h_hit;
+                    cudaMemcpy(hits, d_hit_idx, (size_t)nh*4, cudaMemcpyDeviceToHost);
 
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-
-            total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-#endif
-
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
-                mkdir("results", 0755);
-                char fname[256];
-                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-                FILE *f = fopen(fname, "a");
-                if (f) {
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
-                                seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
+                    printf("\n  *** HIT! seq=0x%08X ***\n", seq);
+                    mkdir("results", 0755);
+                    char fname[256];
+                    snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+                    FILE *f = fopen(fname, "a");
+                    if (f) {
+                        for (int h = 0; h < nh; h++) {
+                            uint32_t raw = hits[h];
+                            uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
+                            int ri = (raw >> 30) & 1;
+                            int hc = (raw >> 31) & 1;
+                            fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                                    seq, lt, hc, ri);
+                            printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
+                        }
+                        fclose(f);
                     }
-                    fclose(f);
+                    found = 1;
                 }
-                found = 1;
             }
+        }
 
-            /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
-                char check[256];
-                for (int g = 0; g < num_gpus; g++) {
-                    if (g == gpu_index) continue;
-                    snprintf(check, sizeof(check), "results/pinning_hit_%d.txt", g);
-                    FILE *cf = fopen(check, "r");
-                    if (cf) { fclose(cf); printf("  GPU %d found hit, stopping.\n", g); found = 1; break; }
-                }
+        /* Check if another GPU found it (single-GPU ranked runs never enter) */
+        {
+            char check[256];
+            for (int g = 0; g < num_gpus; g++) {
+                if (g == gpu_index) continue;
+                snprintf(check, sizeof(check), "results/pinning_hit_%d.txt", g);
+                FILE *cf = fopen(check, "r");
+                if (cf) { fclose(cf); printf("  GPU %d found hit, stopping.\n", g); found = 1; break; }
             }
         }
 
