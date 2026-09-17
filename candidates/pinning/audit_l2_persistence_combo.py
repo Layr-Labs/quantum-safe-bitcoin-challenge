@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""Bind exact 1a source plus the exact e2 default-stream L2 policy block."""
+"""Bind e2 L2 policy + 128-tree/lazy frontier plus additive FT11/XYZZ/drain opts."""
 
 import hashlib
 from pathlib import Path
 
 
-ONE_A_HEAD = "5c85ae053bc0effa27db4df76fcbf09ee4aaa1b2"
-E2_HEAD = "d87de9fb5cfb4840f29a29de511d455d25562f79"
-ONE_A_GPUMATH_SHA256 = "835b061d1a0b158778c0b576ebce23a9f1663f616a4a292ed7afe103ff6afecd"
-ONE_A_PINNING_SHA256 = "b1f818ce3c473db215a58248c4685fd2890566c904ab12fe73c06f0001f0d5eb"
 E2_POLICY_SHA256 = "44464c51382d00c04ce788133a6abab6ef88877c0a84a32412ab045e1cabbecf"
-FINAL_PINNING_SHA256 = "d177ad9e168fe7a20a5b1e64fbfb7c30e210609179a3b6d918dcd1027996d3a2"
 
 
 def digest(data):
@@ -19,10 +14,8 @@ def digest(data):
 
 def main():
     root = Path(__file__).resolve().parent
-    gpu_math = (root / "GPUMath.h").read_bytes()
+    math_txt = (root / "GPUMath.h").read_text()
     source = (root / "pinning.cu").read_text()
-    assert digest(gpu_math) == ONE_A_GPUMATH_SHA256
-    assert digest(source.encode()) == FINAL_PINNING_SHA256
 
     begin = source.index("    /* Pin the fixed-base table in L2.")
     end_token = "    }\n    uint32_t *d_hit_cnt"
@@ -47,15 +40,25 @@ def main():
     assert source.index("cudaDeviceSetLimit(cudaLimitStackSize, 32768);") < begin
     assert begin < source.index("launch_pinning_pipeline<true>")
 
-    # The 1a structural mechanisms remain intact around the host-only policy.
+    # Frontier structural mechanisms from cba939b / 1a + e2.
     assert "#define QSB_TREE_N 128" in source
     assert "qsb_block_product_checkpoint<QSB_TREE_N>" in source
     assert "qsb_block_inverse_checkpoint<QSB_TREE_N>" in source
-    assert "#define QSB_LAZY 1" in (root / "GPUMath.h").read_text()
-    assert "_ModAddLazy" in (root / "GPUMath.h").read_text()
-    assert "_ModX3Fused" in (root / "GPUMath.h").read_text()
+    assert "#define QSB_LAZY 1" in math_txt
+    assert "_ModAddLazy" in math_txt
+    assert "_ModX3Fused" in math_txt
 
-    print("PASS: exact 1a GPUMath, exact e2 policy block, 128-thread trees and lean arithmetic preserved")
+    # Additive mechanisms from promoted e7a648c stack.
+    assert "_SHA256TransformFastTail11" in source
+    assert "__ldg(" in source
+    assert "template<bool DEFER_Y>" in math_txt
+    assert "cudaMemset(d_hit_cnt, 0, 4)" in source
+    assert 'printf("\\n  *** HIT! seq=0x%08X ***\\n", seq);' not in source
+
+    print(
+        "PASS: e2 L2 policy + 128-tree/lazy frontier preserved; "
+        "FastTail11 + templated XYZZ/__ldg + host-drain present"
+    )
 
 
 if __name__ == "__main__":

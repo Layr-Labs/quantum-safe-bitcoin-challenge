@@ -1252,9 +1252,12 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                              const uint64_t *X2, const uint64_t *Y2,
-                              const uint64_t *Yoff, bool defer_y)
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZ(
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1291,7 +1294,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
+  if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
@@ -1299,6 +1302,22 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   }
 
   Load256(X1, T);                      // X3
+}
+
+
+// Runtime-bool dispatcher for rarely compiled prefetch/shm paths. Hot path
+// uses the DEFER_Y template specialization directly.
+__device__ __forceinline__ void _PointAddXYZZ(
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff, bool defer_y)
+{
+  if (defer_y) {
+    _PointAddXYZZ<true>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
+  } else {
+    _PointAddXYZZ<false>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
+  }
 }
 
 // Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3,
