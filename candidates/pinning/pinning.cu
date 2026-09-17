@@ -154,6 +154,83 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #include "GPUHash.h"
 
+/* Sparse FastTail11: W[0..2] live, W[3..14]=0, W[15]=9995*8=79960.
+ * Continues from an existing midstate. First 16 rounds and the first
+ * in-place WMIX drop zero addends; later 48 rounds use generic SHA256_RND/WMIX.
+ * Bit-identical to _SHA256Transform on that padded block. */
+__device__ __forceinline__ void _SHA256TransformFastTail11(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t L = 9995u * 8u; /* 79960 */
+    uint32_t a = state[0];
+    uint32_t b = state[1];
+    uint32_t c = state[2];
+    uint32_t d = state[3];
+    uint32_t e = state[4];
+    uint32_t f = state[5];
+    uint32_t g = state[6];
+    uint32_t h = state[7];
+
+    uint32_t w[16];
+    w[0] = w0;
+    w[1] = w1;
+    w[2] = w2;
+#pragma unroll
+    for (int i = 3; i < 15; i++) w[i] = 0;
+    w[15] = L;
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], L);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(L) + s0(w[2]);
+        w[2] += s1(w[0]);
+        w[3]  = s1(w[1]);
+        w[4]  = s1(w[2]);
+        w[5]  = s1(w[3]);
+        w[6]  = s1(w[4]) + L;
+        w[7]  = s1(w[5]) + w[0];
+        w[8]  = s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(L);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
 /* Mixed regular odd digits: widths [18,17,...,17], 15 chunks.
  * Chunk c starts at bit 0 when c=0, otherwise 17*c+1. Entry d is
  * (2*d+1)*2^offset*(A/2). Every digit is odd and nonzero; the reconstruction
@@ -253,7 +330,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=__ldg(tx+0),x1=__ldg(tx+1),y0=__ldg(ty+0),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -270,12 +347,13 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 
 /* Decode one signed table digit. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
+    uint32_t m = (uint32_t)(ec >> 31); /* arithmetic sign mask */
+    uint32_t ae = ((uint32_t)ec ^ m) - m;
     *idx = (ae - 1) >> 1;
 #if QSB_PROBE_MASK
     *idx &= (uint32_t)QSB_PROBE_MASK;
 #endif
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)m;
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -1029,14 +1107,11 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         single_hash = 1;
         #pragma unroll
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
-        uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
-            pin_tail_words[2],
-            0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
-        };
-        _SHA256Transform(state,blk);
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
+        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        uint32_t w2 = pin_tail_words[2];
+        _SHA256TransformFastTail11(state, w0, w1, w2);
     } else {
         /* Copy suffix, set sequence + locktime */
         uint8_t buf[192];
@@ -1929,7 +2004,7 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaMemset(d_hit_cnt, 0, 4);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -1956,8 +2031,6 @@ int main(int argc, char **argv) {
                     d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
                     d_super_roots,d_root_checkpoint);
             }
-            cudaDeviceSynchronize();
-
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
@@ -1969,7 +2042,6 @@ int main(int argc, char **argv) {
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -1982,7 +2054,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
