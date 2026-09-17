@@ -850,19 +850,28 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare(
     W[4] = 0;
 }
 
-/* Stage 2. C=ZZ*d^2, W=ZZ^2*d, inv=1/W. h=inv*ZZZ=A/(B*d) is the common slope
- * scale and delta=inv*C=d/ZZ=xR-xP, so xs=2*xR-delta=xP+xR. The y formulas are
- * anchored at R (no affine yP is reconstructed):
+/* Stage 1b. yb = yR*ZZZ does not depend on inv. Issue it after C consumes ZZ
+ * and before the block inverse so the post-inverse chain is inv-dependent only.
+ * yb may alias ZZ; it must not alias yR or ZZZ. */
+__device__ __forceinline__ void qsb_xyzz_finish_anchor_yb(
+    uint64_t *yb, uint64_t *yR, uint64_t *ZZZ
+) {
+    Load256(yb, yR);
+    _ModMult(yb, ZZZ);
+}
+
+/* Stage 2. C=ZZ*d^2, W=ZZ^2*d, inv=1/W, yb=yR*ZZZ already issued. h=inv*ZZZ
+ * = A/(B*d) and delta=inv*C=d/ZZ=xR-xP, so xs=2*xR-delta=xP+xR. The y
+ * formulas are anchored at R (no affine yP is reconstructed):
  *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
  * Returns the two y parities in bits 0 and 1; C, W and ZZZ are reused. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t *C, uint64_t *Y, uint64_t *W, uint64_t *ZZZ,
-    uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *inv, uint64_t *xR, uint64_t *yR, uint64_t *yb,
     uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t yb[4], m[4], t[4], s[4];
+    uint64_t m[4], t[4], s[4];
 
-    _ModMult(yb, yR, ZZZ);       /* yR*B */
     _ModMult(ZZZ, inv);          /* h = B/(A^2*d) = A/(B*d) */
 
     _ModMult(C, inv);            /* delta = C/W = d/ZZ */
@@ -1082,12 +1091,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
     uint64_t Wsave[4]; Load256(Wsave,prod);
     if(usable){ _ModSqr(qx,qx); _ModMult(qx,qzz); }   /* qx -> C = ZZ*d^2 */
+    /* ZZ is dead. Fold yR*ZZZ into the pre-inverse window; qzz holds yb. */
+    qsb_xyzz_finish_anchor_yb(qzz,u2ry,qzzz);
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
     if(!usable)return;
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint32_t y_parities = qsb_xyzz_finish_precomputed(qx,qy,Wsave,qzzz,prod,u2rx,u2ry,qzz,q1x,q2x);
 
     int v=0, hash_choice=0, recid=0;
     for(int ri=0;ri<2&&!v;ri++){
