@@ -931,8 +931,8 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
 // 8 diagonal squares, then the same double-fold as _ModMultCore. 45 IMAD.WIDE/square
 // (vs 73 for a*a via _ModMultCore). Output convention identical to _ModMultCore:
 // [0,2^256), final 2^256 carry dropped. Device: inline PTX; host: __uint128_t C-ref of
-// the IDENTICAL schedule. Independently validated (notes/research/sqr_ptx/VALIDATION.md):
-// 10^6 random + boundaries vs crypto.py, PTX row-schedule emulation, CE 45 IMAD.WIDE.
+// the IDENTICAL schedule. Independently checked against a reference implementation,
+// boundary cases, and an emulation of the PTX row schedule.
 __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 #ifdef __CUDA_ARCH__
     uint64_t r0, r1, r2, r3;
@@ -1306,7 +1306,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   Load256(X1, T);                      // X3
 }
 
-// Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
+// Compile-time twin of _PointAddXYZZ: the
 // production chain calls <true> twelve times in its rolled loop and <false>
 // once for the resolving final addition, so no defer_y branch is in the loop.
 template<bool DEFER_Y>

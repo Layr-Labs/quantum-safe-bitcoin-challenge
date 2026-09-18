@@ -17,13 +17,13 @@
 #include <sys/stat.h>
 #include <cuda_runtime.h>
 
-#include "GPUMath.h"
+#include "quantum-safe-bitcoin-pinning-source-001.h"
 
 static_assert(sizeof(ulonglong2) == 16, "pipeline vector must be 128 bits");
 static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligned");
 
-/* ---- Experiment switches (fable round 2). Defaults are set at the end of
- * this block; ab.sh overrides them with -D on the build line. ---- */
+/* ---- Pipeline switches. Defaults are set at the end of this block; build
+ * definitions may override them when compiling a benchmark variant. ---- */
 #ifndef QSB_TREE_N
 #define QSB_TREE_N 128        /* leaves per candidate product tree = prepare/finish block size (256, 128 or 64) */
 #endif
@@ -37,7 +37,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_BATCH 16777216    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
-#define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
+#define QSB_PREFETCH 1        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
 #endif
 #ifndef QSB_STREAM
 #define QSB_STREAM 0          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
@@ -85,22 +85,22 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
-#define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#define QSB_HOST_READBACK 0   /* One blocking readback of counter+indices per batch. */
 #endif
 #ifndef QSB_SPARSE_TAIL
-#define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
+#define QSB_SPARSE_TAIL 1     /* Sparse-schedule transform for the 11-byte tail block. */
 #endif
 #ifndef QSB_FINAL_TEMPLATE
-#define QSB_FINAL_TEMPLATE 1  /* delta C (jacklightChen e582bda4): compile-time final (resolved) XYZZ addition */
+#define QSB_FINAL_TEMPLATE 1  /* Compile-time final (resolved) XYZZ addition. */
 #endif
 #ifndef QSB_SPARSE_D
-#define QSB_SPARSE_D 1        /* delta D (preludebrace bc77eb42, unmeasured): sparse SHA256d-second and pubkey transforms */
+#define QSB_SPARSE_D 1        /* Sparse SHA256d-second and pubkey transforms. */
 #endif
 #ifndef QSB_SYM_FINISH
-#define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
+#define QSB_SYM_FINISH 1      /* Symmetric recovery, six state planes, K=3xR^2 constant. */
 #endif
 #ifndef QSB_COFACTOR
-#define QSB_COFACTOR 1        /* 1: cofactor checkpoints (tekkac 31e98e47). prepare runs a downward
+#define QSB_COFACTOR 1        /* 1: cofactor checkpoints. prepare runs a downward
                                *    exclusion pass over the same product tree, so every lane leaves
                                *    with C = prod_{j!=i} a_j and C/T = 1/a_i.  The denominator is the
                                *    square-free D = V*d instead of W = A^2*d, and the only things that
@@ -123,7 +123,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    peeling them with the serial gt_mixed_step recurrence */
 #endif
 #ifndef QSB_SQFREE
-#define QSB_SQFREE 1          /* 1: square-free recovery x-pair (subset frontier e00f5566). With
+#define QSB_SQFREE 1          /* 1: square-free recovery x-pair. With
                                *    c = 3*xR^2/(2*yR) uploaded per problem, x1 = (l1+m2)*(l1-c)+xR
                                *    and x2 = (l1+m2)*(m2-c)+xR replace F=2u^2-K*t+xR / H=2*u*v, so
                                *    the pair costs 2M instead of 2M+1S. Only takes effect under
@@ -220,7 +220,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
     0x00,0x7F,0xFF,0x09,0x0D
 };
 
-#include "GPUHash.h"
+#include "quantum-safe-bitcoin-pinning-source-002.h"
 
 /* Mixed regular odd digits: widths [18,17,...,17], 15 chunks.
  * Chunk c starts at bit 0 when c=0, otherwise 17*c+1. Entry d is
@@ -681,7 +681,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         table_base += 1u << 16;
     }
 #elif QSB_FINAL_TEMPLATE
-    /* Delta C (jacklightChen e582bda4): twelve deferred additions in the
+    /* Twelve deferred additions in the
      * rolled loop, then the resolving final addition as its own compile-time
      * specialisation, so the loop body carries no defer_y branch. */
     #pragma unroll 1
@@ -778,7 +778,7 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 
 
 /* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block
- * (delta B, scarletbright 7f965b4d). Pad shape: W[0..2] live, W[3..14]=0,
+ * Pad shape: W[0..2] live, W[3..14]=0,
  * W[15]=9995*8=79960. Continues from an existing midstate. The first 16
  * rounds and the first in-place WMIX drop zero addends; later rounds use the
  * generic SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on
@@ -859,8 +859,8 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     state[7] += h;
 }
 
-/* Sparse-schedule SHA-256 for the SHA256d second compression (delta D,
- * preludebrace bc77eb42): 32-byte message = first digest as eight words,
+/* Sparse-schedule SHA-256 for the SHA256d second compression:
+ * 32-byte message = first digest as eight words,
  * fixed pad W[8]=0x80000000, W[9..14]=0, W[15]=256, from the SHA-256 IV.
  * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
 __device__ __forceinline__ void _SHA256TransformDigest32(
@@ -936,7 +936,7 @@ __device__ __forceinline__ void _SHA256TransformDigest32(
     out[7] = 0x5be0cd19u + h;
 }
 
-/* Sparse-schedule SHA-256 for the 33-byte compressed public key (delta D):
+/* Sparse-schedule SHA-256 for the 33-byte compressed public key:
  * live words pb[0..8], W[9..14]=0, W[15]=0x108, from the SHA-256 IV.
  * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
 __device__ __forceinline__ void _SHA256TransformPubkey33(
@@ -1424,7 +1424,7 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
 }
 
 #if QSB_COFACTOR
-/* Cofactor collective (tekkac 31e98e47), ported onto this tree's numbering.
+/* Cofactor collective, ported onto this tree's numbering.
  *
  * Let a_i be a lane's denominator, or one for an unusable/inactive lane, and
  * let T be the product of all N of them.  The upward pass is byte-for-byte the
@@ -1641,10 +1641,10 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2ry_words[4];
-__device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2 (delta E) */
+__device__ __constant__ uint64_t pin_u2rk_words[4];   /* K = 3*xR^2. */
 __device__ __constant__ uint64_t pin_u2rc_words[4];   /* c = 3*xR^2/(2*yR) (QSB_SQFREE) */
 
-/* Delta E (xlib 0c6f4c8), with the QSB_SQFREE x-pair layered on top.
+/* Symmetric recovery with the square-free x-pair layered on top.
  * With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
  * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
  * K=3*xR^2 is fixed for the entire problem. The shared x base is
@@ -1662,7 +1662,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *x_plus, uint64_t *x_minus
 ) {
 #if QSB_SQFREE
-    /* Square-free x-pair (subset frontier e00f5566). lambda1=u-v and m2=u+v are
+    /* Square-free x-pair. lambda1=u-v and m2=u+v are
      * the two slopes, so lambda1+m2=2*u and, with c=3*xR^2/(2*yR),
      * 2*u*c = K*t exactly. Hence F-H = (lambda1+m2)*(lambda1-c)+xR and
      * F+H = (lambda1+m2)*(m2-c)+xR: the u^2 square, the K*t multiply and the
@@ -1742,12 +1742,12 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
 }
 
 #if QSB_COFACTOR
-/* Cofactor form of the same tail.  tekkac's checkpoint already carries the two
+/* Cofactor form of the same tail.  The checkpoint already carries the two
  * values the tail consumes, so the four opening multiplies of
  * qsb_xyzz_finish_symmetric -- h=V*I, t=V*h, u=yR*t, v=Y*h -- lose their first
  * two: t arrives in V and v arrives in v, both as _ModMult outputs, exactly the
  * operand class the shared-denominator path handed on.  Everything from
- * u = yR*t downward is delta E / QSB_SQFREE unchanged, so both x coordinates
+ * u = yR*t downward is unchanged, so both x coordinates
  * and both parities are bit-for-bit what the tree path produced. */
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric_tv(
     uint64_t *V, uint64_t *v,
@@ -1941,7 +1941,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
 #if QSB_COFACTOR
-    /* tekkac 31e98e47.  The denominator is the square-free D = V*d, not
+    /* The denominator is the square-free D = V*d, not
      * W = A^2*d, so qsb_xyzz_finish_prepare's _ModSqr is never executed: one
      * product replaces a square and a product.  D vanishes exactly when W did
      * (valid XYZZ has V^2 = A^3, so A = 0 iff V = 0), so the usability
@@ -1997,7 +1997,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
 #if QSB_SYM_FINISH
-    /* Delta E: only Y, ZZZ and W cross the kernel boundary (W stays in
+    /* Only Y, ZZZ and W cross the kernel boundary (W stays in
      * planes 4-5 so the tree kernels are unchanged). */
     Load256(qzz,prod);           /* qzz becomes W */
     if (!usable) {
@@ -2051,7 +2051,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     } else {
 
 #if QSB_COFACTOR
-    /* tekkac 31e98e47: no tree, no checkpoint and no barrier left in finish,
+    /* No tree, checkpoint or barrier remains in finish,
      * so inactive lanes have nothing to take part in and may leave at once. */
     if(!active) return;
     {
@@ -2444,7 +2444,7 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
-/* Batch-affine ladder build (delta C, jacklightChen e582bda4, after PR46):
+/* Batch-affine ladder build:
  * the point sequence is unchanged; EC_POINTs_make_affine replaces one
  * inversion per point by one batched inversion per ladder. */
 static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
@@ -2765,7 +2765,7 @@ int main(int argc, char **argv) {
         uint8_t be[32];
         for(int i=0;i<32;i++) be[i]=pp.u2r_x[31-i]; BN_bin2bn(be,32,bx);
         for(int i=0;i<32;i++) be[i]=pp.u2r_y[31-i]; BN_bin2bn(be,32,by);
-        {   /* K=3*xR^2 is invariant across all candidates in this problem (delta E). */
+        {   /* K=3*xR^2 is invariant across all candidates in this problem. */
             BIGNUM *field=BN_new(),*bk=BN_new();
             if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
                !BN_mod_sqr(bk,bx,field,ctx) || !BN_mul_word(bk,3) ||
@@ -2890,7 +2890,7 @@ int main(int argc, char **argv) {
     }
     uint32_t *d_hit_cnt, *d_hit_idx;
 #if QSB_HOST_READBACK
-    /* Delta A (jungjipdo a91746ca): counter and indices contiguous, so one
+    /* Counter and indices contiguous, so one
      * blocking copy per batch replaces synchronize + two copies. */
     {
         cudaError_t hit_err = cudaMalloc(&d_hit_cnt, (1 + 1024)*sizeof(uint32_t));
