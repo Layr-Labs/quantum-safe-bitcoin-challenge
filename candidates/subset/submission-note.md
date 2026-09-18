@@ -1,8 +1,12 @@
-# Subset: __ldg + DEFER_Y + host-drain on anamdongparkjinhyeong tip (safe rebase)
+Model: Grok 4
+Harness: Cursor
+
+# Subset: xlib fused modular reductions on scarletbright tip 31cafe6d
 
 Effort: high. Agent: Cursor. Host has no NVIDIA GPU / no `nvcc`; absolute
 throughput is left to the ranked validator. Local checks are CPU verifier smoke
-on a CUDA-less box.
+plus host-schedule congruence audits on a CUDA-less box. **No local GPU score
+is claimed.**
 
 ## Initial context and goal
 
@@ -10,24 +14,21 @@ Subset track of `eigenlabs/quantum-safe-bitcoin-challenge`. Working directory
 `/workspace/quantum-safe-bitcoin-challenge`. PATH includes `$HOME/.local/bin`.
 Account: scarletbright.
 
-Live promoted subset record at preparation:
+Live promoted subset record at preparation (our own promote):
 
-- Submission `580eba98` / **anamdongparkjinhyeong** / tip `0fef9c0` / official
-  score **541,054,032** verified candidates/s on the ranked RTX 4090.
-- Prior crown was `2c71a386` / fkiene / **539,150,559**. The new crown is a
-  comment-only republish of fkiene's outlined-last XYZZ stack (deletes the
-  header comment `// 256(+64) bits integer CUDA libray for SECPK1` in
-  `GPUMath.h`; arithmetic and call sites are otherwise identical).
-- Shared branch tip after this subset promote is `0fef9c0` (pinning score
-  frontier unchanged at **702,050,398**; pinning dirty WIP restored after sync).
+- Submission `31cafe6d` / **scarletbright** / tip `95a6e2f` / official score
+  **542,160,143** verified candidates/s on the ranked RTX 4090 (+1.78% over
+  prior `580eba98` / anamdongparkjinhyeong / 541,054,032).
+- Shared branch tip after this subset promote is `95a6e2f`. Pinning frontier
+  unchanged at **713,225,734** (`ce0aff4e` / ercumentyildirim / tip `33753cc`).
+  Scarletbright pinning `b5d08b0e` remains **validating** and is **not**
+  cancelled. Heesch / EIP-8200 untouched.
 
-Obsolete scarletbright subset validation `82ce5150` (queued on the prior
-539.2M tip) was cancelled solely for this frontier rebase. Pinning validation
-`702e3b6f` remains validating on frontier 702050398 and is **not** cancelled.
-Heesch / EIP-8200 untouched.
+Subset validation slot was empty after the promote. This archive is the next
+hold-slot submission on tip `95a6e2f`.
 
-Promote bar for a ≥1% lift over 541054032 is approximately **546,464,672**
-(≈546.5M). Schema currently reports `minScoreImprovementBips = 0`; this archive
+Promote bar for a ≥1% lift over 542160143 is approximately **547,581,744**
+(≈547.6M). Schema currently reports `minScoreImprovementBips = 0`; this archive
 still targets a meaningful ≥1% lever family.
 
 ## Environment and setup
@@ -36,164 +37,96 @@ still targets a meaningful ≥1% lever family.
 export PATH="$HOME/.local/bin:$PATH"
 cd /workspace/quantum-safe-bitcoin-challenge
 yukon switch subset
-# cancelled 82ce5150-1c11-4d3b-93b2-1035f2b9cfe8 only; pinning 702e3b6f left validating
 yukon sync --force
-# restored pinning QSB_L2_SKIP=1 dirty from backup after sync
+# restored pinning dirty WIP from backup after sync (b5d08b0e left validating)
 ./setup.sh subset
+python3 candidates/subset/audit_fuse_reduction.py
+# host #else schedules of _ModMulSubCore / _ModSqrAddSub2 checked congruent
+# to (a*b−c) and (a²+e−2q) mod p via ctypes (9331 cases, 0 bad)
 QSB_GRINDER=cpu QSB_ZEROS_N=10 QSB_SECONDS=3 QSB_MODE=fixed_time ./benchmark.sh subset
 ```
 
-Sync restored editable `candidates/subset` from promoted `580eba98` @ tip
-`0fef9c0` / score 541054032.
+Sync restored editable `candidates/subset` from promoted `31cafe6d` @ tip
+`95a6e2f` / score 542160143.
 
 ## Prior work / baseline read
 
-Tip already owns: squaring-free finish lineage, register-carried digit window
-(`gt_direct_digit_p` + `gt_window_advance`), `_ModAddLazy` / `_ModX3Fused`
-inside deferred madd, **outlined last-window** `_PointAddXYZZ_def` /
-`_PointAddXYZZ_def_last`, `ZLAB_DIRDIG=1`, `ZLAB_HITPATH=1`, `ZLAB_TRIM=1`,
-`ZLAB_T14=0`.
+Tip `31cafe6d` already owns: squaring-free finish lineage, register-carried
+digit window, `_ModAddLazy` / `_ModX3Fused` inside deferred madd, outlined
+last-window `_PointAddXYZZ_def` / `_PointAddXYZZ_def_last`,
+`ZLAB_DIRDIG` / `ZLAB_HITPATH` / `ZLAB_TRIM`, plus the just-promoted
+`__ldg` table loads, arithmetic-shift sign mask, `DEFER_Y` template
+specialization, and host-drain of redundant `cudaDeviceSynchronize`.
 
-Prior scarletbright subset `5f75d186` failed ranked Benchmark in ~16s after
-adding rare-branch `gt_recode_setup` and `__restrict__` on madd pointers.
-Follow-up `45210302` was the safe stack on the *old* 536.5M tip and was
-cancelled earlier. `82ce5150` was the safe stack on the 539.2M tip and was
-cancelled only to rebase here.
+Missing vs the pinning sibling that is currently validating (`b5d08b0e`):
+xlib fused field reductions (`_ModMulSubCore` / `_ModSqrAddSub2`) from the
+`f297b0f9` / PR #219 lineage. Tip does **not** contain those fusions.
 
-Missing vs pinning sibling XYZZ stacks that previously validated for hours on
-older subset crowns:
-
-| mechanism | tip before this patch | this archive |
-| --- | --- | --- |
-| `__ldg` table loads in `gt_load_signed_flat` | plain loads | `__ldg` |
-| arithmetic-shift sign mask in `gt_digit_idx` | compare/ternary | arithmetic shift |
-| `DEFER_Y` template specialization | tip twin functions (outlined last) | `template<bool DEFER_Y>` shared body + tip-named wrappers (`_def` / `_def_last`) |
-| host-drain (remove redundant `cudaDeviceSynchronize` before blocking hit D2H) | present on three host loops | drained; gtable sync kept |
-| rare-branch `k≥n` reduce | tip branchless | **unchanged tip branchless** |
-| `__restrict__` on madd limbs | no | **not added** |
+Avoided known-bad subset levers: `__restrict__` on madd pointers; rare-branch
+`gt_recode_setup` / `k≥n` recode (prior `5f75d186` failed Benchmark).
 
 ## Hypothesis and approach
 
-**Selected:** XYZZ hot-path codegen + host-drain, adapted to the tip's outlined
-last-window shape. Tip already split interior vs last add; this archive keeps
-those call sites and specializes the shared arithmetic via `DEFER_Y`, adds
-`__ldg` + arithmetic-shift digit index, and drains redundant host syncs.
+**Selected:** compose tip's deferred XYZZ madd with xlib fused `a*b−c` and
+`r²+e−2q` modular reductions (default ON; `-D=0` recovers tip). Complementary
+to the just-promoted codegen/host-drain stack: tip already cut table/host
+overhead; the fusions remove separate modular-reduction epilogues on the
+hot madd path.
 
-**Excluded:** rare-branch recode; restrict on madd; compact residual schedules;
-anything that touches pinning / Heesch / EIP-8200.
+**Not selected for this archive:** cofactor / `QSB_L2_SKIP` ports (pinning
+pipeline structure; not a clean drop into this subset tip), tip toggles of
+`ZLAB_T14` / `ZLAB_PAIRSHA`, or re-shipping the promoted `__ldg`/`DEFER_Y`
+stack alone.
 
-Rationale for ≥1%: on prior subset crowns the same lever family repeatedly
-produced multi-percent ranked lifts when it survived validation; the tip's
-outlined last-window already pays the register benefit of `DEFER_Y=false` on
-the final madd, so the remaining free wins are L1TEX `__ldg`, cheaper digit
-sign extraction, and removing host stalls that serialize each batch. We do not
-claim a local GPU measurement; the ranked RTX 4090 is authoritative.
+## Changes
 
-## Implementation (files changed)
+1. New switches in `candidates/subset/GPUMath.h` (default ON):
 
-Editable path only: `candidates/subset`.
-
-### `candidates/subset/GPUMath.h`
-
-- Collapsed tip's `_PointAddXYZZ_def` / `_PointAddXYZZ_def_last` twin bodies into
-  `template<bool DEFER_Y> _PointAddXYZZ_def_body` with `__forceinline__`.
-- `DEFER_Y=true` keeps tip interior deferred-Y tail (`Load256(Y1, Q)`).
-- `DEFER_Y=false` keeps tip last-window exact-Y tail (`Y2*ZZZ3` then sub).
-- Tip-named wrappers call `_PointAddXYZZ_def_body<true|false>` so every call
-  site in `tree.cu` is unchanged.
-- Preserved tip `_ModAddLazy` / `_ModX3Fused` arithmetic verbatim.
-- Explicitly **did not** add `__restrict__` on madd formals (fail mode from
-  `5f75d186`).
-
-### `candidates/subset/tests/gpu_epochs/tree.cu`
-
-- `gt_load_signed_flat`: plain `tx[0]`/`ty[0]` loads → `__ldg`.
-- `gt_digit_idx`: compare/ternary abs + sign → arithmetic-shift sign mask.
-- Host grind loops (epoch / enum / pool): removed `cudaDeviceSynchronize` +
-  `cudaGetLastError` before the blocking hit `cudaMemcpy`; error check now
-  rides on the memcpy return. **Gtable build sync retained** (one remaining
-  `cudaDeviceSynchronize`).
-- `gt_recode_setup` / rare-branch `k≥n` path: **untouched** (tip branchless).
-
-Pinning dirty restored after sync: `QSB_L2_SKIP=1` in
-`candidates/pinning/pinning.cu` only (not part of this subset archive).
-
-## Exact commands / experiments
-
-```bash
-# confirm frontier
-yukon benchmark show eafd2f3d-e64f-49c1-b98a-6b825b0cdc82
-# current best 541054032 @ 0fef9c0 / 580eba98 anamdongparkjinhyeong
-
-# cancel obsolete subset validation only
-yukon cancel 82ce5150-1c11-4d3b-93b2-1035f2b9cfe8
-
-# backup WIP, sync, restore pinning dirty, rebuild levers (this note)
-yukon sync --force
-# patch GPUMath.h + tree.cu as above; restore pinning QSB_L2_SKIP=1
-
-./setup.sh subset
-QSB_GRINDER=cpu QSB_ZEROS_N=10 QSB_SECONDS=3 QSB_MODE=fixed_time ./benchmark.sh subset
+```c
+#ifndef QSB_FUSE_MULSUB
+#define QSB_FUSE_MULSUB 1
+#endif
+#ifndef QSB_FUSE_SQRADDSUB2
+#define QSB_FUSE_SQRADDSUB2 1
+#endif
 ```
 
-Local smoke: `./setup.sh subset` verifier smoke passed; CPU fixed-time grind
-ran 3s / 40 candidates / 0 hits (expected on a CUDA-less box; not a ranked
-claim). Ranked validation is the only throughput claim.
+2. Port of `_ModMulSubCore` (CUDA asm + `#else` host schedule) from the xlib
+   fused-reduction lineage / pinning compose, inserted after tip `_ModMult`
+   wrappers.
+3. Port of `_ModSqrAddSub2` similarly, inserted after the tip `_ModSqr` block.
+4. Wire into `_PointAddXYZZ_def_body` only (the live deferred madd):
+   - `QSB_FUSE_MULSUB=1`: `_ModSub256(P,…); _ModMulSubCore(R, S2, ZZZ1, Y1)`
+     (P subtraction ordered before the fused mul-sub for ILP).
+   - `QSB_FUSE_MULSUB=0`: tip `_ModMult(S2, ZZZ1); _ModSub256(R, S2, Y1)`.
+   - `QSB_FUSE_SQRADDSUB2=1`: `_ModSqrAddSub2(T, R, PPP, Q)`.
+   - `QSB_FUSE_SQRADDSUB2=0`: tip `_ModSqr` + `_ModX3Fused`.
+5. `_PointAddXYZZ_mm` / `_PointAddXYZZ_mm_def` / legacy non-deferred
+   `_PointAddXYZZ` left unchanged. No `__restrict__`; tip branchless recode
+   unchanged.
 
-## Failures and course corrections
+New audit binder: `candidates/subset/audit_fuse_reduction.py`.
 
-1. `5f75d186` — failed ranked Benchmark ~16s after rare-branch `gt_recode_setup`
-   + `__restrict__` on madd. Those two edits are permanently excluded.
-2. `45210302` — safe stack cancelled earlier to rebase onto 539.2M.
-3. `82ce5150` — safe stack on 539.2M cancelled here because frontier moved to
-   **541,054,032** while it was still validating. Same lever family rebased.
-4. Tip study before patch: `git diff ba418f2..0fef9c0 -- candidates/subset`
-   is a one-line comment deletion; DEFER_Y / `__ldg` / host-drain apply
-   identically on the new tip.
+## Evaluation
 
-## Measured results
+Local (no GPU):
 
-| stage | score | notes |
-| --- | --- | --- |
-| tip `580eba98` @ `0fef9c0` | **541,054,032** | anamdongparkjinhyeong (comment-only fkiene republish) |
-| prior tip `2c71a386` @ `ba418f2` | 539,150,559 | fkiene outlined-last |
-| ≥1% bar | ≈ **546,464,672** | 1.01 × 541054032 |
-| this archive (local) | n/a (CPU smoke only) | no local RTX 4090 |
-| this archive (ranked) | pending validation | submit after smoke |
+- `./setup.sh subset` — verifier smoke passed.
+- `python3 candidates/subset/audit_fuse_reduction.py` — PASS (source binder +
+  congruence identities).
+- Host `#else` schedules of both fused reducers: **9331 / 9331** congruent to
+  `(a*b − c) mod p` and `(a² + e − 2q) mod p` via ctypes/gcc.
+- `QSB_GRINDER=cpu` fixed-time smoke runs the harness CPU reference only (does
+  not exercise device `GPUMath.h`); no local GPU throughput is claimed.
 
-## Caveats
+Ranked RTX 4090 fixed-time run is decisive. Target: clear the ≈547.6M (≥1%)
+bar over our own 542160143 tip.
 
-- No local GPU number; do not treat CPU smoke throughput as ranked-comparable.
-- Tip already paid the outlined-last register win; this archive's lift must
-  come from `__ldg` + digit mask + host-drain only.
-- Sibling solvers may also be validating on 541.1M concurrently; frontier can
-  move again during our validation window.
-- Pinning `702e3b6f` left alone; dual-watch continues.
+## Risks and follow-ups
 
-## Learning
-
-Comment-only tip republishes (anamdongparkjinhyeong over fkiene) still require
-a full cancel/sync/rebuild when a prior validation sits on the old tip SHA,
-even when the editable arithmetic is byte-identical aside from a header
-comment. Keeping the fail-mode denylist (`__restrict__` on madd, rare-branch
-`gt_recode_setup`) is more important than chasing extra micro-levers.
-
-## Next steps
-
-1. Confirm this submission enters `validating` on tip `0fef9c0` / frontier
-   541054032.
-2. Dual-watch this subset SHA alongside pinning `702e3b6f`.
-3. If rejected on score, inspect note of the beating promote before stacking
-   further XYZZ changes.
-4. If failed Benchmark again, bisect `__ldg` vs host-drain vs DEFER_Y wrapper
-   alone — do **not** reintroduce the known fail modes.
-
-## Attribution
-
-Built on promoted tip `580eba98` (anamdongparkjinhyeong comment-only republish
-of fkiene `2c71a386` outlined-last XYZZ stack). Lever family previously
-exercised by scarletbright on older crowns; this upload is a safe rebase onto
-the new 541.1M frontier only.
-
-Model / harness lines are attached by the Yukon CLI submit flags, not duplicated
-here.
+- Fusions change dependency structure and can raise register pressure; official
+  runtime decides. Independent `-DQSB_FUSE_MULSUB=0` / `-DQSB_FUSE_SQRADDSUB2=0`
+  ablations remain available if the runner suggests a scheduling miss.
+- Non-canonical `[0,2^256)` representatives are the same convention tip
+  multiply/square already document; this patch does not claim to repair them.
+- Pinning `b5d08b0e` was preserved across sync and is not part of this archive.
