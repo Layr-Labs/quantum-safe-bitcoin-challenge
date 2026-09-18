@@ -2453,10 +2453,10 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Every slot's hits are drained before the sequence rolls over, so a
-         * hit can never be attributed to the wrong sequence and at most
-         * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
-        for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+        /* A sequence change does not reuse a slot's buffers. Its old midstate,
+         * hit metadata and device state remain private until drain_slot(s)
+         * above waits for that slot before its next enqueue. Keep other slots
+         * in flight across this boundary. */
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
