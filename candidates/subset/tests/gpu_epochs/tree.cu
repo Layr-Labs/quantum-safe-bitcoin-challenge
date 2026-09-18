@@ -1215,7 +1215,8 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
  * with two multiplies. Every per-block cost -- the tree barriers, the shared
  * traffic and the cooperative root inverse -- is paid once per 512 candidates
  * instead of once per 256. The pre-inverse half of the first candidate's finish
- * is parked in shared memory (16 KiB/block) so the lane frame stays small. */
+ * is parked in shared memory (16 KiB/block, 24 KiB at ZLAB_K2S3M != 0) so the
+ * lane frame stays small. */
 #ifndef ZLAB_K2S
 #define ZLAB_K2S 1        /* ON: measured +1.292% rate / +0.31-0.51% M/J paired on gpu2.
                            * The ranked build line passes no defines, so this default IS the ship
@@ -1260,6 +1261,94 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
+
+/* ---- ZLAB_K2S3M: the same finish in 3M instead of 4M ----------------------
+ * qsb_k2s_pre above multiplies BOTH slope numerators by ZZ and qsb_k2s_post
+ * multiplies BOTH by inv: four multiplies to apply the single scale
+ * h = ZZ/W = A/(B*d).  qsb_xyzz_finish_precomputed (above) already did this job
+ * in three by forming h once.  Park (yR*B - Y), (yR*B + Y) and ZZ -- 12 words,
+ * 96 B per lane instead of 64 -- and post forms h = ZZ*inv once (1M) and
+ * applies it twice (2M).  Net -1M per candidate.
+ *   0 = the 4M pair above (kill switch; byte-identical to frontier-subsetA).
+ *   1 = 3M for the PARKED candidate A only (ship default).  Candidate B keeps
+ *       the 4M pair, so it still carries 8 words rather than 12 across the
+ *       block inverse and the kernel's spill stays at the frontier's 8 B.
+ *   2 = 3M for BOTH candidates.  Measured -248 SASS slots / -146 IMAD.WIDE on
+ *       sm_89 (against -128 / -73 at 1), but candidate B's fixed-base front
+ *       then spills one extra 64-bit word: 16 B spill stores/loads instead of
+ *       8 B.  The spill sits INSIDE the front-end window (before the first
+ *       BAR.SYNC), not in the tree or the root inverse -- it is the same
+ *       single STL.64/LDL.64 pair the frontier already pays in candidate A's
+ *       front, now paid in B's front too.  Static counts say 2 is the better
+ *       build; 1 ships because it is the setting with no resource regression
+ *       at all.  Both are correct; only one A/B run separates them. */
+#ifndef ZLAB_K2S3M
+#define ZLAB_K2S3M 1
+#endif
+#if ZLAB_K2S3M
+/* n[0..3] = yR*B - Y, n[4..7] = yR*B + Y, n[8..11] = ZZ.  Nothing here needs
+ * 1/W.  The (yR*B + Y) add feeds a multiply only, so it may stay lazy. */
+__device__ __forceinline__ void qsb_k2s_pre3(
+    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
+) {
+    uint64_t yb[4];
+    _ModMult(yb, yR, ZZZ);
+    _ModSub256(n, yb, Y);
+    _ModAddLazy(n + 4, yb, Y);
+    Load256(n + 8, ZZ);
+}
+/* h = ZZ*inv is the common slope scale, exactly as in
+ * qsb_xyzz_finish_precomputed: lambda1 = n[0..3]*h, m2 = n[4..7]*h.  The tail
+ * from _ModAddLazy(sum,...) on is the tail of qsb_k2s_post unchanged; the two
+ * x + xR adds stay canonical because their results are hashed. */
+__device__ __forceinline__ uint32_t qsb_k2s_post3(
+    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *x1, uint64_t *x2
+) {
+    uint64_t t[4], sum[4], m1[4], m2[4];
+    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    _ModMult(n + 8, inv);          /* h = ZZ/W */
+    _ModMult(m1, n, n + 8);        /* lambda1 = (yR*B - Y)*h */
+    _ModMult(m2, n + 4, n + 8);    /* m2      = (yR*B + Y)*h */
+    _ModAddLazy(sum, m1, m2);
+    _ModSub256(t, m1, cc);
+    _ModMult(x1, sum, t);
+    _ModAdd256(x1, x1, xR);
+    _ModSub256(t, xR, x1);
+    _ModMult(t, m1);
+    _ModSub256(t, yR);
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    _ModSub256(t, m2, cc);
+    _ModMult(x2, sum, t);
+    _ModAdd256(x2, x2, xR);
+    _ModSub256(t, xR, x2);
+    _ModMult(t, m2);
+    _ModSub256(t, yR);
+    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+    return parities;
+}
+/* qsb_k2s_front with qsb_k2s_pre3 in place of qsb_k2s_pre; see the SEAM 4 note
+ * in qsb_k2s_front below for why only first_epoch selects the epoch. */
+__device__ __forceinline__ int qsb_k2s_front3(
+    const uint32_t * __restrict__ first_epoch, int lane, const uint8_t *d_gt,
+    uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *n
+) {
+    uint32_t state[8];
+    qsb_scheduled_window_hash(state, first_epoch, lane);
+    uint32_t s2[8];
+    _SHA256TransformDigest32(s2, state);
+    uint64_t z[4];
+    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+}
+#endif
 /* One candidate up to its denominator: window hash, SHA-256d, u1*G, W = ZZZ*d,
  * and the pre-inverse finish pair. Returns 0 when the candidate is unusable. */
 __device__ __forceinline__ int qsb_k2s_front(
@@ -1351,7 +1440,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if ZLAB_K2S
     {
         const int tid = threadIdx.x;
+#if ZLAB_K2S3M
+        /* 12 words: (yR*B - Y), (yR*B + Y), ZZ.  24,576 B; with the tree's
+         * 16,384 + 8,192 the block is at 49,152 B, so 2 blocks/SM still fit
+         * (2*(49152+1024) = 100,352 <= 102,400). */
+        __shared__ uint64_t parkA[12][256];
+#else
         __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
+#endif
         /* SEAM 3. ep0 is this digest block's FIRST epoch-within-launch index.
          * Each digest block owns QSB_K2S_MUL == 2 consecutive epochs, so the
          * epoch index is QSB_K2S_MUL*blockIdx.x + k for k in {0,1}, NEVER
@@ -1367,6 +1463,28 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         const uint32_t *f1 = f0 + first_stride;
         uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
         uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+#if ZLAB_K2S3M
+        uint64_t prodA[5], prodB[5];
+#if ZLAB_K2S3M >= 2
+        uint64_t nB[12];           /* B carries (yb-Y),(yb+Y),ZZ over the tree */
+#else
+        uint64_t m1B[4], m2B[4];   /* B keeps the 4M pair: 8 words over the tree */
+#endif
+        int okA, okB;
+        {
+            uint64_t n[12];
+            okA = qsb_k2s_front3(f0,tid,d_gt,u2rx,u2ry,prodA,n) && active;
+            if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+            #pragma unroll
+            for(int k=0;k<12;k++)parkA[k][tid]=n[k];
+        }
+#if ZLAB_K2S3M >= 2
+        okB = qsb_k2s_front3(f1,tid,d_gt,u2rx,u2ry,prodB,nB) && active;
+#else
+        okB = qsb_k2s_front(f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B) && active;
+#endif
+        if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+#else
         uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
         int okA, okB;
         {
@@ -1378,15 +1496,24 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
         okB = qsb_k2s_front(f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B) && active;
         if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+#endif
         uint64_t leaf[5];
         qsb_field_mul_raw(leaf,prodA,prodB);
         qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
         if(okA){
+#if ZLAB_K2S3M
+            uint64_t inv[5],n[12],q1x[4],q2x[4];
+            qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
+            #pragma unroll
+            for(int k=0;k<12;k++)n[k]=parkA[k][tid];
+            uint32_t par=qsb_k2s_post3(n,inv,u2rx,u2ry,q1x,q2x);
+#else
             uint64_t inv[5],m1[4],m2[4],q1x[4],q2x[4];
             qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
             #pragma unroll
             for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
             uint32_t par=qsb_k2s_post(m1,m2,inv,u2rx,u2ry,q1x,q2x);
+#endif
             int recid=0;
             if(qsb_k2s_gate(q1x,q2x,par,&recid)){
                 uint32_t pslot=atomicAdd(d_hit_cnt,1);
@@ -1400,7 +1527,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(okB){
             uint64_t inv[5],q1x[4],q2x[4];
             qsb_field_mul_raw(inv,leaf,prodA);    /* 1/WB */
+#if ZLAB_K2S3M >= 2
+            uint32_t par=qsb_k2s_post3(nB,inv,u2rx,u2ry,q1x,q2x);
+#else
             uint32_t par=qsb_k2s_post(m1B,m2B,inv,u2rx,u2ry,q1x,q2x);
+#endif
             int recid=0;
             if(qsb_k2s_gate(q1x,q2x,par,&recid)){
                 uint32_t pslot=atomicAdd(d_hit_cnt,1);
