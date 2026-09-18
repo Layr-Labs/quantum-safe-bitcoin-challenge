@@ -714,7 +714,9 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_FAST_N_INC   30
 #define QSB_FAST_N_CONST 69
 #define QSB_PREFIX_BLOCKS 2
+#if !ZLAB_TRIM
 #include "prefix_cache.cuh"
+#endif
 
 /* Short-epoch shape: the pool is cut at 137 with 6 early omissions per epoch
  * (folded into an epoch midstate built ON GPU by kernel_build_epochs) and 3
@@ -1413,7 +1415,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
         return;
     }
-#endif
+#else
 
     /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
@@ -1701,6 +1703,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
         }
     }
+#endif
 }
 
 /* ============================================================
