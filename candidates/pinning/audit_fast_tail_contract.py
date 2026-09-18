@@ -54,7 +54,8 @@ def audit_source():
     guard = "if (FAST_TAIL || single_hash) continue;"
     assert loop.count(guard) == 1
     assert loop.index("if(vv){") < loop.index(guard)
-    assert loop.index(guard) < loop.index("uint8_t pp[64]")
+    # Second-hash path uses sparse Digest32 (tip Pubkey33 + our Digest32).
+    assert loop.index(guard) < loop.index("_SHA256TransformDigest32(h2s, hs)")
     assert source.count("launch_pinning_pipeline<true>") == 1
     assert source.count("launch_pinning_pipeline<false>") == 1
 
