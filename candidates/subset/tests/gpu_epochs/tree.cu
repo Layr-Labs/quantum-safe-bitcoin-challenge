@@ -46,6 +46,7 @@
 #include <openssl/sha.h>
 
 #include "../../GPUMath.h"
+#include "gtable_ldg.cuh"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -365,9 +366,8 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
                                                      uint64_t neg,
                                                      uint64_t gx[4], uint64_t gy[4]) {
     size_t off = ((size_t)base + idx) * 64;
-    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
-    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0,x1,y0,y1;
+    gt_ldg_xy_ll2(&x0,&x1,&y0,&y1,gTable+off);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
