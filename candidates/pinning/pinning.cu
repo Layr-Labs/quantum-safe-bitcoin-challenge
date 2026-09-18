@@ -79,7 +79,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
 #endif
 #ifndef QSB_PK_UNROLL
-#define QSB_PK_UNROLL 0       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
+#define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
 #define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
