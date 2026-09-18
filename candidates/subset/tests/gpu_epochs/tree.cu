@@ -367,7 +367,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -387,9 +387,10 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
  * issued one iteration ahead. Returns (qx,qy,qz) WITHOUT affine conversion so
  * the caller shares one inverse across the recid finish. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
+    int32_t mask = ec >> 31;   /* arithmetic-shift sign mask */
+    uint32_t ae = ((uint32_t)ec ^ (uint32_t)mask) - (uint32_t)mask;
     *idx = (ae - 1) >> 1;
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)(mask & 1);   /* 0/1; load expands via 0ULL-neg */
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -503,22 +504,32 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, true);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
         table_base += 1u << 18;
     }
     #pragma unroll 1
-    for (int c=GT_BIG;c<GT_CHUNKS;c++){
+    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
 #if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),c==GT_CHUNKS-1,&idx,&neg); pos+=gt_width(GT_BIG);
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
 #else
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<18>(M,sign):sign*(int32_t)M[0];
+        ec=gt_mixed_step<18>(M,sign);
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
         table_base += 1u << 17;
+    }
+    {
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
+#else
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ_def<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
 #if ZLAB_DIRDIG
@@ -535,11 +546,20 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t wlo=wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
     uint64_t whi=wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),false,&idx,&neg);
         pos+=gt_width(2);
         gt_window_advance(M,pos,&wli,&wlo,&whi);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),true,&idx,&neg);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ_def<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -549,14 +569,19 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#endif
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+    {
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ_def<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#endif
 #endif
 }
 
@@ -2524,14 +2549,12 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             epoch_base += nblk;
 #if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
@@ -2560,7 +2583,8 @@ int main(int argc, char **argv) {
             }
             if (0) {
 #else
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
 #endif
                 uint32_t hits[64];
@@ -2700,13 +2724,11 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
                 t_win, s_early, d_early, fast_inc, d_const_words, NULL);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             enum_base += batch_pos;
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
@@ -2900,16 +2922,12 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
                 t_sel, 0, d_early, 0, d_const_words, NULL);
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-
             total_searched += batch_pos;
             g_total_searched = total_searched;
             batch_pos = 0;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            cudaError_t err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
