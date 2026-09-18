@@ -617,9 +617,22 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
  * W[15]=9995*8=79960. Continues from an existing midstate. The first 16
  * rounds and the first in-place WMIX drop zero addends; later rounds use the
  * generic SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on
- * that padded block. */
+ * that padded block.
+ *
+ * Q207: the caller passes the tile-invariant schedule prefix
+ *   pre0 = s0(w1)
+ *   pre1 = w1 + s1(L) + s0(w2)          (= schedule word W[17])
+ *   pre2 = s1(pre1)                     (= W[19])
+ *   pre3 = s1(pre2)                     (= W[21])
+ *   pre4 = s1(pre3)
+ * which is constant across all locktimes sharing the same upper 24 bits
+ * (w2 and L are fixed pad words; w1 depends only on lt's upper bytes).
+ * The caller shares one computation per warp via shuffle; the per-lane
+ * fallback is to compute the same five values from its own w1/w2. */
 __device__ __forceinline__ void _SHA256TransformFastTail11(
-    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2,
+    uint32_t pre0, uint32_t pre1, uint32_t pre2,
+    uint32_t pre3, uint32_t pre4)
 {
     const uint32_t L = 9995u * 8u; /* 79960 */
     uint32_t t1;
@@ -660,14 +673,14 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     S2Round(b, c, d, e, f, g, h, a, K[15], L);
 
     {
-        w[0] += s0(w[1]);
-        w[1] += s1(L) + s0(w[2]);
+        w[0] += pre0;
+        w[1] = pre1;
         w[2] += s1(w[0]);
-        w[3]  = s1(w[1]);
+        w[3]  = pre2;
         w[4]  = s1(w[2]);
-        w[5]  = s1(w[3]);
+        w[5]  = pre3;
         w[6]  = s1(w[4]) + L;
-        w[7]  = s1(w[5]) + w[0];
+        w[7]  = pre4 + w[0];
         w[8]  = s1(w[6]) + w[1];
         w[9]  = s1(w[7]) + w[2];
         w[10] = s1(w[8]) + w[3];
@@ -1283,9 +1296,6 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     int total_preimage_len,
     uint32_t seq_value,         /* current sequence value */
     uint32_t start_lt,          /* starting locktime for this batch */
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gt,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
@@ -1311,7 +1321,39 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
                 ((lt >> 16) & 0xff00u) | pin_tail_words[1];
         uint32_t w2 = pin_tail_words[2];
-        _SHA256TransformFastTail11(state, w0, w1, w2);
+        /* Q207: w1 depends only on lt's upper 24 bits (LT batches are
+         * 256-aligned), so the schedule prefix s0(w1), w1+s1(L)+s0(w2),
+         * s1^1..s1^3 of it is invariant across the 256-wide locktime tile.
+         * Lane 0 computes it once per warp and shuffles it out; the ballot
+         * guard falls back to per-lane computation for straddling warps. */
+        uint32_t pre0 = 0, pre1 = 0, pre2 = 0, pre3 = 0, pre4 = 0;
+        uint32_t lane0_lt = __shfl_sync(0xffffffffu, lt, 0);
+        unsigned tile_agree =
+            __ballot_sync(0xffffffffu, (lt & ~0xffu) == (lane0_lt & ~0xffu));
+        if (tile_agree == 0xffffffffu) {
+            if ((threadIdx.x & 31u) == 0u) {
+                uint32_t tb = lane0_lt & ~0xffu;
+                uint32_t w1c = ((tb & 0xff00u) << 16) | (tb & 0xff0000u) |
+                        ((tb >> 16) & 0xff00u) | pin_tail_words[1];
+                pre0 = s0(w1c);
+                pre1 = w1c + s1(9995u * 8u) + s0(pin_tail_words[2]);
+                pre2 = s1(pre1);
+                pre3 = s1(pre2);
+                pre4 = s1(pre3);
+            }
+            pre0 = __shfl_sync(0xffffffffu, pre0, 0);
+            pre1 = __shfl_sync(0xffffffffu, pre1, 0);
+            pre2 = __shfl_sync(0xffffffffu, pre2, 0);
+            pre3 = __shfl_sync(0xffffffffu, pre3, 0);
+            pre4 = __shfl_sync(0xffffffffu, pre4, 0);
+        } else {
+            pre0 = s0(w1);
+            pre1 = w1 + s1(9995u * 8u) + s0(w2);
+            pre2 = s1(pre1);
+            pre3 = s1(pre2);
+            pre4 = s1(pre3);
+        }
+        _SHA256TransformFastTail11(state, w0, w1, w2, pre0, pre1, pre2, pre3, pre4);
 #else
         uint32_t blk[16] = {
             pin_tail_words[0] | (lt & 0xffu),
@@ -1546,9 +1588,6 @@ static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
     int suffix_len, int seq_offset, int lt_offset, int total_preimage_len,
     uint32_t seq_value, uint32_t start_lt,
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
     uint8_t *d_gt, uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
@@ -1558,7 +1597,7 @@ static void launch_pinning_pipeline(
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        seq_value,start_lt,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree);
     cudaError_t err=cudaGetLastError();
@@ -1606,7 +1645,7 @@ static void launch_pinning_pipeline(
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        seq_value,start_lt,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree);
     err=cudaGetLastError();
@@ -1747,7 +1786,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
-    BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
+    BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE */
     BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
     EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
     memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
@@ -1903,6 +1942,30 @@ err:
 }
 
 
+/* Bounded hit-record encoder (Q192): replaces fprintf varargs on the hit
+ * path. Output is byte-identical to
+ *   fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n", ...)
+ * for hc, ri in {0,1}; each record is <= 62 bytes. */
+static char *qsb_u32_dec(char *p, uint32_t v) {
+    char tmp[10]; int n = 0;
+    do { tmp[n++] = char('0' + (v % 10u)); v /= 10u; } while (v);
+    while (n) *p++ = tmp[--n];
+    return p;
+}
+static char *qsb_append_hit_record(char *p, uint32_t seq, uint32_t lt,
+                                   int hc, int ri) {
+    memcpy(p, "sequence=", 9); p += 9;
+    p = qsb_u32_dec(p, seq);
+    memcpy(p, "\nlocktime=", 10); p += 10;
+    p = qsb_u32_dec(p, lt);
+    memcpy(p, "\nhash_choice=", 13); p += 13;
+    *p++ = char('0' + hc);
+    memcpy(p, "\nrecid=", 7); p += 7;
+    *p++ = char('0' + ri);
+    *p++ = '\n';
+    return p;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Usage: %s <pinning2.bin> [gpu_index] [total_gpus] [global_offset] [easy]\n", argv[0]);
@@ -2010,12 +2073,6 @@ int main(int argc, char **argv) {
     printf("  Mode: %s\n", easy ? "EASY" : "REAL");
 
     /* Upload EC constants */
-    uint64_t *d_nri, *d_u2rx, *d_u2ry, *d_neg2u2rx, *d_neg2u2ry;
-    cudaMalloc(&d_nri,32); cudaMalloc(&d_u2rx,32); cudaMalloc(&d_u2ry,32);
-    cudaMalloc(&d_neg2u2rx,32); cudaMalloc(&d_neg2u2ry,32);
-    cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
     cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
@@ -2055,24 +2112,7 @@ int main(int argc, char **argv) {
             }
             BN_free(field); BN_free(bk);
         }
-        EC_POINT *pt=EC_POINT_new(grp);
-        EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
-        EC_POINT *dbl=EC_POINT_new(grp);
-        EC_POINT_dbl(grp,dbl,pt,ctx);
-        EC_POINT_invert(grp,dbl,ctx);
-        BIGNUM *dx=BN_new(),*dy=BN_new();
-        EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
-        uint8_t dxb[32],dyb[32]; memset(dxb,0,32);memset(dyb,0,32);
-        BN_bn2bin(dx,dxb+(32-BN_num_bytes(dx)));
-        BN_bn2bin(dy,dyb+(32-BN_num_bytes(dy)));
-        uint64_t n2x[4],n2y[4];
-        for(int i=0;i<4;i++){n2x[i]=0;n2y[i]=0;
-            for(int b=0;b<8;b++){n2x[i]|=(uint64_t)dxb[31-i*8-b]<<(b*8);
-                n2y[i]|=(uint64_t)dyb[31-i*8-b]<<(b*8);}}
-        cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice);
-        cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice);
-        BN_free(bx);BN_free(by);BN_free(dx);BN_free(dy);
-        EC_POINT_free(pt);EC_POINT_free(dbl);
+        BN_free(bx);BN_free(by);
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
@@ -2335,6 +2375,7 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+    FILE *hit_f = NULL;   /* Q191: one persistent descriptor, appended per drain */
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
         cudaEventSynchronize(slot_done[s]);
@@ -2345,20 +2386,26 @@ int main(int argc, char **argv) {
         if (h_hit > 0) {
             const uint32_t *hits = h_hit_idx + (size_t)s*64;
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
-            mkdir("results", 0755);
-            char fname[256];
-            snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-            FILE *f = fopen(fname, "a");
-            if (f) {
+            if (!hit_f) {
+                mkdir("results", 0755);
+                char fname[256];
+                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+                hit_f = fopen(fname, "a");
+            }
+            if (hit_f) {
+                /* Q192: bounded encoder, one buffered write per drain.
+                 * Records are <= 62 bytes, nh <= 64. */
+                char buf[64 * 64];
+                char *p = buf;
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
                     uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
                     int ri = (raw >> 30) & 1;
                     int hc = (raw >> 31) & 1;
-                    fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
-                            slot_seq[s], lt, hc, ri);
+                    p = qsb_append_hit_record(p, slot_seq[s], lt, hc, ri);
                 }
-                fclose(f);
+                fwrite(buf, 1, (size_t)(p - buf), hit_f);
+                fflush(hit_f);
             }
             found = 1;
         }
@@ -2398,7 +2445,6 @@ int main(int argc, char **argv) {
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
                     d_hit_cnt_s[s], d_hit_idx_s[s],
                     batch_sz, easy, single_hash,
@@ -2410,7 +2456,6 @@ int main(int argc, char **argv) {
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
                     d_hit_cnt_s[s], d_hit_idx_s[s],
                     batch_sz, easy, single_hash,
@@ -2485,7 +2530,6 @@ int main(int argc, char **argv) {
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
                     d_hit_cnt, d_hit_idx,
                     batch_sz, easy, single_hash,
@@ -2497,7 +2541,6 @@ int main(int argc, char **argv) {
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
                     d_hit_cnt, d_hit_idx,
                     batch_sz, easy, single_hash,
