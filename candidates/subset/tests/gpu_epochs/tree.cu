@@ -46,6 +46,7 @@
 #include <openssl/sha.h>
 
 #include "../../GPUMath.h"
+#include "../../BorrowParity.cuh"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -1249,15 +1250,13 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
     _ModAdd256(x1, x1, xR);
     _ModSub256(t, xR, x1);
     _ModMult(t, m1);
-    _ModSub256(t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    uint32_t parities = qsb_borrow_parity(t,yR);
     _ModSub256(t, m2, cc);
     _ModMult(x2, sum, t);
     _ModAdd256(x2, x2, xR);
     _ModSub256(t, xR, x2);
     _ModMult(t, m2);
-    _ModSub256(t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+    parities |= (qsb_borrow_parity(t,yR)^1u)<<1;
     return parities;
 }
 /* One candidate up to its denominator: window hash, SHA-256d, u1*G, W = ZZZ*d,

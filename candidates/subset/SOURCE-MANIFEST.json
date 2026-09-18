@@ -1,0 +1,82 @@
+{
+  "base_commit": "2791ed0588f5014ccd688d48ba5502df2879f2f1",
+  "model": "GPT-6 Astra",
+  "effort": "medium",
+  "harness": "Codex",
+  "compiler": "CUDA 12.8.93; official default and sm_89 compile checks; local sm_86 execution",
+  "source_sha256": {
+    "BorrowParity.cuh": "29f2c24456c1841e2cea6a85936c43651f338fceb4a3f6af90e26590c4dd2205",
+    "GPUHash.h": "d29adbbdb331b164aa16f19611c9f95d412105febaef9417de185ba486a72692",
+    "GPUMath.h": "b93fa266439d2b71d56f7ac85cea06460b92d8d9f5ec5281008d755bbd090b9c",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/dirdig_audit.cu": "5c0290f674063a2b793a26cafa0072b40bb9185ed3494af79d5c4ea6d30fe6a8",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/tree.cu": "770330052864ee9c352eb3025dbdc7a2a0210fe1fba4c22bc59d4b21a1529f15",
+    "tests/gpu_epochs/tree_audit.cu": "25ec22761b2724f62896c1a621516ca00ba5fe52d50f03239167ea7ea45034d4",
+    "tests/gpu_epochs/tree_inverse.cuh": "afa07a330119b2bd55c01de275b1a78766e9d2026113acb8f658be7c9311d1a6",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "94aab78aa0ce08788b0c6cd2593e31be689d6b0363934f18085bae3779c97d0a",
+    "tests/gpu_epochs/zinv32.cuh": "8249034e5bff1526de31ebd64efd923d0b0c18683d71f7f6c7ed4fe70ca31807",
+    "tests/parity_audit.cu": "fae1363148119e2b6ae9dd64100fd38d5c8fee08016685ce9f7785017381d1d3"
+  },
+  "local_verification": {
+    "score": 135144768.0,
+    "metrics": {
+      "bench": "subset",
+      "unit": "verified candidates per second",
+      "direction": "higher is better",
+      "throughput_Mps": 135.144768,
+      "hits_per_s": 16.110506,
+      "leading_zero_bits": 24,
+      "mode": "fixed_time",
+      "candidates": 16248733696,
+      "candidates_self_reported": 16273016748,
+      "elapsed_s": 120.2321,
+      "verified_hits": 1937,
+      "hit_relative_variance": 0.022721,
+      "problem_seed": 938417,
+      "gpu": "RTX_3070_LOCAL",
+      "verified": true
+    }
+  },
+  "fixed_work_comparison": {
+    "track": "subset",
+    "verified_hits": 505,
+    "identical_hitsets": true,
+    "warning": null,
+    "baseline_Mps": 135.2991480004253,
+    "candidate_Mps": 135.8793287097807,
+    "gain_pct": 0.42881327630650556,
+    "runs": [
+      {
+        "track": "subset",
+        "variant": "baseline",
+        "count": 4294967296,
+        "seconds": 31.908624253,
+        "Mps": 134.60208318433513
+      },
+      {
+        "track": "subset",
+        "variant": "branch",
+        "count": 4294967296,
+        "seconds": 31.287368758,
+        "Mps": 137.27480023074173
+      },
+      {
+        "track": "subset",
+        "variant": "branch",
+        "count": 4294967296,
+        "seconds": 31.936675418,
+        "Mps": 134.48385718881968
+      },
+      {
+        "track": "subset",
+        "variant": "baseline",
+        "count": 4294967296,
+        "seconds": 31.581521331,
+        "Mps": 135.9962128165155
+      }
+    ]
+  },
+  "note": "Local RTX 3070 evidence does not establish RTX 4090 speedup or promotion."
+}
