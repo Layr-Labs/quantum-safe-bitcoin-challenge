@@ -41,7 +41,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
 #endif
 #ifndef QSB_STREAM
-#define QSB_STREAM 0          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
+#define QSB_STREAM 1          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
 #endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
