@@ -433,6 +433,28 @@ __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigne
     uint64_t hi = li == 0 ? m[1] : li == 1 ? m[2] : li == 2 ? m[3] : 0ULL;
     return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
 }
+/* Same field, but with the limb pair carried by the caller. `pos` advances by a fixed
+ * width per chunk and is a loop-index function, not data, so the limb index changes on a
+ * uniform branch every ~3.7 chunks instead of costing a four-way select every chunk. */
+__device__ __forceinline__ uint32_t gt_field_bits_p(uint64_t lo, uint64_t hi, unsigned sh) {
+    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
+}
+__device__ __forceinline__ void gt_window_advance(const uint64_t m[4], unsigned pos,
+                                                  unsigned *li, uint64_t *lo, uint64_t *hi) {
+    const unsigned nli = pos >> 6;
+    if (nli != *li) {                       /* uniform across the warp: pos is loop state */
+        *li = nli; *lo = *hi;
+        *hi = nli == 0 ? m[1] : nli == 1 ? m[2] : nli == 2 ? m[3] : 0ULL;
+    }
+}
+__device__ __forceinline__ void gt_direct_digit_p(uint64_t lo, uint64_t hi, unsigned sh,
+                                                  uint64_t sflag, unsigned w, bool last,
+                                                  uint32_t *idx, uint64_t *neg) {
+    uint32_t f = gt_field_bits_p(lo, hi, sh) & ((1u << w) - 1u);
+    uint32_t t = f >> (w - 1);
+    *idx = last ? (f & ((1u << (w - 1)) - 1u)) : ((f ^ (t - 1u)) & ((1u << (w - 1)) - 1u));
+    *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
+}
 /* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
 __host__ __device__ __forceinline__ unsigned gt_width(int c) {
     return c == GT_CHUNKS-1 ? (unsigned)(gt_shift(c) - gt_shift(c-1))
@@ -509,10 +531,14 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
+    unsigned wli=pos>>6;
+    uint64_t wlo=wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
+    uint64_t whi=wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS;c++){
-        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
         pos+=gt_width(2);
+        gt_window_advance(M,pos,&wli,&wlo,&whi);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
@@ -779,10 +805,17 @@ __global__ void kernel_build_epochs(
             cur_pos = 0;
         }
     }
-    int sel = 0;
-    for (int i = 0; i < window_start; i++) {
-        if (sel < s_early && (int)early[sel] == i) { sel++; continue; }
-        const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
+    /* Iterate over OUTPUT pushes, not source indices. Every epoch keeps exactly
+     * window_start - s_early pushes, so with this loop shape the 64-byte boundary
+     * (and therefore every _SHA256Transform) falls at the same iteration in every
+     * lane; the source-push loop fired the transform at a lane-dependent iteration,
+     * which made the whole producer warp-divergent. Same byte stream, same
+     * midstates, bit for bit -- only the schedule changes. */
+    const int kept = window_start - s_early;
+    for (int j = 0; j < kept; j++) {
+        int src = j;
+        for (int k = 0; k < s_early; k++) src += ((int)early[k] <= src) ? 1 : 0;
+        const uint8_t *row = d_dummy_sigs + (size_t)src * SIG_PUSH_SIZE;
         for (int b = 0; b < SIG_PUSH_SIZE; b++) {
             cur[cur_pos++] = row[b];
             if (cur_pos == 64) {
