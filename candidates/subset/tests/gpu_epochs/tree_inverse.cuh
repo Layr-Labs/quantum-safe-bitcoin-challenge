@@ -1,7 +1,6 @@
 // One work-efficient binary product tree per block. The caller supplies
 // a power-of-two block size at most 256 and identity factors for inactive lanes.
 #pragma once
-#include "zinv32.cuh"
 /* ZLAB_TREE (kill switch):
  *  0 = promoted heap tree: every product canonical, 18 barriers.
  *  1 = same heap layout, lazy canonicalization (internal nodes stay exact but
@@ -149,6 +148,10 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
+    /* Lane 0 inverts the root in place in shared memory. A stack array whose
+     * address reaches the __noinline__ _ModInv, plus the two root children held
+     * live across the call, cost every lane 120 bytes of STACK (sm_89 res-usage). */
+    __shared__ uint64_t root_inv[5];
     const int tid=threadIdx.x,n=blockDim.x;
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
@@ -172,29 +175,30 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if(half>32)__syncthreads();else __syncwarp();
     }
     // offset == 2n-4: the two root children.
-    // Lanes 0..3 of warp 0 form the same root product and invert it cooperatively
-    // (zinv32.cuh): lane 0 owns u, lane 1 v, lane 2 r, lane 3 s, one shared decision
-    // stream. Lanes 0 and 1 then each form one child inverse, so the whole root stage
-    // is one warp-uniform instruction stream instead of a serial lane-0 _ModInv.
-    if(tid<4){
-        uint64_t a[5],b[5],root[5];
-        #pragma unroll
-        for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
-        a[4]=b[4]=0;
-        qsb_field_mul_raw(root,a,b);
-        qsb_field_normalize(root);
-        root[4]=0;
-        zi_inverse_quad(root,tid);
-        if(tid<2){
-            /* child = products[offset + 1 - tid]: lane 0 writes 1/a, lane 1 writes 1/b,
-             * the same two values (and the same order) the serial form wrote. */
-            uint64_t child[5];
+    if(tid==0){
+        {
+            uint64_t a[5],b[5],root[5];
             #pragma unroll
-            for(int k=0;k<4;k++)child[k]=products[k][offset+1-tid];
-            child[4]=0;
-            qsb_field_mul_raw(child,root,child);
+            for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+            a[4]=b[4]=0;
+            qsb_field_mul_raw(root,a,b);
+            qsb_field_normalize(root);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
+            for(int k=0;k<4;k++)root_inv[k]=root[k];
+            root_inv[4]=0;
+        }
+        _ModInv(root_inv);
+        {
+            // Reload both children after the call: nothing is live across it.
+            uint64_t a[5],b[5],root[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){root[k]=root_inv[k];a[k]=products[k][offset];b[k]=products[k][offset+1];}
+            root[4]=a[4]=b[4]=0;
+            qsb_field_mul_raw(a,root,a);   /* 1/b */
+            qsb_field_mul_raw(b,root,b);   /* 1/a */
+            // inverse index = product index - n
+            #pragma unroll
+            for(int k=0;k<4;k++){inverses[k][offset-n]=b[k];inverses[k][offset-n+1]=a[k];}
         }
     }
     __syncwarp();
