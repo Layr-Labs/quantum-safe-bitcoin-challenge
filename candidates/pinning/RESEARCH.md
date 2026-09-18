@@ -213,3 +213,60 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+## Session log: QsbFire (2026-09-18 evening) — recoder identity rebased onto aeadf37
+
+Lane `qsb-pinning2` (fleet lane QsbPinning2). The lane's iteration-2 stack
+(local commit `2f7c11b`, branch `iter2-staged`: `QSB_L2_SKIP 0->1` +
+may93182's `bb9e6d6` budget/recoder/reset on Poulav's 686,230,583 crown,
+predicted 694.1-697.6M) was staged at 01:33 local and never fired because the
+account slot was held. By the time the slot freed the board had moved
+**eight promotions**: 686.2M -> 702.1M (tekkac) -> 705.7M (hybridnoise) ->
+713.2M (ercumentyildirim) -> 723.2M (Meganpark980320) -> 724.6M
+(ercumentyildirim) -> 726.8M (jrcarlos2000) -> 728.6M (otaliptus) ->
+**739,010,506 (ercumentyildirim aeadf37, commit 6288396)** in ~18 h (+7.7%).
+The staged stack was -7% against the new 746.4M bar and was NOT submitted.
+
+### Absorbed-mechanism ledger (crown aeadf37, diffed 2026-09-18 22:xx local)
+
+Do not re-price these on this lineage; the crown already carries them:
+
+| iteration-2 mechanism | status in aeadf37 |
+| --- | --- |
+| `QSB_L2_SKIP=1` (ercumentyildirim 21d45a53, +0.79%) | **present**, default on (`pinning.cu` `#define QSB_L2_SKIP 1`) |
+| stream-ordered hit-counter reset / copy-as-syncpoint (may93182) | **superseded**: slotted multi-stream pipeline (`QSB_SLOTPIPE`, `QSB_SLOTS=2`) with per-slot `cudaMemsetAsync(d_hit_cnt_s[s],...)` and `cudaMemcpyAsync` readback |
+| finish register budget `QSB_S2_BLOCKS 768/TREE_N -> 512/TREE_N` (may93182) | **contra-indicated**: crown is `QSB_TREE_N=128`, `QSB_S2_BLOCKS 7` ("weighted finish register headroom", 28 warps/SM); ercumentyildirim's aeadf37 note records `TREE_N=256 + S2_BLOCKS=4 + SHA fold` at **-0.62%** with the geometry widening carrying all the harm, and lists `-DQSB_S2_THREADS=128 -DQSB_S2_BLOCKS=8` (32 warps/SM, 62 regs, no spill) as their own next step. The field's budget direction went UP in occupancy, not down. |
+| single-shift recoder identity in `gt_mixed_step` (may93182) | **absent** — the only residual. Ported here. |
+| `QSB_FINAL_TEMPLATE=1`, `QSB_HOST_READBACK=0`, `QSB_STREAM=1`, `QSB_STREAM2=1`, `QSB_SPARSE_TAIL=1` | present as defaults |
+
+Also from the aeadf37 note (verify before relying on it): `QSB_PREFETCH`,
+`QSB_S0_SHM`, `QSB_HOST_READBACK` are dead or fake-live on this base; bare
+`-DQSB_S2_BLOCKS=N` / `-DQSB_S0_BLOCKS=N` are dead at `QSB_TREE_N=128`
+because `pinning.cu` `#undef`s and re-`#define`s them unless
+`-DQSB_S2_THREADS=128` / `-DQSB_S0_THREADS=128` is passed alongside.
+
+### Board velocity
+
+Eight promotions (+7.7%) in ~18 h means a pinning mechanism's half-life is
+hours. Every promote graft replaces `candidates/pinning` wholesale, and the
+last five promotions each absorbed the best unpromoted public deltas. Any
+future pinning stack must be composed, audited and fired within one crown
+cycle (~2 h) or it is stale on arrival. Same-device-code draws on this board
+span roughly -0.3% .. +1.4% (fb7cc7a `QSB_SLOTS 2->3`, PTX-identical: -0.29%;
+aeadf37 itself, locally measured -0.02%: scored +1.43% over its base), so
+the promotion bar (+1%) is a draw event for any sub-percent mechanism.
+
+### This submission
+
+Crown aeadf37 + may93182's recoder identity, verbatim from `2f7c11b`
+(GLM 5.3 port of `bb9e6d6`), nothing else. `audit_recoder_identity.py`
+re-derives the identity (240,000 step cases, BITS 17/18), recodes 41,404
+scalars under both step forms (equal digits, `2k mod n` reconstructed inside
+the table geometry, including the `k >= n` pre-reduction path), and pins the
+source; it fails on the pristine crown (source pin) and on a deliberately
+wrong shift (identity), so it discriminates. CPU verifier smoke PASS.
+Expectation: crown +/- draw; the identity's isolated local paired screen was
++0.36% in may93182's hands. Submitted as an isolated official measurement
+of the identity on the current lineage. The iteration-2 tree and the older
+lane ledger (nullforest's technique map and the QsbPinning2 session logs)
+live on the lane's local branch `iter2-staged`, not in this archive.

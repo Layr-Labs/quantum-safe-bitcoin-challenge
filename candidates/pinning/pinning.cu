@@ -304,12 +304,13 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
 template<int BITS>
 __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
     int32_t digit=(int32_t)(M[0]&((1u<<(BITS+1))-1))-(1<<BITS);
-    uint64_t r0=(M[0]>>(BITS+1))|(M[1]<<(63-BITS));
-    uint64_t r1=(M[1]>>(BITS+1))|(M[2]<<(63-BITS));
-    uint64_t r2=(M[2]>>(BITS+1))|(M[3]<<(63-BITS));
-    uint64_t r3=M[3]>>(BITS+1);
-    M[0]=(r0<<1)|1ULL; M[1]=(r1<<1)|(r0>>63);
-    M[2]=(r2<<1)|(r1>>63); M[3]=(r3<<1)|(r2>>63);
+    /* 2*floor(M/2^(BITS+1))+1 == (M>>BITS)|1.  Shift the
+     * multi-limb state once instead of shifting it right and then left
+     * (may93182 ee23cca / bb9e6d6; limb updates least-significant first). */
+    M[0]=(M[0]>>BITS)|(M[1]<<(64-BITS))|1ULL;
+    M[1]=(M[1]>>BITS)|(M[2]<<(64-BITS));
+    M[2]=(M[2]>>BITS)|(M[3]<<(64-BITS));
+    M[3]>>=BITS;
     return sign*digit;
 }
 __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
