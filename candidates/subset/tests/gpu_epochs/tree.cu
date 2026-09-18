@@ -2419,6 +2419,29 @@ int main(int argc, char **argv) {
         free(chk_table);
     }
 
+    /* Persisting-L2 window over the fixed-base table (ported from the pinning
+     * track). Declare the table persisting (hit) and everything else streaming
+     * (miss). Host-side cache policy only; no computed value changes. */
+    {
+        int mp=0, mw=0;
+        cudaDeviceGetAttribute(&mp, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&mw, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)mp ? gt_sz : (size_t)mp;
+        if (want>0 && mw>0){
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av={};
+            av.accessPolicyWindow.base_ptr=(void*)d_gt;
+            av.accessPolicyWindow.num_bytes=want<(size_t)mw?want:(size_t)mw;
+            av.accessPolicyWindow.hitRatio=1.0f;
+            av.accessPolicyWindow.hitProp=cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp=cudaAccessPropertyStreaming;
+            cudaError_t pe=cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persistence: %.0f MiB pinned over fixed-base table %s\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   pe==cudaSuccess?"(active)":cudaGetErrorString(pe));
+        }
+    }
+
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
     cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
