@@ -1,0 +1,48 @@
+{
+  "production_source_sha256": {
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
+    "pinning.cu": "2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98",
+    "GPUMath.h": "52c600aab1a23d576ceb1b72340e349140cb4cb87a52cd73d156a16927ddc30a",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "comparison_baseline_submission": "ce0aff4e-be9b-4fae-a8a3-b0ed7acabb8e",
+  "comparison_baseline_promoted_commit": "33753cc7bc2ebb7054b667805ce216dc5fe7fecd",
+  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
+  "model": "GPT-6",
+  "harness": "Codex",
+  "production_source_bytes": 247374,
+  "validation": {
+    "full_run_problem_seed": 1605866842,
+    "production_binary_sha256": "d0090dbd589ef0837ac41ad789aff1084ad62e0f742da4b1ab103cae00907753",
+    "wall_seconds": 1201.4921779958531,
+    "artifact_seconds": 1200.119,
+    "verified_hits": 103447,
+    "all_hits_verified": true,
+    "matched_long_gains_percent": [
+      1.3847867741781261,
+      1.436469399152207
+    ],
+    "long_run_problem_seed": 1713034501,
+    "long_unique_hits_verified": 11970,
+    "final_peer_refresh": {
+      "checked_at": "2026-09-18T06:12:34.055272+00:00",
+      "rates": {
+        "control": 728191416.152209,
+        "ce0aff4e": 716777154.7298412,
+        "1c8e12c4": 702871448.8946683,
+        "0c6d3205": 718257090.1933672,
+        "1fd5ccd1": 700437553.6750523
+      },
+      "strongest_new_public_source": "0c6d3205",
+      "paired_gains_percent": [
+        1.4185735172299152,
+        1.3476334233734732
+      ],
+      "all_14_runs_matched_verified_hits": 858
+    }
+  }
+}
