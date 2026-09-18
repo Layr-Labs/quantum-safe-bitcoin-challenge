@@ -1264,12 +1264,17 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
 // The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
 // the ordinary slope numerator is (Y2+Yoff)*ZZZ1 - Yd, so the Y1*PPP product is
-// skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
-// addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final.
+// skipped. DEFER_Y is a compile-time specialization: the deferred form writes
+// only R*(Q-X3) (anchor = Y2); the last addition instantiates <false> and
+// resolves the exact Y3. 7M+2S deferred, 8M+2S final. Pointers are restrict
+// because the formula forbids aliasing outputs with the affine table point.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                                  const uint64_t *X2, const uint64_t *Y2,
-                                  const uint64_t *Yoff, bool defer_y)
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZ_def(
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1281,7 +1286,7 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   uint64_t T[4];
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-  _ModAddLazy(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+  _ModAddLazy(S2, Y2, Yoff);
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
@@ -1296,7 +1301,7 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
+  if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
@@ -1309,9 +1314,11 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
 // Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
 // X3, ZZ3, ZZZ3 are the ordinary coordinates of P1+P2; Y3 holds only R*(Q-X3). The
 // caller anchors the next _PointAddXYZZ_def with Yoff = Y1 (the first affine y).
-__device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
-                                     const uint64_t *X1, const uint64_t *Y1,
-                                     const uint64_t *X2, const uint64_t *Y2)
+__device__ __forceinline__ void _PointAddXYZZ_mm_def(
+    uint64_t *__restrict__ X3, uint64_t *__restrict__ Y3,
+    uint64_t *__restrict__ ZZ3, uint64_t *__restrict__ ZZZ3,
+    const uint64_t *__restrict__ X1, const uint64_t *__restrict__ Y1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2)
 {
   uint64_t P[4];
   uint64_t R[4];
