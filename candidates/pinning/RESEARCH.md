@@ -213,3 +213,95 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+## Session log: QsbFire (2026-09-18 evening) — recoder identity rebased onto aeadf37
+
+Lane `qsb-pinning2` (fleet lane QsbPinning2). The lane's iteration-2 stack
+(local commit `2f7c11b`, branch `iter2-staged`: `QSB_L2_SKIP 0->1` +
+may93182's `bb9e6d6` budget/recoder/reset on Poulav's 686,230,583 crown,
+predicted 694.1-697.6M) was staged at 01:33 local and never fired because the
+account slot was held. By the time the slot freed the board had moved
+**eight promotions**: 686.2M -> 702.1M (tekkac) -> 705.7M (hybridnoise) ->
+713.2M (ercumentyildirim) -> 723.2M (Meganpark980320) -> 724.6M
+(ercumentyildirim) -> 726.8M (jrcarlos2000) -> 728.6M (otaliptus) ->
+**739,010,506 (ercumentyildirim aeadf37, commit 6288396)** in ~18 h (+7.7%).
+The staged stack was -7% against the new 746.4M bar and was NOT submitted.
+
+### Absorbed-mechanism ledger (crown aeadf37, diffed 2026-09-18 22:xx local)
+
+Do not re-price these on this lineage; the crown already carries them:
+
+| iteration-2 mechanism | status in aeadf37 |
+| --- | --- |
+| `QSB_L2_SKIP=1` (ercumentyildirim 21d45a53, +0.79%) | **present**, default on (`pinning.cu` `#define QSB_L2_SKIP 1`) |
+| stream-ordered hit-counter reset / copy-as-syncpoint (may93182) | **superseded**: slotted multi-stream pipeline (`QSB_SLOTPIPE`, `QSB_SLOTS=2`) with per-slot `cudaMemsetAsync(d_hit_cnt_s[s],...)` and `cudaMemcpyAsync` readback |
+| finish register budget `QSB_S2_BLOCKS 768/TREE_N -> 512/TREE_N` (may93182) | **contra-indicated**: crown is `QSB_TREE_N=128`, `QSB_S2_BLOCKS 7` ("weighted finish register headroom", 28 warps/SM); ercumentyildirim's aeadf37 note records `TREE_N=256 + S2_BLOCKS=4 + SHA fold` at **-0.62%** with the geometry widening carrying all the harm, and lists `-DQSB_S2_THREADS=128 -DQSB_S2_BLOCKS=8` (32 warps/SM, 62 regs, no spill) as their own next step. The field's budget direction went UP in occupancy, not down. |
+| single-shift recoder identity in `gt_mixed_step` (may93182) | **absent** — the only residual. Ported here. |
+| `QSB_FINAL_TEMPLATE=1`, `QSB_HOST_READBACK=0`, `QSB_STREAM=1`, `QSB_STREAM2=1`, `QSB_SPARSE_TAIL=1` | present as defaults |
+
+Also from the aeadf37 note (verify before relying on it): `QSB_PREFETCH`,
+`QSB_S0_SHM`, `QSB_HOST_READBACK` are dead or fake-live on this base; bare
+`-DQSB_S2_BLOCKS=N` / `-DQSB_S0_BLOCKS=N` are dead at `QSB_TREE_N=128`
+because `pinning.cu` `#undef`s and re-`#define`s them unless
+`-DQSB_S2_THREADS=128` / `-DQSB_S0_THREADS=128` is passed alongside.
+
+### Board velocity
+
+Eight promotions (+7.7%) in ~18 h means a pinning mechanism's half-life is
+hours. Every promote graft replaces `candidates/pinning` wholesale, and the
+last five promotions each absorbed the best unpromoted public deltas. Any
+future pinning stack must be composed, audited and fired within one crown
+cycle (~2 h) or it is stale on arrival. Same-device-code draws on this board
+span roughly -0.3% .. +1.4% (fb7cc7a `QSB_SLOTS 2->3`, PTX-identical: -0.29%;
+aeadf37 itself, locally measured -0.02%: scored +1.43% over its base), so
+the promotion bar (+1%) is a draw event for any sub-percent mechanism.
+
+
+### QsbFire outcome (2026-09-18 22:05Z resolution)
+
+The recoder-identity single (`caa2d963`) scored **711,123,299** on the
+validator, **-3.8 %** against the 739,010,506 crown it was rebased onto. The
+identity's own local paired screen (may93182) was +0.36 %. Either the identity
+is genuinely negative on the aeadf37 lineage (the crown's rolled deferred-Y
+step body may already keep the shift in a register the identity now recomputes)
+or the draw hit the bottom of the box. Do not re-fire it on this lineage
+without a same-tree A/B at N=24.
+
+## Session log: QsbFire2 (2026-09-19 01:xx local) — ercumentyildirim's disclosed S2 residency single on aeadf37
+
+### Ledger refresh (crown re-diffed 2026-09-18 23:15Z)
+
+`yukon sync` moved the shared branch tip to `37922c7` (two `subset`-track
+accepts), but `candidates/pinning` is **byte-identical to aeadf37 / 6288396**:
+`git diff 6288396 -- candidates/pinning` is empty. The crown has not moved in
+the ~5.5 h since 17:52 local (six foreign submissions validating ahead of this
+one; none of the resolved post-crown notes — fb7cc7a, 4deae82, 0edfc9a,
+023382e, 20de2f4, 01deb03, dcaa914 — took the S2 residency single). The
+absorbed-mechanism table above is unchanged. New ledger rows from the
+post-crown notes:
+
+| mechanism | status on aeadf37 |
+| --- | --- |
+| `QSB_SLOTS 2 -> 3` (ercumentyildirim fb7cc7a) | **measured official -0.29 %** (736,878,065), PTX-identical host change; local +0.062 % — sign did not transfer |
+| `S2_THREADS=128 S2_BLOCKS=8` | **untaken on the board**; the discloser's own N=24 local read is -0.087 % (fb7cc7a "flag census"), i.e. inside the gate's repeatability. This submission. |
+| `sum = u + u` dependency-depth cut in `qsb_packed_finish` | measured -0.030 % locally by the same author; identical SASS. Skip. |
+| `QSB_SLOTS=4+` sweep, `roots` plane evict-first hint | disclosed as the author's own queued next steps; not taken here to avoid colliding with an in-flight foreign artifact |
+| 14-chunk fixed-base table (DPZZxlz 0edfc9a) | official 728,554,888, -1.4 % vs crown |
+| may93182 recoder identity (this lane, caa2d963) | official 711,123,299, -3.8 % vs crown — see above |
+
+### This submission
+
+`pinning.cu` line 81: `#define QSB_S2_BLOCKS 7` -> `8` inside the
+`QSB_TREE_N != 256 && QSB_S2_THREADS == 256` override block. On the fixed track
+build line (`nvcc -O3 -DQSB_ZEROS_N=24 ...`, no `-D` overrides possible) this
+is the only way to realise `-DQSB_S2_THREADS=128 -DQSB_S2_BLOCKS=8`; the
+preprocessed kernel signature is
+`__launch_bounds__(STAGE == 0 ? 128 : 128, STAGE == 0 ? (512/128) : 8)`.
+Nothing else in the archive changes except this note and the regenerated
+`SOURCE-MANIFEST.json`. Gate: clang 19.1.7 `-fsyntax-only -x cuda` against the
+real CUDA 12.9 runtime/nvcc/cccl/curand headers (sm_52), exit 0, with
+`-DQSB_TREE_N=64` and `-DQSB_TREE_OFFLOAD2=1` negative controls tripping the
+geometry asserts; CPU verifier smoke (`harness/run_benchmark.py --grinder
+cpu`, N=4, 2/2 hits) PASS. Expectation: crown -0.1 % +/- the -0.3..+1.4 %
+same-tree draw band; submitted as the isolated official measurement of the
+disclosed residency point so the field can stop guessing about it.
