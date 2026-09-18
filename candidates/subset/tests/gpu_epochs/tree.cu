@@ -75,6 +75,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #define ASSEMBLY_SIGMA 1  /* funnel-shift sigma macros in GPUHash.h (test) */
 #include "../../GPUHash.h"
+#include "sparse_sha.cuh"
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
@@ -431,7 +432,11 @@ __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigne
     unsigned li = pos >> 6, sh = pos & 63u;
     uint64_t lo = li == 0 ? m[0] : li == 1 ? m[1] : li == 2 ? m[2] : m[3];
     uint64_t hi = li == 0 ? m[1] : li == 1 ? m[2] : li == 2 ? m[3] : 0ULL;
-    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
+    // Only the low 32 result bits are needed. Select a 32-bit adjacent
+    // pair and use one funnel shift instead of two 64-bit variable shifts.
+    uint32_t lower=sh<32u?(uint32_t)lo:(uint32_t)(lo>>32);
+    uint32_t upper=sh<32u?(uint32_t)(lo>>32):(uint32_t)hi;
+    return __funnelshift_r(lower,upper,sh&31u);
 }
 /* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
 __host__ __device__ __forceinline__ unsigned gt_width(int c) {
@@ -1274,14 +1279,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
      * the state words themselves in big-endian order, followed by standard
      * 32-byte-message padding (total length 256 bits = 0x100). */
-    uint32_t b2[16];
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
+    uint32_t s2[8];
+    _SHA256TransformDigest32(s2,state);
 
     /* EC recovery with both flags + ModInv + the leading-zeros gate.
      * z is the big-endian value of the 32-byte second hash, which IS the state
@@ -1357,7 +1356,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
         pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        uint32_t hs[8];_SHA256TransformPubkey33(hs,pb);
         /* Ranked gate reads the state words. Only the easy/calibrate
          * diagnostics need the digest as bytes, so only they build it. */
         int vv;
