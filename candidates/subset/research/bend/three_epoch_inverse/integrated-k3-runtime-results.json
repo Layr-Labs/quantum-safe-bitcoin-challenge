@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "triple_schedules": 4096,
+  "candidate_recoveries": 12281,
+  "identity_substituted_singular_candidates": 7,
+  "finish_order": "C,A,B",
+  "validation_level": "source-extracted production pre/post with exact K3 split schedule",
+  "gpu_executed": false,
+  "limitations": "OpenSSL field operations replace PTX arithmetic; no CUDA execution or timing.",
+  "source_fingerprint": "2f8b41e0b79b360a02c28cae4338b5ac81687a059a5c7a513f8b3808d6ce312f",
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "958be6d3b63ba65dc7728fd300d583cadd57e14bf7861ac74060eb0cc41136b2",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/tree.cu": "ecd77206bab899eace1186e4d18c2c92da99ee8895053e4cd0c0996065fc4411",
+    "tests/gpu_epochs/tree_audit.cu": "25ec22761b2724f62896c1a621516ca00ba5fe52d50f03239167ea7ea45034d4",
+    "tests/gpu_epochs/tree_inverse.cuh": "4ad557c3f7d4365e31ae4bf4bd7b17be3cbe139f20bd553bb4e58a44d1763525",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "fcd8875884cf0e21b0f24a81e76b5c555455b9aafe46aac7cd94199cd46280ab",
+    "tests/gpu_epochs/zinv32.cuh": "e8385842bbddcdd7023dac5fcbbf4d01780cb128494896dc1375db52f359da11"
+  },
+  "audit_sha256": "9c640efc556c132408bd655596e0b097b27018bc9fbb9fede374406212256fd3"
+}
