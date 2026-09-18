@@ -26,13 +26,28 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 /* ---- Experiment switches (fable round 2). Defaults are set at the end of
  * this block; ab.sh overrides them with -D on the build line. ---- */
 #ifndef QSB_TREE_N
-#define QSB_TREE_N 128        /* leaves per candidate product tree = prepare/finish block size (256, 128 or 64) */
+#define QSB_TREE_N 256        /* leaves per candidate product tree = prepare/finish block size (256, 128 or 64) */
+#endif
+#ifndef QSB_SHA0
+#define QSB_SHA0 1            /* 1: hoist SHA round 0 of the locktime tail block.  Its only
+                               *    locktime-dependent operand is the message word W[0]; every other
+                               *    input (a..h from the per-sequence midstate, K[0]) is constant for
+                               *    the whole sequence, so the host folds them into two words carried
+                               *    in the per-sequence midstate buffer and the round becomes two adds.
+                               *    Pure code motion: uint32_t addition is associative, so the state
+                               *    entering round 1 is bit-identical. */
 #endif
 #ifndef QSB_S0_SHM
 #define QSB_S0_SHM 0          /* 1: keep the recode state and the y anchor in shared memory (register relief) */
 #endif
 #if QSB_TREE_N != 256 && QSB_TREE_N != 128 && QSB_TREE_N != 64
 #error "QSB_TREE_N must be 256, 128 or 64"
+#endif
+/* The cofactor collective's tree width is the candidate tree width: the
+ * collective runs inside prepare over that block's leaves.  LeafRecovery.cuh
+ * defaults it to 128 on its own, which silently disagrees with QSB_TREE_N. */
+#ifndef QSB_RECOVERY_N
+#define QSB_RECOVERY_N QSB_TREE_N
 #endif
 #ifndef QSB_BATCH
 #define QSB_BATCH 16777216    /* candidates per pipeline launch */
@@ -62,13 +77,34 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_S2_THREADS 256    /* finish-kernel block size (only free when the down-tree is offloaded) */
 #endif
 #ifndef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 3       /* finish-kernel resident blocks per SM */
+#define QSB_S2_BLOCKS 4       /* finish-kernel resident blocks per SM.  At QSB_TREE_N=256 the finish
+                               * block is 256 threads, so 4 blocks is 1024 threads/SM; ptxas meets it
+                               * at 62 registers with zero spills and an unchanged instruction stream.
+                               * The stock 3 would be 768 threads/SM, below the 128-wide geometry's
+                               * 7 x 128 = 896, so 4 is what keeps the finish kernel from losing
+                               * occupancy when the tree widens. */
+#endif
+#ifndef QSB_S2_BLOCKS_128
+#define QSB_S2_BLOCKS_128 7   /* the same knob for the narrow geometry (control runs) */
+#endif
+/* The non-fast-tail finish specialisation compiles both the easy-mode and the
+ * double-hash branches and is register-hungrier; at 4 x 256 it spills 8 bytes.
+ * It never runs on the production problem (which takes the fast-tail path), but
+ * it should not spill either, so it keeps the stock 3 blocks at the wide
+ * geometry.  At every other width it is exactly QSB_S2_BLOCKS, so the emitted
+ * launch bound is unchanged there. */
+#ifndef QSB_S2_BLOCKS_SLOW
+#if QSB_TREE_N == 256
+#define QSB_S2_BLOCKS_SLOW 3
+#else
+#define QSB_S2_BLOCKS_SLOW QSB_S2_BLOCKS
+#endif
 #endif
 #if QSB_TREE_N != 256 && QSB_S2_THREADS == 256
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
+#define QSB_S2_BLOCKS QSB_S2_BLOCKS_128 /* Weighted finish register headroom. */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
@@ -618,8 +654,13 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
  * rounds and the first in-place WMIX drop zero addends; later rounds use the
  * generic SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on
  * that padded block. */
+#if QSB_SHA0
+__device__ __forceinline__ void _SHA256TransformFastTail11(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2, uint32_t d0, uint32_t h0)
+#else
 __device__ __forceinline__ void _SHA256TransformFastTail11(
     uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+#endif
 {
     const uint32_t L = 9995u * 8u; /* 79960 */
     uint32_t t1;
@@ -642,7 +683,19 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     for (int i = 3; i < 15; i++) w[i] = 0;
     w[15] = L;
 
+#if QSB_SHA0
+    /* Round 0 hoisted (qsb_mid_pack on the host).  S2Round here is
+     *   t1 = h + S1(e) + Ch(e,f,g) + K[0] + w[0];  t2 = S0(a) + Maj(a,b,c);
+     *   d += t1;  h = t1 + t2;
+     * with a..h the per-sequence midstate, so only w[0] varies per candidate.
+     * d0 = d + h + S1(e) + Ch(e,f,g) + K[0] and h0 = (d0 - d) + t2 leave both
+     * results one add on w[0].  a, b, c, e, f and g are untouched by round 0
+     * and enter round 1 unchanged. */
+    d = d0 + w[0];
+    h = h0 + w[0];
+#else
     S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+#endif
     S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
     S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
     S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
@@ -1219,7 +1272,7 @@ __device__ __constant__ uint64_t pin_recovery_c[4];
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
 #include "PackedRecovery.cuh"
-static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
+static_assert((QSB_RECOVERY_N==128 || QSB_RECOVERY_N==256) && QSB_RECOVERY_N==QSB_TREE_N && QSB_S0_THREADS==QSB_TREE_N && QSB_S2_THREADS==QSB_TREE_N && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 
 /* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
  * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
@@ -1274,7 +1327,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
 
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
-                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
+                                  STAGE == 0 ? QSB_S0_BLOCKS
+                                             : (FAST_TAIL ? QSB_S2_BLOCKS
+                                                          : QSB_S2_BLOCKS_SLOW)) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -1311,7 +1366,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
                 ((lt >> 16) & 0xff00u) | pin_tail_words[1];
         uint32_t w2 = pin_tail_words[2];
+#if QSB_SHA0
+        _SHA256TransformFastTail11(state, w0, w1, w2,
+                                   d_midstate[8], d_midstate[9]);
+#else
         _SHA256TransformFastTail11(state, w0, w1, w2);
+#endif
 #else
         uint32_t blk[16] = {
             pin_tail_words[0] | (lt & 0xffu),
@@ -1540,6 +1600,32 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
     }
 }
 #endif
+
+#if QSB_SHA0
+/* The per-sequence midstate buffer carries two extra words: the constant
+ * halves of the tail block's first SHA round.  Mirrors GPUHash.h's S0/S1/
+ * Ch/Maj on uint32_t; K[0] = 0x428A2F98.  These live in the midstate buffer
+ * and not in __constant__ because under QSB_SLOTPIPE two sequences are in
+ * flight at once and __constant__ is device-global, not per-stream. */
+#define QSB_MID_WORDS 10
+static inline uint32_t qsb_ror32(uint32_t x, int n) {
+    return (uint32_t)((x >> n) | (x << (32 - n)));
+}
+static void qsb_mid_pack(uint32_t out[QSB_MID_WORDS], const uint32_t m[8]) {
+    for (int i = 0; i < 8; i++) out[i] = m[i];
+    const uint32_t a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],g=m[6],h=m[7];
+    const uint32_t S1e = qsb_ror32(e,6) ^ qsb_ror32(e,11) ^ qsb_ror32(e,25);
+    const uint32_t S0a = qsb_ror32(a,2) ^ qsb_ror32(a,13) ^ qsb_ror32(a,22);
+    const uint32_t Ch_efg = g ^ (e & (f ^ g));
+    const uint32_t Maj_abc = (a & b) | (c & (a | b));
+    const uint32_t base = h + S1e + Ch_efg + 0x428A2F98u;  /* t1 without w[0] */
+    out[8] = d + base;                                     /* d after round 0 */
+    out[9] = base + S0a + Maj_abc;                         /* h after round 0 */
+}
+#else
+#define QSB_MID_WORDS 8
+#endif
+#define QSB_MID_BYTES ((int)(QSB_MID_WORDS * sizeof(uint32_t)))
 
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
@@ -1985,8 +2071,14 @@ int main(int argc, char **argv) {
     }
 
     /* Upload midstate */
+#if QSB_SHA0
+    uint32_t *d_mid; cudaMalloc(&d_mid, QSB_MID_BYTES);
+    { uint32_t mid0[QSB_MID_WORDS]; qsb_mid_pack(mid0, pp.midstate);
+      cudaMemcpy(d_mid, mid0, QSB_MID_BYTES, cudaMemcpyHostToDevice); }
+#else
     uint32_t *d_mid; cudaMalloc(&d_mid, 32);
     cudaMemcpy(d_mid, pp.midstate, 32, cudaMemcpyHostToDevice);
+#endif
 
     /* Build suffix template. In the NEW pipeline format (combined_suffix), the
      * suffix loaded from pinning.bin ALREADY includes:
@@ -2143,14 +2235,20 @@ int main(int argc, char **argv) {
     {
         cudaError_t se = cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*sizeof(uint32_t), cudaHostAllocDefault);
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_hit_idx, QSB_SLOTS*64*sizeof(uint32_t), cudaHostAllocDefault);
-        if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
+        if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*QSB_MID_WORDS*sizeof(uint32_t), cudaHostAllocDefault);
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
+#if QSB_SHA0
+            if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], QSB_MID_BYTES);
+            if (se==cudaSuccess) { uint32_t mid0[QSB_MID_WORDS]; qsb_mid_pack(mid0, pp.midstate);
+                se = cudaMemcpy(d_mid_slot[s], mid0, QSB_MID_BYTES, cudaMemcpyHostToDevice); }
+#else
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 32);
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
+#endif
         }
         if (se != cudaSuccess) {
             fprintf(stderr, "Slot pipeline setup failed: %s\n", cudaGetErrorString(se));
@@ -2332,7 +2430,7 @@ int main(int argc, char **argv) {
     }
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
     int slot_busy[QSB_SLOTS];
-    uint32_t cur_mid[8];
+    uint32_t cur_mid[QSB_MID_WORDS];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
     auto drain_slot = [&](int s) -> int {
@@ -2373,9 +2471,17 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
+#if QSB_SHA0
+            qsb_mid_pack(cur_mid, ctx.h);
+#else
             for(int i=0;i<8;i++) cur_mid[i]=ctx.h[i];
+#endif
         } else {
+#if QSB_SHA0
+            qsb_mid_pack(cur_mid, pp.midstate);
+#else
             for(int i=0;i<8;i++) cur_mid[i]=pp.midstate[i];
+#endif
         }
 
         /* Search all safe locktimes for this sequence */
@@ -2388,8 +2494,13 @@ int main(int argc, char **argv) {
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
+#if QSB_SHA0
+            memcpy(h_mid + (size_t)s*QSB_MID_WORDS, cur_mid, QSB_MID_BYTES);
+            cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*QSB_MID_WORDS, QSB_MID_BYTES, cudaMemcpyHostToDevice, st);
+#else
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);
             cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
+#endif
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
 
             if (fast_tail) {
@@ -2463,7 +2574,12 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
+#if QSB_SHA0
+            uint32_t midw[QSB_MID_WORDS]; qsb_mid_pack(midw, ctx.h);
+            cudaError_t copy_err = cudaMemcpy(d_mid,midw,QSB_MID_BYTES,cudaMemcpyHostToDevice);
+#else
             cudaError_t copy_err = cudaMemcpy(d_mid,ctx.h,32,cudaMemcpyHostToDevice);
+#endif
             if (copy_err != cudaSuccess) {
                 fprintf(stderr, "Failed to upload per-sequence SHA state: %s\n",
                         cudaGetErrorString(copy_err));
