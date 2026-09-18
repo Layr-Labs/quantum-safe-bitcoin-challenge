@@ -1752,3 +1752,81 @@ deferred recurrence on 20,000 arbitrary-field accumulations, 1,000 curve
 accumulations, and 1,000 complete mixed-window accumulations. It also checks
 the production source form and the invariant after every intermediate point.
 All inherited field, root, vector-state, finish, and SHA-tail audits pass.
+
+## Evict-first streaming checkpoint traffic (2026-09-18)
+
+Hypothesis: under `QSB_COFACTOR=1` each candidate streams 64 B of checkpoint
+state written in prepare and re-read in finish (four `ulonglong2` planes),
+about 2 GiB per 16M batch in each direction, through the same L2 that must
+serve fifteen random 64-byte fixed-base table reads per candidate over the
+64 MiB table. The host source itself notes this streaming state evicts the
+L2-pinned table (`pinning.cu`, L2-persistence block). Marking exactly that
+write-once/read-once traffic evict-first (`.cs`) should keep table lines
+resident at zero extra-instruction cost and with no math, addressing, or
+occupancy change.
+
+Change: `QSB_STREAM` default `0 -> 1` in `candidates/pinning/pinning.cu`. The
+switch already existed and still is a compile-time `-D` override
+(`-DQSB_STREAM=0` restores the control for A/B). It routes the four existing
+wrappers (`qsb_st_v2`, `qsb_ld_v2`, `qsb_st_u64`, `qsb_ld_u64`) to
+`st.global.cs` / `ld.global.cs`; table loads, which use plain vector derefers,
+keep normal caching. Ranked builds pass only `-DQSB_ZEROS_N`, so the default
+flip is what reaches the validator. Alternatives ranked lower and left at 0:
+`QSB_PREFETCH` (adds prefetch instructions), `QSB_EARLY_LOAD` (prior spill
+regression pattern), `QSB_PK_UNROLL` (duplicates the SHA image), and the
+offload splits (restructure kernels; also forbidden under `QSB_COFACTOR`).
+
+Audits (Mac, no nvcc, CPU-only): `audit_fast_tail_contract`,
+`audit_field_final_carry`, `audit_shared_tree`,
+`audit_superbatch_representation`, and `check_tail_words` PASS.
+`audit_deferred_chain`, `audit_external_pipeline`, `audit_stream_recode`,
+`audit_superbatch_roots`, and `audit_vector_state_layout` FAIL on stale
+source-string asserts -- verified byte-identical failure logs on pristine
+`33753cc` via `git stash`, so the failures predate this change and the edit
+introduces zero audit delta (a `.cs` hint cannot alter any math model).
+
+No GPU score is claimed here: this workstation has no NVIDIA GPU or nvcc.
+Required next step on the RTX 4090 is the standard gate -- native `sm_89`
+resource check (expect unchanged registers/stack/shared, only cache-operator
+bits in SASS), JIT warmup, then reverse-order short A/B at 1.005 before any
+ranked submission. `QSB_PROBE_MASK` remains disabled.
+
+## Minimal host drain: memset reset, no pre-copy sync (2026-09-18)
+
+Hypothesis: the per-batch host loop pays two avoidable drains per 16M batch
+with zero device-arithmetic content -- a 4-byte H2D `cudaMemcpy` to reset the
+hit counter, and an explicit `cudaDeviceSynchronize()` before the blocking D2H
+counter copy. Re-derived from CUDA semantics rather than taken on trust from
+unpromoted note `ad77219`: all search kernels launch on the default stream
+(`launch_pinning_pipeline` uses bare `<<<...>>>` launches, no streams or async
+copies), so (a) `cudaMemset(d_hit_cnt, 0, 4)` on the default stream is ordered
+identically to the old zero-word copy while dropping the host staging buffer,
+and (b) a blocking default-stream D2H copy already waits for all prior
+default-stream kernels, making the standalone synchronize a redundant host
+round-trip per batch.
+
+Change (`candidates/pinning/pinning.cu` host loop only, device code untouched):
+1. Counter reset is now checked `cudaMemset(d_hit_cnt, 0, 4)` (old unchecked
+   `cudaMemcpy` removed; 4 zero bytes == zero `uint32_t` on any endianness).
+2. The `#else` (non-`QSB_HOST_READBACK`) branch drops `cudaDeviceSynchronize()`;
+   the blocking `cudaMemcpy(&h_hit, d_hit_cnt, 4, D2H)` provides the ordering,
+   followed by the existing `cudaGetLastError()` sticky-error check.
+3. Both D2H copies (counter and conditional hit-index) now have their return
+   codes checked; previously both were unchecked. Hit-index cap (`nh<=64`),
+   tag decode, `results/pinning_hit_*.txt` `sequence=/locktime=/recid` text
+   form, and per-hit stdout are byte-identical -- no reporting truncation.
+
+Not touched: `QSB_STREAM` stays 1; `QSB_HOST_READBACK` stays 0 (separate A/B);
+`QSB_PREFETCH`, `QSB_EARLY_LOAD`, `QSB_PROBE_MASK`, `QSB_TREE_OFFLOAD(/2)`, and
+`QSB_PK_UNROLL` all remain 0.
+
+Audits (Mac, no nvcc, CPU-only): `audit_fast_tail_contract`,
+`audit_field_final_carry`, `audit_shared_tree`, and `check_tail_words` PASS
+after the edit. `audit_vector_state_layout` still fails on its stale
+`ulonglong2 *saved` source-string assert, same class of pre-existing failure as
+on pristine `33753cc`; left alone per instruction since host-loop edits cannot
+alter the math models.
+
+No GPU score is claimed here. Next step on the RTX 4090 is the standard gate:
+native `sm_89` build (expect unchanged kernel resources), JIT warmup, then
+reverse-order short A/B at 1.005 before any ranked submission.

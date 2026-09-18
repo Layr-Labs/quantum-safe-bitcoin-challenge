@@ -40,7 +40,12 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
 #endif
 #ifndef QSB_STREAM
-#define QSB_STREAM 0          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
+#define QSB_STREAM 1          /* 1: .cs (evict-first) hints on pipeline state/tree traffic, so the
+                                *    write-once/read-once checkpoint streams (~64 B written + 64 B
+                                *    read per candidate under QSB_COFACTOR) do not thrash the L2
+                                *    lines holding the 64 MiB random fixed-base table. Only cache
+                                *    operators change; math, addressing and occupancy are untouched.
+                                *    Override with -DQSB_STREAM=0 for A/B. */
 #endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
@@ -3023,7 +3028,13 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            /* Equivalent zero reset without a 4-byte host staging buffer.
+             * Default-stream ordering vs surrounding kernels/copies holds. */
+            cudaError_t reset_err = cudaMemset(d_hit_cnt, 0, 4);
+            if (reset_err != cudaSuccess) {
+                printf("CUDA error: %s\n", cudaGetErrorString(reset_err));
+                return 1;
+            }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -3065,18 +3076,19 @@ int main(int argc, char **argv) {
                 const uint32_t *hits = hit_report + 1;
                 int nh = (h_hit > 64) ? 64 : h_hit;
 #else
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
+            /* The blocking default-stream D2H copy below already waits for
+             * all prior default-stream kernels, so no separate synchronize. */
+            cudaError_t err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err == cudaSuccess) err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
+                err = cudaMemcpy(hits, d_hit_idx, (size_t)nh*4, cudaMemcpyDeviceToHost);
+                if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 #endif
 
                 printf("\n  *** HIT! seq=0x%08X ***\n", seq);
