@@ -38,7 +38,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_BATCH 16777216    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
-#define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
+#define QSB_PREFETCH 1        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
 #endif
 #ifndef QSB_STREAM
 #define QSB_STREAM 1          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
@@ -74,7 +74,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
 #endif
 #ifndef QSB_EARLY_LOAD
-#define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
+#define QSB_EARLY_LOAD 1      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
