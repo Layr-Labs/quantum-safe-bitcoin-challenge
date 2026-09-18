@@ -1157,6 +1157,7 @@ __device__ void _ModSqr(uint64_t *rp, const uint64_t *up)
     qsb_square32(rp, up);
 }
 #endif
+#if 0
 //Very efficient way of finding 8-byte target value in global memory buffer (Buffer must be ordered in ascending order)
 //Each step it does fast division by half: mid = (hi + lo) >> 1; and checks resulting value
 //Worst-case performance is O(log n), and we don't need to calculate any hashes by using this method.
@@ -1196,6 +1197,7 @@ __device__ int _BinarySearch(uint64_t *buffer, int hi, uint64_t target)
 	}
 }
 
+#endif
 //Secp256k1 Point Addition implementation
 __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, uint64_t *p2x, uint64_t *p2y)
 {
@@ -1253,6 +1255,7 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
+#if 0
 __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
                               const uint64_t *X2, const uint64_t *Y2)
 {
@@ -1288,6 +1291,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   _ModMult(ZZZ1, PPP);                 // ZZZ3 = ZZZ1*PPP
 }
 
+#endif
 // ---------------------------------------------------------------------------------------
 // Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
 // The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
@@ -1385,6 +1389,7 @@ __device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, 
   Load256(X3, T);                                  // X3
 }
 
+#if 0
 // EFD "mmadd-2008-s" -- affine (X1,Y1) + affine (X2,Y2) -> XYZZ, 4M + 2S (ZZ1 = ZZZ1 = 1):
 //   P = X2-X1, R = Y2-Y1, PP = P^2, PPP = P*PP, Q = X1*PP
 //   X3 = R^2 - PPP - 2Q,  Y3 = R*(Q-X3) - Y1*PPP,  ZZ3 = PP,  ZZZ3 = PPP
@@ -1415,3 +1420,4 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModSub256(Y3, Q, R);                            // Y3 = R*(Q - X3) - Y1*PPP
   Load256(X3, T);                                  // X3
 }
+#endif

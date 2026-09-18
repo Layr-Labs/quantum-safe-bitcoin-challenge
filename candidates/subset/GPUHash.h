@@ -266,6 +266,7 @@ __device__ void _SHA256Transform(uint32_t output[8], uint32_t* w)
 
 }
 
+#if 0
 //Modified SHA256 function specifically for combining two wordlists (books)
 //Byte 0x80 must be placed at the end of input data
 //The last four bytes of input buffer must be the index of 0x80 byte
@@ -1166,3 +1167,4 @@ __device__ __noinline__ void _GetHashKeccak160(uint64_t* x, uint64_t* y, uint32_
 	hash[3] = e.d[6];
 	hash[4] = e.d[7];
 }
+#endif
