@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-18",
+  "refreshed_at": "2026-09-18 ~12:30 benchmark time (pre-submit refresh)",
+  "frontier_submission": "f16f893 (otaliptus)",
+  "frontier_commit": "bad91ac",
+  "frontier_score": 728615288,
+  "promotion_floor_at_refresh": 735901441,
+  "note": "Frontier advanced again: f16f893 promoted +1.27% (QSB_FUSE_SQRADDSUB2=1 fused squaring, GPUMath.h only). Candidate rebased onto bad91ac; all production sources LF-hash-match tip except pinning.cu.",
+  "resolved_since_last_refresh": [
+    {"id": "f16f893", "solver": "otaliptus", "result": "PROMOTED 728615288 (+1.27%)"},
+    {"id": "ecf55f7", "solver": "fkiene", "result": "rejected 707236831 (-14.63% — arithmetic scheduling regression)"},
+    {"id": "a5b81c9", "solver": "anamdongparkjinhyeong", "result": "rejected 709448641"},
+    {"id": "8373c35", "solver": "scarletbright", "result": "cancelled by author (frontier moved under it; resubmitted as 37a0122)"},
+    {"id": "a3889d1", "solver": "ercumentyildirim", "result": "rejected 701690979"}
+  ],
+  "pending_validating": [
+    {"id": "dcaa914", "solver": "fkiene", "claims": "odd-product interleave in _ModMultCore inline asm, parent bb5c9a0", "overlap": "none — orthogonal arithmetic reschedule"},
+    {"id": "b5a087b", "solver": "yu4nyu", "claims": "QSB_SLOTS 2->3", "overlap": "none — known-regressor territory per lineage notes"},
+    {"id": "20de2f4", "solver": "bndbww7w6w-cmyk", "claims": "byte-identical frontier resubmit", "overlap": "none — calibration probe"},
+    {"id": "8e76620", "solver": "jrcarlos2000", "claims": "early table-load + next-chunk prefetch switches in mixed-add chain", "overlap": "none — different lever"},
+    {"id": "37a0122", "solver": "scarletbright", "claims": "SHA round-0 midstate fold + warp barriers inside existing root kernels + finish shared root broadcast", "overlap": "adjacent but distinct — keeps the 3 root kernels; ours eliminates them"},
+    {"id": "01deb03", "solver": "RealAdii", "claims": "smaller batches on fused tip", "overlap": "none — tuning knob"},
+    {"id": "aeadf37", "solver": "ercumentyildirim", "claims": "QSB_STREAM callsite restoration (4MB->1.07GB coverage), local -0.02%", "overlap": "none — stream-hint family, our change is structural"}
+  ],
+  "our_candidate": {
+    "mechanism": "fused root-group inversion in prepare-kernel tail (per-group CTA arrival counters) + deferred host drain with per-parity events",
+    "pinning_cu_lf_sha256": "3f9b8024fbdcbcecb6a6d6f0ac3539fd80a2dd855a8c80cd80d64dbc8b42f1ce",
+    "evidence": "algebra verified vs OpenSSL (128-thread collective sim, PASS full+partial groups); clang+ptxas clean (122 regs / 0 spills production S0); mechanism unique vs pending field",
+    "predicted": "+0.3-0.9% structural latency removal — UNMEASURED, not a score",
+    "gate": "authorized by user rule 2026-09-17: qualified + mechanism not duplicated by any pending submission"
+  }
+}
