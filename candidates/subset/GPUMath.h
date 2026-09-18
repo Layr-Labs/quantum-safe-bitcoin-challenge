@@ -424,6 +424,8 @@ __device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, cons
     r[0] = t0; r[1] = t1; r[2] = t2; r[3] = t3;
 }
 
+#include "tests/gpu_epochs/mmadd_x3_fused.cuh"
+
 // ---------------------------------------------------------------------------------------
 
 __device__ void _ModSub256(uint64_t *r, uint64_t *b)
@@ -1354,9 +1356,7 @@ __device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, 
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
   _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+  _ModX3Classic(T, T, ZZZ3, Q);                    // X3 = R^2 - PPP - 2Q, one chain
 
   _ModSub256(Q, Q, T);                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)

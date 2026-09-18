@@ -3,7 +3,9 @@
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
 __device__ uint32_t QSB_WINDOW_FIRST[14][256];
-__device__ uint32_t QSB_WINDOW_SECOND[64][256];
+/* Slot-major and 16-byte aligned: each lane reads its 64 pre-added (W+K) words as 16
+ * contiguous uint4 loads instead of 64 scattered 4-byte loads. Same values as before. */
+__device__ __align__(16) uint32_t QSB_WINDOW_SECOND[256][64];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
 __device__ uint32_t QSB_FIRST_CLASS[256];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][256];
@@ -26,7 +28,7 @@ static uint32_t qsb_window_first_key(const uint8_t w[3]) {
 
 static int qsb_prepare_window_schedule(const uint8_t *rows,
         const uint8_t windows[256][3], const uint32_t *constant) {
-    uint32_t first[14][256], second[64][256]={}, round_k[64];
+    uint32_t first[14][256], second[256][64]={}, round_k[64];
     uint32_t classes[256], unique[256][16];
     uint32_t first_classes[256], first_unique[256][14], transposed[14][256]={};
     int first_distinct=0;
@@ -63,7 +65,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
             uint32_t b=qsb_host_rotr(y,17)^qsb_host_rotr(y,19)^(y>>10);
             expanded[j]=expanded[j-16]+a+expanded[j-7]+b;
         }
-        for (int j=0; j<64; j++) second[j][slot]=expanded[j]+round_k[j];
+        for (int j=0; j<64; j++) second[slot][j]=expanded[j]+round_k[j];
     }
     printf("Window schedule classes: first=%d second=%d of 256\n",first_distinct,distinct);
     qsb_first_class_count=first_distinct;
@@ -132,18 +134,25 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
+    const uint4 * __restrict__ ks=(const uint4 *)QSB_WINDOW_SECOND[slot];
     #pragma unroll 1
-    for (int r=0; r<64; r+=8) {
-        S2Round(a,b,c,d,e,f,g,h,0,QSB_WINDOW_SECOND[r][slot]);
-        S2Round(h,a,b,c,d,e,f,g,0,QSB_WINDOW_SECOND[r+1][slot]);
-        S2Round(g,h,a,b,c,d,e,f,0,QSB_WINDOW_SECOND[r+2][slot]);
-        S2Round(f,g,h,a,b,c,d,e,0,QSB_WINDOW_SECOND[r+3][slot]);
-        S2Round(e,f,g,h,a,b,c,d,0,QSB_WINDOW_SECOND[r+4][slot]);
-        S2Round(d,e,f,g,h,a,b,c,0,QSB_WINDOW_SECOND[r+5][slot]);
-        S2Round(c,d,e,f,g,h,a,b,0,QSB_WINDOW_SECOND[r+6][slot]);
-        S2Round(b,c,d,e,f,g,h,a,0,QSB_WINDOW_SECOND[r+7][slot]);
+    for (int r=0; r<16; r+=2) {
+        uint4 k0=ks[r], k1=ks[r+1];
+        S2Round(a,b,c,d,e,f,g,h,0,k0.x);
+        S2Round(h,a,b,c,d,e,f,g,0,k0.y);
+        S2Round(g,h,a,b,c,d,e,f,0,k0.z);
+        S2Round(f,g,h,a,b,c,d,e,0,k0.w);
+        S2Round(e,f,g,h,a,b,c,d,0,k1.x);
+        S2Round(d,e,f,g,h,a,b,c,0,k1.y);
+        S2Round(c,d,e,f,g,h,a,b,0,k1.z);
+        S2Round(b,c,d,e,f,g,h,a,0,k1.w);
     }
     state[0]+=a;state[1]+=b;state[2]+=c;state[3]+=d;
     state[4]+=e;state[5]+=f;state[6]+=g;state[7]+=h;
-    qsb_compress_constant_rolled(state);
+    /* Unrolled constant-schedule tail: the K+W words become immediate constant-bank
+     * operands instead of a load plus loop control per round. Same arithmetic. */
+    qsb_compress_constant<0>(state);
+    qsb_compress_constant<1>(state);
+    qsb_compress_constant<2>(state);
+    qsb_compress_constant<3>(state);
 }

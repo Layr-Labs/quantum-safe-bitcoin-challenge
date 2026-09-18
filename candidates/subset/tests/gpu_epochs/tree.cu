@@ -25,6 +25,12 @@
  * 0 = promoted host loop. */
 #ifndef ZLAB_HITPATH
 #define ZLAB_HITPATH 1
+/* Two-slot host pipeline (mechanism by dun999, b7c8717e): each launch parity owns its
+ * epoch descriptors, first-block states and hit buffer plus a stream, so the producer
+ * kernels of launch i+1 overlap the digest kernel of launch i. The previous launch is
+ * drained while the current one runs; the final in-flight launch is drained after the
+ * loop. Hit records and their order are unchanged. */
+#define QSB_STM_SLOTS 2
 #endif
 /* ZLAB_TRIM (kill switch): 1 = compile only the ranked short-epoch consumer
  * into kernel_digest and drop the legacy enum/tile host paths (and with them
@@ -46,6 +52,7 @@
 #include <openssl/sha.h>
 
 #include "../../GPUMath.h"
+#include "../../BorrowParity.cuh"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -877,19 +884,24 @@ __global__ void kernel_build_epochs(
  *   d_first[(size_t)e*first_stride + c*8 + j],  first_stride = 8*first_count.
  * Both the store here and the consumer load are 16-byte aligned by
  * construction (every record starts on a 32-byte boundary). */
+#define QSB_FIRST_EPB 4
 __global__ void kernel_build_first(
-    uint64_t epoch_base, uint64_t n_epochs, int first_count,
+    uint64_t epoch_base, uint64_t n_epochs, int first_count, int n_ep_launch,
     const epoch_desc_t * __restrict__ d_epochs,
     uint32_t * __restrict__ d_first)
 {
-    const int cls = threadIdx.x;
-    if (cls >= first_count) return;              /* blockDim.x == first_count */
+    /* QSB_FIRST_EPB epochs per block: blockDim.x == QSB_FIRST_EPB * first_count, so a
+     * block carries whole warps instead of one 54..84-thread block per epoch. Thread
+     * t handles class t % first_count of epoch blockIdx.x*QSB_FIRST_EPB + t / first_count.
+     * Same outputs, same indexing of d_epochs and d_first by the epoch-within-launch. */
+    const int cls = threadIdx.x % first_count;
     /* SEAM 2. ep is the EPOCH-WITHIN-LAUNCH index, not "the digest block that
      * will consume it": under ZLAB_K2S one digest block consumes two epochs.
      * ep == blockIdx.x holds only because SEAM 1 launches one block per epoch
      * (nblk * QSB_K2S_MUL), never one block per digest block. Both d_epochs and
      * d_first are indexed by ep, so the body needs no other change. */
-    const int ep = blockIdx.x;
+    const int ep = blockIdx.x * QSB_FIRST_EPB + threadIdx.x / first_count;
+    if (ep >= n_ep_launch) return;               /* tail block of the launch */
     const uint64_t e = epoch_base + (uint64_t)ep;
     if (e >= n_epochs) return;                   /* matches kernel_build_epochs */
     uint32_t out[8];
@@ -1249,15 +1261,13 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
     _ModAdd256(x1, x1, xR);
     _ModSub256(t, xR, x1);
     _ModMult(t, m1);
-    _ModSub256(t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    uint32_t parities = qsb_borrow_parity(t,yR);
     _ModSub256(t, m2, cc);
     _ModMult(x2, sum, t);
     _ModAdd256(x2, x2, xR);
     _ModSub256(t, xR, x2);
     _ModMult(t, m2);
-    _ModSub256(t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+    parities |= (qsb_borrow_parity(t,yR)^1u)<<1;
     return parities;
 }
 /* One candidate up to its denominator: window hash, SHA-256d, u1*G, W = ZZZ*d,
@@ -2419,6 +2429,36 @@ int main(int argc, char **argv) {
         free(chk_table);
     }
 
+    /* Persisting-L2 access-policy window over the hot part of the fixed-base table
+     * (host-only; the promoted pinning candidate carries the same policy: ercumentyildirim
+     * e2fd8093 for the window, 21d45a53 for skipping the double-sized, half-as-hot chunk 0).
+     * The RTX 4090 reports a 50 MiB persisting set-aside; a window larger than that thrashes,
+     * so the request is clamped and starts past chunk 0 when the rest still needs the room.
+     * On a device without persisting L2 every call is a no-op. */
+    {
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window,  cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        if (want > 0 && max_window > 0) {
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av = {};
+            size_t cold = (size_t)gt_entries(0) * 64;         /* chunk 0: 2x the entries, half the heat */
+            size_t skip = (gt_sz > cold + want) ? cold : 0;
+            av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+            size_t avail = gt_sz - skip, nb = want < avail ? want : avail;
+            av.accessPolicyWindow.num_bytes = nb < (size_t)max_window ? nb : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persisting window: %.0f MiB at +%.0f MiB (%s)\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024), (double)skip/(1024*1024),
+                   pe == cudaSuccess ? "set" : cudaGetErrorString(pe));
+            cudaGetLastError();
+        }
+    }
+
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
     cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
@@ -2481,7 +2521,7 @@ int main(int argc, char **argv) {
         }
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
-        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL * sizeof(epoch_desc_t));
+        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL * QSB_STM_SLOTS * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
         /* SEAM 5. Producer-stage buffer: 8 words per first-block class per
          * EPOCH, and a launch holds QSB_SE_LAUNCH_BLOCKS digest blocks x
@@ -2492,8 +2532,8 @@ int main(int argc, char **argv) {
          * for d_epochs); at K2S=0 it is half that. */
         if (qsb_first_class_count <= 0) { fprintf(stderr, "ERROR: no first classes\n"); return 1; }
         qsb_first_stride = qsb_first_class_count * 8;
-        cudaMalloc(&d_first, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL
-                             * qsb_first_stride * sizeof(uint32_t));
+        cudaMalloc(&d_first, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL * QSB_STM_SLOTS
+                   * qsb_first_stride * sizeof(uint32_t));
         if (!d_first) { fprintf(stderr, "OOM: first-block state buffer\n"); return 1; }
     }
 
@@ -2730,11 +2770,18 @@ int main(int argc, char **argv) {
         /* One device buffer: [u32 count][record 0 ...], record p = u32 tag at
          * 4+16p and 9 combo bytes at 8+16p. */
         uint8_t *d_hitbuf = NULL;
-        cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC);
+        const size_t QSB_HITBUF_BYTES = 4 + (size_t)1024 * ZLAB_HIT_REC;
+        cudaMalloc(&d_hitbuf, QSB_HITBUF_BYTES * QSB_STM_SLOTS);
         if (!d_hitbuf) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
-        uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
-        uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
-        uint8_t *zh_combos = d_hitbuf + 8;
+        cudaStream_t stm_s[QSB_STM_SLOTS];
+        cudaEvent_t  stm_ev[QSB_STM_SLOTS];
+        uint64_t     stm_pend[QSB_STM_SLOTS];
+        for (int i = 0; i < QSB_STM_SLOTS; i++) {
+            cudaStreamCreateWithFlags(&stm_s[i], cudaStreamNonBlocking);
+            cudaEventCreateWithFlags(&stm_ev[i], cudaEventDisableTiming);
+            stm_pend[i] = 0;
+        }
+        uint64_t stm_i = 0;
         mkdir("results", 0755);
         char zh_fname[256];
         if (calibrate) snprintf(zh_fname, sizeof(zh_fname), "results/digest_calibrate_%d.txt", gpu_index);
@@ -2754,24 +2801,21 @@ int main(int argc, char **argv) {
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH
-            kernel_build_epochs<<<(nblk * QSB_K2S_MUL + 255) / 256, 256>>>(
+            const int slot = (int)(stm_i % QSB_STM_SLOTS);
+            epoch_desc_t *s_epc = d_epochs + (size_t)slot * QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL;
+            uint32_t *s_frst = d_first + (size_t)slot * QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL * qsb_first_stride;
+            uint8_t *s_hb = d_hitbuf + (size_t)slot * QSB_HITBUF_BYTES;
+            uint32_t *s_cnt = (uint32_t *)s_hb;
+            uint32_t *s_idx = (uint32_t *)(s_hb + 4);
+            uint8_t  *s_cmb = s_hb + 8;
+            kernel_build_epochs<<<(nblk * QSB_K2S_MUL + 255) / 256, 256, 0, stm_s[slot]>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs, zh_cnt);
-#else
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(nblk * QSB_K2S_MUL + 255) / 256, 256>>>(
-                epoch_base, n_epochs, window_start, s_early,
-                d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs);
-#endif
-            /* SEAM 1. The producer is one block per EPOCH, and a launch holds
-             * nblk digest blocks x QSB_K2S_MUL epochs each. Multiplying the grid
-             * (and nothing inside the kernel) is what makes kernel_build_first's
-             * blockIdx.x span the whole epoch range of the launch. */
-            kernel_build_first<<<nblk * QSB_K2S_MUL, qsb_first_class_count>>>(
-                epoch_base, n_epochs, qsb_first_class_count, d_epochs, d_first);
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+                d_dsigs, s_epc, s_cnt);
+            kernel_build_first<<<(nblk * QSB_K2S_MUL + QSB_FIRST_EPB - 1) / QSB_FIRST_EPB,
+                                 QSB_FIRST_EPB * qsb_first_class_count, 0, stm_s[slot]>>>(
+                epoch_base, n_epochs, qsb_first_class_count, nblk * QSB_K2S_MUL, s_epc, s_frst);
+            kernel_digest<<<nblk, QSB_SE_PER_EPOCH, 0, stm_s[slot]>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -2780,8 +2824,8 @@ int main(int argc, char **argv) {
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gt,
 #if ZLAB_HITPATH
-                zh_cnt, zh_idx,
-                zh_combos, d_hit_sighash,
+                s_cnt, s_idx,
+                s_cmb, d_hit_sighash,
 #else
                 d_hit_cnt, d_hit_idx,
                 d_hit_combos, d_hit_sighash,
@@ -2789,22 +2833,28 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,
-                d_first, qsb_first_stride);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += (uint64_t)batch_pos * QSB_K2S_MUL;
-            g_total_searched = total_searched;
+                t_win, s_early, d_early, fast_inc, d_const_words, s_epc,
+                s_frst, qsb_first_stride);
+            cudaEventRecord(stm_ev[slot], stm_s[slot]);
+            stm_pend[slot] = (uint64_t)batch_pos * QSB_K2S_MUL;
             epoch_base += (uint64_t)nblk * QSB_K2S_MUL;
-#if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
-            memcpy(&h_hit, zh_host, 4);
+            stm_i++;
+            /* Drain the previous launch while this one runs. */
+            auto stm_drain = [&](int d) -> int {
+                cudaEventSynchronize(stm_ev[d]);
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+                total_searched += stm_pend[d];
+                stm_pend[d] = 0;
+                g_total_searched = total_searched;
+                const uint8_t *dhb = d_hitbuf + (size_t)d * QSB_HITBUF_BYTES;
+                cudaMemcpy(zh_host, dhb, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
                 if (nh > ZLAB_HIT_FIRST)
                     cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               d_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                               dhb + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
                                (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
@@ -2824,6 +2874,11 @@ int main(int argc, char **argv) {
                 }
                 hit_counter += (uint64_t)nh;
                 g_hit_counter = hit_counter;
+            }
+                return 0;
+            };
+            if (stm_i >= (uint64_t)QSB_STM_SLOTS) {
+                if (stm_drain((int)(stm_i % QSB_STM_SLOTS))) return 1;
             }
             if (0) {
 #else
@@ -2900,6 +2955,43 @@ int main(int argc, char **argv) {
             }
             if (epoch_base >= n_epochs) break;
         }
+#if ZLAB_HITPATH
+        for (int k = 1; k <= QSB_STM_SLOTS; k++) {
+            int d = (int)((stm_i + k) % QSB_STM_SLOTS);
+            if (stm_pend[d] == 0) continue;
+            uint32_t h_hit = 0;
+            cudaEventSynchronize(stm_ev[d]);
+            total_searched += stm_pend[d]; stm_pend[d] = 0; g_total_searched = total_searched;
+            const uint8_t *dhb = d_hitbuf + (size_t)d * QSB_HITBUF_BYTES;
+            cudaMemcpy(zh_host, dhb, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            memcpy(&h_hit, zh_host, 4);
+            if (h_hit > 0) {
+                int nh = (h_hit > 64) ? 64 : (int)h_hit;
+                if (nh > ZLAB_HIT_FIRST)
+                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                               dhb + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                /* Complete records only; one write() per launch. */
+                char wb[64 * 96];
+                int wl = 0;
+                for (int h = 0; h < nh; h++) {
+                    uint32_t raw; memcpy(&raw, zh_host + 4 + h * ZLAB_HIT_REC, 4);
+                    const uint8_t *combo = zh_host + 8 + h * ZLAB_HIT_REC;
+                    wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n",
+                                   combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
+                                   (int)((raw >> 31) & 1), (int)((raw >> 30) & 1), (int)(raw & 0x3FFFFFFF));
+                }
+                const char *wp = wb;
+                while (wl > 0) {
+                    ssize_t k = write(zh_fd, wp, (size_t)wl);
+                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                    wp += k; wl -= (int)k;
+                }
+                hit_counter += (uint64_t)nh;
+                g_hit_counter = hit_counter;
+            }
+        }
+#endif
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
