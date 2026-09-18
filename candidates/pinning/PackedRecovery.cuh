@@ -65,7 +65,7 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+    _ModSub256(l,u,v); _ModAdd256(m,u,v); qsb_weighted_sum(sum,u);
     _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
     _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);

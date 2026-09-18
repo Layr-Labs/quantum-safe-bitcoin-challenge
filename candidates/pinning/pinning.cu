@@ -1226,6 +1226,7 @@ __device__ __constant__ uint64_t pin_u2rx_words[4];
 __device__ __constant__ uint64_t pin_u2rk_words[4];
 __device__ __constant__ uint64_t pin_recovery_c[4];
 
+#include "RecoveryWeight.cuh"
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
 #include "PackedRecovery.cuh"

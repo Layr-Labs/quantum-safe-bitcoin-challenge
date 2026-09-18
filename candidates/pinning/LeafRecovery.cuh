@@ -33,8 +33,9 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     uint64_t raw[5];qsb_field_mul(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
     _ModSub256(d,X);
-    qsb_recovery_mul(W,V,d);       // W = V*(a*U-X), with U=ZZ and V=ZZZ.
-    W[4]=0;
+    // Tree-internal W is a weighted cofactor leaf. Keep the exact residue;
+    // the inverse still canonicalizes the root.
+    qsb_weighted_leaf(W,const_cast<uint64_t*>(V),d);
 }
 
 // Preserve Y,V before this call. Instead of saving W, save H_i=U_i*W_sibling.
