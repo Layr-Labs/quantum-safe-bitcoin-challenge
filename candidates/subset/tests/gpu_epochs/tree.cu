@@ -19,10 +19,10 @@
 #include <fcntl.h>
 #include <errno.h>
 /* ZLAB_HITPATH (kill switch): 1 = short-epoch host loop without per-launch
- * hit-count H2D (the producer kernel zeroes the device counter), one combined
- * D2H of count + first records per launch, and hit records appended with one
- * write() per launch to a hit file opened once (no per-hit stdout/summary I/O).
- * 0 = promoted host loop. */
+ * hit-count H2D, one combined D2H of count + first records per launch, and
+ * hit records appended with one write() per launch (no per-hit stdout).
+ * Occupancy is host-drained with cudaMemsetAsync; the copy is stream-ordered
+ * (no cudaDeviceSynchronize before D2H). 0 = promoted host loop. */
 #ifndef ZLAB_HITPATH
 #define ZLAB_HITPATH 1
 #endif
@@ -46,6 +46,7 @@
 #include <openssl/sha.h>
 
 #include "../../GPUMath.h"
+#include "host_drain.cuh"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -800,8 +801,10 @@ __global__ void kernel_build_epochs(
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
 #if ZLAB_HITPATH
-    /* Runs before this launch's digest kernel on the same stream. */
-    if (t == 0) *d_hit_reset = 0;
+    /* Occupancy is host-drained (cudaMemsetAsync on this stream) before
+     * the producer launch. The device store is gone so the producer is
+     * only an epoch writer. */
+    (void)d_hit_reset;
 #endif
     uint64_t e = epoch_base + (uint64_t)t;
     if (e >= n_epochs) return;
@@ -2501,7 +2504,10 @@ int main(int argc, char **argv) {
         else snprintf(zh_fname, sizeof(zh_fname), "results/digest_hit_%d.txt", gpu_index);
         int zh_fd = open(zh_fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
-        uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
+        uint8_t *zh_host = NULL;
+        if (cudaHostAlloc((void **)&zh_host, 4 + 64 * ZLAB_HIT_REC, cudaHostAllocDefault) != cudaSuccess) {
+            fprintf(stderr, "OOM: pinned hit staging\n"); return 1;
+        }
 #endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
@@ -2510,6 +2516,9 @@ int main(int argc, char **argv) {
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH
+            if (host_drain_memset_u32(zh_cnt, 1, 0) != cudaSuccess) {
+                fprintf(stderr, "ERROR: hit drain memset failed\n"); return 1;
+            }
             kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
@@ -2540,14 +2549,23 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
+#if ZLAB_HITPATH
+            /* Stream-ordered drain: the memcpy is the wait. No device-wide
+             * barrier before the copy. */
+            if (host_drain_copy_u32((uint32_t *)zh_host, (const uint32_t *)d_hitbuf,
+                    (4u + (uint32_t)ZLAB_HIT_FIRST * (uint32_t)ZLAB_HIT_REC) / 4u, 0) != cudaSuccess) {
+                fprintf(stderr, "ERROR: hit drain copy failed\n"); return 1;
+            }
+            cudaStreamSynchronize(0);
+#else
             cudaDeviceSynchronize();
+#endif
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
             g_total_searched = total_searched;
             epoch_base += nblk;
 #if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
@@ -2662,6 +2680,11 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+#if ZLAB_HITPATH
+        cudaFreeHost(zh_host);
+        cudaFree(d_hitbuf);
+        close(zh_fd);
+#endif
         free(h_combos);
         return 0;
     }
