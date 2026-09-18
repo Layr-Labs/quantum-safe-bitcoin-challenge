@@ -77,7 +77,13 @@ __device__ __forceinline__ void qsb_recovery_product_checkpoint(
             }
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        // Once a level has at most 32 writers, every subsequent reader is
+        // in warp 0. Keep an explicit warp memory barrier for independent
+        // thread scheduling, without waiting for the other block warps.
+        if(count>2){
+            if(count<=64)__syncwarp();
+            else __syncthreads();
+        }
     }
     if(tid==0){
         #pragma unroll
@@ -117,7 +123,11 @@ __device__ __forceinline__ void qsb_recovery_pair_inverse(
             for(int k=0;k<4;k++)inverses[k][offset-QSB_RECOVERY_N+tid]=child[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        // The next level has 2*count readers. It stays in warp 0 only
+        // while count<32. The count==32 transition and final broadcast
+        // require a block barrier because other warps read these values.
+        if(count<32)__syncwarp();
+        else __syncthreads();
     }
     #pragma unroll
     for(int k=0;k<4;k++)value[k]=inverses[k][tid&(QSB_RECOVERY_N/2-1)];
