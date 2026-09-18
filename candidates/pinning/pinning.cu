@@ -392,6 +392,16 @@ struct qsb_digit_window {
         sh += bits;
         if (sh >= 64u) { w0 = w1; w1 = w2; w2 = w3; w3 = 0ULL; sh -= 64u; }
     }
+    /* Same idx/neg as qsb_decode_to_shared, one window at a time. Last
+     * chunk replaces the high-bit sign with D's sign (65535-f when D<0). */
+    __device__ __forceinline__ void peel(unsigned bits, bool last, int negative,
+                                         uint32_t *idx, uint64_t *nmask) {
+        uint32_t f = peek() & ((1u << bits) - 1u);
+        int32_t tm = last ? -negative : (int32_t)(f >> (bits - 1u)) - 1;
+        *idx = (f ^ (uint32_t)tm) & ((1u << (bits - 1u)) - 1u);
+        *nmask = 0ULL - (uint32_t)(tm < 0);
+        advance(bits);
+    }
 };
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -545,11 +555,34 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_DIRECT_DIGITS
+    /* Peel signed odd indices from the recode residue in registers. The
+     * 15-code shared plane is not the cofactor arena: it was only a spill
+     * sink, and the volatile load/store pair on every gather fought the
+     * table LDG. Bit-identical idx/neg to qsb_decode_to_shared. */
+    uint64_t M[4]; int negative; qsb_signed_recode_setup(k,M,&negative);
+    qsb_digit_window win; win.init(M, 1u);
+    uint32_t idx; uint64_t nmask;
+    win.peel(18u, false, 0, &idx, &nmask);
+    gt_load_signed_flat_m(table, gt_offset(0), idx, nmask, x0, y0);
+    win.peel(17u, false, 0, &idx, &nmask);
+    gt_load_signed_flat_m(table, gt_offset(1), idx, nmask, x1, y1);
+    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    unsigned base=gt_offset(2);
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        win.peel(17u, c==GT_CHUNKS-1, negative, &idx, &nmask);
+        gt_load_signed_flat_m(table, base, idx, nmask, x1, y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        base+=1u<<16;
+    }
+#else
+    qsb_decode_to_shared(k);
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
@@ -559,6 +592,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 }
 
