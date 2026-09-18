@@ -1263,15 +1263,13 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
 // The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
 // the ordinary slope numerator is (Y2+Yoff)*ZZZ1 - Yd, so the Y1*PPP product is
-// skipped. Tip outlined the last window as a twin so the rolled madd never carries
-// the Y2*ZZZ3 multiply; this archive keeps that shape as DEFER_Y=false while
-// specializing the shared body via template<bool DEFER_Y> (forceinline). Tip
-// ModAddLazy / ModX3Fused arithmetic is preserved verbatim. No restrict on madd.
+// skipped. Interior calls use this outlined 7M+2S body. The last window
+// uses _PointAddXYZZ_def_last (8M+2S) so the rolled madd never carries
+// the Y2*ZZZ3 multiply or its registers.
 // ---------------------------------------------------------------------------------------
-template<bool DEFER_Y>
-__device__ __forceinline__ void _PointAddXYZZ_def_body(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
+__device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+                                  const uint64_t *X2, const uint64_t *Y2,
+                                  const uint64_t *Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1298,28 +1296,43 @@ __device__ __forceinline__ void _PointAddXYZZ_def_body(
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (DEFER_Y) {
-    Load256(Y1, Q);                    // deferred Y: actual Y3 = Y1 - Y2*ZZZ3
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
-    _ModSub256(Y1, Q, S2);             // exact Y3
-  }
+  Load256(Y1, Q);                      // deferred Y: actual Y3 = Y1 - Y2*ZZZ3
   Load256(X1, T);                      // X3
 }
 
-// Interior / last-window wrappers — preserve tip call sites and register outline.
-__device__ __forceinline__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                                  const uint64_t *X2, const uint64_t *Y2,
-                                  const uint64_t *Yoff)
-{
-  _PointAddXYZZ_def_body<true>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
-}
-
-__device__ __forceinline__ void _PointAddXYZZ_def_last(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+// Last-window twin. Same prefix; Y tail is exact Y3 = R*(V-X3) - Y2*ZZZ3.
+__device__ void _PointAddXYZZ_def_last(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
                                        const uint64_t *X2, const uint64_t *Y2,
                                        const uint64_t *Yoff)
 {
-  _PointAddXYZZ_def_body<false>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
+  uint64_t U2[4];
+  uint64_t S2[4];
+  uint64_t P[4];
+  uint64_t R[4];
+  uint64_t PP[4];
+  uint64_t PPP[4];
+  uint64_t Q[4];
+  uint64_t T[4];
+
+  _ModMult(U2, (uint64_t *)X2, ZZ1);
+  _ModAddLazy(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+  _ModMult(S2, ZZZ1);
+  _ModSub256(P, U2, X1);
+  _ModSub256(R, S2, Y1);
+  _ModSqr(PP, P);
+  _ModMult(PPP, PP, P);
+  _ModMult(Q, U2, PP);
+  _ModMult(ZZ1, PP);
+
+  _ModSqr(T, R);
+  _ModX3Fused(T, T, PPP, Q);
+
+  _ModMult(ZZZ1, PPP);
+  _ModSub256(Q, Q, T);
+  _ModMult(Q, R);
+  _ModMult(S2, (uint64_t *)Y2, ZZZ1);
+  _ModSub256(Y1, Q, S2);
+  Load256(X1, T);
 }
 
 // Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
