@@ -244,6 +244,20 @@ __device__ uint64_t BINOM_C[151][10];
  * 2^17 for the rest (2,359,296 64-byte records = 144 MiB). One fewer table load
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
+#ifndef HM37_COMB
+#define HM37_COMB 1
+#endif
+#if HM37_COMB
+#define ZLAB_T14 0
+#define GT_CHUNKS 8
+#define GT_TOTAL_ENTRIES (1u << 18)
+#define GT_LO 256
+#define GT_HI 128
+__host__ __device__ __forceinline__ unsigned gt_entries(int c) { return 32768; }
+__host__ __device__ __forceinline__ unsigned gt_offset(int c) { return (unsigned)c << 15; }
+__host__ __device__ __forceinline__ int gt_shift(int c) { return 32*c; }
+static_assert(GT_TOTAL_ENTRIES*64ULL == 16ULL*1024*1024,"comb table is exactly 16 MiB");
+#else
 #ifndef ZLAB_T14
 #define ZLAB_T14 0
 #endif
@@ -282,6 +296,9 @@ static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
               "mixed table must contain exactly 64 MiB");
 #endif
 
+#endif
+
+#if !HM37_COMB
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
     0xBFD25E8CD0364141ULL, 0xBAAEDCE6AF48A03BULL,
@@ -576,6 +593,10 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
 #endif
 }
 
+#else
+#include "hm37_comb.cuh"
+#endif
+
 /* _FixedBaseSignedAffine: removed -- dead on the ranked path. It is still a __device__/
  * __global__ symbol, so it is emitted into the PTX the driver must JIT at first
  * launch, INSIDE the measured 1200 s window. Measured on the previous base:
@@ -745,7 +766,7 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
                                    * reducing work per candidate, so a throttling runner should
                                    * expect at most the measured +0.28%. */
 #endif
-#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads x QSB_K2S_MUL candidates/launch */
+#define QSB_SE_LAUNCH_BLOCKS (QSB_X66 ? ZLAB_LAUNCH_BLOCKS/2 : ZLAB_LAUNCH_BLOCKS) /* same total epochs/launch at K4 */
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -1206,6 +1227,27 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     return parities;
 }
 
+#if HM37_COMB
+/* Complete W=0 recovery from HM37. Preserve the finite recid mask: P=+/-R
+ * has one finite recovery, whereas P=infinity has two. No collective here. */
+__device__ __forceinline__ uint32_t hm37_recovery_exception(
+    uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,uint64_t *xR,uint64_t *yR,
+    uint64_t *x1,uint64_t *x2,uint32_t *parities) {
+    if(hm37_zero(ZZ)){
+        Load256(x1,xR);Load256(x2,xR);
+        *parities=(uint32_t)(yR[0]&1u)|((uint32_t)((yR[0]&1u)^1u)<<1);
+        return 3;
+    }
+    uint64_t t[4],c[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    _ModMult(t,yR,ZZZ);_ModSub256(t,t,Y);
+    bool positive=hm37_zero(t);
+    _ModSqr(x1,c);_ModSub256(x1,x1,xR);_ModSub256(x1,x1,xR);Load256(x2,x1);
+    _ModSub256(t,xR,x1);_ModMult(t,c);_ModSub256(t,yR);
+    *parities=(uint32_t)(t[0]&1u)|((uint32_t)((t[0]&1u)^1u)<<1);
+    return positive?1u:2u;
+}
+#endif
+
 #include "tree_inverse.cuh"
 
 
@@ -1221,7 +1263,16 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
                            * The ranked build line passes no defines, so this default IS the ship
                            * setting - do not rely on -DZLAB_K2S=1. */
 #endif
-#define QSB_K2S_MUL (ZLAB_K2S ? 2 : 1)
+#ifndef QSB_X66
+#define QSB_X66 1
+#endif
+#ifndef QSB_X66_BLOCKS
+#define QSB_X66_BLOCKS 256
+#endif
+#if QSB_X66 && (!ZLAB_K2S || !ZLAB_TRIM || !ZLAB_HITPATH)
+#error "bounded K4 requires the ranked K2 pre/post and packed-hit interface"
+#endif
+#define QSB_K2S_MUL (QSB_X66 ? 4 : (ZLAB_K2S ? 2 : 1))
 #if ZLAB_K2S
 /* Everything in the finish that does not need 1/W: m1 = (yR*B - Y)*ZZ and
  * m2 = (yR*B + Y)*ZZ. After the inverse, lambda1 = m1/W and m2' = m2/W. */
@@ -1260,6 +1311,39 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
+/* Exact point-to-parked-state boundary, shared by the ranked front and oracles.
+ * Exceptional outputs reuse m1/m2 for final x coordinates; identity factors
+ * keep all lanes in the same reciprocal collective. */
+__device__ __forceinline__ int qsb_k2s_prepare_point(
+    uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
+    uint64_t *xR,uint64_t *yR,uint64_t *prod,uint64_t *m1,uint64_t *m2
+) {
+    qsb_xyzz_finish_prepare(X,ZZ,ZZZ,xR,prod);
+#if HM37_COMB
+    if(hm37_zero(prod)) {
+        uint32_t par;
+        uint32_t valid=hm37_recovery_exception(Y,ZZ,ZZZ,xR,yR,m1,m2,&par);
+        prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;
+        return 2 | (valid<<2) | (par<<4);
+    }
+#endif
+    qsb_k2s_pre(Y,ZZ,ZZZ,yR,m1,m2);
+    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+}
+__device__ __forceinline__ uint32_t qsb_k2s_finish_point(
+    int state,uint64_t *m1,uint64_t *m2,uint64_t *inv,
+    uint64_t *xR,uint64_t *yR,uint64_t *x1,uint64_t *x2,uint32_t *valid
+) {
+    *valid=3;
+#if HM37_COMB
+    if(state!=1){
+        Load256(x1,m1);Load256(x2,m2);*valid=(state>>2)&3;
+        return (state>>4)&3;
+    }
+#endif
+    return qsb_k2s_post(m1,m2,inv,xR,yR,x1,x2);
+}
+
 /* One candidate up to its denominator: window hash, SHA-256d, u1*G, W = ZZZ*d,
  * and the pre-inverse finish pair. Returns 0 when the candidate is unusable. */
 __device__ __forceinline__ int qsb_k2s_front(
@@ -1286,13 +1370,12 @@ __device__ __forceinline__ int qsb_k2s_front(
     z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
-    qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
-    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+    return qsb_k2s_prepare_point(qx,qy,qzz,qzzz,u2rx,u2ry,prod,m1,m2);
 }
 /* Ranked single-hash gate over the two x-coordinates and their y parities. */
-__device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
+__device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out, uint32_t valid_recids=3) {
     for(int ri=0;ri<2;ri++){
+        if(!(valid_recids&(1u<<ri)))continue;
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
         uint64_t sx2=ri ? q2x[2] : q1x[2];
@@ -1314,6 +1397,9 @@ __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32
 }
 #endif
 
+#if QSB_X66
+#include "bounded_k4.cuh"
+#else
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -1371,13 +1457,15 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         int okA, okB;
         {
             uint64_t m1[4],m2[4];
-            okA = qsb_k2s_front(f0,tid,d_gt,u2rx,u2ry,prodA,m1,m2) && active;
-            if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+            okA = qsb_k2s_front(f0,tid,d_gt,u2rx,u2ry,prodA,m1,m2);
+            if(!active)okA=0;
+            if(okA!=1){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
             #pragma unroll
             for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
         }
-        okB = qsb_k2s_front(f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B) && active;
-        if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+        okB = qsb_k2s_front(f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B);
+        if(!active)okB=0;
+        if(okB!=1){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
         uint64_t leaf[5];
         qsb_field_mul_raw(leaf,prodA,prodB);
         qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
@@ -1386,9 +1474,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
             #pragma unroll
             for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
-            uint32_t par=qsb_k2s_post(m1,m2,inv,u2rx,u2ry,q1x,q2x);
+            uint32_t valid_recids;
+            uint32_t par=qsb_k2s_finish_point(okA,m1,m2,inv,u2rx,u2ry,q1x,q2x,&valid_recids);
             int recid=0;
-            if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            if(qsb_k2s_gate(q1x,q2x,par,&recid,valid_recids)){
                 uint32_t pslot=atomicAdd(d_hit_cnt,1);
                 if(pslot<1024){
                     d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
@@ -1400,9 +1489,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(okB){
             uint64_t inv[5],q1x[4],q2x[4];
             qsb_field_mul_raw(inv,leaf,prodA);    /* 1/WB */
-            uint32_t par=qsb_k2s_post(m1B,m2B,inv,u2rx,u2ry,q1x,q2x);
+            uint32_t valid_recids;
+            uint32_t par=qsb_k2s_finish_point(okB,m1B,m2B,inv,u2rx,u2ry,q1x,q2x,&valid_recids);
             int recid=0;
-            if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            if(qsb_k2s_gate(q1x,q2x,par,&recid,valid_recids)){
                 uint32_t pslot=atomicAdd(d_hit_cnt,1);
                 if(pslot<1024){
                     d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
@@ -1578,14 +1668,24 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prod[5];
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W = ZZZ*d */
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
+#if HM37_COMB
+    usable=active&&!hm37_zero(prod);
+#endif
     /* d and W are not needed after the inverse: the finish derives both
      * x-coordinates from the two slopes and the constant QSB_U2R_C. */
     // One block-wide inverse, preserving identity factors for tail/unusable lanes.
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_block_inverse_tree(prod);
-    if(!usable)return;
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
+    uint32_t y_parities,valid_recids=3;
+#if HM37_COMB
+    if(!active)return;
+    if(!usable)valid_recids=hm37_recovery_exception(qy,qzz,qzzz,u2rx,u2ry,q1x,q2x,&y_parities);
+    else y_parities=qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
+#else
+    if(!usable)return;
+    y_parities=qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
+#endif
 
     int v=0, hash_choice=0, recid=0;
 #if ZLAB_PAIRSHA
@@ -1609,11 +1709,12 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         }
         uint32_t hs0[8],hs1[8];
         zlab_sha256_pair_h0(pw[0],pw[1],hs0,hs1);
-        if(gpu_bench_valid_words(hs0)){v=1;recid=0;}
-        else if(gpu_bench_valid_words(hs1)){v=1;recid=1;}
+        if((valid_recids&1)&&gpu_bench_valid_words(hs0)){v=1;recid=0;}
+        else if((valid_recids&2)&&gpu_bench_valid_words(hs1)){v=1;recid=1;}
     }
 #else
     for(int ri=0;ri<2&&!v;ri++){
+        if(!(valid_recids&(1u<<ri)))continue;
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
         uint64_t sx2=ri ? q2x[2] : q1x[2];
@@ -1703,6 +1804,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
 }
 
+#endif
+
 /* ============================================================
  * Fixed-base table construction on the GPU (signed-digit table)
  *
@@ -1738,20 +1841,22 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-#if ZLAB_T14
+#if HM37_COMB
+    int ch=(int)(t>>15);
+#elif ZLAB_T14
     int ch=t<((uint64_t)GT_BIG<<18)?(int)(t>>18):GT_BIG+(int)((t-((uint64_t)GT_BIG<<18))>>17);
 #else
     int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
 #endif
     int d=(int)(t-gt_offset(ch));
-    int m  = 2*d + 1;                        /* odd multiple below 2^18 */
+    int m  = HM37_COMB ? d : 2*d + 1;
     int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 1024 */
 
     const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
 
     uint64_t rx[4], ry[4];
-    if (hi == 0) {
+    if (!HM37_COMB && hi == 0) {
         for (int k = 0; k < 4; k++) { rx[k] = Lp[k]; ry[k] = Lp[4 + k]; }
     } else {
         uint64_t px[4], py[4], pz[5] = {1, 0, 0, 0, 0}, qx[4], qy[4];
@@ -1805,6 +1910,9 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
  * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
  * comes from the runtime problem (little-endian 32 bytes), so the ladders are
  * rebuilt per instance and NOT cached across problems (anti-replay). */
+#if HM37_COMB
+#include "hm37_table.cuh"
+#else
 static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
@@ -1927,6 +2035,8 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     EC_POINT_free(base);EC_POINT_free(pt);EC_POINT_free(two_base);
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
+
+#endif
 
 /* Digest params loader */
 typedef struct {
@@ -2721,8 +2831,8 @@ int main(int argc, char **argv) {
      * consumer hashes 6 blocks per candidate from there. Per launch:
      * QSB_SE_LAUNCH_BLOCKS epochs x 256 candidates = 8M candidates. */
     if (se_mode) {
-        printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
-               QSB_SE_LAUNCH_BLOCKS);
+        printf("  Using short-epoch producer/consumer path (up to %d epochs per launch)\n",
+               QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL);
         fflush(stdout);
         uint64_t epoch_base = 0;
         struct timespec t_last_se = t0;
@@ -2743,14 +2853,27 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if QSB_X66
+        uint64_t *d_k4_scratch=NULL;
+        const size_t k4_bytes=(size_t)QSB_X66_BLOCKS*256*QSB_K4_EPOCHS*QSB_K4_WORDS*sizeof(uint64_t);
+        cudaError_t k4_alloc=cudaMalloc(&d_k4_scratch,k4_bytes);
+        if(k4_alloc!=cudaSuccess || !d_k4_scratch){fprintf(stderr,"OOM: bounded K4 scratch\n");return 1;}
+#endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
+#if QSB_X66
+            if(epochs_left==0)break;
+            const uint64_t launch_cap=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_K4_EPOCHS;
+            int launch_epochs=(int)(epochs_left<launch_cap?epochs_left:launch_cap);
+            int nblk=(launch_epochs+QSB_K4_EPOCHS-1)/QSB_K4_EPOCHS;
+#else
 #if ZLAB_K2S
             epochs_left >>= 1;            /* whole blocks of two epochs */
             if (epochs_left == 0) break;
 #endif
             int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
                        ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
+#endif
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH
@@ -2771,6 +2894,12 @@ int main(int argc, char **argv) {
              * blockIdx.x span the whole epoch range of the launch. */
             kernel_build_first<<<nblk * QSB_K2S_MUL, qsb_first_class_count>>>(
                 epoch_base, n_epochs, qsb_first_class_count, d_epochs, d_first);
+#if QSB_X66
+            int physical_blocks=nblk<QSB_X66_BLOCKS?nblk:QSB_X66_BLOCKS;
+            kernel_digest_k4<<<physical_blocks,QSB_SE_PER_EPOCH>>>(
+                d_gt,d_epochs,d_first,qsb_first_stride,launch_epochs,physical_blocks,
+                d_k4_scratch,zh_cnt,zh_idx,zh_combos);
+#else
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -2791,12 +2920,21 @@ int main(int argc, char **argv) {
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,
                 d_first, qsb_first_stride);
+#endif
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_X66
+            total_searched += (uint64_t)launch_epochs * QSB_SE_PER_EPOCH;
+#else
             total_searched += (uint64_t)batch_pos * QSB_K2S_MUL;
+#endif
             g_total_searched = total_searched;
+#if QSB_X66
+            epoch_base += (uint64_t)launch_epochs;
+#else
             epoch_base += (uint64_t)nblk * QSB_K2S_MUL;
+#endif
 #if ZLAB_HITPATH
             cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
             memcpy(&h_hit, zh_host, 4);
@@ -2913,6 +3051,9 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+#if QSB_X66
+        cudaFree(d_k4_scratch);
+#endif
         free(h_combos);
         return 0;
     }
