@@ -2,6 +2,17 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
+/* QSB_STREAM_CS (kill switch, default 1 = promoted): the producer->consumer
+ * first-block-state stream (d_first: ~906 MB stored + ~906 MB loaded per
+ * launch, the largest data stream in the digest loop) moves to the evict-first
+ * (streaming) path instead of the write-back path, so its lines stop competing
+ * for L2 with the 64 MiB fixed-base comb table.  Same mechanism the pinning
+ * track promoted on 2026-09-18 (submission 67b4968b, +0.303%; subset had no
+ * cache-operator usage at all).  Cache hint only: identical arithmetic,
+ * identical hit path.  0 = previous write-back path. */
+#ifndef QSB_STREAM_CS
+#define QSB_STREAM_CS 1
+#endif
 __device__ uint32_t QSB_WINDOW_FIRST[14][256];
 __device__ uint32_t QSB_WINDOW_SECOND[64][256];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
@@ -108,12 +119,20 @@ __device__ __forceinline__ void qsb_store_first_state(uint32_t * __restrict__ ds
     a.x=in[0];a.y=in[1];a.z=in[2];a.w=in[3];
     b.x=in[4];b.y=in[5];b.z=in[6];b.w=in[7];
     uint4 *v=reinterpret_cast<uint4*>(dst);
+#if QSB_STREAM_CS
+    __stcs(v,a);__stcs(v+1,b);
+#else
     v[0]=a;v[1]=b;
+#endif
 }
 __device__ __forceinline__ void qsb_load_first_state(const uint32_t * __restrict__ src,
         uint32_t out[8]) {
     const uint4 *v=reinterpret_cast<const uint4*>(src);
+#if QSB_STREAM_CS
+    uint4 a=__ldcs(v),b=__ldcs(v+1);
+#else
     uint4 a=v[0],b=v[1];
+#endif
     out[0]=a.x;out[1]=a.y;out[2]=a.z;out[3]=a.w;
     out[4]=b.x;out[5]=b.y;out[6]=b.z;out[7]=b.w;
 }
