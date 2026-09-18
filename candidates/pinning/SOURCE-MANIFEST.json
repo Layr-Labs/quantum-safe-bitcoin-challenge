@@ -1,48 +1,204 @@
 {
+  "status": "Qualified for submission: native correctness, full production all-hit verification and current public-source comparisons passed. No official score claimed for this new source.",
+  "parent": "b89c5b10adcb383bddb898a749ef3af8a58fc916",
+  "parent_submission": "99234b73-be8f-4fbe-9676-af3ab7daf03e",
   "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
     "pinning.cu": "2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98",
-    "GPUMath.h": "52c600aab1a23d576ceb1b72340e349140cb4cb87a52cd73d156a16927ddc30a",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "GPUMath.h": "c1e9c2e213d76df01b942c3c68fd8e9850d03d1d9f6c0bd318ac75a506bb9013",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "ce0aff4e-be9b-4fae-a8a3-b0ed7acabb8e",
-  "comparison_baseline_promoted_commit": "33753cc7bc2ebb7054b667805ce216dc5fe7fecd",
-  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
+  "runtime_digest": "9a5bf73974c19955f8a75ca5ce88fdeaf2d25f1991d3c52f64b80546ad9bad9e",
   "model": "GPT-6",
   "harness": "Codex",
-  "production_source_bytes": 247374,
-  "validation": {
-    "full_run_problem_seed": 1605866842,
-    "production_binary_sha256": "d0090dbd589ef0837ac41ad789aff1084ad62e0f742da4b1ab103cae00907753",
-    "wall_seconds": 1201.4921779958531,
-    "artifact_seconds": 1200.119,
-    "verified_hits": 103447,
-    "all_hits_verified": true,
-    "matched_long_gains_percent": [
-      1.3847867741781261,
-      1.436469399152207
-    ],
-    "long_run_problem_seed": 1713034501,
-    "long_unique_hits_verified": 11970,
-    "final_peer_refresh": {
-      "checked_at": "2026-09-18T06:12:34.055272+00:00",
-      "rates": {
-        "control": 728191416.152209,
-        "ce0aff4e": 716777154.7298412,
-        "1c8e12c4": 702871448.8946683,
-        "0c6d3205": 718257090.1933672,
-        "1fd5ccd1": 700437553.6750523
-      },
-      "strongest_new_public_source": "0c6d3205",
-      "paired_gains_percent": [
-        1.4185735172299152,
-        1.3476334233734732
+  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
+  "native_validation": {
+    "passed": true,
+    "native_triples": 40551,
+    "field_alias_comparisons": 162204,
+    "native_affine_points": 33040,
+    "pipeline_modes": 4,
+    "all_wall_runs": 10,
+    "unique_independently_verified_hits_per_run": 858,
+    "production_header_sha256": "c1e9c2e213d76df01b942c3c68fd8e9850d03d1d9f6c0bd318ac75a506bb9013"
+  },
+  "short_screen": {
+    "scope": "short complete-work wall comparison; not ranked result",
+    "rates": {
+      "control": 728908453.2561338,
+      "ce0aff4e": 717503767.0570514,
+      "fused": 731445885.8587399
+    },
+    "per_direction_rates": {
+      "control": [
+        729522790.9222466,
+        728294115.5900209
       ],
-      "all_14_runs_matched_verified_hits": 858
+      "ce0aff4e": [
+        717112669.4614291,
+        717894864.6526736
+      ],
+      "fused": [
+        732189544.195766,
+        730702227.5217136
+      ]
+    },
+    "relative_to_peer": {
+      "control": 1.5894949577561546,
+      "ce0aff4e": 0.0,
+      "fused": 1.943142244238527
+    },
+    "relative_to_parent": {
+      "control": 0.0,
+      "ce0aff4e": -1.5646253172310054,
+      "fused": 0.34811403150436515
+    },
+    "control_range_percent": 0.16870592607085566
+  },
+  "long_comparison": {
+    "long_seed": 1426352754,
+    "paired_gains_percent": [
+      0.2204804595244081,
+      0.2710024798461719
+    ],
+    "observed_lower_gain_percent": 0.2204804595244081,
+    "matched_peer_gate": true,
+    "production_binary_sha256": "f6ef737617f4f28d64ac63f362bed89c2200c1f36e789eafd7e7ef5f989614a4",
+    "evidence_sha256": "b5c50f45b7b23b9b9fc7f2e4e058dd5cae90fe73a6688355fe1ce8efcbfb8626",
+    "independently_verified_hits_per_run": 11788
+  },
+  "reproducibility_sources": {
+    "audit_fused_field.cu": "c53c192af10a3bf27bf2c8a29f0f718f3c23bca9765b925a1a7e5230de2cd965",
+    "audit_fused_field.py": "8024fd2cabaf38c4aedd6d5c282b181685450024908657c0231775ddd3e09adc"
+  },
+  "matched_contender_long": {
+    "evidence_sha256": "9f9f9a0fcbfab4cca99e0eb45a481772fcb9c9875ede25d38bf1a70570b6a860",
+    "verified_hits_per_run": 11872,
+    "rates": [
+      728586153.4458029,
+      728586829.1401324
+    ],
+    "mean_gain_percent": {
+      "89afe119": 0.17473550828706053,
+      "cf11eb1f": 0.0824319898256709,
+      "2dc72281": 0.09976740521797645
+    },
+    "minimum_observed_gain_percent": {
+      "89afe119": 0.13368171031695741,
+      "cf11eb1f": 0.025237950221912442,
+      "2dc72281": 0.09821001065046797
     }
+  },
+  "full_production_verification": {
+    "started_at": "2026-09-18T09:05:34.332830+00:00",
+    "policy": "Verified fastest current public source; final live queue comparison is separate.",
+    "scope": "Local unchanged production wrapper verification, not an official score.",
+    "prior_qualification_sha256": "b5c50f45b7b23b9b9fc7f2e4e058dd5cae90fe73a6688355fe1ce8efcbfb8626",
+    "manifest_sha256": "ab96057531f6515dea3a5412bcb090e37ca1e98d8d9f16a875c0aafc92a5c2f8",
+    "production_binary_sha256": "f6ef737617f4f28d64ac63f362bed89c2200c1f36e789eafd7e7ef5f989614a4",
+    "paired_gains_percent": [
+      0.2204804595244081,
+      0.2710024798461719
+    ],
+    "source_hashes_verified_before": true,
+    "status": "full verification passed; refresh all peers before any submission",
+    "full_seed": 1228084452,
+    "finished_at": "2026-09-18T09:26:22.361570+00:00",
+    "source_hashes_verified_after": true,
+    "full_candidate": {
+      "wall_seconds": 1201.5077589889988,
+      "artifact_seconds": 1200.14,
+      "verified_hits": 104254,
+      "all_hits_verified": true,
+      "binary_sha256": "f6ef737617f4f28d64ac63f362bed89c2200c1f36e789eafd7e7ef5f989614a4"
+    },
+    "proof_sha256": "a8ac469b7dd6840f23d6fbb17f7fb385231ec1e2067240e2e581cb5f96dc0cc4"
+  },
+  "final_tail_peer_screen": {
+    "rates": {
+      "control": 731219626.0495584,
+      "frontier": 729153631.2607298,
+      "165c0b30": 726817432.3649843,
+      "5290cb11": 726443137.5557234
+    },
+    "per_direction_rates": {
+      "control": [
+        731852415.7790688,
+        730586836.3200479
+      ],
+      "frontier": [
+        729667673.7798815,
+        728639588.7415782
+      ],
+      "165c0b30": [
+        727507753.7364007,
+        726127110.9935677
+      ],
+      "5290cb11": [
+        726661910.6821715,
+        726224364.4292753
+      ]
+    },
+    "mean_gain_percent": {
+      "165c0b30": 0.6056808062858243,
+      "5290cb11": 0.6575171884624753
+    },
+    "timed_candidates_per_run": 4978400000,
+    "all_invocations": 12,
+    "verified_hits_per_prefix": 858,
+    "summary_sha256": "349569426ca8778688419fd6df949e3675ec360d77516ee740bd1049fa35b007",
+    "production_source_files_verified_before_and_after": 28
+  },
+  "competitive_gate": {
+    "decision": "GO",
+    "checked_at": "2026-09-18T09:38:37.052889+00:00",
+    "frontier_score": 723219946,
+    "frontier_runtime_digest": "e4568aca296d96412d7346ce60399dd9f8180d027dd8d20d195a612d65d09276",
+    "pending": [
+      {
+        "id": "2dc72281-0f08-4cfc-9b94-884c8d754754",
+        "runtime_digest": "4d734ec70b3591bdcfdf417594d591108651cd33eea80fd9382d2b9ac2cc9bd5"
+      },
+      {
+        "id": "62ee65d7-5a29-45d3-b8df-ccb303bd6118",
+        "runtime_digest": "74c18fbb6a1366e268af59916e258aa744eecad27e86ce973c8756c455423124"
+      },
+      {
+        "id": "9ab11d96-e68a-48a4-ba35-20ff1fe68c0d",
+        "runtime_digest": "dc8be04f29d4037bb88840715e0fcf0e78729ee54fdb760e5a79a5d3fbab0799"
+      },
+      {
+        "id": "165c0b30-c873-48b1-ac1f-6d4ffa0ec3f5",
+        "runtime_digest": "2056b0e3f0d1c92e6d4ace9146de281fca78feabfe3a9eefff8688f389ee8c76"
+      },
+      {
+        "id": "5290cb11-940c-42c1-a8cc-51242bc631c2",
+        "runtime_digest": "cb8b78f2e5a68f0f7773022484b8fc58ac063918d651682c1287af98f5e5229f"
+      }
+    ],
+    "evidence_registry_sha256": "e7d0526744fb9b321528e6de7ce3fc034eb597a2cb029159c9062355db8f812c",
+    "comparison_cohorts": 6,
+    "separate_peer_comparisons": 18,
+    "pre_upload_refresh_required": true
+  },
+  "native_three_limb_boundary": {
+    "passed": true,
+    "scope": "inspect already completed native evidence; no new GPU execution",
+    "indices": [
+      7980,
+      38380
+    ],
+    "input_sha256": "a5cbbd2c35d50b2f65951a8ea84e3e64173a327bc038615e8c3e732fd22e20f4",
+    "output_sha256": "1888ccf0d629aa6f4ce9618550db3633898ce812355f7449cc92c791da88519d",
+    "a": "B-1",
+    "e": "B-1",
+    "q": 0,
+    "exact_native_output_hex": "0x1000007a1000e8cd0",
+    "third_u32_limb": 1,
+    "reason": "This carry case needs the third u32 correction limb; two limbs would lose bit64."
   }
 }
