@@ -33,6 +33,9 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 #define ZI_B 30
 #define ZI_MM32 0xD2253531u            /* -p^-1 mod 2^32 */
 #define ZI_MASK30 0x3FFFFFFFu
+#ifndef QSB_ZI_SKIP_ZERO_NEGATION
+#define QSB_ZI_SKIP_ZERO_NEGATION 1
+#endif
 
 /* Decision loop: 30 delayed divsteps on (u0,v0) low words and (uh,vh) aligned heads.
  * Returns matrix rows (a,b) for u and (c,d) for v, each row l1-norm <= 2^30. */
@@ -82,7 +85,7 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
     X[8]=(uint32_t)acc;
     for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
-    X[8]=(uint32_t)((int32_t)X[8]>>ZI_B);
+    X[8]=(uint32_t)(acc>>ZI_B);
 }
 ZI_DEV void zi_condneg(uint32_t *X,uint32_t neg){
     const uint32_t msk=0u-neg; uint64_t c=neg;
@@ -140,7 +143,11 @@ ZI_DEV void zi_inverse_quad(uint64_t *R,int lane){
         zi_row_ip(P,Q,ka,kb,rs);
         uint32_t neg=(uint32_t)((int32_t)P[8]<0);
         neg=zi_x(neg,lane&1);
+#if QSB_ZI_SKIP_ZERO_NEGATION
+        if(neg)zi_condneg(P,1u);
+#else
         zi_condneg(P,neg);
+#endif
         uint32_t nz=0;
         for(int i=0;i<9;i++)nz|=P[i];
         nz=zi_x(nz,1);
