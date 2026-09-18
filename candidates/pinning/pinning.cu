@@ -521,15 +521,15 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
-    for(int c=2;c<GT_CHUNKS;c++) {
+    for(int c=2;c<GT_CHUNKS-1;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
         base+=1u<<16;
     }
-    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    qsb_load_decoded(table,GT_CHUNKS-1,base,x1,y1);
+    _PointAddXYZZT<false>(X,Y,U,V,x1,y1,y0);
 }
-
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
 
