@@ -43,16 +43,6 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_STREAM
 #define QSB_STREAM 1          /* 1: .cs (evict-first) hints on pipeline state/tree traffic */
 #endif
-#ifndef QSB_STREAM2
-#define QSB_STREAM2 1         /* 1: extend the .cs (evict-first) hint to the FOUR LIVE pipeline
-                               * state planes.  QSB_STREAM only ever reaches the 8-byte root
-                               * checkpoint: its .v2 call sites sit inside QSB_TREE_OFFLOAD /
-                               * QSB_TREE_OFFLOAD2, both 0 on this base, so they are dead.
-                               * The state planes are 16 B each, written once by prepare and
-                               * read once by finish, ~1.07 GB per batch -- they can never be
-                               * L2-resident, so caching them only evicts the 64 MiB table
-                               * that every candidate reads 15 times. */
-#endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
 #endif
@@ -84,7 +74,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
 #endif
 #ifndef QSB_EARLY_LOAD
-#define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
+#define QSB_EARLY_LOAD 1      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
@@ -384,7 +374,9 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 #ifndef QSB_DIRECT_DIGITS
 #define QSB_DIRECT_DIGITS 1
 #endif
-#if QSB_DIRECT_DIGITS && (QSB_PREFETCH || QSB_S0_SHM || QSB_EARLY_LOAD)
+/* PREFETCH / S0_SHM still force the shared digit-plane path. EARLY_LOAD is
+ * wired into _FixedBaseSignedXYZZScalar below and coexists with DIRECT_DIGITS. */
+#if QSB_DIRECT_DIGITS && (QSB_PREFETCH || QSB_S0_SHM)
 #undef QSB_DIRECT_DIGITS
 #define QSB_DIRECT_DIGITS 0
 #endif
@@ -487,6 +479,53 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
 }
 #endif
 
+#if QSB_EARLY_LOAD
+/* Mixed addition twin of tip _PointAddXYZZT<true>: same S2-then-U2 schedule,
+ * but once X2/Y2 die under deferred-Y the next table record is issued into
+ * nx/ny so its DRAM latency overlaps the remaining 5M+2S of this addition.
+ * Only the deferred-Y form is provided; Scalar resolves Y once at chain end. */
+__device__ __forceinline__ void _PointAddXYZZT_early(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff,
+    bool do_load, const uint8_t *gTable, uint32_t nbase, uint32_t nidx, uint64_t nneg,
+    uint64_t *nx, uint64_t *ny)
+{
+  uint64_t U2[4], S2[4], P[4], R[4], PP[4], PPP[4], Q[4], T[4];
+#if QSB_LAZY
+  _ModAddLazy(S2, Y2, Yoff);
+#else
+  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  /* X2 and Y2 are dead under deferred-Y: overlap the next table fill here. */
+  if (do_load) gt_load_signed_flat(gTable, nbase, nidx, nneg, nx, ny);
+  _ModSqr(PP, P);
+  _ModMult(PPP, PP, P);
+  _ModMult(Q, U2, PP);
+  _ModMult(ZZ1, PP);
+#if QSB_FUSE_SQRADDSUB2
+  _ModSqrAddSub2(T, R, PPP, Q);
+#else
+  _ModSqr(T, R);
+#if QSB_LAZY
+  _ModX3Fused(T, T, PPP, Q);
+#else
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);
+#endif
+#endif
+  _ModMult(ZZZ1, PPP);
+  _ModSub256(Q, Q, T);
+  _ModMult(Q, R);
+  Load256(Y1, Q);
+  Load256(X1, T);
+}
+#endif
+
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
 
@@ -561,6 +600,32 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_EARLY_LOAD
+    /* Tip hole: QSB_EARLY_LOAD existed for the e[] path but production always
+     * calls this Scalar entry, which never issued the next table fill inside
+     * the madd. Peel chunk 2 first, then each madd overlaps the next fill. */
+    uint64_t nx[4],ny[4];
+    unsigned base=gt_offset(2);
+    qsb_load_decoded(table,2,base,x1,y1);
+    base+=1u<<16;
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        const bool more=(c+1)<GT_CHUNKS;
+        uint32_t nidx=0; uint64_t nneg=0ULL;
+        if(more){
+            volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+            uint32_t code=codes[(size_t)(c+1)*QSB_TREE_N+threadIdx.x];
+            nidx=code&0x1ffffu;
+            nneg=0ULL-(code>>31);
+        }
+        _PointAddXYZZT_early(X,Y,U,V,x1,y1,y0, more, table, base, nidx, nneg, nx, ny);
+        Load256(y0,y1);
+        if(more){
+            Load256(x1,nx); Load256(y1,ny);
+            base+=1u<<16;
+        }
+    }
+#else
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -569,6 +634,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 }
 
@@ -1412,13 +1478,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 
     if(!active)return;
     size_t i=(size_t)idx,s=(size_t)batch_size;
-#if QSB_STREAM2
-    ulonglong2 y01=qsb_ld_v2(&saved[0*s+i]),y23=qsb_ld_v2(&saved[1*s+i]);
-    ulonglong2 v01=qsb_ld_v2(&saved[2*s+i]),v23=qsb_ld_v2(&saved[3*s+i]);
-#else
     ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
     ulonglong2 v01=saved[2*s+i],v23=saved[3*s+i];
-#endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
