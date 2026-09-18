@@ -82,7 +82,13 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
     X[8]=(uint32_t)acc;
     for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
-    X[8]=(uint32_t)((int32_t)X[8]>>ZI_B);
+    /* The top limb's accumulator can exceed int32: |a|,|b| <= 2^30 and the r/s
+     * top limbs reach -2, so a*X[8]+b*Y[8]+m+carry can pass 2^31. Truncating to
+     * 32 bits before the shift dropped those bits and returned a wrong inverse
+     * for rare structured inputs (e.g. p-2^27-1, p-2^51-1). Shift the full
+     * 64-bit accumulator instead; same instruction count on sm_89.
+     * Reported by @Calcutatator (e8249b2). */
+    X[8]=(uint32_t)(acc>>ZI_B);
 }
 ZI_DEV void zi_condneg(uint32_t *X,uint32_t neg){
     const uint32_t msk=0u-neg; uint64_t c=neg;
