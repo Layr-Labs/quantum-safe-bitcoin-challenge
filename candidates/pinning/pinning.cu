@@ -403,6 +403,16 @@ struct qsb_digit_window {
         if (sh >= 64u) { w0 = w1; w1 = w2; w2 = w3; w3 = 0ULL; sh -= 64u; }
     }
 };
+__device__ __forceinline__ void qsb_direct_digit(
+    qsb_digit_window &w, unsigned bits, bool last, int negative,
+    uint32_t *idx, uint64_t *mneg) {
+    uint32_t f = w.peek() & ((1u << bits) - 1u);
+    int32_t tm = last ? -negative : (int32_t)(f >> (bits - 1u)) - 1;
+    *idx = (f ^ (uint32_t)tm) & ((1u << (bits - 1u)) - 1u);
+    *mneg = 0ULL - (uint32_t)(tm < 0);
+    w.advance(bits);
+}
+
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
  * y=Y/ZZZ). Seed the first two chunks with a deferred-Y mmadd (3M+2S), adjust
@@ -555,21 +565,28 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
-    unsigned base=gt_offset(2);
+    (void)unused;
+    uint64_t M[4]; int negative;
+    qsb_signed_recode_setup(k, M, &negative);
+    qsb_digit_window w;
+    w.init(M, 1u);
+    uint64_t x0[4], y0[4], x1[4], y1[4];
+    uint32_t idx; uint64_t mneg;
+    qsb_direct_digit(w, 18u, false, negative, &idx, &mneg);
+    gt_load_signed_flat_m(table, gt_offset(0), idx, mneg, x0, y0);
+    qsb_direct_digit(w, 17u, false, negative, &idx, &mneg);
+    gt_load_signed_flat_m(table, gt_offset(1), idx, mneg, x1, y1);
+    _PointAddXYZZ_mm(X, Y, U, V, x0, y0, x1, y1);
+    unsigned base = gt_offset(2);
     #pragma unroll 1
-    for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
-        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-        Load256(y0,y1);
-        base+=1u<<16;
+    for (int c = 2; c < GT_CHUNKS; c++) {
+        qsb_direct_digit(w, 17u, c == GT_CHUNKS - 1, negative, &idx, &mneg);
+        gt_load_signed_flat_m(table, base, idx, mneg, x1, y1);
+        _PointAddXYZZT<true>(X, Y, U, V, x1, y1, y0);
+        Load256(y0, y1);
+        base += 1u << 16;
     }
-    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    _ModMult(x1, y0, V); _ModSub256(Y, Y, x1);
 }
 
 
