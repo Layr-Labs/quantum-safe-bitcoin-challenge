@@ -21,11 +21,44 @@ __device__ __forceinline__ uint32_t qsb_difference_parity(
 }
 
 // Exact full-width residue; callers normalize before additions/parity.
+// Shared-multiplicand dual product: out0=a0*s, out1=a1*s. Recovery leaves
+// vbar=Y*hc and tbar=V*hc share hc and are otherwise independent, so one
+// helper issues both exact muls before any mask or global store.
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
     uint64_t tmp[5];qsb_field_mul(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
     Load256(out,tmp);
 }
+__device__ __forceinline__ void qsb_packed_raw_mul2_shared(
+    uint64_t *out0,const uint64_t *a0,uint64_t *out1,const uint64_t *a1,
+    const uint64_t *s) {
+    uint64_t t0[5],t1[5];
+    qsb_field_mul(t0,const_cast<uint64_t*>(a0),const_cast<uint64_t*>(s));
+    qsb_field_mul(t1,const_cast<uint64_t*>(a1),const_cast<uint64_t*>(s));
+    Load256(out0,t0);
+    Load256(out1,t1);
+}
+__device__ __forceinline__ void qsb_packed_raw_mul2(
+    uint64_t *out0,const uint64_t *a0,const uint64_t *b0,
+    uint64_t *out1,const uint64_t *a1,const uint64_t *b1) {
+    uint64_t t0[5],t1[5];
+    qsb_field_mul(t0,const_cast<uint64_t*>(a0),const_cast<uint64_t*>(b0));
+    qsb_field_mul(t1,const_cast<uint64_t*>(a1),const_cast<uint64_t*>(b1));
+    Load256(out0,t0);
+    Load256(out1,t1);
+}
+__device__ __forceinline__ void qsb_recovery_mul2(
+    uint64_t *out0,const uint64_t *a0,const uint64_t *b0,
+    uint64_t *out1,const uint64_t *a1,const uint64_t *b1) {
+    uint64_t t0[5],t1[5];
+    qsb_field_mul(t0,const_cast<uint64_t*>(a0),const_cast<uint64_t*>(b0));
+    qsb_field_mul(t1,const_cast<uint64_t*>(a1),const_cast<uint64_t*>(b1));
+    qsb_field_normalize(t0);
+    qsb_field_normalize(t1);
+    Load256(out0,t0);
+    Load256(out1,t1);
+}
+
 
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
@@ -40,8 +73,7 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
-        qsb_packed_raw_mul(vbar,Y,hc);
-        qsb_packed_raw_mul(tbar,V,hc);
+        qsb_packed_raw_mul2_shared(vbar,Y,tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
@@ -62,14 +94,16 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
     uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
-    uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
-    qsb_recovery_mul(u,tbar,weighted_inv);
-    qsb_recovery_mul(v,vbar,root_inv);
+    uint64_t u[4],v[4],l[4],m[4],sum[4],t1[4],t2[4],s1[4],s2[4];
+    qsb_recovery_mul2(u,tbar,weighted_inv,v,vbar,root_inv);
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
-    uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
-    return parity|(qsb_difference_parity(b,s)<<1);
+    _ModSub256(t1,l,c); _ModSub256(t2,m,c);
+    qsb_packed_raw_mul2_shared(x1,t1,x2,t2,sum);
+    qsb_add_boundary(x1,a); _ModAdd256(x1,x1,a);
+    qsb_add_boundary(x2,a); _ModAdd256(x2,x2,a);
+    _ModSub256(t1,a,x1); _ModSub256(t2,a,x2);
+    qsb_packed_raw_mul2(s1,l,t1,s2,m,t2);
+    qsb_parity_boundary(s1,b); qsb_parity_boundary(s2,b);
+    uint32_t parity=qsb_difference_parity(s1,b);
+    return parity|(qsb_difference_parity(b,s2)<<1);
 }
