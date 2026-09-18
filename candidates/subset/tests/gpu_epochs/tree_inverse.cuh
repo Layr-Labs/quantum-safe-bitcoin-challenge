@@ -152,7 +152,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     value[4]=0;
 }
 #else
-__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+__device__ __noinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
     const int tid=threadIdx.x,n=blockDim.x;
