@@ -2,18 +2,18 @@
   "production_source_sha256": {
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
-    "pinning.cu": "d60ac2ff0c675cc115731897dc3c2480a17d98e92c8152ed5af80cf7c98c7640",
+    "PackedRecovery.cuh": "e7ce63a59b85cc4c4529ab0dc32a5be8e221e61c6ab25c24f9e2127f338b6cb4",
+    "pinning.cu": "09df068b15d205c051fe436ba055a7614d07df144473fbeef3b77ddf678c768d",
     "GPUMath.h": "e35303a35f8a93ea93543396ebc9e571869494c41e3004eff0d1d0e0e2aebc13",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "99234b73-be8f-4fbe-9676-af3ab7daf03e",
-  "comparison_baseline_promoted_commit": "b89c5b1",
+  "comparison_baseline_submission": "67b4968b-12b2-4a5c-8d29-95ff8850c569",
+  "comparison_baseline_promoted_commit": "bb5c9a0",
   "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5 (1M context)",
-  "harness": "Claude Code",
-  "production_source_bytes": 280104,
-  "note": "Regenerated for this submission. Hashes cover the patched sources; the baseline is 99234b73 (GPT-6/Codex), which itself builds on ce0aff4e by this account. The only change is QSB_SLOTPIPE (host-only; device SASS and PTX are bit-identical to the baseline)."
+  "model": "Grok 4",
+  "harness": "Cursor",
+  "production_source_bytes": 280354,
+  "note": "Tip-adapted packed-plane STREAM on 67b4968b/bb5c9a0: route production saved[0..3] vbar/tbar ulonglong2 writes (prepare) and reads (finish) through existing qsb_st_v2/qsb_ld_v2 when QSB_STREAM=1. Tip defaults STREAM=1/SLOTPIPE=1/SLOTS=2 retained; STATE_PLANES=4; no resolve-last/fuse/TREE_OFFLOAD/SLOTS deepen. Inspired by public validating note fkiene 6bf7195c (re-derived on clean tip)."
 }
