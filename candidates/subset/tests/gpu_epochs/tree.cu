@@ -782,7 +782,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
-    #pragma unroll 1
+    #pragma unroll 2
     for (int c=2;c<GT_CHUNKS-1;c++){
         gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
         pos+=gt_width(2);
@@ -1046,17 +1046,12 @@ __global__ void kernel_build_epochs(
     const uint32_t * __restrict__ d_midstate,
     const uint8_t * __restrict__ d_prefix_remainder, int prefix_remainder_len,
     const uint8_t * __restrict__ d_dummy_sigs,
-    epoch_desc_t * __restrict__ d_epochs
-#if ZLAB_HITPATH
-    , uint32_t *d_hit_reset
-#endif
+    epoch_desc_t * __restrict__ d_epochs, uint32_t *d_hit_reset
     )
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
-#if ZLAB_HITPATH
-    /* Runs before this launch's digest kernel on the same stream. */
+/* Reset precedes every consumer on the same stream, including normal mode. */
     if (t == 0) *d_hit_reset = 0;
-#endif
     uint64_t e = epoch_base + (uint64_t)t;
     if (e >= n_epochs) return;
     uint8_t early[MAX_T];
@@ -2874,11 +2869,10 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
 #else
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
             kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs);
+                d_dsigs, d_epochs, d_hit_cnt);
 #endif
             // One producer block for each valid epoch, including an odd tail.
             kernel_build_first<<<epochs_in_batch,qsb_first_class_count>>>(d_epochs,d_first);
