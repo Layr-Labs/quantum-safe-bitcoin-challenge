@@ -1,19 +1,78 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "dc884771614339f5c2ba9732824252a514344605bf099ce6f4c759dae7674240",
-    "pinning.cu": "d60ac2ff0c675cc115731897dc3c2480a17d98e92c8152ed5af80cf7c98c7640",
-    "GPUMath.h": "e35303a35f8a93ea93543396ebc9e571869494c41e3004eff0d1d0e0e2aebc13",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+  "base_commit": "2791ed0588f5014ccd688d48ba5502df2879f2f1",
+  "model": "GPT-6 Astra",
+  "effort": "medium",
+  "harness": "Codex",
+  "compiler": "CUDA 12.8.93; official default and sm_89 compile checks; local sm_86 execution",
+  "source_sha256": {
+    "BorrowParity.cuh": "c8cf29da608eaa67c272f860654dd68b2f7231ddccc8401d97182bf232a17e69",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "GPUMath.h": "e35303a35f8a93ea93543396ebc9e571869494c41e3004eff0d1d0e0e2aebc13",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "36329475840186535861e18dc97b449bfdb465d9e899a7fc5c7fe963c6f78f00",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "d60ac2ff0c675cc115731897dc3c2480a17d98e92c8152ed5af80cf7c98c7640",
+    "tests/boundary_audit.cu": "334480ba099e929022b2854646fa5037ea154053a8539b96f27fe6afa63d3204"
   },
-  "comparison_baseline_submission": "99234b73-be8f-4fbe-9676-af3ab7daf03e",
-  "comparison_baseline_promoted_commit": "b89c5b1",
-  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5 (1M context)",
-  "harness": "Claude Code",
-  "production_source_bytes": 280104,
-  "note": "Regenerated for this submission. Hashes cover the patched sources; the baseline is 99234b73 (GPT-6/Codex), which itself builds on ce0aff4e by this account. The only change is QSB_SLOTPIPE (host-only; device SASS and PTX are bit-identical to the baseline)."
+  "local_verification": {
+    "score": 167755952.0,
+    "metrics": {
+      "bench": "pinning",
+      "unit": "verified candidates per second",
+      "direction": "higher is better",
+      "throughput_Mps": 167.755952,
+      "hits_per_s": 19.99807,
+      "leading_zero_bits": 24,
+      "mode": "fixed_time",
+      "candidates": 20166213632,
+      "candidates_self_reported": 20739354239,
+      "elapsed_s": 120.2116,
+      "verified_hits": 2404,
+      "hit_relative_variance": 0.020395,
+      "problem_seed": 938417,
+      "gpu": "RTX_3070_LOCAL",
+      "verified": true
+    }
+  },
+  "fixed_work_comparison": {
+    "track": "pinning",
+    "verified_hits": 585,
+    "identical_hitsets": true,
+    "warning": null,
+    "baseline_Mps": 165.69162071142358,
+    "candidate_Mps": 166.65054294172054,
+    "gain_pct": 0.5787391216162119,
+    "runs": [
+      {
+        "track": "pinning",
+        "variant": "baseline",
+        "count": 4978400000,
+        "seconds": 29.691151001,
+        "Mps": 167.6728530945913
+      },
+      {
+        "track": "pinning",
+        "variant": "candidate",
+        "count": 4978400000,
+        "seconds": 30.015911954,
+        "Mps": 165.8586954689066
+      },
+      {
+        "track": "pinning",
+        "variant": "candidate",
+        "count": 4978400000,
+        "seconds": 29.73201701,
+        "Mps": 167.4423904145345
+      },
+      {
+        "track": "pinning",
+        "variant": "baseline",
+        "count": 4978400000,
+        "seconds": 30.40979898,
+        "Mps": 163.7103883282559
+      }
+    ]
+  },
+  "note": "Local RTX 3070 evidence does not establish RTX 4090 speedup or promotion."
 }
