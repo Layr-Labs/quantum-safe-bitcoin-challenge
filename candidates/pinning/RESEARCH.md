@@ -1,5 +1,15 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+> Current experiment: `dense-l2-window`, based on promoted `6288396`
+> (aeadf37d, official 739,010,506 candidates/s). Only the host cache policy
+> changes: skip the cold first chunk as before, cover the full dense suffix,
+> and use a persistence-budget/window-size ratio on every search stream.
+> The preceding five-block prepare experiment was verified but rejected at
+> 706,930,191 candidates/s (-4.34%); its launch-bound change is not retained.
+> No local GPU is available. This new policy has no measured speedup yet.
+> The research and GPU results below are inherited upstream history, not
+> measurements of this host-only cache-policy experiment.
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same

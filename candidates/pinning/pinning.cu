@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
+#include "l2_policy.h"
 
 #include "GPUMath.h"
 
@@ -2120,24 +2121,24 @@ int main(int argc, char **argv) {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
-        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
-         * chunks 2^16 each: pinning the dense chunks first captures more of the
-         * 15 random reads. The window stays inside the table. */
+         * chunks 2^16 each. Spread the persistence budget across all of the
+         * dense suffix, instead of giving its last chunks no persisting lines.
+         * Both the window and its approximate hit share obey device limits. */
         size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
-        if (want > gt_sz - skip) want = gt_sz - skip;
-        if (want > 0 && max_window > 0) {
-            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+        const qsb_l2_policy policy = qsb_make_l2_policy(gt_sz, skip, max_persist, max_window);
+        if (policy.window_bytes > 0) {
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, policy.set_aside_bytes);
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
-            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.num_bytes = policy.window_bytes;
+            av.accessPolicyWindow.hitRatio  = policy.hit_ratio;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
             cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
-            printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
-                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
-                   (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
+            printf("  L2 persistence: %.0f MiB window, ratio %.6f (budget %.0f MiB) %s\n",
+                   (double)policy.window_bytes/(1024*1024), (double)policy.hit_ratio,
+                   (double)policy.set_aside_bytes/(1024*1024),
                    pe==cudaSuccess?"ok":cudaGetErrorString(pe));
             fflush(stdout);
         }
@@ -2174,14 +2175,13 @@ int main(int argc, char **argv) {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
-        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
         size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
-        if (want > gt_sz - skip) want = gt_sz - skip;
-        if (want > 0 && max_window > 0) {
+        const qsb_l2_policy policy = qsb_make_l2_policy(gt_sz, skip, max_persist, max_window);
+        if (policy.window_bytes > 0) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
-            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.num_bytes = policy.window_bytes;
+            av.accessPolicyWindow.hitRatio  = policy.hit_ratio;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
             for (int s = 0; s < QSB_SLOTS; s++)
