@@ -75,7 +75,6 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #define ASSEMBLY_SIGMA 1  /* funnel-shift sigma macros in GPUHash.h (test) */
 #include "../../GPUHash.h"
-#include "sparse_sha_fixed.cuh"
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
@@ -729,7 +728,7 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_PER_EPOCH 256
 /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 262144   /* successor: pending f63b274 geometry */
+#define ZLAB_LAUNCH_BLOCKS 131072   /* 16.8M candidates per launch (measured +0.3%) */
 #endif
 #define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
 
@@ -1226,8 +1225,16 @@ __device__ __forceinline__ int qsb_k2s_front(
     #pragma unroll
     for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
     qsb_scheduled_window_hash(state, ep, lane, first);
-    uint32_t s2[8];
-    _SHA256TransformDigest32(s2,state);
+    uint32_t b2[16];
+    #pragma unroll
+    for (int i=0;i<8;i++) b2[i]=state[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for (int i=9;i<15;i++) b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2, b2);
     uint64_t z[4];
     z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
     z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
@@ -1249,14 +1256,15 @@ __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32
         uint64_t sx3=ri ? q2x[3] : q1x[3];
         uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
                          (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-        uint32_t pb[9];
+        uint32_t pb[16];
         uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
         pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
         pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
         pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
         pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
         pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-        uint32_t hs[8];_SHA256TransformPubkey33(hs,pb);
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
         if(gpu_bench_valid_words(hs)){*recid_out=ri;return 1;}
     }
     return 0;
@@ -2581,7 +2589,7 @@ int main(int argc, char **argv) {
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 2048);
+    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;

@@ -1,0 +1,96 @@
+{
+  "status": "PASS",
+  "cases": 200100,
+  "unique_zero_failure_mask": 15,
+  "features": [
+    "lo_parity",
+    "hi_parity",
+    "second_fold_quotient_parity",
+    "canonical_subtraction"
+  ],
+  "mutation_failures": [
+    100284,
+    100350,
+    100184,
+    99858,
+    100132,
+    100178,
+    49916,
+    10,
+    100284,
+    100352,
+    100180,
+    99848,
+    100132,
+    100180,
+    49912,
+    0
+  ],
+  "first_witnesses": [
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0x2",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85e"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffff7ffffe17",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2d"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0x2",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85e"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffff7ffffe17",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2d"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0x2",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85e"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85e",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85e"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    {
+      "a": "0x2",
+      "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85e"
+    },
+    {
+      "a": "0x1",
+      "b": "0x1"
+    },
+    null
+  ],
+  "max_folded_u_bits": 257,
+  "scope": "Boundary/random full-width oracle screen; Bend exhaustively synthesizes the analogous reduced-radix mask. Not a universal proof or CUDA performance result.",
+  "model_sha256": "3dadf195dcda73c055d8c68d20ebb5b2d3a619d92deb42b3666adeadfc505e22",
+  "checker_sha256": "e412f1dd9a390fd02af09d1c419f64ffa2a3c0559e0afac247838159d9654631"
+}

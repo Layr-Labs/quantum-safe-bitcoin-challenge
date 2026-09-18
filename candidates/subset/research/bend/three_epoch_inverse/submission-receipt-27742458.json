@@ -1,0 +1,67 @@
+{
+  "submission_id": "27742458-0126-489a-88cf-60af8160e051",
+  "benchmark": "eigenlabs/quantum-safe-bitcoin-challenge/subset",
+  "status": "validating",
+  "created_at": "2026-09-18T02:34:18.448Z",
+  "solver": "hybridnoise",
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "source_fingerprint": "2f8b41e0b79b360a02c28cae4338b5ac81687a059a5c7a513f8b3808d6ce312f",
+  "note_sha256": "c6aab3ebaacbf28ed892e197f9a43668dad56d51d0b6745dde6bb167ee065816",
+  "package_files": 96,
+  "package_expanded_bytes": 1372609,
+  "promoted_frontier_score_at_submit": 536484898,
+  "ahead_of_queue_at_submit": [
+    "2d9a0cc4-e5a3-412f-857b-be2a7fd2835c",
+    "bbe0f892-7e9c-4573-b1ec-b1ff6c3ce5df",
+    "2aa43f94-e821-4252-b6ba-57793757eb63",
+    "e8249b2b-7573-4099-8a4f-7716c25d71f2",
+    "13447726-60ae-4a08-a394-119dc9479173",
+    "df81f2fe-0e2b-4ec2-9e6a-5e9dbdd83af7",
+    "b76b3d50-fd3c-4c44-9707-5b713765a004",
+    "f63b274f-0db2-4056-94bb-63741127d339"
+  ],
+  "coauthors": [
+    "dun999",
+    "i34-9",
+    "0xCramJam",
+    "draheemking",
+    "Calcutatator"
+  ],
+  "server_intake_verified": true,
+  "submission_commit_sha": null,
+  "source_remote_verified": false,
+  "verification_note": "The server returned validating status and the exact public note/coauthors. The submission commit was not yet assigned at first intake check; verify archive source when it appears.",
+  "ahead_results_observed_after_submit": {
+    "68e7d850-7d6f-4034-b390-c76c5deee0b5": {
+      "status": "rejected",
+      "score": 518993642
+    },
+    "b3c22d41-00bc-4ee3-8473-69f3759ce0ec": {
+      "status": "cancelled",
+      "score": null
+    },
+    "2d9a0cc4-e5a3-412f-857b-be2a7fd2835c": {
+      "status": "failed",
+      "reason": "GPU bridge admission conflict before benchmark execution"
+    },
+    "bbe0f892-7e9c-4573-b1ec-b1ff6c3ce5df": {
+      "status": "failed",
+      "reason": "GPU bridge admission conflict before benchmark execution"
+    },
+    "2aa43f94-e821-4252-b6ba-57793757eb63": {
+      "status": "failed",
+      "reason": "GPU bridge admission conflict before benchmark execution"
+    },
+    "e8249b2b-7573-4099-8a4f-7716c25d71f2": {
+      "status": "failed",
+      "reason": "GPU bridge admission conflict after setup and verifier smoke passed"
+    },
+    "13447726-60ae-4a08-a394-119dc9479173": {
+      "status": "failed",
+      "reason": "GPU bridge admission conflict after setup and verifier smoke passed"
+    }
+  },
+  "ahead_active_count": 3,
+  "ahead_active_prefixes": ["df81f2f", "b76b3d5", "f63b274"]
+}

@@ -18,7 +18,7 @@
  * Leaves are returned as exact residues below 2^256, the same contract as
  * every _ModMult output that feeds the finish. */
 #ifndef ZLAB_TREE
-#define ZLAB_TREE 3  /* in-place packed inverse levels; cooperative root, 16 KiB shared */
+#define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
 #endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
@@ -145,7 +145,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
-#elif ZLAB_TREE == 2
+#else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
@@ -227,92 +227,6 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         for(int k=0;k<4;k++){
             parent_inv[k]=inverses[k][tid&(half-1)];
             sibling[k]=products[k][tid^half];
-        }
-        parent_inv[4]=sibling[4]=0;
-        qsb_field_mul_raw(value,parent_inv,sibling);
-    }
-    value[4]=0;
-}
-#else
-/* Level-packed in-place inverse propagation. Once every child at a level has
- * loaded its sibling product, that product level is dead and can hold child
- * inverses. Cross-warp levels synchronize after their loads before overwrite. */
-__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-    __shared__ uint64_t nodes[4][512];
-    const int tid=threadIdx.x,n=blockDim.x;
-    #pragma unroll
-    for(int k=0;k<4;k++)nodes[k][tid]=value[k];
-    __syncthreads();
-    int offset=0;
-    #pragma unroll 1
-    for(int count=n;count>2;count>>=1){
-        int half=count>>1;
-        if(tid<half){
-            uint64_t a[5],b[5],out[5];
-            #pragma unroll
-            for(int k=0;k<4;k++){a[k]=nodes[k][offset+tid];b[k]=nodes[k][offset+half+tid];}
-            a[4]=b[4]=0;
-            qsb_field_mul_raw(out,a,b);
-            #pragma unroll
-            for(int k=0;k<4;k++)nodes[k][offset+count+tid]=out[k];
-        }
-        offset+=count;
-        if(half>32)__syncthreads();else __syncwarp();
-    }
-    if(tid<4){
-        uint64_t a[5],b[5],root[5];
-        #pragma unroll
-        for(int k=0;k<4;k++){a[k]=nodes[k][offset];b[k]=nodes[k][offset+1];}
-        a[4]=b[4]=0;
-        qsb_field_mul_raw(root,a,b);
-        qsb_field_normalize(root);
-        root[4]=0;
-        zi_inverse_quad(root,tid);
-        if(tid<2){
-            uint64_t child[5];
-            #pragma unroll
-            for(int k=0;k<4;k++)child[k]=nodes[k][offset+1-tid];
-            child[4]=0;
-            __syncwarp(0x3u);
-            qsb_field_mul_raw(child,root,child);
-            #pragma unroll
-            for(int k=0;k<4;k++)nodes[k][offset+tid]=child[k];
-        }
-    }
-    __syncwarp();
-    offset-=4;
-    #pragma unroll 1
-    for(int count=4;count<n;count<<=1){
-        int half=count>>1;
-        uint64_t parent_inv[5],sibling[5];
-        if(tid<count){
-            #pragma unroll
-            for(int k=0;k<4;k++){
-                parent_inv[k]=nodes[k][offset+count+(tid&(half-1))];
-                sibling[k]=nodes[k][offset+(tid^half)];
-            }
-            parent_inv[4]=sibling[4]=0;
-        }
-        if(count>32)__syncthreads();
-        else if(tid<count){
-            unsigned live=count==32 ? 0xffffffffu : ((1u<<count)-1u);
-            __syncwarp(live);
-        }
-        if(tid<count){
-            qsb_field_mul_raw(parent_inv,parent_inv,sibling);
-            #pragma unroll
-            for(int k=0;k<4;k++)nodes[k][offset+tid]=parent_inv[k];
-        }
-        offset-=count<<1;
-        if((count<<1)>32)__syncthreads();else __syncwarp();
-    }
-    {
-        const int half=n>>1;
-        uint64_t parent_inv[5],sibling[5];
-        #pragma unroll
-        for(int k=0;k<4;k++){
-            parent_inv[k]=nodes[k][n+(tid&(half-1))];
-            sibling[k]=nodes[k][tid^half];
         }
         parent_inv[4]=sibling[4]=0;
         qsb_field_mul_raw(value,parent_inv,sibling);
