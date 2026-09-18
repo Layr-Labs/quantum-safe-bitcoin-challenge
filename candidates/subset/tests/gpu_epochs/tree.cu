@@ -450,6 +450,7 @@ __device__ __forceinline__ void gt_direct_digit(const uint64_t M[4], uint64_t sf
     *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
 }
 #endif
+#include "../../quantum-safe-bitcoin-subset-source-001.cuh"
 // Complete final addition for the regular odd chain. PR229 (hybridnoise)
 // supplied a modular-doubling witness for the fifteen-term parent. The helper
 // below is our independently implemented and GPU-audited shifted-GLV final
@@ -486,6 +487,26 @@ __device__ __forceinline__ void qsb_complete_last_add(
     _ModSqr(T,R);_ModAdd256(T,T,PPP);_ModSub256(T,T,Q);_ModSub256(T,T,Q);
     _ModMult(ZZZ1,PPP);_ModSub256(Q,Q,T);_ModMult(Q,R);
     _ModMult(S2,(uint64_t*)Y2,ZZZ1);_ModSub256(Y1,Q,S2);Load256(X1,T);
+}
+__device__ __forceinline__ void qsb_factor_complete_last_add(
+    uint64_t *X1,uint64_t *Y1,uint64_t *Yfactor,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff){
+    uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4],T[4];
+    _ModMult(U2,(uint64_t*)X2,ZZ1);
+    _ModAdd256(S2,(uint64_t*)Y2,(uint64_t*)Yoff);
+    _ModSub256(P,U2,X1);qsb_field_transition(R,S2,ZZZ1,Y1,Yfactor);
+    if(!(P[0]|P[1]|P[2]|P[3])){
+        if(!(R[0]|R[1]|R[2]|R[3])) qsb_double_affine(X1,Y1,ZZ1,ZZZ1,X2,Y2);
+        else {
+            #pragma unroll
+            for(int i=0;i<4;i++){X1[i]=0;Y1[i]=(i==0);ZZ1[i]=ZZZ1[i]=0;}
+        }
+        return;
+    }
+    _ModSqr(PP,P);_ModMult(PPP,PP,P);_ModMult(Q,U2,PP);_ModMult(ZZ1,PP);
+    _ModSqr(T,R);_ModAdd256(T,T,PPP);_ModSub256(T,T,Q);_ModSub256(T,T,Q);
+    _ModMult(ZZZ1,PPP);_ModSub256(Q,Q,T);
+    qsb_field_transition(Y1,R,Q,Y2,ZZZ1);Load256(X1,T);
 }
 // Delayed dispatch only: either the original path is identical, or its exact chain is replayed.
 #include "../../chain_replay_field.cuh"
@@ -711,7 +732,9 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 }
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
-                                           const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+                                           const uint64_t k[4], const uint8_t *gTable, uint32_t &bad,
+                                           uint64_t (*factor_park)[256]) {
+    uint64_t Yfactor[4];
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
@@ -729,7 +752,8 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     ec=gt_mixed_step<19>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
 #endif
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    qsb_filter_point_seed(X,Y,Yfactor,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
 #if ZLAB_DIRDIG
@@ -744,7 +768,9 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_filter_point_add<true>(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
         Load256(y0, cy);
         table_base += 1u << 18;
     }
@@ -757,7 +783,9 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_filter_point_add<true>(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
         Load256(y0, cy);
         table_base += 1u << 17;
     }
@@ -769,7 +797,8 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_factor_complete_last_add(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0);
     }
 #else
 #if ZLAB_DIRDIG
@@ -778,7 +807,8 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     gt_load_signed(gTable,0,idx,neg,x0,y0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
     gt_load_signed(gTable,1,idx,neg,x1,y1);
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    qsb_filter_point_seed(X,Y,Yfactor,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
@@ -787,35 +817,42 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
         pos+=gt_width(2);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_filter_point_add<true>(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_factor_complete_last_add(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0);
     }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
     ec=gt_mixed_step<17>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    qsb_filter_point_seed(X,Y,Yfactor,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
         ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_filter_point_add<true>(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0,bad);
+        for(int k=0;k<4;++k) factor_park[k][threadIdx.x]=Yfactor[k];
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        for(int k=0;k<4;++k) Yfactor[k]=factor_park[k][threadIdx.x];
+        qsb_factor_complete_last_add(X,Y,Yfactor,ZZ,ZZZ, cx,cy, y0);
     }
 #endif
 #endif
@@ -1472,6 +1509,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(blockIdx.x*blockDim.x>=batch_size)return;
     const bool active = idx<batch_size;
     __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
+    __shared__ uint64_t qsb_factor_park[4][256];
     const epoch_desc_t *e0 = d_epochs + 2*blockIdx.x;
     const bool hasB = 2*blockIdx.x+1 < epochs_in_batch;
     const epoch_desc_t *e1 = hasB ? e0+1 : e0;
@@ -1483,7 +1521,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int okA, okB;
     {
         uint64_t m1[4],m2[4];
-        QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3],qsb_factor_park);
         Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
         okA=fa.ok && active;
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
@@ -1491,7 +1529,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
-    QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3],qsb_factor_park);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
     okB=fb.ok && active && hasB;
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
