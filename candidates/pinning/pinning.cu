@@ -189,6 +189,15 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
  * is 2*k modulo the group order, as in the original regular recoder.
  * First chunk has 2^17 entries, others 2^16: 2^20 points, 64 MiB total. */
 #define GT_CHUNKS 15
+
+/* Peel last mixed-add as _PointAddXYZZT<false>; fold post-loop Y repair into
+ * the last add. Default ON; -DQSB_RESOLVE_LAST=0 recovers tip. */
+#ifndef QSB_RESOLVE_LAST
+#define QSB_RESOLVE_LAST 1
+#endif
+#if (QSB_RESOLVE_LAST != 0 && QSB_RESOLVE_LAST != 1)
+#error QSB_RESOLVE_LAST must be 0 or 1
+#endif
 #define GT_TOTAL_ENTRIES (1u << 20)
 #define GT_LO 256
 #define GT_HI 1024
@@ -520,6 +529,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
+#if QSB_RESOLVE_LAST
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS-1;c++) {
+        qsb_load_decoded(table,c,base,x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        base+=1u<<16;
+    }
+    qsb_load_decoded(table,GT_CHUNKS-1,base,x1,y1);
+    _PointAddXYZZT<false>(X,Y,U,V,x1,y1,y0);
+#else
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
@@ -528,6 +548,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         base+=1u<<16;
     }
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
