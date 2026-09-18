@@ -18,19 +18,12 @@ __global__ void audit_digits(const uint64_t *ks, uint32_t *bad, int n) {
     uint64_t M[4]; int sign; gt_recode_setup(k, M, &sign);
     uint64_t sflag = (uint64_t)(sign < 0);
     unsigned pos = 1u;
-    /* windowed extraction state, exactly as the chain loop carries it */
-    unsigned wli = pos >> 6;
-    uint64_t wlo = wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
-    uint64_t whi = wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
     for (int c = 0; c < GT_CHUNKS; c++) {
-        uint32_t idx_r, idx_d, idx_w; uint64_t neg_r, neg_d, neg_w;
+        uint32_t idx_r, idx_d; uint64_t neg_r, neg_d;
         gt_digit_idx(e[c], &idx_r, &neg_r);
         gt_direct_digit(M, sflag, pos, gt_width(c), c == GT_CHUNKS-1, &idx_d, &neg_d);
-        gt_direct_digit_p(wlo, whi, pos & 63u, sflag, gt_width(c), c == GT_CHUNKS-1, &idx_w, &neg_w);
         pos += gt_width(c);
-        gt_window_advance(M, pos, &wli, &wlo, &whi);
         if (idx_r != idx_d || neg_r != neg_d || idx_r >= gt_entries(c)) atomicAdd(bad, 1u);
-        if (idx_w != idx_d || neg_w != neg_d) atomicAdd(bad + 1, 1u);
     }
 }
 
@@ -45,16 +38,14 @@ int main() {
     const uint64_t nlim[4] = {0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
     for (int j = 0; j < 4; j++) { ks[j] = 0; ks[4+j] = (j==0); ks[8+j] = ~0ULL; ks[12+j] = nlim[j]; ks[16+j] = nlim[j]; }
     ks[16] -= 1; ks[20] = 2; for (int j = 1; j < 4; j++) ks[20+j] = 0;
-    uint64_t *dk; uint32_t *dbad; uint32_t bad2[2] = {0, 0};
-    cudaMalloc(&dk, ks.size()*8); cudaMalloc(&dbad, 8);
+    uint64_t *dk; uint32_t *dbad, bad = 0;
+    cudaMalloc(&dk, ks.size()*8); cudaMalloc(&dbad, 4);
     cudaMemcpy(dk, ks.data(), ks.size()*8, cudaMemcpyHostToDevice);
-    cudaMemcpy(dbad, bad2, 8, cudaMemcpyHostToDevice);
+    cudaMemcpy(dbad, &bad, 4, cudaMemcpyHostToDevice);
     audit_digits<<<(n+255)/256, 256>>>(dk, dbad, n);
     cudaDeviceSynchronize();
-    cudaMemcpy(bad2, dbad, 8, cudaMemcpyDeviceToHost);
+    cudaMemcpy(&bad, dbad, 4, cudaMemcpyDeviceToHost);
     printf("direct digits: %d scalars x %d chunks, mismatches=%u (%s)\n",
-           n, GT_CHUNKS, bad2[0], bad2[0] ? "FAIL" : "PASS");
-    printf("windowed digits (carried limb pair): mismatches vs direct=%u (%s)\n",
-           bad2[1], bad2[1] ? "FAIL" : "PASS");
-    return (bad2[0] || bad2[1]) ? 1 : 0;
+           n, GT_CHUNKS, bad, bad ? "FAIL" : "PASS");
+    return bad ? 1 : 0;
 }

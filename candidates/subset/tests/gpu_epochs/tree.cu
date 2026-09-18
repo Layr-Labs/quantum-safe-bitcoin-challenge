@@ -299,17 +299,18 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
     __uint128_t s;
-    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
-     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
-     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
-     * < n this is a no-op. */
-    s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
-    uint64_t k0=(k[0]&~km)|(kd0&km), k1=(k[1]&~km)|(kd1&km),
-             k2=(k[2]&~km)|(kd2&km), k3=(k[3]&~km)|(kd3&km);
+    /* A raw SHA scalar is at least n with probability (2^256-n)/2^256. Keep
+     * that exact case, but let the overwhelmingly common path avoid a
+     * four-limb subtract and four selects. */
+    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
+    if (k3 == n3 &&
+        (k2 > n2 ||
+         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
+        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
+    }
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -360,14 +361,15 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
 
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
-__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
+__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
                                                      uint64_t neg,
-                                                     uint64_t gx[4], uint64_t gy[4]) {
+                                                     uint64_t *__restrict__ gx,
+                                                     uint64_t *__restrict__ gy) {
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -387,9 +389,10 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
  * issued one iteration ahead. Returns (qx,qy,qz) WITHOUT affine conversion so
  * the caller shares one inverse across the recid finish. */
 __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
+    int32_t mask = ec >> 31;   /* arithmetic-shift sign mask */
+    uint32_t ae = ((uint32_t)ec ^ (uint32_t)mask) - (uint32_t)mask;
     *idx = (ae - 1) >> 1;
-    *neg = (ec < 0) ? 1ULL : 0ULL;
+    *neg = (uint64_t)(mask & 1);   /* 0/1; load expands via 0ULL-neg */
 }
 
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
@@ -433,28 +436,6 @@ __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigne
     uint64_t hi = li == 0 ? m[1] : li == 1 ? m[2] : li == 2 ? m[3] : 0ULL;
     return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
 }
-/* Same field, but with the limb pair carried by the caller. `pos` advances by a fixed
- * width per chunk and is a loop-index function, not data, so the limb index changes on a
- * uniform branch every ~3.7 chunks instead of costing a four-way select every chunk. */
-__device__ __forceinline__ uint32_t gt_field_bits_p(uint64_t lo, uint64_t hi, unsigned sh) {
-    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
-}
-__device__ __forceinline__ void gt_window_advance(const uint64_t m[4], unsigned pos,
-                                                  unsigned *li, uint64_t *lo, uint64_t *hi) {
-    const unsigned nli = pos >> 6;
-    if (nli != *li) {                       /* uniform across the warp: pos is loop state */
-        *li = nli; *lo = *hi;
-        *hi = nli == 0 ? m[1] : nli == 1 ? m[2] : nli == 2 ? m[3] : 0ULL;
-    }
-}
-__device__ __forceinline__ void gt_direct_digit_p(uint64_t lo, uint64_t hi, unsigned sh,
-                                                  uint64_t sflag, unsigned w, bool last,
-                                                  uint32_t *idx, uint64_t *neg) {
-    uint32_t f = gt_field_bits_p(lo, hi, sh) & ((1u << w) - 1u);
-    uint32_t t = f >> (w - 1);
-    *idx = last ? (f & ((1u << (w - 1)) - 1u)) : ((f ^ (t - 1u)) & ((1u << (w - 1)) - 1u));
-    *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
-}
 /* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
 __host__ __device__ __forceinline__ unsigned gt_width(int c) {
     return c == GT_CHUNKS-1 ? (unsigned)(gt_shift(c) - gt_shift(c-1))
@@ -469,7 +450,47 @@ __device__ __forceinline__ void gt_direct_digit(const uint64_t M[4], uint64_t sf
     *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
 }
 #endif
-__device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+// Complete final addition for the regular odd chain. PR229 (hybridnoise)
+// supplied a modular-doubling witness for the fifteen-term parent. The helper
+// below is our independently implemented and GPU-audited shifted-GLV final
+// guard; it applies to the same deferred XYZZ representation here.
+__device__ __forceinline__ void qsb_double_affine(uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
+                                             const uint64_t *x,const uint64_t *y){
+    uint64_t yy[4],yyyy[4],ss[4],mm[4],tt[4],uu[4];
+    _ModSqr(yy,(uint64_t*)y);_ModSqr(yyyy,yy);
+    _ModMult(ss,(uint64_t*)x,yy);_ModAdd256(ss,ss,ss);_ModAdd256(ss,ss,ss);
+    _ModSqr(mm,(uint64_t*)x);_ModAdd256(tt,mm,mm);_ModAdd256(mm,mm,tt);
+    _ModSqr(tt,mm);_ModSub256(tt,tt,ss);_ModSub256(X,tt,ss);
+    _ModSub256(uu,ss,X);_ModMult(uu,mm);
+    _ModAdd256(yyyy,yyyy,yyyy);_ModAdd256(yyyy,yyyy,yyyy);_ModAdd256(yyyy,yyyy,yyyy);
+    _ModSub256(Y,uu,yyyy);
+    _ModAdd256(ZZ,yy,yy);_ModAdd256(ZZ,ZZ,ZZ);
+    _ModMult(ZZZ,(uint64_t*)y,ZZ);_ModAdd256(ZZZ,ZZZ,ZZZ);
+}
+__device__ __forceinline__ void qsb_complete_last_add(
+    uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff){
+    uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4],T[4];
+    _ModMult(U2,(uint64_t*)X2,ZZ1);
+    _ModAdd256(S2,(uint64_t*)Y2,(uint64_t*)Yoff);_ModMult(S2,ZZZ1);
+    _ModSub256(P,U2,X1);_ModSub256(R,S2,Y1);
+    if(!(P[0]|P[1]|P[2]|P[3])){
+        if(!(R[0]|R[1]|R[2]|R[3])) qsb_double_affine(X1,Y1,ZZ1,ZZZ1,X2,Y2);
+        else {
+            #pragma unroll
+            for(int i=0;i<4;i++){X1[i]=0;Y1[i]=(i==0);ZZ1[i]=ZZZ1[i]=0;}
+        }
+        return;
+    }
+    _ModSqr(PP,P);_ModMult(PPP,PP,P);_ModMult(Q,U2,PP);_ModMult(ZZ1,PP);
+    _ModSqr(T,R);_ModAdd256(T,T,PPP);_ModSub256(T,T,Q);_ModSub256(T,T,Q);
+    _ModMult(ZZZ1,PPP);_ModSub256(Q,Q,T);_ModMult(Q,R);
+    _ModMult(S2,(uint64_t*)Y2,ZZZ1);_ModSub256(Y1,Q,S2);Load256(X1,T);
+}
+// Delayed dispatch only: either the original path is identical, or its exact chain is replayed.
+#include "../../chain_replay_field.cuh"
+#include "../../hit_filter_field.cuh"
+__device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
@@ -503,7 +524,7 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
         table_base += 1u << 18;
     }
@@ -516,18 +537,20 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
         table_base += 1u << 17;
     }
+    {
 #if ZLAB_DIRDIG
-    gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
 #else
-    ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg);
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg);
 #endif
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    _PointAddXYZZ_def_last(X,Y,ZZ,ZZZ, cx,cy, y0);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
 #else
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
@@ -539,15 +562,20 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
-    unsigned wli=pos>>6;
-    uint64_t wlo=wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
-    uint64_t whi=wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
-        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),false,&idx,&neg);
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
         pos+=gt_width(2);
-        gt_window_advance(M,pos,&wli,&wlo,&whi);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -560,21 +588,247 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     for (int c=2;c<GT_CHUNKS-1;c++){
         ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#endif
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
-#if ZLAB_DIRDIG
-    gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),true,&idx,&neg);
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#else
-    ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    {
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
 #endif
-    _PointAddXYZZ_def_last(X,Y,ZZ,ZZZ, cx,cy, y0);
 #endif
 }
+__device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+                                           const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+    uint64_t M[4]; int sign;
+    gt_recode_setup(k, M, &sign);
+    uint32_t idx; uint64_t neg;
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+#if ZLAB_T14
+#if ZLAB_DIRDIG
+    uint64_t sflag=(uint64_t)(sign<0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+#else
+    int32_t ec=gt_mixed_step<19>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<19>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+#endif
+    qsb_replay_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+#if ZLAB_DIRDIG
+    unsigned pos=(unsigned)gt_shift(2)+1u;
+#endif
+    #pragma unroll 1
+    for (int c=2;c<GT_BIG;c++){
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg); pos+=gt_width(2);
+#else
+        ec=gt_mixed_step<19>(M,sign);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_replay_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 18;
+    }
+    #pragma unroll 1
+    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
+#else
+        ec=gt_mixed_step<18>(M,sign);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_replay_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 17;
+    }
+    {
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
+#else
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#else
+#if ZLAB_DIRDIG
+    uint64_t sflag=(uint64_t)(sign<0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+    qsb_replay_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+    unsigned pos=(unsigned)gt_shift(2)+1u;
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_replay_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#else
+    int32_t ec=gt_mixed_step<18>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<17>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    qsb_replay_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_replay_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#endif
+#endif
+}
+__device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+                                           const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+    uint64_t M[4]; int sign;
+    gt_recode_setup(k, M, &sign);
+    uint32_t idx; uint64_t neg;
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+#if ZLAB_T14
+#if ZLAB_DIRDIG
+    uint64_t sflag=(uint64_t)(sign<0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+#else
+    int32_t ec=gt_mixed_step<19>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<19>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+#endif
+    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+#if ZLAB_DIRDIG
+    unsigned pos=(unsigned)gt_shift(2)+1u;
+#endif
+    #pragma unroll 1
+    for (int c=2;c<GT_BIG;c++){
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg); pos+=gt_width(2);
+#else
+        ec=gt_mixed_step<19>(M,sign);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 18;
+    }
+    #pragma unroll 1
+    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
+#else
+        ec=gt_mixed_step<18>(M,sign);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 17;
+    }
+    {
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
+#else
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#else
+#if ZLAB_DIRDIG
+    uint64_t sflag=(uint64_t)(sign<0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+    unsigned pos=(unsigned)gt_shift(2)+1u;
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#else
+    int32_t ec=gt_mixed_step<18>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<17>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+    }
+#endif
+#endif
+}
+__device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+                                           const uint64_t k[4], const uint8_t *gTable) {
+    // The original scalar survives even if an output aliases the input k.
+    uint64_t saved_k[4];Load256(saved_k,k);
+    uint32_t bad=0;
+    qsb_replay_chain_trial(X,Y,ZZ,ZZZ,saved_k,gTable,bad);
+    if(bad)qsb_replay_chain_exact(X,Y,ZZ,ZZZ,saved_k,gTable);
+}
+
 
 /* _FixedBaseSignedAffine: removed -- dead on the ranked path. It is still a __device__/
  * __global__ symbol, so it is emitted into the PTX the driver must JIT at first
@@ -729,23 +983,11 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_TWIN      3
 #define QSB_SE_CUT       137
 #define QSB_SE_PER_EPOCH 256
-/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768.
- * Carried at the base value of THIS tree (262144, from the three fixes), not
- * the 65536 the producer stage was ported against; the producer's own A/B
- * against 65536 is history, and launch geometry stays a separate mechanism.
- * Both d_epochs and d_first are sized from this macro TIMES QSB_K2S_MUL, so
- * -DZLAB_LAUNCH_BLOCKS=N scales both: d_first is 54 classes x 32 B x N x
- * QSB_K2S_MUL = 864 MiB at N=262144 with K2S on, 432 MiB with it off. */
+/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 262144  /* 67M candidates per launch. The e2e auditor measured
-                                   * 65536 -> 262144 at +0.278% (3 legs, spread 0.011%,
-                                   * 16384 anchoring the fit at 136 us/launch); the cubin is
-                                   * byte-identical because the constant is host-only, and the
-                                   * hit set is invariant. This raises duty cycle rather than
-                                   * reducing work per candidate, so a throttling runner should
-                                   * expect at most the measured +0.28%. */
+#define ZLAB_LAUNCH_BLOCKS 262144  /* Match PR309: 134217728 paired candidates per full launch. */
 #endif
-#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads x QSB_K2S_MUL candidates/launch */
+#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -833,17 +1075,10 @@ __global__ void kernel_build_epochs(
             cur_pos = 0;
         }
     }
-    /* Iterate over OUTPUT pushes, not source indices. Every epoch keeps exactly
-     * window_start - s_early pushes, so with this loop shape the 64-byte boundary
-     * (and therefore every _SHA256Transform) falls at the same iteration in every
-     * lane; the source-push loop fired the transform at a lane-dependent iteration,
-     * which made the whole producer warp-divergent. Same byte stream, same
-     * midstates, bit for bit -- only the schedule changes. */
-    const int kept = window_start - s_early;
-    for (int j = 0; j < kept; j++) {
-        int src = j;
-        for (int k = 0; k < s_early; k++) src += ((int)early[k] <= src) ? 1 : 0;
-        const uint8_t *row = d_dummy_sigs + (size_t)src * SIG_PUSH_SIZE;
+    int sel = 0;
+    for (int i = 0; i < window_start; i++) {
+        if (sel < s_early && (int)early[sel] == i) { sel++; continue; }
+        const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
         for (int b = 0; b < SIG_PUSH_SIZE; b++) {
             cur[cur_pos++] = row[b];
             if (cur_pos == 64) {
@@ -861,41 +1096,6 @@ __global__ void kernel_build_epochs(
     d->remW[0] = bswap32(curW[0]);
     d->remW[1] = bswap32(curW[1]);
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
-}
-
-/* Short-epoch producer stage 2 (sub_prod2): one block per EPOCH (NOT per
- * digest block -- with ZLAB_K2S a digest block consumes QSB_K2S_MUL epochs),
- * one thread per distinct first-block message class (QSB_FIRST_COUNT, 54).
- * Runs between kernel_build_epochs and kernel_digest on the same stream, so
- * every state is visible to the consumer without any extra synchronisation.
- *
- * This is the SAME total arithmetic the digest block used to do in its leader
- * lanes (one SHA-256 compression per class per epoch); it is moved out so the
- * digest block no longer has 202 of 256 lanes idling at a __syncthreads().
- *
- * d_first is class-major: epoch e, class c, word j lives at
- *   d_first[(size_t)e*first_stride + c*8 + j],  first_stride = 8*first_count.
- * Both the store here and the consumer load are 16-byte aligned by
- * construction (every record starts on a 32-byte boundary). */
-__global__ void kernel_build_first(
-    uint64_t epoch_base, uint64_t n_epochs, int first_count,
-    const epoch_desc_t * __restrict__ d_epochs,
-    uint32_t * __restrict__ d_first)
-{
-    const int cls = threadIdx.x;
-    if (cls >= first_count) return;              /* blockDim.x == first_count */
-    /* SEAM 2. ep is the EPOCH-WITHIN-LAUNCH index, not "the digest block that
-     * will consume it": under ZLAB_K2S one digest block consumes two epochs.
-     * ep == blockIdx.x holds only because SEAM 1 launches one block per epoch
-     * (nblk * QSB_K2S_MUL), never one block per digest block. Both d_epochs and
-     * d_first are indexed by ep, so the body needs no other change. */
-    const int ep = blockIdx.x;
-    const uint64_t e = epoch_base + (uint64_t)ep;
-    if (e >= n_epochs) return;                   /* matches kernel_build_epochs */
-    uint32_t out[8];
-    qsb_first_state_class(d_epochs + ep, cls, out);
-    qsb_store_first_state(d_first + (size_t)ep * (first_count * 8)
-                                  + (size_t)cls * 8, out);
 }
 
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
@@ -1207,112 +1407,37 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+#include "pair_shared.cuh"
 
-
-/* ---- ZLAB_K2S: two epochs per block (mechanism by @dun999, b76b3d5) --------
- * Lane t grinds window triple t of epoch 2b AND of epoch 2b+1, multiplies the
- * two shared denominators into one tree leaf, and splits the block inverse back
- * with two multiplies. Every per-block cost -- the tree barriers, the shared
- * traffic and the cooperative root inverse -- is paid once per 512 candidates
- * instead of once per 256. The pre-inverse half of the first candidate's finish
- * is parked in shared memory (16 KiB/block) so the lane frame stays small. */
-#ifndef ZLAB_K2S
-#define ZLAB_K2S 1        /* ON: measured +1.292% rate / +0.31-0.51% M/J paired on gpu2.
-                           * The ranked build line passes no defines, so this default IS the ship
-                           * setting - do not rely on -DZLAB_K2S=1. */
-#endif
-#define QSB_K2S_MUL (ZLAB_K2S ? 2 : 1)
-#if ZLAB_K2S
-/* Everything in the finish that does not need 1/W: m1 = (yR*B - Y)*ZZ and
- * m2 = (yR*B + Y)*ZZ. After the inverse, lambda1 = m1/W and m2' = m2/W. */
-__device__ __forceinline__ void qsb_k2s_pre(
-    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
-) {
-    uint64_t yb[4];
-    _ModMult(yb, yR, ZZZ);
-    _ModSub256(m1, yb, Y);
-    _ModMult(m1, ZZ);
-    _ModAdd256(m2, yb, Y);
-    _ModMult(m2, ZZ);
-}
-__device__ __forceinline__ uint32_t qsb_k2s_post(
-    uint64_t *m1, uint64_t *m2, uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2
-) {
-    uint64_t t[4], sum[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    _ModMult(m1, inv);
-    _ModMult(m2, inv);
-    _ModAdd256(sum, m1, m2);
-    _ModSub256(t, m1, cc);
-    _ModMult(x1, sum, t);
-    _ModAdd256(x1, x1, xR);
-    _ModSub256(t, xR, x1);
-    _ModMult(t, m1);
-    _ModSub256(t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
-    _ModSub256(t, m2, cc);
-    _ModMult(x2, sum, t);
-    _ModAdd256(x2, x2, xR);
-    _ModSub256(t, xR, x2);
-    _ModMult(t, m2);
-    _ModSub256(t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
-    return parities;
-}
-/* One candidate up to its denominator: window hash, SHA-256d, u1*G, W = ZZZ*d,
- * and the pre-inverse finish pair. Returns 0 when the candidate is unusable. */
-__device__ __forceinline__ int qsb_k2s_front(
-    const uint32_t * __restrict__ first_epoch, int lane, const uint8_t *d_gt,
-    uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
-) {
-    /* SEAM 4 (the one the compiler catches). The producer stage replaced the
-     * 3-arg qsb_scheduled_window_hash(state, epoch, lane) -- which staged the
-     * first-block states in __shared__ behind a __syncthreads() -- with a form
-     * reading this epoch's already-produced states from global memory. After
-     * that change this front-end reads NOTHING from epoch_desc_t, so the
-     * epoch_desc_t* parameter is gone: only first_epoch selects the epoch, and
-     * the caller keeps e0/e1 solely for ->early in the hit record. The old
-     * "state = ep->mid" preamble is dropped because it was already dead -- the
-     * window hash overwrites all 8 words from the first-class record. */
-    uint32_t state[8];
-    qsb_scheduled_window_hash(state, first_epoch, lane);
-    uint32_t s2[8];
-    _SHA256TransformDigest32(s2, state);
-    uint64_t z[4];
-    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
-    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
-    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
-    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
-    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
-    qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
-    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
-}
-/* Ranked single-hash gate over the two x-coordinates and their y parities. */
-__device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
-    for(int ri=0;ri<2;ri++){
-        uint64_t sx0=ri ? q2x[0] : q1x[0];
-        uint64_t sx1=ri ? q2x[1] : q1x[1];
-        uint64_t sx2=ri ? q2x[2] : q1x[2];
-        uint64_t sx3=ri ? q2x[3] : q1x[3];
-        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
-                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-        uint32_t pb[16];
-        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
-        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-        uint32_t hs[8];
-        _SHA256TransformPubkey33(hs,pb);
-        if(gpu_bench_valid_words(hs)){*recid_out=ri;return 1;}
+// A separate kernel keeps exact recovery out of the speculative kernel's
+// register allocation. No tentative record is read by the host output path.
+__global__ void kernel_verify_pair_hits(
+    const uint8_t*tentative,uint8_t*verified,const epoch_desc_t*epochs,
+    const uint32_t*first,const uint8_t*gtable,int epochs_in_batch){
+    if(threadIdx.x==0)*((uint32_t*)verified)=0;
+    __syncthreads(); // One block; all lanes participate before the loop.
+    const uint32_t count=*((const uint32_t*)tentative);
+    const uint32_t limit=count<1024u?count:1024u;
+    for(uint32_t i=threadIdx.x;i<limit;i+=blockDim.x){
+        const uint8_t*record=tentative+4+(size_t)i*ZLAB_HIT_REC;
+        const uint32_t index=*((const uint32_t*)record)&0x3fffffffu;
+        const uint32_t ep=index>>8,lane=index&255u;
+        if(ep>=(uint32_t)epochs_in_batch)continue;
+        const int encoded=qsb_pair_verify_candidate(
+            epochs+ep,first+(size_t)ep*QSB_FIRST_SLOTS*8,lane,gtable);
+        if(!encoded)continue;
+        const uint32_t slot=atomicAdd((uint32_t*)verified,1u);
+        if(slot<1024u){
+            uint8_t*out=verified+4+(size_t)slot*ZLAB_HIT_REC;
+            *((uint32_t*)out)=index|((uint32_t)(encoded-1)<<30);
+            // Reconstruct the published identity from the independently
+            // selected epoch/lane, rather than trusting tentative combo bytes.
+            for(int j=0;j<6;j++)out[4+j]=epochs[ep].early[j];
+            for(int j=0;j<3;j++)out[10+j]=WIN3[lane][j];
+        }
     }
-    return 0;
 }
-#endif
+
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
@@ -1338,82 +1463,85 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int window_start, uint64_t enum_base,
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
     int fast_inc, const uint32_t * __restrict__ d_const_words,
-    const epoch_desc_t * __restrict__ d_epochs,  /* short-epoch mode: one per block, else NULL */
-    const uint32_t * __restrict__ d_first,       /* short-epoch mode: kernel_build_first output */
-    int first_stride                             /* 8 * QSB_FIRST_COUNT words per epoch */
+    const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
+, const uint32_t *d_first, int epochs_in_batch
 ) {
+#if QSB_PAIR_SHARED
+    const int tid = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + tid;
+    if(blockIdx.x*blockDim.x>=batch_size)return;
+    const bool active = idx<batch_size;
+    __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
+    const epoch_desc_t *e0 = d_epochs + 2*blockIdx.x;
+    const bool hasB = 2*blockIdx.x+1 < epochs_in_batch;
+    const epoch_desc_t *e1 = hasB ? e0+1 : e0;
+    const uint32_t *f0=d_first+(size_t)(2*blockIdx.x)*QSB_FIRST_SLOTS*8;
+    const uint32_t *f1=hasB?f0+QSB_FIRST_SLOTS*8:f0;
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
+    int okA, okB;
+    {
+        uint64_t m1[4],m2[4];
+        QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
+        okA=fa.ok && active;
+        if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+        #pragma unroll
+        for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
+    }
+    // Both first-state tables are read-only; the odd tail aliases A safely.
+    QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
+    okB=fb.ok && active && hasB;
+    if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+    uint64_t leaf[5];
+    qsb_field_mul_raw(leaf,prodA,prodB);
+    qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
+    if(okA){
+        uint64_t inv[5],m1[4],m2[4];
+        qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
+        #pragma unroll
+        for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
+        int encoded=qsb_pair_tail_value(m1[0],m1[1],m1[2],m1[3],m2[0],m2[1],m2[2],m2[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#ifdef QSB_FORCE_EXACT_HIT_CHECK
+        encoded=1; // Diagnostic only: ignore the speculative filter entirely.
+#endif
+        int recid=encoded-1;
+        if(encoded){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((2u*blockIdx.x+0u)*blockDim.x+threadIdx.x)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+    if(okB){
+        uint64_t inv[5];
+        qsb_field_mul_raw(inv,leaf,prodA);    /* 1/WB */
+        int encoded=qsb_pair_tail_value(m1B[0],m1B[1],m1B[2],m1B[3],m2B[0],m2B[1],m2B[2],m2B[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#ifdef QSB_FORCE_EXACT_HIT_CHECK
+        encoded=1; // Diagnostic only: ignore the speculative filter entirely.
+#endif
+        int recid=encoded-1;
+        if(encoded){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((2u*blockIdx.x+1u)*blockDim.x+threadIdx.x)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+#else
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
     const int easy_flag=0,single_hash_flag=1,calibrate_flag=0;
     // All tail lanes remain present through the block inverse.
     if(blockIdx.x*blockDim.x>=batch_size)return;
     int active=idx<batch_size;
-#if ZLAB_K2S
-    {
-        const int tid = threadIdx.x;
-        __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
-        /* SEAM 3. ep0 is this digest block's FIRST epoch-within-launch index.
-         * Each digest block owns QSB_K2S_MUL == 2 consecutive epochs, so the
-         * epoch index is QSB_K2S_MUL*blockIdx.x + k for k in {0,1}, NEVER
-         * blockIdx.x. d_epochs and d_first are both linear in that same index,
-         * with strides 1 and first_stride, so the pointer pairs must advance
-         * together: (e0,f0) is epoch ep0 and (e1,f1) is epoch ep0+1.
-         * Passing f0 for both epochs, or swapping f0/f1 against e0/e1, compiles
-         * and runs and silently yields a wrong hit set. Nothing checks it. */
-        const int ep0 = QSB_K2S_MUL * blockIdx.x;
-        const epoch_desc_t *e0 = d_epochs + ep0;
-        const epoch_desc_t *e1 = e0 + 1;
-        const uint32_t *f0 = d_first + (size_t)ep0 * first_stride;
-        const uint32_t *f1 = f0 + first_stride;
-        uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-        uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
-        uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
-        int okA, okB;
-        {
-            uint64_t m1[4],m2[4];
-            okA = qsb_k2s_front(f0,tid,d_gt,u2rx,u2ry,prodA,m1,m2) && active;
-            if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
-            #pragma unroll
-            for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
-        }
-        okB = qsb_k2s_front(f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B) && active;
-        if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
-        uint64_t leaf[5];
-        qsb_field_mul_raw(leaf,prodA,prodB);
-        qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
-        if(okA){
-            uint64_t inv[5],m1[4],m2[4],q1x[4],q2x[4];
-            qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
-            #pragma unroll
-            for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
-            uint32_t par=qsb_k2s_post(m1,m2,inv,u2rx,u2ry,q1x,q2x);
-            int recid=0;
-            if(qsb_k2s_gate(q1x,q2x,par,&recid)){
-                uint32_t pslot=atomicAdd(d_hit_cnt,1);
-                if(pslot<1024){
-                    d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
-                    for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
-                    for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[tid][i];
-                }
-            }
-        }
-        if(okB){
-            uint64_t inv[5],q1x[4],q2x[4];
-            qsb_field_mul_raw(inv,leaf,prodA);    /* 1/WB */
-            uint32_t par=qsb_k2s_post(m1B,m2B,inv,u2rx,u2ry,q1x,q2x);
-            int recid=0;
-            if(qsb_k2s_gate(q1x,q2x,par,&recid)){
-                uint32_t pslot=atomicAdd(d_hit_cnt,1);
-                if(pslot<1024){
-                    d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
-                    for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
-                    for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[tid][i];
-                }
-            }
-        }
-        return;
-    }
-#endif
 
     /* Load this thread's skip indices: enum mode unranks base+idx on-GPU
      * (no CPU fill, no HtoD), otherwise load precomputed combos. */
@@ -1426,14 +1554,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
 #if ZLAB_TRIM
-    /* ONE EPOCH PER DIGEST BLOCK. Correct only at ZLAB_K2S == 0; at K2S == 1 the
-     * block above has already returned and none of this runs. Left indexed by
-     * blockIdx.x deliberately so the kill switch -DZLAB_K2S=0 is still a valid,
-     * self-consistent tree rather than a half-converted one. */
     const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
     uint32_t state[8];
-    qsb_scheduled_window_hash(state, d_first + (size_t)blockIdx.x * first_stride,
-                              threadIdx.x);
+    for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x, d_first+(size_t)blockIdx.x*QSB_FIRST_SLOTS*8);
 #else
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
@@ -1467,8 +1591,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
 
   if (fast_inc == QSB_SE_N_INC) {
-    qsb_scheduled_window_hash(state, d_first + (size_t)blockIdx.x * first_stride,
-                              threadIdx.x);
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x, d_first+(size_t)blockIdx.x*QSB_FIRST_SLOTS*8);
   } else if (fast_inc == QSB_FAST_N_INC) {
     // Cached states are rebuilt from this batch's midstate and public input.
     // Legacy combo launches and unsupported shapes retain the full emitter.
@@ -1549,10 +1672,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
      * the state words themselves in big-endian order, followed by standard
      * 32-byte-message padding (total length 256 bits = 0x100). */
-    /* Sparse schedule: the pad (W[8]=0x80000000, W[9..14]=0, W[15]=0x100) and the
-     * IV are folded in, so only the eight live digest words are supplied. */
-    uint32_t s2[8];
-    _SHA256TransformDigest32(s2, state);
+    uint32_t b2[16];
+    for (int i=0;i<8;i++) b2[i]=state[i];
+    b2[8]=0x80000000;
+    for (int i=9;i<15;i++) b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2, b2);
 
     /* EC recovery with both flags + ModInv + the leading-zeros gate.
      * z is the big-endian value of the 32-byte second hash, which IS the state
@@ -1701,6 +1828,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
         }
     }
+
+#endif
 }
 
 /* ============================================================
@@ -2451,8 +2580,7 @@ int main(int argc, char **argv) {
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
-    uint32_t *d_first = NULL;      /* kernel_build_first output, one record per epoch */
-    int qsb_first_stride = 0;      /* 8 * QSB_FIRST_COUNT words */
+    uint32_t *d_first = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2481,20 +2609,10 @@ int main(int argc, char **argv) {
         }
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
-        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL * sizeof(epoch_desc_t));
+        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
-        /* SEAM 5. Producer-stage buffer: 8 words per first-block class per
-         * EPOCH, and a launch holds QSB_SE_LAUNCH_BLOCKS digest blocks x
-         * QSB_K2S_MUL epochs. The QSB_K2S_MUL factor is not optional: without
-         * it the top half of every launch writes and reads past the end of the
-         * buffer. Sized exactly like d_epochs above, which already carries it.
-         * 262144 blocks x 2 epochs x 54 classes x 32 B = 864 MiB (32 MiB more
-         * for d_epochs); at K2S=0 it is half that. */
-        if (qsb_first_class_count <= 0) { fprintf(stderr, "ERROR: no first classes\n"); return 1; }
-        qsb_first_stride = qsb_first_class_count * 8;
-        cudaMalloc(&d_first, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_K2S_MUL
-                             * qsb_first_stride * sizeof(uint32_t));
-        if (!d_first) { fprintf(stderr, "OOM: first-block state buffer\n"); return 1; }
+        cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
+        if(first_error!=cudaSuccess){fprintf(stderr,"OOM: first states: %s\n",cudaGetErrorString(first_error));return 1;}
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -2561,11 +2679,7 @@ int main(int argc, char **argv) {
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    /* The deepest measured frame on this build is 120 B (kernel_build_gtable; digest and
-     * prefix_cache are 0 B), so 32768 reserved ~5.9 GiB for nothing. 2048 keeps 17x
-     * headroom over the measured frame and returns the reservation as OOM headroom.
-     * Rate-neutral by construction - it changes no device code. */
-    cudaDeviceSetLimit(cudaLimitStackSize, 2048);
+    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
@@ -2732,6 +2846,10 @@ int main(int argc, char **argv) {
         uint8_t *d_hitbuf = NULL;
         cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC);
         if (!d_hitbuf) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
+        uint8_t *d_verified_hitbuf=NULL;
+        cudaMalloc(&d_verified_hitbuf,4+(size_t)1024*ZLAB_HIT_REC);
+        if(!d_verified_hitbuf){fprintf(stderr,"OOM: verified hit buffer\n");return 1;}
+
         uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
         uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
         uint8_t *zh_combos = d_hitbuf + 8;
@@ -2745,32 +2863,25 @@ int main(int argc, char **argv) {
 #endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
-#if ZLAB_K2S
-            epochs_left >>= 1;            /* whole blocks of two epochs */
-            if (epochs_left == 0) break;
-#endif
-            int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
-                       ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
+            const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
+            const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
+            int nblk=(epochs_in_batch+QSB_PAIR_MUL-1)/QSB_PAIR_MUL;
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH
-            kernel_build_epochs<<<(nblk * QSB_K2S_MUL + 255) / 256, 256>>>(
-                epoch_base, n_epochs, window_start, s_early,
+            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+                epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
 #else
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(nblk * QSB_K2S_MUL + 255) / 256, 256>>>(
-                epoch_base, n_epochs, window_start, s_early,
+            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+                epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
-            /* SEAM 1. The producer is one block per EPOCH, and a launch holds
-             * nblk digest blocks x QSB_K2S_MUL epochs each. Multiplying the grid
-             * (and nothing inside the kernel) is what makes kernel_build_first's
-             * blockIdx.x span the whole epoch range of the launch. */
-            kernel_build_first<<<nblk * QSB_K2S_MUL, qsb_first_class_count>>>(
-                epoch_base, n_epochs, qsb_first_class_count, d_epochs, d_first);
+            // One producer block for each valid epoch, including an odd tail.
+            kernel_build_first<<<epochs_in_batch,qsb_first_class_count>>>(d_epochs,d_first);
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -2789,22 +2900,24 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs,
-                d_first, qsb_first_stride);
-            cudaDeviceSynchronize();
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+            kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+            // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += (uint64_t)batch_pos * QSB_K2S_MUL;
-            g_total_searched = total_searched;
-            epoch_base += (uint64_t)nblk * QSB_K2S_MUL;
+            total_searched += (uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH;
+            epoch_base += epochs_in_batch;
 #if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            err = cudaMemcpy(zh_host, d_verified_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
+            // Publish only completed batches to the termination-time diagnostic.
+            g_total_searched = total_searched;
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
                 if (nh > ZLAB_HIT_FIRST)
                     cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               d_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                               d_verified_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
                                (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
@@ -2828,6 +2941,7 @@ int main(int argc, char **argv) {
             if (0) {
 #else
             cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            g_total_searched = total_searched;
             if (h_hit > 0) {
 #endif
                 uint32_t hits[64];
@@ -2967,13 +3081,15 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
                 t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, 0);
-            cudaDeviceSynchronize();
+            // Blocking hit-count copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += batch_pos;
-            g_total_searched = total_searched;
             enum_base += batch_pos;
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
+            // Publish only completed batches to the termination-time diagnostic.
+            g_total_searched = total_searched;
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
@@ -3167,16 +3283,17 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
                 t_sel, 0, d_early, 0, d_const_words, NULL, NULL, 0);
-            cudaDeviceSynchronize();
-
+            // Blocking hit-count copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_pos;
-            g_total_searched = total_searched;
             batch_pos = 0;
 
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            err = cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
+            // Publish only completed batches to the termination-time diagnostic.
+            g_total_searched = total_searched;
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;

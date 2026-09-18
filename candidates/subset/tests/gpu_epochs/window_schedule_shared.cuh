@@ -2,6 +2,7 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
+#define QSB_FIRST_SLOTS 64   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][256];
 __device__ uint32_t QSB_WINDOW_SECOND[64][256];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
@@ -67,6 +68,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     }
     printf("Window schedule classes: first=%d second=%d of 256\n",first_distinct,distinct);
     qsb_first_class_count=first_distinct;
+    if(first_distinct>QSB_FIRST_SLOTS)return 1;
     for(int slot=0;slot<first_distinct;slot++)
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
     if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
@@ -77,58 +79,33 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
-/* PRODUCER STAGE (sub_prod2). The per-epoch first-block SHA-256 midstate of
- * first-class `cls` used to be compressed by leader lane `cls` of the digest
- * block into a __shared__ uint32_t first_states[8][256] (8192 B) behind a
- * __syncthreads(): 54 of 256 lanes worked, 202 idled, and every lane paid the
- * barrier. kernel_build_first now computes exactly these states one launch
- * earlier and parks them in global memory; the digest's consumer lanes read
- * their class's 32 bytes directly. The arithmetic below is character-for-
- * character the old leader-lane body, so every produced state is bit-identical.
- *
- * Layout: class-major, 8 words (32 B) per class, QSB_FIRST_COUNT classes per
- * epoch. Offsets are therefore always 32 B multiples, so the 16-byte vector
- * accessors below are always correctly aligned for a cudaMalloc'd base. */
-__device__ __forceinline__ void qsb_first_state_class(const epoch_desc_t *epoch,
-        int cls, uint32_t out[8]) {
-    uint32_t W[16];
+/* First-block states for every (epoch, class) of a launch, computed as its own
+ * producer stage: one block per epoch, one thread per first-block class. The
+ * consumer used to spend a thread barrier plus one compression of block time
+ * per epoch while 54 leader lanes built these states and the other lanes
+ * waited; now each lane reads its class state (32 bytes). */
+__global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
+        uint32_t * __restrict__ d_first) {
+    const epoch_desc_t *ep = d_epochs + blockIdx.x;
+    const int c = threadIdx.x;
+    uint32_t st[8], W[16];
     #pragma unroll
-    for(int j=0;j<8;j++)out[j]=epoch->mid[j];
-    W[0]=epoch->remW[0];W[1]=epoch->remW[1];
+    for(int j=0;j<8;j++)st[j]=ep->mid[j];
+    W[0]=ep->remW[0];W[1]=ep->remW[1];
     #pragma unroll
-    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][cls];
-    _SHA256Transform(out,W);   /* mutates W; out is the epoch midstate */
+    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+    _SHA256Transform(st,W);
+    const size_t base=((size_t)blockIdx.x*QSB_FIRST_SLOTS+(size_t)c)*8;
+    #pragma unroll
+    for(int j=0;j<8;j++)d_first[base+j]=st[j];
 }
 
-/* 2 x 128-bit accesses instead of 8 x 32-bit: the store is a fully coalesced
- * 32 B/lane run, and one consumer warp needs 32 sectors rather than 256. */
-__device__ __forceinline__ void qsb_store_first_state(uint32_t * __restrict__ dst,
-        const uint32_t in[8]) {
-    uint4 a,b;
-    a.x=in[0];a.y=in[1];a.z=in[2];a.w=in[3];
-    b.x=in[4];b.y=in[5];b.z=in[6];b.w=in[7];
-    uint4 *v=reinterpret_cast<uint4*>(dst);
-    v[0]=a;v[1]=b;
-}
-__device__ __forceinline__ void qsb_load_first_state(const uint32_t * __restrict__ src,
-        uint32_t out[8]) {
-    const uint4 *v=reinterpret_cast<const uint4*>(src);
-    uint4 a=v[0],b=v[1];
-    out[0]=a.x;out[1]=a.y;out[2]=a.z;out[3]=a.w;
-    out[4]=b.x;out[5]=b.y;out[6]=b.z;out[7]=b.w;
-}
-
-/* first_epoch points at ONE EPOCH's record: d_first + ep*stride with
- * stride = 8*QSB_FIRST_COUNT words and ep the epoch-within-launch index.
- * It is NOT "this block's" record in general: with ZLAB_K2S a digest block
- * consumes QSB_K2S_MUL epochs, so ep = QSB_K2S_MUL*blockIdx.x + k and the
- * caller passes a different first_epoch for each k. */
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
-        const uint32_t * __restrict__ first_epoch, int lane) {
-    // No barrier and no shared staging: the first-block states were produced
-    // by kernel_build_first on the previous launch of the same stream.
-    int first_slot=QSB_FIRST_CLASS[lane];
-    qsb_load_first_state(first_epoch+(size_t)first_slot*8,state);
+        const epoch_desc_t *epoch, int lane, const uint32_t *first) {
+    (void)epoch;
+    const int first_slot=QSB_FIRST_CLASS[lane];
+    #pragma unroll
+    for(int j=0;j<8;j++)state[j]=first[first_slot*8+j];
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;

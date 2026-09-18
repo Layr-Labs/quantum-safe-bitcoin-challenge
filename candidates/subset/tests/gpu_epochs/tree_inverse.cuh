@@ -1,6 +1,12 @@
+// Paired two-CTA layout: separate immutable products from downward inverses.
+// This restores the audited earlier tree layout, retaining current root-entry
+// warp synchronization. The extra 8 KiB removes destructive-read barriers.
 // One work-efficient binary product tree per block. The caller supplies
 // a power-of-two block size at most 256 and identity factors for inactive lanes.
 #pragma once
+#include "hm39_pair_inverse.cuh"
+#include "hm41_quad_inverse.cuh"
+#include "hm43_warp_inverse.cuh"
 #include "zinv32.cuh"
 /* ZLAB_TREE (kill switch):
  *  0 = promoted heap tree: every product canonical, 18 barriers.
@@ -172,31 +178,69 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if(half>32)__syncthreads();else __syncwarp();
     }
     // offset == 2n-4: the two root children.
-    // Lanes 0..3 of warp 0 form the same root product and invert it cooperatively
-    // (zinv32.cuh): lane 0 owns u, lane 1 v, lane 2 r, lane 3 s, one shared decision
-    // stream. Lanes 0 and 1 then each form one child inverse, so the whole root stage
-    // is one warp-uniform instruction stream instead of a serial lane-0 _ModInv.
+#if HM43_WARP_ROOT
     if(tid<4){
+        uint64_t a[5],b[5],root[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+        a[4]=b[4]=0;__syncwarp(0x0000000f);qsb_field_mul_raw(root,a,b);qsb_field_normalize(root);
+        root[4]=0;zi_inverse_quad(root,tid);
+        if(tid<2){
+            uint64_t child[5];
+            #pragma unroll
+            for(int k=0;k<4;k++)child[k]=tid?a[k]:b[k];
+            child[4]=0;qsb_field_mul_raw(child,root,child);
+            #pragma unroll
+            for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
+        }
+    }
+#elif HM41_QUAD_ROOT
+    if(tid<4){
+        uint64_t a[5],b[5],root[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+        a[4]=b[4]=0;__syncwarp(0x0000000f);qsb_field_mul_raw(root,a,b);qsb_field_normalize(root);
+        root[4]=0;hm41_quad_inverse(root,tid);
+        if(tid<2){
+            uint64_t child[5];
+            #pragma unroll
+            for(int k=0;k<4;k++)child[k]=tid?a[k]:b[k];
+            child[4]=0;qsb_field_mul_raw(child,root,child);
+            #pragma unroll
+            for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
+        }
+    }
+#elif HM39_PAIR_ROOT
+    if(tid<2){
+        uint64_t a[5],b[5],root[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+        a[4]=b[4]=0;__syncwarp(0x00000003);qsb_field_mul_raw(root,a,b);qsb_field_normalize(root);
+        root[4]=0;hm39_pair_inverse(root,tid);
+        uint64_t child[5];
+        #pragma unroll
+        for(int k=0;k<4;k++)child[k]=tid? a[k]:b[k];
+        child[4]=0;qsb_field_mul_raw(child,root,child);
+        #pragma unroll
+        for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
+    }
+#else
+    if(tid==0){
         uint64_t a[5],b[5],root[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
         a[4]=b[4]=0;
         qsb_field_mul_raw(root,a,b);
         qsb_field_normalize(root);
+        _ModInv(root);
         root[4]=0;
-        zi_inverse_quad(root,tid);
-        if(tid<2){
-            /* child = products[offset + 1 - tid]: lane 0 writes 1/a, lane 1 writes 1/b,
-             * the same two values (and the same order) the serial form wrote. */
-            uint64_t child[5];
-            #pragma unroll
-            for(int k=0;k<4;k++)child[k]=products[k][offset+1-tid];
-            child[4]=0;
-            qsb_field_mul_raw(child,root,child);
-            #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
-        }
+        qsb_field_mul_raw(a,root,a);   /* 1/b */
+        qsb_field_mul_raw(b,root,b);   /* 1/a */
+        // inverse index = product index - n
+        #pragma unroll
+        for(int k=0;k<4;k++){inverses[k][offset-n]=b[k];inverses[k][offset-n+1]=a[k];}
     }
+#endif
     __syncwarp();
     // Level count (4..n/2): lanes < count read parent inverses written by
     // lanes < count/2 and write inverses read by lanes < 2*count.

@@ -271,38 +271,3 @@ layout to reduce synchronization and shared-memory traffic. Each must retain
 the nonzero field contract, inactive identity factors, complete hit checking,
 and a separate comparison against the resulting frontier. None is included
 or claimed as measured by this submission.
-
-## Root inverse: four-lane cooperative form (`tests/gpu_epochs/zinv32.cuh`)
-
-The single modular inverse at the root is no longer a serial `_ModInv` on lane
-zero. Lanes 0..3 of warp 0 form the same root product from shared memory and run
-one cooperative inverse: lane 0 owns U, lane 1 V, lane 2 R and lane 3 S of the
-delayed-divstep state, each lane also holding its pair partner's vector, and all
-four run a single instruction stream. Per 30-bit batch the lanes exchange only
-the two matrix coefficients, one sign flag, one zero flag and the nine limbs of
-the partner vector (`__shfl_sync`, mask 0xF); the decision loop itself is run
-redundantly by lanes 0 and 1, which hold identical operands and therefore take
-identical branches, so no cross-lane traffic appears inside it. Lanes 0 and 1
-then form one child inverse each and write the same two values, in the same
-slots, that the serial form wrote.
-
-The arithmetic is the same family as `_ModInv` (Jean Luc Pons, GPL-3.0): delayed
-right-shift divsteps on low words and aligned heads, with R and S carried through
-a Montgomery-style `m*p` correction. It differs in representation: 30-bit batches
-over 32-bit registers with an `int32` matrix, nine 32-bit signed limbs, a sparse
-`m*p` (p = 2^256 - 2^32 - 977), a sentinel-terminated decision loop, and a
-branch-free final canonicalisation. The result is the canonical inverse in [0,p),
-bit-identical to `_ModInv` for every canonical input, and 0 for input 0, so the
-whole tree, and therefore the hit set, is unchanged.
-
-The cooperative structure - lanes owning U, V, R, S and broadcasting only matrix
-rows - follows @AbdelStark's warp-cooperative root inverse (PR 189, submission
-db248c65); the algorithm and arithmetic here are ours.
-
-Measured on an RTX 4090 (sm_89): one root inverse costs 39,851 cycles serially
-and 28,155 cycles in this form, and the kernel loses the `__noinline__` call and
-its 120-byte stack frame (ptxas: 126 registers, 0 spills, 0-byte frame, 32,768 B
-shared, versus 128 registers and a 120-byte frame before). On a 150 s paired
-screen at 425 W the block throughput rises from 562.15 to 600.55 M candidates/s
-at 389.8 -> 403.8 W, i.e. +6.83 % throughput and +3.11 % candidates per joule,
-with every verified hit matching (10,802 of 10,802, zero failures).
