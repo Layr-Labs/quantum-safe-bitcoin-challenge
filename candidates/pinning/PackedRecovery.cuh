@@ -29,6 +29,8 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
 
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
+// Independent leaves issue through distinct product buffers: tbar/vbar share
+// only hc, u/v share nothing, and the x-pair shares only S.
 __device__ __forceinline__ void qsb_packed_prepare(
     uint64_t *D, const uint64_t *U, const uint64_t *Y, const uint64_t *V,
     bool usable, bool active, int n, ulonglong2 *saved, uint64_t *roots) {
@@ -40,8 +42,14 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
-        qsb_packed_raw_mul(vbar,Y,hc);
-        qsb_packed_raw_mul(tbar,V,hc);
+        // Weighted leaf tbar=V*hc is issued first (finish consumes u=tbar*J
+        // first). The sibling vbar=Y*hc is independent and uses its own
+        // product buffer so it is not stuck behind tbar's store.
+        uint64_t ttmp[5],vtmp[5];
+        qsb_field_mul(ttmp,const_cast<uint64_t*>(V),hc);
+        qsb_field_mul(vtmp,const_cast<uint64_t*>(Y),hc);
+        Load256(tbar,ttmp);
+        Load256(vbar,vtmp);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
         saved[0*s+i]=make_ulonglong2(vbar[0],vbar[1]);
@@ -55,14 +63,26 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
     uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
-    uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
-    qsb_recovery_mul(u,tbar,weighted_inv);
-    qsb_recovery_mul(v,vbar,root_inv);
+    uint64_t u[4],v[4],l[4],m[4],sum[4],t1[4],t2[4],s[4];
+    // Dual leaf muls: u=tbar*J and v=vbar*I share no product buffer.
+    // Canonicalize both after both products so the second mul is not stuck
+    // behind the first qsb_recovery_mul's normalize. Same residues.
+    uint64_t ut[5],vt[5];
+    qsb_field_mul(ut,const_cast<uint64_t*>(tbar),const_cast<uint64_t*>(weighted_inv));
+    qsb_field_mul(vt,const_cast<uint64_t*>(vbar),const_cast<uint64_t*>(root_inv));
+    qsb_field_normalize(ut); qsb_field_normalize(vt);
+    Load256(u,ut); Load256(v,vt);
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
+    // Independent x-pair leaves share sum but not the (·-c) factor. Split the
+    // reused t so both multiplies issue before either +a. Reuse ut/vt.
+    _ModSub256(t1,l,c); _ModSub256(t2,m,c);
+    qsb_field_mul(ut,sum,t1);
+    qsb_field_mul(vt,sum,t2);
+    qsb_field_normalize(ut); qsb_field_normalize(vt);
+    Load256(x1,ut); Load256(x2,vt);
+    _ModAdd256(x1,x1,a); _ModAdd256(x2,x2,a);
+    _ModSub256(t1,a,x1); qsb_packed_raw_mul(s,l,t1); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
+    _ModSub256(t2,a,x2); qsb_packed_raw_mul(s,m,t2); qsb_parity_boundary(s,b);
     return parity|(qsb_difference_parity(b,s)<<1);
 }
