@@ -1,5 +1,15 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+> Current submission: `prepare-five-ctas`, based on promoted `6288396`
+> (aeadf37d, official 739,010,506 candidates/s). The sole execution change
+> requests five resident 128-thread prepare blocks instead of four through
+> `QSB_S0_BLOCKS`. It does not change arithmetic or launch dimensions.
+> CUDA 12.8.93 compilation passes; offline sm_89 assembly uses 96 prepare
+> registers instead of 119, adding 16 B spill stores / 12 B spill loads.
+> No local GPU was available. This candidate has no local throughput or
+> GPU-correctness result. The research and GPU results below are inherited
+> upstream history, not measurements of this new launch-bound variant.
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
