@@ -424,6 +424,8 @@ __device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, cons
     r[0] = t0; r[1] = t1; r[2] = t2; r[3] = t3;
 }
 
+#include "tests/gpu_epochs/sub_lazy.cuh"
+
 // ---------------------------------------------------------------------------------------
 
 __device__ void _ModSub256(uint64_t *r, uint64_t *b)
@@ -1283,8 +1285,8 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModAddLazy(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModSubLazy(P, U2, X1);               // P  = U2 - X1
+  _ModSubLazy(R, S2, Y1);               // R  = S2 - Y1
   _ModSqr(PP, P);                      // PP = P^2
   _ModMult(PPP, PP, P);                // PPP = P*PP
   _ModMult(Q, U2, PP);                 // V  = U2*PP
@@ -1294,7 +1296,7 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V, one carry chain
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModSub256(Q, Q, T);                 // V - X3
+  _ModSubLazy(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
   Load256(Y1, Q);                      // deferred Y: actual Y3 = Y1 - Y2*ZZZ3
   Load256(X1, T);                      // X3
@@ -1317,8 +1319,8 @@ __device__ void _PointAddXYZZ_def_last(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1
   _ModMult(U2, (uint64_t *)X2, ZZ1);
   _ModAddLazy(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
   _ModMult(S2, ZZZ1);
-  _ModSub256(P, U2, X1);
-  _ModSub256(R, S2, Y1);
+  _ModSubLazy(P, U2, X1);
+  _ModSubLazy(R, S2, Y1);
   _ModSqr(PP, P);
   _ModMult(PPP, PP, P);
   _ModMult(Q, U2, PP);
@@ -1328,10 +1330,10 @@ __device__ void _PointAddXYZZ_def_last(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1
   _ModX3Fused(T, T, PPP, Q);
 
   _ModMult(ZZZ1, PPP);
-  _ModSub256(Q, Q, T);
+  _ModSubLazy(Q, Q, T);
   _ModMult(Q, R);
   _ModMult(S2, (uint64_t *)Y2, ZZZ1);
-  _ModSub256(Y1, Q, S2);
+  _ModSubLazy(Y1, Q, S2);
   Load256(X1, T);
 }
 
