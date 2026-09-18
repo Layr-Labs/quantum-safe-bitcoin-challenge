@@ -898,6 +898,30 @@ __global__ void kernel_build_first(
                                   + (size_t)cls * 8, out);
 }
 
+/* Same per-(epoch,class) body and same d_first layout as kernel_build_first,
+ * but a flat 1-D grid packs (ep, cls) pairs densely: every warp is full instead
+ * of 2 of 8 warps per 54-thread block. QSB_FIRST_FLAT=0 restores the promoted
+ * launch for an A/B on one binary. */
+#ifndef QSB_FIRST_FLAT
+#define QSB_FIRST_FLAT 1
+#endif
+__global__ void kernel_build_first_flat(
+    uint64_t epoch_base, uint64_t n_epochs, int first_count,
+    const epoch_desc_t * __restrict__ d_epochs,
+    uint32_t * __restrict__ d_first, uint64_t total)
+{
+    const uint64_t idx = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+    const int cls = (int)(idx % (uint64_t)first_count);
+    const int ep = (int)(idx / (uint64_t)first_count);
+    const uint64_t e = epoch_base + (uint64_t)ep;
+    if (e >= n_epochs) return;
+    uint32_t out[8];
+    qsb_first_state_class(d_epochs + ep, cls, out);
+    qsb_store_first_state(d_first + (size_t)ep * (first_count * 8)
+                                  + (size_t)cls * 8, out);
+}
+
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
 // Preserve the final reduction carry and canonicalize before _ModInv.
 /* ZLAB: the asm body is shared by the canonical multiply (qsb_field_mul, tree
@@ -2769,8 +2793,17 @@ int main(int argc, char **argv) {
              * nblk digest blocks x QSB_K2S_MUL epochs each. Multiplying the grid
              * (and nothing inside the kernel) is what makes kernel_build_first's
              * blockIdx.x span the whole epoch range of the launch. */
+#if QSB_FIRST_FLAT
+            {
+                uint64_t ftot = (uint64_t)nblk * QSB_K2S_MUL
+                                * (uint64_t)qsb_first_class_count;
+                kernel_build_first_flat<<<(unsigned)((ftot + 255) / 256), 256>>>(
+                    epoch_base, n_epochs, qsb_first_class_count, d_epochs, d_first, ftot);
+            }
+#else
             kernel_build_first<<<nblk * QSB_K2S_MUL, qsb_first_class_count>>>(
                 epoch_base, n_epochs, qsb_first_class_count, d_epochs, d_first);
+#endif
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
