@@ -1,4 +1,3 @@
-// Symmetric 8x32 square with 28 cross products and eight diagonal products.
 // Uses the canonical sparse-prime fold validated by the inverse-tree audit.
 // Carry semantics: https://docs.nvidia.com/cuda/parallel-thread-execution/#extended-precision-arithmetic-instructions-madc
 __device__ __forceinline__ void qsb_square32(uint64_t *out,const uint64_t *a){
