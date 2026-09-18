@@ -24,27 +24,53 @@ Let `n` be the secp256k1 group order and `D = 2*(k mod n)-n`. `D` is odd and lie
 in `[-n,n)`. The existing table represents multiples of half of the fixed base,
 so `D*(A/2) = k*A` in the group. The new decoder keeps D's raw 256-bit residue
 and its mathematical sign directly. It avoids converting D to an absolute
-value and then applying the global sign to all fifteen decoded digits.
+value and then applying the global sign to all `QSB_CHUNKS` decoded digits.
 
 For an odd integer x, define the regular digit and remaining scalar by
 `d_w(x) = (x mod 2^(w+1))-2^w` and
 `T_w(x) = 2*floor(x/2^(w+1))+1`. Both functions commute with negation.
 Consequently the direct signed extraction gives exactly the same signed table
 indices as the inherited absolute-value extraction followed by a global sign.
-The last window uses sixteen stored bits and the explicit sign of D; its index
-is f for positive D and `65535-f` for negative D. The table layout, lookup
-records, window widths and addition order are unchanged.
+The last window stores one bit fewer than its declared width and takes its sign
+from the explicit sign of D; its index is f for positive D and its complement
+for negative D. The lookup record (one 64-byte affine point) and the addition
+order are unchanged; the window widths are now a function of `QSB_CHUNKS` (see
+the P3 section below).
 
 The raw `k >= n` case retains an exact conditional reduction. Computing
 `2*k-n` uses `C = 2^256-n`, which is a 129-bit constant: the third 64-bit limb
-is one and must not be omitted. The fifteen immutable index/sign words are
+is one and must not be omitted. The `QSB_CHUNKS` immutable index/sign words are
 stored in per-thread shared-memory planes. This lets scalar limbs die before
 the point-chain loop. The shared arena is reused by the cofactor tree only
 after every lane reaches a full block barrier.
 
+### P3: window count as a compile-time parameter (`QSB_CHUNKS`)
+
+The digit geometry is now derived from `QSB_CHUNKS` instead of being hard-coded.
+A window of width w stores 2^(w-1) odd magnitudes, the sign being the loader's
+conditional y negation, so a geometry whose widths sum to 256 costs
+64*sum_c 2^(w_c-1) bytes and, the cost being convex, is minimised by equal widths.
+`QSB_CHUNKS=15` is the inherited split 18 + 14*17 = 2^20 entries = 64.0 MiB and
+reproduces the baseline PTX exactly. `QSB_CHUNKS=14` (the default) is the
+balanced split 4*19 + 10*18 = 2,359,296 entries = 144.0 MiB, the smallest table
+any 14-window geometry can have; it removes one deferred-Y mixed add (7M+2S,
+601 `mul.wide.u32`) from every candidate. The four wide chunks are placed first
+so the ten narrow ones -- twice as hot per byte, one read each into half the
+footprint -- form a contiguous tail for the persisting-L2 window to pin.
+
+Table construction stays inside the timed region because the base A/2 depends on
+the instance. It is one kernel launch of one thread per entry, each thread doing
+one mixed addition plus one modular inversion, fed by two short host ladders per
+chunk (12,002 points at 15 chunks, 12,772 at 14). Going from 1,048,576 to
+2,359,296 entries costs a few milliseconds of kernel time; the larger items are
+the device-to-host verification copy (64 -> 144 MiB) and the unchanged OpenSSL
+ladder and spot check. The whole build is well under a second, under 0.01% of
+the 1200-second window, and is not deducted from the expected gain because it is
+three orders of magnitude smaller than that estimate.
+
 ### Keep one deferred point-add body and shorten register lifetimes
 
-All thirteen remaining mixed additions use one rolled deferred-Y
+All `QSB_CHUNKS-2` remaining mixed additions use one rolled deferred-Y
 specialization. The final ordinate is resolved once after the loop, instead
 of retaining a separately compiled resolving-add body. The field-operation
 count and algebra are preserved. The slope numerator is formed before the
@@ -211,5 +237,5 @@ full COPYING file are included with the production source.
 
 Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
-`2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
-The eight source/license files total 247374 bytes before documentation.
+`0ddd6e53d7d6b84f3ced60e4b38526ce2aa822172357c194fa16a9c0df4d7514`.
+The eight source/license files total 283810 bytes before documentation.
