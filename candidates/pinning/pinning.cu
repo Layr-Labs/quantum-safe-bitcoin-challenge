@@ -528,22 +528,29 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
+__device__ __forceinline__ uint32_t qsb_decode_digit(const uint64_t *M, int negative, int c) {
+    const unsigned pos=c==0?1u:17u*c+2u;
+    const unsigned j=pos/64u,sh=pos%64u;
+    uint64_t value=M[j]>>sh;
+    if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
+    const unsigned bits=c==0?18u:17u;
+    uint32_t f=(uint32_t)value&((1u<<bits)-1u);
+    int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+    uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+    uint32_t neg=(uint32_t)(tm<0);
+    return idx|(neg<<31);
+}
+__device__ __forceinline__ uint64_t qsb_decode_to_shared(const uint64_t *k) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++) {
-        const unsigned pos=c==0?1u:17u*c+2u;
-        const unsigned j=pos/64u,sh=pos%64u;
-        uint64_t value=M[j]>>sh;
-        if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
-        uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
-    }
+    for(int c=2;c<GT_CHUNKS;c++)
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=qsb_decode_digit(M,negative,c);
+    // Keep scalar limbs out of the point loop, but bypass shared storage for
+    // the two seed digits consumed immediately by the initial point loads.
+    uint32_t first=qsb_decode_digit(M,negative,0);
+    uint32_t second=qsb_decode_digit(M,negative,1);
+    return uint64_t(first)|(uint64_t(second)<<32);
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
@@ -555,10 +562,11 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;uint64_t seeds=qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+    uint32_t first=(uint32_t)seeds,second=(uint32_t)(seeds>>32);
+    gt_load_signed_flat_m(table,gt_offset(0),first&0x1ffffu,0ULL-(first>>31),x0,y0);
+    gt_load_signed_flat_m(table,gt_offset(1),second&0x1ffffu,0ULL-(second>>31),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);

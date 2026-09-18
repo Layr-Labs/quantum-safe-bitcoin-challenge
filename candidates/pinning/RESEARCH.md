@@ -1,5 +1,14 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+> Current experiment: `seed-digits`, based on promoted `6288396`
+> (aeadf37d, official 739,010,506 candidates/s). Only the first two decoded
+> index/sign words bypass shared storage and feed the original seed loads.
+> The other thirteen words, table layout and point-add order are unchanged.
+> CUDA compilation and source-bound CPU tests pass; no local GPU is available.
+> Official GPU verification and throughput are required. The rejected host,
+> cache and launch-bound variants are not retained. All GPU measurements below
+> are inherited history, not this experiment.
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
