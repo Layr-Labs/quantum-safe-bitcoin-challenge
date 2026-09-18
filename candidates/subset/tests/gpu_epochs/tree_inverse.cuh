@@ -242,11 +242,14 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
 #endif
     __syncwarp();
-    // Level count (4..n/2): lanes < count read parent inverses written by
-    // lanes < count/2 and write inverses read by lanes < 2*count.
+    // Level count (4..n/4): stop before the n/2 inverse level. Each lane
+    // then forms its leaf inverse from the n/4 parent inverse, the
+    // never-overwritten n/2 sibling product, and its L0 sibling (two
+    // multiplies). Skipping the n/2 inverse stores drops that level's
+    // shared write and the barrier that used to follow it.
     offset-=4;   /* level count=4 */
     #pragma unroll 1
-    for(int count=4;count<n;count<<=1){
+    for(int count=4;count<(n>>1);count<<=1){
         int half=count>>1;
         if(tid<count){
             uint64_t parent_inv[5],sibling[5],child_inv[5];
@@ -263,17 +266,19 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         offset-=count<<1;
         if((count<<1)>32)__syncthreads();else __syncwarp();
     }
-    // offset == 0 would be the leaf level; lanes form their own leaf inverse.
     {
         const int half=n>>1;
-        uint64_t parent_inv[5],sibling[5];
+        const int quarter=n>>2;
+        uint64_t parent_inv[5],sib_l1[5],sib_l0[5];
         #pragma unroll
         for(int k=0;k<4;k++){
-            parent_inv[k]=inverses[k][tid&(half-1)];
-            sibling[k]=products[k][tid^half];
+            parent_inv[k]=inverses[k][half+(tid&(quarter-1))];
+            sib_l1[k]=products[k][n+((tid&(half-1))^quarter)];
+            sib_l0[k]=products[k][tid^half];
         }
-        parent_inv[4]=sibling[4]=0;
-        qsb_field_mul_raw(value,parent_inv,sibling);
+        parent_inv[4]=sib_l1[4]=sib_l0[4]=0;
+        qsb_field_mul_raw(parent_inv,parent_inv,sib_l1);
+        qsb_field_mul_raw(value,parent_inv,sib_l0);
     }
     value[4]=0;
 }
