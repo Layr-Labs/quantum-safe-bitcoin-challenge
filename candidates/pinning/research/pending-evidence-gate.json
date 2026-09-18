@@ -1,0 +1,136 @@
+{
+  "date": "2026-09-18",
+  "refreshed_at": "2026-09-18 ~14:45 benchmark time (post-submit field resolve)",
+  "frontier_submission": "aeadf37 (ercumentyildirim)",
+  "frontier_commit": "6288396",
+  "frontier_score": 739010506,
+  "promotion_floor_at_refresh": 746400611,
+  "note": "Frontier moved AGAIN mid-validation: aeadf37 promoted 739,010,506 (+1.43% vs bad91ac tip; +7.12% vs its own parent) via QSB_STREAM callsite restoration — its local -0.02% read inverted to an official win. Our cc2de7c4 (base bad91ac) still validating ~2h; predicted +0.3-0.9% would land ~731-735M, likely below the new floor. Entire pre-submit pending field resolved: 6 rejected, 1 failed, 1 promoted, 0 scores above floor except aeadf37.",
+  "resolved_since_last_refresh": [
+    {
+      "id": "f16f893",
+      "solver": "otaliptus",
+      "result": "PROMOTED 728615288 (+1.27%) — superseded"
+    },
+    {
+      "id": "aeadf37",
+      "solver": "ercumentyildirim",
+      "result": "PROMOTED 739010506 — new frontier (stream-hint callsite family)"
+    },
+    {
+      "id": "dcaa914",
+      "solver": "fkiene",
+      "result": "rejected 721186689 (-5.08%)"
+    },
+    {
+      "id": "b5a087b",
+      "solver": "yu4nyu",
+      "result": "rejected 705832273 (-15.60% — SLOTS=3 regressor confirmed)"
+    },
+    {
+      "id": "20de2f4",
+      "solver": "bndbww7w6w-cmyk",
+      "result": "rejected 726193014 (-1.66% — calibration probe, confirms eval variance band)"
+    },
+    {
+      "id": "8e76620",
+      "solver": "jrcarlos2000",
+      "result": "rejected 710878729 (-12.14%)"
+    },
+    {
+      "id": "37a0122",
+      "solver": "scarletbright",
+      "result": "FAILED n/a (no score — validation failure, mechanism unmeasured)"
+    },
+    {
+      "id": "01deb03",
+      "solver": "RealAdii",
+      "result": "rejected 722206833 (-4.39%)"
+    },
+    {
+      "id": "f88219a",
+      "solver": "fkiene",
+      "result": "rejected 714026178 (-17.10%)"
+    },
+    {
+      "id": "cb691a9",
+      "solver": "anamdongparkjinhyeong",
+      "result": "rejected 707900148 (-21.30%)"
+    }
+  ],
+  "pending_validating": [
+    {
+      "id": "cc2de7c4",
+      "solver": "ItlaStudent",
+      "claims": "OURS — fused root-group inversion in prepare tail + deferred host drain, base bad91ac",
+      "overlap": "n/a"
+    },
+    {
+      "id": "da1c81e",
+      "solver": "anamdongparkjinhyeong",
+      "claims": "unknown (submitted 14:06)",
+      "overlap": "tbd"
+    },
+    {
+      "id": "48043b3",
+      "solver": "wiimdy",
+      "claims": "unknown (submitted 14:21)",
+      "overlap": "tbd"
+    },
+    {
+      "id": "9410c21",
+      "solver": "scarletbright",
+      "claims": "unknown (submitted 14:36, 3rd attempt after cancel+fail)",
+      "overlap": "tbd"
+    },
+    {
+      "id": "39e4586",
+      "solver": "fkiene",
+      "claims": "unknown (submitted 14:37)",
+      "overlap": "tbd"
+    },
+    {
+      "id": "fb7cc7a",
+      "solver": "ercumentyildirim",
+      "claims": "unknown (submitted 14:42 — frontier owner iterating)",
+      "overlap": "tbd"
+    }
+  ],
+  "our_candidate": {
+    "mechanism": "fused root-group inversion in prepare-kernel tail (per-group CTA arrival counters) + deferred host drain with per-parity events",
+    "pinning_cu_lf_sha256": "3f9b8024fbdcbcecb6a6d6f0ac3539fd80a2dd855a8c80cd80d64dbc8b42f1ce",
+    "evidence": "algebra verified vs OpenSSL (128-thread collective sim, PASS full+partial groups); clang+ptxas clean (122 regs / 0 spills production S0); mechanism unique vs pending field",
+    "predicted": "+0.3-0.9% structural latency removal — UNMEASURED, not a score",
+    "gate": "authorized by user rule 2026-09-17: qualified + mechanism not duplicated by any pending submission",
+    "post_verdict_plan": "if rejected-with-score: delta informs extension (winner-CTA does its group's finish work too — eliminates S2 kernel + roots[] round-trip) ONTO NEW TIP 6288396; if promoted: compose with orthogonal levers; must rebase either way — tip changed"
+  },
+  "status": "submitted_v2_validating",
+  "frontier": {
+    "commit": "6288396",
+    "submission": "aeadf37",
+    "score": 739010506,
+    "promotion_floor": 746400612
+  },
+  "our_pending": {
+    "submission": "455355cf-502f-4623-acd2-c4455d54b408",
+    "base": "6288396",
+    "variant": "fused-rootgroup-prepare-tail+deferred-drain+armed-parity-drain",
+    "model": "SWE-2 Max",
+    "harness": "Devin CLI",
+    "note": "v2: fixes cc2de7c4 duplicate-hit defect (seq-boundary re-drain) via slot_armed flags; mechanism unchanged"
+  },
+  "cc2de7c4_result": {
+    "status": "failed",
+    "raw_ms": 747.6,
+    "score_recorded": 722.6577,
+    "verified_hits": 103551,
+    "total_hits": 105171,
+    "duplicates_flagged": 10,
+    "poisson_band": [
+      104989,
+      108923
+    ],
+    "root_cause": "host-side seq-boundary re-drain emitted stale hits twice; NOT a perf failure and not a device-code failure"
+  },
+  "post_verdict_plan": "if v2 promotes: crown. if rejected with score: read verified-hit ratio — clean stream + ~747M means drain bug was sole defect; residual deficit points at fused tail (revert fusion, keep drain fix). next lever: finish-fusion extension (winner CTA does group finish, removes S2 + roots[] round-trip)."
+}
