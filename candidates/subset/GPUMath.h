@@ -1267,9 +1267,15 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
 // addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final.
 // ---------------------------------------------------------------------------------------
-__device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                                  const uint64_t *X2, const uint64_t *Y2,
-                                  const uint64_t *Yoff, bool defer_y)
+// Templated deferred-anchor XYZZ madd (hot-path codegen). DEFER_Y specializes
+// the exact-Y resolve so intermediate adds compile without the runtime branch.
+// Keeps tip ModAddLazy / ModX3Fused arithmetic unchanged.
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZ_def(
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1296,7 +1302,7 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  if (defer_y) {
+  if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
@@ -1304,6 +1310,20 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   }
 
   Load256(X1, T);                      // X3
+}
+
+// Runtime-bool dispatcher for any remaining non-specialized call sites.
+__device__ __forceinline__ void _PointAddXYZZ_def(
+    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
+    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
+    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
+    const uint64_t *__restrict__ Yoff, bool defer_y)
+{
+  if (defer_y) {
+    _PointAddXYZZ_def<true>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
+  } else {
+    _PointAddXYZZ_def<false>(X1, Y1, ZZ1, ZZZ1, X2, Y2, Yoff);
+  }
 }
 
 // Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
