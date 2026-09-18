@@ -1,5 +1,14 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+> Current experiment: `sequence-overlap`, based on promoted `6288396`
+> (aeadf37d, official 739,010,506 candidates/s). Only the host's all-slot drain
+> at sequence rollover is removed; the per-slot reuse wait remains. CUDA
+> compilation passes and GPU PTX is identical to the baseline. CPU tests of
+> the actual host-loop text cover delayed copies and hit-file attribution.
+> No local GPU is available and this variant has no measured GPU speedup.
+> Official GPU verification and throughput are required. The research and
+> GPU measurements below are inherited upstream history, not this experiment.
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
