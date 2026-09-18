@@ -74,7 +74,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
 #endif
 #ifndef QSB_EARLY_LOAD
-#define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
+#define QSB_EARLY_LOAD 1      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
@@ -123,6 +123,12 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
+#endif
+#ifndef QSB_ROOT_WARP_BAR
+#define QSB_ROOT_WARP_BAR 1   /* 1: warp-scope product/inverse barriers once half<=32 (root-group N=256) */
+#endif
+#ifndef QSB_FINISH_ROOT_SH
+#define QSB_FINISH_ROOT_SH 1  /* 1: shared broadcast of per-CTA root + weighted inverses in finish */
 #endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
@@ -374,7 +380,9 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 #ifndef QSB_DIRECT_DIGITS
 #define QSB_DIRECT_DIGITS 1
 #endif
-#if QSB_DIRECT_DIGITS && (QSB_PREFETCH || QSB_S0_SHM || QSB_EARLY_LOAD)
+/* PREFETCH / S0_SHM still force the shared digit-plane path. EARLY_LOAD is
+ * wired into _FixedBaseSignedXYZZScalar below and coexists with DIRECT_DIGITS. */
+#if QSB_DIRECT_DIGITS && (QSB_PREFETCH || QSB_S0_SHM)
 #undef QSB_DIRECT_DIGITS
 #define QSB_DIRECT_DIGITS 0
 #endif
@@ -431,31 +439,36 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
 }
 
 #if QSB_EARLY_LOAD
-/* Mixed addition with the next record's loads issued as soon as the current
- * record is consumed: X2 dies after U2, Y2 after S2. The next digit is peeled
- * one step ahead (one register); the loaded point lands in nx/ny while the
- * remaining 5M+2S of this addition execute. */
-__device__ __forceinline__ void _PointAddXYZZ_early(
+/* Mixed addition twin of _PointAddXYZZT<true>: same S2-then-U2 schedule as the
+ * tip's rolled chain, but once X2/Y2 die the next table record is issued into
+ * nx/ny so its DRAM latency overlaps the remaining 5M+2S of this addition.
+ * Only the deferred-Y form is provided; the Scalar path resolves Y once at the
+ * end of the chain exactly as the tip does today. */
+__device__ __forceinline__ void _PointAddXYZZT_early(
     uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff, bool defer_y,
+    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff,
     bool do_load, const uint8_t *gTable, uint32_t nbase, uint32_t nidx, uint64_t nneg,
     uint64_t *nx, uint64_t *ny)
 {
   uint64_t U2[4], S2[4], P[4], R[4], PP[4], PPP[4], Q[4], T[4];
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
 #if QSB_LAZY
   _ModAddLazy(S2, Y2, Yoff);
 #else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  /* X2 and Y2 are dead under deferred-Y: overlap the next table fill here. */
   if (do_load) gt_load_signed_flat(gTable, nbase, nidx, nneg, nx, ny);
-  _ModSub256(P, U2, X1);
-  _ModSub256(R, S2, Y1);
   _ModSqr(PP, P);
   _ModMult(PPP, PP, P);
   _ModMult(Q, U2, PP);
   _ModMult(ZZ1, PP);
+#if QSB_FUSE_SQRADDSUB2
+  _ModSqrAddSub2(T, R, PPP, Q);
+#else
   _ModSqr(T, R);
 #if QSB_LAZY
   _ModX3Fused(T, T, PPP, Q);
@@ -464,15 +477,11 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);
 #endif
+#endif
   _ModMult(ZZZ1, PPP);
   _ModSub256(Q, Q, T);
   _ModMult(Q, R);
-  if (defer_y) {
-    Load256(Y1, Q);
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);
-    _ModSub256(Y1, Q, S2);
-  }
+  Load256(Y1, Q);
   Load256(X1, T);
 }
 #endif
@@ -551,6 +560,32 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_EARLY_LOAD
+    /* Tip hole: QSB_EARLY_LOAD existed for the e[] path but production always
+     * calls this Scalar entry, which never issued the next table fill inside
+     * the madd. Peel chunk 2 first, then each madd overlaps the next fill. */
+    uint64_t nx[4],ny[4];
+    unsigned base=gt_offset(2);
+    qsb_load_decoded(table,2,base,x1,y1);
+    base+=1u<<16;
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        const bool more=(c+1)<GT_CHUNKS;
+        uint32_t nidx=0; uint64_t nneg=0ULL;
+        if(more){
+            volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+            uint32_t code=codes[(size_t)(c+1)*QSB_TREE_N+threadIdx.x];
+            nidx=code&0x1ffffu;
+            nneg=0ULL-(code>>31);
+        }
+        _PointAddXYZZT_early(X,Y,U,V,x1,y1,y0, more, table, base, nidx, nneg, nx, ny);
+        Load256(y0,y1);
+        if(more){
+            Load256(x1,nx); Load256(y1,ny);
+            base+=1u<<16;
+        }
+    }
+#else
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -559,6 +594,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 }
 
@@ -1016,7 +1052,11 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             }
         }
         offset+=count;
+#if QSB_ROOT_WARP_BAR
+        if(count>2){if(half>32)__syncthreads();else __syncwarp();}
+#else
         if(count>2)__syncthreads();
+#endif
     }
 
     if(tid==0){
@@ -1071,7 +1111,11 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
+#if QSB_ROOT_WARP_BAR
+        if((count<<1)>32)__syncthreads();else __syncwarp();
+#else
         __syncthreads();
+#endif
     }
 
     uint64_t parent_inv[5],sibling[5];
@@ -1400,6 +1444,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     return;
     } else {
 
+#if QSB_FINISH_ROOT_SH
+    /* One load of the CTA's root + weighted inverses; all 128 lanes share them.
+     * Must precede any early return so every lane hits the barrier. */
+    size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+    __shared__ uint64_t sh_root_inv[4], sh_weighted_inv[4];
+    if(threadIdx.x<4){
+        sh_root_inv[threadIdx.x]=__ldg(&roots[4ull*blockIdx.x+threadIdx.x]);
+        sh_weighted_inv[threadIdx.x]=__ldg(&roots[4ull*(root_count+blockIdx.x)+threadIdx.x]);
+    }
+    __syncthreads();
+#endif
     if(!active)return;
     size_t i=(size_t)idx,s=(size_t)batch_size;
     ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
@@ -1407,11 +1462,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+#if QSB_FINISH_ROOT_SH
+    for(int k=0;k<4;k++)prod[k]=sh_root_inv[k];
+    prod[4]=0;
+    uint64_t weighted_inv[4];
+    for(int k=0;k<4;k++)weighted_inv[k]=sh_weighted_inv[k];
+#else
     for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
     prod[4]=0;
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
+#endif
     (void)tree;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
