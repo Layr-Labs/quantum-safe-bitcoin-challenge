@@ -1,19 +1,307 @@
 {
+  "purpose": "Improve the public QSB pinning benchmark using organizer-generated inputs and unchanged verification/scoring.",
+  "parent_commit": "192b905dae49f6e82f280a8e11d3bc4927d6b927",
+  "runtime_digest": "9bb3bc72456089a36a9d6bfd2b374357c08ec5a9d3322e8d3193c6960f7f8668",
   "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "pinning.cu": "2f1ec5a2b480327c6fd5c96580e2bfdfe1180fe96b6df4fc5ec850b00cbb217b",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "1c34db149ad89977909265d052f9d014c99104ede795755d5eea69ccf119284e",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "GPUMath.h": "c1e9c2e213d76df01b942c3c68fd8e9850d03d1d9f6c0bd318ac75a506bb9013",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "PackedRecovery.cuh": "0e6edd155383cf7dca5f80695f283472da67452c03904f32efdd8fa9cb480236"
   },
-  "comparison_baseline_submission": "f16f893",
-  "comparison_baseline_promoted_commit": "bad91ac",
-  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5 (1M context)",
-  "harness": "Claude Code",
-  "production_source_bytes": 280594,
-  "note": "Regenerated for this submission. Baseline is f16f893 (otaliptus), 728,615,288. The only change is QSB_STREAM2: the existing qsb_st_v2/qsb_ld_v2 evict-first helpers applied to the four LIVE pipeline state planes (writes PackedRecovery.cuh, reads pinning.cu). No arithmetic is touched; -DQSB_STREAM2=0 reproduces the baseline PTX exactly."
+  "model": "GPT-6",
+  "harness": "Codex",
+  "composition": {
+    "base_guard_stream_three_slots": "65e92255bbb48642726998da592ff28a25ead9da42e5cdcc6ecacfc78b75f79c",
+    "new_change": "Lazy-open one append stream for the slotted hit reporter; flush every completed nonempty hit batch. Preserve output file, records, ordering and device computation.",
+    "attribution": "Persistent descriptor idea isolated from publicca39af55; public host-slot and real-state streaming lineage retained."
+  },
+  "native_validation": {
+    "passed": true,
+    "source_digest": "9bb3bc72456089a36a9d6bfd2b374357c08ec5a9d3322e8d3193c6960f7f8668",
+    "source_hashes_verified": true,
+    "inputs_and_binaries_verified": true,
+    "loader_cases": 14436,
+    "native_points": 66080,
+    "pipeline_mode_cases": 8,
+    "proofs": {
+      "loader-gate.json": {
+        "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/loader-gate.json",
+        "sha256": "1c60e7e5e55e1feb8d4b89339d8be0ffaab33c70bada9cb396e178e46bb99b80",
+        "proof": {
+          "passed": true,
+          "cases": 14436,
+          "safe": 13740,
+          "fallback": 696,
+          "required_negative_fallback": 348,
+          "actual_host_scan_both_outcomes": true,
+          "input_sha256": "01906c28bab76f7c617beeed7ff46b0dbb653a8b7df8141e5d84a8bf9b223f9e",
+          "output_sha256": "c0fed9143cad76b1c06c1080cc512403171c7948b5efa6f491ed24dc40c7650f",
+          "source_sha256": "2f1ec5a2b480327c6fd5c96580e2bfdfe1180fe96b6df4fc5ec850b00cbb217b",
+          "verifier": "Independent Python integer oracle for actual CUDA loader outputs"
+        }
+      },
+      "points-guarded-G.json": {
+        "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/points-guarded-G.json",
+        "sha256": "135eebe6e1542d17d1294be0590521bc0db00ff0e795765a3ee0dbe84cc4e3be",
+        "proof": {
+          "passed": true,
+          "terms": 15,
+          "native_points": 16520,
+          "dense_base": false,
+          "exception_cases": 0
+        }
+      },
+      "points-guarded-dense.json": {
+        "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/points-guarded-dense.json",
+        "sha256": "c3cfa8b963e27ca9a8c3b334675a10e904066b63178a5963af4af43a53207aee",
+        "proof": {
+          "passed": true,
+          "terms": 15,
+          "native_points": 16520,
+          "dense_base": true,
+          "exception_cases": 0
+        }
+      },
+      "points-full-G.json": {
+        "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/points-full-G.json",
+        "sha256": "135eebe6e1542d17d1294be0590521bc0db00ff0e795765a3ee0dbe84cc4e3be",
+        "proof": {
+          "passed": true,
+          "terms": 15,
+          "native_points": 16520,
+          "dense_base": false,
+          "exception_cases": 0
+        }
+      },
+      "points-full-dense.json": {
+        "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/points-full-dense.json",
+        "sha256": "c3cfa8b963e27ca9a8c3b334675a10e904066b63178a5963af4af43a53207aee",
+        "proof": {
+          "passed": true,
+          "terms": 15,
+          "native_points": 16520,
+          "dense_base": true,
+          "exception_cases": 0
+        }
+      },
+      "pipeline-gate.json": {
+        "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/pipeline-gate.json",
+        "sha256": "087127571c5d0a38d3a083b11c0c04515f7ab47790d93b1f5f8883c5999c8c8a",
+        "proof": [
+          {
+            "variant": "guarded",
+            "mode": "fast",
+            "matched_records": 291,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "guarded",
+            "mode": "double",
+            "matched_records": 553,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "guarded",
+            "mode": "easy-single",
+            "matched_records": 276,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "guarded",
+            "mode": "easy-double",
+            "matched_records": 533,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "full",
+            "mode": "fast",
+            "matched_records": 291,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "full",
+            "mode": "double",
+            "matched_records": 553,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "full",
+            "mode": "easy-single",
+            "matched_records": 276,
+            "candidates": 2352,
+            "passed": true
+          },
+          {
+            "variant": "full",
+            "mode": "easy-double",
+            "matched_records": 533,
+            "candidates": 2352,
+            "passed": true
+          }
+        ]
+      }
+    },
+    "manifest": {
+      "path": "research/native-table-guard-persistent-2016/gpu-evidence/manifest.json",
+      "sha256": "78af9ba4cde2c2b1bfeea47b68762130de574a4a67a2d2846a88a7d29e07c590"
+    },
+    "original_inputs": {
+      "path": "research/native-table-guard-persistent-2016/gpu-evidence/inputs.sha256",
+      "sha256": "e9f886e27d7f5635cb4820fc45a248d7ab833fbb6ecdbb6659135db4254e7019"
+    },
+    "binaries": {
+      "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/binaries.sha256",
+      "sha256": "0a053167be14281c75f34c83fe736e588d5308ddb5d33aa78384013575a095b7"
+    },
+    "compiler": {
+      "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/compiler.txt",
+      "sha256": "68f8b0a1301428031e307cf5260142a517bff25cc232a09eae2734be475d721f"
+    },
+    "gpu": {
+      "path": "research/native-table-guard-persistent-2016/gpu-evidence/logs/gpu.txt",
+      "sha256": "69d413b0f1f7dba51a40c272b86a24670be62038106b7b186216aff63e361e18"
+    }
+  },
+  "status": "Locally qualified and live preflight GO; official upload/result recorded separately.",
+  "long_frontier": {
+    "passed": true,
+    "purpose": "Independent local verification of original matched long-run evidence.",
+    "seed": 528697884,
+    "hits_per_run": 11889,
+    "timed_runs": 4,
+    "rates": {
+      "control": [
+        750215680.9762098,
+        750085429.6675647
+      ],
+      "frontier": [
+        738530129.2261394,
+        741369000.6852612
+      ]
+    },
+    "means": {
+      "control": 750150555.3218873,
+      "frontier": 739949564.9557004
+    },
+    "comparisons": {
+      "frontier": {
+        "mean_gain_percent": 1.3786061711918984,
+        "minimum_observed_gain_percent": 1.1757207239912582
+      }
+    }
+  },
+  "long_pending_leader": {
+    "passed": true,
+    "purpose": "Independent local verification of original matched long-run evidence.",
+    "seed": 129613284,
+    "hits_per_run": 11708,
+    "timed_runs": 4,
+    "rates": {
+      "control": [
+        748323204.8219177,
+        749691992.9767779
+      ],
+      "fbd0f7ac": [
+        741928572.961337,
+        737415874.6928084
+      ]
+    },
+    "means": {
+      "control": 749007598.8993478,
+      "fbd0f7ac": 739672223.8270726
+    },
+    "comparisons": {
+      "fbd0f7ac": {
+        "mean_gain_percent": 1.2620962057996232,
+        "minimum_observed_gain_percent": 0.8618931920975959
+      }
+    }
+  },
+  "full_qualification": {
+    "started_at": "2026-09-18T21:46:33.310603+00:00",
+    "purpose": "Optimize the public QSB pinning benchmark using organizer-generated inputs.",
+    "scope": "Local unchanged production wrapper verification, not an official score.",
+    "manifest_sha256": "45ad4d0e3a5250220a24f01fdf46107ba3ac1143e7f2cfd2ca19097bbd0cf178",
+    "source_digest": "9bb3bc72456089a36a9d6bfd2b374357c08ec5a9d3322e8d3193c6960f7f8668",
+    "production_binary_sha256": "1adaa474107f5a4dac114b38cdf2295299fb54810c2ee1e794af3c94502074b8",
+    "source_hashes_verified_before": true,
+    "status": "full verification passed; refresh all peers before submission",
+    "unmeasured_pending_at_preparation": [
+      "1ac08036-cd26-4112-b35b-0eca1cfb01ad",
+      "fbd0f7ac-b260-423f-81ce-94901e5453de"
+    ],
+    "full_seed": 1663757687,
+    "problem_sha256": "935db5498d8329f58fc654093164912b863eacdeee9aca61ba1f18f942cd50a5",
+    "finished_at": "2026-09-18T22:07:19.998591+00:00",
+    "source_hashes_verified_after": true,
+    "full_candidate": {
+      "wall_seconds": 1201.596029267006,
+      "artifact_seconds": 1200.176,
+      "verified_hits": 107335,
+      "all_hits_verified": true,
+      "binary_sha256": "1adaa474107f5a4dac114b38cdf2295299fb54810c2ee1e794af3c94502074b8"
+    }
+  },
+  "local_all_hit_proof": {
+    "verified_hits": 107335,
+    "reported_hits": 107335,
+    "failures": [],
+    "passed": true,
+    "verifier": "independent OpenSSL diagnostic",
+    "verification_seconds": 21.813062919012737
+  },
+  "fused_header_proof": {
+    "passed": true,
+    "scope": "Reuse native primitive proof only because the complete GPUMath.h bytes are identical; new full-run qualification is still required.",
+    "header_sha256": "c1e9c2e213d76df01b942c3c68fd8e9850d03d1d9f6c0bd318ac75a506bb9013",
+    "proofs": {
+      "native-summary.json": {
+        "path": "research/fused-row-fold/native-summary.json",
+        "sha256": "6a34e33480c4d7657234343d08fd95961521717922011c21405b7d0241f17e51"
+      },
+      "native-carry-count.json": {
+        "path": "research/fused-row-fold/native-carry-count.json",
+        "sha256": "34d38572fb670ce61164dd6a62d46e1964f6d330d71fa3fa5246442a58e6bdba"
+      }
+    },
+    "native_summary": {
+      "passed": true,
+      "native_triples": 40551,
+      "field_alias_comparisons": 162204,
+      "native_affine_points": 33040,
+      "pipeline_modes": 4,
+      "all_wall_runs": 10,
+      "unique_independently_verified_hits_per_run": 858,
+      "production_header_sha256": "c1e9c2e213d76df01b942c3c68fd8e9850d03d1d9f6c0bd318ac75a506bb9013"
+    },
+    "carry_cases": {
+      "passed": true,
+      "native_triples": 40551,
+      "final_carry_cases": 3737,
+      "input_sha256": "a5cbbd2c35d50b2f65951a8ea84e3e64173a327bc038615e8c3e732fd22e20f4"
+    }
+  },
+  "competitive_preflight": {
+    "checked_at": "2026-09-18T22:08:38.697754+00:00",
+    "decision": "GO",
+    "comparison_count": 24,
+    "frontier_commit": "37922c77408828f2eadca010a76d2e87014813c1",
+    "frontier_runtime_digest": "dea51d1ddd2bc82761d990e5d27e6356a9bfd5e34e18f61e80a7b93d648f6b18",
+    "pending_labels": [
+      "0edfc9a7-dee4-4137-ad12-1ad60672d23f",
+      "023382e4-c34a-4a48-8d77-4dfc432c8bbb",
+      "1ac08036-cd26-4112-b35b-0eca1cfb01ad",
+      "fbd0f7ac-b260-423f-81ce-94901e5453de",
+      "3c7d088f-0d11-4c24-a5b5-2fa1887950e6"
+    ]
+  }
 }
