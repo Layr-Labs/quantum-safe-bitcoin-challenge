@@ -23,6 +23,13 @@
 static_assert(sizeof(ulonglong2) == 16, "pipeline vector must be 128 bits");
 static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligned");
 
+#ifndef QSB_SPARSE_D
+#define QSB_SPARSE_D 1        /* sparse SHA256d-second + pubkey transforms (preludebrace lineage) */
+#endif
+#if (QSB_SPARSE_D != 0 && QSB_SPARSE_D != 1)
+#error QSB_SPARSE_D must be 0 or 1
+#endif
+
 /* Batch size: 2^26 candidates per pipeline launch. Larger batches amortize the
  * five kernel launches, the host round trip and the pipeline ramp over more
  * candidates (idea from public submission b756a1c by welttowelt). The
@@ -430,6 +437,158 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     state[6] += g;
     state[7] += h;
 }
+/* Sparse-schedule SHA-256 for the SHA256d second compression (32-byte digest
+ * message): live words m[0..7], W[8]=0x80000000, W[9..14]=0, W[15]=256, from
+ * the SHA-256 IV. Bit-identical to _SHA256Initialize + _SHA256Transform on
+ * that padded block. */
+__device__ __forceinline__ void _SHA256TransformDigest32(
+    uint32_t out[8], const uint32_t m[8])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = 0x6a09e667u;
+    uint32_t b = 0xbb67ae85u;
+    uint32_t c = 0x3c6ef372u;
+    uint32_t d = 0xa54ff53au;
+    uint32_t e = 0x510e527fu;
+    uint32_t f = 0x9b05688cu;
+    uint32_t g = 0x1f83d9abu;
+    uint32_t h = 0x5be0cd19u;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 8; i++) w[i] = m[i];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0x80000000u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 256u);
+
+    {
+        /* First schedule expansion; w[9..14]=0 and w[8]/w[15] are the fixed
+         * pad words. s0(0)=s1(0)=0, so zero terms vanish. */
+        w[0] += s0(w[1]);
+        w[1] += s1(256u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 256u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
+        w[8]  = 0x80000000u + s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(256u);
+        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    out[0] = 0x6a09e667u + a;
+    out[1] = 0xbb67ae85u + b;
+    out[2] = 0x3c6ef372u + c;
+    out[3] = 0xa54ff53au + d;
+    out[4] = 0x510e527fu + e;
+    out[5] = 0x9b05688cu + f;
+    out[6] = 0x1f83d9abu + g;
+    out[7] = 0x5be0cd19u + h;
+}
+
+/* Sparse-schedule SHA-256 for the 33-byte compressed public key:
+ * live words pb[0..8], W[9..14]=0, W[15]=0x108, from the SHA-256 IV.
+ * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
+__device__ __forceinline__ void _SHA256TransformPubkey33(
+    uint32_t out[8], const uint32_t m[9])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = 0x6a09e667u;
+    uint32_t b = 0xbb67ae85u;
+    uint32_t c = 0x3c6ef372u;
+    uint32_t d = 0xa54ff53au;
+    uint32_t e = 0x510e527fu;
+    uint32_t f = 0x9b05688cu;
+    uint32_t g = 0x1f83d9abu;
+    uint32_t h = 0x5be0cd19u;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 9; i++) w[i] = m[i];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], w[8]);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
+
+    {
+        /* First schedule expansion; w[9..14]=0 and w[15]=0x108 is fixed. */
+        w[0] += s0(w[1]);
+        w[1] += s1(0x108u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(w[8]);
+        w[8] += s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(0x108u);
+        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    out[0] = 0x6a09e667u + a;
+    out[1] = 0xbb67ae85u + b;
+    out[2] = 0x3c6ef372u + c;
+    out[3] = 0xa54ff53au + d;
+    out[4] = 0x510e527fu + e;
+    out[5] = 0x9b05688cu + f;
+    out[6] = 0x1f83d9abu + g;
+    out[7] = 0x5be0cd19u + h;
+}
+
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -957,6 +1116,11 @@ __global__ void __launch_bounds__(128, STAGE == 0 ? 4 : 7) kernel_pinning_pipeli
     }
 
     /* Second SHA-256: the first digest is already in big-endian words. */
+    uint32_t s2[8];
+#if QSB_SPARSE_D
+    _SHA256TransformDigest32(s2, state);
+#else
+    {
     uint32_t b2[16];
     #pragma unroll
     for(int i=0;i<8;i++) b2[i]=state[i];
@@ -964,9 +1128,13 @@ __global__ void __launch_bounds__(128, STAGE == 0 ? 4 : 7) kernel_pinning_pipeli
     #pragma unroll
     for(int i=9;i<15;i++) b2[i]=0;
     b2[15]=256;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    const uint32_t iv[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                          0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    #pragma unroll
+    for(int i=0;i<8;i++) s2[i]=iv[i];
     _SHA256Transform(s2,b2);
+    }
+#endif
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
     uint64_t z[4];
@@ -1053,8 +1221,13 @@ __global__ void __launch_bounds__(128, STAGE == 0 ? 4 : 7) kernel_pinning_pipeli
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
+        uint32_t hs[8];
+#if QSB_SPARSE_D
+        _SHA256TransformPubkey33(hs,pb);   /* pb[9..14]=0, pb[15]=0x108 folded in */
+#else
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+        _SHA256Initialize(hs);_SHA256Transform(hs,pb);
+#endif
         int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];
@@ -1073,10 +1246,15 @@ __global__ void __launch_bounds__(128, STAGE == 0 ? 4 : 7) kernel_pinning_pipeli
         uint8_t h[32];
         for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
             h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+        uint32_t h2s[8];
+#if QSB_SPARSE_D
+        _SHA256TransformDigest32(h2s, hs);
+#else
         uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
         uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
             ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
-        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
+        _SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
+#endif
         if (!FAST_TAIL && easy_mode) {
             uint8_t h2[32];
             for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
