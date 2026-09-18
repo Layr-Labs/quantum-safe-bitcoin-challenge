@@ -783,8 +783,15 @@ __device__ __forceinline__ void _SHA256TransformDigest32(
 
 /* Sparse-schedule SHA-256 for the 33-byte compressed public key (delta D):
  * live words pb[0..8], W[9..14]=0, W[15]=0x108, from the SHA-256 IV.
- * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
-__device__ __forceinline__ void _SHA256TransformPubkey33(
+ * Bit-identical to _SHA256Initialize + _SHA256Transform on that block.
+ *
+ * The ranked single-hash path only tests the leading QSB_ZEROS_N bits.  For
+ * N<=32 it therefore needs only digest word zero.  WORD0_ONLY makes that
+ * liveness explicit so ptxas can discard the other seven feed-forward adds
+ * and outputs (and any final-round work used only by them).  The full digest
+ * specialization remains available for diagnostic and double-hash modes. */
+template<bool WORD0_ONLY>
+__device__ __forceinline__ uint32_t _SHA256TransformPubkey33Core(
     uint32_t out[8], const uint32_t m[9])
 {
     uint32_t t1;
@@ -846,15 +853,42 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
     WMIX();
     SHA256_RND(48);
 
-    out[0] = 0x6a09e667u + a;
-    out[1] = 0xbb67ae85u + b;
-    out[2] = 0x3c6ef372u + c;
-    out[3] = 0xa54ff53au + d;
-    out[4] = 0x510e527fu + e;
-    out[5] = 0x9b05688cu + f;
-    out[6] = 0x1f83d9abu + g;
-    out[7] = 0x5be0cd19u + h;
+    uint32_t word0 = 0x6a09e667u + a;
+    if (!WORD0_ONLY) {
+        out[0] = word0;
+        out[1] = 0xbb67ae85u + b;
+        out[2] = 0x3c6ef372u + c;
+        out[3] = 0xa54ff53au + d;
+        out[4] = 0x510e527fu + e;
+        out[5] = 0x9b05688cu + f;
+        out[6] = 0x1f83d9abu + g;
+        out[7] = 0x5be0cd19u + h;
+    }
+    return word0;
 }
+
+__device__ __forceinline__ void _SHA256TransformPubkey33(
+    uint32_t out[8], const uint32_t m[9])
+{
+    (void)_SHA256TransformPubkey33Core<false>(out, m);
+}
+
+#if QSB_ZEROS_N <= 32
+__device__ __forceinline__ int _SHA256Pubkey33LeadingGate(
+    const uint32_t m[9])
+{
+    uint32_t word0 = _SHA256TransformPubkey33Core<true>(NULL, m);
+#if QSB_ZEROS_N == 0
+    (void)word0;
+    return 1;
+#elif QSB_ZEROS_N < 32
+    return (word0 >> (32 - QSB_ZEROS_N)) == 0u;
+#else
+    static_assert(QSB_ZEROS_N == 32, "word-zero gate supports at most 32 bits");
+    return word0 == 0u;
+#endif
+}
+#endif
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -1459,14 +1493,31 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
+        int vv;
         uint32_t hs[8];
+#if QSB_SPARSE_D && QSB_ZEROS_N <= 32
+        if (FAST_TAIL) {
+            /* Ranked Config A consumes only the leading-bit predicate.  Do
+             * not materialize the seven digest words that cannot affect it. */
+            vv=_SHA256Pubkey33LeadingGate(pb);
+        } else {
+            _SHA256TransformPubkey33(hs,pb); /* zero/pad words are folded in */
+            if (easy_mode) {
+                uint8_t h[32];
+                for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+                    h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+                vv=gpu_is_der_easy(h,32);
+            } else {
+                vv=gpu_bench_valid_words(hs);
+            }
+        }
+#else
 #if QSB_SPARSE_D
-        _SHA256TransformPubkey33(hs,pb);   /* pb[9..14]=0, pb[15]=0x108 folded in */
+        _SHA256TransformPubkey33(hs,pb);     /* zero/pad words are folded in */
 #else
         pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
         _SHA256Initialize(hs);_SHA256Transform(hs,pb);
 #endif
-        int vv;
         if (!FAST_TAIL && easy_mode) {
             uint8_t h[32];
             for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
@@ -1475,6 +1526,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         } else {
             vv=gpu_bench_valid_words(hs);
         }
+#endif
         if(vv){
             uint32_t pos=atomicAdd(d_hit_cnt,1);
             if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
