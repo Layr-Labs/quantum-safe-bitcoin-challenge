@@ -1,0 +1,32 @@
+{
+  "bench": "pinning",
+  "zeros_n": 24,
+  "mode": "fixed_time",
+  "grinder": "candidates/pinning/pinning.cu",
+  "candidates": 490480695150,
+  "elapsed_s": 1200.8714,
+  "throughput_Mps": 407.376555,
+  "verified_hits": 58318,
+  "problem_seed": 274283709,
+  "bridge_metrics": {
+    "schema": "yukon.gpu-bench-metrics.v1",
+    "bench": "pinning",
+    "wall_s": 1200.87136826,
+    "command_exit_status": 0,
+    "profile_sha256": "7256bf0abd252a3d6f66e71cbe61f9d363ef7e38bf28414fa22d22dc24becf54",
+    "observed_epoch": 1789584328
+  },
+  "self_reported": {
+    "elapsed_s": 1200.1,
+    "throughput_Mps": 408.7
+  },
+  "max_relative_variance": 0.1,
+  "hit_relative_variance": 0.004141,
+  "hit_implied_candidates": 489206841344,
+  "gpu": "RTX_4090",
+  "score": {
+    "primary_throughput_Mps": 407.376555,
+    "secondary_hits_per_s": 48.563068,
+    "valid": true
+  }
+}
