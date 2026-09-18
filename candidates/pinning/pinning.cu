@@ -67,7 +67,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS (768/QSB_TREE_N)    /* keep 768 threads per SM at 80 registers */
+#define QSB_S2_BLOCKS 7    /* keep 768 threads per SM at 80 registers */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
@@ -79,10 +79,10 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
 #endif
 #ifndef QSB_PK_UNROLL
-#define QSB_PK_UNROLL 0       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
+#define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
-#define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
+#define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
@@ -224,13 +224,17 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
      * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
      * and the 2k-mod-n step below (one more subtract) is exact. For a k already
      * < n this is a no-op. */
-    s=(__uint128_t)k[0]-n0;    uint64_t kd0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[1]-n1-kb; uint64_t kd1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[2]-n2-kb; uint64_t kd2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    s=(__uint128_t)k[3]-n3-kb; uint64_t kd3=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-    uint64_t km = (uint64_t)0 - (1ULL - kb);   /* all-ones if k >= n (no borrow) */
-    uint64_t k0=(k[0]&~km)|(kd0&km), k1=(k[1]&~km)|(kd1&km),
-             k2=(k[2]&~km)|(kd2&km), k3=(k[3]&~km)|(kd3&km);
+    /* Donor @scarletbright e7a648c7: the common path avoids a four-limb
+     * subtract and four selects. */
+    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
+    if (k3 == n3 &&
+        (k2 > n2 ||
+         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
+        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
+        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
+    }
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -274,14 +278,54 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
 
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
-__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *gTable,
-                                                     uint32_t base, uint32_t idx,
-                                                     uint64_t neg,
-                                                     uint64_t gx[4], uint64_t gy[4]) {
+/* Register-carried digit window. `pos` is pure loop state - identical in every
+ * lane - so the limb pair the extractor needs is carried in registers and the
+ * window is shifted down one limb on a warp-uniform branch (three times in the
+ * twelve rolled iterations) instead of a four-way SEL on every chunk. Same
+ * value as gt_field_bits(M0..M3,pos) by construction. */
+struct qsb_digit_window {
+    uint64_t w0, w1, w2, w3;
+    unsigned sh;
+    __device__ __forceinline__ void init(const uint64_t *M, unsigned pos) {
+        w0 = M[0]; w1 = M[1]; w2 = M[2]; w3 = M[3]; sh = pos;
+        while (sh >= 64u) { w0 = w1; w1 = w2; w2 = w3; w3 = 0ULL; sh -= 64u; }
+    }
+    __device__ __forceinline__ uint32_t peek() const {
+        return (uint32_t)((w0 >> sh) | ((w1 << 1) << (63u - sh)));
+    }
+    __device__ __forceinline__ void advance(unsigned bits) {
+        sh += bits;
+        if (sh >= 64u) { w0 = w1; w1 = w2; w2 = w3; w3 = 0ULL; sh -= 64u; }
+    }
+};
+
+/* Mask-taking variant: the direct-digit path already holds the sign as an
+ * all-ones/zero mask, so the loader does not redo 0-neg on every chunk. */
+__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
+                                                      uint32_t base, uint32_t idx,
+                                                      uint64_t m,
+                                                      uint64_t *__restrict__ gx,
+                                                      uint64_t *__restrict__ gy) {
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=tx[0],x1=tx[1],y0=ty[0],y1=ty[1];
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
+    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
+    UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
+    gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
+}
+
+__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
+                                                     uint32_t base, uint32_t idx,
+                                                     uint64_t neg,
+                                                     uint64_t *__restrict__ gx,
+                                                     uint64_t *__restrict__ gy) {
+    size_t off = ((size_t)base + idx) * 64;
+    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
+    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -429,120 +473,47 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X, uint64_t *Y,
         }
     }
 #endif
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    /* The global sign becomes an all-ones/zero mask once per candidate, the
+     * per-chunk (t-1) term is computed once and used both as the index-flip
+     * mask and (sign-extended) as the point-negation mask, and the digit
+     * window is carried in registers. */
+    uint64_t smask = 0ULL - (uint64_t)(sign < 0);
+    qsb_digit_window dw; dw.init(M, 1u);
+    {
+        uint32_t f = dw.peek() & 0x3ffffu;
+        int32_t tm = (int32_t)(f >> 17) - 1;
+        idx = (f ^ (uint32_t)tm) & 0x1ffffu;
+        gt_load_signed_flat_m(gTable, gt_offset(0), idx, (uint64_t)(int64_t)tm ^ smask, x0, y0);
+        dw.advance(18u);
+    }
+    {
+        uint32_t f = dw.peek() & 0x1ffffu;
+        int32_t tm = (int32_t)(f >> 16) - 1;
+        idx = (f ^ (uint32_t)tm) & 0xffffu;
+        gt_load_signed_flat_m(gTable, gt_offset(1), idx, (uint64_t)(int64_t)tm ^ smask, x1, y1);
+        dw.advance(17u);
+    }
     _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
-#if QSB_PREFETCH == 1
-    /* Peel the digit one chunk ahead and prefetch its record into L2. Only the
-     * next signed digit (one register) stays live, not the 64-byte point. */
-    int32_t ec_next=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec_next, &idx, &neg);
-    qsb_prefetch_l2(gTable+((size_t)table_base+idx)*64);
-    qsb_prefetch_l2(gTable+((size_t)table_base+idx)*64+32);
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=ec_next;
-        if (c<GT_CHUNKS-1) {
-            ec_next=(c+1<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-            uint32_t pi; uint64_t pn; gt_digit_idx(ec_next,&pi,&pn);
-            qsb_prefetch_l2(gTable+((size_t)table_base+(1u<<16)+pi)*64);
-            qsb_prefetch_l2(gTable+((size_t)table_base+(1u<<16)+pi)*64+32);
-        }
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
-#elif QSB_S0_SHM
-    #pragma unroll
-    for(int i=0;i<4;i++){ QSB_M_ST(i,M[i]); QSB_Y0_ST(i,y0[i]); }
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        uint64_t Ms[4]; int32_t ecs;
-        #pragma unroll
-        for(int i=0;i<4;i++) Ms[i]=QSB_M_LD(i);
-        if (c<GT_CHUNKS-1) {
-            ecs=gt_mixed_step<17>(Ms,sign);
-            #pragma unroll
-            for(int i=0;i<4;i++) QSB_M_ST(i,Ms[i]);
-        } else {
-            ecs=sign*(int32_t)Ms[0];
-        }
-        gt_digit_idx(ecs, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        uint64_t ya[4];
-        #pragma unroll
-        for(int i=0;i<4;i++) ya[i]=QSB_Y0_LD(i);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, ya, c != GT_CHUNKS-1);
-        #pragma unroll
-        for(int i=0;i<4;i++) QSB_Y0_ST(i,cy[i]);   /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
-    #undef QSB_M_LD
-    #undef QSB_M_ST
-    #undef QSB_Y0_LD
-    #undef QSB_Y0_ST
-#elif QSB_EARLY_LOAD
-    /* Chunk 2 is loaded up front; every later record is loaded inside the
-     * preceding addition. Two point buffers alternate roles. */
-    uint64_t nx[4],ny[4];
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c+=2){
-        /* iteration c: consume cx/cy, load c+1 into nx/ny */
-        bool more=(c+1<GT_CHUNKS);
-        uint32_t ni=0; uint64_t nn=0;
-        if (more) { ec=(c+1<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0]; gt_digit_idx(ec,&ni,&nn); }
-        _PointAddXYZZ_early(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1,
-                            more, gTable, table_base+(1u<<16), ni, nn, nx, ny);
-        Load256(y0, cy);
-        table_base += 1u << 16;
-        if (!more) break;
-        /* iteration c+1: consume nx/ny, load c+2 into cx/cy */
-        bool more2=(c+2<GT_CHUNKS);
-        ni=0; nn=0;
-        if (more2) { ec=(c+2<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0]; gt_digit_idx(ec,&ni,&nn); }
-        _PointAddXYZZ_early(X,Y,ZZ,ZZZ, nx,ny, y0, c+1 != GT_CHUNKS-1,
-                            more2, gTable, table_base+(1u<<16), ni, nn, cx, cy);
-        Load256(y0, ny);
-        table_base += 1u << 16;
-    }
-#elif QSB_FINAL_TEMPLATE
-    /* Delta C (jacklightChen e582bda4): twelve deferred additions in the
-     * rolled loop, then the resolving final addition as its own compile-time
-     * specialisation, so the loop body carries no defer_y branch. */
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        uint32_t f = dw.peek() & 0x1ffffu;
+        int32_t tm = (int32_t)(f >> 16) - 1;
+        idx = (f ^ (uint32_t)tm) & 0xffffu;
+        gt_load_signed_flat_m(gTable,table_base,idx,(uint64_t)(int64_t)tm ^ smask,cx,cy);
         _PointAddXYZZT<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
+        dw.advance(17u);
     }
-    ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg);
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    _PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
-#else
-#if QSB_UNROLL == 2
-    #pragma unroll 2
-#elif QSB_UNROLL == 3
-    #pragma unroll 3
-#else
-    #pragma unroll 1
-#endif
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+    /* Last chunk is the positive remainder, and its addition resolves the
+     * deferred ordinate, so it is peeled out of the rolled loop. */
+    {
+        uint32_t f = dw.peek() & 0x1ffffu;
+        gt_load_signed_flat_m(gTable,table_base,f & 0xffffu,smask,cx,cy);
+        _PointAddXYZZT<false>(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
-#endif
 }
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
