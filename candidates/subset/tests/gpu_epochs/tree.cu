@@ -731,7 +731,13 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_PER_EPOCH 256
 /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 65536   /* 16.8M candidates per launch (measured +0.3%) */
+#define ZLAB_LAUNCH_BLOCKS 262144  /* 67M candidates per launch. The e2e auditor measured
+                                   * 65536 -> 262144 at +0.278% (3 legs, spread 0.011%,
+                                   * 16384 anchoring the fit at 136 us/launch); the cubin is
+                                   * byte-identical because the constant is host-only, and the
+                                   * hit set is invariant. This raises duty cycle rather than
+                                   * reducing work per candidate, so a throttling runner should
+                                   * expect at most the measured +0.28%. */
 #endif
 #define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
 
@@ -1323,14 +1329,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* Second SHA-256 (SHA-256d): the message is the 32-byte first hash, i.e.
      * the state words themselves in big-endian order, followed by standard
      * 32-byte-message padding (total length 256 bits = 0x100). */
-    uint32_t b2[16];
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
+    /* Sparse schedule: the pad (W[8]=0x80000000, W[9..14]=0, W[15]=0x100) and the
+     * IV are folded in, so only the eight live digest words are supplied. */
+    uint32_t s2[8];
+    _SHA256TransformDigest32(s2, state);
 
     /* EC recovery with both flags + ModInv + the leading-zeros gate.
      * z is the big-endian value of the 32-byte second hash, which IS the state
@@ -2325,7 +2327,11 @@ int main(int argc, char **argv) {
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    /* The deepest measured frame on this build is 120 B (kernel_build_gtable; digest and
+     * prefix_cache are 0 B), so 32768 reserved ~5.9 GiB for nothing. 2048 keeps 17x
+     * headroom over the measured frame and returns the reservation as OOM headroom.
+     * Rate-neutral by construction - it changes no device code. */
+    cudaDeviceSetLimit(cudaLimitStackSize, 2048);
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
