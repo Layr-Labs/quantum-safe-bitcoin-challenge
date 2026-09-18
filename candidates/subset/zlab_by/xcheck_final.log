@@ -1,0 +1,16 @@
+zi_divstep30_by unit: 3270336 cases vs the direct recursion, 3182958 with |delta|>4 (clamped), mismatches=0
+tested=389081  failures=0   (BY vs Stein, x*inv==1, vs BN_mod_inverse, canonical range)
+   class rand in [1,p)                                              n=250000
+   class small 1..4096                                              n=4096
+   class p-1 .. p-4096                                              n=4096
+   class 2^k-1,2^k,2^k+1 (k=0..255)                                 n=768
+   class limb patterns (all-ones/zero/AA/55)                        n=1024
+   class zero (non-invertible)                                      n=1
+   class odd*2^j, j=0..255  (long even runs -> delta far above the clamp) n=4096
+   class max-batch search (19-batch witnesses + random)             n=125000
+batch histogram: 1:1 17:2357 18:343872 19:42851
+mean batches 18.1040   max 19   (Bernstein-Yang 741-divstep bound = 25 batches)
+f ended at -1 (final conditional negate taken): 194807 of 389081
+shipped Stein path, same inputs, batch histogram: 1:1 9:6613 10:335 11:370 12:168601 13:206874 14:1627 15:872 16:989 17:2774 18:25
+   Stein mean batches 12.5393
+RESULT: PASS

@@ -1,0 +1,3 @@
+batch-count search over 3000000 random values in [1,p):
+   histogram: 17:11086 18:2644185 19:344729
+   mean 18.1112  max 19  (every case terminated; zero outputs=0)
