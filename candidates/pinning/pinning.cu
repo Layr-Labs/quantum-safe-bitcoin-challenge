@@ -416,14 +416,23 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
 #else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
+#if QSB_FUSE_MULSUB
+  if (do_load) gt_load_signed_flat(gTable, nbase, nidx, nneg, nx, ny);
+  _ModSub256(P, U2, X1);
+  _ModMulSubCore(R, S2, ZZZ1, Y1);
+#else
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   if (do_load) gt_load_signed_flat(gTable, nbase, nidx, nneg, nx, ny);
   _ModSub256(P, U2, X1);
   _ModSub256(R, S2, Y1);
+#endif
   _ModSqr(PP, P);
   _ModMult(PPP, PP, P);
   _ModMult(Q, U2, PP);
   _ModMult(ZZ1, PP);
+#if QSB_FUSE_SQRADDSUB2
+  _ModSqrAddSub2(T, R, PPP, Q);
+#else
   _ModSqr(T, R);
 #if QSB_LAZY
   _ModX3Fused(T, T, PPP, Q);
@@ -432,6 +441,8 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);
 #endif
+#endif
+
   _ModMult(ZZZ1, PPP);
   _ModSub256(Q, Q, T);
   _ModMult(Q, R);
