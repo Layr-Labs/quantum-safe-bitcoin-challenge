@@ -16,6 +16,7 @@
 */
 
 // ---------------------------------------------------------------------------------
+// 256(+64) bits integer CUDA libray for SECPK1
 // ---------------------------------------------------------------------------------
 
 
@@ -1263,13 +1264,12 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
 // The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
 // the ordinary slope numerator is (Y2+Yoff)*ZZZ1 - Yd, so the Y1*PPP product is
-// skipped. Interior calls use this outlined 7M+2S body. The last window
-// uses _PointAddXYZZ_def_last (8M+2S) so the rolled madd never carries
-// the Y2*ZZZ3 multiply or its registers.
+// skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
+// addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final.
 // ---------------------------------------------------------------------------------------
 __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
                                   const uint64_t *X2, const uint64_t *Y2,
-                                  const uint64_t *Yoff)
+                                  const uint64_t *Yoff, bool defer_y)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1296,43 +1296,14 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
-  Load256(Y1, Q);                      // deferred Y: actual Y3 = Y1 - Y2*ZZZ3
+  if (defer_y) {
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+  } else {
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+    _ModSub256(Y1, Q, S2);             // exact Y3
+  }
+
   Load256(X1, T);                      // X3
-}
-
-// Last-window twin. Same prefix; Y tail is exact Y3 = R*(V-X3) - Y2*ZZZ3.
-__device__ void _PointAddXYZZ_def_last(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-                                       const uint64_t *X2, const uint64_t *Y2,
-                                       const uint64_t *Yoff)
-{
-  uint64_t U2[4];
-  uint64_t S2[4];
-  uint64_t P[4];
-  uint64_t R[4];
-  uint64_t PP[4];
-  uint64_t PPP[4];
-  uint64_t Q[4];
-  uint64_t T[4];
-
-  _ModMult(U2, (uint64_t *)X2, ZZ1);
-  _ModAddLazy(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
-  _ModMult(S2, ZZZ1);
-  _ModSub256(P, U2, X1);
-  _ModSub256(R, S2, Y1);
-  _ModSqr(PP, P);
-  _ModMult(PPP, PP, P);
-  _ModMult(Q, U2, PP);
-  _ModMult(ZZ1, PP);
-
-  _ModSqr(T, R);
-  _ModX3Fused(T, T, PPP, Q);
-
-  _ModMult(ZZZ1, PPP);
-  _ModSub256(Q, Q, T);
-  _ModMult(Q, R);
-  _ModMult(S2, (uint64_t *)Y2, ZZZ1);
-  _ModSub256(Y1, Q, S2);
-  Load256(X1, T);
 }
 
 // Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
