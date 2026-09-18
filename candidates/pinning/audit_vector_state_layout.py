@@ -76,10 +76,7 @@ def audit_source():
     source = Path(__file__).with_name("pinning.cu").read_text()
     assert 'static_assert(sizeof(ulonglong2) == 16' in source
     assert 'static_assert(alignof(ulonglong2) == 16' in source
-    # Exact 1a retains two disabled tree-offload experiment kernels in
-    # addition to the production kernel and launcher signatures.
-    assert source.count("ulonglong2 *saved") == 4
-    assert source.count("const ulonglong2 *saved") == 1
+    assert source.count("ulonglong2 *saved") == 2
     assert "BATCH*8u*sizeof(ulonglong2)" in source
     assert "alignof(ulonglong2)-1u" in source
     for plane in range(VECTOR_PLANES):

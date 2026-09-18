@@ -342,6 +342,10 @@ __device__ void _ModAdd256(uint64_t *r, uint64_t *a, uint64_t *b)
     }
 }
 
+#ifndef QSB_LAZY
+#define QSB_LAZY 1
+#endif
+#if QSB_LAZY
 // r = a - b, plus p when the subtraction borrows. Adding p modulo 2^256 is
 // the same as subtracting K = 2^256 - p = 2^32 + 977, so the borrow mask only
 // has to select one limb-sized constant instead of four limbs of p. The
@@ -431,6 +435,53 @@ __device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, cons
     UADD1(t3, 0ULL);
     r[0] = t0; r[1] = t1; r[2] = t2; r[3] = t3;
 }
+#else
+__device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
+{
+    uint64_t t;
+    uint64_t T[4];
+
+    USUBO(r[0], a[0], b[0]);
+    USUBC(r[1], a[1], b[1]);
+    USUBC(r[2], a[2], b[2]);
+    USUBC(r[3], a[3], b[3]);
+    USUB(t, 0ULL, 0ULL);
+
+    T[0] = 0xFFFFFFFEFFFFFC2FULL & t;
+    T[1] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[2] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[3] = 0xFFFFFFFFFFFFFFFFULL & t;
+
+    UADDO1(r[0], T[0]);
+    UADDC1(r[1], T[1]);
+    UADDC1(r[2], T[2]);
+    UADD1(r[3], T[3]);
+
+}
+
+// ---------------------------------------------------------------------------------------
+
+__device__ void _ModSub256(uint64_t *r, uint64_t *b)
+{
+
+    uint64_t t;
+    uint64_t T[4];
+    USUBO(r[0], r[0], b[0]);
+    USUBC(r[1], r[1], b[1]);
+    USUBC(r[2], r[2], b[2]);
+    USUBC(r[3], r[3], b[3]);
+    USUB(t, 0ULL, 0ULL);
+    T[0] = 0xFFFFFFFEFFFFFC2FULL & t;
+    T[1] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[2] = 0xFFFFFFFFFFFFFFFFULL & t;
+    T[3] = 0xFFFFFFFFFFFFFFFFULL & t;
+    UADDO1(r[0], T[0]);
+    UADDC1(r[1], T[1]);
+    UADDC1(r[2], T[2]);
+    UADD1(r[3], T[3]);
+
+}
+#endif
 
 // ---------------------------------------------------------------------------------------
 
@@ -1202,11 +1253,13 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
 template<bool DEFER_Y>
-__device__ __forceinline__ void _PointAddXYZZ(
-    uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
-    uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
-    const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
-    const uint64_t *__restrict__ Yoff)
+__device__ __forceinline__ void _PointAddXYZZT(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff);
+
+__device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+                              const uint64_t *X2, const uint64_t *Y2,
+                              const uint64_t *Yoff, bool defer_y)
 {
   uint64_t U2[4];
   uint64_t S2[4];
@@ -1218,7 +1271,11 @@ __device__ __forceinline__ void _PointAddXYZZ(
   uint64_t T[4];
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
+#if QSB_LAZY
   _ModAddLazy(S2, Y2, Yoff);
+#else
+  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
@@ -1228,7 +1285,66 @@ __device__ __forceinline__ void _PointAddXYZZ(
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
+#if QSB_LAZY
   _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
+#else
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
+
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModSub256(Q, Q, T);                 // V - X3
+  _ModMult(Q, R);                      // R*(V - X3)
+  if (defer_y) {
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+  } else {
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+    _ModSub256(Y1, Q, S2);             // exact Y3
+  }
+
+  Load256(X1, T);                      // X3
+}
+
+// Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
+// production chain calls <true> twelve times in its rolled loop and <false>
+// once for the resolving final addition, so no defer_y branch is in the loop.
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZT(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff)
+{
+  uint64_t U2[4];
+  uint64_t S2[4];
+  uint64_t P[4];
+  uint64_t R[4];
+  uint64_t PP[4];
+  uint64_t PPP[4];
+  uint64_t Q[4];
+  uint64_t T[4];
+
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
+#if QSB_LAZY
+  _ModAddLazy(S2, Y2, Yoff);
+#else
+  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModSqr(PP, P);                      // PP = P^2
+  _ModMult(PPP, PP, P);                // PPP = P*PP
+  _ModMult(Q, U2, PP);                 // V  = U2*PP
+  _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
+
+  _ModSqr(T, R);                       // R^2
+#if QSB_LAZY
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
+#else
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
