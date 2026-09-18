@@ -503,23 +503,31 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, true);
+        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
         table_base += 1u << 18;
     }
     #pragma unroll 1
-    for (int c=GT_BIG;c<GT_CHUNKS;c++){
+    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
 #if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),c==GT_CHUNKS-1,&idx,&neg); pos+=gt_width(GT_BIG);
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
 #else
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<18>(M,sign):sign*(int32_t)M[0];
+        ec=gt_mixed_step<18>(M,sign);
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);
         table_base += 1u << 17;
     }
+#if ZLAB_DIRDIG
+    gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
+#else
+    ec=sign*(int32_t)M[0];
+    gt_digit_idx(ec, &idx, &neg);
+#endif
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+    _PointAddXYZZ_def_last(X,Y,ZZ,ZZZ, cx,cy, y0);
 #else
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
@@ -535,8 +543,8 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t wlo=wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
     uint64_t whi=wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),false,&idx,&neg);
         pos+=gt_width(2);
         gt_window_advance(M,pos,&wli,&wlo,&whi);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
@@ -549,14 +557,22 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
 #endif
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
+        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
+#if ZLAB_DIRDIG
+    gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),true,&idx,&neg);
+    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+#else
+    ec=sign*(int32_t)M[0];
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+#endif
+    _PointAddXYZZ_def_last(X,Y,ZZ,ZZZ, cx,cy, y0);
 #endif
 }
 
