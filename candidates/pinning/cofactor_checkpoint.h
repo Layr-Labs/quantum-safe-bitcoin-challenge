@@ -2,7 +2,8 @@
 
 // The caller supplies nonzero effective leaves (identity for unusable lanes).
 // Preserve immutable products and accumulate exclusion products separately.
-// All N lanes participate in every barrier; one block publishes one raw root.
+// All N lanes participate in every collective; warp-local levels use __syncwarp.
+// One block publishes one raw root.
 template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     uint64_t *value,uint64_t *roots,uint64_t (*products)[2*N],uint64_t (*excluded)[N]) {
     static_assert(N>=2 && !(N&(N-1)),"power-of-two tree");
@@ -23,7 +24,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        /* count<=64: writers and next readers live in warp 0 (N<=256). */
+        if(count>64)__syncthreads();
+        else if(count>2)__syncwarp();
     }
     if(tid==0) {
         #pragma unroll
@@ -50,7 +53,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        /* Next reader set fits in warp 0 iff count<32 (2*count <= 32). */
+        if(count>=32)__syncthreads();
+        else __syncwarp();
     }
     uint64_t parent[5],sibling[5];
     #pragma unroll
