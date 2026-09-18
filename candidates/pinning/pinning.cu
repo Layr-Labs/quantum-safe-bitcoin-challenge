@@ -2290,11 +2290,11 @@ static void launch_pinning_pipeline(
     uint8_t *d_gt, uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
-    uint64_t *super_roots, uint64_t *root_checkpoint
+    uint64_t *super_roots, uint64_t *root_checkpoint, cudaStream_t st
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS>>>(
+    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS,0,st>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -2305,7 +2305,7 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #if QSB_TREE_OFFLOAD
-    qsb_leaf_tree_prepare<<<blocks,256>>>(saved,batch_size,roots,tree);
+    qsb_leaf_tree_prepare<<<blocks,256,0,st>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Leaf-tree launch failed: %s\n",cudaGetErrorString(err));
@@ -2313,20 +2313,20 @@ static void launch_pinning_pipeline(
     }
 #endif
     int root_groups=(blocks+255)/256;
-    qsb_root_group_prepare<<<root_groups,256>>>(
+    qsb_root_group_prepare<<<root_groups,256,0,st>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<(root_groups+255)/256,256>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+255)/256,256,0,st>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_root_group_finish<<<root_groups,256>>>(
+    qsb_root_group_finish<<<root_groups,256,0,st>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
@@ -2334,7 +2334,7 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #if QSB_TREE_OFFLOAD2
-    qsb_leaf_tree_finish<<<blocks,256>>>(saved,batch_size,roots,tree);
+    qsb_leaf_tree_finish<<<blocks,256,0,st>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Leaf-inverse launch failed: %s\n",cudaGetErrorString(err));
@@ -2342,7 +2342,7 @@ static void launch_pinning_pipeline(
     }
 #endif
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
-    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS>>>(
+    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS,0,st>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -2888,70 +2888,95 @@ int main(int argc, char **argv) {
             fflush(stdout);
         }
     }
-    uint32_t *d_hit_cnt, *d_hit_idx;
-#if QSB_HOST_READBACK
-    /* Delta A (jungjipdo a91746ca): counter and indices contiguous, so one
-     * blocking copy per batch replaces synchronize + two copies. */
-    {
-        cudaError_t hit_err = cudaMalloc(&d_hit_cnt, (1 + 1024)*sizeof(uint32_t));
-        if (hit_err != cudaSuccess) {
-            fprintf(stderr, "Hit buffer allocation failed: %s\n", cudaGetErrorString(hit_err));
-            return 1;
-        }
-        d_hit_idx = d_hit_cnt + 1;
-        hit_err = cudaMemset(d_hit_cnt, 0, (1 + 1024)*sizeof(uint32_t));
-        if (hit_err != cudaSuccess) {
-            fprintf(stderr, "Hit buffer initialization failed: %s\n", cudaGetErrorString(hit_err));
-            return 1;
+    /* Slotted pipeline: batch k runs on slot k % QSB_SLOTS (own stream, state,
+     * tree/root buffers, hit buffers, midstate). The host never synchronizes
+     * the device; it waits on the slot it is about to reuse, so the GPU always
+     * has the next batch's prepare kernel queued behind the current batch's
+     * root phase, finish kernel and hit readback. Restored from the promoted
+     * two-stream overlap at 399cf3b / 260879f4 onto this cofactor crown. */
+#ifndef QSB_SLOTS
+#define QSB_SLOTS 2
+#endif
+    cudaStream_t slot_stream[QSB_SLOTS];
+    cudaEvent_t slot_done[QSB_SLOTS];
+    uint32_t *d_hit_cnt[QSB_SLOTS], *d_hit_idx[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
+    uint32_t *h_hit_cnt, *h_hit_idx, *h_mid;
+    cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*4, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_hit_idx, QSB_SLOTS*64*4, cudaHostAllocDefault);
+    cudaHostAlloc((void**)&h_mid, QSB_SLOTS*32, cudaHostAllocDefault);
+    for (int s = 0; s < QSB_SLOTS; s++) {
+        cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
+        cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
+        cudaMalloc(&d_hit_cnt[s], 4); cudaMalloc(&d_hit_idx[s], 1024*4);
+        cudaMalloc(&d_mid_slot[s], 32);
+        cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
+    }
+    {   /* Same persisting-L2 window on the slot streams. */
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        if (want > gt_sz - skip) want = gt_sz - skip;
+        if (want > 0 && max_window > 0) {
+            cudaStreamAttrValue av = {};
+            av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            for (int s = 0; s < QSB_SLOTS; s++)
+                cudaStreamSetAttribute(slot_stream[s], cudaStreamAttributeAccessPolicyWindow, &av);
         }
     }
-#else
-    cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
-#endif
 
     int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
     int BLKSZ = 256;
     (void)BLKSZ;
+    (void)d_mid;
     int GRDSZ = (BATCH+QSB_TREE_N-1)/QSB_TREE_N;
     int ROOT_GRDSZ=(GRDSZ+255)/256;
-    ulonglong2 *d_pipeline_state=NULL;
-    uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
-    uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
+    ulonglong2 *d_pipeline_state[QSB_SLOTS];
+    uint64_t *d_pipeline_roots[QSB_SLOTS],*d_pipeline_tree[QSB_SLOTS];
+    uint64_t *d_super_roots[QSB_SLOTS],*d_root_checkpoint[QSB_SLOTS];
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*4u*sizeof(uint64_t);
 #if QSB_COFACTOR
-    /* No candidate product-tree checkpoint exists any more: the exclusion pass
-     * consumes every internal node inside prepare's shared memory. */
     size_t pipeline_tree_bytes=0;
 #else
     size_t pipeline_tree_bytes=(size_t)GRDSZ*4u*QSB_CAND_STRIDE*sizeof(uint64_t);
 #endif
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
-    cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
+    for (int s = 0; s < QSB_SLOTS; s++) {
+        d_pipeline_state[s]=NULL; d_pipeline_roots[s]=NULL; d_pipeline_tree[s]=NULL;
+        d_super_roots[s]=NULL; d_root_checkpoint[s]=NULL;
+        cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);
 #if !QSB_COFACTOR
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_pipeline_tree[s],pipeline_tree_bytes);
 #endif
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_root_checkpoint,root_checkpoint_bytes);
-    if(pipeline_err!=cudaSuccess){
-        fprintf(stderr,"Pipeline allocation failed: %s\n",cudaGetErrorString(pipeline_err));
-        return 1;
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_super_roots[s],super_root_bytes);
+        if(pipeline_err==cudaSuccess)
+            pipeline_err=cudaMalloc(&d_root_checkpoint[s],root_checkpoint_bytes);
+        if(pipeline_err!=cudaSuccess){
+            fprintf(stderr,"Pipeline allocation failed: %s\n",cudaGetErrorString(pipeline_err));
+            return 1;
+        }
+        if(((uintptr_t)d_pipeline_state[s] & (alignof(ulonglong2)-1u)) != 0){
+            fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
+            return 1;
+        }
     }
-    if(((uintptr_t)d_pipeline_state & (alignof(ulonglong2)-1u)) != 0){
-        fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
-        return 1;
-    }
-    printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB tree + %.0f MiB roots + %.2f MiB root tree\n",
+    printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB tree + %.0f MiB roots + %.2f MiB root tree (x%d slots)\n",
            (double)pipeline_state_bytes/(1024*1024),
            (double)pipeline_tree_bytes/(1024*1024),
            (double)pipeline_root_bytes/(1024*1024),
-           (double)(super_root_bytes+root_checkpoint_bytes)/(1024*1024));
+           (double)(super_root_bytes+root_checkpoint_bytes)/(1024*1024),
+           QSB_SLOTS);
 
     /* Safe ranges */
     uint32_t LT_MIN = 500000000;   /* timestamp interpretation */
@@ -2999,7 +3024,44 @@ int main(int argc, char **argv) {
 
     /* Benchmark runs for a fixed window ended by the harness's timeout.
      * The loop no longer stops at the first hit; hits are appended per batch.
-     */
+     * Slotted: see QSB_SLOTS above. Before reusing a slot the host waits for
+     * that slot's previous batch, drains its hits from pinned memory, then
+     * enqueues the next batch asynchronously. */
+    uint32_t slot_seq[QSB_SLOTS], slot_lt[QSB_SLOTS];
+    int slot_busy[QSB_SLOTS];
+    uint32_t cur_mid[8];
+    for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
+    uint64_t batch_no = 0;
+    auto drain_slot = [&](int s) -> void {
+        if (!slot_busy[s]) return;
+        cudaEventSynchronize(slot_done[s]);
+        slot_busy[s] = 0;
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); exit(1); }
+        uint32_t h_hit = h_hit_cnt[s];
+        if (h_hit > 0) {
+            const uint32_t *hits = h_hit_idx + s*64;
+            int nh = (h_hit > 64) ? 64 : h_hit;
+            printf("\n  *** HIT! seq=0x%08X ***\n", slot_seq[s]);
+            mkdir("results", 0755);
+            char fname[256];
+            snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+            FILE *f = fopen(fname, "a");
+            if (f) {
+                for (int h = 0; h < nh; h++) {
+                    uint32_t raw = hits[h];
+                    uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
+                    int ri = (raw >> 30) & 1;
+                    int hc = (raw >> 31) & 1;
+                    fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
+                            slot_seq[s], lt, hc, ri);
+                    printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", slot_seq[s], lt, hc, ri);
+                }
+                fclose(f);
+            }
+            found = 1;
+        }
+    };
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -3009,95 +3071,56 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
-            cudaError_t copy_err = cudaMemcpy(d_mid,ctx.h,32,cudaMemcpyHostToDevice);
-            if (copy_err != cudaSuccess) {
-                fprintf(stderr, "Failed to upload per-sequence SHA state: %s\n",
-                        cudaGetErrorString(copy_err));
-                return 1;
-            }
+            for(int i=0;i<8;i++) cur_mid[i]=ctx.h[i];
+        } else {
+            for(int i=0;i<8;i++) cur_mid[i]=pp.midstate[i];
         }
 
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
+            int s = (int)(batch_no % QSB_SLOTS);
+            batch_no++;
+            drain_slot(s);
+            cudaStream_t st = slot_stream[s];
+            slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
-            uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            memcpy(h_mid + s*8, cur_mid, 32);
+            cudaMemcpyAsync(d_mid_slot[s], h_mid + s*8, 32, cudaMemcpyHostToDevice, st);
+            cudaMemsetAsync(d_hit_cnt[s], 0, 4, st);
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
-                    d_mid, d_suffix, gpu_suffix_len,
+                    d_mid_slot[s], d_suffix, gpu_suffix_len,
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
                     d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
-                    d_hit_cnt, d_hit_idx,
+                    d_hit_cnt[s], d_hit_idx[s],
                     batch_sz, easy, single_hash,
-                    d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                    d_super_roots,d_root_checkpoint);
+                    d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
+                    d_super_roots[s],d_root_checkpoint[s], st);
             } else {
                 launch_pinning_pipeline<false>(
-                    d_mid, d_suffix, gpu_suffix_len,
+                    d_mid_slot[s], d_suffix, gpu_suffix_len,
                     pp.seq_offset, pp.lt_offset,
                     pp.total_preimage_len,
                     seq, batch_lt,
                     d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                     d_gt,
-                    d_hit_cnt, d_hit_idx,
+                    d_hit_cnt[s], d_hit_idx[s],
                     batch_sz, easy, single_hash,
-                    d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                    d_super_roots,d_root_checkpoint);
+                    d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
+                    d_super_roots[s],d_root_checkpoint[s], st);
             }
-#if QSB_HOST_READBACK
-            /* The blocking default-stream copy waits for all kernels and
-             * returns the counter plus the same first 64 indices reported below. */
-            uint32_t hit_report[1 + 64];
-            cudaError_t err = cudaMemcpy(hit_report, d_hit_cnt, sizeof(hit_report),
-                                         cudaMemcpyDeviceToHost);
-            if (err == cudaSuccess) err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            cudaMemcpyAsync(h_hit_cnt + s, d_hit_cnt[s], 4, cudaMemcpyDeviceToHost, st);
+            cudaMemcpyAsync(h_hit_idx + s*64, d_hit_idx[s], 64*4, cudaMemcpyDeviceToHost, st);
+            cudaEventRecord(slot_done[s], st);
+            slot_busy[s] = 1;
 
             total_searched += batch_sz;
-            h_hit = hit_report[0];
-            if (h_hit > 0) {
-                const uint32_t *hits = hit_report + 1;
-                int nh = (h_hit > 64) ? 64 : h_hit;
-#else
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-
-            total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
-            if (h_hit > 0) {
-                uint32_t hits[64];
-                int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
-#endif
-
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
-                mkdir("results", 0755);
-                char fname[256];
-                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-                FILE *f = fopen(fname, "a");
-                if (f) {
-                    for (int h = 0; h < nh; h++) {
-                        uint32_t raw = hits[h];
-                        uint32_t lt = batch_lt + (raw & 0x3FFFFFFF);
-                        int ri = (raw >> 30) & 1;
-                        int hc = (raw >> 31) & 1;
-                        fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
-                                seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
-                    }
-                    fclose(f);
-                }
-                found = 1;
-            }
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
@@ -3122,6 +3145,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    for (int s = 0; s < QSB_SLOTS; s++) drain_slot(s);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
     printf("\n  Done: %luM in %.0fs (%.1fM/s), found=%d\n",
