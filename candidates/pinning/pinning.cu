@@ -18,6 +18,7 @@
 #include <cuda_runtime.h>
 
 #include "GPUMath.h"
+#include "qsb_host_drain.h"
 
 static_assert(sizeof(ulonglong2) == 16, "pipeline vector must be 128 bits");
 static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligned");
@@ -3023,7 +3024,8 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            cudaError_t reset_err = qsb_host_drain_reset(d_hit_cnt);
+            if (reset_err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(reset_err)); return 1; }
 
             if (fast_tail) {
                 launch_pinning_pipeline<true>(
@@ -3065,21 +3067,16 @@ int main(int argc, char **argv) {
                 const uint32_t *hits = hit_report + 1;
                 int nh = (h_hit > 64) ? 64 : h_hit;
 #else
-            cudaDeviceSynchronize();
-
-            cudaError_t err = cudaGetLastError();
+            cudaError_t err = qsb_host_drain_counter(&h_hit, d_hit_cnt);
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 
             total_searched += batch_sz;
-
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
                 cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
 #endif
 
-                printf("\n  *** HIT! seq=0x%08X ***\n", seq);
                 mkdir("results", 0755);
                 char fname[256];
                 snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
@@ -3092,7 +3089,6 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
                         fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
                                 seq, lt, hc, ri);
-                        printf("  seq=0x%08X lt=%u hc=%d recid=%d\n", seq, lt, hc, ri);
                     }
                     fclose(f);
                 }
