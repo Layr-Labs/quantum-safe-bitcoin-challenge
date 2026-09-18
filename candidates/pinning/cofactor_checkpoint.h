@@ -31,7 +31,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     if(tid==0) {
         #pragma unroll
         for(int k=0;k<4;k++) {
+#if defined(QSB_STREAM3) && QSB_STREAM3
+            qsb_st_u64(&roots[(size_t)blockIdx.x*4+k], products[k][2*N-2]);
+#else
             roots[(size_t)blockIdx.x*4+k]=products[k][2*N-2];
+#endif
             excluded[k][N-2]=k==0?1:0;
         }
     }

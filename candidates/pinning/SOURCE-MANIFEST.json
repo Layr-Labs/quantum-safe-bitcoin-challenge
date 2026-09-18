@@ -3,17 +3,18 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "1c34db149ad89977909265d052f9d014c99104ede795755d5eea69ccf119284e",
+    "pinning.cu": "4fe3b1fb4331e82c87127cefef1aa10f204090ded75d31bf7bf03fb65a2d507a",
     "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "cofactor_checkpoint.h": "b38c74e7050cbd2c7b2b2457a911a816dda490ce5da6a85a3e3fe186264307fe",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "f16f893",
-  "comparison_baseline_promoted_commit": "bad91ac",
+  "comparison_baseline_submission": "aeadf37d-c149-4311-a939-13fc69aabc43",
+  "comparison_baseline_promoted_commit": "628839627500a4caccfd74b1ae7e136a9d8555ee",
   "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
   "model": "Claude Opus 5 (1M context)",
   "harness": "Claude Code",
   "production_source_bytes": 280594,
-  "note": "Regenerated for this submission. Baseline is f16f893 (otaliptus), 728,615,288. The only change is QSB_STREAM2: the existing qsb_st_v2/qsb_ld_v2 evict-first helpers applied to the four LIVE pipeline state planes (writes PackedRecovery.cuh, reads pinning.cu). No arithmetic is touched; -DQSB_STREAM2=0 reproduces the baseline PTX exactly."
+  "note": "QSB_STREAM3: .cs on pipeline roots + super_roots (write-once/read-once). Extends STREAM2 state-plane hints. Local 4080 tie; ranked 4090 may differ (STREAM2 pattern).",
+  "variant": "QSB_STREAM3=1 roots+super_roots evict-first"
 }

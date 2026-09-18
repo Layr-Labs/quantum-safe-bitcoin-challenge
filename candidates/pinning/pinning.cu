@@ -53,6 +53,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                * L2-resident, so caching them only evicts the 64 MiB table
                                * that every candidate reads 15 times. */
 #endif
+#ifndef QSB_STREAM3
+#define QSB_STREAM3 1         /* 1: .cs on pipeline roots + super_roots.  STREAM2 covered the
+                               * 1.07 GB state planes; the remaining write-once/read-once root
+                               * arrays (~8.4 MB roots + small super_roots) still used plain
+                               * stores/loads and could displace the fixed-base table under
+                               * QSB_L2_SKIP=1.  Reuses qsb_st_u64/qsb_ld_u64 (already .cs when
+                               * QSB_STREAM=1). */
+#endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
 #endif
@@ -1031,7 +1039,13 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
 
     if(tid==0){
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        for(int k=0;k<4;k++){
+#if QSB_STREAM3
+            qsb_st_u64(&roots[(size_t)blockIdx.x*4u+k], products[k][2*N-2]);
+#else
+            roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+#endif
+        }
     }
 }
 template<int N>
@@ -1059,7 +1073,13 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
         products[k][tid]=value[k];
         if(tid<N-2)
             products[k][N+tid]=qsb_ld_u64(&checkpoint[block_base+(size_t)k*N+tid]);
-        if(tid==0)inverses[k][N-2]=roots[(size_t)blockIdx.x*4u+k];
+        if(tid==0){
+#if QSB_STREAM3
+            inverses[k][N-2]=qsb_ld_u64(&roots[(size_t)blockIdx.x*4u+k]);
+#else
+            inverses[k][N-2]=roots[(size_t)blockIdx.x*4u+k];
+#endif
+        }
     }
     __syncthreads();
 
@@ -1105,10 +1125,17 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
 ) {
     int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
     bool active=i<count;
+#if QSB_STREAM3
+    uint64_t r[5]={active?qsb_ld_u64(&roots[(size_t)i*4u]):1ULL,
+                   active?qsb_ld_u64(&roots[(size_t)i*4u+1]):0ULL,
+                   active?qsb_ld_u64(&roots[(size_t)i*4u+2]):0ULL,
+                   active?qsb_ld_u64(&roots[(size_t)i*4u+3]):0ULL,0};
+#else
     uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
+#endif
     qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
 }
 
@@ -1119,14 +1146,27 @@ __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
 ) {
     int tid=(int)(blockIdx.x*256u+threadIdx.x);
     bool active=tid<count;
+#if QSB_STREAM3
+    uint64_t r[5]={active?qsb_ld_u64(&super_roots[(size_t)tid*4u]):1ULL,
+                   active?qsb_ld_u64(&super_roots[(size_t)tid*4u+1]):0ULL,
+                   active?qsb_ld_u64(&super_roots[(size_t)tid*4u+2]):0ULL,
+                   active?qsb_ld_u64(&super_roots[(size_t)tid*4u+3]):0ULL,0};
+#else
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
                    active?super_roots[(size_t)tid*4u+2]:0ULL,
                    active?super_roots[(size_t)tid*4u+3]:0ULL,0};
+#endif
     qsb_block_inverse(r);
     if(active){
         #pragma unroll
-        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
+        for(int k=0;k<4;k++){
+#if QSB_STREAM3
+            qsb_st_u64(&super_roots[(size_t)tid*4u+k], r[k]);
+#else
+            super_roots[(size_t)tid*4u+k]=r[k];
+#endif
+        }
     }
 }
 
@@ -1137,20 +1177,39 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 ) {
     int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
     bool active=i<count;
+#if QSB_STREAM3
+    uint64_t r[5]={active?qsb_ld_u64(&roots[(size_t)i*4u]):1ULL,
+                   active?qsb_ld_u64(&roots[(size_t)i*4u+1]):0ULL,
+                   active?qsb_ld_u64(&roots[(size_t)i*4u+2]):0ULL,
+                   active?qsb_ld_u64(&roots[(size_t)i*4u+3]):0ULL,0};
+#else
     uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
+#endif
     qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+        for(int k=0;k<4;k++){
+#if QSB_STREAM3
+            qsb_st_u64(&roots[(size_t)i*4u+k], r[k]);
+#else
+            roots[(size_t)i*4u+k]=r[k];
+#endif
+        }
         // One fixed-ordinate multiplication per128-leaf tree, instead of
         // one per leaf in finish. Keep both inverse representatives.
         uint64_t b[5]={pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3],0};
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
         #pragma unroll
-        for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
+        for(int k=0;k<4;k++){
+#if QSB_STREAM3
+            qsb_st_u64(&roots[((size_t)count+i)*4u+k], weighted[k]);
+#else
+            roots[((size_t)count+i)*4u+k]=weighted[k];
+#endif
+        }
     }
 }
 
@@ -1422,11 +1481,23 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
-    for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
+    for(int k=0;k<4;k++){
+#if QSB_STREAM3
+        prod[k]=qsb_ld_u64(&roots[4ull*blockIdx.x+k]);
+#else
+        prod[k]=roots[4ull*blockIdx.x+k];
+#endif
+    }
     prod[4]=0;
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
-    for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
+    for(int k=0;k<4;k++){
+#if QSB_STREAM3
+        weighted_inv[k]=qsb_ld_u64(&roots[4ull*(root_count+blockIdx.x)+k]);
+#else
+        weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
+#endif
+    }
     (void)tree;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
