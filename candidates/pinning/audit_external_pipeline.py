@@ -21,18 +21,22 @@ def audit_source():
     up_begin = source.index("void qsb_block_product_checkpoint(")
     up_end = source.index("void qsb_block_inverse_checkpoint(", up_begin)
     up = source[up_begin:up_end]
-    assert "for(int count=256;count>1;count>>=1)" in up
-    assert "if(node<510)" in up
-    assert "node-256" in up
-    assert "products[k][510]" in up
+    assert "for(int count=N;count>32;count>>=1)" in up
+    assert "if(count==64)" in up
+    assert "qsb_shfl_xor_u64(cur[k],half)" in up
+    assert "if(node<2*N-2)" in up
+    assert "node-N" in up
+    assert "roots[(size_t)blockIdx.x*4u+k]=cur[k]" in up
 
     down_begin = up_end
     down_end = source.index("__global__ void __launch_bounds__(256,2) qsb_root_group_prepare", down_begin)
     down = source[down_begin:down_end]
-    assert "if(tid<QSB_CHECKPOINT_NODES)" in down
-    assert "products[k][256+tid]" in down
-    assert "for(int count=2;count<256;count<<=1)" in down
-    assert "inverses[k][254]" in down
+    assert "if(tid<N-64)" in down
+    assert "for(int count=2;count<=32;count<<=1)" in down
+    assert "qsb_shfl_idx_u64(cur_inv[k],parent_lane)" in down
+    assert "products[k][2*N-64+tid]=cur_inv[k]" in down
+    assert "for(int count=64;count<N;count<<=1)" in down
+    assert "products[k][N+(tid&(N/2-1))]" in down
     assert "qsb_field_normalize(value);" in down
 
     root_begin = source.index("__device__ __forceinline__ void qsb_block_inverse(")

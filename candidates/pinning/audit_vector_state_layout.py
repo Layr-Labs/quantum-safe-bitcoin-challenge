@@ -76,12 +76,13 @@ def audit_source():
     source = Path(__file__).with_name("pinning.cu").read_text()
     assert 'static_assert(sizeof(ulonglong2) == 16' in source
     assert 'static_assert(alignof(ulonglong2) == 16' in source
-    assert source.count("ulonglong2 *saved") == 2
-    assert "BATCH*8u*sizeof(ulonglong2)" in source
+    assert source.count("ulonglong2 *saved") == 4
+    assert "BATCH*QSB_STATE_PLANES*sizeof(ulonglong2)" in source
     assert "alignof(ulonglong2)-1u" in source
     for plane in range(VECTOR_PLANES):
         address = f"saved[{plane}u*state_plane_stride+state_idx]"
-        assert source.count(address) == 2
+        expected_count = 4 if plane < 6 else 2
+        assert source.count(address) == expected_count
 
 
 def audit_production_batch():
