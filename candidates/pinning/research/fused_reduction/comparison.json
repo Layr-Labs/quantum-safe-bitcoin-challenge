@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-17",
+  "base_commit": "f7f588c7a9baacc261f5d6214c13e54130583f31",
+  "candidate_commit": "211f74dc72340fa673e4ca0c3924d9af681ef6c0",
+  "candidate_submission": "f297b0f9-d2ec-4b17-964c-703d12226f12",
+  "compiler": "CUDA 12.8.93",
+  "target": "sm_89",
+  "gpu_executed": false,
+  "prepare_full_path": {
+    "control": {
+      "registers": 126,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0,
+      "instruction_slots": 7400,
+      "non_nop": 7386,
+      "iadd3_x": 1108,
+      "imad_wide_u32": 655,
+      "imad_wide_u32_x": 1224
+    },
+    "candidate": {
+      "registers": 128,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0,
+      "instruction_slots": 7424,
+      "non_nop": 7410,
+      "iadd3_x": 1150,
+      "imad_wide_u32": 653,
+      "imad_wide_u32_x": 1224
+    }
+  },
+  "prepare_fast_tail_path": {
+    "control_instruction_slots": 7056,
+    "candidate_instruction_slots": 7080,
+    "control_registers": 126,
+    "candidate_registers": 128,
+    "spills_both": 0
+  },
+  "finish_kernels": "resource and SASS counts identical",
+  "interpretation": "The fused reducers alter the prepare dependency/instruction mix but do not yield an obvious static instruction-count reduction. They consume the remaining two registers without spilling. Official GPU timing is required.",
+  "decision": "Do not independently resubmit while f297b0f is validating. If it promotes, inherit it. If it loses, treat the official score as evidence against this combined fusion on the PR219 base and inspect single-fusion variants only if runner feedback suggests a scheduling rather than arithmetic loss."
+}

@@ -1,0 +1,13 @@
+{
+  "context_sha256": "8439a6456d6e22da96daa6158c9ed0e8ffdcaa3a65bc27e24f5717c09ffe5b06",
+  "review_scope": "Original full-rebuild Y,W,B helper and curated caller contract; later variants not sent.",
+  "Gemini 3.8 Flash High": {
+    "status": "completed",
+    "disposition": "No reported implementation defect survives independent review. Caller replaces unusable D with1 and returns after collectives; CPU tests exercise singular and inactive lanes. CUDA build confirms valid overloads; inherited alias-safe field primitives and local state mutation are intended. Target recid1 is P-R, so negated parity is correct. The stated2M+1S is net change across prepare/finish, not absolute reconstruction count.",
+    "limitations": "Source-only model review; no validation credit for unsupported findings."
+  },
+  "Grok 4.6": {
+    "status": "timeout after180s",
+    "final_visible_response": false
+  }
+}

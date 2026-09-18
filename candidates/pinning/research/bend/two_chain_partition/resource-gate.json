@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-17",
+  "frontier_commit": "067302c",
+  "frontier_score": 686230583,
+  "compiler": "CUDA 12.8.93",
+  "target": "sm_89",
+  "source_report": "../../pk_unroll/control-native.json",
+  "prepare_kernel": {
+    "template": "kernel_pinning_pipeline<false,0>",
+    "threads_per_block": 128,
+    "registers_per_thread": 128,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0,
+    "shared_bytes_per_block": 8192
+  },
+  "second_chain_minimum_live_state": {
+    "xyzz_fields": 4,
+    "limbs_per_field": 4,
+    "bits_per_limb": 64,
+    "minimum_32bit_register_equivalents": 32,
+    "deferred_affine_anchor_register_equivalents": 8,
+    "total_before_merge_temporaries": 40,
+    "shared_memory_alternative_bytes_per_thread": 160,
+    "shared_memory_alternative_bytes_per_128_thread_block": 20480,
+    "shared_memory_total_with_existing_block_bytes": 28672
+  },
+  "bend_schedule_result": "The 8+7 partition preserves all 15 signed shifted terms.",
+  "decision": "Reject the naive simultaneous two-XYZZ-state implementation at the current geometry. It has no register headroom and would require local spills or at least 20 KiB extra shared memory per block before merge scratch. Revisit only with a compact second-chain representation, cross-thread ownership, or a work-removing merge that changes this resource bound.",
+  "limits": "The register-equivalent count is a live-value lower bound, not a ptxas allocation proof. The CUDA report is static compilation, not GPU execution or timing."
+}

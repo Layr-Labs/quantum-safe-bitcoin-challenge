@@ -1,0 +1,28 @@
+==================
+WARNING: ThreadSanitizer: data race (pid=27229)
+  Read of size 8 at 0x000104fe8dd8 by thread T28:
+    #0 <null> <null> (missing_up_crosswarp:arm64+0x10000243c)
+    #1 <null> <null> (missing_up_crosswarp:arm64+0x100001ecc)
+    #2 <null> <null> (libclang_rt.tsan_osx_dynamic.dylib:arm64e+0x33b18)
+
+  Previous write of size 8 at 0x000104fe8dd8 by thread T60:
+    #0 <null> <null> (missing_up_crosswarp:arm64+0x100002548)
+    #1 <null> <null> (missing_up_crosswarp:arm64+0x100001ecc)
+    #2 <null> <null> (libclang_rt.tsan_osx_dynamic.dylib:arm64e+0x33b18)
+
+  Thread T28 (tid=7539952, running) created by main thread at:
+    #0 <null> <null> (libclang_rt.tsan_osx_dynamic.dylib:arm64e+0x33bac)
+    #1 <null> <null> (missing_up_crosswarp:arm64+0x100001cc8)
+    #2 <null> <null> (missing_up_crosswarp:arm64+0x100000ba8)
+    #3 <null> <null> (missing_up_crosswarp:arm64+0x100001474)
+    #4 <null> <null> (missing_up_crosswarp:arm64+0x1000013a4)
+
+  Thread T60 (tid=7540152, running) created by main thread at:
+    #0 <null> <null> (libclang_rt.tsan_osx_dynamic.dylib:arm64e+0x33bac)
+    #1 <null> <null> (missing_up_crosswarp:arm64+0x100001cc8)
+    #2 <null> <null> (missing_up_crosswarp:arm64+0x100000ba8)
+    #3 <null> <null> (missing_up_crosswarp:arm64+0x100001474)
+    #4 <null> <null> (missing_up_crosswarp:arm64+0x1000013a4)
+
+SUMMARY: ThreadSanitizer: data race (/private/var/folders/3p/1_ynj0ls64g0yk2ylxvbh69m0000gn/T/qsb-warp-checkpoint-0anocsun/missing_up_crosswarp:arm64+0x10000243c) 
+==================

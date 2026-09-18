@@ -1,0 +1,18 @@
+{
+  "base_submission": "66c031c6-16e4-484e-ad4d-0e7e0ef3f38f",
+  "base_fingerprint": "ed600d1c31cc168b0010419da1dfafc78d1be147b816e78dbab52cd37f2e5e54",
+  "source_sha256": {
+    "wide_table_kernels.cuh": "811668b4a00b8fb35716392b7c60d79e952c511eeb3f08a5a6c9321b4057c8d2",
+    "pinning.cu": "ee4e058b0ead2dc64b7c82382eba8ea237784744276e7e21a5745e1703648af8",
+    "wide_geometry.cuh": "985e935e371842eceabe05245b8d28237bfd19e2987c75894c59e389766eabbb",
+    "three_state.cuh": "50b47f2579fe8b642d849992c19da8f5fd6ca5fb008bde637eea27994c0d77cf",
+    "wide_fused_kernel.cuh": "9151385a09c76c9067616c53f0b1e664ab86aa4332ff846524589a83fc4e70ba",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "7f7a518c2021c2f104e2ce9b014d03108e6c858576341779c240595260405187",
+    "wide_search_tuner.cuh": "acb985958deea7644189ca749ca78220010b4ec803efe9053361b01feb6b451d",
+    "wide_table_host.cuh": "ac27e68bbc52f7cb8d9c00faba61f96f75545af0aa22d2a8d0adf4ffd41e8e4b"
+  },
+  "production_modified": false,
+  "change": "Search only: three fields U=Y*B,W,V=B^2; batch inverse D=W*V; rebuild128 search tree nodes, checkpoint126 upper nodes. Outer root hierarchy, table builder and fused path unchanged."
+}
