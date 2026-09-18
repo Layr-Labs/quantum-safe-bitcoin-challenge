@@ -40,6 +40,12 @@
 #ifndef ZLAB_PAIRSHA
 #define ZLAB_PAIRSHA 0
 #endif
+/* QSB_PAIR_SHA (default on): route the live hit gate through that same
+ * interleaved pair compression, hashing both recovery pubkeys at once
+ * instead of looping recid 0 then 1. 0 = sequential loop. */
+#ifndef QSB_PAIR_SHA
+#define QSB_PAIR_SHA 1
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -910,34 +916,7 @@ __device__ int gpu_bench_valid(const uint8_t *h) {
  * big-endian order, so "the first QSB_ZEROS_N bits are zero" is a test on the
  * top bits of hs[0], hs[1], ... The ranked path therefore never materialises
  * the 32-byte digest or walks it a byte at a time. */
-#if ZLAB_PAIRSHA
-/* Two independent SHA-256 compressions from the IV, rounds interleaved. */
-#define ZP_RND2(k) { \
-  for (int zr = 0; zr < 16; zr++) { \
-    S2RoundZ(a0,b0,c0,d0,e0,f0,g0,h0,x0,K[k+zr],w0[zr]); \
-    S2RoundZ(a1,b1,c1,d1,e1,f1,g1,h1,x1,K[k+zr],w1[zr]); \
-  } }
-#define S2RoundZ(a,b,c,d,e,f,g,h,x,k,w) { \
-    uint32_t zt1 = h + S1(e) + Ch(e,f,g) + (k) + (w); \
-    uint32_t zt2 = S0(a) + Maj(a,b,c); \
-    d += zt1; x = zt1 + zt2; \
-    h=g; g=f; f=e; e=d; d=c; c=b; b=a; a=x; }
-#define ZP_WMIX(w) { \
-    for (int zi = 0; zi < 16; zi++) w[zi] += s1(w[(zi+14)&15]) + w[(zi+9)&15] + s0(w[(zi+1)&15]); }
-__device__ __forceinline__ void zlab_sha256_pair_h0(uint32_t *w0, uint32_t *w1, uint32_t *out0, uint32_t *out1) {
-    uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7],x0;
-    uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7],x1;
-    #pragma unroll 1
-    for (int blk = 0; blk < 64; blk += 16) {
-        if (blk) { ZP_WMIX(w0); ZP_WMIX(w1); }
-        ZP_RND2(blk);
-    }
-    out0[0]=I[0]+a0;out0[1]=I[1]+b0;out0[2]=I[2]+c0;out0[3]=I[3]+d0;
-    out0[4]=I[4]+e0;out0[5]=I[5]+f0;out0[6]=I[6]+g0;out0[7]=I[7]+h0;
-    out1[0]=I[0]+a1;out1[1]=I[1]+b1;out1[2]=I[2]+c1;out1[3]=I[3]+d1;
-    out1[4]=I[4]+e1;out1[5]=I[5]+f1;out1[6]=I[6]+g1;out1[7]=I[7]+h1;
-}
-#endif
+#include "pair_sha.cuh"
 __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
     int ok = 1;
     #pragma unroll
@@ -1471,11 +1450,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int idx = blockIdx.x * blockDim.x + tid;
     if(blockIdx.x*blockDim.x>=batch_size)return;
     const bool active = idx<batch_size;
-#if ZLAB_K2S3M
-    __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
-#else
     __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
-#endif
     const epoch_desc_t *e0 = d_epochs + 2*blockIdx.x;
     const bool hasB = 2*blockIdx.x+1 < epochs_in_batch;
     const epoch_desc_t *e1 = hasB ? e0+1 : e0;
@@ -1483,21 +1458,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint32_t *f1=hasB?f0+QSB_FIRST_SLOTS*8:f0;
     uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
-#if ZLAB_K2S3M
-    uint64_t prodA[5], prodB[5], nB[12];
-#else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
-#endif
     int okA, okB;
     {
-#if ZLAB_K2S3M
-        QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
-        Load256(prodA,fa.words);prodA[4]=0;
-        okA=fa.ok && active;
-        if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
-        #pragma unroll
-        for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
-#else
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
         Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
@@ -1505,37 +1468,21 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
         #pragma unroll
         for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
-#endif
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
-#if ZLAB_K2S3M
-    QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
-    Load256(prodB,fb.words);prodB[4]=0;
-    #pragma unroll
-    for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
-#else
     QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
-#endif
     okB=fb.ok && active && hasB;
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
     qsb_field_mul_raw(leaf,prodA,prodB);
     qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
     if(okA){
-#if ZLAB_K2S3M
-        uint64_t inv[5],n[12];
-        qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
-        #pragma unroll
-        for(int k=0;k<12;k++)n[k]=parkA[k][tid];
-        int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
-#else
         uint64_t inv[5],m1[4],m2[4];
         qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
         #pragma unroll
         for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
         int encoded=qsb_pair_tail_value(m1[0],m1[1],m1[2],m1[3],m2[0],m2[1],m2[2],m2[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
-#endif
 #ifdef QSB_FORCE_EXACT_HIT_CHECK
         encoded=1; // Diagnostic only: ignore the speculative filter entirely.
 #endif
@@ -1552,11 +1499,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     if(okB){
         uint64_t inv[5];
         qsb_field_mul_raw(inv,leaf,prodA);    /* 1/WB */
-#if ZLAB_K2S3M
-        int encoded=qsb_pair_tail3_value(nB[0],nB[1],nB[2],nB[3],nB[4],nB[5],nB[6],nB[7],nB[8],nB[9],nB[10],nB[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
-#else
         int encoded=qsb_pair_tail_value(m1B[0],m1B[1],m1B[2],m1B[3],m2B[0],m2B[1],m2B[2],m2B[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
-#endif
 #ifdef QSB_FORCE_EXACT_HIT_CHECK
         encoded=1; // Diagnostic only: ignore the speculative filter entirely.
 #endif
@@ -2583,6 +2526,41 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
     }
+
+#if QSB_CACHEPOL
+    /* Pin the fixed-base table in L2. The table is 64 MiB against AD102's
+     * 72 MB L2, but every launch streams the ~1 GiB d_first plane through the
+     * same cache and evicts it; the window plus the .cs accesses above keep
+     * the 15 random table reads per candidate resident. Advisory only: if the
+     * device or driver refuses, the run proceeds with the default policy. */
+    {
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        if (want > 0 && max_window > 0) {
+            cudaError_t le = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            if (le != cudaSuccess) {
+                printf("  L2 persistence: unavailable (%s)\n", cudaGetErrorString(le));
+                cudaGetLastError();
+            } else {
+                cudaStreamAttrValue av = {};
+                av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+                av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+                av.accessPolicyWindow.hitRatio  = 1.0f;
+                av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+                av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+                cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+                printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
+                       (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                       (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
+                       pe==cudaSuccess?"ok":cudaGetErrorString(pe));
+                if (pe != cudaSuccess) cudaGetLastError();
+            }
+            fflush(stdout);
+        }
+    }
+#endif
 
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);

@@ -3,6 +3,25 @@
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
 #define QSB_FIRST_SLOTS 64   /* first-block classes per epoch in d_first */
+
+/* Default 0 for this submission: the write-side streaming stores + persisting-L2
+ * policy are kept in the archive but left off so the measured delta attributes
+ * to a single mechanism (QSB_PAIR_SHA). Set to 1 to re-enable. */
+#ifndef QSB_CACHEPOL
+#define QSB_CACHEPOL 0   /* 1: evict-first (.cs) accesses on the d_first plane + L2 pinning of the fixed-base table */
+#endif
+#if QSB_CACHEPOL
+/* The producer writes this plane once per launch and never reads it back, so
+ * its stores carry no reuse and only evict the fixed-base table from L2. The
+ * consumer keeps the baseline read-only path: each 32-byte class state is read
+ * by four lanes of the block, so the read side does have reuse. The state is
+ * 32-byte aligned, so the evict-first store keeps the 16-byte vector width the
+ * baseline already emits. */
+__device__ __forceinline__ void qsb_store_first_state(uint32_t *dst, const uint32_t *st) {
+    __stcs(reinterpret_cast<uint4 *>(dst),     make_uint4(st[0], st[1], st[2], st[3]));
+    __stcs(reinterpret_cast<uint4 *>(dst) + 1, make_uint4(st[4], st[5], st[6], st[7]));
+}
+#endif
 __device__ uint32_t QSB_WINDOW_FIRST[14][256];
 __device__ uint32_t QSB_WINDOW_SECOND[64][256];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
@@ -89,15 +108,31 @@ __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
     const epoch_desc_t *ep = d_epochs + blockIdx.x;
     const int c = threadIdx.x;
     uint32_t st[8], W[16];
+#if QSB_CACHEPOL
+    /* The evict-first store below is opaque to the compiler's alias analysis,
+     * which would otherwise cost this kernel's read-only inputs their .nc
+     * form; request it explicitly so the store is the only access that
+     * changes. */
+    #pragma unroll
+    for(int j=0;j<8;j++)st[j]=__ldg(&ep->mid[j]);
+    W[0]=__ldg(&ep->remW[0]);W[1]=__ldg(&ep->remW[1]);
+    #pragma unroll
+    for(int j=2;j<16;j++)W[j]=__ldg(&QSB_FIRST_UNIQUE[j-2][c]);
+#else
     #pragma unroll
     for(int j=0;j<8;j++)st[j]=ep->mid[j];
     W[0]=ep->remW[0];W[1]=ep->remW[1];
     #pragma unroll
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+#endif
     _SHA256Transform(st,W);
     const size_t base=((size_t)blockIdx.x*QSB_FIRST_SLOTS+(size_t)c)*8;
+#if QSB_CACHEPOL
+    qsb_store_first_state(d_first+base,st);
+#else
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
+#endif
 }
 
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
