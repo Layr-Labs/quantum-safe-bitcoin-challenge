@@ -122,7 +122,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
+#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+                               * 1 GiB of pipeline state per slot at QSB_BATCH=16M, so 3 slots hold
+                               * 3 GiB against the 24 GiB official RTX 4090 runner. Grids derive from
+                               * the launched batch size, never from the slot count, and the
+                               * persisting-L2 window is sized from the G-table, so a third slot only
+                               * deepens the queue. With QSB_STREAM=1 the extra slot traffic carries
+                               * .cs evict-first hints, so it is steered out of L2 ahead of the
+                               * persisting G-table window rather than competing with it. */
 #endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
