@@ -124,6 +124,15 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
+#ifndef QSB_SHA0
+#define QSB_SHA0 1            /* 1: host-fold FastTail11 round 0 into per-sequence working state */
+#endif
+#ifndef QSB_ROOT_WARP_BAR
+#define QSB_ROOT_WARP_BAR 1   /* 1: warp-scope product/inverse barriers once half<=32 (root-group N=256) */
+#endif
+#ifndef QSB_FINISH_ROOT_SH
+#define QSB_FINISH_ROOT_SH 1  /* 1: shared broadcast of per-CTA root + weighted inverses in finish */
+#endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
 #endif
@@ -694,6 +703,89 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     state[7] += h;
 }
 
+#if QSB_SHA0
+/* Round-0 folded FastTail11: r0_work holds working registers after round 0 with
+ * W[0]=pin_tail_words[0] (low byte clear). Device adds lt_lo into a and e, then
+ * continues from round 1. Bit-identical to _SHA256TransformFastTail11. */
+__device__ __forceinline__ void _SHA256TransformFastTail11_sha0(
+    uint32_t state[8], const uint32_t r0_work[8],
+    uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t L = 79960u;
+    uint32_t t1;
+    uint32_t t2;
+    const uint32_t lt_lo = w0 & 0xffu;
+
+    uint32_t a = r0_work[0] + lt_lo;
+    uint32_t b = r0_work[1];
+    uint32_t c = r0_work[2];
+    uint32_t d = r0_work[3];
+    uint32_t e = r0_work[4] + lt_lo;
+    uint32_t f = r0_work[5];
+    uint32_t g = r0_work[6];
+    uint32_t h = r0_work[7];
+
+    uint32_t w[16];
+    w[0] = w0;
+    w[1] = w1;
+    w[2] = w2;
+#pragma unroll
+    for (int i = 3; i < 15; i++) w[i] = 0;
+    w[15] = L;
+
+    /* Round 0 already applied on the host; continue from round 1. */
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], L);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(L) + s0(w[2]);
+        w[2] += s1(w[0]);
+        w[3]  = s1(w[1]);
+        w[4]  = s1(w[2]);
+        w[5]  = s1(w[3]);
+        w[6]  = s1(w[4]) + L;
+        w[7]  = s1(w[5]) + w[0];
+        w[8]  = s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(L);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+#endif
+
 /* Sparse-schedule SHA-256 for the SHA256d second compression (delta D,
  * preludebrace bc77eb42): 32-byte message = first digest as eight words,
  * fixed pad W[8]=0x80000000, W[9..14]=0, W[15]=256, from the SHA-256 IV.
@@ -912,7 +1004,11 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
+#if QSB_ROOT_WARP_BAR
+        if(count>2){if(half>32)__syncthreads();else __syncwarp();}
+#else
         if(count>2)__syncthreads();
+#endif
     }
 
     if(tid==0){
@@ -1071,7 +1167,11 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
+#if QSB_ROOT_WARP_BAR
+        if((count<<1)>32)__syncthreads();else __syncwarp();
+#else
         __syncthreads();
+#endif
     }
 
     uint64_t parent_inv[5],sibling[5];
@@ -1307,11 +1407,16 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
 #if QSB_SPARSE_TAIL
         /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
-        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
         uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
                 ((lt >> 16) & 0xff00u) | pin_tail_words[1];
         uint32_t w2 = pin_tail_words[2];
+#if QSB_SHA0
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
+        _SHA256TransformFastTail11_sha0(state, d_midstate + 8, w0, w1, w2);
+#else
+        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
         _SHA256TransformFastTail11(state, w0, w1, w2);
+#endif
 #else
         uint32_t blk[16] = {
             pin_tail_words[0] | (lt & 0xffu),
@@ -1400,6 +1505,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     return;
     } else {
 
+#if QSB_FINISH_ROOT_SH
+    /* One load of the CTA's root + weighted inverses; all lanes share them.
+     * Must precede any early return so every lane hits the barrier. */
+    size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+    __shared__ uint64_t sh_root_inv[4], sh_weighted_inv[4];
+    if(threadIdx.x<4){
+        sh_root_inv[threadIdx.x]=__ldg(&roots[4ull*blockIdx.x+threadIdx.x]);
+        sh_weighted_inv[threadIdx.x]=__ldg(&roots[4ull*(root_count+blockIdx.x)+threadIdx.x]);
+    }
+    __syncthreads();
+#endif
     if(!active)return;
     size_t i=(size_t)idx,s=(size_t)batch_size;
     ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
@@ -1407,11 +1523,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+#if QSB_FINISH_ROOT_SH
+    for(int k=0;k<4;k++)prod[k]=sh_root_inv[k];
+    prod[4]=0;
+    uint64_t weighted_inv[4];
+    for(int k=0;k<4;k++)weighted_inv[k]=sh_weighted_inv[k];
+#else
     for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
     prod[4]=0;
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
+#endif
     (void)tree;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
@@ -1903,6 +2026,34 @@ err:
 }
 
 
+
+#if QSB_SHA0
+static uint32_t qsb_sha_ror(uint32_t x, int n) {
+    return (x >> n) | (x << (32 - n));
+}
+static void qsb_sha0_fold_round0(const uint32_t mid[8], uint32_t tail_base,
+                                 uint32_t out_work[8]) {
+    const uint32_t K0 = 0x428a2f98u;
+    uint32_t a = mid[0], b = mid[1], c = mid[2], d = mid[3];
+    uint32_t e = mid[4], f = mid[5], g = mid[6], h = mid[7];
+    uint32_t s1 = qsb_sha_ror(e,6) ^ qsb_sha_ror(e,11) ^ qsb_sha_ror(e,25);
+    uint32_t ch = g ^ (e & (f ^ g));
+    uint32_t t1 = h + s1 + ch + K0 + tail_base;
+    uint32_t s0 = qsb_sha_ror(a,2) ^ qsb_sha_ror(a,13) ^ qsb_sha_ror(a,22);
+    uint32_t maj = (a & b) | (c & (a | b));
+    uint32_t t2 = s0 + maj;
+    out_work[0] = t1 + t2;
+    out_work[1] = a;
+    out_work[2] = b;
+    out_work[3] = c;
+    out_work[4] = d + t1;
+    out_work[5] = e;
+    out_work[6] = f;
+    out_work[7] = g;
+}
+#endif
+
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Usage: %s <pinning2.bin> [gpu_index] [total_gpus] [global_offset] [easy]\n", argv[0]);
@@ -1985,8 +2136,13 @@ int main(int argc, char **argv) {
     }
 
     /* Upload midstate */
+#if QSB_SHA0
+    uint32_t *d_mid; cudaMalloc(&d_mid, 64);
+    cudaMemcpy(d_mid, pp.midstate, 32, cudaMemcpyHostToDevice);
+#else
     uint32_t *d_mid; cudaMalloc(&d_mid, 32);
     cudaMemcpy(d_mid, pp.midstate, 32, cudaMemcpyHostToDevice);
+#endif
 
     /* Build suffix template. In the NEW pipeline format (combined_suffix), the
      * suffix loaded from pinning.bin ALREADY includes:
@@ -2143,14 +2299,23 @@ int main(int argc, char **argv) {
     {
         cudaError_t se = cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*sizeof(uint32_t), cudaHostAllocDefault);
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_hit_idx, QSB_SLOTS*64*sizeof(uint32_t), cudaHostAllocDefault);
+        #if QSB_SHA0
+        if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*16*sizeof(uint32_t), cudaHostAllocDefault);
+#else
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
+#endif
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
+#if QSB_SHA0
+            if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 64);
+            if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
+#else
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 32);
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
+#endif
         }
         if (se != cudaSuccess) {
             fprintf(stderr, "Slot pipeline setup failed: %s\n", cudaGetErrorString(se));
@@ -2377,6 +2542,15 @@ int main(int argc, char **argv) {
         } else {
             for(int i=0;i<8;i++) cur_mid[i]=pp.midstate[i];
         }
+#if QSB_SHA0
+        uint32_t cur_r0[8];
+        if (fast_tail) {
+            uint32_t tail_base =
+                ((uint32_t)pp.suffix[64]<<24) | ((uint32_t)pp.suffix[65]<<16) |
+                ((uint32_t)pp.suffix[66]<<8);
+            qsb_sha0_fold_round0(cur_mid, tail_base, cur_r0);
+        }
+#endif
 
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
@@ -2388,8 +2562,15 @@ int main(int argc, char **argv) {
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
+#if QSB_SHA0
+            memcpy(h_mid + (size_t)s*16, cur_mid, 32);
+            if (fast_tail) memcpy(h_mid + (size_t)s*16 + 8, cur_r0, 32);
+            cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*16, fast_tail ? 64 : 32,
+                            cudaMemcpyHostToDevice, st);
+#else
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);
             cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
+#endif
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
 
             if (fast_tail) {
@@ -2463,7 +2644,17 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
+#if QSB_SHA0
+            uint32_t pack[16];
+            for(int i=0;i<8;i++) pack[i]=ctx.h[i];
+            uint32_t tail_base =
+                ((uint32_t)pp.suffix[64]<<24) | ((uint32_t)pp.suffix[65]<<16) |
+                ((uint32_t)pp.suffix[66]<<8);
+            qsb_sha0_fold_round0(pack, tail_base, pack + 8);
+            cudaError_t copy_err = cudaMemcpy(d_mid, pack, 64, cudaMemcpyHostToDevice);
+#else
             cudaError_t copy_err = cudaMemcpy(d_mid,ctx.h,32,cudaMemcpyHostToDevice);
+#endif
             if (copy_err != cudaSuccess) {
                 fprintf(stderr, "Failed to upload per-sequence SHA state: %s\n",
                         cudaGetErrorString(copy_err));
