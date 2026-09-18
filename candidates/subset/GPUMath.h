@@ -16,7 +16,6 @@
 */
 
 // ---------------------------------------------------------------------------------
-// 256(+64) bits integer CUDA libray for SECPK1
 // ---------------------------------------------------------------------------------
 
 
@@ -1202,6 +1201,69 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 
 // ---------------------------------------------------------------------------------------
 // Deferred-anchor XYZZ mixed add (transplanted from the promoted pinning frontier).
+#ifndef QSB_LAZY
+#define QSB_LAZY 1
+#endif
+#if QSB_LAZY
+
+// Lazy add: r = a + b reduced only by folding the 2^256 carry as K. The
+// result is in [0, 2^256) and congruent mod p, which every consumer in the
+// fixed-base chain (_ModMultCore, _ModSqr, _ModSub256, this routine) accepts.
+// The fold can carry again only when r >= 2^256 - K after a carry, a 2^-223
+// event for field-random inputs, ignored like the existing 2^-224 exposure
+// of _ModSub256 to inputs above p.
+__device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, const uint64_t *b)
+{
+    uint64_t c;
+    UADDO(r[0], a[0], b[0]);
+    UADDC(r[1], a[1], b[1]);
+    UADDC(r[2], a[2], b[2]);
+    UADDC(r[3], a[3], b[3]);
+    UADD(c, 0ULL, 0ULL);
+    c = (0ULL - c) & 0x1000003D1ULL;    /* K when the add carried, else 0 */
+    UADDO1(r[0], c);
+    UADDC1(r[1], 0ULL);
+    UADDC1(r[2], 0ULL);
+    UADD1(r[3], 0ULL);
+}
+
+
+// Fused X3 = a + b - 2c (mod p) for the XYZZ addition (R^2 + PPP - 2V), in
+// one carry chain: t = a + b + 2p - 2c lies in [0, 2^258) (the 2^-224 case
+// c > p + (a+b)/2 is ignored), and its top two bits h fold as h*K. A second
+// carry needs t mod 2^256 >= 2^256 - 2^34, a 2^-222 event, ignored.
+__device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, const uint64_t *b, const uint64_t *c)
+{
+    uint64_t t0, t1, t2, t3, t4, d0, d1, d2, d3, d4;
+    UADDO(t0, a[0], b[0]);
+    UADDC(t1, a[1], b[1]);
+    UADDC(t2, a[2], b[2]);
+    UADDC(t3, a[3], b[3]);
+    UADD(t4, 0ULL, 0ULL);
+    UADDO1(t0, 0xFFFFFFFDFFFFF85EULL);      /* 2p = 2^257 - 2K */
+    UADDC1(t1, 0xFFFFFFFFFFFFFFFFULL);
+    UADDC1(t2, 0xFFFFFFFFFFFFFFFFULL);
+    UADDC1(t3, 0xFFFFFFFFFFFFFFFFULL);
+    UADD1(t4, 1ULL);
+    d0 = c[0] << 1;
+    d1 = (c[1] << 1) | (c[0] >> 63);
+    d2 = (c[2] << 1) | (c[1] >> 63);
+    d3 = (c[3] << 1) | (c[2] >> 63);
+    d4 = c[3] >> 63;
+    USUBO1(t0, d0);
+    USUBC1(t1, d1);
+    USUBC1(t2, d2);
+    USUBC1(t3, d3);
+    USUB1(t4, d4);                          /* t4 in {0,1,2,3} */
+    t4 *= 0x1000003D1ULL;
+    UADDO1(t0, t4);
+    UADDC1(t1, 0ULL);
+    UADDC1(t2, 0ULL);
+    UADD1(t3, 0ULL);
+    r[0] = t0; r[1] = t1; r[2] = t2; r[3] = t3;
+}
+#endif  /* QSB_LAZY */
+
 // The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
 // the ordinary slope numerator is (Y2+Yoff)*ZZZ1 - Yd, so the Y1*PPP product is
 // skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
@@ -1221,7 +1283,11 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   uint64_t T[4];
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
+#if QSB_LAZY
+  _ModAddLazy(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
@@ -1231,9 +1297,13 @@ __device__ void _PointAddXYZZ_def(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uin
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
+#if QSB_LAZY
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V, one carry chain
+#else
   _ModAdd256(T, T, PPP);
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
