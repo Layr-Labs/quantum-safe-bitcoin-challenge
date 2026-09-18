@@ -18,34 +18,34 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-/* ZLAB_HITPATH (kill switch): 1 = short-epoch host loop without per-launch
+/* QSB_CFG_HIT_PATH (kill switch): 1 = short-epoch host loop without per-launch
  * hit-count H2D (the producer kernel zeroes the device counter), one combined
  * D2H of count + first records per launch, and hit records appended with one
  * write() per launch to a hit file opened once (no per-hit stdout/summary I/O).
  * 0 = promoted host loop. */
-#ifndef ZLAB_HITPATH
-#define ZLAB_HITPATH 1
+#ifndef QSB_CFG_HIT_PATH
+#define QSB_CFG_HIT_PATH 1
 #endif
-/* ZLAB_TRIM (kill switch): 1 = compile only the ranked short-epoch consumer
+/* QSB_CFG_TRIM (kill switch): 1 = compile only the ranked short-epoch consumer
  * into kernel_digest and drop the legacy enum/tile host paths (and with them
  * the prefix-cache kernel) from the PTX the driver JITs inside the window; a
  * non-ranked problem shape exits with an error. 0 = promoted code. */
-#ifndef ZLAB_TRIM
-#define ZLAB_TRIM 1
+#ifndef QSB_CFG_TRIM
+#define QSB_CFG_TRIM 1
 #endif
-/* ZLAB_PAIRSHA (kill switch, default off): hash both recovery public keys with
+/* QSB_CFG_PAIR_HASH (kill switch, default off): hash both recovery public keys with
  * one interleaved pair of one-block SHA-256 compressions (idea: paired recovery
  * SHA from unpromoted 5605ad8 by @nullforest8200, isolated in 558d022 by
  * @DPZZxlz; this is an independent implementation). 0 = sequential loop. */
-#ifndef ZLAB_PAIRSHA
-#define ZLAB_PAIRSHA 0
+#ifndef QSB_CFG_PAIR_HASH
+#define QSB_CFG_PAIR_HASH 0
 #endif
-#define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
-#define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
+#define QSB_CFG_HIT_RECORD 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
+#define QSB_CFG_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
 
-#include "../../GPUMath.h"
+#include "quantum-safe-bitcoin-subset-source-002.h"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -73,8 +73,9 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
     0x00,0x7F,0xFF,0x09,0x0D
 };
 
-#define ASSEMBLY_SIGMA 1  /* funnel-shift sigma macros in GPUHash.h (test) */
-#include "../../GPUHash.h"
+#define ASSEMBLY_SIGMA 1  /* funnel-shift sigma macros in source-001 */
+#include "quantum-safe-bitcoin-subset-source-001.h"
+#include "quantum-safe-bitcoin-subset-source-005.cuh"
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
@@ -239,15 +240,15 @@ __device__ uint64_t BINOM_C[151][10];
  * record. Every digit is odd and nonzero; the reconstruction is 2*k modulo
  * the group order, as in the original regular recoder. First chunk has 2^17
  * entries, others 2^16: 2^20 points, 64 MiB total. */
-/* ZLAB_T14 (kill switch, default off): 14-term signed table, widths
+/* QSB_CFG_TABLE (kill switch, default off): 14-term signed table, widths
  * [19,19,19,19,18 x 10] = 256 bits, 2^18 entries for the first four chunks and
  * 2^17 for the rest (2,359,296 64-byte records = 144 MiB). One fewer table load
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
-#ifndef ZLAB_T14
-#define ZLAB_T14 0
+#ifndef QSB_CFG_TABLE
+#define QSB_CFG_TABLE 0
 #endif
-#if ZLAB_T14
+#if QSB_CFG_TABLE
 #define GT_CHUNKS 14
 #define GT_BIG 4
 #define GT_TOTAL_ENTRIES (GT_BIG * (1u << 18) + (GT_CHUNKS - GT_BIG) * (1u << 17))
@@ -345,7 +346,7 @@ __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
 }
 __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
     uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
-#if ZLAB_T14
+#if QSB_CFG_TABLE
     #pragma unroll
     for(int c=0;c<GT_BIG;c++)e[c]=gt_mixed_step<19>(M,sign);
     #pragma unroll
@@ -413,7 +414,7 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  *    resolves the exact Y. 3M+2S + 13*(7M+2S) + 8M+2S = 102M+30S for the
  *    16-point sum, versus 4M+2S + 14*(8M+2S) = 116M+30S before, and the
  *    caller consumes XYZZ directly (no 3M homogeneous conversion). */
-/* ZLAB_DIRDIG (kill switch): read each chunk's signed odd digit straight out of
+/* QSB_CFG_DIGITS (kill switch): read each chunk's signed odd digit straight out of
  * the Joye-Tunstall setup value instead of running the 4-limb peel recurrence
  * once per chunk. Mechanism from dun999's subset submission f535811
  * (gt_field_bits_v / audit_direct_digits.py); this is a re-derivation for the
@@ -423,37 +424,18 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  *   t = f >> (w-1):  digit = 2f+1-2^w,  |digit|/2 index = (f ^ (t-1)) & (2^(w-1)-1),
  *   negative iff t == 0, XOR the global recode sign. The last chunk is the
  *   positive remainder, index f & (entries-1). */
-#ifndef ZLAB_DIRDIG
-#define ZLAB_DIRDIG 1
+#ifndef QSB_CFG_DIGITS
+#define QSB_CFG_DIGITS 1
 #endif
-#if ZLAB_DIRDIG
+#ifndef QSB_CFG_DIRECTIONAL
+#define QSB_CFG_DIRECTIONAL 1
+#endif
+#if QSB_CFG_DIGITS
 __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigned pos) {
     unsigned li = pos >> 6, sh = pos & 63u;
     uint64_t lo = li == 0 ? m[0] : li == 1 ? m[1] : li == 2 ? m[2] : m[3];
     uint64_t hi = li == 0 ? m[1] : li == 1 ? m[2] : li == 2 ? m[3] : 0ULL;
     return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
-}
-/* Same field, but with the limb pair carried by the caller. `pos` advances by a fixed
- * width per chunk and is a loop-index function, not data, so the limb index changes on a
- * uniform branch every ~3.7 chunks instead of costing a four-way select every chunk. */
-__device__ __forceinline__ uint32_t gt_field_bits_p(uint64_t lo, uint64_t hi, unsigned sh) {
-    return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
-}
-__device__ __forceinline__ void gt_window_advance(const uint64_t m[4], unsigned pos,
-                                                  unsigned *li, uint64_t *lo, uint64_t *hi) {
-    const unsigned nli = pos >> 6;
-    if (nli != *li) {                       /* uniform across the warp: pos is loop state */
-        *li = nli; *lo = *hi;
-        *hi = nli == 0 ? m[1] : nli == 1 ? m[2] : nli == 2 ? m[3] : 0ULL;
-    }
-}
-__device__ __forceinline__ void gt_direct_digit_p(uint64_t lo, uint64_t hi, unsigned sh,
-                                                  uint64_t sflag, unsigned w, bool last,
-                                                  uint32_t *idx, uint64_t *neg) {
-    uint32_t f = gt_field_bits_p(lo, hi, sh) & ((1u << w) - 1u);
-    uint32_t t = f >> (w - 1);
-    *idx = last ? (f & ((1u << (w - 1)) - 1u)) : ((f ^ (t - 1u)) & ((1u << (w - 1)) - 1u));
-    *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
 }
 /* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
 __host__ __device__ __forceinline__ unsigned gt_width(int c) {
@@ -468,6 +450,17 @@ __device__ __forceinline__ void gt_direct_digit(const uint64_t M[4], uint64_t sf
     *idx = last ? (f & ((1u << (w - 1)) - 1u)) : ((f ^ (t - 1u)) & ((1u << (w - 1)) - 1u));
     *neg = (last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
 }
+__device__ __forceinline__ void gt_window_digit(uint64_t f, uint64_t sflag, bool last,
+                                                uint32_t *idx, uint64_t *neg) {
+    uint32_t v=(uint32_t)f & ((1u << 17) - 1u);
+    uint32_t t=v >> 16;
+    *idx=last ? (v & 0xffffu) : ((v ^ (t-1u)) & 0xffffu);
+    *neg=(last ? 0ULL : (uint64_t)(t ^ 1u)) ^ sflag;
+}
+__device__ __forceinline__ void gt_window_shift17(uint64_t W[4]) {
+    W[0]=(W[0]>>17)|(W[1]<<47); W[1]=(W[1]>>17)|(W[2]<<47);
+    W[2]=(W[2]>>17)|(W[3]<<47); W[3]>>=17;
+}
 #endif
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
@@ -475,8 +468,8 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
-#if ZLAB_T14
-#if ZLAB_DIRDIG
+#if QSB_CFG_TABLE
+#if QSB_CFG_DIGITS
     uint64_t sflag=(uint64_t)(sign<0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
     gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -491,45 +484,37 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
-#if ZLAB_DIRDIG
+#if QSB_CFG_DIGITS
     unsigned pos=(unsigned)gt_shift(2)+1u;
 #endif
     #pragma unroll 1
     for (int c=2;c<GT_BIG;c++){
-#if ZLAB_DIRDIG
+#if QSB_CFG_DIGITS
         gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg); pos+=gt_width(2);
 #else
         ec=gt_mixed_step<19>(M,sign);
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, true);
         Load256(y0, cy);
         table_base += 1u << 18;
     }
     #pragma unroll 1
-    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
-#if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
+    for (int c=GT_BIG;c<GT_CHUNKS;c++){
+#if QSB_CFG_DIGITS
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),c==GT_CHUNKS-1,&idx,&neg); pos+=gt_width(GT_BIG);
 #else
-        ec=gt_mixed_step<18>(M,sign);
+        ec=(c<GT_CHUNKS-1)?gt_mixed_step<18>(M,sign):sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);
         table_base += 1u << 17;
     }
-#if ZLAB_DIRDIG
-    gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
 #else
-    ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg);
-#endif
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-    _PointAddXYZZ_def_last(X,Y,ZZ,ZZZ, cx,cy, y0);
-#else
-#if ZLAB_DIRDIG
+#if QSB_CFG_DIGITS
     uint64_t sflag=(uint64_t)(sign<0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
     gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -539,15 +524,36 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
-    unsigned wli=pos>>6;
-    uint64_t wlo=wli==0?M[0]:wli==1?M[1]:wli==2?M[2]:M[3];
-    uint64_t whi=wli==0?M[1]:wli==1?M[2]:wli==2?M[3]:0ULL;
+#if QSB_CFG_DIRECTIONAL
+    uint64_t W[4]={M[0],M[1],M[2],M[3]};
+    W[0]=(W[0]>>36)|(W[1]<<28); W[1]=(W[1]>>36)|(W[2]<<28);
+    W[2]=(W[2]>>36)|(W[3]<<28); W[3]>>=36;
+#endif
+    /* One record in flight: the digit and address of chunk c+1 depend only on
+     * the recode state (gt_direct_digit does not consume M), so its 64-byte
+     * record is prefetched into L2 before the addition of chunk c runs. Two
+     * prefetch instructions per chunk, no extra registers. */
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),false,&idx,&neg);
+    for (int c=2;c<GT_CHUNKS;c++){
+#if QSB_CFG_DIRECTIONAL
+        gt_window_digit(W[0],sflag,c==GT_CHUNKS-1,&idx,&neg);
+        gt_window_shift17(W);
+#else
+        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
         pos+=gt_width(2);
-        gt_window_advance(M,pos,&wli,&wlo,&whi);
+#endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        if (c+1 < GT_CHUNKS) {
+            uint32_t nidx; uint64_t nneg;
+#if QSB_CFG_DIRECTIONAL
+            gt_window_digit(W[0],sflag,(c+1)==GT_CHUNKS-1,&nidx,&nneg);
+#else
+            gt_direct_digit(M,sflag,pos,gt_width(2),(c+1)==GT_CHUNKS-1,&nidx,&nneg);
+#endif
+            const uint8_t *nrec = gTable + ((size_t)(table_base + (1u<<16)) + nidx) * 64;
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(nrec));
+            asm volatile("prefetch.global.L2 [%0];" :: "l"(nrec+32));
+        }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -557,22 +563,14 @@ __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *Z
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
+    for (int c=2;c<GT_CHUNKS;c++){
+        ec=(c<GT_CHUNKS-1)?gt_mixed_step<17>(M,sign):sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
 #endif
-        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0);
+        _PointAddXYZZ_def(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
         Load256(y0, cy);                /* current affine y anchors next madd */
         table_base += 1u << 16;
     }
-#if ZLAB_DIRDIG
-    gt_direct_digit_p(wlo,whi,pos&63u,sflag,gt_width(2),true,&idx,&neg);
-    gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#else
-    ec=sign*(int32_t)M[0];
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-#endif
-    _PointAddXYZZ_def_last(X,Y,ZZ,ZZZ, cx,cy, y0);
 #endif
 }
 
@@ -656,7 +654,7 @@ __device__ int gpu_bench_valid(const uint8_t *h) {
  * big-endian order, so "the first QSB_ZEROS_N bits are zero" is a test on the
  * top bits of hs[0], hs[1], ... The ranked path therefore never materialises
  * the 32-byte digest or walks it a byte at a time. */
-#if ZLAB_PAIRSHA
+#if QSB_CFG_PAIR_HASH
 /* Two independent SHA-256 compressions from the IV, rounds interleaved. */
 #define ZP_RND2(k) { \
   for (int zr = 0; zr < 16; zr++) { \
@@ -670,7 +668,7 @@ __device__ int gpu_bench_valid(const uint8_t *h) {
     h=g; g=f; f=e; e=d; d=c; c=b; b=a; a=x; }
 #define ZP_WMIX(w) { \
     for (int zi = 0; zi < 16; zi++) w[zi] += s1(w[(zi+14)&15]) + w[(zi+9)&15] + s0(w[(zi+1)&15]); }
-__device__ __forceinline__ void zlab_sha256_pair_h0(uint32_t *w0, uint32_t *w1, uint32_t *out0, uint32_t *out1) {
+__device__ __forceinline__ void qsb_sha256_pair_h0(uint32_t *w0, uint32_t *w1, uint32_t *out0, uint32_t *out1) {
     uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7],x0;
     uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7],x1;
     #pragma unroll 1
@@ -714,7 +712,7 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_FAST_N_INC   30
 #define QSB_FAST_N_CONST 69
 #define QSB_PREFIX_BLOCKS 2
-#include "prefix_cache.cuh"
+#include "quantum-safe-bitcoin-subset-source-006.cuh"
 
 /* Short-epoch shape: the pool is cut at 137 with 6 early omissions per epoch
  * (folded into an epoch midstate built ON GPU by kernel_build_epochs) and 3
@@ -729,11 +727,11 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_TWIN      3
 #define QSB_SE_CUT       137
 #define QSB_SE_PER_EPOCH 256
-/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
-#ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 65536   /* 16.8M candidates per launch (measured +0.3%) */
+/* QSB_CFG_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
+#ifndef QSB_CFG_LAUNCH_BLOCKS
+#define QSB_CFG_LAUNCH_BLOCKS 256      /* K137: 8.98M candidates, 2 CTAs/SM */
 #endif
-#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
+#define QSB_SE_LAUNCH_BLOCKS QSB_CFG_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -753,7 +751,7 @@ static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
  * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
  * the block-wide inverse, and the benchmark scores verified throughput. */
 __device__ __constant__ uint8_t WIN3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
-#include "window_schedule_shared.cuh"
+#include "quantum-safe-bitcoin-subset-source-007.cuh"
 
 /* Combinadic unranking: rank -> sorted skip[0..t-1] in lex order for C(n,t).
  * Uses BINOM_C table (C[n][k], capped at 2^63). Binary search per position
@@ -793,13 +791,13 @@ __global__ void kernel_build_epochs(
     const uint8_t * __restrict__ d_prefix_remainder, int prefix_remainder_len,
     const uint8_t * __restrict__ d_dummy_sigs,
     epoch_desc_t * __restrict__ d_epochs
-#if ZLAB_HITPATH
+#if QSB_CFG_HIT_PATH
     , uint32_t *d_hit_reset
 #endif
     )
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
-#if ZLAB_HITPATH
+#if QSB_CFG_HIT_PATH
     /* Runs before this launch's digest kernel on the same stream. */
     if (t == 0) *d_hit_reset = 0;
 #endif
@@ -821,17 +819,10 @@ __global__ void kernel_build_epochs(
             cur_pos = 0;
         }
     }
-    /* Iterate over OUTPUT pushes, not source indices. Every epoch keeps exactly
-     * window_start - s_early pushes, so with this loop shape the 64-byte boundary
-     * (and therefore every _SHA256Transform) falls at the same iteration in every
-     * lane; the source-push loop fired the transform at a lane-dependent iteration,
-     * which made the whole producer warp-divergent. Same byte stream, same
-     * midstates, bit for bit -- only the schedule changes. */
-    const int kept = window_start - s_early;
-    for (int j = 0; j < kept; j++) {
-        int src = j;
-        for (int k = 0; k < s_early; k++) src += ((int)early[k] <= src) ? 1 : 0;
-        const uint8_t *row = d_dummy_sigs + (size_t)src * SIG_PUSH_SIZE;
+    int sel = 0;
+    for (int i = 0; i < window_start; i++) {
+        if (sel < s_early && (int)early[sel] == i) { sel++; continue; }
+        const uint8_t *row = d_dummy_sigs + (size_t)i * SIG_PUSH_SIZE;
         for (int b = 0; b < SIG_PUSH_SIZE; b++) {
             cur[cur_pos++] = row[b];
             if (cur_pos == 64) {
@@ -853,8 +844,8 @@ __global__ void kernel_build_epochs(
 
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
 // Preserve the final reduction carry and canonicalize before _ModInv.
-/* ZLAB: the asm body is shared by the canonical multiply (qsb_field_mul, tree
- * audit) and the lazy tree multiply (qsb_field_mul_raw, ZLAB_TREE>=1), whose
+/* QSB: the asm body is shared by the canonical multiply (qsb_field_mul, tree
+ * audit) and the lazy tree multiply (qsb_field_mul_raw, QSB_CFG_TREE>=1), whose
  * result is an exact residue in [0,2^256) that may be non-canonical. */
 __device__ __forceinline__ void qsb_field_mul_raw(uint64_t *out,uint64_t *a,uint64_t *b){
     uint64_t r0,r1,r2,r3;
@@ -1159,7 +1150,149 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     return parities;
 }
 
-#include "tree_inverse.cuh"
+#include "quantum-safe-bitcoin-subset-source-008.cuh"
+
+
+/* ---- QSB_CFG_BATCH: two epochs per block -------------------------------------
+ * Lane t grinds window triple t of epoch 2b and of epoch 2b+1, multiplies the
+ * two shared denominators into one tree leaf and splits the block inverse back
+ * with two multiplies. Every per-block cost -- the fifteen tree barriers, the
+ * shared-memory tree traffic and the ~190-iteration cooperative root inverse
+ * (about 13% of block time by ablation) -- is paid once per 512 candidates
+ * instead of once per 256. The pre-inverse half of the finish is parked in
+ * shared memory so the lane frame stays off the stack. */
+#ifndef QSB_CFG_BATCH
+#define QSB_CFG_BATCH 1
+#endif
+#ifndef QSB_CFG_ACTIVE_BATCH
+#define QSB_CFG_ACTIVE_BATCH 1
+#endif
+#define QSB_BATCH_FACTOR (QSB_CFG_ACTIVE_BATCH ? 137 : (QSB_CFG_BATCH ? 2 : 1))
+#define QSB_RECORD_DATA_WORDS ((size_t)QSB_BATCH_FACTOR * 16u * 256u)
+#define QSB_RECORD_WORDS_PER_BLOCK (QSB_RECORD_DATA_WORDS + (size_t)QSB_BATCH_FACTOR * 4u)
+#ifndef QSB_CFG_STREAMS
+#define QSB_CFG_STREAMS 1
+#endif
+#if QSB_CFG_STREAMS && !QSB_CFG_HIT_PATH
+#error "QSB_CFG_STREAMS requires QSB_CFG_HIT_PATH"
+#endif
+#define QSB_STM_SLOTS (QSB_CFG_STREAMS ? 2 : 1)
+#define QSB_HITBUF_BYTES (4 + 1024 * QSB_CFG_HIT_RECORD)
+#if QSB_CFG_BATCH
+/* Everything in the finish that does not need 1/W: m1 = (yR*B - Y)*ZZ and
+ * m2 = (yR*B + Y)*ZZ. After the inverse, lambda1 = m1/W and m2' = m2/W. */
+__device__ __forceinline__ void qsb_k2s_pre(
+    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
+) {
+    uint64_t yb[4];
+    _ModMult(yb, yR, ZZZ);
+    _ModSub256(m1, yb, Y);
+    _ModMult(m1, ZZ);
+    _ModAdd256(m2, yb, Y);
+    _ModMult(m2, ZZ);
+}
+
+/* Return parity((a*b - sub) mod p) under _ModMultCore's existing raw-fold
+ * convention without materialising the final modular subtraction.  For the
+ * 256-bit raw product r, subtraction modulo p changes bit zero exactly by the
+ * parity of sub and by one iff r<sub, because secp256k1's p is odd. */
+__device__ __forceinline__ uint32_t qsb_mul_sub_parity(
+    const uint64_t *a, const uint64_t *b, const uint64_t *sub
+) {
+    uint64_t r[4];
+    _ModMultCore(r, a, b);
+#ifdef __CUDA_ARCH__
+    uint64_t low;
+    uint32_t borrow;
+    asm("{\n\t"
+        ".reg .u64 d1,d2,d3;\n\t"
+        "sub.cc.u64 %0,%2,%6;\n\t"
+        "subc.cc.u64 d1,%3,%7;\n\t"
+        "subc.cc.u64 d2,%4,%8;\n\t"
+        "subc.cc.u64 d3,%5,%9;\n\t"
+        "subc.u32 %1,0,0;\n\t"
+        "}"
+        : "=l"(low), "=r"(borrow)
+        : "l"(r[0]), "l"(r[1]), "l"(r[2]), "l"(r[3]),
+          "l"(sub[0]), "l"(sub[1]), "l"(sub[2]), "l"(sub[3]));
+    return (uint32_t)((low ^ (uint64_t)borrow) & 1ULL);
+#else
+    uint32_t borrow = (r[3] < sub[3]) ||
+        (r[3] == sub[3] && (r[2] < sub[2] ||
+        (r[2] == sub[2] && (r[1] < sub[1] ||
+        (r[1] == sub[1] && r[0] < sub[0])))));
+    return (uint32_t)((r[0] ^ sub[0] ^ (uint64_t)borrow) & 1ULL);
+#endif
+}
+
+__device__ __forceinline__ uint32_t qsb_k2s_post(
+    uint64_t *m1, uint64_t *m2, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *x1, uint64_t *x2
+) {
+    uint64_t t[4], sum[4];
+    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    _ModMult(m1, inv);
+    _ModMult(m2, inv);
+    _ModAdd256(sum, m1, m2);
+    _ModSub256(t, m1, cc);
+    _ModMult(x1, sum, t);
+    _ModAdd256(x1, x1, xR);
+    _ModSub256(t, xR, x1);
+    uint32_t parities = qsb_mul_sub_parity(t, m1, yR);
+    _ModSub256(t, m2, cc);
+    _ModMult(x2, sum, t);
+    _ModAdd256(x2, x2, xR);
+    _ModSub256(t, xR, x2);
+    parities |= (qsb_mul_sub_parity(t, m2, yR) ^ 1u) << 1;
+    return parities;
+}
+
+/* One candidate up to its denominator: window hash, SHA-256d, u1*G, W = ZZZ*d,
+ * and the pre-inverse finish pair. Returns 0 when the candidate is unusable. */
+__device__ __forceinline__ int qsb_k2s_front(
+    const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
+    uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
+) {
+    uint32_t state[8];
+    #pragma unroll
+    for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
+    qsb_scheduled_window_hash(state, ep, lane, first);
+    uint32_t s2[8];
+    _SHA256TransformDigest32(s2,state);
+    uint64_t z[4];
+    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
+    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+}
+
+/* Ranked single-hash gate over the two x-coordinates and their y parities. */
+__device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
+    for(int ri=0;ri<2;ri++){
+        uint64_t sx0=ri ? q2x[0] : q1x[0];
+        uint64_t sx1=ri ? q2x[1] : q1x[1];
+        uint64_t sx2=ri ? q2x[2] : q1x[2];
+        uint64_t sx3=ri ? q2x[3] : q1x[3];
+        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+        uint32_t pb[9];
+        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+        uint32_t hs[8];_SHA256TransformPubkey33(hs,pb);
+        if(gpu_bench_valid_words(hs)){*recid_out=ri;return 1;}
+    }
+    return 0;
+}
+#endif
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
@@ -1185,8 +1318,237 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int window_start, uint64_t enum_base,
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
     int fast_inc, const uint32_t * __restrict__ d_const_words,
-    const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
+    const epoch_desc_t * __restrict__ d_epochs,  /* short-epoch mode: one per block, else NULL */
+    const uint32_t * __restrict__ d_first,       /* short-epoch mode: QSB_FIRST_SLOTS states per block */
+    uint64_t * __restrict__ d_state_arena             /* K3: epoch-B m1/m2, slot already selected by host */
 ) {
+#if QSB_CFG_BATCH
+#if QSB_CFG_ACTIVE_BATCH
+    const int tid = threadIdx.x;
+    const int idx = blockIdx.x * blockDim.x + tid;
+    if (blockIdx.x * blockDim.x >= batch_size) return;
+    const bool active = idx < batch_size;
+    const epoch_desc_t *e0 = d_epochs + QSB_BATCH_FACTOR * blockIdx.x;
+    const uint32_t *f0 = d_first + (size_t)(QSB_BATCH_FACTOR * blockIdx.x) * QSB_FIRST_SLOTS * 8;
+    uint64_t *arena = d_state_arena + (size_t)blockIdx.x * QSB_RECORD_WORDS_PER_BLOCK;
+    uint32_t *valid_masks = (uint32_t *)(arena + QSB_RECORD_DATA_WORDS);
+    uint64_t u2rx[4] = {QSB_U2R[0], QSB_U2R[1], QSB_U2R[2], QSB_U2R[3]};
+    uint64_t u2ry[4] = {QSB_U2R[4], QSB_U2R[5], QSB_U2R[6], QSB_U2R[7]};
+    uint64_t prefix[5] = {1, 0, 0, 0, 0};
+
+    /* Forward temporal scan.  Plane layout per epoch is m1[4], m2[4],
+     * denominator[4] and inclusive prefix[4]. Validity is one ballot mask per
+     * warp instead of a 64-bit plane. All limb accesses are coalesced and every
+     * inactive/invalid denominator is replaced by one. */
+    for (int i = 0; i < QSB_BATCH_FACTOR; i++) {
+        const epoch_desc_t *e = e0 + i;
+        const uint32_t *f = f0 + (size_t)i * QSB_FIRST_SLOTS * 8;
+        uint64_t den[5], m1[4], m2[4], next[5];
+        int ok = qsb_k2s_front(e, f, tid, d_gt, u2rx, u2ry, den, m1, m2) && active;
+        if (!ok) { den[0] = 1; den[1] = den[2] = den[3] = den[4] = 0; }
+        qsb_field_mul_raw(next, prefix, den);
+        uint64_t *row = arena + (size_t)i * 16u * 256u;
+        #pragma unroll
+        for (int k = 0; k < 4; k++) {
+            row[(size_t)k * 256u + tid] = m1[k];
+            row[(size_t)(4 + k) * 256u + tid] = m2[k];
+            row[(size_t)(8 + k) * 256u + tid] = den[k];
+            row[(size_t)(12 + k) * 256u + tid] = next[k];
+            prefix[k] = next[k];
+        }
+        prefix[4] = next[4];
+        uint32_t valid = __ballot_sync(0xffffffffu, ok);
+        if ((tid & 31) == 0) valid_masks[i * 8 + (tid >> 5)] = valid;
+    }
+
+    qsb_block_inverse_tree(prefix); /* inverse of all 137 lane denominators */
+
+    /* Reverse split: inv_i = inv(prefix_K) * prefix_(i-1), then extend the
+     * accumulator by denominator_i.  Candidate zero receives the accumulator
+     * directly.  The post/gate path is otherwise identical to K3. */
+    for (int i = QSB_BATCH_FACTOR - 1; i >= 0; i--) {
+        uint64_t *row = arena + (size_t)i * 16u * 256u;
+        uint64_t inv[5], den[5], next_acc[5], m1[4], m2[4], q1x[4], q2x[4];
+        #pragma unroll
+        for (int k = 0; k < 4; k++) {
+            den[k] = row[(size_t)(8 + k) * 256u + tid];
+            m1[k] = row[(size_t)k * 256u + tid];
+            m2[k] = row[(size_t)(4 + k) * 256u + tid];
+        }
+        den[4] = 0;
+        if (i) {
+            uint64_t prev[5];
+            uint64_t *prow = arena + (size_t)(i - 1) * 16u * 256u;
+            #pragma unroll
+            for (int k = 0; k < 4; k++) prev[k] = prow[(size_t)(12 + k) * 256u + tid];
+            prev[4] = 0;
+            qsb_field_mul_raw(inv, prefix, prev);
+            qsb_field_mul_raw(next_acc, prefix, den);
+            #pragma unroll
+            for (int k = 0; k < 5; k++) prefix[k] = next_acc[k];
+        } else {
+            #pragma unroll
+            for (int k = 0; k < 5; k++) inv[k] = prefix[k];
+        }
+        uint32_t valid = valid_masks[i * 8 + (tid >> 5)];
+        if ((valid >> (tid & 31)) & 1u) {
+            uint32_t par = qsb_k2s_post(m1, m2, inv, u2rx, u2ry, q1x, q2x);
+            int recid = 0;
+            if (qsb_k2s_gate(q1x, q2x, par, &recid)) {
+                uint32_t pslot = atomicAdd(d_hit_cnt, 1);
+                if (pslot < 1024) {
+                    d_hit_idx[pslot * 4] = ((uint32_t)idx) | ((uint32_t)recid << 30);
+                    const epoch_desc_t *e = e0 + i;
+                    for (int j = 0; j < 6; j++) d_hit_combos[pslot * QSB_CFG_HIT_RECORD + j] = e->early[j];
+                    for (int j = 0; j < 3; j++) d_hit_combos[pslot * QSB_CFG_HIT_RECORD + 6 + j] = WIN3[tid][j];
+                }
+            }
+        }
+    }
+#else
+    const int tid = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + tid;
+    if(blockIdx.x*blockDim.x>=batch_size)return;
+    const bool active = idx<batch_size;
+    __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
+#if QSB_CFG_LEGACY_BATCH
+    __shared__ uint64_t denA[4][256];         /* A denominator; total static shared = 48 KiB */
+    __shared__ uint64_t denB[4][256];         /* B denominator, using compact-tree savings */
+#endif
+    const epoch_desc_t *e0 = d_epochs + QSB_BATCH_FACTOR*blockIdx.x;
+    const epoch_desc_t *e1 = e0 + 1;
+    const uint32_t *f0 = d_first + (size_t)(QSB_BATCH_FACTOR*blockIdx.x) * QSB_FIRST_SLOTS * 8;
+    const uint32_t *f1 = f0 + (size_t)QSB_FIRST_SLOTS * 8;
+    uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
+    int okA, okB;
+    {
+        uint64_t m1[4],m2[4];
+        okA = qsb_k2s_front(e0,f0,tid,d_gt,u2rx,u2ry,prodA,m1,m2) && active;
+        if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+        #pragma unroll
+        for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
+#if QSB_CFG_LEGACY_BATCH
+        #pragma unroll
+        for(int k=0;k<4;k++)denA[k][tid]=prodA[k];
+#endif
+    }
+#if QSB_CFG_LEGACY_BATCH
+    uint64_t prodAB[5];
+    uint64_t *parkB=d_state_arena+(size_t)blockIdx.x*8u*256u;
+    okB = qsb_k2s_front(e1,f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B) && active;
+    if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+    qsb_field_mul_raw(prodAB,prodA,prodB);
+    #pragma unroll
+    for(int k=0;k<4;k++){
+        parkB[(size_t)k*256u+tid]=m1B[k];
+        parkB[(size_t)(4+k)*256u+tid]=m2B[k];
+        denB[k][tid]=prodB[k];
+    }
+    const epoch_desc_t *e2=e1+1;
+    const uint32_t *f2=f1+(size_t)QSB_FIRST_SLOTS*8;
+    uint64_t prodC[5],m1C[4],m2C[4];
+    int okC=qsb_k2s_front(e2,f2,tid,d_gt,u2rx,u2ry,prodC,m1C,m2C) && active;
+    if(!okC){prodC[0]=1;prodC[1]=prodC[2]=prodC[3]=prodC[4]=0;}
+    uint64_t leaf[5];
+    qsb_field_mul_raw(leaf,prodAB,prodC);
+    qsb_block_inverse_tree(leaf);             /* 1/(WA*WB*WC) for this lane */
+    uint64_t invAB[5];
+    qsb_field_mul_raw(invAB,leaf,prodC);      /* 1/(WA*WB) */
+    /* Finish C first so its parked pair, prodAB and leaf die before A/B. */
+    if(okC){
+        uint64_t inv[5],q1x[4],q2x[4];
+        qsb_field_mul_raw(inv,leaf,prodAB);   /* 1/WC */
+        uint32_t par=qsb_k2s_post(m1C,m2C,inv,u2rx,u2ry,q1x,q2x);
+        int recid=0;
+        if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+i]=e2->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+    if(okA){
+        uint64_t inv[5],b[5],m1[4],m2[4],q1x[4],q2x[4];
+        #pragma unroll
+        for(int k=0;k<4;k++)b[k]=denB[k][tid];
+        b[4]=0;
+        qsb_field_mul_raw(inv,invAB,b);       /* 1/WA */
+        #pragma unroll
+        for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
+        uint32_t par=qsb_k2s_post(m1,m2,inv,u2rx,u2ry,q1x,q2x);
+        int recid=0;
+        if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+i]=e0->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+    if(okB){
+        uint64_t inv[5],a[5],m1[4],m2[4],q1x[4],q2x[4];
+        #pragma unroll
+        for(int k=0;k<4;k++)a[k]=denA[k][tid];
+        a[4]=0;
+        qsb_field_mul_raw(inv,invAB,a);       /* 1/WB */
+        #pragma unroll
+        for(int k=0;k<4;k++){m1[k]=parkB[(size_t)k*256u+tid];m2[k]=parkB[(size_t)(4+k)*256u+tid];}
+        uint32_t par=qsb_k2s_post(m1,m2,inv,u2rx,u2ry,q1x,q2x);
+        int recid=0;
+        if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+i]=e1->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+#else
+    okB = qsb_k2s_front(e1,f1,tid,d_gt,u2rx,u2ry,prodB,m1B,m2B) && active;
+    if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+    uint64_t leaf[5];
+    qsb_field_mul_raw(leaf,prodA,prodB);
+    qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
+    if(okA){
+        uint64_t inv[5],m1[4],m2[4],q1x[4],q2x[4];
+        qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
+        #pragma unroll
+        for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
+        uint32_t par=qsb_k2s_post(m1,m2,inv,u2rx,u2ry,q1x,q2x);
+        int recid=0;
+        if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+i]=e0->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+    if(okB){
+        uint64_t inv[5],q1x[4],q2x[4];
+        qsb_field_mul_raw(inv,leaf,prodA);    /* 1/WB */
+        uint32_t par=qsb_k2s_post(m1B,m2B,inv,u2rx,u2ry,q1x,q2x);
+        int recid=0;
+        if(qsb_k2s_gate(q1x,q2x,par,&recid)){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((uint32_t)idx)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+i]=e1->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*QSB_CFG_HIT_RECORD+6+i]=WIN3[tid][i];
+            }
+        }
+    }
+#endif
+#endif
+#else
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // The ranked wrapper fixes these flags; keep one kernel so driver JIT stays small.
     const int easy_flag=0,single_hash_flag=1,calibrate_flag=0;
@@ -1204,11 +1566,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * sees exactly the same convention as before. Non-enum launches pass
      * window_start=0, s_early=0, t_win=t_sel, which reduces this to the
      * original whole-pool behaviour. */
-#if ZLAB_TRIM
+#if QSB_CFG_TRIM
     const epoch_desc_t *se_desc = d_epochs + blockIdx.x;
     uint32_t state[8];
     for (int i = 0; i < 8; i++) state[i] = se_desc->mid[i];
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x, d_first + (size_t)blockIdx.x * QSB_FIRST_SLOTS * 8);
 #else
     uint8_t skip[MAX_T];
     const epoch_desc_t *se_desc = NULL;
@@ -1242,7 +1604,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
 
   if (fast_inc == QSB_SE_N_INC) {
-    qsb_scheduled_window_hash(state, se_desc, threadIdx.x);
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x, d_first + (size_t)blockIdx.x * QSB_FIRST_SLOTS * 8);
   } else if (fast_inc == QSB_FAST_N_INC) {
     // Cached states are rebuilt from this batch's midstate and public input.
     // Legacy combo launches and unsupported shapes retain the full emitter.
@@ -1366,7 +1728,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint32_t y_parities = qsb_xyzz_finish_precomputed(qy,qzz,qzzz,prod,u2rx,u2ry,q1x,q2x);
 
     int v=0, hash_choice=0, recid=0;
-#if ZLAB_PAIRSHA
+#if QSB_CFG_PAIR_HASH
     {
         uint32_t pw[2][16];
         for(int ri=0;ri<2;ri++){
@@ -1386,7 +1748,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
         }
         uint32_t hs0[8],hs1[8];
-        zlab_sha256_pair_h0(pw[0],pw[1],hs0,hs1);
+        qsb_sha256_pair_h0(pw[0],pw[1],hs0,hs1);
         if(gpu_bench_valid_words(hs0)){v=1;recid=0;}
         else if(gpu_bench_valid_words(hs1)){v=1;recid=1;}
     }
@@ -1448,16 +1810,16 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
      * bytes of local memory written for every candidate, hit or not. */
     if(v){uint32_t p=atomicAdd(d_hit_cnt,1);
         if(p<1024) {
-#if ZLAB_HITPATH
+#if QSB_CFG_HIT_PATH
           if(se_desc) {
             /* Packed record p at d_hit_idx[4p] (tag) and d_hit_combos[16p..] (9 indices). */
             d_hit_idx[p*4]=((uint32_t)idx)|(recid<<30)|(hash_choice<<31);
-            for(int i=0;i<6;i++)d_hit_combos[p*ZLAB_HIT_REC+i]=se_desc->early[i];
-            for(int i=0;i<3;i++)d_hit_combos[p*ZLAB_HIT_REC+6+i]=WIN3[threadIdx.x][i];
+            for(int i=0;i<6;i++)d_hit_combos[p*QSB_CFG_HIT_RECORD+i]=se_desc->early[i];
+            for(int i=0;i<3;i++)d_hit_combos[p*QSB_CFG_HIT_RECORD+6+i]=WIN3[threadIdx.x][i];
           } else
 #endif
-#if ZLAB_TRIM
-#if ZLAB_HITPATH
+#if QSB_CFG_TRIM
+#if QSB_CFG_HIT_PATH
           {}
 #else
           {
@@ -1479,6 +1841,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
         }
     }
+#endif
 }
 
 /* ============================================================
@@ -1516,7 +1879,7 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-#if ZLAB_T14
+#if QSB_CFG_TABLE
     int ch=t<((uint64_t)GT_BIG<<18)?(int)(t>>18):GT_BIG+(int)((t-((uint64_t)GT_BIG<<18))>>17);
 #else
     int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
@@ -2229,6 +2592,8 @@ int main(int argc, char **argv) {
      * this mode -- the producer kernel consumes them, and the per-epoch
      * host refresh of the old epoch machinery never runs. */
     epoch_desc_t *d_epochs = NULL;
+    uint32_t *d_first = NULL;
+    uint64_t *d_state_arena = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2257,8 +2622,14 @@ int main(int argc, char **argv) {
         }
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
-        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * sizeof(epoch_desc_t));
+        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_BATCH_FACTOR * QSB_STM_SLOTS * sizeof(epoch_desc_t));
+        cudaMalloc(&d_first, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_BATCH_FACTOR * QSB_STM_SLOTS * QSB_FIRST_SLOTS * 8 * sizeof(uint32_t));
+#if QSB_CFG_ACTIVE_BATCH
+        cudaMalloc(&d_state_arena, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_STM_SLOTS * QSB_RECORD_WORDS_PER_BLOCK * sizeof(uint64_t));
+#endif
+        if (!d_first) { fprintf(stderr, "OOM: first-block states\n"); return 1; }
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
+        if (QSB_CFG_ACTIVE_BATCH && !d_state_arena) { fprintf(stderr, "OOM: K137 temporal arena\n"); return 1; }
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -2325,7 +2696,7 @@ int main(int argc, char **argv) {
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    cudaDeviceSetLimit(cudaLimitStackSize, 2048);
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
@@ -2486,11 +2857,11 @@ int main(int argc, char **argv) {
         fflush(stdout);
         uint64_t epoch_base = 0;
         struct timespec t_last_se = t0;
-#if ZLAB_HITPATH
+#if QSB_CFG_HIT_PATH
         /* One device buffer: [u32 count][record 0 ...], record p = u32 tag at
          * 4+16p and 9 combo bytes at 8+16p. */
         uint8_t *d_hitbuf = NULL;
-        cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC);
+        cudaMalloc(&d_hitbuf, (size_t)QSB_HITBUF_BYTES * QSB_STM_SLOTS);
         if (!d_hitbuf) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
         uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
         uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
@@ -2501,27 +2872,54 @@ int main(int argc, char **argv) {
         else snprintf(zh_fname, sizeof(zh_fname), "results/digest_hit_%d.txt", gpu_index);
         int zh_fd = open(zh_fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
-        uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
+        uint8_t zh_host[4 + 64 * QSB_CFG_HIT_RECORD];
+        /* Two-stream slotted pipeline: slot s owns stream[s], event[s] and
+         * the s-th third of every per-launch device buffer. */
+        cudaStream_t stm_s[QSB_STM_SLOTS];
+        cudaEvent_t  stm_ev[QSB_STM_SLOTS];
+        uint64_t     stm_pend[QSB_STM_SLOTS];
+        for (int i = 0; i < QSB_STM_SLOTS; i++) {
+            cudaStreamCreateWithFlags(&stm_s[i], cudaStreamNonBlocking);
+            cudaEventCreateWithFlags(&stm_ev[i], cudaEventDisableTiming);
+            stm_pend[i] = 0;
+        }
+        uint64_t stm_i = 0;
 #endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
+#if QSB_CFG_BATCH
+            epochs_left /= QSB_BATCH_FACTOR;   /* whole compound blocks */
+            if (epochs_left == 0) break;
+#endif
             int nblk = (epochs_left < (uint64_t)QSB_SE_LAUNCH_BLOCKS)
                        ? (int)epochs_left : QSB_SE_LAUNCH_BLOCKS;
             int batch_pos = nblk * QSB_SE_PER_EPOCH;
             uint32_t h_hit = 0;
-#if ZLAB_HITPATH
-            kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
+            const int stm_slot = (int)(stm_i % QSB_STM_SLOTS);
+            epoch_desc_t *stm_epc = d_epochs
+                + (size_t)stm_slot * QSB_SE_LAUNCH_BLOCKS * QSB_BATCH_FACTOR;
+            uint32_t *stm_frst = d_first
+                + (size_t)stm_slot * QSB_SE_LAUNCH_BLOCKS * QSB_BATCH_FACTOR * QSB_FIRST_SLOTS * 8;
+            uint64_t *stm_state_arena = d_state_arena
+                + (size_t)stm_slot * QSB_SE_LAUNCH_BLOCKS * QSB_RECORD_WORDS_PER_BLOCK;
+            uint8_t *stm_hb = d_hitbuf + (size_t)stm_slot * QSB_HITBUF_BYTES;
+            uint32_t *stm_cnt = (uint32_t *)stm_hb;
+            uint32_t *stm_idx = (uint32_t *)(stm_hb + 4);
+            uint8_t  *stm_cmb = stm_hb + 8;
+#if QSB_CFG_HIT_PATH
+            kernel_build_epochs<<<(nblk * QSB_BATCH_FACTOR + 255) / 256, 256, 0, stm_s[stm_slot]>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
-                d_dsigs, d_epochs, zh_cnt);
+                d_dsigs, stm_epc, stm_cnt);
 #else
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(nblk + 255) / 256, 256>>>(
+            kernel_build_epochs<<<(nblk * QSB_BATCH_FACTOR + 255) / 256, 256>>>(
                 epoch_base, n_epochs, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            kernel_build_first<<<nblk * QSB_BATCH_FACTOR, qsb_first_class_count, 0, stm_s[stm_slot]>>>(stm_epc, stm_frst);
+            kernel_digest<<<nblk, QSB_SE_PER_EPOCH, 0, stm_s[stm_slot]>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -2529,9 +2927,9 @@ int main(int argc, char **argv) {
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
                 d_gt,
-#if ZLAB_HITPATH
-                zh_cnt, zh_idx,
-                zh_combos, d_hit_sighash,
+#if QSB_CFG_HIT_PATH
+                stm_cnt, stm_idx,
+                stm_cmb, d_hit_sighash,
 #else
                 d_hit_cnt, d_hit_idx,
                 d_hit_combos, d_hit_sighash,
@@ -2539,28 +2937,35 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs);
-            cudaDeviceSynchronize();
+                t_win, s_early, d_early, fast_inc, d_const_words, stm_epc, stm_frst, stm_state_arena);
+            cudaEventRecord(stm_ev[stm_slot], stm_s[stm_slot]);
+            stm_pend[stm_slot] = (uint64_t)batch_pos * QSB_BATCH_FACTOR;
+            epoch_base += (uint64_t)nblk * QSB_BATCH_FACTOR;
+            stm_i++;
+            /* Nothing finished yet on the very first launch of the pipeline. */
+            if (stm_i < (uint64_t)QSB_STM_SLOTS) continue;
+            const int stm_d = (int)(stm_i % QSB_STM_SLOTS);
+            uint8_t *stm_dhb = d_hitbuf + (size_t)stm_d * QSB_HITBUF_BYTES;
+            cudaEventSynchronize(stm_ev[stm_d]);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            total_searched += batch_pos;
+            total_searched += stm_pend[stm_d];
             g_total_searched = total_searched;
-            epoch_base += nblk;
-#if ZLAB_HITPATH
-            cudaMemcpy(zh_host, d_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+#if QSB_CFG_HIT_PATH
+            cudaMemcpy(zh_host, stm_dhb, 4 + QSB_CFG_HIT_FIRST * QSB_CFG_HIT_RECORD, cudaMemcpyDeviceToHost);
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
-                if (nh > ZLAB_HIT_FIRST)
-                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               d_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                if (nh > QSB_CFG_HIT_FIRST)
+                    cudaMemcpy(zh_host + 4 + QSB_CFG_HIT_FIRST * QSB_CFG_HIT_RECORD,
+                               stm_dhb + 4 + QSB_CFG_HIT_FIRST * QSB_CFG_HIT_RECORD,
+                               (size_t)(nh - QSB_CFG_HIT_FIRST) * QSB_CFG_HIT_RECORD, cudaMemcpyDeviceToHost);
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
                 int wl = 0;
                 for (int h = 0; h < nh; h++) {
-                    uint32_t raw; memcpy(&raw, zh_host + 4 + h * ZLAB_HIT_REC, 4);
-                    const uint8_t *combo = zh_host + 8 + h * ZLAB_HIT_REC;
+                    uint32_t raw; memcpy(&raw, zh_host + 4 + h * QSB_CFG_HIT_RECORD, 4);
+                    const uint8_t *combo = zh_host + 8 + h * QSB_CFG_HIT_RECORD;
                     wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n",
                                    combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
                                    (int)((raw >> 31) & 1), (int)((raw >> 30) & 1), (int)(raw & 0x3FFFFFFF));
@@ -2647,7 +3052,18 @@ int main(int argc, char **argv) {
                 }
                 t_last_se = t_now;
             }
-            if (epoch_base >= n_epochs) break;
+            if (epoch_base >= n_epochs) {
+                /* Drain whatever is still in flight so the last launch's
+                 * attempts and hits are not silently dropped. */
+                for (int k = 1; k < QSB_STM_SLOTS; k++) {
+                    int f = (int)((stm_i + k) % QSB_STM_SLOTS);
+                    cudaEventSynchronize(stm_ev[f]);
+                    total_searched += stm_pend[f];
+                    stm_pend[f] = 0;
+                }
+                g_total_searched = total_searched;
+                break;
+            }
         }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
@@ -2665,8 +3081,8 @@ int main(int argc, char **argv) {
         free(h_combos);
         return 0;
     }
-#if ZLAB_TRIM
-    fprintf(stderr, "ERROR: ZLAB_TRIM build supports only the ranked short-epoch shape\n");
+#if QSB_CFG_TRIM
+    fprintf(stderr, "ERROR: QSB_CFG_TRIM build supports only the ranked short-epoch shape\n");
     return 1;
 #else
 
@@ -2715,7 +3131,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
-                t_win, s_early, d_early, fast_inc, d_const_words, NULL);
+                t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, NULL);
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -2915,7 +3331,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
-                t_sel, 0, d_early, 0, d_const_words, NULL);
+                t_sel, 0, d_early, 0, d_const_words, NULL, NULL, NULL);
             cudaDeviceSynchronize();
 
             cudaError_t err = cudaGetLastError();

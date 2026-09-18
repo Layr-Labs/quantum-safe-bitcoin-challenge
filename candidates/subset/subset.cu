@@ -1,1 +1,1 @@
-#include "tests/gpu_epochs/tree.cu"
+#include "quantum-safe-bitcoin-subset-source-004.cu"

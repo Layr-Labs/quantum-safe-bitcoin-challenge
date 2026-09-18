@@ -1,5 +1,5 @@
-/* zinv32: 32-bit-word delayed binary-GCD field inverse for secp256k1 p.
- * Same algorithm family as VanitySearch's _ModInv (Jean Luc Pons, GPL-3.0; see GPUMath.h):
+/* 32-bit-word delayed binary-GCD field inverse for secp256k1 p.
+ * Same algorithm family as VanitySearch's _ModInv (Jean Luc Pons, GPL-3.0; see source-002):
  * delayed right-shift divsteps on low/high approximations, r/s tracked with a Montgomery-style
  * m*p correction. Differences: 30-bit batches on 32-bit registers (int32 matrix), 9x32-bit
  * signed limbs, sparse m*p, sentinel-terminated decision loop. Output: canonical inverse in
@@ -82,7 +82,7 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
     X[8]=(uint32_t)acc;
     for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
-    X[8]=(uint32_t)((int32_t)X[8]>>ZI_B);
+    X[8]=(uint32_t)(acc>>ZI_B);
 }
 ZI_DEV void zi_condneg(uint32_t *X,uint32_t neg){
     const uint32_t msk=0u-neg; uint64_t c=neg;

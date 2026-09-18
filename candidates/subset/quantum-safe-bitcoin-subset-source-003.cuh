@@ -205,7 +205,7 @@ __device__ __forceinline__ void qsb_square32(uint64_t *out,const uint64_t *a){
         "\taddc.cc.u32 z6, z6, 0;\n"
         "\taddc.u32 z7, z7, 0;\n"
         /* The third 977-fold and the conditional subtract that used to sit here
-         * are removed. _ModMultCore (GPUMath.h) is documented as returning a
+         * are removed. _ModMultCore in source-002 is documented as returning a
          * value in [0,2^256) with the final 2^256 carry dropped -- deliberately
          * NOT canonical -- and 126 of the 159 field operations per candidate
          * already go through it. This square was the only primitive canonicalising
@@ -231,4 +231,3 @@ __device__ __forceinline__ void qsb_square32(uint64_t *out,const uint64_t *a){
     _ModMultCore(out,a,a);
 #endif
 }
-
