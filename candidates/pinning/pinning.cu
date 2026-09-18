@@ -1213,7 +1213,13 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 
+#ifndef QSB_SQFREE
+#define QSB_SQFREE 1          /* 1: squaring-free recovery x-pair, c = K/(2*yR) */
+#endif
 __device__ __constant__ uint64_t pin_u2rk_words[4];
+#if QSB_SQFREE
+__device__ __constant__ uint64_t pin_u2rc_words[4];   /* c = 3*xR^2/(2*yR) */
+#endif
 __device__ __constant__ uint64_t pin_recovery_c[4];
 
 #include "LeafRecovery.cuh"
@@ -1238,6 +1244,25 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(u, yR, V);          /* u = yR*t */
     _ModMult(v, Y, h);           /* v = Y*h */
 
+#if QSB_SQFREE
+    /* Squaring-free x-pair. With c = K/(2*yR) and u = yR*t we have 2*u*c = K*t,
+     * so F-H = 2u*(lam1-c)+xR and F+H = 2u*(m2-c)+xR, where lam1 = u-v and
+     * m2 = u+v. Two products, no square, and the near-p square hazard that
+     * forced the negative-representative dance disappears with it. u and v are
+     * left untouched because the parity tail below still needs both. */
+    qsb_field_normalize(u);
+    _ModAdd256(f, u, u);              /* 2u */
+    _ModSub256(h, u, v);              /* lam1 */
+    _ModSub256(h, h, pin_u2rc_words); /* lam1 - c */
+    _ModMult(x_plus, f, h);
+    _ModAdd256(x_plus, x_plus, xR);
+    _ModAdd256(h, u, v);              /* m2 */
+    _ModSub256(h, h, pin_u2rc_words); /* m2 - c */
+    _ModMult(x_minus, f, h);
+    _ModAdd256(x_minus, x_minus, xR);
+    qsb_field_normalize(x_plus);
+    qsb_field_normalize(x_minus);
+#else
     /* GPUMath's square drops a final carry for some near-p operands. For
      * upper-half u, square the equivalent negative representative; keep u
      * unchanged for H and y. */
@@ -1255,6 +1280,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModAdd256(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
+#endif
 
     _ModSub256(h, u, v);
     _ModSub256(V, xR, x_plus);
@@ -2053,6 +2079,29 @@ int main(int argc, char **argv) {
                 fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
                 return 1;
             }
+#if QSB_SQFREE
+            {   /* c = K/(2*yR): one modular inverse on the host, once per run. */
+                BIGNUM *two_y=BN_new(),*cinv=BN_new(),*bc=BN_new();
+                if(!two_y||!cinv||!bc||
+                   !BN_mod_add(two_y,by,by,field,ctx)||
+                   !BN_mod_inverse(cinv,two_y,field,ctx)||
+                   !BN_mod_mul(bc,bk,cinv,field,ctx)){
+                    fprintf(stderr,"Failed to precompute recovery c\n");
+                    return 1;
+                }
+                uint8_t cb[32]={0};
+                BN_bn2bin(bc,cb+(32-BN_num_bytes(bc)));
+                uint64_t cw[4]={0,0,0,0};
+                for(int i=0;i<4;i++)for(int b=0;b<8;b++)
+                    cw[i]|=(uint64_t)cb[31-i*8-b]<<(b*8);
+                cudaError_t cerr=cudaMemcpyToSymbol(pin_u2rc_words,cw,sizeof(cw));
+                if(cerr!=cudaSuccess){
+                    fprintf(stderr,"Failed to upload recovery c: %s\n",cudaGetErrorString(cerr));
+                    return 1;
+                }
+                BN_free(two_y); BN_free(cinv); BN_free(bc);
+            }
+#endif
             BN_free(field); BN_free(bk);
         }
         EC_POINT *pt=EC_POINT_new(grp);
