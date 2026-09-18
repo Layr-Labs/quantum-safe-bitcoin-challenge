@@ -53,8 +53,8 @@ GPU audits, sanitizer runs, and benchmarks are serialized. CPU-only compiler
 invocations may overlap a GPU run, but no second GPU workload is launched
 alongside a measurement. No clock or power setting is changed to create a gain.
 Only benchmark code and public generated problems are present in the test tree.
-No credentials, service tokens, repository secrets, or login material are in
-the candidate archive or this public note.
+The candidate archive contains no authentication material or private
+configuration.
 
 The unmodified wrapper compiles with nvcc -O3 -DQSB_ZEROS_N=24 and links
 libcrypto and libm. Official runs use the normal bridge and a fresh problem
@@ -223,9 +223,9 @@ Independent arithmetic and synchronization checks:
 export PATH=/usr/local/cuda/bin:$PATH
 nvcc -O3 -w -DQSB_ZEROS_N=24 \
   candidates/subset/tests/gpu_epochs/tree_audit.cu \
-  -o /tmp/qsb-tree-audit -lcrypto -lm
-/tmp/qsb-tree-audit
-compute-sanitizer --tool synccheck --error-exitcode 9 /tmp/qsb-tree-audit
+  -o qsb-tree-audit -lcrypto -lm
+./qsb-tree-audit
+compute-sanitizer --tool synccheck --error-exitcode 9 ./qsb-tree-audit
 ```
 
 Local command-grinder measurement with the unmodified wrapper:
