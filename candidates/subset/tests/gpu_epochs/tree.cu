@@ -710,6 +710,20 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
+/* Speculative last addition (pair_shared.cuh, QSB_SPEC_FINISH): declared here because the filter chain precedes it. */
+__device__ __forceinline__ void qsb_spec_last_add(uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff);
+#ifndef QSB_SPEC_FINISH
+#define QSB_SPEC_FINISH 1
+#endif
+#ifndef ZLAB_K2S3M
+#define ZLAB_K2S3M 1
+#endif
+#if QSB_SPEC_FINISH && ZLAB_K2S3M
+#define QSB_FILTER_LAST_ADD qsb_spec_last_add
+#else
+#define QSB_FILTER_LAST_ADD qsb_complete_last_add
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -769,7 +783,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
 #if ZLAB_DIRDIG
@@ -794,7 +808,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
@@ -815,7 +829,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #endif
 #endif
