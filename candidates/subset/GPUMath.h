@@ -392,6 +392,37 @@ __device__ __forceinline__ void _ModAdd256(uint64_t *r,uint64_t *a,uint64_t *b){
 #endif
 }
 
+__device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, const uint64_t *b, const uint64_t *c)
+{
+    uint64_t t0, t1, t2, t3, t4, d0, d1, d2, d3, d4;
+    UADDO(t0, a[0], b[0]);
+    UADDC(t1, a[1], b[1]);
+    UADDC(t2, a[2], b[2]);
+    UADDC(t3, a[3], b[3]);
+    UADD(t4, 0ULL, 0ULL);
+    UADDO1(t0, 0xFFFFFFFDFFFFF85EULL);
+    UADDC1(t1, 0xFFFFFFFFFFFFFFFFULL);
+    UADDC1(t2, 0xFFFFFFFFFFFFFFFFULL);
+    UADDC1(t3, 0xFFFFFFFFFFFFFFFFULL);
+    UADD1(t4, 1ULL);
+    d0 = c[0] << 1;
+    d1 = (c[1] << 1) | (c[0] >> 63);
+    d2 = (c[2] << 1) | (c[1] >> 63);
+    d3 = (c[3] << 1) | (c[2] >> 63);
+    d4 = c[3] >> 63;
+    USUBO1(t0, d0);
+    USUBC1(t1, d1);
+    USUBC1(t2, d2);
+    USUBC1(t3, d3);
+    USUB1(t4, d4);
+    t4 *= 0x1000003D1ULL;
+    UADDO1(t0, t4);
+    UADDC1(t1, 0ULL);
+    UADDC1(t2, 0ULL);
+    UADD1(t3, 0ULL);
+    r[0] = t0; r[1] = t1; r[2] = t2; r[3] = t3;
+}
+
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
 {
     uint64_t t;
@@ -1296,8 +1327,8 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // ---------------------------------------------------------------------------------------
 // Templated deferred-anchor XYZZ madd (hot-path codegen). DEFER_Y specializes
 // the exact-Y resolve so intermediate adds compile without the runtime branch.
-// __restrict__ matches the pinning XYZZ hot-path; arithmetic is unchanged from
-// the prior bool form (no lazy/fused-X3 riders).
+// __restrict__ matches the pinning XYZZ hot-path. Fused-X3 rider restored:
+// X3 = R^2 + PPP - 2V is one carry chain (_ModX3Fused), not add+sub+sub.
 template<bool DEFER_Y>
 __device__ __forceinline__ void _PointAddXYZZ_def(
     uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
@@ -1325,9 +1356,7 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V, one carry chain
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
