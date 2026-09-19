@@ -1,0 +1,3 @@
+# Packed PTX last-add filter experiment
+
+Parent: our last51165fc799 on odinfree PR511. The existing DEFER_Y=true speculative point body computes X, ZZ, ZZZ and deferred Y=R*(V-X3). A final existing raw multiply and modular subtraction restore Y=R*(V-X3)-y2*ZZZ. This algebra is the same generic mixed-add tail as the DEFER_Y=false C++ body, but it also uses the packed PTX body through the last addition. All inherited arithmetic, notices and licenses are retained. Approximate filter limitations still apply; only the unchanged independent exact output checker publishes hits. No GPU timing or validation claim yet.
