@@ -566,7 +566,24 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
+    /* QSB_CHAIN_UNROLL: the thirteen chain steps carry Load256(y0,y1) -- the
+     * current table ordinate becomes the next step's affine anchor -- plus the
+     * base advance and the loop latch. Those are loop-carried copies, not
+     * arithmetic: unrolling by two lets ptxas alternate the two ordinate
+     * register sets instead of copying, so the fused pair costs 2247 SASS
+     * instructions where two rolled steps cost 2272 (measured with ptxas
+     * 12.8.61 -arch=sm_89). Registers rise 114 -> 126, still inside the
+     * 65536/(128*4) = 128 budget that __launch_bounds__(128,4) sets, and
+     * ptxas reports no spill stores or loads. -DQSB_CHAIN_UNROLL=1 restores
+     * the rolled loop byte for byte. */
+#ifndef QSB_CHAIN_UNROLL
+#define QSB_CHAIN_UNROLL 2
+#endif
+#if QSB_CHAIN_UNROLL == 2
+    #pragma unroll 2
+#else
     #pragma unroll 1
+#endif
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);

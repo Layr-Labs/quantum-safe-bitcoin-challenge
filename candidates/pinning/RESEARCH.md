@@ -213,3 +213,79 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+---
+
+# Addendum: static-only round on 208bbcb6 (03e399c) — no GPU
+
+Claude Opus 5 / Claude Code, effort max. No card was available; every number here is a
+compile-time artifact from the ranked compiler (`cuda-nvcc-12-8=12.8.61-1`), produced with
+the method owizdom established in `aff38dd0`:
+
+```sh
+nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm
+cuobjdump -ptx pinning | awk '/^\.version/{f=1} f' > c.ptx
+ptxas -arch=sm_89 -O3 -v c.ptx -o c.cubin
+nvdisasm -c c.cubin > c.sass
+```
+
+The instrument reproduces `547a64cf`'s published table exactly (chain body 1136,
+prepare 5944, finish 3784, 120 registers, no spills), which is what makes the rest
+reproducible by anyone else without a card. When counting SASS, match `/*[0-9a-f]{4,}*/`
+and not `{4}`: these kernels pass 0xffff and a four-digit regex truncates `prepare`
+to exactly 4096 instructions.
+
+## Calibration
+
+`547a64cf` removed ~992 dynamic instructions per candidate (-4.0% of ~24,760) and
+measured +3.40% / +3.92% on a real 4090. Elasticity is ~0.85-0.98: on this kernel
+throughput tracks dynamic instruction count roughly 1:1. Cross-check: 766.67e6
+candidates/s x ~23,770 instructions ~= 1.82e13 instr/s against a 4090's
+128 SM x 64 int32/clk x ~2.5 GHz ~= 2.05e13, i.e. ~85-90% of peak integer issue.
+
+Dynamic budget per candidate (SHA rows ablation-measured by stubbing each transform):
+
+| component | instructions |
+|---|---:|
+| chain loop, 13 x 1136 | 14,768 |
+| tail SHA-256 | 1,304 |
+| SHA-256d second | 1,312 |
+| pubkey SHA-256 x 2 | 2,656 |
+| cofactor tree up/down (warp-weighted) | ~700 |
+| rest of prepare | ~1,900 |
+| rest of finish | ~1,128 |
+
+## What this rules out
+
+- **PTX JIT**: `ptxas -arch=sm_89 -O3` over the shipped PTX takes 838 ms total for all
+  six kernels, ~0.07% of a 1200 s window. The lever owizdom opened is now spent.
+- **GLV / shrinking the 64 MiB table**: dominated by plain window narrowing (16-bit
+  windows give the same 32 MiB and the same 16 lookups with no beta multiply and no
+  lattice decomposition), and counterproductive either way: +1 chain step is +1136
+  instructions (+4.8%), which the calibrated model says costs more than the L2 win.
+- **Karatsuba** in `_ModMultCore`: -16 partial products but ~+40 IADD3, net +26.
+  ptxas already fuses the even/odd merge into the `0x3d1` fold chain, which is why
+  `_ModMult` lands at 119 SASS and not ~135.
+- **More occupancy**: 5 blocks/SM is feasible (96 registers, zero spills) but costs
+  +50 instructions in the chain body; at ~85-90% of peak issue the extra warps have
+  nothing to hide.
+- Primitive floors measured: `_ModMult` 119, `_ModSqr` 101, `_ModSqrAddSub2` 139,
+  `_ModSub256` 19, `_ModAdd256` 31; SHA-256 at ~14 instructions/round.
+
+## What changed here
+
+No arithmetic. (1) `_PointAddXYZZT`'s statements are reissued in a different valid
+topological order of the same dependence graph — the emitted PTX instruction multiset
+for `kernel_pinning_pipeline<true,0>` is identical opcode-for-opcode (9,104 ops both
+ways) — taking the rolled body 1136 -> 1134 and prepare registers 120 -> 114.
+(2) The chain loop is unrolled by two (`QSB_CHAIN_UNROLL`, default 2) so the
+loop-carried ordinate-anchor copy becomes register alternation: the fused pair is
+2247 SASS where two rolled steps are 2272. Dynamic chain instructions
+14,768 -> 14,613, i.e. -155 per candidate or -0.65%. Registers 126 stay inside the
+128 that `__launch_bounds__(128,4)` allows, so occupancy is unchanged, and ptxas
+reports no spill stores or loads. `-DQSB_CHAIN_UNROLL=1` restores the rolled loop.
+
+Unmeasured risk: unrolling takes the hot loop from 18.2 KB to 36.0 KB of SASS. Both
+already exceed a per-partition L0 and both sit inside the per-SM L1I, and the body runs
+strictly sequentially, but instruction fetch is the one thing a static instrument cannot
+bound. `-DQSB_CHAIN_UNROLL=1` isolates it in a single build.

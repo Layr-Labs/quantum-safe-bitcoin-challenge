@@ -1767,18 +1767,35 @@ __device__ __forceinline__ void _PointAddXYZZT(
   uint64_t Q[4];
   uint64_t T[4];
 
+  /* Issue order only. The thirteen statements below are a permutation of the
+   * 547a64cf/03e399c schedule that respects every read-after-write,
+   * write-after-read and write-after-write edge of the original, so the
+   * arithmetic, the operands and the results are unchanged (the emitted PTX
+   * instruction multiset for kernel_pinning_pipeline<true,0> is identical).
+   * Two edges are worth naming because they are the ones a reordering could
+   * break: U2 = X2*ZZ1 is kept ahead of the in-place ZZ1 = ZZ1*PP, and
+   * S2 = (Y2+Yoff)*ZZZ1 ahead of the in-place ZZZ1 = ZZZ1*PPP, so both
+   * in-place frame updates still read the pre-update value. The <false>
+   * resolving arm deliberately reads ZZZ1 *after* its update, as before.
+   *
+   * The permutation was chosen by exhaustively scoring valid topological
+   * orders on ptxas 12.8.61 -arch=sm_89: this one lowers the rolled chain
+   * body from 1136 to 1134 SASS instructions and the prepare kernel from 120
+   * to 114 registers, and it is the best order found when the chain loop is
+   * unrolled by two (2250 -> 2247 for the fused pair). */
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1   (before ZZ1 is updated)
 #if QSB_LAZY
   _ModAddLazy(S2, Y2, Yoff);
 #else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
-  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSqr(PP, P);                      // PP = P^2
-  _ModMult(PPP, PP, P);                // PPP = P*PP
   _ModMult(Q, U2, PP);                 // V  = U2*PP
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1 (before ZZZ1 update)
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModMult(PPP, PP, P);                // PPP = P*PP
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
 
 #if QSB_FUSE_SQRADDSUB2
   /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
@@ -1794,11 +1811,10 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #endif
 #endif
 
-  _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
-                                       // on the paired-carry schedule without predicate spills)
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
+  _ModMult(ZZ1, PP);                   // ZZ3 (last: PP stays live, and the tail of the
+                                       // step no longer competes with the frame update)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
