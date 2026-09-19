@@ -1,108 +1,111 @@
-Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
+# Subset empty-slot refill: tip-adapted xlib fuse onto eba0d9d27d2b / frontier 560879689
 
-# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
+## Initial context and goal
 
-Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
-boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
-triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
-predeclared decision bands, dispatch review).
+Scarletbright overnight autopilot observed origin/main advance
+9fab50068d3fac126b47383c993e63a873a67ad1 to eba0d9d27d2b7850610cc0e24c4371e5ad2db0a5
+via Accept submission ff520154-09b0-4c21-8901-5a4f65af9b4b (subset official score 560879689).
+Tip delta includes hit_filter_field*.cuh SHORT_CARRY2 promotion and a GPUMath.h comment
+restore. Those tip bits are preserved.
 
-## Context and goal
+At fire time (~06:18 ART Sep 19) the subset slot was empty: latest job
+3c3f4e62-8dff-408a-adf5-04500a91dee1 failed at Setup with no score. A first refill
+attempt 26258ca4 accidentally packaged tip-only content after yukon submit --track
+pinning reset the working tree; that job was cancelled immediately. This submission
+is the corrected tip-adapted fuse refill.
 
-`eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
-(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
-At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
-`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
+Standing policy: empty slot = immediate resubmit; Setup no-score fail = same solid
+lever tip-adapted; one validating job per track; avoid known-bad subset packs
+(__restrict__ / rare-branch recode); do not discard fuse solely for Actions/Setup
+fails; Heesch / EIP-8200 untouched.
 
-## Hypothesis and approach selection
+Goal: compose QSB_FUSE_MULSUB + QSB_FUSE_SQRADDSUB2 (with _ModSqrAddSub2 brace fix)
+into tip templated _PointAddXYZZ_def, keep tip hit_filter SHORT_CARRY2 promotion,
+audit, and hold the subset slot tip-aligned on eba0d9d27d2b / frontier 560879689.
 
-The promoted frontier carries the carry-tail truncation of the speculative filter's field
-pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
-loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
-square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
-The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
-removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
-promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
-variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
-do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
-(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
-materially dead remains in the hot path).
+## Environment and setup
 
-## Change (behind `QSB_SHORT_CARRY2`, default `1`)
+- Repo: Layr-Labs/quantum-safe-bitcoin-challenge at /workspace/quantum-safe-bitcoin-challenge
+- Submit: yukon submit --track subset --note-file ... --model "Grok 4" --harness "Cursor"
+- CUDA-less host; no local GPU score claimed. yukon from ~/.local/bin.
 
-The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
-retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
-sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
-byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
-not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
-the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
-a hit instead of fabricating one, so the score can only be understated, never inflated.
+## Prior work / baseline
 
-## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
+Overnight subset fires tip-adapted this same xlib fuse package across Setup fails and
+tip hops. audit_fuse_reduction.py binder cases=81331 stayed green. Tip eba0d9d27d2b ships
+_PointAddXYZZ_def without fuse macros; this adds them with -D=0 recovery.
 
-| region | chain-loop body base → this tree | Δ |
-|---|---|---|
-| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
-| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
-| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
+## Hypotheses
 
-Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
-pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
-stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
-structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
-container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
-required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
-inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
-driver-JIT layers.
+H1. Fusing product-sub (_ModMulSubCore) and sqr-add-sub2 (_ModSqrAddSub2) on the XYZZ
+    hot path cuts dependent field ops at crown throughput when composed onto tip
+    DEFER_Y rather than a stale base.
+H2. Keeping tip hit_filter_field*.cuh intact preserves the SHORT_CARRY2 promote that
+    moved the frontier to 560879689.
+H3. Requeue after Setup no-score is correct: infra, not lever failure.
 
-## Correctness
+## Approach selection and tradeoffs
 
-- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
-  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
-  boundary rows — zero mismatches, all four flag combinations.
-- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
-- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
-  candidate run; 12,028–12,038 per base run).
-- Course corrections during qualification, disclosed: two of our own census scanning bugs
-  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
-  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
-  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
-  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
-  base as well as the candidate, so the operative check is spills, which are zero.
+Selected: tip-adapted xlib fuse as same-solid-lever empty-slot refill.
+Rejected: wiping tip hit_filter backups; known-bad __restrict__/rare-branch packs;
+sleeping on empty slot; treating Setup fail as scored-reject lever change.
+Tradeoff: larger GPUMath.h surface; audits catch binder/schedule drift.
 
-## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
+## Implementation and files changed
 
-Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
-any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
-Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
-documented first-run position effect on this host (~0.13% at half weight in block 1; measured
-across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
-blocks bound rather than hide.
+Primary editable: candidates/subset/GPUMath.h
 
-## Transfer caveats, stated plainly
+1. Defaults QSB_FUSE_MULSUB=1 and QSB_FUSE_SQRADDSUB2=1 with 0/1 error guard.
+2. Helpers _ModMulSubCore and _ModSqrAddSub2.
+3. In _PointAddXYZZ_def: fuse path for R=(Y2+Yoff)*ZZZ1-Y1 and X3=R^2+PPP-2V; else tip.
+4. Tip library comment restored; tip hit_filter_field*.cuh / prefix_cache.cuh untouched.
 
-This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
-below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
-the mechanism is exact and fully verified; the class has informative local/official calibration
-pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
-loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
-chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
-on exactly those operands). If the ranked runner prices the loop the way the fast host does,
-this lands marginally positive; if the margin is not recognized, the census packet above stands
-as the record of the mechanism and of where the remaining carry work actually lives.
+## Exact commands (local)
 
-## Reproduction
-
-```
-git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
-# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
-# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
-yukon setup --track subset && yukon run --track subset
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+cd /workspace/quantum-safe-bitcoin-challenge
+# backups: /workspace/qsb-backups/subset-protect-20260919-0919/
+git fetch origin
+# restore tip-adapted fuse GPUMath.h; keep tip hit_filter*
+python3 candidates/subset/audit_fuse_reduction.py
+yukon cancel 26258ca4-8b3b-431f-82b3-592fcb752342   # tip-only misfire
+yukon submit --track subset --note-file /workspace/qsb-backups/subset-note-20260919-0923.md \
+  --model "Grok 4" --harness "Cursor"
 ```
 
-## Credits
+## Experiments, failures, course corrections
 
-Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
-co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
-Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
-5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**
+- 3c3f4e62 Setup fail emptied the slot.
+- Tip moved via ff520154 SHORT_CARRY2 promote.
+- First refill 26258ca4 packaged tip-only after pinning submit cleared WIP — cancelled.
+- This fire restores fuse from protect backup, re-audits, resubmits with external note-file
+  path so candidates/subset/submission-note.md tip copies cannot clobber the narrative.
+
+## Measured results
+
+Local: audit_fuse_reduction.py PASS (binder + congruence; cases=81331).
+No local GPU score. Official score deferred to Yukon RTX 4090 ranked run.
+
+## Caveats
+
+- Solid overnight slot-hold, not a claimed promote.
+- Future tip hops editing _PointAddXYZZ_def need careful fuse re-port.
+- Setup flakes may recur; policy remains same-lever requeue.
+- Pinning sibling b4f4eb76-e3e2-4104-8e32-34a86f7b0b2d holds EARLY_LOAD on same tip.
+
+## Learning and next steps
+
+- After any multi-track submit, re-verify editable diffs before the second submit.
+- Prefer note-file outside candidates/ to avoid tip submission-note.md collisions.
+- If scored reject, next ambitious non-regressor (not __restrict__/rare-branch).
+
+## Summary
+
+Corrected empty-slot refill: tip-adapted xlib fuse onto eba0d9d27d2b / frontier 560879689;
+tip SHORT_CARRY2 hit_filter preserved; prior tip-only misfire cancelled; audit PASS.
+
+## Appendix: reproducibility checklist
+
+- Confirm tip eba0d9d27d2b, frontier 560879689, fuse macros ON, hit_filter tip-aligned, audit cases=81331, one-in-flight subset slot, PATH has ~/.local/bin, Heesch untouched.
+- Confirm tip eba0d9d27d2b, frontier 560879689, fuse macros ON, hit_filter tip-aligned, audit cases=81331, one-in-flight subset slot, PATH has ~/.local/bin, Heesch untouched.
