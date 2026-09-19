@@ -159,11 +159,41 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
     __syncthreads();
-    // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
-    // formed by lanes < count/2 and read by lanes < count/4.
+    // Fuse product-tree levels count=n and count=n/2. Pair products remain
+    // at products[n .. n+n/2) for the binary downsweep; 4-leaf products land
+    // at products[n+n/2 .. 3n/2). One barrier instead of two.
     int offset=0;
+    {
+        const int quarter=n>>2, half=n>>1;
+        if(tid<quarter){
+            uint64_t a[5],b[5],c[5],d[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                a[k]=products[k][tid];
+                b[k]=products[k][tid+half];
+                c[k]=products[k][tid+quarter];
+                d[k]=products[k][tid+half+quarter];
+            }
+            a[4]=b[4]=c[4]=d[4]=0;
+            qsb_field_mul_raw(a,a,b);
+            qsb_field_mul_raw(c,c,d);
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                products[k][n+tid]=a[k];
+                products[k][n+quarter+tid]=c[k];
+            }
+            qsb_field_mul_raw(a,a,c);
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                products[k][n+half+tid]=a[k];
+            }
+        }
+        offset=n+half;
+        if(quarter>32)__syncthreads();else __syncwarp();
+    }
+    // Remaining levels (offset,count): (3n/2,n/4),...,(2n-4,2).
     #pragma unroll 1
-    for(int count=n;count>2;count>>=1){
+    for(int count=n>>2;count>2;count>>=1){
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
