@@ -1,3 +1,4 @@
+#include "BorrowParity.cuh"
 // Let B=2^256, p=B-K, K=2^32+977. A raw exact product is in [0,B).
 // If b[3]!=0 then b>=2^192>K, so -p<raw-b<p. Its canonical parity
 // needs just the subtraction borrow. Small b retains normalization.
@@ -15,9 +16,7 @@ __device__ __forceinline__ void qsb_add_boundary(uint64_t *raw,const uint64_t *a
 // parity we need; computing all four corrected output limbs is unnecessary.
 __device__ __forceinline__ uint32_t qsb_difference_parity(
     const uint64_t *a,const uint64_t *b) {
-    const bool borrow=a[3]!=b[3] ? a[3]<b[3] :
-        a[2]!=b[2] ? a[2]<b[2] : a[1]!=b[1] ? a[1]<b[1] : a[0]<b[0];
-    return (uint32_t)((a[0]^b[0]^uint64_t(borrow))&1u);
+    return qsb_borrow_parity(a,b);
 }
 
 // Exact full-width residue; callers normalize before additions/parity.
@@ -66,8 +65,8 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
+    _ModSub256(t,l,c); qsb_packed_raw_mul(x1,sum,t); qsb_add_boundary(x1,a); _ModAdd256(x1,x1,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(x2,sum,t); qsb_add_boundary(x2,a); _ModAdd256(x2,x2,a);
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
     _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);

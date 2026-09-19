@@ -1000,15 +1000,15 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 // square schedule is unchanged; 3p+e-2q enters its first 320-bit fold before
 // the remaining folds. All four pointers may alias, and inputs may be any
 // 256-bit representatives. The result is congruent in [0, 2^256).
+// Conditional bias: after the first pseudo-Mersenne fold, the signed wide
+// value S+e-2q can be negative. Add 3p only in that case; 3p is zero modulo p.
+// The signed top-word test covers negative values, including small-square
+// and full-width boundary inputs. The nonnegative path omits the bias chain.
+// The CPU reference below retains the congruent unconditional 3p schedule.
 __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a[4], const uint64_t e[4], const uint64_t q[4]) {
 #ifdef __CUDA_ARCH__
     uint64_t r0, r1, r2, r3;
-    asm(
-        /* Final correction needs only three 32-bit limbs. With B=2^256
-         * and K=2^32+977, the previous fold is below B+K*(K+4).
-         * If it carries, low+K < K*(K+5) < 2^65; otherwise the
-         * correction is zero. Upper five limbs remain unchanged. */
-        "{\n"
+    asm(        "{\n"
         "\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7;\n"
         "\t.reg .u64 e2,e4,e6,e8,e10,e12,o1,o3,o5,o7,o9,o11,o13,t;\n"
         "\t.reg .u32 ecy,ocy,e14,o15;\n"
@@ -1131,11 +1131,6 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmov.b64 {u4,u5}, %10; mov.b64 {u6,u7}, %11;\n"
         "\tmov.b64 {v0,v1}, %12; mov.b64 {v2,v3}, %13;\n"
         "\tmov.b64 {v4,v5}, %14; mov.b64 {v6,v7}, %15;\n"
-        "\tadd.cc.u32 z0, z0, 0xfffff48d; addc.cc.u32 z1, z1, 0xfffffffc;\n"
-        "\taddc.cc.u32 z2, z2, 0xffffffff; addc.cc.u32 z3, z3, 0xffffffff;\n"
-        "\taddc.cc.u32 z4, z4, 0xffffffff; addc.cc.u32 z5, z5, 0xffffffff;\n"
-        "\taddc.cc.u32 z6, z6, 0xffffffff; addc.cc.u32 z7, z7, 0xffffffff;\n"
-        "\taddc.cc.u32 z8, z8, 2; addc.u32 z9, z9, 0;\n"
         "\tadd.cc.u32 z0, z0, u0; addc.cc.u32 z1, z1, u1;\n"
         "\taddc.cc.u32 z2, z2, u2; addc.cc.u32 z3, z3, u3;\n"
         "\taddc.cc.u32 z4, z4, u4; addc.cc.u32 z5, z5, u5;\n"
@@ -1151,7 +1146,16 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
         "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
         "\tsubc.cc.u32 z8, z8, 0; subc.u32 z9, z9, 0;\n"
-        "\tmul.wide.u32 t, z8, 977; mov.b64 {m0,m1}, t;\n"
+        "\t.reg .pred q5_negative;\n"
+        "setp.lt.s32 q5_negative,z9,0;\n"
+        "@!q5_negative bra q5_nonnegative;\n"
+        "add.cc.u32 z0, z0, 0xfffff48d; addc.cc.u32 z1, z1, 0xfffffffc;\n"
+        "\taddc.cc.u32 z2, z2, 0xffffffff; addc.cc.u32 z3, z3, 0xffffffff;\n"
+        "\taddc.cc.u32 z4, z4, 0xffffffff; addc.cc.u32 z5, z5, 0xffffffff;\n"
+        "\taddc.cc.u32 z6, z6, 0xffffffff; addc.cc.u32 z7, z7, 0xffffffff;\n"
+        "\taddc.cc.u32 z8, z8, 2; addc.u32 z9, z9, 0;\n"
+        "\tq5_nonnegative:\n"
+        "mul.wide.u32 t, z8, 977; mov.b64 {m0,m1}, t;\n"
         "\tmad.lo.u32 m1, z9, 977, m1;\n"
         "\tadd.cc.u32 m1, m1, z8; addc.u32 m2, z9, 0;\n"
         "\tadd.cc.u32 z0, z0, m0; addc.cc.u32 z1, z1, m1; addc.cc.u32 z2, z2, m2;\n"
