@@ -8,14 +8,7 @@ constexpr int QSB_PREFIX_KEEP=(64*QSB_PREFIX_BLOCKS+9)/10;
 constexpr int QSB_PREFIX_BITS=QSB_PREFIX_KEEP+6;
 constexpr int QSB_PREFIX_ENTRIES=1<<QSB_PREFIX_BITS;
 struct __align__(16) QSBPrefixRecord { uint4 lo,hi,tail; };
-/* The prefix cache, the kernel that fills it and the hash that reads it serve only
- * the GPU-enum path. ZLAB_TRIM=1 (the shipped default) compiles that path out of
- * main() and out of kernel_digest, so nothing launches qsb_prepare_prefix_cache and
- * nothing reads QSB_PREFIX_CACHE -- but a __global__ in an included header is still
- * emitted, so the kernel stayed in the PTX the driver JIT-compiles at first launch,
- * inside the measured window (221,234 of 2,170,046 PTX bytes = 10.2%), and the
- * 2^19-entry table stayed a 25 MB device global. Both now follow the switch. */
-#if !ZLAB_TRIM
+#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
 __device__ QSBPrefixRecord QSB_PREFIX_CACHE[QSB_PREFIX_ENTRIES];
 #endif
 
@@ -45,7 +38,7 @@ __device__ __forceinline__ void qsb_emit_pushes(uint32_t *state,uint32_t *W,uint
     }
 }
 
-#if !ZLAB_TRIM
+#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED   /* only the legacy (non-pair) host path launches it */
 __global__ void qsb_prepare_prefix_cache(const uint32_t *mid,int start,int t){
     unsigned mask=blockIdx.x*blockDim.x+threadIdx.x;
     if(mask>=QSB_PREFIX_ENTRIES || __popc(mask)>t)return;
@@ -63,7 +56,9 @@ __global__ void qsb_prepare_prefix_cache(const uint32_t *mid,int start,int t){
     record.tail=make_uint4(W[0],W[1],pos,0);
     QSB_PREFIX_CACHE[mask]=record;
 }
+#endif
 
+#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_fast_window_hash(uint32_t *state,const uint8_t *skip,
         int t,int early,int start,bool cached,const uint32_t *constant_words){
     uint32_t W[16];
@@ -95,4 +90,4 @@ __device__ __forceinline__ void qsb_fast_window_hash(uint32_t *state,const uint8
     }
     qsb_compress_constant_rolled(state);
 }
-#endif /* !ZLAB_TRIM */
+#endif
