@@ -91,7 +91,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
 #ifndef QSB_UNROLL
-#define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
+#define QSB_UNROLL 2          /* unroll factor of the 13-iteration chain loop */
 #endif
 #ifndef QSB_PK_UNROLL
 #define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
@@ -436,7 +436,11 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
      * each chunk just-in-time; the loads are still independent (indices known
      * from the recoded digits) so the hardware overlaps them. */
     uint64_t cx[4],cy[4];
+#if QSB_UNROLL > 1
+    #pragma unroll QSB_UNROLL
+#else
     #pragma unroll 1
+#endif
     for (int c=2;c<GT_CHUNKS;c++){
         gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
         _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
@@ -566,7 +570,11 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
+#if QSB_UNROLL > 1
+    #pragma unroll QSB_UNROLL
+#else
     #pragma unroll 1
+#endif
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
