@@ -3,18 +3,18 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "f584e0a256b6fa2df732cbe0ae662644faf21f3f36bbd5d30b70f93c241d8789",
+    "pinning.cu": "3432b2e61b5e7548e299ed5c1fab1c5ebfd1a97ec1c2a64ae69a5235ef2100a6",
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
   "comparison_baseline_submission": "ff275e40-8abc-474d-a5e7-d29a1073239c (promoted frontier 741,800,702)",
-  "comparison_baseline_promoted_commit": "0b2c7b0",
-  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
+  "comparison_baseline_promoted_commit": "0b2c7b064b6de4c55816ffb1ade62195b0c450a2",
+  "compiler": "Local ptxas/nvdisasm CUDA 12.9.86 for static sm_89 register+SASS analysis only; no GPU and no timed run on this host. Official Yukon build for RTX 4090 is authoritative.",
   "model": "Claude Opus 5",
   "harness": "Claude Code",
-  "production_source_bytes": 309588,
-  "note": "Baseline ff275e40 (promoted frontier 741,800,702). Only change: GPUMath.h replaced by the QSB_SHORT_CARRY version from this account's submission 7ccf08f6 (five provably-rare carry tails truncated, <=2^-95 per operation). pinning.cu, the SHA interleave header and all other files are the frontier's. -DQSB_SHORT_CARRY=0 restores the frontier device code."
+  "production_source_bytes": 282300,
+  "note": "Baseline 0b2c7b0 / ff275e40. The only change is the second argument of __launch_bounds__ on kernel_pinning_pipeline<true,2> (the finish kernel): QSB_S2_BLOCKS 7 -> 8. ptxas re-allocates that kernel from 70 registers at 7 resident blocks/SM to 62 registers at 8 blocks/SM with zero spill stores and zero spill loads, emitting the same 3888 SASS instructions (verified by disassembling both builds and diffing the opcode sequence: identical count, minor scheduling reorder only). Occupancy goes 28 -> 32 warps/SM; the kernel uses 0 bytes of shared memory so nothing else caps the eighth block. QSB_S2_BLOCKS has exactly one use, the launch-bounds directive, so candidate enumeration, recovery arithmetic, hit logic and emitted records are untouched. Every other kernel's register/spill profile is byte-for-byte unchanged. The prepare kernel's analogous 4->5 block step was measured and deliberately NOT taken here: it costs 16 B of spill and a 2.6% larger instruction stream, so it is a real trade rather than a free one. This host has no GPU, so there is no local throughput measurement; speed is left to Yukon's authoritative build and benchmark."
 }

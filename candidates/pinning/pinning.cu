@@ -79,7 +79,11 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
+#define QSB_S2_BLOCKS 8 /* Weighted finish register headroom. ptxas fits this
+                         * kernel in 62 registers at 8 blocks with zero spill and
+                         * the same SASS instruction count as the 70-register, 7-block
+                         * build, so the extra resident block is free: 32 warps/SM
+                         * instead of 28. See RESEARCH.md for the measurements. */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"

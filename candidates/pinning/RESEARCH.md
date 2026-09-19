@@ -213,3 +213,95 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+---
+
+# Addendum: finish-kernel occupancy (QSB_S2_BLOCKS 7 -> 8)
+
+This section documents a later, independent change and supersedes nothing
+above; the sections before it describe an earlier generation of this tree.
+
+## Change
+
+One token in `pinning.cu`:
+
+```c
+#undef QSB_S2_BLOCKS
+#define QSB_S2_BLOCKS 8   /* was 7 */
+```
+
+`QSB_S2_BLOCKS` has exactly one use, the second argument of
+`__launch_bounds__` on `kernel_pinning_pipeline<FAST_TAIL, STAGE>` for
+`STAGE == 2` (the finish kernel). It is a register-allocation/occupancy
+directive. It does not appear in any launch geometry, index computation,
+loop bound, or predicate, so it cannot change which candidates are visited,
+which hits are emitted, or any arithmetic result.
+
+## Why
+
+The finish kernel was register-limited to **7** resident blocks per SM.
+`ptxas` re-allocates it into **62** registers at 8 blocks with **no spilling
+at all**, and emits the **same number of SASS instructions** as the
+70-register build.
+
+## Measurements
+
+Host has no GPU. All numbers below are from `ptxas`/`nvdisasm` (CUDA 12.9.86)
+targeting `sm_89`, compiling the unmodified ranked source with only the
+`__launch_bounds__` second argument overridden:
+
+Finish kernel, `kernel_pinning_pipeline<true,2>`, 128 threads/block:
+
+| `__launch_bounds__` | Registers | Spill st / ld | SASS instrs | Blocks/SM | Warps/SM | Occupancy |
+|---|---:|---:|---:|---:|---:|---:|
+| (128, 7) — previous | 70 | 0 / 0 | 3888 | 7 | 28 | 58% |
+| **(128, 8) — this change** | **62** | **0 / 0** | **3888** | **8** | **32** | **67%** |
+| (128, 9) | 56 | 56 B / 56 B | — | 9 | 36 | 75% |
+
+Block math on `sm_89` (65536 registers/SM, 8-register granularity, 4 warps
+per 128-thread block): 70 rounds to 72 -> 72*32*4 = 9216 registers/block ->
+floor(65536/9216) = 7 blocks. 62 rounds to 64 -> 64*32*4 = 8192 ->
+65536/8192 = exactly 8 blocks. The finish kernel uses **0 bytes of shared
+memory**, so shared memory does not cap the eighth block.
+
+Disassembling both builds and comparing the opcode sequence shows the same
+3888 instructions with only minor scheduling reordering (a handful of
+`LEA.HI.X` / `IMAD.WIDE.U32` moved by one or two slots) and different
+register numbers. No added instruction, no spill, one more resident block.
+
+The 9-block point is rejected: it buys 4 more warps but introduces 56 bytes
+of spill stores and loads per thread.
+
+## Not changed, and why
+
+The prepare kernel `<true,0>` was measured the same way:
+
+| `__launch_bounds__` | Registers | Spill st / ld | SASS instrs | Blocks/SM | Warps/SM |
+|---|---:|---:|---:|---:|---:|
+| (128, 4) — current | 119 | 0 / 0 | 6240 | 4 | 16 |
+| (128, 5) | 96 | 16 B / 12 B | 6400 | 5 | 20 |
+| (128, 6) | 80 | 200 B / 176 B | — | 6 | 24 |
+
+(128, 5) is *not* free: it costs 16 bytes of spill stores and a 2.6% larger
+instruction stream (6240 -> 6400) to buy +25% occupancy. That may well be a
+net win on a memory-latency-bound kernel that reads a 64 MiB L2-resident
+G-table 15 times per candidate, but unlike the finish kernel it is a real
+trade, not a free one. It is deliberately left out of this submission so the
+finish-kernel result is measured on its own. It is the obvious next
+experiment for anyone with a 4090.
+
+## Correctness
+
+`__launch_bounds__` is semantics-neutral by construction. In addition:
+
+- The ranked build line (`nvcc -O3 -DQSB_ZEROS_N=24`, no `-arch`) compiles
+  clean, as does an explicit `-arch=sm_89` build.
+- Per-kernel register/spill profile is unchanged for every other kernel:
+  prepare 119/0, `kernel_build_gtable` 128, `qsb_invert_super_roots` 114,
+  `qsb_root_group_finish` 44, `qsb_root_group_prepare` 42.
+- `test_sha_interleave.py` still passes: 11,522 vectors, 34,566 digest
+  comparisons against `hashlib`, including in-place aliasing.
+
+No GPU was available, so this change is **not** backed by a local throughput
+measurement. The occupancy gain is derived from the register allocator's own
+output, not from a timed run.
