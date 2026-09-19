@@ -58,18 +58,28 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+// Complete the square in both recovered abscissae. h=c/2, A=a-c^2/2
+// are canonical, problem-invariant constants computed by the host.
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
-    uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
-    uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
+    uint64_t *a,uint64_t *b,const uint64_t *h,const uint64_t *A,
+    uint64_t *x1,uint64_t *x2) {
+    uint64_t u[4],v[4],l[4],m[4],t[4],s[4];
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
+    qsb_recovery_sub_exact(t,u,h);
+    qsb_recovery_square_exact(x2,t);
+    _ModAdd256(x2,x2,x2);
+    _ModAdd256(x2,x2,A);                       // middle=2*(u-h)^2+A
+    qsb_recovery_product_exact(x1,u,v);
+    _ModAdd256(x1,x1,x1);                     // offset=2*u*v
+    qsb_recovery_sub_exact(t,x2,x1);
+    _ModAdd256(x2,x2,x1);                     // x2=middle+offset
+    Load256(x1,t);                            // x1=middle-offset
+    qsb_recovery_sub_exact(l,u,v); _ModAdd256(m,u,v);
+    qsb_recovery_sub_exact(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
+    qsb_recovery_sub_exact(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
     return parity|(qsb_difference_parity(b,s)<<1);
 }

@@ -1240,10 +1240,12 @@ __device__ __constant__ uint32_t pin_tail_words[3];
 __device__ __constant__ uint64_t pin_u2rx_words[4];
 
 __device__ __constant__ uint64_t pin_u2rk_words[4];
-__device__ __constant__ uint64_t pin_recovery_c[4];
+__device__ __constant__ uint64_t pin_recovery_h[4];
+__device__ __constant__ uint64_t pin_recovery_A[4];
 
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
+#include "RecoverySquare.cuh"
 #include "PackedRecovery.cuh"
 static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 
@@ -1448,11 +1450,13 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
                       pin_u2ry_words[2],pin_u2ry_words[3]};
-    uint64_t recovery_c[4]={pin_recovery_c[0],pin_recovery_c[1],
-                            pin_recovery_c[2],pin_recovery_c[3]};
+    uint64_t recovery_h[4]={pin_recovery_h[0],pin_recovery_h[1],
+                            pin_recovery_h[2],pin_recovery_h[3]};
+    uint64_t recovery_A[4]={pin_recovery_A[0],pin_recovery_A[1],
+                            pin_recovery_A[2],pin_recovery_A[3]};
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
-        qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+        qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_h,recovery_A,q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
@@ -2050,10 +2054,12 @@ int main(int argc, char **argv) {
     cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
-        uint64_t recovery_c[4];
+        uint64_t recovery_c[4],recovery_h[4],recovery_A[4];
         if(!qsb_make_recovery_constant(recovery_c,pp.u2r_x,pp.u2r_y) ||
-           cudaMemcpyToSymbol(pin_recovery_c,recovery_c,sizeof(recovery_c))!=cudaSuccess){
-            fprintf(stderr,"Failed to prepare the squaring-free recovery constant\n");
+           !qsb_make_square_constants(recovery_h,recovery_A,pp.u2r_x,recovery_c) ||
+           cudaMemcpyToSymbol(pin_recovery_h,recovery_h,sizeof(recovery_h))!=cudaSuccess ||
+           cudaMemcpyToSymbol(pin_recovery_A,recovery_A,sizeof(recovery_A))!=cudaSuccess){
+            fprintf(stderr,"Failed to prepare recovery square constants\n");
             return 1;
         }
     }

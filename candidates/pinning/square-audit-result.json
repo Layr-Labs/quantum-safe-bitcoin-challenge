@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "source_call_interpreter_cases": 10432,
+  "source_call_ptx_cases": 256,
+  "exact_square_ptx_cases": 2015,
+  "exact_sub_ptx_cases": 2144,
+  "new_helper_instruction_counts": {
+    "square": 194,
+    "multiply": 233,
+    "subtraction": 10
+  },
+  "new_finish_temporaries": "six 4-limb local arrays vs seven in baseline, excluding compiler decisions",
+  "new_constants_bytes": 64,
+  "baseline_constants_bytes": 32,
+  "sha256": {
+    "pinning.cu": "0df23a8107a0c8b57f22d898558daa915101bd8fcdd0db6e8346ceeb2154187c",
+    "PackedRecovery.cuh": "6c233ea127b6444d6f66baa55df6dcb34a7f299037ab4047e654c4f0827bdc2a",
+    "RecoveryConstant.h": "13133407591146a74b8c16efbecf5dc111216744cb7dbeaf1b2c90f892fe3f5d",
+    "RecoverySquare.cuh": "cbd147a34e9de4693c2cf9758f3fc480aa074f35367f24024b113826449337f4"
+  },
+  "limitations": "No native compilation/GPU execution. New square/sub helpers interpreted from actual PTX; source finish evaluated under field multiplication contract. Inherited approximate u/v/parity/tree helpers remain baseline; this is not universal bit equivalence to its rare errors. Host BN sequence checked structurally and modeled with Python integers, not executed as C++."
+}
