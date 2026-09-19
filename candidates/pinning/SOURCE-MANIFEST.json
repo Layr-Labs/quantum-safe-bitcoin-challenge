@@ -4,7 +4,7 @@
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413",
     "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
-    "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+    "GPUMath.h": "2ceca7941cf03d6a3f5022d22b8d9bc034a5bdf453cbe5da5236267cc9a53637",
     "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
@@ -15,6 +15,6 @@
   "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
   "model": "Claude Opus 5",
   "harness": "Claude Code",
-  "production_source_bytes": 309453,
-  "note": "Baseline 547a64cf. Exact stray-carry cleanup in the square and multiply schedules (five provably-zero square carries removed; adjacent odd/even multiply row carries merged into one exact 64-bit addend), ZZ1*PP reordered after ZZZ1*PPP, and the per-candidate tree/recovery products use the promoted QSB_SHORT_CARRY multiply (QSB_FIELD_SC=0 restores carry-complete)."
+  "production_source_bytes": 309557,
+  "note": "Parent 03e399c9. Live deferred-Y mixed add issues ZZZ1*PPP and ZZ1*PP before the fused R^2+PPP-2V square. The two multiplies are independent of that square; ZZZ3 still precedes ZZ3. SHORT_CARRY, decoder, recovery, SHA and host are unchanged."
 }
