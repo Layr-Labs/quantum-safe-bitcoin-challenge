@@ -2402,8 +2402,14 @@ int main(int argc, char **argv) {
                     uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
                     int ri = (raw >> 30) & 1;
                     int hc = (raw >> 31) & 1;
-                    fprintf(f, "sequence=%u\nlocktime=%u\nhash_choice=%d\nrecid=%d\n",
-                            slot_seq[s], lt, hc, ri);
+                    /* One line per hit: harness/gpu_wrap.py searches every line for
+                     * sequence=/locktime=/recid= and starts a new record at each
+                     * sequence=, so the record parses identically; hash_choice is not
+                     * read by the harness (single_hash mode, always 0). Fewer lines
+                     * shorten the in-window hit parse. */
+                    (void)hc;
+                    fprintf(f, "sequence=%u locktime=%u recid=%d\n",
+                            slot_seq[s], lt, ri);
                 }
                 fclose(f);
             }
