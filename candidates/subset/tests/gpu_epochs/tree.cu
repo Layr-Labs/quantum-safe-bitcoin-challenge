@@ -490,16 +490,6 @@ __device__ __forceinline__ void qsb_complete_last_add(
 // Delayed dispatch only: either the original path is identical, or its exact chain is replayed.
 #include "../../chain_replay_field.cuh"
 #include "../../hit_filter_field.cuh"
-// Speculative final point step: retain the packed PTX body, then resolve Y.
-// The complete/exact chains and output checker do not call this helper.
-__device__ __forceinline__ void qsb_filter_last_add(
-    uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
-    const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
-    qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
-    uint64_t scaled_y[4];
-    qsb_filter_mul(scaled_y,y,ZZZ,bad);
-    _ModSub256(Y,Y,scaled_y);
-}
 __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
@@ -779,7 +769,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
 #if ZLAB_DIRDIG
@@ -804,7 +794,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
@@ -825,7 +815,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #endif
 #endif
