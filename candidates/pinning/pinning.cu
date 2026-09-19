@@ -1026,7 +1026,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             }
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        if(count>2){if(half>32)__syncthreads();else __syncwarp();}
     }
 
     if(tid==0){
@@ -1081,7 +1081,7 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        if((count<<1)>32)__syncthreads();else __syncwarp();
     }
 
     uint64_t parent_inv[5],sibling[5];

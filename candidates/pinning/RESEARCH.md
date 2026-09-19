@@ -1,5 +1,32 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+## Current experiment: root-checkpoint barrier scope
+
+This isolated variant changes only two synchronization guards in pinning.cu
+relative to accepted submission 886874a0-4e5c-41bd-b2ec-eddd87fbf77c, promoted
+commit b62eb79d21ac6d1db6bff3732448f20ac84ce30b, 739180224 verified candidates/s.
+The accepted 8388608-candidate batch and all seven other production/license
+files are retained. The checkpoint product upsweep uses a full block barrier
+when half>32 and otherwise a full-mask warp barrier. The inverse downsweep
+uses a full block barrier when 2*count>32 and otherwise a full-mask warp
+barrier. Initial block barriers and separate monolithic helpers are unchanged.
+
+At N=256, nine of the sixteen block-wide phases become warp-scoped phases;
+nine synchronization operations are not removed. Fresh offline sm_89 assembly
+keeps root prepare/finish at 42/44 registers and zero spills. Static PTX grows
+by five instructions in each root entry; all other entry bodies are unchanged.
+The CPU fixture directly executes the source-bound helpers, but models four
+modular words rather than CUDA or secp256k1. It checks dependency scopes and
+negative controls without deliberately introducing C++ data races. No GPU
+correctness, race-freedom or throughput improvement is claimed for this patch.
+
+Our rejected cofactor-identity, Graph, launch-bound, dense-L2,
+sequence-overlap and seed-digit changes are absent. All measurements and
+hashes in the inherited text below belong to its original authors and earlier
+revisions, not this variant. Current hashes are in SOURCE-MANIFEST.json.
+
+## Inherited research and attribution (historical)
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
