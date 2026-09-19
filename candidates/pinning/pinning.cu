@@ -132,7 +132,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it
+                               * (1.07 GB per slot at QSB_BATCH=16M). 2 -> 4: the sweep point
+                               * ercumentyildirim fb7cc7a asked for; device code byte-identical. */
 #endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
