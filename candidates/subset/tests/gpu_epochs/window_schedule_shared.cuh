@@ -2,7 +2,10 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
-#define QSB_FIRST_SLOTS 64   /* first-block classes per epoch in d_first */
+#define QSB_FIRST_SLOTS 64
+#ifndef QSB_SHA_UNROLL_CONST
+#define QSB_SHA_UNROLL_CONST 1
+#endif   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][256];
 __device__ uint32_t QSB_WINDOW_SECOND[64][256];
 __device__ uint32_t QSB_WINDOW_CLASS[256];
@@ -84,6 +87,25 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
  * consumer used to spend a thread barrier plus one compression of block time
  * per epoch while 54 leader lanes built these states and the other lanes
  * waited; now each lane reads its class state (32 bytes). */
+/* Flat mapping: one thread per (epoch, class) over full 256-thread blocks, instead of one
+ * 54-thread block per epoch (two warps, 10 idle lanes, and a block launch per epoch). */
+__global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_t * __restrict__ d_epochs,
+        uint32_t * __restrict__ d_first, unsigned n_epochs, unsigned classes) {
+    const unsigned t = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned e = t / classes, c = t - e * classes;
+    if (e >= n_epochs) return;
+    const epoch_desc_t *ep = d_epochs + e;
+    uint32_t st[8], W[16];
+    #pragma unroll
+    for(int j=0;j<8;j++)st[j]=ep->mid[j];
+    W[0]=ep->remW[0];W[1]=ep->remW[1];
+    #pragma unroll
+    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+    _SHA256Transform(st,W);
+    const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+    #pragma unroll
+    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+}
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
         uint32_t * __restrict__ d_first) {
     const epoch_desc_t *ep = d_epochs + blockIdx.x;
@@ -122,67 +144,14 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     }
     state[0]+=a;state[1]+=b;state[2]+=c;state[3]+=d;
     state[4]+=e;state[5]+=f;state[6]+=g;state[7]+=h;
+#if QSB_SHA_UNROLL_CONST
+    // Fully unrolled constant blocks: K+W becomes a constant-bank operand of the
+    // round adds (no LDC, no loop counter). Same arithmetic, same order.
+    qsb_compress_constant<0>(state);
+    qsb_compress_constant<1>(state);
+    qsb_compress_constant<2>(state);
+    qsb_compress_constant<3>(state);
+#else
     qsb_compress_constant_rolled(state);
-}
-
-#if ZLAB_DUAL_EPOCH_SHA
-/* The paired consumer has the same lane (and therefore the same scheduled
- * second block and constant suffix) in both epochs.  Load each schedule word
- * once and advance two independent SHA-256 states with it. */
-__device__ __forceinline__ void qsb_scheduled_window_hash_pair(
-    uint32_t *stateA, uint32_t *stateB, int lane,
-    const uint32_t *firstA, const uint32_t *firstB) {
-    const int first_slot=QSB_FIRST_CLASS[lane];
-    const int slot=QSB_WINDOW_CLASS[lane];
-    #pragma unroll
-    for(int j=0;j<8;j++){
-        stateA[j]=firstA[first_slot*8+j];
-        stateB[j]=firstB[first_slot*8+j];
-    }
-    uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
-    uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
-#define QSB_PAIR_STATE_LOAD() do { \
-    a0=stateA[0];b0=stateA[1];c0=stateA[2];d0=stateA[3]; \
-    e0=stateA[4];f0=stateA[5];g0=stateA[6];h0=stateA[7]; \
-    a1=stateB[0];b1=stateB[1];c1=stateB[2];d1=stateB[3]; \
-    e1=stateB[4];f1=stateB[5];g1=stateB[6];h1=stateB[7]; \
-} while(0)
-#define QSB_PAIR_STATE_ADD() do { \
-    stateA[0]+=a0;stateA[1]+=b0;stateA[2]+=c0;stateA[3]+=d0; \
-    stateA[4]+=e0;stateA[5]+=f0;stateA[6]+=g0;stateA[7]+=h0; \
-    stateB[0]+=a1;stateB[1]+=b1;stateB[2]+=c1;stateB[3]+=d1; \
-    stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
-} while(0)
-    QSB_PAIR_STATE_LOAD();
-    #pragma unroll 1
-    for(int r=0;r<64;r+=8){
-        {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+2][slot];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+3][slot];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+4][slot];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+5][slot];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+6][slot];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-    }
-    QSB_PAIR_STATE_ADD();
-    #pragma unroll 1
-    for(int block=0;block<4;block++){
-        QSB_PAIR_STATE_LOAD();
-        #pragma unroll 1
-        for(int r=0;r<64;r+=8){
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+1];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+2];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+3];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+4];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+5];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+6];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+7];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-        }
-        QSB_PAIR_STATE_ADD();
-    }
-#undef QSB_PAIR_STATE_LOAD
-#undef QSB_PAIR_STATE_ADD
-}
 #endif
+}
