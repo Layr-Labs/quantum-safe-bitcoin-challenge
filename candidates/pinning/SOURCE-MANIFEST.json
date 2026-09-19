@@ -3,7 +3,7 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "1c34db149ad89977909265d052f9d014c99104ede795755d5eea69ccf119284e",
+    "pinning.cu": "c263ab5b94e5ac1e28a9c482a349d21366c12c48f35a7b340d11d0e4d0c72d9d",
     "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
