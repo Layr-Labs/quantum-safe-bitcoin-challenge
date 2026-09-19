@@ -158,6 +158,44 @@ __device__ __forceinline__ int qsb_k2s_front3(
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
+#if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+struct QsbPairEpochZ {uint64_t a[4],b[4];};
+__device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
+    uint32_t b2[16];
+    #pragma unroll
+    for(int i=0;i<8;i++)b2[i]=state[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for(int i=9;i<15;i++)b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2,b2);
+    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+}
+__device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
+    const uint32_t*firstA,const uint32_t*firstB,int lane){
+    uint32_t stateA[8],stateB[8];
+    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
+    QsbPairEpochZ out;
+    qsb_pair_second_sha_z(stateA,out.a);
+    qsb_pair_second_sha_z(stateB,out.b);
+    return out;
+}
+__device__ __forceinline__ int qsb_k2s_front3_z(
+    const uint64_t*z,const uint8_t*d_gt,uint64_t*u2rx,uint64_t*u2ry,
+    uint64_t*prod,uint64_t*n){
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    uint32_t unused_flag=0;
+    qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+    return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
+}
+#endif
 __device__ __forceinline__ int qsb_k2s_front_exact(
     const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
     uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
@@ -252,6 +290,21 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 #if ZLAB_K2S3M
 
 struct QsbPairFront3 {uint64_t words[16];int ok;};
+#if ZLAB_DUAL_EPOCH_SHA
+__device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
+    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t z[4]={z0,z1,z2,z3};
+    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    uint64_t prod[5],n[12];QsbPairFront3 out;
+    out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+    Load256(out.words,prod);
+    #pragma unroll
+    for(int k=0;k<12;k++)out.words[4+k]=n[k];
+    return out;
+}
+#endif
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
     const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
     uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
