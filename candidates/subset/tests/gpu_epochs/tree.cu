@@ -40,6 +40,9 @@
 #ifndef ZLAB_PAIRSHA
 #define ZLAB_PAIRSHA 0
 #endif
+#ifndef ZLAB_DUAL_EPOCH_SHA
+#define ZLAB_DUAL_EPOCH_SHA 1
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -1495,18 +1498,39 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
 #if ZLAB_K2S3M
     uint64_t prodA[5], prodB[5], nB[12];
+#if ZLAB_DUAL_EPOCH_SHA
+    uint64_t zB[4];
+    QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,tid);
+    // Park B's scalar while A runs its field chain; these four rows are free
+    // until A's final four pre-inverse words are written below.
+    #pragma unroll
+    for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+#endif
 #else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
 #endif
     int okA, okB;
     {
 #if ZLAB_K2S3M
+#if ZLAB_DUAL_EPOCH_SHA
+        QsbPairFront3 fa=qsb_pair_front3_z_value_c(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt);
+#else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
         Load256(prodA,fa.words);prodA[4]=0;
         okA=fa.ok && active;
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+#if ZLAB_DUAL_EPOCH_SHA
+        #pragma unroll
+        for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
+        #pragma unroll
+        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+        #pragma unroll
+        for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
+#else
         #pragma unroll
         for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+#endif
 #else
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
@@ -1519,7 +1543,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
+#if ZLAB_DUAL_EPOCH_SHA
+    QsbPairFront3 fb=qsb_pair_front3_z_value_c(zB[0],zB[1],zB[2],zB[3],d_gt);
+#else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
     for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
@@ -1538,7 +1566,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
         #pragma unroll
         for(int k=0;k<12;k++)n[k]=parkA[k][tid];
-        int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        int encoded=qsb_pair_tail3_value_c(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3]);
 #else
         uint64_t inv[5],m1[4],m2[4];
         qsb_field_mul_raw(inv,leaf,prodB);    /* 1/WA */
