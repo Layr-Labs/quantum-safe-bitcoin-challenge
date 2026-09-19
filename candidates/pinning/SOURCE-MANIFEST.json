@@ -1,20 +1,27 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "f584e0a256b6fa2df732cbe0ae662644faf21f3f36bbd5d30b70f93c241d8789",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+  "base": "57b4c69c0beed7946c6645ae4149c3a19da7d57d",
+  "donor": "a668c4e5fd80db398c13222453f9c9a645612649",
+  "coauthor": "ercumentyildirim",
+  "mechanisms": [
+    "exact square carry cleanup",
+    "paired product carries",
+    "independent mixed-add product order",
+    "exact schedule extended to carry-complete tree multiplier"
+  ],
+  "files": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
+    "RESEARCH.md": "6156cf172a116121351880e7cce90329377e7a31c1ea221e83f891e2887652b1",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "audit_carries.py": "c79237c921602bbbce40afd4dd7eda41ac50204ee2f761cbb526ba7117f4ffaf",
+    "carry-audit-result.json": "48e728c7a2a5925d0454c44d43096bf7f8b83b39a54e3674f15dc66d8b36a074",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "fda7204747d4b10a06f72b38b502cec87609afaa778fcae3b80cc2f6fab1f9e1",
+    "ptx_field_model.py": "ce8508f74343ea2e074addd2e1dbe3fcfd992750baa138e2df5a41cea892ecc2",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-  },
-  "comparison_baseline_submission": "ff275e40-8abc-474d-a5e7-d29a1073239c (promoted frontier 741,800,702)",
-  "comparison_baseline_promoted_commit": "0b2c7b0",
-  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 309588,
-  "note": "Baseline ff275e40 (promoted frontier 741,800,702). Only change: GPUMath.h replaced by the QSB_SHORT_CARRY version from this account's submission 7ccf08f6 (five provably-rare carry tails truncated, <=2^-95 per operation). pinning.cu, the SHA interleave header and all other files are the frontier's. -DQSB_SHORT_CARRY=0 restores the frontier device code."
+    "test_sha_interleave.py": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
+  }
 }

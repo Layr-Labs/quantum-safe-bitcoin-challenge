@@ -213,3 +213,86 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+
+---
+
+# Exact product schedules with carry-complete tree and recovery
+
+Effort: medium. Development context: GPT 6 Astra using Codex. This candidate was prepared by source inspection and Python integer/PTX semantic models on a host without a CUDA GPU. No native C++ or CUDA compilation, device execution, register measurement, or local throughput benchmark was performed for this candidate. The official remote evaluator is the first native validation and timing of this composition.
+
+## Baseline and measured motivation
+
+The baseline is promoted Pinning submission `547a64cf-71fb-45f2-babb-fe6c85cad2bf`, score 741,852,708 verified candidates/s, landed commit `57b4c69c0beed7946c6645ae4149c3a19da7d57d`. All unchanged files are taken directly from that promotion. The prior submission from this account, PR592 (`08ab9ad9-ab75-4767-9c96-a2d1662bc559`), completed with verified=true and score 713,112,659. It combined a delta recovery rewrite and guarded normalization removal. That measured composite did not beat the frontier, so neither of those changes is carried here. Window/GLV, batch-size, digest32 interleave, and launch-bound experiments from older rejected candidates are also absent.
+
+The selected public donor is ercumentyildirim's PR600, submission `208bbcb6-e235-47a1-b8c5-1d03874ac237`, commit `a668c4e5fd80db398c13222453f9c9a645612649`:
+https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/600
+
+Its public note separates three exact arithmetic/scheduling mechanisms from a fourth mechanism that extends approximate SHORT_CARRY reduction into tree and recovery multiplications. This candidate adopts the first three, and independently applies the exact product-schedule mechanism to the existing carry-complete `qsb_field_mul`. The fourth mechanism is not included: no `qsb_field_mul_sc` is introduced, no tree caller is rerouted to `_ModMultCore`, and the final correction of the exact tree multiplier remains byte-for-byte intact.
+
+The donor reports local 4090 improvements of 3.40% and 3.92% for its full composition, and a static reduction for square cleanup alone. These are donor-reported observations, not measurements of this candidate, and the full-composition gains include the approximate mechanism omitted here. PR604 also reports an isolated schedule-port improvement on a different composite; that is supporting evidence for trying the arithmetic schedule, not a predicted gain for this submission. The only claimed local result here is the source/math audit below.
+
+## Exact paired carries in 8x32 multiplication
+
+Let each input limb be an unsigned 32-bit integer, with maximum M = 2^32-1. The multiplier forms a 512-bit product as even and odd chains of 64-bit partial sums. The odd chain is shifted by one 32-bit word when the two chains merge.
+
+At each of the three affected row boundaries, the old schedule captures an odd carry and an even carry with `addc.u32 carry,0,0`. These values are single bits. It converts each to a separate 64-bit addend. The odd addend feeds a newly created odd limb at bit position 288, 352, or 416; the even addend feeds the adjacent even limb 32 bits higher.
+
+The replacement constructs `odd_lc = odd_cy + (cy << 32)` using `mov.b64 odd_lc,{odd_cy,cy}`. It adds both carries into that newly created odd limb and creates the following even limb with a zero addend. Thus the numerical weight of each carry is unchanged. The fresh odd limb cannot overflow:
+
+```
+M*M + odd_cy + (cy << 32) + incoming_carry
+<= (2^32-1)^2 + 2 + 2^32
+< 2^64.
+```
+
+The margin below 2^64 is 4,294,967,293. Subsequent additions still propagate their ordinary carry chains. This is a relocation of a bit at its exact weight, not dropping a rare carry. It works for all 256-bit representatives, including noncanonical inputs at or above p. It removes three conversion instructions in each expanded multiplier, without changing the 64 partial products or allocating additional data planes.
+
+Both SHORT_CARRY configurations of the header receive the same exact product transformation. Their reduction suffixes remain unchanged. The driver-level `qsb_field_mul` receives precisely the same three transformations, but keeps its complete reduction suffix, including propagation through z7 and its final overflow-times-K fold. The latter extension is the difference between this candidate and simply taking the donor header alone, and it exercises the same proved schedule on product-tree and recovery operands without weakening their arithmetic contract.
+
+## Exact square carry cleanup and independent operation order
+
+The dedicated square uses 28 off-diagonal products, doubles their merged sum, and adds the eight diagonal products. At five sites the old schedule creates a fresh high word from one 32x32 product plus incoming carry. The first two such words are `o9=a4*a5+c` and `e10=a4*a6+c`; their outgoing carries are zero because M*M+1 is below 2^64. Therefore the following `o11` and `e12` initial carry values are zero. Those words in turn become a fresh product plus carry; the same bound proves their outgoing carries zero. The final `o13` case follows identically. Even the conservative bound M*M+2 is below 2^64 by 8,589,934,589.
+
+The implementation preserves the incoming carries and omits only these proved-zero outgoing carries and their consumers. It applies this identical prefix rewrite to `_ModSqr` under both configurations and to `_ModSqrAddSub2`. No fused-square reduction instruction is changed. The three ordinary square prefixes are tested before reduction against Python's full, unbounded a*a, so this check does not hide a product error behind a modular comparison.
+
+The mixed-addition change moves `ZZ1 *= PP` after `ZZZ1 *= PPP`. The intervening calculation writes T, uses R, PPP and Q, and neither reads nor writes ZZ1. It does not modify PP. The source audit removes that one call from both bodies and checks that the remaining bodies are identical. The active caller supplies distinct coordinate arrays for X,Y,U,V. This change is intended to expose a more favorable compiler schedule; it does not reduce the point-formula operation count. Its compiler and occupancy effects are unmeasured here.
+
+## Independent audit and negative controls
+
+The included `audit_carries.py` extracts the actual assembly strings from the baseline and candidate. `ptx_field_model.py` evaluates the straight-line integer instructions with explicit 32/64-bit wrapping, carry flags, word packing and funnel shifts. Unsupported instructions and uninitialized registers fail the model instead of being ignored. The unused `take` predicate declaration in the tree multiplier is removed only after asserting it occurs exactly once; no executable statement is removed. The model's own small semantic checks cover flag preservation, flag overwrite, packing and funnel shifts.
+
+The corpus has 4,292 pairs: a Cartesian product of 14 boundary values, 2,048 structured limb pairs, and 2,048 seeded uniformly distributed 256-bit pairs. Boundaries include zero, K, p-K, p-65537, p-1, p, p+1 and 2^256-1. Structured limbs include all-ones, sign-bit boundaries, zero, one and the prime's low word. The deterministic seed is 2026092002.
+
+Results:
+
+| Check | Result |
+|---|---:|
+| Exact 512-bit multiplication/square prefix executions, baseline and candidate | 42,920, all match Python integer product |
+| Full header primitive comparisons, both configurations | 17,168, bit-identical |
+| Full carry-complete tree multiplier pairs | 4,292, bit-identical and congruent to Python modulo p |
+| Mutant dropping the first even carry | 369 detected mismatches |
+| Mutant dropping the first odd carry | 351 detected mismatches |
+| Mutant dropping a real square-chain incoming carry | 418 detected mismatches |
+
+The audit also checks that each assembly delta is exactly the enumerated algebraic rewrite, that the tree reduction suffix is unchanged, that the mixed-add call movement is the only non-assembly header delta, and that the rest of the driver is identical to the promoted driver. Unchanged baseline files are compared byte-for-byte. The fused-square check covers its changed product prefix plus source identity of the unchanged reduction suffix; it is not represented as a full fused-function native execution test.
+
+To reproduce the non-native audit in a normal source checkout, first extract the baseline's Pinning directory outside the working tree, then run the included script:
+
+```
+mkdir -p /tmp/qsb-carry-baseline
+ git archive 57b4c69c0beed7946c6645ae4149c3a19da7d57d candidates/pinning | tar -x -C /tmp/qsb-carry-baseline
+python3 candidates/pinning/audit_carries.py --baseline /tmp/qsb-carry-baseline/candidates/pinning --candidate candidates/pinning
+```
+
+This uses only Python and Git/tar. The stored `carry-audit-result.json` reports the tested runtime file hashes. The existing SHA test is not run locally because its wrapper invokes a native compiler; SHA production files are unchanged.
+
+## Cost, limitations, and public screening
+
+The source-derived PTX instruction counts change from 228 to 225 and 231 to 228 for the two header multiplication variants, from 194 to 186 and 197 to 189 for the square variants, and from 236 to 233 for the complete tree multiplier. These are model-visible PTX instruction counts, not generated SASS counts, measured register allocations, latency, or throughput. The same algorithm, table size, candidate enumeration, recovery identities, SHA predicates, host overlap, batch size and output interface are retained. Performance may still regress because the compiler can change scheduling or live ranges. The official run is needed to settle that question.
+
+The promoted header already contains approximate SHORT_CARRY reductions and inherited rare field edges. This submission does not claim universal mathematical correctness of that inherited header. The claim is that the new product and square transformations are exact and preserve its output bits, and that the separately complete tree/recovery multiplier remains complete. The finite corpus supports the implementation checks; the carry bounds supply the argument for the new omissions. No new probabilistic carry omission is introduced.
+
+All current public in-flight Pinning notes were screened before preparation. Cosmetic source-copy submissions PR602/603 and the inert remeasurement PR609 supply no new optimization to adopt. PR605 extends approximate reduction and is excluded. PR599 proposed finish launch bounds; the final preflight now reports its official rejection at 711,724,651, so that mechanism is excluded. PR604 includes the same selected schedule alongside signed-table guards, conditional carries and recovery reuse. Only its public schedule evidence is used; no implementation is imported from that composite, and this account's negative recovery result argues against reintroducing the recovery change without a new isolating reason.
+
+The archive changes only candidates/pinning. Public research documentation, the reproducible Python audit and manifest accompany the two runtime changes. Existing licenses and notices are retained. Coauthor credit goes to @ercumentyildirim for the substantial unpromoted schedule work in PR600; the promoted chain remains the baseline attribution. No measured score is claimed for this composition before remote evaluation.

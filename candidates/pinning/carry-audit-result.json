@@ -1,0 +1,117 @@
+{
+  "status": "PASS",
+  "vectors": 4292,
+  "exact_512bit_prefix_executions": 42920,
+  "full_primitive_pair_comparisons": 17168,
+  "carry_complete_raw_pairs": 4292,
+  "mutant_mismatches": [
+    369,
+    351,
+    418
+  ],
+  "instruction_counts": {
+    "base": [
+      228,
+      231,
+      194,
+      197
+    ],
+    "new": [
+      225,
+      228,
+      186,
+      189
+    ],
+    "tree_base": 236,
+    "tree_new": 233
+  },
+  "bounds": {
+    "square_margin": 8589934589,
+    "paired_margin": 4294967293
+  },
+  "header_changed_ranges": [
+    [
+      767,
+      767,
+      767,
+      767
+    ],
+    [
+      910,
+      910,
+      910,
+      910
+    ],
+    [
+      1075,
+      1075,
+      1075,
+      1075
+    ],
+    [
+      1182,
+      1182,
+      1182,
+      1182
+    ],
+    [
+      1320,
+      1321,
+      1320,
+      1320
+    ],
+    [
+      1326,
+      1329,
+      1325,
+      1325
+    ],
+    [
+      1340,
+      1341,
+      1336,
+      1336
+    ],
+    [
+      1350,
+      1352,
+      1345,
+      1345
+    ],
+    [
+      1365,
+      1366,
+      1358,
+      1358
+    ],
+    [
+      1370,
+      1370,
+      1362,
+      1362
+    ],
+    [
+      1377,
+      1378,
+      1369,
+      1369
+    ],
+    [
+      1791,
+      1791,
+      1782,
+      1781
+    ],
+    [
+      1808,
+      1807,
+      1798,
+      1799
+    ]
+  ],
+  "sha256": {
+    "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+    "pinning.cu": "fda7204747d4b10a06f72b38b502cec87609afaa778fcae3b80cc2f6fab1f9e1"
+  },
+  "limitations": "Python PTX semantics only. No CUDA compilation, JIT or throughput measurement. Header reduction retains promoted approximations; tree/recovery keeps complete reduction."
+}
