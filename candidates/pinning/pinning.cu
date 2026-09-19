@@ -7,6 +7,10 @@
  * Build:  nvcc -O3 -o qsb_real qsb_real_search.cu -lcrypto -lm
  * Usage:  ./qsb_real pinning2.bin [easy]
  */
+/* QSB-DRAW-2 (QsbFire5 2026-09-19): box-timed intel-r5 draw, single change vs
+ * crown 886874a (b62eb79): QSB_S2_BLOCKS 7 -> 8 below. Delete this comment
+ * block and sha256 the remainder: d072b1e45e58e7b4ced6c97040d64a1be8536ae694ede043813d66bad0e856b2. Every draw of this tree carries the
+ * same digest -- only the draw id in the marker differs. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,7 +82,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
+#define QSB_S2_BLOCKS 8 /* 32 warps/SM finish residency (64-register budget); was 7. QSB-DRAW-2 */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"

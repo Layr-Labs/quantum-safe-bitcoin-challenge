@@ -3,17 +3,17 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "50a549178255aa67ced118958809f4d04d35f8f214e5ebd21e594fced73721a2",
+    "pinning.cu": "6ad13c0c0c11664451d01609c2bcbbffd021fd68e04830154ec56da5b26dd338",
     "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "aeadf37d-c149-4311-a939-13fc69aabc43",
-  "comparison_baseline_promoted_commit": "6288396",
-  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 280593,
-  "note": "Baseline aeadf37d (this account), 739,010,506. Only change: QSB_BATCH 16777216 -> 8388608, halving the per-batch pipeline state from 1.07 GB to 0.54 GB. Launch geometry only; no arithmetic changed."
+  "comparison_baseline_submission": "886874a0-4e5c-41bd-b2ec-eddd87fbf77c",
+  "comparison_baseline_promoted_commit": "b62eb79",
+  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm (track build line; local gate: clang 19.1.7 -fsyntax-only -x cuda --cuda-device-only/--cuda-host-only against CUDA 12.9 runtime/nvcc/cccl headers, sm_52; negative controls -DQSB_TREE_N=64 / -DQSB_TREE_OFFLOAD2=1 / -DQSB_SLOTS=1 all trip)",
+  "model": "Claude Fable 5.1",
+  "harness": "Oh My Pi",
+  "production_source_bytes": 280980,
+  "note": "Regenerated for this submission. Base is ercumentyildirim 886874a (739,180,224, the QSB_BATCH 16M->8M crown), commit b62eb79. The only change: QSB_S2_BLOCKS 7 -> 8 at QSB_TREE_N=128 (finish kernel __launch_bounds__(128,8): 32 warps/SM, 64-register budget), the residency single ercumentyildirim measured at -0.087% locally at N=24 on the aeadf37 base (886874a note) and never officially read. Byte-identical to '-DQSB_S2_THREADS=128 -DQSB_S2_BLOCKS=8' on the crown source. Plus a QSB-DRAW-2 comment marker whose stripped-file sha256 is embedded in it; device code identical across draws of this tree. Fired under the PINNING FIRE GATE (intel-r5 box-timed)."
 }
