@@ -106,6 +106,7 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
 }
+#if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
         uint32_t * __restrict__ d_first) {
     const epoch_desc_t *ep = d_epochs + blockIdx.x;
@@ -121,6 +122,7 @@ __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
 }
+#endif
 
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         const epoch_desc_t *epoch, int lane, const uint32_t *first) {
@@ -155,3 +157,76 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     qsb_compress_constant_rolled(state);
 #endif
 }
+
+#if ZLAB_DUAL_EPOCH_SHA
+#ifndef QSB_PAIR_SHA_UNROLL_CONST
+#define QSB_PAIR_SHA_UNROLL_CONST 0
+#endif
+/* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
+ * second block and constant suffix) in both epochs.  Load each schedule word
+ * once and advance two independent SHA-256 states with it. */
+__device__ __forceinline__ void qsb_scheduled_window_hash_pair(
+    uint32_t *stateA, uint32_t *stateB, int lane,
+    const uint32_t *firstA, const uint32_t *firstB) {
+    const int first_slot=QSB_FIRST_CLASS[lane];
+    const int slot=QSB_WINDOW_CLASS[lane];
+    #pragma unroll
+    for(int j=0;j<8;j++){
+        stateA[j]=firstA[first_slot*8+j];
+        stateB[j]=firstB[first_slot*8+j];
+    }
+    uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
+    uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
+#define QSB_PAIR_STATE_LOAD() do { \
+    a0=stateA[0];b0=stateA[1];c0=stateA[2];d0=stateA[3]; \
+    e0=stateA[4];f0=stateA[5];g0=stateA[6];h0=stateA[7]; \
+    a1=stateB[0];b1=stateB[1];c1=stateB[2];d1=stateB[3]; \
+    e1=stateB[4];f1=stateB[5];g1=stateB[6];h1=stateB[7]; \
+} while(0)
+#define QSB_PAIR_STATE_ADD() do { \
+    stateA[0]+=a0;stateA[1]+=b0;stateA[2]+=c0;stateA[3]+=d0; \
+    stateA[4]+=e0;stateA[5]+=f0;stateA[6]+=g0;stateA[7]+=h0; \
+    stateB[0]+=a1;stateB[1]+=b1;stateB[2]+=c1;stateB[3]+=d1; \
+    stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
+} while(0)
+    QSB_PAIR_STATE_LOAD();
+    #pragma unroll 1
+    for(int r=0;r<64;r+=8){
+        {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+2][slot];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+3][slot];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+4][slot];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+5][slot];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+6][slot];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+    }
+    QSB_PAIR_STATE_ADD();
+#if QSB_PAIR_SHA_UNROLL_CONST
+    #pragma unroll
+#else
+    #pragma unroll 1
+#endif
+    for(int block=0;block<4;block++){
+        QSB_PAIR_STATE_LOAD();
+#if QSB_PAIR_SHA_UNROLL_CONST
+        #pragma unroll
+#else
+        #pragma unroll 2
+#endif
+        for(int r=0;r<64;r+=8){
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+1];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+2];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+3];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+4];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+5];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+6];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+7];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+        }
+        QSB_PAIR_STATE_ADD();
+    }
+#undef QSB_PAIR_STATE_LOAD
+#undef QSB_PAIR_STATE_ADD
+}
+#endif

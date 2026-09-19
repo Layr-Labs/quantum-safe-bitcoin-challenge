@@ -40,6 +40,9 @@
 #ifndef ZLAB_PAIRSHA
 #define ZLAB_PAIRSHA 0
 #endif
+#ifndef ZLAB_DUAL_EPOCH_SHA
+#define ZLAB_DUAL_EPOCH_SHA 1
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -1569,18 +1572,39 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
 #if ZLAB_K2S3M
     uint64_t prodA[5], prodB[5], nB[12];
+#if ZLAB_DUAL_EPOCH_SHA
+    uint64_t zB[4];
+    QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,tid);
+    // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
+    // until A's final four pre-inverse words are written below.
+    #pragma unroll
+    for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+#endif
 #else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
 #endif
     int okA, okB;
     {
 #if ZLAB_K2S3M
+#if ZLAB_DUAL_EPOCH_SHA
+        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
         Load256(prodA,fa.words);prodA[4]=0;
         okA=fa.ok && active;
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+#if ZLAB_DUAL_EPOCH_SHA
+        #pragma unroll
+        for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
+        #pragma unroll
+        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+        #pragma unroll
+        for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
+#else
         #pragma unroll
         for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+#endif
 #else
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
@@ -1593,7 +1617,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
+#if ZLAB_DUAL_EPOCH_SHA
+    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
     for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
@@ -3098,9 +3126,11 @@ int main(int argc, char **argv) {
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw; memcpy(&raw, zh_host + 4 + h * ZLAB_HIT_REC, 4);
                     const uint8_t *combo = zh_host + 8 + h * ZLAB_HIT_REC;
-                    wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d\nhash_choice=%d\nrecid=%d\ncombo_idx=%d\n",
+                    /* One line per hit: harness/gpu_wrap.py reads indices= and recid= from the same
+                     * line (its regexes are per line), so the in-window parse is ~2x cheaper. */
+                    wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
                                    combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
-                                   (int)((raw >> 31) & 1), (int)((raw >> 30) & 1), (int)(raw & 0x3FFFFFFF));
+                                   (int)((raw >> 30) & 1));
                 }
                 const char *wp = wb;
                 while (wl > 0) {
@@ -3238,8 +3268,10 @@ int main(int argc, char **argv) {
             uint32_t h_hit = 0;
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
+#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
+#endif
             kernel_digest<<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,

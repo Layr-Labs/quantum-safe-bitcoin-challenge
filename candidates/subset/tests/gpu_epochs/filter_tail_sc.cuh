@@ -10,8 +10,9 @@
 #endif
 #if QSB_SHORT_CARRY3
 // r = a - b mod p for a,b < 2^256. The borrow correction subtracts K = 2^32+977 from the
-// wrapped difference; its borrow is kept through limb 1 only. It would have to cross limb 1
-// only if limb0 < K and limb1 == 0 after the subtraction: probability <= 2^-95.
+// wrapped difference; this private variant keeps the correction through limb 0 only.
+// It differs from the parent when a<b and the wrapped low64 difference is below K.
+// No input-distribution probability or absence of lost proposals is assumed.
 __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n\t.reg .u64 brw,lo;\n\t"
@@ -21,14 +22,14 @@ __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const u
         "subc.cc.u64 %3,%7,%11;\n\t"
         "subc.u64 brw,0,0;\n\t"
         "and.b64 lo,brw,0x1000003D1;\n\t"
-        "sub.cc.u64 %0,%0,lo;\n\t"
-        "subc.u64 %1,%1,0;\n\t}"
+        "sub.u64 %0,%0,lo;\n\t"
+        "\n\t}"
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
 }
-// r = a + b mod p (a,b < 2^256): fold the carry with K; the fold's carry is kept through limb 1
-// (crossing it needs limb0 overflow, p <= 2^-31, and limb1 == 2^64-1: <= 2^-95 overall).
+// r = a + b mod p (a,b < 2^256): fold the carry with K; this private variant keeps the correction through limb 0 only.
+// It differs from the parent if the high carry is set and the wrapped low64 sum + K overflows.
 __device__ __forceinline__ void qsb_fadd(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n\t.reg .u64 h,t;\n\t"
@@ -38,8 +39,8 @@ __device__ __forceinline__ void qsb_fadd(uint64_t *r, const uint64_t *a, const u
         "addc.cc.u64 %3,%7,%11;\n\t"
         "addc.u64 h,0,0;\n\t"
         "mul.lo.u64 t,h,0x1000003d1;\n\t"
-        "add.cc.u64 %0,%0,t;\n\t"
-        "addc.u64 %1,%1,0;\n\t}"
+        "add.u64 %0,%0,t;\n\t"
+        "\n\t}"
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
