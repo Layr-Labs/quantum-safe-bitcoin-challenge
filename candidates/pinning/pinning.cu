@@ -690,10 +690,10 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     }
 
     SHA256_RND(16);
-    WMIX();
-    SHA256_RND(32);
-    WMIX();
-    SHA256_RND(48);
+    /* Scheduling experiment (extends ff275e4): interleave the two dense
+     * schedule expansions with their compression rounds. All 64 rounds intact. */
+    QSB_SHA_INTERLEAVED_16(32);
+    QSB_SHA_INTERLEAVED_16(48);
 
     state[0] += a;
     state[1] += b;
@@ -767,10 +767,10 @@ __device__ __forceinline__ void _SHA256TransformDigest32(
     }
 
     SHA256_RND(16);
-    WMIX();
-    SHA256_RND(32);
-    WMIX();
-    SHA256_RND(48);
+    /* Scheduling experiment (extends ff275e4): interleave the two dense
+     * schedule expansions with their compression rounds. All 64 rounds intact. */
+    QSB_SHA_INTERLEAVED_16(32);
+    QSB_SHA_INTERLEAVED_16(48);
 
     out[0] = 0x6a09e667u + a;
     out[1] = 0xbb67ae85u + b;
