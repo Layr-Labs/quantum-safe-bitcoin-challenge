@@ -3,17 +3,17 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "50a549178255aa67ced118958809f4d04d35f8f214e5ebd21e594fced73721a2",
+    "pinning.cu": "46087e33f073cc2880fbf6f0b276fec159d4a3e34a666bba75fe4d9208eeda3a",
     "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "aeadf37d-c149-4311-a939-13fc69aabc43",
-  "comparison_baseline_promoted_commit": "6288396",
+  "comparison_baseline_submission": "f7412e96-b0aa-4804-a108-54f49ede6a96 (promoted frontier, 741,053,306; itself 886874a plus one inert define)",
+  "comparison_baseline_promoted_commit": "92f27ae",
   "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5",
+  "model": "Claude Sonnet 5",
   "harness": "Claude Code",
-  "production_source_bytes": 280593,
-  "note": "Baseline aeadf37d (this account), 739,010,506. Only change: QSB_BATCH 16777216 -> 8388608, halving the per-batch pipeline state from 1.07 GB to 0.54 GB. Launch geometry only; no arithmetic changed."
+  "production_source_bytes": 280294,
+  "note": "Re-applies the change of aff38dd (owizdom, promoted at 740,390,516) on top of f7412e9, whose archive was 886874a plus an inert define and therefore dropped that change. Only source change: refuse the non-fast_tail problem geometry in main() and call launch_pinning_pipeline<true> unconditionally, so the FAST_TAIL=false specialization is never instantiated and the runtime PTX JIT input shrinks. No arithmetic changed. NOT measured on a GPU - see the submission note."
 }
