@@ -239,10 +239,61 @@ ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
  * lane 0 owns u, lane 1 v, lane 2 r, lane 3 s; P = own vector, Q = pair partner's.
  * Row rule: lane even  new P = a*P + b*Q ; lane odd new P = d*P + c*Q  (same as c*u+d*v).
  * Collectives per batch: 2 coefficients + 1 sign + 1 zero flag + 9 partner limbs. */
+/* ZI_SHFL_IMM: how the 4-lane cooperative root inverse exchanges words.
+ *
+ *   0 = __shfl_sync(0xF, ...) at every exchange (the promoted frontier).
+ *   1 = same instruction written as inline PTX with immediate clamp/membermask
+ *       and no predicate destination. Value-identical to 0; measured to leave
+ *       ptxas codegen unchanged (it still outlines), kept only as a control.
+ *   2 = SHIPPED. One __syncwarp(0xf) at this function's single divergent point
+ *       (zi_conv, below), then raw shfl.idx.b32 for every exchange.
+ *
+ * Semantics are identical, not approximated. CUDA lowers
+ * __shfl_sync(0xF, v, src) to `shfl.sync.idx.b32 d|p, v, src, c, 0xf` with
+ * c = ((warpSize - width) << 8) | 0x1f = 0x1f for the default width 32. The
+ * form below is that same instruction with the same membermask 0xf and the
+ * same clamp 0x1f; the only differences are that the predicate destination
+ * (never read by any caller) is dropped and that clamp/membermask are written
+ * as immediates rather than passed in registers.
+ *
+ * Why it matters: with register operands and a live predicate destination,
+ * ptxas does not inline the shuffle inside the large, register-capped
+ * qsb_pair_tail3_value body. It emits all 29 of them as CALL.REL.NOINC into a
+ * shared $__internal_0_$__cuda_sm70_shflsync_idx_p helper
+ * (IMAD.MOV / WARPSYNC / SHFL.IDX / RET.REL.NODEC) plus the ABI register moves
+ * at each call site. That sits in the serial root inverse that the whole
+ * 256-thread block waits on. With immediates and no predicate destination the
+ * shuffle is emitted inline as a plain SHFL.IDX.
+ *
+ * Set ZI_SHFL_IMM=0 to restore the intrinsic exactly. */
+#ifndef ZI_SHFL_IMM
+#define ZI_SHFL_IMM 2
+#endif
 #ifdef __CUDA_ARCH__
+#if ZI_SHFL_IMM == 2
+/* Mode 2: explicit reconvergence (zi_conv) + raw shuffle. The membermask work
+ * is hoisted out of the 12 per-batch exchanges into ONE __syncwarp(0xf) placed
+ * at the function's only divergent point. */
+ZI_DEV uint32_t zi_x(uint32_t v,int src){
+    uint32_t r;
+    asm volatile("shfl.idx.b32 %0, %1, %2, 0x1f;" : "=r"(r) : "r"(v), "r"(src));
+    return r;
+}
+ZI_DEV void zi_conv(){__syncwarp(0x0000000fu);}
+#elif ZI_SHFL_IMM == 1
+ZI_DEV uint32_t zi_x(uint32_t v,int src){
+    uint32_t r;
+    asm volatile("shfl.sync.idx.b32 %0, %1, %2, 0x1f, 0xf;" : "=r"(r) : "r"(v), "r"(src));
+    return r;
+}
+ZI_DEV void zi_conv(){}
+#else
 ZI_DEV uint32_t zi_x(uint32_t v,int src){return (uint32_t)__shfl_sync(0xFu,(unsigned int)v,src);}
+ZI_DEV void zi_conv(){}
+#endif
 #else
 uint32_t zi_x(uint32_t v,int src);
+static inline void zi_conv(){}
 #endif
 /* p limbs, little-endian 32-bit (limb 8 = 0). Kept as an initialised local array in every
  * user so it folds to immediates in device code instead of a constant-bank load. */
@@ -313,6 +364,11 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
             const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
             delta=zi_divstep30_by(delta,f0,g0,&a,&b,&c,&d);
         }
+        /* The only divergent region in this function. Everything from here to
+         * the uniform `if(nz==0) break;` (and on to the uniform back-edge) is
+         * straight-line across lanes 0..3, so one reconvergence here covers
+         * every exchange below. No-op unless ZI_SHFL_IMM==2. */
+        zi_conv();
         int32_t ka=odd?d:a,kb=odd?c:b;
         ka=(int32_t)zi_x((uint32_t)ka,lane&1);
         kb=(int32_t)zi_x((uint32_t)kb,lane&1);
