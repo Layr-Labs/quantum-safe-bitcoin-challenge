@@ -4,6 +4,7 @@
 // 128-leaf pipeline geometry follows 0xCramJam, public submission 1a228081.
 // The scaled sibling checkpoint and truncated inverse expansion are new here.
 #pragma once
+#include "RecoveryWeight.cuh"
 
 #ifndef QSB_RECOVERY_N
 #define QSB_RECOVERY_N 128
@@ -33,7 +34,7 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     uint64_t raw[5];qsb_field_mul(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
     _ModSub256(d,X);
-    qsb_recovery_mul(W,V,d);       // W = V*(a*U-X), with U=ZZ and V=ZZZ.
+    qsb_weighted_leaf(W,V,d);      // W = V*(a*U-X) as an exact [0,2^256) residue.
     W[4]=0;
 }
 
