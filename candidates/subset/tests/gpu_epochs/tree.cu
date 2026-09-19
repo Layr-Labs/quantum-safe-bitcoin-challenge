@@ -710,6 +710,22 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
+#ifndef QSB_FILTER_LAST
+#define QSB_FILTER_LAST 1
+#endif
+/* Speculative last window: same deferred-Y protocol as the earlier
+ * filter mixed-adds, but instantiate DEFER_Y=false so Y is formed here.
+ * Replay and the verifier keep qsb_complete_last_add unchanged. */
+__device__ __forceinline__ void qsb_filter_last_add(
+    uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff,uint32_t &bad){
+#if QSB_FILTER_LAST
+    qsb_filter_point_add<false>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff,bad);
+#else
+    (void)bad;
+    qsb_complete_last_add(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
+#endif
+}
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -769,7 +785,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
     }
 #else
 #if ZLAB_DIRDIG
@@ -794,7 +810,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
     }
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
@@ -815,7 +831,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
     }
 #endif
 #endif
