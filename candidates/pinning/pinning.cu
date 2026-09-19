@@ -8,6 +8,9 @@
  * Usage:  ./qsb_real pinning2.bin [easy]
  */
 
+#ifndef QSB_REMEASURE_TAG_09191221
+#define QSB_REMEASURE_TAG_09191221 1 /* no-op: frontier re-measurement, see submission note */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1318,16 +1321,16 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
 #if QSB_SPARSE_TAIL
         /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
-        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
-        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        /* Direct byte selection; tail[0] low byte and tail[1] upper 3 bytes are
+           zero by the host FAST initializer, so this matches the mask/shift/OR. */
+        uint32_t w0 = __byte_perm(lt, pin_tail_words[0], 0x7650);
+        uint32_t w1 = __byte_perm(lt, pin_tail_words[1], 0x1234);
         uint32_t w2 = pin_tail_words[2];
         _SHA256TransformFastTail11(state, w0, w1, w2);
 #else
         uint32_t blk[16] = {
-            pin_tail_words[0] | (lt & 0xffu),
-            ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1],
+            __byte_perm(lt, pin_tail_words[0], 0x7650),
+            __byte_perm(lt, pin_tail_words[1], 0x1234),
             pin_tail_words[2],
             0,0,0,0,0,0,0,0,0,0,0,0,9995u*8u
         };
