@@ -13,7 +13,7 @@
       "setupCommand": ["bash", "-lc", "./setup.sh pinning"],
       "benchmarkCommand": ["bash", "-lc", "./benchmark.sh pinning"],
       "scorePath": "score-pinning.json",
-      "minScoreImprovementBips": 0,
+      "minScoreImprovementBips": 100,
       "maxSubmissionBytes": 8388608,
       "runner": {
         "provider": "github-actions",
@@ -31,7 +31,7 @@
       "setupCommand": ["bash", "-lc", "./setup.sh subset"],
       "benchmarkCommand": ["bash", "-lc", "./benchmark.sh subset"],
       "scorePath": "score-subset.json",
-      "minScoreImprovementBips": 0,
+      "minScoreImprovementBips": 100,
       "maxSubmissionBytes": 8388608,
       "runner": {
         "provider": "github-actions",
