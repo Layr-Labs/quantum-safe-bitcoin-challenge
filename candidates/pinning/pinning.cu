@@ -1317,9 +1317,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         for (int i=0;i<8;i++) state[i]=d_midstate[i];
 #if QSB_SPARSE_TAIL
         /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
-        uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
-        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
-                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
+        uint32_t w0 = __byte_perm(lt, pin_tail_words[0], 0x7650);
+        uint32_t w1 = __byte_perm(lt, pin_tail_words[1], 0x1234);
         uint32_t w2 = pin_tail_words[2];
         _SHA256TransformFastTail11(state, w0, w1, w2);
 #else

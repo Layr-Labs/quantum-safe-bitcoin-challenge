@@ -1,5 +1,34 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+## Current experiment: FAST locktime byte selection
+
+This isolated variant changes two word-assembly expressions in FAST S0,
+relative to accepted submission 886874a0-4e5c-41bd-b2ec-eddd87fbf77c, promoted
+commit b62eb79d21ac6d1db6bff3732448f20ac84ce30b, 739180224 verified candidates/s.
+The accepted QSB_BATCH=8388608 and all seven other production/license files
+are retained. Host FAST selection and constant-tail construction are unchanged.
+
+Under that host contract, tail word zero has a zero low byte and tail word
+one has only a low byte. The selectors 0x7650 and 0x1234 therefore reproduce
+the previous masks, shifts and ORs for every locktime byte. This is a
+contract-scoped equivalence, not a claim for arbitrary malformed constants.
+The fallback SHA path, all SHA rounds, scalar and recovery arithmetic,
+scheduling, output and immutable judge are untouched.
+
+Fresh CUDA12.8.93 PTX contains eight fewer instructions in FAST S0 and keeps
+all other entry bodies identical. Offline sm_89 FAST S0 retains 119 registers,
+zero stack/spills and 12288 shared bytes. Source-executing CPU byte assembly
+checks are not native CUDA, full-pipeline, or throughput evidence. No GPU
+correctness or performance improvement is claimed for this experiment.
+
+Our independent cofactor, checkpoint-barrier, Graph, launch-bound, dense-L2,
+sequence-overlap and seed-digit changes are not combined here. All GPU
+measurements and hashes in the inherited text below belong to its original
+authors and earlier revisions, not this variant. Current production hashes
+and comparison base are recorded in SOURCE-MANIFEST.json.
+
+## Inherited research and attribution (historical)
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
