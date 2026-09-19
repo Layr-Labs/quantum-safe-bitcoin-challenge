@@ -40,6 +40,9 @@
 #ifndef ZLAB_PAIRSHA
 #define ZLAB_PAIRSHA 0
 #endif
+#ifndef ZLAB_DUAL_EPOCH_SHA
+#define ZLAB_DUAL_EPOCH_SHA 1
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -490,16 +493,6 @@ __device__ __forceinline__ void qsb_complete_last_add(
 // Delayed dispatch only: either the original path is identical, or its exact chain is replayed.
 #include "../../chain_replay_field.cuh"
 #include "../../hit_filter_field.cuh"
-// Speculative final point step: retain the packed PTX body, then resolve Y.
-// The complete/exact chains and output checker do not call this helper.
-__device__ __forceinline__ void qsb_filter_last_add(
-    uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
-    const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
-    qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
-    uint64_t scaled_y[4];
-    qsb_filter_mul(scaled_y,y,ZZZ,bad);
-    _ModSub256(Y,Y,scaled_y);
-}
 __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
@@ -720,6 +713,26 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
+/* Speculative last addition (pair_shared.cuh, QSB_SPEC_FINISH): declared here because the filter chain precedes it. */
+__device__ __forceinline__ void qsb_spec_last_add(uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff);
+#ifndef QSB_SPEC_FINISH
+#define QSB_SPEC_FINISH 1
+#endif
+#ifndef ZLAB_K2S3M
+#define ZLAB_K2S3M 1
+#endif
+#if QSB_SPEC_FINISH && ZLAB_K2S3M
+#define QSB_FILTER_LAST_ADD qsb_spec_last_add
+#else
+#define QSB_FILTER_LAST_ADD qsb_complete_last_add
+#endif
+#ifndef QSB_FOLD_SEED
+#define QSB_FOLD_SEED 1
+#endif
+#ifndef QSB_FOLD_LAST_ADD
+#define QSB_FOLD_LAST_ADD 1
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -779,19 +792,68 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
     gt_load_signed(gTable,0,idx,neg,x0,y0);
+#if QSB_FOLD_SEED && QSB_FOLD_LAST_ADD
+    /* QSB_FOLD_SEED (kill switch, speculative filter chain only): no separate affine+affine seed.
+     * The first table point is a complete XYZZ point with ZZ = ZZZ = 1; in the deferred-Y
+     * representation (Y_def = Y_true + anchor*ZZZ) that is Y_def = y with anchor 0.  Chunk 1 then
+     * runs as an ordinary iteration: same 17-bit width, same 2^16 stride, gt_offset(1) = 2^17. */
+    Load256(X,x0); Load256(Y,y0);
+    ZZ[0]=1ULL;ZZ[1]=ZZ[2]=ZZ[3]=0ULL; ZZZ[0]=1ULL;ZZZ[1]=ZZZ[2]=ZZZ[3]=0ULL;
+    y0[0]=y0[1]=y0[2]=y0[3]=0ULL;
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(1);
+    unsigned pos=(unsigned)gt_shift(1)+1u;
+    #pragma unroll 1
+    for (int c=1;c<GT_CHUNKS;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 16;
+    }
+    {
+        uint64_t sy[4];
+        qsb_filter_mul(sy,y0,ZZZ,bad);
+        _ModSub256(Y,Y,sy);
+    }
+#else
     gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
     gt_load_signed(gTable,1,idx,neg,x1,y1);
     qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
+#if QSB_FOLD_LAST_ADD
+    /* QSB_FOLD_LAST_ADD (kill switch, speculative filter chain only): the last addition runs as a
+     * 13th iteration of the rolled loop instead of a separate straight-line copy of the point
+     * add.  The deferred-Y body leaves Y = R*(Q-X3); the complete value is that minus y2*ZZZ, so
+     * one multiply and one subtract after the loop finish it (y0 holds the last table y).  The
+     * last digit differs from the others only in its sign rule, selected by a per-iteration flag;
+     * chunk widths and the table stride are the same 17 bits / 2^16 entries.  Idea of running the
+     * filter's final addition on the packed deferred-Y body: Meganpark980320, bb406ab. */
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        uint64_t sy[4];
+        qsb_filter_mul(sy,y0,ZZZ,bad);
+        _ModSub256(Y,Y,sy);
+    }
+#else
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
         gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
@@ -804,8 +866,10 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
+#endif
+#endif /* QSB_FOLD_SEED */
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -825,7 +889,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #endif
 #endif
@@ -1483,6 +1547,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const bool active = idx<batch_size;
 #if ZLAB_K2S3M
     __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
+#if QSB_PARK_PROD_IN_TREE
+    __shared__ uint64_t qsb_tree_products[4][512];   /* owned here, used by the block inverse tree */
+#endif
 #else
     __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
 #endif
@@ -1495,18 +1562,47 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
 #if ZLAB_K2S3M
     uint64_t prodA[5], prodB[5], nB[12];
+#if ZLAB_DUAL_EPOCH_SHA
+    uint64_t zB[4];
+    #if QSB_FRONT_SECOND_SHA
+    QsbPairEpochZ zpair=qsb_pair_epoch_state_value(f0,f1,tid);   /* packed first-hash states */
+#else
+    QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,tid);
+#endif
+    // Park B's scalar while A runs its field chain; these four rows are free
+    // until A's final four pre-inverse words are written below.
+    #pragma unroll
+    for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+#endif
 #else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
 #endif
     int okA, okB;
     {
 #if ZLAB_K2S3M
+#if ZLAB_DUAL_EPOCH_SHA
+        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
         Load256(prodA,fa.words);prodA[4]=0;
         okA=fa.ok && active;
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+#if ZLAB_DUAL_EPOCH_SHA
+        #pragma unroll
+        for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
+        #pragma unroll
+        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+        #pragma unroll
+        for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
+#if QSB_PARK_PROD_IN_TREE
+        #pragma unroll
+        for(int k=0;k<4;k++)qsb_tree_products[k][tid]=prodA[k];
+#endif
+#else
         #pragma unroll
         for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+#endif
 #else
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
@@ -1519,7 +1615,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
+#if ZLAB_DUAL_EPOCH_SHA
+    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
     for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
@@ -1530,8 +1630,19 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     okB=fb.ok && active && hasB;
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
+#if QSB_PARK_PROD_IN_TREE && ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+    #pragma unroll
+    for(int k=0;k<4;k++)prodA[k]=qsb_tree_products[k][tid];
+    prodA[4]=0;
+    qsb_field_mul_raw(leaf,prodA,prodB);
+    qsb_block_inverse_tree(leaf,qsb_tree_products);   /* 1/(WA*WB) for this lane */
+#elif QSB_PARK_PROD_IN_TREE
+    qsb_field_mul_raw(leaf,prodA,prodB);
+    qsb_block_inverse_tree(leaf,qsb_tree_products);
+#else
     qsb_field_mul_raw(leaf,prodA,prodB);
     qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
+#endif
     if(okA){
 #if ZLAB_K2S3M
         uint64_t inv[5],n[12];

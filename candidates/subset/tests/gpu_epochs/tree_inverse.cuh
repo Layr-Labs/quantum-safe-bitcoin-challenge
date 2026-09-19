@@ -152,8 +152,22 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     value[4]=0;
 }
 #else
+/* QSB_PARK_PROD_IN_TREE (kill switch): the kernel entry owns the product array so that lane
+ * slot [k][tid] -- free until the leaf product is published below -- can hold candidate A's
+ * denominator across candidate B's front call instead of eight caller-saved registers.
+ * Same shared bytes, same tree. */
+#ifndef QSB_PARK_PROD_IN_TREE
+#define QSB_PARK_PROD_IN_TREE 1
+#endif
+#ifndef QSB_TREE_FOLD_LEAF
+#define QSB_TREE_FOLD_LEAF 1
+#endif
+#if QSB_PARK_PROD_IN_TREE
+__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value,uint64_t products[4][512]){
+#else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
+#endif
     __shared__ uint64_t inverses[4][256];
     const int tid=threadIdx.x,n=blockDim.x;
     #pragma unroll
@@ -245,6 +259,40 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // Level count (4..n/2): lanes < count read parent inverses written by
     // lanes < count/2 and write inverses read by lanes < 2*count.
     offset-=4;   /* level count=4 */
+#if QSB_TREE_FOLD_LEAF
+    /* QSB_TREE_FOLD_LEAF (kill switch): the leaf level is the same parent-inverse times sibling
+     * product as every internal downward level (offset reaches 0, count reaches n), so it runs
+     * as the last iteration of this loop instead of a second straight-line copy of the multiply.
+     * The last iteration publishes nothing and therefore needs no barrier: every lane keeps its
+     * own leaf inverse.  Same loads, same multiplies, same values. */
+    #pragma unroll 1
+    for(int count=4;count<=n;count<<=1){
+        int half=count>>1;
+        if(tid<count){
+            uint64_t parent_inv[5],sibling[5],child_inv[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                parent_inv[k]=inverses[k][offset+count-n+(tid&(half-1))];
+                sibling[k]=products[k][offset+(tid^half)];
+            }
+            parent_inv[4]=sibling[4]=0;
+            qsb_field_mul_raw(child_inv,parent_inv,sibling);
+            if(count<n){
+                #pragma unroll
+                for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child_inv[k];
+            }else{
+                #pragma unroll
+                for(int k=0;k<4;k++)value[k]=child_inv[k];
+            }
+        }
+        if(count<n){
+            offset-=count<<1;
+            if((count<<1)>32)__syncthreads();else __syncwarp();
+        }
+    }
+    value[4]=0;
+    return;
+#endif
     #pragma unroll 1
     for(int count=4;count<n;count<<=1){
         int half=count>>1;
