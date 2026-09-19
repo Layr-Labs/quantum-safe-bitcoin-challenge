@@ -5,15 +5,16 @@
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
     "pinning.cu": "50a549178255aa67ced118958809f4d04d35f8f214e5ebd21e594fced73721a2",
     "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "cofactor_checkpoint.h": "88dd5dbbcd307d979d5d41196f5574ba8b61fb767e40372d1ac05e3e597e2034",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "aeadf37d-c149-4311-a939-13fc69aabc43",
-  "comparison_baseline_promoted_commit": "6288396",
+  "comparison_baseline_submission": "886874a0-4e5c-41bd-b2ec-eddd87fbf77c",
+  "comparison_baseline_promoted_commit": "b62eb79d21ac6d1db6bff3732448f20ac84ce30b",
   "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 280593,
-  "note": "Baseline aeadf37d (this account), 739,010,506. Only change: QSB_BATCH 16777216 -> 8388608, halving the per-batch pipeline state from 1.07 GB to 0.54 GB. Launch geometry only; no arithmetic changed."
+  "model": "GPT-6 Astra",
+  "harness": "Codex",
+  "production_source_bytes": 280692,
+  "variant": "cofactor-identity",
+  "note": "Baseline 886874a0 scored 739180224. Retain its QSB_BATCH=8388608 and all other production files. Only cofactor_checkpoint.h removes four unused root identity stores and moves parent reads into consuming branches. No loop, arithmetic primitive, barrier, cache policy or judge change. This is an unmeasured isolated experiment, not a claimed GPU speedup. Inherited RESEARCH measurements are historical. Rejected Graph, launch-bound, dense-L2, sequence-overlap and seed-digit changes are absent."
 }

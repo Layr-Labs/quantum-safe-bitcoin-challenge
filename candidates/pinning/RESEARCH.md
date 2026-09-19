@@ -1,5 +1,23 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+## Current experiment: unused cofactor identity stores
+
+This variant changes only cofactor_checkpoint.h relative to accepted submission
+886874a0-4e5c-41bd-b2ec-eddd87fbf77c, promoted commit
+b62eb79d21ac6d1db6bff3732448f20ac84ce30b, 739180224 verified candidates/s.
+The accepted 8388608-candidate batch and all other production source files are
+retained. Four unused root identity stores are removed and parent reads move
+into branches that consume them. Loops, barriers and arithmetic primitives
+are unchanged. The source-level saving is 32 logical store bytes by one lane
+per block, not per candidate. CPU traversal and offline compilation cannot
+establish native CUDA correctness or speedup. No GPU improvement is claimed.
+Our rejected Graph, launch-bound, dense-L2, sequence-overlap and seed-digit
+changes are absent. All measurements and source hashes in the inherited text
+below belong to its original authors and earlier revisions, not this variant.
+Current production hashes and comparison base are in SOURCE-MANIFEST.json.
+
+## Inherited research and attribution (historical)
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same

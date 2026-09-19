@@ -32,7 +32,6 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         #pragma unroll
         for(int k=0;k<4;k++) {
             roots[(size_t)blockIdx.x*4+k]=products[k][2*N-2];
-            excluded[k][N-2]=k==0?1:0;
         }
     }
     __syncwarp();
@@ -44,11 +43,14 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             uint64_t parent[5],sibling[5],out[5];
             #pragma unroll
             for(int k=0;k<4;k++) {
-                parent[k]=excluded[k][offset+count-N+(tid&(half-1))];
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
-            if(count==2){Load256(out,sibling);}else{qsb_field_mul(out,parent,sibling);}
+            if(count==2){Load256(out,sibling);}else{
+                #pragma unroll
+                for(int k=0;k<4;k++)parent[k]=excluded[k][offset+count-N+(tid&(half-1))];
+                qsb_field_mul(out,parent,sibling);
+            }
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }
@@ -58,10 +60,13 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     uint64_t parent[5],sibling[5];
     #pragma unroll
     for(int k=0;k<4;k++) {
-        parent[k]=excluded[k][tid&(N/2-1)];
         sibling[k]=products[k][tid^(N/2)];
     }
     parent[4]=sibling[4]=0;
-    if(N==2){Load256(value,sibling);}else{qsb_field_mul(value,parent,sibling);}
+    if(N==2){Load256(value,sibling);}else{
+        #pragma unroll
+        for(int k=0;k<4;k++)parent[k]=excluded[k][tid&(N/2-1)];
+        qsb_field_mul(value,parent,sibling);
+    }
     value[4]=0;
 }
