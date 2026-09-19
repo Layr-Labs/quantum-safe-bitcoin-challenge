@@ -99,13 +99,27 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
 /* Public subset submission 4f367236 by owizdom supplies the speculative
  * pre-inverse prepare and post-inverse finish used by the scalar-fed dual SHA
  * path below. The promoted bb406ab8 last-add helper in tree.cu is retained
- * independently. QSB_SPEC_FINISH=0 disables the owizdom finish stages, while
+ * independently. QSB_SPEC_FINISH=0 disables both owizdom finish stages, while
  * the promoted packed-PTX last addition remains in both arms. Every tentative
  * hit is recomputed by kernel_verify_pair_hits with the exact guarded chain;
  * the speculative filter can still lose a hit. The exact verify path
- * (qsb_k2s_front_exact, qsb_k2s_post, qsb_pair_verify_candidate) is untouched. */
+ * (qsb_k2s_front_exact, qsb_k2s_post, qsb_pair_verify_candidate) is untouched.
+ *
+ * The 12 in-chain mixed-adds already use unguarded qsb_filter_* ops. Enabling
+ * the same twins on the pre-inverse prepare as well as the post-inverse finish
+ * pushed kernel_digest to the 128-register launch-bounds ceiling and spilled
+ * one entry-frame word. The tail twin alone stays at 127 registers with no
+ * spill. Default: keep the tail on the unguarded ops and leave the front
+ * prepare on the exact _ModMult path. QSB_SPEC_FRONT=1 turns the prepare
+ * twins back on. */
 #ifndef QSB_SPEC_FINISH
 #define QSB_SPEC_FINISH 1
+#endif
+#ifndef QSB_SPEC_FRONT
+#define QSB_SPEC_FRONT 0
+#endif
+#ifndef QSB_SPEC_TAIL
+#define QSB_SPEC_TAIL QSB_SPEC_FINISH
 #endif
 #if QSB_SPEC_FINISH && ZLAB_K2S3M
 __device__ __forceinline__ void qsb_spec_finish_prepare(
@@ -208,7 +222,7 @@ __device__ __forceinline__ int qsb_k2s_front3(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
-#if QSB_SPEC_FINISH
+#if QSB_SPEC_FRONT
     qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
     qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
 #else
@@ -251,9 +265,7 @@ __device__ __forceinline__ int qsb_k2s_front3_z(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
-#if QSB_SPEC_FINISH
-    // Keep the scalar-fed dual SHA path on the same speculative finish as the
-    // original single-epoch front; exact recovery still runs in the verifier.
+#if QSB_SPEC_FRONT
     qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
     qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
 #else
@@ -396,7 +408,7 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t inv[4]={v0,v1,v2,v3};
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t q1x[4],q2x[4];int recid=0;
-#if QSB_SPEC_FINISH
+#if QSB_SPEC_TAIL
     uint32_t par=qsb_spec_post3(n,inv,rx,ry,q1x,q2x);
 #else
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
