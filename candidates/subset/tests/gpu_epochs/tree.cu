@@ -2594,6 +2594,30 @@ int main(int argc, char **argv) {
         free(chk_table);
     }
 
+    /* Persisting-L2 window over the fixed-base table. Declare the table address
+     * range persisting (hit) and everything else streaming (miss). Host-side
+     * cache policy only: no computed value changes. On devices reporting a zero
+     * persisting ceiling this is a no-op. */
+    {
+        int max_persist = 0, max_window = 0;
+        cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+        cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        if (want > 0 && max_window > 0) {
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaStreamAttrValue av = {};
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
+            printf("  L2 persistence: %.0f MiB pinned over the fixed-base table %s\n",
+                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   pe==cudaSuccess ? "(active)" : cudaGetErrorString(pe));
+        }
+    }
+
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
     cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
