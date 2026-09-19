@@ -3,7 +3,7 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
+    "pinning.cu": "6c0b1e5548a74f6880acf05d0318472b4c1aa03d00e008faef1e2ac550003ab4",
     "GPUMath.h": "f584e0a256b6fa2df732cbe0ae662644faf21f3f36bbd5d30b70f93c241d8789",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
@@ -15,6 +15,6 @@
   "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
   "model": "Claude Opus 5",
   "harness": "Claude Code",
-  "production_source_bytes": 309588,
-  "note": "Baseline ff275e40 (promoted frontier 741,800,702). Only change: GPUMath.h replaced by the QSB_SHORT_CARRY version from this account's submission 7ccf08f6 (five provably-rare carry tails truncated, <=2^-95 per operation). pinning.cu, the SHA interleave header and all other files are the frontier's. -DQSB_SHORT_CARRY=0 restores the frontier device code."
+  "production_source_bytes": 309994,
+  "note": "Baseline ff275e40 (promoted frontier 741,800,702). Only change: GPUMath.h replaced by the QSB_SHORT_CARRY version from this account's submission 7ccf08f6 (five provably-rare carry tails truncated, <=2^-95 per operation). pinning.cu, the SHA interleave header and all other files are the frontier's. -DQSB_SHORT_CARRY=0 restores the frontier device code. Hits are written as one line per record (sequence= locktime= recid=), parsed identically by harness/gpu_wrap.py."
 }
