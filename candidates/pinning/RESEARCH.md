@@ -1,3 +1,55 @@
+# 0017 research addendum: predicated ModMult carry tail
+
+This future candidate changes only the CUDA `_ModMultCore` final upper carry
+tail in `GPUMath.h`.  It is an alternate control-flow experiment to the
+branch-form 0016 candidate, not an identical retry and not a claimed speedup.
+After the existing addition into `z2`, the source computes
+`mm_tail_skip = (z2 > 1)` and predicates each of the five inherited upper
+`addc` operations with `@!mm_tail_skip`; it introduces no new branch or label.
+
+The producer bound is `q <= K` and `K*q <= K^2 < 2^65`, so the high addend
+word `m2` is at most one.  Equality is reachable for
+`a=b=B-2K=p-K`: `q=K`, `s=0`, and
+`m=K^2=0x1000007a2000e90a1`.  If the addition into `z2` overflows, its wrapped
+result is at most one.  Therefore a post-addition `z2 > 1` proves that the
+carry into the upper five words (`c96`) is zero.  A false PTX execution guard
+preserves both the destination and condition code, so suppressing these
+zero-carry additions preserves the accepted words and modeled final CC.
+When the predicate is false, the original five-instruction chain executes.
+
+The source-bound frozen suite passes six tests over 50,216 bounded tail states
+and 20,124 complete producer pairs.  It detects ten instruction mutants and
+six scope mutants.  A separate independent challenge detects 25 mutants; nine
+overlap the frozen ten, so there are 16 new and 26 unique instruction mutants
+in the combined evidence, not 35 unique mutants.  The accepted SHA fixture is
+unchanged and passes 11,522 messages / 34,566 digest comparisons.
+
+Static six-entry PTX comparison changes only the table builder and FAST S0;
+the other four entry bodies are byte-identical.  Relative to branch-form
+0016v2, each changed entry has eleven fewer static PTX `bra` instructions,
+while parsed offline resources are equal (FAST S0: 106 registers, zero spills).
+However, the predicated offline FAST `.text` section is 128 bytes larger than
+the branch form.  Raw section bytes are neither instruction counts nor evidence
+of driver-JIT behavior.  The current source contains 95 dynamic
+`_ModMultCore` calls per S0 lane, but that count does not establish a wall-time
+fraction or performance effect.
+
+The inherited outgoing `c256` drop is unchanged.  Equivalence to accepted
+behavior is not a proof of exact field arithmetic for every unsigned 256-bit
+input.  No native GPU execution, JIT/SASS inspection, profiler, sanitizer,
+timing, throughput, branch frequency, official score, or performance gain is
+claimed for this candidate.  The package is prepared for independent review;
+submission additionally requires a terminal predecessor and fresh gates.
+
+---
+
+## Historical accepted-source material below
+
+The remainder is inherited verbatim from accepted commit `0b2c7b0`.  Its
+native-GPU checks, submissions, source-size statements, and performance claims
+describe the historical accepted submission, not experiment 0017.  Current
+0017 evidence and limitations are the addendum above and the package records.
+
 # Pinning: signed digit decoding and weighted cofactor recovery
 
 This candidate removes work from the fixed-base scalar decoder, point-chain
