@@ -1,5 +1,57 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+## Experiment 0014: direct final super-root inversion
+
+This prepared experiment changes only the final super-root inversion kernel and
+its launch geometry relative to accepted commit
+`0b2c7b064b6de4c55816ffb1ade62195b0c450a2` (official score 741,800,702).
+The accepted root-group prepare and finish kernels, field primitives, SHA-256
+schedule interleave, fast-only host routing, and accepted SHA regression test
+remain byte-for-byte unchanged.
+
+For the default full 8,388,608-candidate batch, accepted final-stage batching
+uses 765 field multiplications and one `_ModInv` across 256 super roots. This
+experiment instead assigns one active lane to each super root, normalizes its
+five-limb local buffer, and calls `_ModInv` independently: zero final-stage
+tree multiplications and 256 inversions. The last partial warp returns before
+loads and stores, and the changed kernel contains no barrier or collective.
+
+The retained static comparison reports 874 to 48 PTX opcodes in the changed
+entry, but that count excludes the noinline `_ModInv` callee and all
+data-dependent dynamic work. It is therefore a code-shape observation, not a
+speed or performance claim. No native GPU execution, driver JIT/SASS,
+compute-sanitizer run, timing, throughput measurement, or official result is
+available for this candidate.
+
+Focused source-bound host tests cover direct lane-to-root mapping, partial
+tails, multiple CTAs, loose nonzero representatives, guards, four rejected
+mutants, and restoration of the accepted source outside the three reviewed
+spans. The accepted SHA test separately covers 11,522 messages and 34,566
+digest comparisons, including in-place aliasing. The host fixture substitutes
+a bigint inverse: it does not execute CUDA `_ModInv`, and it intentionally
+assumes canonical nonzero inputs after normalization. Raw zero, exactly the
+field modulus, actual device inversion, SIMT behavior, and producer-side
+nonzero guarantees remain native/integration evidence gaps.
+
+This source is frozen for independent review and is deliberately not eligible
+for submission while the prior official submission remains live. The original
+delta review and current-frontier rebase review are retained outside the
+submission archive and are identified by their SHA-256 digests in the package
+report.
+
+## Historical accepted-0b2 provenance (inherited with clarifications)
+
+The remainder of this document is retained provenance from the earlier Pinning
+submission lineage that became part of accepted commit 0b2. Its native-GPU
+correctness runs, matched performance measurements, statements that a candidate
+was submitted, eight-file/247,374-byte package description, production binary,
+and old `pinning.cu` digest describe that historical submission only. They are
+not validation, packaging metadata, submission status, or performance evidence
+for experiment 0014. Current 0014 bindings are the nine-file manifest, the
+12-member source archive, and the non-native checks described above and in the
+package report. Experiment 0014 has not run on a GPU and remains prepared,
+independently unreviewed, and submission-ineligible.
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
@@ -131,8 +183,9 @@ time 1,201.492 seconds). Every one of its **103,447 reported hits** passed
 independent OpenSSL recovery and hash verification, with no failures or
 duplicates. The production binary SHA-256 was
 `d0090dbd589ef0837ac41ad789aff1084ad62e0f742da4b1ab103cae00907753`.
-The source and binary hashes were checked before and after this run. This is
-local correctness evidence for the submitted source, not an official score.
+The source and binary hashes were checked before and after this historical run.
+This is local correctness evidence for that historical submitted source, not
+for experiment 0014 and not an official score.
 
 ## Matched performance evidence
 
@@ -150,11 +203,12 @@ sequences, **87,122,000,000 completed candidates** in the timed region.
 | B2 | submitted candidate | 120.275803 | 724.351849 |
 | A2 | ce0aff4e frontier | 122.003528 | 714.094106 |
 
-The two paired gains are **+1.38479%** and **+1.43647%**. These are local
-complete-work wall measurements, not hit-derived ranked scores and not a
-cross-division of local throughput by the official record. The candidate is
-submitted because it repeatedly exceeds the fastest currently public artifact
-in this cohort. Ranked hit sampling and future competitors can affect promotion.
+The two paired gains are **+1.38479%** and **+1.43647%**. These are historical
+local complete-work wall measurements, not hit-derived ranked scores and not a
+cross-division of local throughput by the official record. That historical
+candidate was submitted because it repeatedly exceeded the fastest then-public
+artifact in this cohort. This does not describe experiment 0014, which has not
+been submitted. Ranked hit sampling and future competitors can affect promotion.
 
 The contemporary short cohort also included the previous 260879f4 frontier,
 ca8ed548, f4c21084, 0a26e48f, ad772199 and 9f06e0e5, alongside earlier relevant
@@ -183,12 +237,15 @@ completed work. Submission 287a16b9 was deduplicated with 1c8e12c4 after
 verifying that its only executable-source difference was an ordinary comment;
 quoted literals and token boundaries remained part of the identity check.
 
-The production source has its ordinary unbounded search loop terminated by
-the official fixed-time wrapper. Finite-work diagnostic sources, their stop
-conditions, prebuilt binaries, local result files and private infrastructure
-configuration are excluded from the submission. The code payload consists of
-the eight production source/license files, plus this research note and a
-public source manifest. It is below the 8 MiB editable-path limit.
+The historical production source had its ordinary unbounded search loop
+terminated by the official fixed-time wrapper. Finite-work diagnostic sources,
+their stop conditions, prebuilt binaries, local result files and private
+infrastructure configuration were excluded from that submission. That
+historical payload consisted of eight production source/license files, plus
+this research note and a public source manifest, totaling 247,374 production
+bytes as recorded below. The current 0014 archive instead has nine
+production/license files plus this research note, its current manifest, and
+the accepted SHA regression test: 12 regular members below the 8 MiB limit.
 
 ## Provenance
 
@@ -209,7 +266,10 @@ weighted root recovery and proven raw-parity boundary. The selected production
 source retains the baseline one-slot host execution path. GPL notices and the
 full COPYING file are included with the production source.
 
-Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
-`pinning.cu` SHA-256 is
+Historical production source hashes were recorded in that submission's
+`SOURCE-MANIFEST.json`. Its main `pinning.cu` SHA-256 was
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
-The eight source/license files total 247374 bytes before documentation.
+Its eight source/license files totaled 247,374 bytes before documentation.
+For experiment 0014, the current manifest binds nine production/license files
+totaling 281,816 bytes and `pinning.cu` SHA-256
+`67a70b070725892ae7cb5f9d403baebfdbc1ca6b2bea437919b2d32eaf271a82`.

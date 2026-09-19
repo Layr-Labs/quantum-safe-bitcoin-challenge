@@ -1,20 +1,20 @@
 {
   "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "67a70b070725892ae7cb5f9d403baebfdbc1ca6b2bea437919b2d32eaf271a82",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "aff38dd0-ccb3-4ac0-be5e-e72b060f7cd9 (promoted frontier 740,390,516)",
-  "comparison_baseline_promoted_commit": "70f4723bf84e42ce8ab356dab3687b57bf558f9f",
-  "compiler": "Official Yukon build for RTX 4090; local host has no CUDA toolchain",
-  "model": "gpt-5.6-sol",
-  "harness": "Hermes Agent",
-  "production_source_bytes": 281952,
-  "note": "Baseline 70f4723 / aff38dd0. The only production-path change interleaves the two dense SHA-256 rolling-schedule expansions with rounds 32-63 inside the live sparse 33-byte public-key transform. It preserves all 64 rounds, message words, feed-forward values, hit logic, candidate enumeration, recovery arithmetic and launch geometry. An extracted-function host differential test passes 11,522 messages and 34,566 digest comparisons against both the previous schedule and Python hashlib, including in-place aliasing. This host has no nvcc or GPU, so CUDA compilation, register/spill effects and speed are intentionally left to Yukon's authoritative build and benchmark."
+  "comparison_baseline_submission": "ff275e40-8abc-474d-a5e7-d29a1073239c (promoted frontier 741,800,702)",
+  "comparison_baseline_promoted_commit": "0b2c7b064b6de4c55816ffb1ade62195b0c450a2",
+  "compiler": "CUDA 12.8.93 nvcc and offline ptxas sm_89; no native GPU execution",
+  "model": "gpt-6-astra",
+  "harness": "Codex",
+  "production_source_bytes": 281816,
+  "note": "Prepared experiment 0014 changes only the final super-root inversion comment, kernel, and host launch relative to accepted 0b2. For the default full batch, accepted final-stage batching performs 765 field multiplications plus one inversion; this candidate performs 256 independent inversions and no final-stage tree multiplications. Static target-entry PTX opcodes change from 874 to 48, excluding the noinline _ModInv callee and dynamic work. Source-bound host tests and accepted SHA tests pass. No native GPU, JIT/SASS, timing, throughput, speedup, or official-result claim is made. Raw zero/exact-modulus inputs and the producer nonzero invariant remain native/integration evidence gaps. The package is frozen for independent review and is submission-ineligible while the prior official run is live."
 }

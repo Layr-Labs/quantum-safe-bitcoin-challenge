@@ -1097,9 +1097,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
 }
 
 /* Batch the per-search-CTA roots one level further. Groups of 256 roots use
- * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
- * group roots. A full 16M candidate batch therefore executes one _ModInv
- * instead of 65,536 independent inversions. */
+ * the same checkpointed tree helpers, then each group root is independently
+ * normalized and inverted by one active lane. */
 __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
     const uint64_t *roots, int count, uint64_t *super_roots,
     uint64_t *root_checkpoint
@@ -1113,22 +1112,21 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
     qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
 }
 
-/* One 256-lane CTA per 256 group roots; each CTA runs its own _ModInv, so
- * batches with more than 65,536 candidate trees need no third tree level. */
-__global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
+/* One active lane per group root. This kernel has no collective state or
+ * barriers, so a partial final warp may return before normalization/inversion. */
+__global__ void __launch_bounds__(32,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
-    int tid=(int)(blockIdx.x*256u+threadIdx.x);
-    bool active=tid<count;
-    uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
-                   active?super_roots[(size_t)tid*4u+1]:0ULL,
-                   active?super_roots[(size_t)tid*4u+2]:0ULL,
-                   active?super_roots[(size_t)tid*4u+3]:0ULL,0};
-    qsb_block_inverse(r);
-    if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
-    }
+    int tid=(int)(blockIdx.x*32u+threadIdx.x);
+    if(tid>=count)return;
+    uint64_t r[5]={super_roots[(size_t)tid*4u],
+                   super_roots[(size_t)tid*4u+1],
+                   super_roots[(size_t)tid*4u+2],
+                   super_roots[(size_t)tid*4u+3],0};
+    qsb_field_normalize(r);
+    _ModInv(r);
+    #pragma unroll
+    for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
 }
 
 __device__ __constant__ uint64_t pin_u2ry_words[4];
@@ -1598,7 +1596,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+31)/32,32 QSB_STREAM_ARG>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
