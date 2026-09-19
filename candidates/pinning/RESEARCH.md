@@ -1,3 +1,59 @@
+# Current experiment: `_ModMultCore` conservative result guard
+
+This package is corrected experiment 0016 v2, prepared locally against accepted Pinning
+commit `0b2c7b064b6de4c55816ffb1ade62195b0c450a2`, accepted submission
+`ff275e40-8abc-474d-a5e7-d29a1073239c`, and recorded score 741,800,702. It is
+submission-ineligible pending independent package review and every future
+runtime, frontier, ownership, queue, and source-integrity gate.
+
+The only executable-source change is inside the CUDA inline-PTX body of
+`GPUMath.h::_ModMultCore`. For `B=2^256` and `K=2^32+977`, the unchanged first
+fold gives `q<=K`, so the second-fold addend `K*q<=K^2<2^65` and its third
+32-bit word `m2` is at most one. Including the incoming carry, the addition to
+`z2` is therefore increased by at most two. If that addition produces the
+carry into bit 96 (`c96=1`), its post-addition result can only be zero or one.
+Thus post-addition `z2>1` proves `c96=0` and makes the inherited five upper
+zero-add carry operations no-ops.
+
+The candidate uses `setp.gt.u32 mm_tail_skip,z2,1` and an ordinary lane-local
+branch. It does not materialize the condition code, use `bra.uni`, introduce a
+call, or change the host fallback. The guard is conservative: when `z2<=1`
+with `c96=0`, it executes the harmless accepted tail. This false-negative slow
+path means the result guard does not unconditionally dominate the prior
+carry-capture experiment.
+
+The source-bound fixture has eight tests covering 50,224 bounded tail states,
+20,123 complete unsigned-256 producer pairs, all reachable `(c96,c256)`
+classes, ten instruction mutants, and six whole-source scope controls. Global
+bound assertions are independent of sampling. A concrete canonical equality
+witness reaches `q=K`, `s=0`, and `m=K^2`, and is checked through the full
+producer, actual host helper, and candidate tail. The unchanged accepted SHA
+test covers 11,522 messages and 34,566 comparisons including aliasing.
+
+The sealed 0016 v1 CUDA 12.8.93 binary, PTX, and offline sm_89 artifacts are
+reused byte-for-byte because all nine production/license files are identical.
+They are compatibility evidence, not a fresh v2 compilation. Six-entry
+comparison changes only table builder and FAST S0;
+the other four entry bodies are byte-identical. Each changed entry has eleven
+inline sites and gains eleven `setp.gt.u32` plus eleven ordinary `bra`
+instructions. FAST S0 reports 106 rather than 119 registers with zero spills;
+all other parsed resource fields match accepted. These static observations do
+not establish branch frequency, issued instructions, occupancy, timing,
+throughput, or a performance gain.
+
+The inherited final `c256` carry after propagation through `z7` remains
+dropped. Behavior equivalence to accepted source is not proof of exact field
+arithmetic for all unsigned 256-bit input pairs. No native GPU, full point
+pipeline, JIT, SASS, profiler, sanitizer, timing, or official candidate score
+exists for 0016 v2.
+
+The remainder of this file is inherited accepted-0b2 research and attribution.
+Its native-GPU checks, submissions, source counts, hashes, and performance
+statements describe historical accepted work, not validation of experiment
+0016 v2.
+
+---
+
 # Pinning: signed digit decoding and weighted cofactor recovery
 
 This candidate removes work from the fixed-base scalar decoder, point-chain
