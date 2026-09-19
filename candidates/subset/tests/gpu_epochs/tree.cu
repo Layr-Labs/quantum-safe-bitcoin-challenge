@@ -2916,8 +2916,8 @@ int main(int argc, char **argv) {
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
-            // One producer block for each valid epoch, including an odd tail.
-            kernel_build_first<<<epochs_in_batch,qsb_first_class_count>>>(d_epochs,d_first);
+            // Four 64-slot epochs per producer block; guard the partial last block.
+            kernel_build_first<<<(epochs_in_batch+3)/4,256>>>(d_epochs,d_first,epochs_in_batch,qsb_first_class_count);
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,

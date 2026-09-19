@@ -84,10 +84,15 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
  * consumer used to spend a thread barrier plus one compression of block time
  * per epoch while 54 leader lanes built these states and the other lanes
  * waited; now each lane reads its class state (32 bytes). */
+// Pack four 64-slot epochs into each 256-thread producer block.
+// Preserve all 54 active classes and the exact SHA compression per class.
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
-        uint32_t * __restrict__ d_first) {
-    const epoch_desc_t *ep = d_epochs + blockIdx.x;
-    const int c = threadIdx.x;
+        uint32_t * __restrict__ d_first, int epoch_count, int class_count) {
+    const unsigned packed = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned epoch = packed / QSB_FIRST_SLOTS;
+    const int c = (int)(packed % QSB_FIRST_SLOTS);
+    if(epoch >= (unsigned)epoch_count || c >= class_count) return;
+    const epoch_desc_t *ep = d_epochs + epoch;
     uint32_t st[8], W[16];
     #pragma unroll
     for(int j=0;j<8;j++)st[j]=ep->mid[j];
@@ -95,17 +100,25 @@ __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
     #pragma unroll
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
     _SHA256Transform(st,W);
-    const size_t base=((size_t)blockIdx.x*QSB_FIRST_SLOTS+(size_t)c)*8;
-    #pragma unroll
-    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+    const size_t base=((size_t)epoch*QSB_FIRST_SLOTS+(size_t)c)*8;
+    // Each class starts at a 32-byte boundary inside a cudaMalloc allocation.
+    // This temporary state should yield cache capacity to the reusable point table.
+    asm volatile("st.global.cs.v4.u32 [%0],{%1,%2,%3,%4};"
+        :: "l"(d_first+base),"r"(st[0]),"r"(st[1]),"r"(st[2]),"r"(st[3]) : "memory");
+    asm volatile("st.global.cs.v4.u32 [%0],{%1,%2,%3,%4};"
+        :: "l"(d_first+base+4),"r"(st[4]),"r"(st[5]),"r"(st[6]),"r"(st[7]) : "memory");
 }
 
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         const epoch_desc_t *epoch, int lane, const uint32_t *first) {
     (void)epoch;
     const int first_slot=QSB_FIRST_CLASS[lane];
-    #pragma unroll
-    for(int j=0;j<8;j++)state[j]=first[first_slot*8+j];
+    // The same 32-byte class layout is read by both filter and exact verifier.
+    const uint32_t *p=first+(size_t)first_slot*8;
+    asm volatile("ld.global.cs.v4.u32 {%0,%1,%2,%3},[%4];"
+        : "=r"(state[0]),"=r"(state[1]),"=r"(state[2]),"=r"(state[3]) : "l"(p) : "memory");
+    asm volatile("ld.global.cs.v4.u32 {%0,%1,%2,%3},[%4];"
+        : "=r"(state[4]),"=r"(state[5]),"=r"(state[6]),"=r"(state[7]) : "l"(p+4) : "memory");
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
