@@ -11,6 +11,9 @@
 #ifndef QSB_REMEASURE_TAG_09190538
 #define QSB_REMEASURE_TAG_09190538 1 /* no-op: frontier re-measurement, see submission note */
 #endif
+#ifndef QSB_REMEASURE_TAG_09190712
+#define QSB_REMEASURE_TAG_09190712 1 /* no-op: frontier re-measurement, see submission note */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
