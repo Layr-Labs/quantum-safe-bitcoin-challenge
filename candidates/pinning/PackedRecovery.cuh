@@ -65,7 +65,9 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+    // S = l+m = (u-v)+(u+v) = 2u. Form it from u alone so it does not
+    // wait on the slope pair; x_plus/x_minus still consume l and m.
+    _ModAdd256(sum,u,u); _ModSub256(l,u,v); _ModAdd256(m,u,v);
     _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
     _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);

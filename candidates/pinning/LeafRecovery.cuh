@@ -33,7 +33,17 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     uint64_t raw[5];qsb_field_mul(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
     _ModSub256(d,X);
-    qsb_recovery_mul(W,V,d);       // W = V*(a*U-X), with U=ZZ and V=ZZZ.
+    // W = V*(a*U-X). The cofactor tree already multiplies raw [0,2^256)
+    // residues; a canonical leaf here only feeds the zero test. Keep the
+    // exact product and let the caller classify {0,p} as unusable.
+    qsb_field_mul(raw,V,d);
+    Load256(W,raw);
+    // Exact p is 0 in the field. Map it to the integer 0 so the caller's
+    // four-limb OR still classifies the singular leaf without a fold.
+    if(W[0]==0xFFFFFFFEFFFFFC2FULL && W[1]==UINT64_MAX &&
+       W[2]==UINT64_MAX && W[3]==UINT64_MAX){
+        W[0]=W[1]=W[2]=W[3]=0;
+    }
     W[4]=0;
 }
 
