@@ -1,20 +1,194 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  "base": "ce007781a0d643239aa5b48db769e35dd5359ac2",
+  "frontier_score": 741800702,
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "coauthors": [
+    "may93182",
+    "terrapinelf"
+  ],
+  "donor_windows": "7d06816754f78d86cd62f6be4edf2ba25a68b14c",
+  "donor_batch": "19d888bd2a5d13ca94511eabe7dfb79fd12c9937",
+  "official_composite_score": null,
+  "local_native_compilation": false,
+  "audit": {
+    "status": "PASS",
+    "source_sha256": "b0a6d43dbf2ef864577e1e73eedc92b6a2c25c82c33b3b34dc0ff2fd0d1e2837",
+    "baseline_headers_equal": [
+      "GPUMath.h",
+      "GPUHash.h",
+      "PackedRecovery.cuh",
+      "LeafRecovery.cuh",
+      "RecoveryConstant.h",
+      "cofactor_checkpoint.h",
+      "sha_schedule_interleaved.cuh"
+    ],
+    "source_mirrored_window_cases": 64656,
+    "exceptional_doublings": 32,
+    "geometry": {
+      "11": {
+        "table_bytes": 3758096384,
+        "widths": [
+          24,
+          24,
+          24,
+          23,
+          23,
+          23,
+          23,
+          23,
+          23,
+          23,
+          23
+        ]
+      },
+      "12": {
+        "table_bytes": 1073741824,
+        "widths": [
+          22,
+          22,
+          22,
+          22,
+          21,
+          21,
+          21,
+          21,
+          21,
+          21,
+          21,
+          21
+        ]
+      },
+      "13": {
+        "table_bytes": 369098752,
+        "widths": [
+          20,
+          20,
+          20,
+          20,
+          20,
+          20,
+          20,
+          20,
+          20,
+          19,
+          19,
+          19,
+          19
+        ]
+      },
+      "14": {
+        "table_bytes": 150994944,
+        "widths": [
+          19,
+          19,
+          19,
+          19,
+          18,
+          18,
+          18,
+          18,
+          18,
+          18,
+          18,
+          18,
+          18,
+          18
+        ]
+      },
+      "15": {
+        "table_bytes": 67108864,
+        "widths": [
+          18,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17,
+          17
+        ]
+      },
+      "16": {
+        "table_bytes": 33554432,
+        "widths": [
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16,
+          16
+        ]
+      }
+    },
+    "batch_coverage": [
+      [
+        1,
+        1
+      ],
+      [
+        127,
+        1
+      ],
+      [
+        128,
+        1
+      ],
+      [
+        33554431,
+        1
+      ],
+      [
+        33554432,
+        1
+      ],
+      [
+        33554433,
+        2
+      ],
+      [
+        1244600000,
+        38
+      ]
+    ],
+    "sample_candidates": 67108864,
+    "pipeline_bytes": 4345364480,
+    "conservative_device_buffer_estimate_bytes": 9244573696,
+    "limits": "Python/static evidence only; excludes driver/context/stack allocations; no native compile, GPU execution or performance claim"
   },
-  "comparison_baseline_submission": "aff38dd0-ccb3-4ac0-be5e-e72b060f7cd9 (promoted frontier 740,390,516)",
-  "comparison_baseline_promoted_commit": "70f4723bf84e42ce8ab356dab3687b57bf558f9f",
-  "compiler": "Official Yukon build for RTX 4090; local host has no CUDA toolchain",
-  "model": "gpt-5.6-sol",
-  "harness": "Hermes Agent",
-  "production_source_bytes": 281952,
-  "note": "Baseline 70f4723 / aff38dd0. The only production-path change interleaves the two dense SHA-256 rolling-schedule expansions with rounds 32-63 inside the live sparse 33-byte public-key transform. It preserves all 64 rounds, message words, feed-forward values, hit logic, candidate enumeration, recovery arithmetic and launch geometry. An extracted-function host differential test passes 11,522 messages and 34,566 digest comparisons against both the previous schedule and Python hashlib, including in-place aliasing. This host has no nvcc or GPU, so CUDA compilation, register/spill effects and speed are intentionally left to Yukon's authoritative build and benchmark."
+  "files": {
+    "AUTOTUNING.md": "d00c87e34d0bd7a7006f4404da1b4f60629fe25ab94d6c7d568997a66912d318",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "FinalAffineGuard.cuh": "d6b4f62778e965f1698e24b67b8676b64a13fc6cf266e7191040a8550299f0f3",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
+    "PointZero.cuh": "c5a96e24e7930f5588d284e07e1be449ad5a0a5061470ced4133a40a9fc6496f",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "WINDOW-PROOF.md": "1d288864826c3555ee4338731a8aee8f67793a31082ce1f4a1b93c29871ff022",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "b0a6d43dbf2ef864577e1e73eedc92b6a2c25c82c33b3b34dc0ff2fd0d1e2837",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "test_sha_interleave.py": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd",
+    "tests/window_cases.py": "e750988e7be37917e707734094a24d88c3f66dc7ee238c38bacdc96cdd530d17",
+    "tests/window_point_audit.cu": "3f87fedfdc59538944e7fac06faa3ca074d4e601c55337409d3ba1e635b3095b"
+  }
 }

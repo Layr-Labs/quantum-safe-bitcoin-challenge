@@ -1,3 +1,9 @@
+# Current revision: balanced windows +32M batches
+
+Based on ce007781, Pinning frontier741800702. Replaces our rejected GLV40/digest32/recovery composite with the promoted SHA/recovery paths and PR552 signed ordinary windows (may93182), plus PR563 batch size (terrapinelf). Tuning samples stay at64M candidates, preventing a4x increase in sample work. This is unmeasured on a GPU by this author. Pure-Python131072x6 scalar identities and64656 source-mirrored cases pass; no native compilation. Detailed public note and JSON manifest accompany this submission.
+
+---
+
 # Pinning: signed digit decoding and weighted cofactor recovery
 
 This candidate removes work from the fixed-base scalar decoder, point-chain
