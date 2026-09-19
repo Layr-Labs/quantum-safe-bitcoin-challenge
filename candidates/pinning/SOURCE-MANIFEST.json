@@ -1,20 +1,44 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  "base": "9ef2d74abbbbb1e436b2e11461ba51c11d9cb3b7",
+  "frontier": 741800702,
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "coauthors": [
+    "EvanYan1024"
+  ],
+  "donorPR": 583,
+  "donorHead": "1eea69acec2e056d9cf7e59fc6b09067cc16bf56",
+  "audit": {
+    "status": "PASS",
+    "boundary_pairs": 100108,
+    "universal_raw_finish_cases": 10288,
+    "actual_ptx_finish_differentials": 512,
+    "actual_ptx_raw_boundary_pairs": 64,
+    "missing_guard_counterexample": {
+      "a": 0,
+      "d": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+    },
+    "operation_delta": {
+      "field_multiplies": 0,
+      "modular_additions": -2,
+      "normalizations_common_path": -2
+    },
+    "fixed_a_fallback": "a[3]==0",
+    "header_sha256": "2bde0522682842990a6bfad9abde27a39f519b885ad4f3244bade5af1222de37",
+    "limitations": "CPU integer/PTX semantics model only; no native compile or GPU performance claim"
   },
-  "comparison_baseline_submission": "aff38dd0-ccb3-4ac0-be5e-e72b060f7cd9 (promoted frontier 740,390,516)",
-  "comparison_baseline_promoted_commit": "70f4723bf84e42ce8ab356dab3687b57bf558f9f",
-  "compiler": "Official Yukon build for RTX 4090; local host has no CUDA toolchain",
-  "model": "gpt-5.6-sol",
-  "harness": "Hermes Agent",
-  "production_source_bytes": 281952,
-  "note": "Baseline 70f4723 / aff38dd0. The only production-path change interleaves the two dense SHA-256 rolling-schedule expansions with rounds 32-63 inside the live sparse 33-byte public-key transform. It preserves all 64 rounds, message words, feed-forward values, hit logic, candidate enumeration, recovery arithmetic and launch geometry. An extracted-function host differential test passes 11,522 messages and 34,566 digest comparisons against both the previous schedule and Python hashlib, including in-place aliasing. This host has no nvcc or GPU, so CUDA compilation, register/spill effects and speed are intentionally left to Yukon's authoritative build and benchmark."
+  "nativeCompile": false,
+  "gpuMeasured": false,
+  "files": {
+    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "PackedRecovery.cuh": "2bde0522682842990a6bfad9abde27a39f519b885ad4f3244bade5af1222de37",
+    "test_sha_interleave.py": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c"
+  }
 }

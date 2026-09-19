@@ -58,6 +58,16 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+// Delta d is an exact residue in [0,B), B=2^256, p=B-K, K=2^32+977.
+// If canonical a>=K, then -p<a-d<p: the inherited borrow-corrected
+// subtraction computes canonical x=a-d without normalizing d first.
+// a[3]!=0 implies a>=2^192>K. Small fixed a keeps full normalization.
+// The intervening parity product uses the exact full-width multiplier;
+// its own b-boundary guard remains unchanged. PR583 delta form: EvanYan1024.
+__device__ __forceinline__ void qsb_delta_boundary(uint64_t *d,const uint64_t *a) {
+    if(a[3]==0)qsb_field_normalize(d);
+}
+
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -66,10 +76,14 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
+    // d = S*(c-slope) = a - x, kept directly: both d's first (baseline multiply order),
+    // then the two parity products, then x = a - d in place. Two full modular adds fewer.
+    _ModSub256(t,c,l); qsb_packed_raw_mul(x1,sum,t); qsb_delta_boundary(x1,a); // raw d1
+    _ModSub256(t,c,m); qsb_packed_raw_mul(x2,sum,t); qsb_delta_boundary(x2,a); // raw d2
+    qsb_packed_raw_mul(s,l,x1); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
+    _ModSub256(x1,a,x1);
+    qsb_packed_raw_mul(s,m,x2); qsb_parity_boundary(s,b);
+    _ModSub256(x2,a,x2);
     return parity|(qsb_difference_parity(b,s)<<1);
 }

@@ -1,3 +1,9 @@
+# Current delta-boundary integration
+
+Based on current9ef2d74 and Pinning frontier741800702. PR583 EvanYan1024 retains d=a-x; this version independently proves that raw d needs normalization only when a[3]==0. Adds no multiply; removes two modular adds and two common-path normalizations relative to promoted finish. All field/SHA/pipeline source unchanged. Python/source-PTX audit PASS:100108range pairs,10288universal finish cases,512actual-PTX finish cases,64raw multiplier pairs. Native compilation and performance unmeasured. Detailed proof in public submission note; source inventory in manifest.
+
+--- Historical promoted research ---
+
 # Pinning: signed digit decoding and weighted cofactor recovery
 
 This candidate removes work from the fixed-base scalar decoder, point-chain
