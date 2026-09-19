@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
+#include "pipeline_graph.h"
 
 #include "GPUMath.h"
 
@@ -2348,11 +2349,12 @@ int main(int argc, char **argv) {
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
     int slot_busy[QSB_SLOTS];
     uint32_t cur_mid[8];
+    QsbPipelineGraph slot_graph[QSB_SLOTS] = {};
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaEventSynchronize(slot_done[s]);
+        qsb_graph_check(cudaEventSynchronize(slot_done[s]), "wait for slot");
         slot_busy[s] = 0;
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -2408,17 +2410,33 @@ int main(int argc, char **argv) {
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
 
             if (fast_tail) {
-                launch_pinning_pipeline<true>(
-                    d_mid_slot[s], d_suffix, gpu_suffix_len,
-                    pp.seq_offset, pp.lt_offset,
-                    pp.total_preimage_len,
-                    seq, batch_lt,
-                    d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                    d_gt,
-                    d_hit_cnt_s[s], d_hit_idx_s[s],
-                    batch_sz, easy, single_hash,
-                    d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
-                    d_super_roots[s],d_root_checkpoint[s], st);
+                const bool cacheable = batch_sz == BATCH;
+                QsbPipelineGraph *graph = &slot_graph[s];
+                if (cacheable && !graph->executable)
+                    qsb_graph_check(cudaStreamBeginCapture(st, cudaStreamCaptureModeThreadLocal),
+                                    "begin capture");
+                if (!cacheable || !graph->executable) {
+                    launch_pinning_pipeline<true>(
+                        d_mid_slot[s], d_suffix, gpu_suffix_len,
+                        pp.seq_offset, pp.lt_offset,
+                        pp.total_preimage_len,
+                        seq, batch_lt,
+                        d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                        d_gt,
+                        d_hit_cnt_s[s], d_hit_idx_s[s],
+                        batch_sz, easy, single_hash,
+                        d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
+                        d_super_roots[s],d_root_checkpoint[s], st);
+                }
+                if (cacheable) {
+                    if (!graph->executable) {
+                        qsb_graph_check(cudaStreamEndCapture(st, &graph->definition), "end capture");
+                        qsb_graph_instantiate(graph, st,
+                            (void *)kernel_pinning_pipeline<true,0>,
+                            (void *)kernel_pinning_pipeline<true,2>);
+                    }
+                    qsb_graph_launch(graph, st, seq, batch_lt);
+                }
             } else {
                 launch_pinning_pipeline<false>(
                     d_mid_slot[s], d_suffix, gpu_suffix_len,

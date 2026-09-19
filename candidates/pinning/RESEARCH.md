@@ -1,5 +1,16 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+> Current experiment: `0004-slot-graph`, based on promoted `6288396`
+> (aeadf37d, official 739,010,506 candidates/s). Each slot captures the five
+> unchanged kernels for full fast batches and updates sequence/locktime on both
+> search nodes. The stream's L2 policy is copied to every node. Partial/generic
+> batches use direct launches; the original reuse wait and boundary drain remain.
+> CUDA errors fail closed and the helper requires exactly five kernel nodes.
+> There is no local NVIDIA GPU; actual graph execution and throughput still need
+> official verification. Rejected launch-bound, dense-L2, sequence-overlap and
+> seed-digit changes are not included. All GPU measurements below are inherited
+> history, not evidence for this graph experiment.
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
