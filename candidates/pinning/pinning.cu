@@ -1,3 +1,4 @@
+/* re-measurement tag 20260919T1350Z: no functional change (see submission note) */
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
