@@ -710,6 +710,26 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
+/* Speculative last addition (pair_shared.cuh, QSB_SPEC_FINISH): declared here because the filter chain precedes it. */
+__device__ __forceinline__ void qsb_spec_last_add(uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff);
+#ifndef QSB_SPEC_FINISH
+#define QSB_SPEC_FINISH 1
+#endif
+#ifndef ZLAB_K2S3M
+#define ZLAB_K2S3M 1
+#endif
+#if QSB_SPEC_FINISH && ZLAB_K2S3M
+#define QSB_FILTER_LAST_ADD qsb_spec_last_add
+#else
+#define QSB_FILTER_LAST_ADD qsb_complete_last_add
+#endif
+#ifndef QSB_FOLD_SEED
+#define QSB_FOLD_SEED 1
+#endif
+#ifndef QSB_FOLD_LAST_ADD
+#define QSB_FOLD_LAST_ADD 1
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -769,19 +789,68 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_digit_idx(ec, &idx, &neg);
 #endif
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
     gt_load_signed(gTable,0,idx,neg,x0,y0);
+#if QSB_FOLD_SEED && QSB_FOLD_LAST_ADD
+    /* QSB_FOLD_SEED (kill switch, speculative filter chain only): no separate affine+affine seed.
+     * The first table point is a complete XYZZ point with ZZ = ZZZ = 1; in the deferred-Y
+     * representation (Y_def = Y_true + anchor*ZZZ) that is Y_def = y with anchor 0.  Chunk 1 then
+     * runs as an ordinary iteration: same 17-bit width, same 2^16 stride, gt_offset(1) = 2^17. */
+    Load256(X,x0); Load256(Y,y0);
+    ZZ[0]=1ULL;ZZ[1]=ZZ[2]=ZZ[3]=0ULL; ZZZ[0]=1ULL;ZZZ[1]=ZZZ[2]=ZZZ[3]=0ULL;
+    y0[0]=y0[1]=y0[2]=y0[3]=0ULL;
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(1);
+    unsigned pos=(unsigned)gt_shift(1)+1u;
+    #pragma unroll 1
+    for (int c=1;c<GT_CHUNKS;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 16;
+    }
+    {
+        uint64_t sy[4];
+        qsb_filter_mul(sy,y0,ZZZ,bad);
+        _ModSub256(Y,Y,sy);
+    }
+#else
     gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
     gt_load_signed(gTable,1,idx,neg,x1,y1);
     qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     unsigned pos=(unsigned)gt_shift(2)+1u;
+#if QSB_FOLD_LAST_ADD
+    /* QSB_FOLD_LAST_ADD (kill switch, speculative filter chain only): the last addition runs as a
+     * 13th iteration of the rolled loop instead of a separate straight-line copy of the point
+     * add.  The deferred-Y body leaves Y = R*(Q-X3); the complete value is that minus y2*ZZZ, so
+     * one multiply and one subtract after the loop finish it (y0 holds the last table y).  The
+     * last digit differs from the others only in its sign rule, selected by a per-iteration flag;
+     * chunk widths and the table stride are the same 17 bits / 2^16 entries.  Idea of running the
+     * filter's final addition on the packed deferred-Y body: Meganpark980320, bb406ab. */
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),c==GT_CHUNKS-1,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        uint64_t sy[4];
+        qsb_filter_mul(sy,y0,ZZZ,bad);
+        _ModSub256(Y,Y,sy);
+    }
+#else
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
         gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
@@ -794,8 +863,10 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
+#endif
+#endif /* QSB_FOLD_SEED */
 #else
     int32_t ec=gt_mixed_step<18>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
@@ -815,7 +886,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     {
         ec=sign*(int32_t)M[0];
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
+        QSB_FILTER_LAST_ADD(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #endif
 #endif
