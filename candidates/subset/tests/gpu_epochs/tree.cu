@@ -3380,30 +3380,13 @@ int main(int argc, char **argv) {
                     }
                     fclose(ff);
 
-                    /* Also append each hit to the summary file with fsync, so a
-                     * crash/sleep mid-run can't lose hits. The hit file (above)
-                     * is the primary record; the summary is the always-exists
-                     * proof-of-life record. Fields match so downstream tools
-                     * can rely on either. */
-                    if (summary_f) {
-                        time_t now_epoch = time(NULL);
-                        for (int h = 0; h < nh; h++) {
-                            uint32_t raw = hits[h];
-                            int combo_idx = raw & 0x3FFFFFFF;
-                            int ri = (raw >> 30) & 1;
-                            int hc = (raw >> 31) & 1;
-                            uint8_t *combo = all_combos + h * MAX_T;
-                            fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
-                            for (int j = 0; j < t_sel; j++)
-                                fprintf(summary_f, "%s%d", j?",":"", combo[j]);
-                            fprintf(summary_f, " hash_choice=%d recid=%d", hc, ri);
-                            fprintf(summary_f, " combo_idx=%d calibrate=%d\n",
-                                    combo_idx, calibrate);
-                            hit_counter++;
-                            g_hit_counter = hit_counter;
-                        }
-                        fflush(summary_f);
-                        fsync(fileno(summary_f));   /* immediate, on every hit */
+                    /* The primary hit file above is the bridge-consumed record.
+                     * Keep summary accounting in memory, but avoid duplicating every
+                     * hit into the diagnostic summary and forcing storage sync on the
+                     * ranked path. STARTED/PROGRESS/final STATUS records remain. */
+                    if (nh > 0) {
+                        hit_counter += (uint64_t)nh;
+                        g_hit_counter = hit_counter;
                     }
                 }
             }
