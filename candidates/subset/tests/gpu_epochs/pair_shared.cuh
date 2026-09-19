@@ -96,6 +96,61 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     return parities;
 }
 #endif
+/* Public subset submission 4f367236 by owizdom supplies the speculative
+ * pre-inverse prepare and post-inverse finish used by the scalar-fed dual SHA
+ * path below. The promoted bb406ab8 last-add helper in tree.cu is retained
+ * independently. QSB_SPEC_FINISH=0 disables the owizdom finish stages, while
+ * the promoted packed-PTX last addition remains in both arms. Every tentative
+ * hit is recomputed by kernel_verify_pair_hits with the exact guarded chain;
+ * the speculative filter can still lose a hit. The exact verify path
+ * (qsb_k2s_front_exact, qsb_k2s_post, qsb_pair_verify_candidate) is untouched. */
+#ifndef QSB_SPEC_FINISH
+#define QSB_SPEC_FINISH 1
+#endif
+#if QSB_SPEC_FINISH && ZLAB_K2S3M
+__device__ __forceinline__ void qsb_spec_finish_prepare(
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W) {
+    uint64_t t[4];uint32_t bad=0;
+    qsb_filter_mul(t, xR, ZZ, bad);
+    _ModSub256(t, t, X_D);
+    Load256(X_D, t);
+    qsb_filter_mul(W, ZZZ, X_D, bad);
+    W[4] = 0;
+}
+__device__ __forceinline__ void qsb_spec_pre3(
+    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n) {
+    uint64_t yb[4];uint32_t bad=0;
+    qsb_filter_mul(yb, yR, ZZZ, bad);
+    _ModSub256(n, yb, Y);
+    qsb_filter_add(n + 4, yb, Y, bad);
+    Load256(n + 8, ZZ);
+}
+__device__ __forceinline__ uint32_t qsb_spec_post3(
+    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *x1, uint64_t *x2) {
+    uint64_t t[4], sum[4], m1[4], m2[4];uint32_t bad=0;
+    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    qsb_filter_mul(n + 8, inv, bad);
+    qsb_filter_mul(m1, n, n + 8, bad);
+    qsb_filter_mul(m2, n + 4, n + 8, bad);
+    qsb_filter_add(sum, m1, m2, bad);
+    _ModSub256(t, m1, cc);
+    qsb_filter_mul(x1, sum, t, bad);
+    qsb_filter_add(x1, x1, xR, bad);
+    _ModSub256(t, xR, x1);
+    qsb_filter_mul(t, m1, bad);
+    _ModSub256(t, yR);
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    _ModSub256(t, m2, cc);
+    qsb_filter_mul(x2, sum, t, bad);
+    qsb_filter_add(x2, x2, xR, bad);
+    _ModSub256(t, xR, x2);
+    qsb_filter_mul(t, m2, bad);
+    _ModSub256(t, yR);
+    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+    return parities;
+}
+#endif
 __device__ __forceinline__ int qsb_k2s_front(
     const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
     uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
@@ -153,9 +208,59 @@ __device__ __forceinline__ int qsb_k2s_front3(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+#if QSB_SPEC_FINISH
+    qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
+#else
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#endif
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+}
+#endif
+#if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+struct QsbPairEpochZ {uint64_t a[4],b[4];};
+__device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
+    uint32_t b2[16];
+    #pragma unroll
+    for(int i=0;i<8;i++)b2[i]=state[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for(int i=9;i<15;i++)b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2,b2);
+    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+}
+__device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
+    const uint32_t*firstA,const uint32_t*firstB,int lane){
+    uint32_t stateA[8],stateB[8];
+    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
+    QsbPairEpochZ out;
+    qsb_pair_second_sha_z(stateA,out.a);
+    qsb_pair_second_sha_z(stateB,out.b);
+    return out;
+}
+__device__ __forceinline__ int qsb_k2s_front3_z(
+    const uint64_t*z,const uint8_t*d_gt,uint64_t*u2rx,uint64_t*u2ry,
+    uint64_t*prod,uint64_t*n){
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    uint32_t unused_flag=0;
+    qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+#if QSB_SPEC_FINISH
+    // Keep the scalar-fed dual SHA path on the same speculative finish as the
+    // original single-epoch front; exact recovery still runs in the verifier.
+    qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
+#else
+    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#endif
+    return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
 }
 #endif
 __device__ __forceinline__ int qsb_k2s_front_exact(
@@ -252,6 +357,21 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 #if ZLAB_K2S3M
 
 struct QsbPairFront3 {uint64_t words[16];int ok;};
+#if ZLAB_DUAL_EPOCH_SHA
+__device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
+    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t z[4]={z0,z1,z2,z3};
+    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    uint64_t prod[5],n[12];QsbPairFront3 out;
+    out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+    Load256(out.words,prod);
+    #pragma unroll
+    for(int k=0;k<12;k++)out.words[4+k]=n[k];
+    return out;
+}
+#endif
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
     const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
     uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
@@ -276,7 +396,11 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t inv[4]={v0,v1,v2,v3};
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t q1x[4],q2x[4];int recid=0;
+#if QSB_SPEC_FINISH
+    uint32_t par=qsb_spec_post3(n,inv,rx,ry,q1x,q2x);
+#else
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
+#endif
     return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 }
 #endif
