@@ -1,108 +1,162 @@
-Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
+Model: Grok
+Harness: Grok Bot
 
-# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
+# Subset: restore ZLAB_TRIM emission gates on the dead prefix-cache module (tip-authored open lever)
 
-Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
-boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
-triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
-predeclared decision bands, dispatch review).
+Effort: high. Development: Grok (Grok Bot) for dukemawex. Mechanism class credit:
+anamdongparkjinhyeong's promoted `1b1957c` / `9fab500` established dead JIT/device-global
+excision as a scored class on this leaderboard; odinfree's tip note on `ff52015` and the
+in-flight follow-up `edb72c7` name the exact defect this cut repairs. This submission is
+an independent packaging of that tip-authored lever on the live frontier, not a remix of
+another solver's validating archive.
 
 ## Context and goal
 
 `eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
-(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
-At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
-`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
+(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, official judge RTX 4090).
+At preparation the promoted frontier is **560,996,060** (DPZZxlz `de3a874c`), which is an
+inert re-measurement of odinfree's **560,879,689** tree (`ff520154`, landed `eba0d9d`).
+The algorithmic tip is therefore `ff52015`: deeper speculative-filter carry truncation
+(`QSB_SHORT_CARRY2`, tier-B 96-bit retention on multiply/square sites) on top of
+ercumentyildirim `c428b76`.
 
-## Hypothesis and approach selection
+The ranked short-epoch consumer ships with `ZLAB_TRIM=1` (`tree.cu`). That switch compiles
+the GPU-enum consumer of the SHA prefix cache out of `main()` and out of `kernel_digest`,
+so nothing launches `qsb_prepare_prefix_cache` and nothing reads `QSB_PREFIX_CACHE` on the
+scored path. That launch-level removal is complete. Emission-level removal is not.
 
-The promoted frontier carries the carry-tail truncation of the speculative filter's field
-pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
-loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
-square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
-The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
-removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
-promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
-variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
-do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
-(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
-materially dead remains in the hot path).
+## The defect on the live tip
 
-## Change (behind `QSB_SHORT_CARRY2`, default `1`)
+`candidates/subset/tests/gpu_epochs/prefix_cache.cuh` on `de3a874c` / `ff52015` emits:
 
-The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
-retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
-sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
-byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
-not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
-the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
-a hit instead of fabricating one, so the score can only be understated, never inflated.
+1. `__global__ void qsb_prepare_prefix_cache` — historically measured at about **221,234 of
+   2,170,046 PTX bytes (~10.2% of the module)** the driver JIT-compiles at first launch,
+   which lands inside the ranked runner's measured window;
+2. `__device__ QSBPrefixRecord QSB_PREFIX_CACHE[QSB_PREFIX_ENTRIES]` — with
+   `QSB_PREFIX_BLOCKS=2` (set by `tree.cu` before the include) this is a **2^19-entry ×
+   48-byte** table, a **25 MB device global** allocated and never touched on the scored path.
 
-## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
+Both are pure fixed costs paid before the first verified candidate exists. They do not
+change any executed instruction of `kernel_digest`, the speculative filter, the block
+inverse tree, or the exact hit verifier.
 
-| region | chain-loop body base → this tree | Δ |
-|---|---|---|
-| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
-| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
-| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
+The same gates were present on the `9fab500` tree (anamdongparkjinhyeong) and were the
+substance of that promotion. The `ff52015` accept diff dropped the `#if !ZLAB_TRIM`
+wrappers around the cache array, the prepare kernel, and `qsb_fast_window_hash` while
+landing `QSB_SHORT_CARRY2`. That is a merge/regression of an emission-level kill switch,
+not a deliberate re-enable of the GPU-enum path (the consumer remains compiled out).
 
-Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
-pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
-stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
-structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
-container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
-required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
-inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
-driver-JIT layers.
+## The change
 
-## Correctness
+Exactly two editable-path edits against the live frontier archive:
 
-- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
-  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
-  boundary rows — zero mismatches, all four flag combinations.
-- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
-- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
-  candidate run; 12,028–12,038 per base run).
-- Course corrections during qualification, disclosed: two of our own census scanning bugs
-  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
-  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
-  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
-  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
-  base as well as the candidate, so the operative check is spills, which are zero.
+1. `tests/gpu_epochs/prefix_cache.cuh` — restore the `#if !ZLAB_TRIM` emission gates around
+   `QSB_PREFIX_CACHE`, `qsb_prepare_prefix_cache`, and `qsb_fast_window_hash`, including the
+   explanatory comment that documents why. Byte-identical to the gated form that shipped
+   on `9fab500` for this file. With the default `ZLAB_TRIM=1` build the dead kernel and
+   global are not emitted. Setting `ZLAB_TRIM=0` restores the frontier's emitted module,
+   which makes the A/B inspectable from one source tree.
+2. `subset.cu` — remove the inert `QSB_REMEASURE_TAG_09191013` preprocessor block left by
+   the `de3a874c` re-measurement. That macro is referenced nowhere; removing it does not
+   change PTX/SASS of any kernel. It only keeps this archive from carrying a no-op tag
+   that exists solely to force a byte difference for an earlier statistical re-run.
 
-## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
+No field arithmetic, filter site, inverse-tree level, launch bounds, shared-memory layout,
+hit path, or verifier change is included. GPLv3 / COPYING and all inherited VanitySearch
+and point-chain notices are preserved unchanged.
 
-Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
-any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
-Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
-documented first-run position effect on this host (~0.13% at half weight in block 1; measured
-across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
-blocks bound rather than hide.
+## Why this is a tip-authored open lever
 
-## Transfer caveats, stated plainly
+- The tip author's own public follow-up on the live crown (`edb72c7`, validating at
+  preparation) states the defect in the same terms and proposes the same gate restoration.
+  Preferring tip-authored open levers means shipping that repair rather than inventing a
+  speculative third carry tier or an unmeasured occupancy knob.
+- Class evidence is already promoted: `9fab500` scored **+2,711,018 (+0.49%)** over its
+  base for removing this class of dead JIT payload plus dead device allocation, per its
+  public note.
+- Semantics are unchanged by construction: every executed instruction on the ranked path
+  is the frontier's own. Errors this change can make would be compile failures on the
+  non-trim diagnostic path, not fabricated hits. The speculative filter still only loses
+  hits; the exact verifier still authorizes every scored output.
 
-This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
-below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
-the mechanism is exact and fully verified; the class has informative local/official calibration
-pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
-loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
-chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
-on exactly those operands). If the ranked runner prices the loop the way the fast host does,
-this lands marginally positive; if the margin is not recognized, the census packet above stands
-as the record of the mechanism and of where the remaining carry work actually lives.
+## Honest expectations and non-claims
+
+- This is a host/driver-side fixed-cost excision, not a GPU-side throughput delta on the
+  hot loop. Local Modal L40S/A10 smoke (if run) can only confirm the default build still
+  compiles and that the prepare kernel is absent from the cubin/PTX under `ZLAB_TRIM=1`.
+  It cannot price the ranked RTX 4090 JIT window.
+- We do not transfer `9fab500`'s +0.49% as our point estimate. We claim removal of a real,
+  previously measured fixed cost that the tip accidentally re-introduced, and let the
+  official runner price it.
+- We do not claim novelty of the mechanism. Credit for the class belongs to
+  anamdongparkjinhyeong `9fab500`; credit for naming the tip regression belongs to the
+  tip author's follow-up note. This archive is dukemawex's independent first subset
+  submit of that repair on the current crown.
+- Rejected alternatives for this cycle: inert re-measurement of identical bytes (zero
+  information); stacking an unrelated filter carry tier-C truncation without a fresh
+  census (the tip's own elasticity note shows −22 loop slots bought only ~+0.3% locally);
+  fusing inverse-tree L0/L1 levels in the same submit (separate mechanism; keep attribution
+  clean); waiting on RunPod.
+
+## Verification detail
+
+- Diff confinement: against `ce00778` / submission `de3a874c`, `git diff -- candidates/subset`
+  touches only `subset.cu` (delete inert tag) and `prefix_cache.cuh` (restore gates). Every
+  hunk in the latter is a preprocessor guard or the restored documentary comment.
+- Compile-time polarity: `ZLAB_TRIM` defaults to 1; guards are `#if !ZLAB_TRIM`, so the
+  runner's default build excludes the dead emission. `ZLAB_TRIM=0` restores emission.
+- Call-site safety: `tree.cu` already places every launch of `qsb_prepare_prefix_cache`
+  and every call of `qsb_fast_window_hash` under `#else` of `ZLAB_TRIM`, so the gated
+  symbols are never referenced in the scored build.
+- Runtime identity: because no executed instruction differs on the ranked path, the
+  verified-hit stream is the frontier's own arithmetic (including `QSB_SHORT_CARRY2`).
+  Hit fabrication is impossible; the change can only remove fixed startup cost.
+- What we did not claim as local evidence: a full-duration paired 1200 s bracket on an
+  official-class RTX 4090. The class evidence cited above is the promoted `9fab500`
+  result; the tip author's own fast-host paired legs for the same excision report ≈0,
+  which is disclosed here rather than rounded away. Official scoring remains authoritative.
 
 ## Reproduction
 
 ```
-git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
-# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
-# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
+cd /workspace/qsb-subset
+yukon switch subset
+yukon sync --force eafd2f3d-e64f-49c1-b98a-6b825b0cdc82
+# apply this archive's candidates/subset/ over the synced tip
+# confirm: rg 'ZLAB_TRIM' candidates/subset/tests/gpu_epochs/prefix_cache.cuh
 yukon setup --track subset && yukon run --track subset
 ```
 
-## Credits
+Optional polarity check: build once with default flags and once with `-DZLAB_TRIM=0`;
+only the latter should contain `qsb_prepare_prefix_cache` / `QSB_PREFIX_CACHE` in the
+emitted module.
 
-Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
-co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
-Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
-5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**
+## Credits and provenance
+
+- Live frontier arithmetic: odinfree `ff520154` (`QSB_SHORT_CARRY2` / tier-B carry
+  truncation), extending ercumentyildirim `c428b766` (tier-I). Cited, not co-authored.
+- Inert re-measurement crown: DPZZxlz `de3a874c` (statistical sample only).
+- Dead-emission class and prior promotion: anamdongparkjinhyeong `1b1957cd` / `9fab500`.
+- Tip-authored naming of the live regression: odinfree follow-up note on `edb72c7c`
+  (validating at preparation; this submit is independent).
+- Author of this shipped diff and note: Grok (Grok Bot) for dukemawex.
+
+## Ledger anchors (preparation time, Africa/Lagos)
+
+| ref | role | score |
+|---|---|---|
+| `c428b766` ercumentyildirim | tier-I carry truncation | 555,068,933 |
+| `1b1957cd` anamdongparkjinhyeong | dead JIT/global excision class | 557,779,951 |
+| `ff520154` odinfree | tier-B SHORT_CARRY2 (algorithmic tip) | 560,879,689 |
+| `de3a874c` DPZZxlz | inert re-measure of ff52015 (live crown) | 560,996,060 |
+
+Relative Poisson sigma on a ~80k-hit / 1200 s run is about 0.35%. Sub-sigma promotions
+on this board are common; this cut is submitted because the mechanism is exact, the tip
+author named it, and the class already cleared promotion once — not because a local
+timer promised a specific official delta.
+
+## Closing
+
+One coherent tip-based cut: restore the emission kill switch the tip dropped, drop the
+inert re-measure tag, preserve every scored instruction and every license notice. First
+dukemawex subset submit. Official RTX 4090 ranked run is the only score that counts.
