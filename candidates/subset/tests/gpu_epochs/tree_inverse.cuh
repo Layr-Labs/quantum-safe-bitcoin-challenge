@@ -161,9 +161,39 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __syncthreads();
     // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
     // formed by lanes < count/2 and read by lanes < count/4.
+    // L0+L1 fuse (n>=8): one lane owns a 4-leaf group, forms both pair
+    // products and their product in registers, then one barrier. Same 3M
+    // as the two stock levels; the L0 pairs stay in smem for downsweep.
     int offset=0;
+    int count0=n;
+    if(n>=8){
+        const int q=n>>2,h=n>>1;
+        if(tid<q){
+            uint64_t a0[5],a1[5],a2[5],a3[5],p01[5],p23[5],out[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                a0[k]=products[k][tid];
+                a1[k]=products[k][h+tid];
+                a2[k]=products[k][q+tid];
+                a3[k]=products[k][h+q+tid];
+            }
+            a0[4]=a1[4]=a2[4]=a3[4]=0;
+            qsb_field_mul_raw(p01,a0,a1);
+            qsb_field_mul_raw(p23,a2,a3);
+            qsb_field_mul_raw(out,p01,p23);
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                products[k][n+tid]=p01[k];
+                products[k][n+q+tid]=p23[k];
+                products[k][n+h+tid]=out[k];
+            }
+        }
+        offset=n+h;
+        count0=q;
+        if(q>32)__syncthreads();else __syncwarp();
+    }
     #pragma unroll 1
-    for(int count=n;count>2;count>>=1){
+    for(int count=count0;count>2;count>>=1){
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
