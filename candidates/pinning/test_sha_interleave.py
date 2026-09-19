@@ -29,9 +29,30 @@ def main():
     src = (HERE / 'pinning.cu').read_text()
     fun = extract_function(src, '_SHA256TransformPubkey33')
     assert fun.count('QSB_SHA_INTERLEAVED_16(') == 2
+    assert 'QSB_SHA_PUBKEY33_INTERLEAVE_RND16()' in fun
     macros = (HERE / 'GPUHash.h').read_text().split('//Take the last 8 bytes')[0]
     header = (HERE / 'sha_schedule_interleaved.cuh').read_text()
-    baseline = fun.replace('QSB_SHA_INTERLEAVED_16(32);', 'WMIX(); SHA256_RND(32);').replace(
+    burst16 = '''{
+        w[0] += s0(w[1]);
+        w[1] += s1(0x108u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(w[8]);
+        w[8] += s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(0x108u);
+        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+    SHA256_RND(16);'''
+    baseline = fun.replace('QSB_SHA_PUBKEY33_INTERLEAVE_RND16();', burst16).replace(
+        'QSB_SHA_INTERLEAVED_16(32);', 'WMIX(); SHA256_RND(32);').replace(
         'QSB_SHA_INTERLEAVED_16(48);', 'WMIX(); SHA256_RND(48);').replace(
         '_SHA256TransformPubkey33', 'baseline_pubkey33')
     harness = '''#include <cstdint>

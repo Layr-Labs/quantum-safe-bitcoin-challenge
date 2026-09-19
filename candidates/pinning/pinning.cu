@@ -821,29 +821,10 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
     S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
     S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
 
-    {
-        /* First schedule expansion; w[9..14]=0 and w[15]=0x108 is fixed. */
-        w[0] += s0(w[1]);
-        w[1] += s1(0x108u) + s0(w[2]);
-        w[2] += s1(w[0]) + s0(w[3]);
-        w[3] += s1(w[1]) + s0(w[4]);
-        w[4] += s1(w[2]) + s0(w[5]);
-        w[5] += s1(w[3]) + s0(w[6]);
-        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
-        w[7] += s1(w[5]) + w[0] + s0(w[8]);
-        w[8] += s1(w[6]) + w[1];
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(0x108u);
-        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
-    }
-
-    SHA256_RND(16);
-    /* Scheduling-only experiment: interleave the two dense schedule expansions
-     * with their compression rounds. All 64 SHA-256 rounds remain intact. */
+    /* Tip ff275e40 left sparse expansion + RND(16) as a burst; interleave it
+     * the same way tip interleaved WMIX+RND for 32/48. Sparse formulas kept. */
+    QSB_SHA_PUBKEY33_INTERLEAVE_RND16();
+    /* Tip scheduling: interleave dense schedule expansions with rounds 32–63. */
     QSB_SHA_INTERLEAVED_16(32);
     QSB_SHA_INTERLEAVED_16(48);
 
