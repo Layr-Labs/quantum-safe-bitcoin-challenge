@@ -85,8 +85,10 @@ __device__ __forceinline__ void qsb_recovery_product_checkpoint(
         if(count>2)__syncthreads();
     }
     if(tid==0){
+        uint64_t root[4];
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*QSB_RECOVERY_N-2];
+        for(int k=0;k<4;k++)root[k]=products[k][2*QSB_RECOVERY_N-2];
+        qsb_st_root4(&roots[(size_t)blockIdx.x*4u], root);
     }
 }
 
@@ -98,11 +100,13 @@ __device__ __forceinline__ void qsb_recovery_pair_inverse(
     __shared__ uint64_t inverses[4][QSB_RECOVERY_N];
     const int tid=threadIdx.x;
     const size_t block_base=(size_t)blockIdx.x*4u*QSB_RECOVERY_N;
+    uint64_t ext_root[4];
+    if(tid==0)qsb_ld_root4(&roots[(size_t)blockIdx.x*4u], ext_root);
     #pragma unroll
     for(int k=0;k<4;k++){
         if(tid<QSB_RECOVERY_N-2)
             products[k][tid]=checkpoint[block_base+(size_t)k*QSB_RECOVERY_N+tid];
-        if(tid==0)inverses[k][QSB_RECOVERY_N-2]=roots[(size_t)blockIdx.x*4u+k];
+        if(tid==0)inverses[k][QSB_RECOVERY_N-2]=ext_root[k];
     }
     __syncthreads();
     int offset=2*QSB_RECOVERY_N-4;

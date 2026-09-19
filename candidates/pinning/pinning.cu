@@ -53,6 +53,15 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                * L2-resident, so caching them only evicts the 64 MiB table
                                * that every candidate reads 15 times. */
 #endif
+#ifndef QSB_STREAM3
+#define QSB_STREAM3 1         /* 1: the same .cs hint on LIVE per-block roots and super-roots.
+                               * aeadf37's census left pipeline roots (~8.4 MB/batch) unhinted
+                               * after STREAM2 covered the 1.07 GB state planes. These 32-byte
+                               * records cross prepare -> invert -> finish once per 128-leaf
+                               * tree; caching them cannot help a re-read that never happens
+                               * inside the writer, and they share L2 with the 64 MiB table.
+                               * -DQSB_STREAM3=0 restores plain 64-bit assignments. */
+#endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
 #endif
@@ -194,6 +203,30 @@ __device__ __forceinline__ uint64_t qsb_ld_u64(const uint64_t *p) {
     return a;
 #else
     return *p;
+#endif
+}
+/* Four-limb root / super-root records. Independent of QSB_STREAM so STREAM3=0
+ * is an exact A/B against this frontier even while STREAM/STREAM2 stay on. */
+__device__ __forceinline__ void qsb_st_root4(uint64_t *p, const uint64_t r[4]) {
+#if QSB_STREAM3
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.cs.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(r[0]), "l"(r[1]) : "memory");
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.cs.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p + 2), "l"(r[2]), "l"(r[3]) : "memory");
+#else
+    p[0] = r[0]; p[1] = r[1]; p[2] = r[2]; p[3] = r[3];
+#endif
+}
+__device__ __forceinline__ void qsb_ld_root4(const uint64_t *p, uint64_t r[4]) {
+#if QSB_STREAM3
+    uint64_t a0, a1, a2, a3;
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.v2.u64 {%0,%1}, [g]; }"
+                 : "=l"(a0), "=l"(a1) : "l"(p) : "memory");
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.v2.u64 {%0,%1}, [g]; }"
+                 : "=l"(a2), "=l"(a3) : "l"(p + 2) : "memory");
+    r[0] = a0; r[1] = a1; r[2] = a2; r[3] = a3;
+#else
+    r[0] = p[0]; r[1] = p[1]; r[2] = p[2]; r[3] = p[3];
 #endif
 }
 
@@ -1030,8 +1063,10 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
     }
 
     if(tid==0){
+        uint64_t root[4];
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        for(int k=0;k<4;k++)root[k]=products[k][2*N-2];
+        qsb_st_root4(&roots[(size_t)blockIdx.x*4u], root);
     }
 }
 template<int N>
@@ -1054,12 +1089,14 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     /* Each lane supplies its saved W leaf and all but the last two lanes
      * restore one internal node. Lane zero also publishes the external root inverse.
      * One barrier makes both immutable inputs visible to the downward pass. */
+    uint64_t ext_root[4];
+    if(tid==0)qsb_ld_root4(&roots[(size_t)blockIdx.x*4u], ext_root);
     #pragma unroll
     for(int k=0;k<4;k++){
         products[k][tid]=value[k];
         if(tid<N-2)
             products[k][N+tid]=qsb_ld_u64(&checkpoint[block_base+(size_t)k*N+tid]);
-        if(tid==0)inverses[k][N-2]=roots[(size_t)blockIdx.x*4u+k];
+        if(tid==0)inverses[k][N-2]=ext_root[k];
     }
     __syncthreads();
 
@@ -1105,10 +1142,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
 ) {
     int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
     bool active=i<count;
-    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
-                   active?roots[(size_t)i*4u+1]:0ULL,
-                   active?roots[(size_t)i*4u+2]:0ULL,
-                   active?roots[(size_t)i*4u+3]:0ULL,0};
+    uint64_t r[5];
+    if(active){qsb_ld_root4(&roots[(size_t)i*4u], r); r[4]=0;}
+    else{r[0]=1;r[1]=r[2]=r[3]=r[4]=0;}
     qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
 }
 
@@ -1119,15 +1155,11 @@ __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
 ) {
     int tid=(int)(blockIdx.x*256u+threadIdx.x);
     bool active=tid<count;
-    uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
-                   active?super_roots[(size_t)tid*4u+1]:0ULL,
-                   active?super_roots[(size_t)tid*4u+2]:0ULL,
-                   active?super_roots[(size_t)tid*4u+3]:0ULL,0};
+    uint64_t r[5];
+    if(active){qsb_ld_root4(&super_roots[(size_t)tid*4u], r); r[4]=0;}
+    else{r[0]=1;r[1]=r[2]=r[3]=r[4]=0;}
     qsb_block_inverse(r);
-    if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
-    }
+    if(active)qsb_st_root4(&super_roots[(size_t)tid*4u], r);
 }
 
 __device__ __constant__ uint64_t pin_u2ry_words[4];
@@ -1137,20 +1169,17 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 ) {
     int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
     bool active=i<count;
-    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
-                   active?roots[(size_t)i*4u+1]:0ULL,
-                   active?roots[(size_t)i*4u+2]:0ULL,
-                   active?roots[(size_t)i*4u+3]:0ULL,0};
+    uint64_t r[5];
+    if(active){qsb_ld_root4(&roots[(size_t)i*4u], r); r[4]=0;}
+    else{r[0]=1;r[1]=r[2]=r[3]=r[4]=0;}
     qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+        qsb_st_root4(&roots[(size_t)i*4u], r);
         // One fixed-ordinate multiplication per128-leaf tree, instead of
         // one per leaf in finish. Keep both inverse representatives.
         uint64_t b[5]={pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3],0};
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
+        qsb_st_root4(&roots[((size_t)count+i)*4u], weighted);
     }
 }
 
@@ -1422,11 +1451,11 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
-    for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
+    qsb_ld_root4(&roots[4ull*blockIdx.x], prod);
     prod[4]=0;
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
-    for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
+    qsb_ld_root4(&roots[4ull*(root_count+blockIdx.x)], weighted_inv);
     (void)tree;
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};

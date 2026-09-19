@@ -29,11 +29,13 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
     }
     if(tid==0) {
+        uint64_t root[4];
         #pragma unroll
         for(int k=0;k<4;k++) {
-            roots[(size_t)blockIdx.x*4+k]=products[k][2*N-2];
+            root[k]=products[k][2*N-2];
             excluded[k][N-2]=k==0?1:0;
         }
+        qsb_st_root4(&roots[(size_t)blockIdx.x*4], root);
     }
     __syncwarp();
     offset=2*N-4;

@@ -94,6 +94,38 @@ This removes two redundant normalizations while preserving the small-b path.
 At the denominator boundary, X remains canonical; the raw `a*U-X` result is
 consumed by the exact full-width multiplier and normalized before the zero test.
 
+### Stream live roots with the same evict-first hint as the state planes
+
+`QSB_STREAM2` already wraps the four live 16-byte pipeline state planes in
+`.cs` (evict-first) 128-bit global accesses. That hint still stopped at the
+state planes. The per-block product roots, super-roots, inverted roots and
+weighted `b/T` copies remained ordinary 64-bit assignments: about 8.4 MB of
+prepare→invert→finish traffic per 16,777,216-candidate batch, plus a much
+smaller super-root working set. Those records are written once and read once
+across kernel boundaries. Caching them cannot satisfy a later intra-kernel
+re-read, and they compete with the 64 MiB signed table that every candidate
+touches fifteen times.
+
+`QSB_STREAM3=1` (default) routes that live four-limb traffic through
+`qsb_st_root4` / `qsb_ld_root4`. Each helper emits two `st.global.cs.v2.u64`
+or `ld.global.cs.v2.u64` operations when the switch is on, and the previous
+plain stores and loads when it is off. The helpers are independent of
+`QSB_STREAM`, so `-DQSB_STREAM3=0` is an exact A/B against this tree while
+STREAM and STREAM2 stay enabled. Call sites:
+
+- `qsb_cofactor_prepare` publishes each 128-leaf tree root
+- `qsb_block_product_checkpoint` publishes each 256-root group super-root
+- `qsb_root_group_prepare` / `qsb_invert_super_roots` / `qsb_root_group_finish`
+  load and store roots, super-roots, inverted roots and weighted copies
+- finish lanes load the inverted root and the weighted inverse
+- the unused `LeafRecovery.cuh` offload path uses the same helpers so a later
+  geometry toggle does not reintroduce unhinted root traffic
+
+No field arithmetic, SHA schedule, tree width, occupancy, slot count or host
+orchestration changes. `QSB_SLOTS` stays at 2: the official `fb7cc7a` result
+on this STREAM2 tree measured slots 2→3 as −1.46% (736,944,266 vs
+739,010,506). Prefetch, early-load, probe-mask and tree-offload remain off.
+
 ## Correctness evidence
 
 The final composed source passed native CUDA checks before performance
@@ -205,11 +237,11 @@ table authors remain credited in the source and retained license.
 
 Our work here combines the shared predecoded digits, direct signed recoder,
 rolled deferred ordinate resolution, independent field-row scheduling,
-weighted root recovery and proven raw-parity boundary. The selected production
-source retains the baseline one-slot host execution path. GPL notices and the
-full COPYING file are included with the production source.
+weighted root recovery, proven raw-parity boundary, two-slot host pipeline
+and STREAM/STREAM2 evict-first state traffic. This delta adds STREAM3 on the
+live root records. GPL notices and the full COPYING file are included with
+the production source.
 
 Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
-`pinning.cu` SHA-256 is
-`2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
-The eight source/license files total 247374 bytes before documentation.
+`pinning.cu` SHA-256 is updated there with this STREAM3 archive. The eight
+source/license files are counted in that manifest.
