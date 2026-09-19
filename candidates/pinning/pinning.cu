@@ -405,6 +405,20 @@ struct qsb_digit_window {
     }
 };
 
+/* Stream recode: peel signed-odd windows from the live M residue instead of
+ * materialising 15 volatile shared codes. Same (idx, neg) as qsb_decode_to_shared. */
+#ifndef QSB_STREAM_RECODE
+#define QSB_STREAM_RECODE 1
+#endif
+__device__ __forceinline__ void qsb_signed_odd_code(
+    uint32_t f, unsigned bits, int32_t tm, uint32_t *idx, uint64_t *negmask) {
+    *idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+#if QSB_PROBE_MASK
+    *idx&=(uint32_t)QSB_PROBE_MASK;
+#endif
+    *negmask=0ULL-(uint32_t)(tm<0);
+}
+
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
  * y=Y/ZZZ). Seed the first two chunks with a deferred-Y mmadd (3M+2S), adjust
  * each next point's y by the preceding affine anchor, and defer the new anchor
@@ -556,11 +570,39 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;
+#if QSB_STREAM_RECODE
+    /* Peel each mixed window from M at the load site. The 15-code shared
+     * planes never materialise; the cofactor tree still owns the arena. */
+    uint64_t M[4]; int negative; qsb_signed_recode_setup(k,M,&negative);
+    qsb_digit_window win; win.init(M,1u);
+    uint32_t f0=win.peek()&((1u<<18)-1u); win.advance(18);
+    uint32_t idx0; uint64_t n0;
+    qsb_signed_odd_code(f0,18u,(int32_t)(f0>>17)-1,&idx0,&n0);
+    uint32_t f1=win.peek()&((1u<<17)-1u); win.advance(17);
+    uint32_t idx1; uint64_t n1;
+    qsb_signed_odd_code(f1,17u,(int32_t)(f1>>16)-1,&idx1,&n1);
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+    gt_load_signed_flat_m(table,gt_offset(0),idx0,n0,x0,y0);
+    gt_load_signed_flat_m(table,gt_offset(1),idx1,n1,x1,y1);
+    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    unsigned base=gt_offset(2);
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        uint32_t f=win.peek()&((1u<<17)-1u); win.advance(17);
+        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>16)-1;
+        uint32_t idx; uint64_t nm;
+        qsb_signed_odd_code(f,17u,tm,&idx,&nm);
+        gt_load_signed_flat_m(table,base,idx,nm,x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        base+=1u<<16;
+    }
+#else
+    qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
@@ -570,6 +612,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 }
 
