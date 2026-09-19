@@ -1408,6 +1408,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 #include "pair_shared.cuh"
+#include "park32_onewave.cuh"
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
@@ -1471,7 +1472,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int idx = blockIdx.x * blockDim.x + tid;
     if(blockIdx.x*blockDim.x>=batch_size)return;
     const bool active = idx<batch_size;
-#if ZLAB_K2S3M
+#if QSB_PARK32_ONEWAVE
+    __shared__ QsbOWShared owShared;
+    uint64_t (&parkA)[12][256]=owShared.recovery.park;
+#elif ZLAB_K2S3M
     __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
 #else
     __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
@@ -1489,6 +1493,28 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
 #endif
     int okA, okB;
+#if QSB_PARK32_ONEWAVE
+    {
+        QsbOWA a=qsb_ow_prepare_a(e0,f0,tid,d_gt,owShared.fixed.park);
+        QsbOWB b=qsb_ow_prepare_b(e1,f1,tid,d_gt,owShared.fixed.park);
+        if(!active){a.bad=1;qsb_ow_one(a.product);}
+        if(!active || !hasB){b.bad=1;qsb_ow_one(b.product);}
+        uint64_t fixed_leaf[5];qsb_field_mul_raw(fixed_leaf,a.product,b.product);
+        qsb_ow_tree1(fixed_leaf,owShared.fixed.tree);
+        __syncthreads(); // All TREE1 leaf reads finish before A stores inverse(PB).
+        QsbPairFront3 fa=qsb_ow_finish_a(d_gt,fixed_leaf,b.product,a.bad,owShared);
+        Load256(prodA,fa.words);prodA[4]=0;okA=fa.ok && active;
+        if(!okA){qsb_ow_one(prodA);prodA[4]=0;}
+        #pragma unroll
+        for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+        // A has consumed scalar/P1/P4; B's shared P3 (rows 12..15) survives.
+        QsbPairFront3 fb=qsb_ow_finish_b(d_gt,b,owShared);
+        Load256(prodB,fb.words);prodB[4]=0;okB=fb.ok && active && hasB;
+        if(!okB){qsb_ow_one(prodB);prodB[4]=0;}
+        #pragma unroll
+        for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
+    }
+#else
     {
 #if ZLAB_K2S3M
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
@@ -1519,9 +1545,15 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
     okB=fb.ok && active && hasB;
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
+#endif // QSB_PARK32_ONEWAVE front
     uint64_t leaf[5];
     qsb_field_mul_raw(leaf,prodA,prodB);
-    qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
+#if QSB_PARK32_ONEWAVE
+    __syncthreads(); // All B P3/inverse(PB) reads finish before TREE2 overwrites them.
+    qsb_ow_tree2(leaf,owShared.recovery.products,owShared.recovery.inverses);
+#else
+    qsb_block_inverse_tree(leaf);
+#endif             /* 1/(WA*WB) for this lane */
     if(okA){
 #if ZLAB_K2S3M
         uint64_t inv[5],n[12];
