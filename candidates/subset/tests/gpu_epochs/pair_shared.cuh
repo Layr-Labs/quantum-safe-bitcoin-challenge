@@ -96,6 +96,91 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     return parities;
 }
 #endif
+/* QSB_SPEC_FINISH (kill switch): the speculative filter kernel already runs 12 of its 14 point
+ * additions on the unguarded qsb_filter_* field ops (hit_filter_field_sc.cuh): a wrong point can
+ * only lose a tentative hit, every reported hit is recomputed by kernel_verify_pair_hits with the
+ * exact guarded chain.  The last addition, the pre-inverse prepare and the post-inverse finish
+ * still used the exact _ModMult/_ModSqr/_ModAdd256 (boundary prefilter + BSSY/BRA/BSYNC around a
+ * cold-correction call after every operation).  These twins are the same formulas, same operation
+ * order, on the unguarded ops; subtraction keeps the exact borrow/add-back _ModSub256 (it has no
+ * guard).  0 = promoted code.  The exact verify path (qsb_k2s_front_exact, qsb_k2s_post,
+ * qsb_pair_verify_candidate) is not touched. */
+#ifndef QSB_SPEC_FINISH
+#define QSB_SPEC_FINISH 1
+#endif
+/* On the current record (packed filter last addition) the front twins push kernel_digest from 122 to
+ * 128 registers and the entry frame spills one word; the tail twin alone assembles with 127 registers
+ * and no spill.  So only the tail twin is on by default.  -DQSB_SPEC_FRONT=1 turns the others on. */
+#ifndef QSB_SPEC_FRONT
+#define QSB_SPEC_FRONT 0
+#endif
+#ifndef QSB_SPEC_TAIL
+#define QSB_SPEC_TAIL QSB_SPEC_FINISH
+#endif
+#if QSB_SPEC_FINISH && ZLAB_K2S3M
+__device__ __forceinline__ void qsb_spec_last_add(
+    uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff){
+    uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4],T[4];uint32_t bad=0;
+    qsb_filter_mul(U2,X2,ZZ1,bad);
+    qsb_filter_add(S2,(uint64_t*)Y2,(uint64_t*)Yoff,bad);qsb_filter_mul(S2,ZZZ1,bad);
+    _ModSub256(P,U2,X1);_ModSub256(R,S2,Y1);
+    if(!(P[0]|P[1]|P[2]|P[3])){
+        if(!(R[0]|R[1]|R[2]|R[3])) qsb_double_affine(X1,Y1,ZZ1,ZZZ1,X2,Y2);
+        else {
+            #pragma unroll
+            for(int i=0;i<4;i++){X1[i]=0;Y1[i]=(i==0);ZZ1[i]=ZZZ1[i]=0;}
+        }
+        return;
+    }
+    qsb_filter_sqr(PP,P,bad);qsb_filter_mul(PPP,PP,P,bad);qsb_filter_mul(Q,U2,PP,bad);qsb_filter_mul(ZZ1,PP,bad);
+    qsb_filter_sqr(T,R,bad);qsb_filter_add(T,T,PPP,bad);_ModSub256(T,T,Q);_ModSub256(T,T,Q);
+    qsb_filter_mul(ZZZ1,PPP,bad);_ModSub256(Q,Q,T);qsb_filter_mul(Q,R,bad);
+    qsb_filter_mul(S2,Y2,ZZZ1,bad);_ModSub256(Y1,Q,S2);Load256(X1,T);
+}
+__device__ __forceinline__ void qsb_spec_finish_prepare(
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W) {
+    uint64_t t[4];uint32_t bad=0;
+    qsb_filter_mul(t, xR, ZZ, bad);
+    _ModSub256(t, t, X_D);
+    Load256(X_D, t);
+    qsb_filter_mul(W, ZZZ, X_D, bad);
+    W[4] = 0;
+}
+__device__ __forceinline__ void qsb_spec_pre3(
+    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n) {
+    uint64_t yb[4];uint32_t bad=0;
+    qsb_filter_mul(yb, yR, ZZZ, bad);
+    _ModSub256(n, yb, Y);
+    qsb_filter_add(n + 4, yb, Y, bad);
+    Load256(n + 8, ZZ);
+}
+__device__ __forceinline__ uint32_t qsb_spec_post3(
+    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *x1, uint64_t *x2) {
+    uint64_t t[4], sum[4], m1[4], m2[4];uint32_t bad=0;
+    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    qsb_filter_mul(n + 8, inv, bad);
+    qsb_filter_mul(m1, n, n + 8, bad);
+    qsb_filter_mul(m2, n + 4, n + 8, bad);
+    qsb_filter_add(sum, m1, m2, bad);
+    _ModSub256(t, m1, cc);
+    qsb_filter_mul(x1, sum, t, bad);
+    qsb_filter_add(x1, x1, xR, bad);
+    _ModSub256(t, xR, x1);
+    qsb_filter_mul(t, m1, bad);
+    _ModSub256(t, yR);
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    _ModSub256(t, m2, cc);
+    qsb_filter_mul(x2, sum, t, bad);
+    qsb_filter_add(x2, x2, xR, bad);
+    _ModSub256(t, xR, x2);
+    qsb_filter_mul(t, m2, bad);
+    _ModSub256(t, yR);
+    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+    return parities;
+}
+#endif
 __device__ __forceinline__ int qsb_k2s_front(
     const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
     uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
@@ -153,8 +238,13 @@ __device__ __forceinline__ int qsb_k2s_front3(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+#if QSB_SPEC_FRONT
+    qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
+#else
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#endif
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
@@ -276,7 +366,11 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t inv[4]={v0,v1,v2,v3};
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t q1x[4],q2x[4];int recid=0;
+#if QSB_SPEC_TAIL
+    uint32_t par=qsb_spec_post3(n,inv,rx,ry,q1x,q2x);
+#else
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
+#endif
     return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 }
 #endif
