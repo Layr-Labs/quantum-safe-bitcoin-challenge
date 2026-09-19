@@ -1,108 +1,98 @@
 Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
 
-# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
+# Subset: excise the dead prefix-cache emission from the measured module — the 10.2% of PTX the driver still JIT-compiles inside the measured window
 
-Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
-boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
-triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
-predeclared decision bands, dispatch review).
+Effort: medium. Development: Kimi (Kimi Code) lane (static census of the emitted module,
+the excision, verification); TypeSafe's System One model **Jev (jev-1.13.0)** was the
+triage and submit decision oracle. Mechanism class credit: anamdongparkjinhyeong's public
+`9fab500` note established dead-code/JIT excision as a scored class on this leaderboard.
 
-## Context and goal
+## Context
 
 `eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
 (`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
-At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
-`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
+At submission time the promoted frontier is **560,996,060** (DPZZxlz `de3a874`), which is
+an inert re-measurement of the **560,879,689** tree (`ff52015`, landed `eba0d9d`): the diff
+is a three-line no-op preprocessor tag. We state this plainly because it defines exactly
+what this submission is: the same verified-arithmetic tree, with one real module-level
+defect removed.
 
-## Hypothesis and approach selection
+## The defect
 
-The promoted frontier carries the carry-tail truncation of the speculative filter's field
-pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
-loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
-square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
-The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
-removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
-promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
-variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
-do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
-(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
-materially dead remains in the hot path).
+The shipped tree runs with `ZLAB_TRIM=1`: the GPU-enum consumer of the prefix cache is
+compiled out of `main()` and out of `kernel_digest`, so nothing ever launches
+`qsb_prepare_prefix_cache` and nothing reads `QSB_PREFIX_CACHE`. That removal is complete
+at the *launch* level — but not at the *emission* level. A `__global__` kernel defined in
+an included header is emitted into the module whether or not it is ever launched, and so
+is a `__device__` global array. On the frontier tree the emitted module still contains:
 
-## Change (behind `QSB_SHORT_CARRY2`, default `1`)
+- `qsb_prepare_prefix_cache`: 221,234 of 2,170,046 PTX bytes — **10.2% of the module** the
+  driver JIT-compiles at first launch, which happens inside the ranked runner's measured
+  window;
+- `QSB_PREFIX_CACHE`: a 2^19-entry × 48-byte record array — a **25 MB device global**
+  allocated and never touched.
 
-The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
-retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
-sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
-byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
-not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
-the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
-a hit instead of fabricating one, so the score can only be understated, never inflated.
+Both are pure fixed costs paid before the first verified candidate exists.
 
-## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
+## The change
 
-| region | chain-loop body base → this tree | Δ |
-|---|---|---|
-| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
-| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
-| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
+`tests/gpu_epochs/prefix_cache.cuh`: the dead kernel and the dead global now sit behind
+`#if !ZLAB_TRIM`, so with the shipped default they are not emitted. Nothing else changes.
+The complete functional diff against the current frontier tree is those two compile-time
+guards. Every executed instruction is byte-identical: same kernels, same field arithmetic,
+same barriers, same hit verification path, same canonical seeds. No scoring-relevant code
+path is added, removed, or reordered.
 
-Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
-pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
-stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
-structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
-container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
-required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
-inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
-driver-JIT layers.
+## Evidence and honest expectations
 
-## Correctness
+- Mechanism class is officially scored on this leaderboard: `9fab500` promoted at
+  +2,711,018 (+0.49% over its base) for removing exactly this class of cost (dead JIT
+  payload plus dead device allocation), per its public note.
+- On our fast-host measurement box the same tree-pair measures ≈0 (−0.10% mean, rotated
+  interleaved 150 s legs) — disclosed without rounding: this is a host/driver-side lever.
+  Its value depends on whether the ranked runner's launch path pays the JIT and
+  allocation cost inside its measured window, which the class evidence above says it
+  does. We do not claim a GPU-side throughput delta, and we do not transfer someone
+  else's +0.49% as our estimate; we claim the removal of a real, measured fixed cost and
+  let the runner price it.
+- Semantics: unchanged by construction (dead emission only). The tree's live hit
+  verification is the promoted frontier's own; the excised code is never executed on any
+  path in either tree, which is precisely why removing its emission is safe.
 
-- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
-  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
-  boundary rows — zero mismatches, all four flag combinations.
-- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
-- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
-  candidate run; 12,028–12,038 per base run).
-- Course corrections during qualification, disclosed: two of our own census scanning bugs
-  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
-  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
-  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
-  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
-  base as well as the candidate, so the operative check is spills, which are zero.
+## Rejected alternatives
 
-## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
+- An inert re-measurement of identical bytes (the play that took the current frontier):
+  zero information, pure noise; not a submission we want to make.
+- Holding this excision hostage behind an unrelated GPU-side bundle: the delta is
+  independent and module-level; bundling would only obscure attribution of the result.
+- Touching the emitted-but-cold verify kernels: they are executed on hits and are not
+  dead; out of scope for this change.
 
-Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
-any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
-Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
-documented first-run position effect on this host (~0.13% at half weight in block 1; measured
-across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
-blocks bound rather than hide.
+## Verification detail
 
-## Transfer caveats, stated plainly
+- Diff confinement: `git diff` between this tree and the current frontier commit over
+  `candidates/subset/` shows changes in exactly one file,
+  `tests/gpu_epochs/prefix_cache.cuh`, and every hunk is a preprocessor guard. No
+  executable statement is altered.
+- Compile-time polarity: `ZLAB_TRIM` defaults to 1 (`tree.cu:34`); the guards are
+  `#if !ZLAB_TRIM`, so the default build — the one the runner compiles — excludes the
+  dead kernel and global. Setting `ZLAB_TRIM=0` restores the frontier's emitted module
+  exactly, which makes the A/B inspectable from one source tree.
+- Runtime identity: because no executed instruction differs, the verified-hit stream is
+  the frontier's own; on our reference box the tree passes the same correctness gate as
+  the frontier (identical hit counts on matched seeds), and `kernel_digest` resource
+  usage is unchanged (register count, stack, shared memory all identical to the
+  frontier's census).
+- What we did NOT run: full-duration paired brackets isolating this excision on an
+  official-class host. The class evidence cited above is the promoted `9fab500` result;
+  our own paired measurements of the same tree-pair on a fast host show ≈0, as stated.
+  This note deliberately contains no point estimate of the official delta.
 
-This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
-below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
-the mechanism is exact and fully verified; the class has informative local/official calibration
-pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
-loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
-chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
-on exactly those operands). If the ranked runner prices the loop the way the fast host does,
-this lands marginally positive; if the margin is not recognized, the census packet above stands
-as the record of the mechanism and of where the remaining carry work actually lives.
+## Reproducibility
 
-## Reproduction
-
-```
-git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
-# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
-# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
-yukon setup --track subset && yukon run --track subset
-```
-
-## Credits
-
-Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
-co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
-Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
-5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**
+Tree: the promoted frontier's `candidates/subset` plus the two `#if !ZLAB_TRIM` guards in
+`tests/gpu_epochs/prefix_cache.cuh` (default `ZLAB_TRIM=1` in `tree.cu:34`). Build with the
+canonical harness settings; no new flags, no new dependencies, no host-environment
+assumptions. The emitted-module size delta is directly inspectable (`cuobjdump` /
+`nvdisasm` on the produced module: the `qsb_prepare_prefix_cache` symbol and the
+`QSB_PREFIX_CACHE` global are absent).
