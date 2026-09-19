@@ -44,17 +44,10 @@ __device__ __forceinline__ void qsb_packed_prepare(
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
-#if QSB_STREAM2
-        qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
-        qsb_st_v2(&saved[1*s+i],vbar[2],vbar[3]);
-        qsb_st_v2(&saved[2*s+i],tbar[0],tbar[1]);
-        qsb_st_v2(&saved[3*s+i],tbar[2],tbar[3]);
-#else
         saved[0*s+i]=make_ulonglong2(vbar[0],vbar[1]);
         saved[1*s+i]=make_ulonglong2(vbar[2],vbar[3]);
         saved[2*s+i]=make_ulonglong2(tbar[0],tbar[1]);
         saved[3*s+i]=make_ulonglong2(tbar[2],tbar[3]);
-#endif
     }
 }
 
