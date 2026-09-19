@@ -1779,6 +1779,11 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModSqr(PP, P);                      // PP = P^2
   _ModMult(PPP, PP, P);                // PPP = P*PP
   _ModMult(Q, U2, PP);                 // V  = U2*PP
+  /* ZZ3/ZZZ3 do not read R, T or Q and do not write PPP. Issue them before
+   * the fused R^2+PPP-2V square so the two independent multiplies sit against
+   * that square. Keep ZZZ3 then ZZ3 so ptxas can still pair the carries. */
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3)
 
 #if QSB_FUSE_SQRADDSUB2
   /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
@@ -1794,9 +1799,6 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #endif
 #endif
 
-  _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
-                                       // on the paired-carry schedule without predicate spills)
   _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
