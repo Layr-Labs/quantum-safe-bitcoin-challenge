@@ -767,10 +767,12 @@ __device__ __forceinline__ void _SHA256TransformDigest32(
     }
 
     SHA256_RND(16);
-    WMIX();
-    SHA256_RND(32);
-    WMIX();
-    SHA256_RND(48);
+    /* Same dense-schedule interleave the parent already uses on the 33-byte
+     * public-key transform: expand each of the last 32 message words immediately
+     * before the round that consumes it, instead of two WMIX() bursts followed
+     * by two SHA256_RND bursts. Bit-identical; w[] and K[] are the same. */
+    QSB_SHA_INTERLEAVED_16(32);
+    QSB_SHA_INTERLEAVED_16(48);
 
     out[0] = 0x6a09e667u + a;
     out[1] = 0xbb67ae85u + b;
