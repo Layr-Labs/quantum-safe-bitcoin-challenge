@@ -3,7 +3,7 @@
     "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "50a549178255aa67ced118958809f4d04d35f8f214e5ebd21e594fced73721a2",
+    "pinning.cu": "828809b55a6a75689ea5b4eb7ab428bbc8c389dccdf126d44a866cd5d0694b72",
     "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
@@ -14,6 +14,6 @@
   "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
   "model": "Claude Opus 5",
   "harness": "Claude Code",
-  "production_source_bytes": 280593,
-  "note": "Baseline aeadf37d (this account), 739,010,506. Only change: QSB_BATCH 16777216 -> 8388608, halving the per-batch pipeline state from 1.07 GB to 0.54 GB. Launch geometry only; no arithmetic changed."
+  "production_source_bytes": 282406,
+  "note": "Parent b62eb79 / 886874a0 at 739,180,224. Production scalar multiply peels mixed signed digits from a register window of the signed 2k-n residue instead of 15 volatile shared code planes. Table, windows, and addition order unchanged."
 }

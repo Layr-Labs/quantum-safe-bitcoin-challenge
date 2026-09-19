@@ -404,6 +404,17 @@ struct qsb_digit_window {
     }
 };
 
+/* Map a w-bit field of the signed 2k-n residue onto the mixed table. The
+ * top bit of a non-final window is the digit sign; the final window uses the
+ * explicit sign of D and the remaining 16 stored bits. Identical to the
+ * shared-plane encoder, but the code never lands in memory. */
+__device__ __forceinline__ void qsb_load_window_digit(
+    const uint8_t *table, unsigned base, uint32_t f, unsigned bits,
+    int32_t tm, uint64_t *x, uint64_t *y) {
+    uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+    gt_load_signed_flat_m(table,base,idx,0ULL-(uint64_t)(uint32_t)(tm<0),x,y);
+}
+
 /* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
  * y=Y/ZZZ). Seed the first two chunks with a deferred-Y mmadd (3M+2S), adjust
  * each next point's y by the preceding affine anchor, and defer the new anchor
@@ -490,8 +501,10 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
 
-// First used as 15 per-lane digit planes (7.5 KiB) plus an optional ordinate
-// plane (4 KiB); after the handoff, the same 12 KiB holds the cofactor tree.
+// Shared 12 KiB arena. The default recoder peels digits from a register
+// window; this storage is the cofactor product/exclusion tree after the
+// fixed-base chain. The QSB_DIRECT_DIGITS=0 path still parks 15 code planes
+// here before that handoff.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
     __shared__ uint64_t storage[12*QSB_TREE_N];return storage;
 }
@@ -555,11 +568,38 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_DIRECT_DIGITS
+    /* Peel digits from the signed residue in registers. The 15 shared
+     * code planes never materialise; the cofactor tree still owns the
+     * arena after this chain. Chunk 0 is 18 bits at position 1; every
+     * later chunk is 17 bits at 17*c+2. */
+    uint64_t M[4]; int negative; qsb_signed_recode_setup(k,M,&negative);
+    qsb_digit_window win; win.init(M,1u);
+    {
+        uint32_t f=win.peek()&((1u<<18)-1u); win.advance(18u);
+        qsb_load_window_digit(table,gt_offset(0),f,18u,(int32_t)(f>>17)-1,x0,y0);
+    }
+    {
+        uint32_t f=win.peek()&((1u<<17)-1u); win.advance(17u);
+        qsb_load_window_digit(table,gt_offset(1),f,17u,(int32_t)(f>>16)-1,x1,y1);
+    }
+    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    unsigned base=gt_offset(2);
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        uint32_t f=win.peek()&((1u<<17)-1u); win.advance(17u);
+        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>16)-1;
+        qsb_load_window_digit(table,base,f,17u,tm,x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        base+=1u<<16;
+    }
+#else
+    qsb_decode_to_shared(k);
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
@@ -569,6 +609,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 }
 
