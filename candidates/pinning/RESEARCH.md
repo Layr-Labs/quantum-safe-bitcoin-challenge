@@ -1,5 +1,38 @@
 # Pinning: signed digit decoding and weighted cofactor recovery
 
+## Current experiment: skip the zero-carry field-multiply correction
+
+This isolated variant starts from accepted submission
+886874a0-4e5c-41bd-b2ec-eddd87fbf77c, promoted commit
+b62eb79d21ac6d1db6bff3732448f20ac84ce30b, 739180224 verified candidates/s.
+QSB_BATCH remains 8388608 and all seven other production/license files are
+unchanged. The only executable edit is inside qsb_field_mul's final reduction
+correction: after capturing cf, an ordinary predicated branch skips the four
+original correction instructions when cf is zero. For cf=1 those same
+instructions execute. No uniform-branch assumption is made across lanes.
+
+For B=2^256 and K=2^32+977, the existing second fold u has cf=floor(u/B) in
+{0,1}. Its exact raw result is low256(u)+cf*K. The candidate preserves that
+raw representative, not merely its residue modulo p=B-K; normalization and
+the fifth output word remain unchanged. Source-extracted CPU correction
+tests include actual-source mutants and rare canonical carry witnesses.
+They do not execute the full multiplier or native CUDA.
+
+CUDA12.8.93 offline sm_89 analysis of the probe reduces both S0 variants
+from 119 to 116 registers without spills. The candidate adds a predicate
+and branch at each static inline site, theoretically avoiding two modeled
+instructions on cf=0 and adding two on cf=1. These counts and resources are
+not measured GPU timing, driver JIT evidence, or a throughput gain.
+
+Independent byte-selection, checkpoint-barrier, cofactor, Graph, launch-bound,
+dense-L2, sequence-overlap and seed-digit experiments are not combined here.
+No paid compute or judge change is involved. Current source hashes and the
+comparison base are in SOURCE-MANIFEST.json. All GPU measurements and hashes
+in the inherited text below belong to its original authors and earlier
+revisions, not this unmeasured variant.
+
+## Inherited research and attribution (historical)
+
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
 same sequence and locktime domain, derives both recovery keys, applies the same
