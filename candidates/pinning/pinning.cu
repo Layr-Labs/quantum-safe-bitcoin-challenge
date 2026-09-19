@@ -54,6 +54,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                * L2-resident, so caching them only evicts the 64 MiB table
                                * that every candidate reads 15 times. */
 #endif
+#ifndef QSB_TABLE_Y_GUARD
+#define QSB_TABLE_Y_GUARD 1  /* exact signed-load specialization after scanning the generated table */
+#endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
 #endif
@@ -325,6 +328,20 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
+/* Donor: Meganpark980320, public submission 4556bc28. For p=2^256-(2^32+977),
+ * a negative signed load with y[0]<=p[0] has a carry from (~y[0])+(p[0]+1),
+ * so the upper three limbs are exactly ~y[i]. Scan the whole immutable table
+ * before selecting this specialization; use the full-carry loader otherwise. */
+static bool qsb_table_sign_guard_ok = false;
+static bool qsb_table_y_range_ok(const uint8_t *table, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        uint64_t low;
+        memcpy(&low, table + i*64 + 32, sizeof(low));
+        if (low > 0xFFFFFFFEFFFFFC2FULL) return false;
+    }
+    return true;
+}
+
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
@@ -338,6 +355,22 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
     UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
+    gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
+}
+
+__device__ __forceinline__ void gt_load_signed_flat_m_guarded(const uint8_t *__restrict__ gTable,
+                                                              uint32_t base, uint32_t idx,
+                                                              uint64_t m,
+                                                              uint64_t *__restrict__ gx,
+                                                              uint64_t *__restrict__ gy) {
+    size_t off = ((size_t)base + idx) * 64;
+    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
+    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
+    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
+    r0+=c0;
     gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
 }
 
@@ -553,19 +586,32 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     gt_load_signed_flat_m(table,base,code&0x1ffffu,0ULL-(code>>31),x,y);
 }
 
+template<bool SAFE_NEG>
+__device__ __forceinline__ void qsb_load_decoded_guarded(const uint8_t *table,unsigned c,
+    unsigned base,uint64_t *x,uint64_t *y) {
+    if (SAFE_NEG) {
+        volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+        uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
+        gt_load_signed_flat_m_guarded(table,base,code&0x1ffffu,0ULL-(code>>31),x,y);
+    } else {
+        qsb_load_decoded(table,c,base,x,y);
+    }
+}
+
+template<bool SAFE_NEG = false>
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
     (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+    qsb_load_decoded_guarded<SAFE_NEG>(table,0,gt_offset(0),x0,y0);
+    qsb_load_decoded_guarded<SAFE_NEG>(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
+        qsb_load_decoded_guarded<SAFE_NEG>(table,c,base,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
         base+=1u<<16;
@@ -1283,7 +1329,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
-template<bool FAST_TAIL, int STAGE>
+template<bool FAST_TAIL, int STAGE, bool SAFE_NEG = false>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
@@ -1394,7 +1440,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
+    _FixedBaseSignedXYZZScalar<SAFE_NEG>(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -1572,6 +1618,15 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
+#if QSB_TABLE_Y_GUARD
+    if (qsb_table_sign_guard_ok) {
+    kernel_pinning_pipeline<FAST_TAIL,0,true><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+        saved,roots,tree);
+    } else
+#endif
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
@@ -1982,8 +2037,8 @@ int main(int argc, char **argv) {
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv);
+            gt_ok = cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost)==cudaSuccess;
+            if(gt_ok) gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -1994,8 +2049,12 @@ int main(int argc, char **argv) {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
             compute_gtable(chk_table,pp.neg_r_inv);
-            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            if(cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice)!=cudaSuccess) return 1;
         }
+#if QSB_TABLE_Y_GUARD
+        qsb_table_sign_guard_ok = qsb_table_y_range_ok(chk_table,GT_TOTAL_ENTRIES);
+        printf("  Table Y guard: %s\n",qsb_table_sign_guard_ok?"fast signed loads":"full-carry fallback");
+#endif
         fflush(stdout);
         free(chk_table);
     }
