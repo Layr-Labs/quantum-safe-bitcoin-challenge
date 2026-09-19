@@ -1,20 +1,65 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  "baseline_main": "eba0d9d27d2b7850610cc0e24c4371e5ad2db0a5",
+  "baseline_verified_score": 741800702,
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "effort": "medium",
+  "architecture": "40 MiB grouped GLV with promoted XYZZ/cofactor pipeline, digest interleave, guarded recovery normalization",
+  "donors": {
+    "may93182": {
+      "pr": 534,
+      "commit": "4b77964fdd47499644c44a15e717a70b4a208b41"
+    },
+    "fkiene": {
+      "pr": 543,
+      "commit": "eb395c8acb216fb3b41bc7e3df06fe907e0bd262"
+    },
+    "EvanYan1024": {
+      "pr": 541,
+      "commit": "bce628eee63e51dcbb05a322072ce0996fa01f55"
+    }
   },
-  "comparison_baseline_submission": "aff38dd0-ccb3-4ac0-be5e-e72b060f7cd9 (promoted frontier 740,390,516)",
-  "comparison_baseline_promoted_commit": "70f4723bf84e42ce8ab356dab3687b57bf558f9f",
-  "compiler": "Official Yukon build for RTX 4090; local host has no CUDA toolchain",
-  "model": "gpt-5.6-sol",
-  "harness": "Hermes Agent",
-  "production_source_bytes": 281952,
-  "note": "Baseline 70f4723 / aff38dd0. The only production-path change interleaves the two dense SHA-256 rolling-schedule expansions with rounds 32-63 inside the live sparse 33-byte public-key transform. It preserves all 64 rounds, message words, feed-forward values, hit logic, candidate enumeration, recovery arithmetic and launch geometry. An extracted-function host differential test passes 11,522 messages and 34,566 digest comparisons against both the previous schedule and Python hashlib, including in-place aliasing. This host has no nvcc or GPU, so CUDA compilation, register/spill effects and speed are intentionally left to Yukon's authoritative build and benchmark."
+  "previous_own_result": {
+    "id": "c2900b57-9cde-4530-91d0-45340705371b",
+    "score": 138466473,
+    "verified": true,
+    "status": "rejected"
+  },
+  "static_audit": {
+    "wide_product_ptx_cases": 1506,
+    "split_and_table_reconstruction_cases": 100778,
+    "sha_messages": 1282,
+    "boundary_add_cases": 100042,
+    "status": "PASS",
+    "native_compilation": false,
+    "gpu_measured": false
+  },
+  "prefix_proof": {
+    "lattice_basis_and_determinant": "pass",
+    "prefix_intervals": "pass",
+    "coefficient_bounds": [
+      "73716212643657726965931711996242363653876900673891514644489246313411929702400/115792089237316195423570985008687907852837564279074904382605163141518161494337",
+      "62720165597713135216951136498088913517031740469356748765502223554796643680256/115792089237316195423570985008687907852837564279074904382605163141518161494337"
+    ],
+    "finite_joint_term_bound": "pass",
+    "scope": "Exact integer checks supporting the argument in PREFIX-PROOF.md; not a proof of CUDA implementation correctness."
+  },
+  "local_compilation": false,
+  "gpu_measured": false,
+  "production_source_sha256": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
+    "GLVFinalGuard.cuh": "4613a9c8a83b4e80a53ce14bbd4b877acbb74f9a957d611b87d53c1e853ef64c",
+    "GLVPointGuard.cuh": "7a6b2041fb2dafb66a9b8e38e2d4d6160897234918806cfdaefee7b90b3b061a",
+    "GLVScalar.cuh": "ebeb6ec672fe31fd43ad9251ca74779ef41457fde3dafab9c5941681fc57335a",
+    "GLVTableHost.cuh": "380d7bfb486db836a5b6fe85c8fea3dbf5f9da422bada6a3041aaa1ac9b4f3f2",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "a4d7676c664ea2436b9628028d9432a20f0aa1df5004c0cf7697488ee45f11ca",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "23060ea2a6147c8464ec2be2411c9aa5abc9eee75d64d7dbd0e35ebbc9860856",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  }
 }
