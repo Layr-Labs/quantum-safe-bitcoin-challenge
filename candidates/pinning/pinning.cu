@@ -888,29 +888,30 @@ __device__ __forceinline__ void qsb_field_normalize(uint64_t *r) {
 
 /* qsb_warp_inverse: removed -- it has no caller. */
 
-// Share one inverse across all 256 lanes with a work-efficient binary product
+// Share one inverse across N lanes with a work-efficient binary product
 // tree. Each level is packed after the preceding level, and every level stores
 // its left half before its right half. Thus both operands of a multiply are
 // contiguous across a warp. Products are immutable during the downward pass;
-// the 255 internal inverses use a second, smaller packed array. Limb-major
+// the N-1 internal-node inverses use a second, smaller packed array. Limb-major
 // storage gives adjacent lanes adjacent 64-bit words instead of a 32-byte AoS
 // stride. Whole-block participation is required: the caller maps inactive and
 // unusable tail lanes to the multiplicative identity before entering here.
+template<int N>
 __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
-    __shared__ uint64_t products[4][512];
-    __shared__ uint64_t inverses[4][256];
+    static_assert(N>=2 && !(N&(N-1)),"power-of-two inverse group");
+    __shared__ uint64_t products[4][2*N];
+    __shared__ uint64_t inverses[4][N];
     int tid=threadIdx.x;
 
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
     __syncthreads();
 
-    // Level (offset,count) pairs are (0,256), (256,128), (384,64), ...,
-    // (508,2), (510,1). The final root iteration is executed only by lane zero,
+    // Packed levels end at root node 2*N-2. The final product is lane-local,
     // so it can invert the result immediately without another synchronization.
     int offset=0;
     #pragma unroll 1
-    for(int count=256;count>1;count>>=1){
+    for(int count=N;count>1;count>>=1){
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
@@ -931,46 +932,46 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
     if(tid==0){
         uint64_t root[5];
         #pragma unroll
-        for(int k=0;k<4;k++)root[k]=products[k][510];
+        for(int k=0;k<4;k++)root[k]=products[k][2*N-2];
         root[4]=0;
         qsb_field_normalize(root);
         _ModInv(root);
         #pragma unroll
-        for(int k=0;k<4;k++)inverses[k][254]=root[k];
+        for(int k=0;k<4;k++)inverses[k][N-2]=root[k];
     }
     __syncthreads();
 
     // If I=1/(L*R), then I*R=1/L and I*L=1/R. One thread per child
-    // therefore expands all internal inverse levels with 254 multiplies.
-    // Internal inverse index = product index - 256.
-    offset=508;
+    // therefore expands all internal inverse levels with N-2 multiplies.
+    // Internal inverse index = product index - N.
+    offset=2*N-4;
     #pragma unroll 1
-    for(int count=2;count<256;count<<=1){
+    for(int count=2;count<N;count<<=1){
         int half=count>>1;
         if(tid<count){
             int local_parent=tid&(half-1);
             uint64_t parent_inv[5],sibling[5],child_inv[5];
             #pragma unroll
             for(int k=0;k<4;k++){
-                parent_inv[k]=inverses[k][offset+count-256+local_parent];
+                parent_inv[k]=inverses[k][offset+count-N+local_parent];
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
             qsb_field_mul(child_inv,parent_inv,sibling);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
+            for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
         __syncthreads();
     }
 
     // The leaf level has no shared inverse destination or following barrier.
-    // Its 256 child inverses can be returned directly to the callers.
+    // Its N child inverses can be returned directly to the callers.
     uint64_t parent_inv[5],sibling[5];
     #pragma unroll
     for(int k=0;k<4;k++){
-        parent_inv[k]=inverses[k][tid&127];
-        sibling[k]=products[k][tid^128];
+        parent_inv[k]=inverses[k][tid&(N/2-1)];
+        sibling[k]=products[k][tid^(N/2)];
     }
     parent_inv[4]=sibling[4]=0;
     qsb_field_mul(value,parent_inv,sibling);
@@ -1099,9 +1100,8 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
 }
 
 /* Batch the per-search-CTA roots one level further. Groups of 256 roots use
- * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
- * group roots. A full 16M candidate batch therefore executes one _ModInv
- * instead of 65,536 independent inversions. */
+ * the same checkpointed tree helpers, then 32-lane CTAs invert the group roots.
+ * A full 8M candidate batch has 256 group roots and eight independent inverses. */
 __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
     const uint64_t *roots, int count, uint64_t *super_roots,
     uint64_t *root_checkpoint
@@ -1115,18 +1115,18 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
     qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
 }
 
-/* One 256-lane CTA per 256 group roots; each CTA runs its own _ModInv, so
- * batches with more than 65,536 candidate trees need no third tree level. */
-__global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
+/* One 32-lane CTA per 32 group roots; keep full-block synchronization and
+ * identity padding while allowing independent inverse groups to run in parallel. */
+__global__ void __launch_bounds__(32,1) qsb_invert_super_roots(
     uint64_t *super_roots, int count
 ) {
-    int tid=(int)(blockIdx.x*256u+threadIdx.x);
+    int tid=(int)(blockIdx.x*32u+threadIdx.x);
     bool active=tid<count;
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
                    active?super_roots[(size_t)tid*4u+2]:0ULL,
                    active?super_roots[(size_t)tid*4u+3]:0ULL,0};
-    qsb_block_inverse(r);
+    qsb_block_inverse<32>(r);
     if(active){
         #pragma unroll
         for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
@@ -1600,7 +1600,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+31)/32,32 QSB_STREAM_ARG>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));

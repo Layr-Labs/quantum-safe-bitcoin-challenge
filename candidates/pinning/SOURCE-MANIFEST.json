@@ -1,19 +1,20 @@
 {
   "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "50a549178255aa67ced118958809f4d04d35f8f214e5ebd21e594fced73721a2",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "pinning.cu": "0ba1acb38491424c51c8d4b672ac631c41b469027e5b19cd1b73f9a36d2eb21b"
   },
-  "comparison_baseline_submission": "aeadf37d-c149-4311-a939-13fc69aabc43",
-  "comparison_baseline_promoted_commit": "6288396",
-  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 280593,
-  "note": "Baseline aeadf37d (this account), 739,010,506. Only change: QSB_BATCH 16777216 -> 8388608, halving the per-batch pipeline state from 1.07 GB to 0.54 GB. Launch geometry only; no arithmetic changed."
+  "comparison_baseline_submission": "f7412e96-b0aa-4804-a108-54f49ede6a96",
+  "comparison_baseline_promoted_commit": "92f27aef95e0df4496537b576a30be793fddfcd0",
+  "comparison_baseline_official_score": 741053306,
+  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm",
+  "model": "gpt-6-astra",
+  "harness": "Codex",
+  "production_source_bytes": 280703,
+  "note": "Measurement candidate: only pinning.cu changes. The accepted 256-lane final inverse group becomes independently scheduled 32-lane groups. Static and CPU-model evidence only; no native GPU timing or performance claim."
 }
