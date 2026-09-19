@@ -62,10 +62,21 @@ __device__ __forceinline__ void qsb_k2s_pre3(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
     uint64_t yb[4];
-    _ModMult(yb, yR, ZZZ);
-    _ModSub256(n, yb, Y);
-    _ModAdd256(n + 4, yb, Y);
+    X_FMUL(yb, yR, ZZZ);
+    X_FSUB(n, yb, Y);
+    X_FADD(n + 4, yb, Y);
     Load256(n + 8, ZZ);
+}
+/* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
+__device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
+) {
+    uint64_t t[4];
+    X_FMUL(t, xR, ZZ);
+    X_FSUB(t, t, X_D);
+    Load256(X_D, t);             /* X_D becomes d */
+    X_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    W[4] = 0;
 }
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
  * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
@@ -75,78 +86,23 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
 ) {
     uint64_t t[4], sum[4], m1[4], m2[4];
     uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    _ModMult(n + 8, inv);          /* h = ZZ/W, formed once */
-    _ModMult(m1, n, n + 8);
-    _ModMult(m2, n + 4, n + 8);
-    _ModAdd256(sum, m1, m2);
-    _ModSub256(t, m1, cc);
-    _ModMult(x1, sum, t);
-    _ModAdd256(x1, x1, xR);
-    _ModSub256(t, xR, x1);
-    _ModMult(t, m1);
-    _ModSub256(t, yR);
+    QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
+    QSB_FMUL(m1, n, n + 8);
+    QSB_FMUL(m2, n + 4, n + 8);
+    QSB_FADD(sum, m1, m2);
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(x1, sum, t);
+    QSB_FADD(x1, x1, xR);
+    QSB_FSUB(t, xR, x1);
+    QSB_FMUL(t, t, m1);
+    QSB_FSUB(t, t, yR);
     uint32_t parities = (uint32_t)(t[0] & 1ULL);
-    _ModSub256(t, m2, cc);
-    _ModMult(x2, sum, t);
-    _ModAdd256(x2, x2, xR);
-    _ModSub256(t, xR, x2);
-    _ModMult(t, m2);
-    _ModSub256(t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
-    return parities;
-}
-#endif
-/* Public subset submission 4f367236 by owizdom supplies the speculative
- * pre-inverse prepare and post-inverse finish used by the scalar-fed dual SHA
- * path below. The promoted bb406ab8 last-add helper in tree.cu is retained
- * independently. QSB_SPEC_FINISH=0 disables the owizdom finish stages, while
- * the promoted packed-PTX last addition remains in both arms. Every tentative
- * hit is recomputed by kernel_verify_pair_hits with the exact guarded chain;
- * the speculative filter can still lose a hit. The exact verify path
- * (qsb_k2s_front_exact, qsb_k2s_post, qsb_pair_verify_candidate) is untouched. */
-#ifndef QSB_SPEC_FINISH
-#define QSB_SPEC_FINISH 1
-#endif
-#if QSB_SPEC_FINISH && ZLAB_K2S3M
-__device__ __forceinline__ void qsb_spec_finish_prepare(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W) {
-    uint64_t t[4];uint32_t bad=0;
-    qsb_filter_mul(t, xR, ZZ, bad);
-    _ModSub256(t, t, X_D);
-    Load256(X_D, t);
-    qsb_filter_mul(W, ZZZ, X_D, bad);
-    W[4] = 0;
-}
-__device__ __forceinline__ void qsb_spec_pre3(
-    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n) {
-    uint64_t yb[4];uint32_t bad=0;
-    qsb_filter_mul(yb, yR, ZZZ, bad);
-    _ModSub256(n, yb, Y);
-    qsb_filter_add(n + 4, yb, Y, bad);
-    Load256(n + 8, ZZ);
-}
-__device__ __forceinline__ uint32_t qsb_spec_post3(
-    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2) {
-    uint64_t t[4], sum[4], m1[4], m2[4];uint32_t bad=0;
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    qsb_filter_mul(n + 8, inv, bad);
-    qsb_filter_mul(m1, n, n + 8, bad);
-    qsb_filter_mul(m2, n + 4, n + 8, bad);
-    qsb_filter_add(sum, m1, m2, bad);
-    _ModSub256(t, m1, cc);
-    qsb_filter_mul(x1, sum, t, bad);
-    qsb_filter_add(x1, x1, xR, bad);
-    _ModSub256(t, xR, x1);
-    qsb_filter_mul(t, m1, bad);
-    _ModSub256(t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
-    _ModSub256(t, m2, cc);
-    qsb_filter_mul(x2, sum, t, bad);
-    qsb_filter_add(x2, x2, xR, bad);
-    _ModSub256(t, xR, x2);
-    qsb_filter_mul(t, m2, bad);
-    _ModSub256(t, yR);
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(x2, sum, t);
+    QSB_FADD(x2, x2, xR);
+    QSB_FSUB(t, xR, x2);
+    QSB_FMUL(t, t, m2);
+    QSB_FSUB(t, t, yR);
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
@@ -208,13 +164,8 @@ __device__ __forceinline__ int qsb_k2s_front3(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
-#if QSB_SPEC_FINISH
-    qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
-    qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
-#else
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
-#endif
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
@@ -251,15 +202,8 @@ __device__ __forceinline__ int qsb_k2s_front3_z(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
-#if QSB_SPEC_FINISH
-    // Keep the scalar-fed dual SHA path on the same speculative finish as the
-    // original single-epoch front; exact recovery still runs in the verifier.
-    qsb_spec_finish_prepare(qx,qzz,qzzz,u2rx,prod);
-    qsb_spec_pre3(qy,qzz,qzzz,u2ry,n);
-#else
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+    qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);   /* same finish as qsb_k2s_front3 */
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
-#endif
     return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
 }
 #endif
@@ -293,7 +237,72 @@ __device__ __forceinline__ int qsb_k2s_front_exact(
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 
+/* QSB_GATE_PAIR (kill switch): 1 = hash both recovery-id pubkeys in one interleaved SHA-256 block
+ * (two independent dependency chains -> ILP), then test ri=0 before ri=1 exactly as the loop did.
+ * Same arithmetic per stream; the only difference is that ri=1 is also hashed when ri=0 passes (rare). */
+#ifndef QSB_GATE_PAIR
+#define QSB_GATE_PAIR 1
+#endif
+#if QSB_GATE_PAIR
+__device__ __forceinline__ void qsb_gate_block(uint32_t *pb, const uint64_t *qx, uint32_t parity) {
+    uint64_t sx0=qx[0], sx1=qx[1], sx2=qx[2], sx3=qx[3];
+    uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+                     (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+    uint8_t prefix_byte = 0x2+(uint8_t)(parity&1u);
+    pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+    pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+    pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+    pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+    pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+    pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+}
+#define QSB_GP_WMIX(w) { \
+w[0] += s1(w[14]) + w[9] + s0(w[1]);   w[1] += s1(w[15]) + w[10] + s0(w[2]); \
+w[2] += s1(w[0]) + w[11] + s0(w[3]);   w[3] += s1(w[1]) + w[12] + s0(w[4]); \
+w[4] += s1(w[2]) + w[13] + s0(w[5]);   w[5] += s1(w[3]) + w[14] + s0(w[6]); \
+w[6] += s1(w[4]) + w[15] + s0(w[7]);   w[7] += s1(w[5]) + w[0] + s0(w[8]); \
+w[8] += s1(w[6]) + w[1] + s0(w[9]);    w[9] += s1(w[7]) + w[2] + s0(w[10]); \
+w[10] += s1(w[8]) + w[3] + s0(w[11]);  w[11] += s1(w[9]) + w[4] + s0(w[12]); \
+w[12] += s1(w[10]) + w[5] + s0(w[13]); w[13] += s1(w[11]) + w[6] + s0(w[14]); \
+w[14] += s1(w[12]) + w[7] + s0(w[15]); w[15] += s1(w[13]) + w[8] + s0(w[0]); }
+#define QSB_GP_R2(A,B,C,D,E,F,G,H,k,i) \
+    S2Round(A##0,B##0,C##0,D##0,E##0,F##0,G##0,H##0,K[(k)+(i)],w0[i]); \
+    S2Round(A##1,B##1,C##1,D##1,E##1,F##1,G##1,H##1,K[(k)+(i)],w1[i]);
+#define QSB_GP_RND(k) { \
+    QSB_GP_R2(a,b,c,d,e,f,g,h,k,0)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,1) \
+    QSB_GP_R2(g,h,a,b,c,d,e,f,k,2)  QSB_GP_R2(f,g,h,a,b,c,d,e,k,3) \
+    QSB_GP_R2(e,f,g,h,a,b,c,d,k,4)  QSB_GP_R2(d,e,f,g,h,a,b,c,k,5) \
+    QSB_GP_R2(c,d,e,f,g,h,a,b,k,6)  QSB_GP_R2(b,c,d,e,f,g,h,a,k,7) \
+    QSB_GP_R2(a,b,c,d,e,f,g,h,k,8)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,9) \
+    QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
+    QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
+    QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) QSB_GP_R2(b,c,d,e,f,g,h,a,k,15) }
+/* Two independent single-block SHA-256 compressions from the initial state, interleaved round by round. */
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
+    uint32_t t1, t2;
+    uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
+    uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
+    QSB_GP_RND(0);  QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+    QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+    QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+    QSB_GP_RND(48);
+    o0[0]=I[0]+a0;o0[1]=I[1]+b0;o0[2]=I[2]+c0;o0[3]=I[3]+d0;o0[4]=I[4]+e0;o0[5]=I[5]+f0;o0[6]=I[6]+g0;o0[7]=I[7]+h0;
+    o1[0]=I[0]+a1;o1[1]=I[1]+b1;o1[2]=I[2]+c1;o1[3]=I[3]+d1;o1[4]=I[4]+e1;o1[5]=I[5]+f1;o1[6]=I[6]+g1;o1[7]=I[7]+h1;
+}
+#undef QSB_GP_RND
+#undef QSB_GP_R2
+#undef QSB_GP_WMIX
+#endif
 __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
+#if QSB_GATE_PAIR
+    uint32_t pb0[16], pb1[16], hs0[8], hs1[8];
+    qsb_gate_block(pb0, q1x, y_parities);
+    qsb_gate_block(pb1, q2x, y_parities>>1);
+    qsb_sha256_init_transform_pair(hs0, pb0, hs1, pb1);
+    if(gpu_bench_valid_words(hs0)){*recid_out=0;return 1;}
+    if(gpu_bench_valid_words(hs1)){*recid_out=1;return 1;}
+    return 0;
+#else
     for(int ri=0;ri<2;ri++){
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
@@ -313,6 +322,7 @@ __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32
         if(gpu_bench_valid_words(hs)){*recid_out=ri;return 1;}
     }
     return 0;
+#endif
 }
 
 struct QsbPairFront {uint64_t words[12];int ok;};
@@ -396,11 +406,7 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t inv[4]={v0,v1,v2,v3};
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t q1x[4],q2x[4];int recid=0;
-#if QSB_SPEC_FINISH
-    uint32_t par=qsb_spec_post3(n,inv,rx,ry,q1x,q2x);
-#else
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
-#endif
     return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 }
 #endif
