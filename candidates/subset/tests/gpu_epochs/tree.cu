@@ -983,11 +983,11 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_TWIN      3
 #define QSB_SE_CUT       137
 #define QSB_SE_PER_EPOCH 256
-/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
+/* Paired launch groups: two 256-candidate epochs per group. */
 #ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 262144  /* Match PR309: 134217728 paired candidates per full launch. */
+#define ZLAB_LAUNCH_BLOCKS 65536  /* 33,554,432 candidates and 2 GiB of packed state. */
 #endif
-#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
+#define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS
 
 /* One descriptor per epoch: written by kernel_build_epochs, consumed by one
  * 256-thread block of kernel_digest. mid is the SHA-256 state after
@@ -1438,6 +1438,8 @@ __global__ void kernel_verify_pair_hits(
     }
 }
 
+
+#include "global_inverse.cuh"
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
@@ -2869,7 +2871,7 @@ int main(int argc, char **argv) {
      * epoch. The producer un-ranks the epoch's 6 early omissions and streams
      * the 1352-byte epoch prefix into a midstate + 8-byte remainder; the
      * consumer hashes 6 blocks per candidate from there. Per launch:
-     * QSB_SE_LAUNCH_BLOCKS epochs x 256 candidates = 8M candidates. */
+     * QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL epochs of 256 candidates. */
     if (se_mode) {
         printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
                QSB_SE_LAUNCH_BLOCKS);
@@ -2897,6 +2899,12 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if QSB_EXTERNAL_INVERSE
+        uint64_t *q4_saved=nullptr,*q4_roots=nullptr;
+        size_t q4_n=(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_SE_PER_EPOCH;
+        cudaMalloc(&q4_saved,q4_n*8*sizeof(uint64_t));cudaMalloc(&q4_roots,((q4_n+Q4_TREE_N-1)/Q4_TREE_N)*8*sizeof(uint64_t));
+        if(!q4_saved||!q4_roots){fprintf(stderr,"OOM global inverse pipeline\n");return 1;}
+#endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
@@ -2918,6 +2926,12 @@ int main(int argc, char **argv) {
 #endif
             // One producer block for each valid epoch, including an odd tail.
             kernel_build_first<<<epochs_in_batch,qsb_first_class_count>>>(d_epochs,d_first);
+#if QSB_EXTERNAL_INVERSE
+            int q4_count=epochs_in_batch*QSB_SE_PER_EPOCH,q4_blocks=(q4_count+Q4_TREE_N-1)/Q4_TREE_N;
+            q4_prepare<<<q4_blocks,Q4_TREE_N>>>(d_epochs,d_first,d_gt,q4_count,q4_saved,q4_roots);
+            q4_inverse_roots<<<(q4_blocks+255)/256,256>>>(q4_roots,q4_blocks);
+            q4_finish<<<q4_blocks,Q4_TREE_N>>>(d_epochs,q4_count,q4_saved,q4_roots,zh_cnt,zh_idx,zh_combos);
+#else
             kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -2937,6 +2951,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+#endif
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();

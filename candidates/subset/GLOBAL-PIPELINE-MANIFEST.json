@@ -1,0 +1,52 @@
+{
+  "model": "GPT-6 Astra",
+  "effort": "xhigh",
+  "harness": "Codex",
+  "base_commit": "37922c77408828f2eadca010a76d2e87014813c1",
+  "baseline_submission": "91867373-4f3f-4fc0-95e0-c10062221189",
+  "configuration": {
+    "QSB_EXTERNAL_INVERSE": 1,
+    "Q4_TREE_N": 128,
+    "ZLAB_LAUNCH_BLOCKS": 65536,
+    "Q4_STREAM_STATE": 1
+  },
+  "source_sha256": {
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "86ade5d707770870ba29994c20cbd12c3d98a29036fb7f48d93ba00c13bd3b12",
+    "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+    "hit_filter_field.cuh": "91258f3a3846ed6cea880e571a0f2a3372ae4781860e2410ab2455e32346edb9",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "e2bead6006809470d21f6beb8de58a5efe7af483ffcf74f31596a9da108446ef",
+    "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
+    "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
+    "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
+    "tests/gpu_epochs/dirdig_audit.cu": "9b4a85157256cb32170ad26ab94ec09a80706b9219e956a82d4c83f40c02e69b",
+    "tests/gpu_epochs/first_stage_audit.cu": "c9405ec70d3dc3f2572a10c5831dd1137179b8182a3983009dbc660d54e472de",
+    "tests/gpu_epochs/global_inverse.cuh": "a1479364e8c06a29e2ecfcf1ad1341acc6fff81b8ce205cbef75ccbe06918a74",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+    "tests/gpu_epochs/pair_finish_audit.cu": "ce76d53a0ae76bfaaca1bbd12ff87d7f268ca7dea187c1f733da14cebb9b261a",
+    "tests/gpu_epochs/pair_shared.cuh": "cce0f439ca453284831c939aeb3824223c4060fbec4783bee288f52fb1669b02",
+    "tests/gpu_epochs/pipeline_audit.cu": "050458012ca96e34e033c5709c0de31f715b9b2722e5a23bcc54d36f8a34a6ca",
+    "tests/gpu_epochs/pipeline_cofactor.cuh": "d5aa91c0df786f6b71714deddc01eaf915bb33e8574b65bd5dceb52cb9ce66ec",
+    "tests/gpu_epochs/point_audit.cu": "abc998ea5fc4f2180fc4690b209fc6ecb27a1189a8f884ead4607f06e82b315e",
+    "tests/gpu_epochs/point_predicate_audit.cu": "b8427c62a23c55070839548f28ce89c8309a47a6dc38d33ba594d3a120cc5c63",
+    "tests/gpu_epochs/prefix_cache.cuh": "2b289341d3ed1136c4ea157d2d68c2924da2b5a6538cf4ea49e8c720712977b5",
+    "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
+    "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
+    "tests/gpu_epochs/tree.cu": "3021197e7a78e7bc1849bb7f44b7620020015c85ab5bdec81388ae2d2c4c739b",
+    "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
+    "tests/gpu_epochs/tree_inverse.cuh": "8df5ceb6b173c3ec6523820525d2f884089044990dde6a8f1f4bf68dbad324a3",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "fcd8875884cf0e21b0f24a81e76b5c555455b9aafe46aac7cd94199cd46280ab",
+    "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689"
+  },
+  "validation": {
+    "long_fixed_work_gain_percent": 2.3919442556937787,
+    "long_identical_verified_hits": 2002,
+    "collective_audit_cases": 102144,
+    "tail_identical_verified_hits": 2032,
+    "independent_harness_verified_hits": 2229
+  }
+}
