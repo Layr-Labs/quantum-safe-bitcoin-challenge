@@ -1096,45 +1096,21 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     qsb_field_normalize(value);
 }
 
-/* Batch the per-search-CTA roots one level further. Groups of 256 roots use
- * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
- * group roots. A full 16M candidate batch therefore executes one _ModInv
- * instead of 65,536 independent inversions. */
-__global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
-    const uint64_t *roots, int count, uint64_t *super_roots,
-    uint64_t *root_checkpoint
-) {
-    int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
-    bool active=i<count;
-    uint64_t r[5]={active?roots[(size_t)i*4u]:1ULL,
-                   active?roots[(size_t)i*4u+1]:0ULL,
-                   active?roots[(size_t)i*4u+2]:0ULL,
-                   active?roots[(size_t)i*4u+3]:0ULL,0};
-    qsb_block_product_checkpoint<256>(r,super_roots,root_checkpoint);
-}
-
-/* One 256-lane CTA per 256 group roots; each CTA runs its own _ModInv, so
- * batches with more than 65,536 candidate trees need no third tree level. */
-__global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
-    uint64_t *super_roots, int count
-) {
-    int tid=(int)(blockIdx.x*256u+threadIdx.x);
-    bool active=tid<count;
-    uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
-                   active?super_roots[(size_t)tid*4u+1]:0ULL,
-                   active?super_roots[(size_t)tid*4u+2]:0ULL,
-                   active?super_roots[(size_t)tid*4u+3]:0ULL,0};
-    qsb_block_inverse(r);
-    if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)super_roots[(size_t)tid*4u+k]=r[k];
-    }
-}
-
+/* Batch the per-search-CTA roots one level further. Groups of 256 roots are
+ * inverted by ONE collective kernel: qsb_block_inverse already performs the
+ * whole Montgomery batch inversion inside a single CTA -- packed product
+ * tree in shared memory, one _ModInv at the root, downward expansion -- with
+ * a packed node numbering identical to the checkpointed split form.  The
+ * promoted path split this stage into prepare/invert/finish only so the tiny
+ * super-root inversion could run as its own launch; that round trip wrote
+ * and re-read every group's product tree through root_checkpoint and staged
+ * the group roots through super_roots.  Fusing the three launches removes
+ * two kernel-boundary synchronizations, the checkpoint write/read traffic,
+ * and one extra pass over roots[], while the S2 finish contract is
+ * unchanged: roots[i] still receives I=1/T and roots[count+i] J=b*I. */
 __device__ __constant__ uint64_t pin_u2ry_words[4];
-__global__ void __launch_bounds__(256,2) qsb_root_group_finish(
-    uint64_t *roots, int count, const uint64_t *super_roots,
-    const uint64_t *root_checkpoint
+__global__ void __launch_bounds__(256,2) qsb_root_group_invert(
+    uint64_t *roots, int count
 ) {
     int i=(int)(blockIdx.x*blockDim.x+threadIdx.x);
     bool active=i<count;
@@ -1142,7 +1118,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
                    active?roots[(size_t)i*4u+1]:0ULL,
                    active?roots[(size_t)i*4u+2]:0ULL,
                    active?roots[(size_t)i*4u+3]:0ULL,0};
-    qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
+    /* Inactive lanes enter as the multiplicative identity so every lane
+     * reaches the collective's barriers; only active lanes store. */
+    qsb_block_inverse(r);
     if(active){
         #pragma unroll
         for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
@@ -1591,24 +1569,10 @@ static void launch_pinning_pipeline(
     }
 #endif
     int root_groups=(blocks+255)/256;
-    qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
-        roots,blocks,super_roots,root_checkpoint);
+    qsb_root_group_invert<<<root_groups,256 QSB_STREAM_ARG>>>(roots,blocks);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
-        fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
-        exit(2);
-    }
-    qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
-    err=cudaGetLastError();
-    if(err!=cudaSuccess){
-        fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
-        exit(2);
-    }
-    qsb_root_group_finish<<<root_groups,256 QSB_STREAM_ARG>>>(
-        roots,blocks,super_roots,root_checkpoint);
-    err=cudaGetLastError();
-    if(err!=cudaSuccess){
-        fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
+        fprintf(stderr,"Root-group inverse launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
 #if QSB_TREE_OFFLOAD2
