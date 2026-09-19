@@ -15,8 +15,25 @@ __device__ __forceinline__ void qsb_add_boundary(uint64_t *raw,const uint64_t *a
 // parity we need; computing all four corrected output limbs is unnecessary.
 __device__ __forceinline__ uint32_t qsb_difference_parity(
     const uint64_t *a,const uint64_t *b) {
-    const bool borrow=a[3]!=b[3] ? a[3]<b[3] :
-        a[2]!=b[2] ? a[2]<b[2] : a[1]!=b[1] ? a[1]<b[1] : a[0]<b[0];
+    uint32_t borrow;
+    asm("{\n\t"
+        ".reg .pred lower, different;\n\t"
+        "setp.lt.u64 lower, %4, %8;\n\t"
+        "setp.ne.u64 different, %4, %8;\n\t"
+        "@different bra qsb_parity_compare_done;\n\t"
+        "setp.lt.u64 lower, %3, %7;\n\t"
+        "setp.ne.u64 different, %3, %7;\n\t"
+        "@different bra qsb_parity_compare_done;\n\t"
+        "setp.lt.u64 lower, %2, %6;\n\t"
+        "setp.ne.u64 different, %2, %6;\n\t"
+        "@different bra qsb_parity_compare_done;\n\t"
+        "setp.lt.u64 lower, %1, %5;\n\t"
+        "qsb_parity_compare_done:\n\t"
+        "selp.u32 %0, 1, 0, lower;\n\t"
+        "}"
+        : "=r"(borrow)
+        : "l"(a[0]), "l"(a[1]), "l"(a[2]), "l"(a[3]),
+          "l"(b[0]), "l"(b[1]), "l"(b[2]), "l"(b[3]));
     return (uint32_t)((a[0]^b[0]^uint64_t(borrow))&1u);
 }
 

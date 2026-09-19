@@ -1,4 +1,50 @@
-# Pinning: signed digit decoding and weighted cofactor recovery
+# Current experiment: rebased packed-recovery parity comparison
+
+This source package is experiment 0012, prepared but not submitted. Its exact
+baseline is accepted submission `aff38dd0-ccb3-4ac0-be5e-e72b060f7cd9`,
+promoted commit `70f4723bf84e42ce8ab356dab3687b57bf558f9f`, recorded at
+740390516 candidates/s. Submission eligibility and the accepted frontier must
+be refreshed immediately before any submission.
+
+The only executable-source change is
+`PackedRecovery.cuh::qsb_difference_parity`. It is the exact reviewed helper
+from experiment 0010, now transplanted onto the current accepted source. The
+candidate full-header SHA256 is
+`5ad098f24cff0b058f928124ffc0ed1b71c3880a160af1b7f6d77f1fac5a3fd4`.
+Replacing that helper with accepted text reconstructs the accepted header byte
+for byte. The other seven production/license files equal commit 70f4723.
+
+The helper preserves the unsigned high-to-low four-limb comparison and returns
+`(a[0] ^ b[0] ^ (a < b)) & 1`. A hash-bound source fixture reruns the reviewed
+ASan/UBSan CPU translation and independent bigint oracle on 101289 pairs and
+three input alias arrangements. These overlap checks prove the two read-only
+input views may alias and remain unchanged; they do not test PTX output-register
+allocation. Output-register lifetime safety is instead reviewed from the exact
+inline-PTX instruction order and constraints and the emitted PTX: every input
+comparison reached on a control-flow path precedes the final write-only 32-bit
+output selection, with block-local predicates and label.
+
+Fresh CUDA 12.8.93 compilation produces six PTX entries. Only FAST S2 changes:
+it has 11 fewer static PTX instructions and 12 fewer static `bra.uni`; ordinary
+`bra` count is unchanged. The other five entry bodies are byte-identical and
+all parsed offline sm_89 resource fields are unchanged. FAST S2 remains at 70
+registers, zero stack bytes and zero spills. This is compiler evidence, not a
+native GPU, SASS, driver-JIT, dynamic branch-frequency, latency or throughput
+measurement. No speedup or optimality is claimed.
+
+The accepted compiler output already short-circuits, so this is not a new early
+exit. The modeled branch tradeoff depends on the real limb-prefix distribution.
+Only an official accepted finite score above the refreshed baseline followed by
+promotion can establish a performance improvement. No paid resource, new
+dependency, public write or submission was used to prepare this package.
+
+The remainder of this file is inherited research and attribution from the
+accepted source. Its historical measurements and claims are not evidence for
+experiment 0012.
+
+---
+
+# Inherited research: signed digit decoding and weighted cofactor recovery
 
 This candidate removes work from the fixed-base scalar decoder, point-chain
 scheduling and public cofactor recovery pipeline. The search still visits the
