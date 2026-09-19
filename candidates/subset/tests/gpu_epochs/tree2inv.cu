@@ -1416,6 +1416,7 @@ __global__ void kernel_verify_pair_hits(
     const uint32_t*first,const uint8_t*gtable,int epochs_in_batch){
     if(threadIdx.x==0)*((uint32_t*)verified)=0;
     __syncthreads(); // One block; all lanes participate before the loop.
+#if !ZLAB_FINISHSPLIT
     const uint32_t count=*((const uint32_t*)tentative);
     const uint32_t limit=count<1024u?count:1024u;
     for(uint32_t i=threadIdx.x;i<limit;i+=blockDim.x){
@@ -1436,7 +1437,40 @@ __global__ void kernel_verify_pair_hits(
             for(int j=0;j<3;j++)out[10+j]=WIN3[lane][j];
         }
     }
+#else
+    (void)tentative;(void)epochs;(void)first;(void)gtable;(void)epochs_in_batch;
+#endif
 }
+
+#if ZLAB_FINISHSPLIT
+/* Split finish: the digest kernel only publishes (epoch,lane,recid) after its
+ * cheap in-kernel gate; this tiny kernel re-derives both candidates per HIT
+ * (not per candidate) via the exact self-inverse check and writes the ledger.
+ * A candidate that no longer verifies drops out before results/ is written,
+ * so the ranked verifier still sees only exact-valid records. */
+__global__ void kernel_finish_hits(
+    const uint8_t*tentative,uint8_t*verified,const epoch_desc_t*epochs,
+    const uint32_t*first,const uint8_t*gtable,int epochs_in_batch){
+    const uint32_t count=*((const uint32_t*)tentative);
+    const uint32_t limit=count<1024u?count:1024u;
+    for(uint32_t i=threadIdx.x;i<limit;i+=blockDim.x){
+        const uint8_t*record=tentative+4+(size_t)i*ZLAB_HIT_REC;
+        const uint32_t index=*((const uint32_t*)record)&0x3fffffffu;
+        const uint32_t ep=index>>8,lane=index&255u;
+        if(ep>=(uint32_t)epochs_in_batch)continue;
+        const int encoded=qsb_pair_verify_candidate(
+            epochs+ep,first+(size_t)ep*QSB_FIRST_SLOTS*8,lane,gtable);
+        if(!encoded)continue;
+        const uint32_t slot=atomicAdd((uint32_t*)verified,1u);
+        if(slot<1024u){
+            uint8_t*out=verified+4+(size_t)slot*ZLAB_HIT_REC;
+            *((uint32_t*)out)=index|((uint32_t)(encoded-1)<<30);
+            for(int j=0;j<6;j++)out[4+j]=epochs[ep].early[j];
+            for(int j=0;j<3;j++)out[10+j]=WIN3[lane][j];
+        }
+    }
+}
+#endif
 
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
@@ -2938,6 +2972,9 @@ int main(int argc, char **argv) {
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+#if ZLAB_FINISHSPLIT
+            kernel_finish_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+#endif
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
