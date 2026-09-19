@@ -1,20 +1,28 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "9a5fb5389330e3e6da462ffd440a554f981c98c09d13176875adecf1b27733a1",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+  "files": {
     "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
+    "GLVPointGuard.cuh": "9a60a916b81502a9b90ce799a0c1ea2191cdad332fa9ac743b45694a16273220",
+    "GLVScalar.cuh": "ebeb6ec672fe31fd43ad9251ca74779ef41457fde3dafab9c5941681fc57335a",
+    "GLVTableHost.cuh": "acba3a7078474e3a7e284c09879da2a7490ca4320f48523745eafb660f8ac2c1",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
+    "pinning.cu": "9f2c1d43f8ff52c8132217a307a6033ed9b8a56998a2d7397a602807944c3318",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
   },
-  "comparison_baseline_submission": "aff38dd0-ccb3-4ac0-be5e-e72b060f7cd9 (promoted frontier 740,390,516)",
+  "tests": {
+    "glv_cases.py": "af12c8c8928f10a0d56dad5cd660a6d3a4a437328f6be555476d652f358f4533",
+    "glv_point_audit.cu": "0a5148bf318d2b218bd619bc126bfb07bc267aa7c2f3dbab76f4b427f6a47f48",
+    "glv_scalar_audit.cu": "766438bfea02ece1feff25937779154b4f7348cf8fa7182280e906c7ae35858e"
+  },
   "comparison_baseline_promoted_commit": "70f4723bf84e42ce8ab356dab3687b57bf558f9f",
-  "compiler": "Official Yukon build for RTX 4090; local host has no CUDA toolchain",
-  "model": "gpt-5.6-sol",
-  "harness": "Hermes Agent",
-  "production_source_bytes": 281952,
-  "note": "Baseline 70f4723 / aff38dd0. The only production-path change interleaves the two dense SHA-256 rolling-schedule expansions with rounds 32-63 inside the live sparse 33-byte public-key transform. It preserves all 64 rounds, message words, feed-forward values, hit logic, candidate enumeration, recovery arithmetic and launch geometry. An extracted-function host differential test passes 11,522 messages and 34,566 digest comparisons against both the previous schedule and Python hashlib, including in-place aliasing. This host has no nvcc or GPU, so CUDA compilation, register/spill effects and speed are intentionally left to Yukon's authoritative build and benchmark."
+  "latest_checked_promoted_commit": "92f27aef95e0df4496537b576a30be793fddfcd0",
+  "model": "GPT-6 Astra",
+  "harness": "Codex",
+  "effort": "xhigh",
+  "production_source_bytes": 297713,
+  "note": "Standard signed-128 GLV split, shared seven-chunk XY table, joint final window, fully precomputed endomorphism x planes; fifteen terms and 56 MiB total. Original inline exceptional point law. No cold fallback or coarse split. Local RTX3070 screen slower; RTX4090 cache tradeoff requires official validation."
 }
