@@ -213,3 +213,64 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+### 8ddf6c52 resolution (01:39Z) — box model 3/3; both singles lost to the slow box
+
+Scored **713,844,351 REJECTED** on `leadergpu-...-3568275` (job 01:12:23 ->
+01:39:12Z, run 35411119478): the slow box read of a tree whose intel band
+tops at 739M. Pre-registered prediction 707-712M; landed 713.8M — the third
+consecutive confirmation that this runner scores every lineage ~2.5-4 % below
+the intel boxes, regardless of source change. **No information about
+`QSB_SLOTS` was produced**: both host-only singles (`5e1a94dc` SLOTS=3,
+707.1M; `8ddf6c52` SLOTS=4, 713.8M) were dispatched into a queue whose next
+free runner was 3568275 — the FIFO lottery the PINNING FIRE GATE exists to
+stop. `QSB_SLOTS` 3 vs 4 remains officially unmeasured on any intel box;
+ercumentyildirim's `fb7cc7a` (SLOTS=3) read -0.289 % on intel-r5, which is
+the only intel datapoint in that family.
+
+### Crown move 01:00-02:08Z (local 2:08 AM row): 886874a, QSB_BATCH 16M -> 8M
+
+ercumentyildirim promoted **739,180,224 (+0.12 %)**, commit `b62eb79`, run
+35410312057 **on intel-r5** (00:49:05 -> 01:35:58Z). Single change on
+`aeadf37`: `QSB_BATCH` 16,777,216 -> 8,388,608 — halves the per-batch
+pipeline state streaming through L2 (1.07 GB -> 0.54 GB) so the 64 MiB
+persisting table window survives. Not structural for our purposes: launch
+geometry + one host allocation size; no arithmetic. Intel from the note:
+
+- His seq/s instrument: +0.057 % (8M) vs -1.121 % (4M) — 8M is the knee.
+- The peak-rate local instrument is blind to effects that accrue over the
+  run (it extrapolates a stale peak); his entire "-0.x %" ban list for
+  cache/occupancy/geometry changes is suspect — re-measure, don't trust.
+- **`S2_THREADS=128 S2_BLOCKS=8` measured -0.087 % locally** (old base) —
+  noise-level; officially still untaken. Our draw program stands.
+- A bare `-DQSB_S2_BLOCKS=N` is DEAD at `QSB_TREE_N=128` (header `#undef` +
+  re-`#define`); only the source edit (what this lane does) is live.
+- 12M batch untested (his next-steps).
+
+### QSB-DRAW-1: program rebased onto the new crown (QsbFire4, 01:5xZ)
+
+The old draw tree (`aeb61e8` = aeadf37 + S2_BLOCKS=8) is dead as a promotion
+vehicle: the bar is now 739,180,224 and the old-base r5 band tops at 739.0M.
+Rebased: **b62eb79 (886874a) + QSB_S2_BLOCKS 7 -> 8**, single change vs the
+current crown, plus a `QSB-DRAW-n` comment marker. Stripped-file digest
+(marker comment block deleted, sha256 of the remainder):
+
+    d072b1e45e58e7b4ced6c97040d64a1be8536ae694ede043813d66bad0e856b2
+
+Every draw of this tree carries the same digest; only the draw id differs.
+Draw math: crown-lineage intel-r5 samples 734.4-739.0M on the old base; the
+QSB_BATCH=8M base adds ~+0.12 % (r5 read 739.18M is its first sample) ->
+band ~735.3-739.9M vs bar 739,180,224 => ~10-15 % Poisson per draw, plus a
+real officially-unmeasured single (local -0.087 % = noise) every time.
+Gates on this exact file: device+host `clang++ -fsyntax-only` vs real CUDA
+12.9 headers exit 0 (host 0 errors / 0 cudaConfigureCall); negative controls
+`-DQSB_TREE_N=64` (7 errors), `-DQSB_TREE_OFFLOAD2=1` (cofactor geometry
+static_assert), `-DQSB_SLOTS=1` (#error) all trip; CPU verifier smoke N=4
+2/2 hits independently verified.
+
+Runner state 01:48Z: intel-r5 busy since 01:36:20Z (fkiene, frees ~02:23Z),
+3568275 busy since 01:39:33Z (scarletbright, frees ~02:06Z), intel-r3 busy
+since 01:44:31Z (hybridnoise, frees ~02:31Z), queue empty. Gate fails now
+(3568275 frees FIRST — an untimed fire lands on the slow box). Watching for
+the window: foreign job takes 3568275 ~02:06Z, then fire in 02:16-02:23Z
+with 3568275 >= 20 min loaded and r5 next-to-free.
