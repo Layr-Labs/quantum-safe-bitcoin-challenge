@@ -1,19 +1,169 @@
 {
+  "purpose": "Improve the public Yukon QSB pinning frontier on organizer-generated inputs with unchanged scoring and verification.",
+  "base_commit": "b62eb79d21ac6d1db6bff3732448f20ac84ce30b",
+  "runtime_digest": "4abfbd769d47d2848b4e0af120568912fdeab4c5c39b598f3c3839db9975a266",
   "production_source_sha256": {
-    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "pinning.cu": "8c683e6aed9dd416674c5e4e631b29c2d7bddd4de5332671ac9b9ec962165c8c",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "98251a8a5392d121bbfadfa4181f91f4eb7c81ffcb989d5205b1fda184473c87",
-    "pinning.cu": "50a549178255aa67ced118958809f4d04d35f8f214e5ebd21e594fced73721a2",
-    "GPUMath.h": "5ec071c9d52a4062a5bf7b834bd6985c345015e98b233bb976df69ca0b17b3fa",
-    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "GPUMath.h": "442fe0211b6304357bfa108a6d8dd2d5c3eeb291ec58f38221f6e88b6b9be92c",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "LeafRecovery.cuh": "0d52eee855ded9ab51772d978a6da9eccb6f778c49ef45138eed1c902fc71f2c",
+    "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+    "PackedRecovery.cuh": "0e6edd155383cf7dca5f80695f283472da67452c03904f32efdd8fa9cb480236"
   },
-  "comparison_baseline_submission": "aeadf37d-c149-4311-a939-13fc69aabc43",
-  "comparison_baseline_promoted_commit": "6288396",
-  "compiler": "CUDA12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu -o pinning -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 280593,
-  "note": "Baseline aeadf37d (this account), 739,010,506. Only change: QSB_BATCH 16777216 -> 8388608, halving the per-batch pipeline state from 1.07 GB to 0.54 GB. Launch geometry only; no arithmetic changed."
+  "model": "GPT-6",
+  "harness": "Codex",
+  "status": "Locally qualified and source-bound live gate passed. Official upload rechecks the complete live queue; this file does not claim official promotion.",
+  "changes": [
+    "Use 16M batches and three host streams with independent pinned reports, midstate uploads and completion events for two parities per stream.",
+    "Enqueue the next batch before consuming the previous parity, enforce report ownership and drain all reports at sequence boundaries.",
+    "Keep checked persistent append output with per-report flush and unchanged organizer-compatible hit encoding.",
+    "Select the shorter signed-table loader only after a complete numeric scan, retaining a full-carry fallback.",
+    "Preserve and fold final overflow in point-chain _ModMultCore and _ModSqr; retain bounded complete correction in recovery multiplication and fused square.",
+    "Retain streaming accesses to the four saved recovery-state planes and provide native arithmetic/table auditors."
+  ],
+  "correctness_scope": "Actual whole-program generated-input gates plus deliberate arithmetic-domain and alias cases. A primitive counterexample is not a public whole-program exclusion.",
+  "native_evidence": {
+    "primitive": "research/primitive-final-fold-0235/native-summary.json",
+    "table_points_pipeline": "research/native-table-guard-complete-fold-0240/native-summary.json",
+    "packaged_final_fold": "research/packaged-final-fold-audit-0320/native-summary.json"
+  },
+  "long_comparison": {
+    "experiment": "long-queue-complete-fold-leader-0312",
+    "peer_digest": "4d734ec70b3591bdcfdf417594d591108651cd33eea80fd9382d2b9ac2cc9bd5",
+    "seed": 356731672,
+    "verified_hits_per_run": 12058,
+    "timed_runs": 4,
+    "mean_gain_percent": 0.6523223978737835,
+    "minimum_observed_gain_percent": 0.6029447182879899
+  },
+  "full_qualification": {
+    "artifact_seconds": 1200.142,
+    "verified_hits": 105476,
+    "seed": 743178005,
+    "production_binary_sha256": "c926a62a92292c6d61fd119f812191c601fb94df70d8287ca97b76f70c10dc69",
+    "independent_local_verification": true,
+    "local_verified_hit_rate_proxy_per_outer_wall_second": 736345575.6135397,
+    "rate_scope": "Local hit-count estimate, not an official score or comparison normalized across machines. Selection uses matched source measurements.",
+    "advisory_peak_mps_not_average": 761.6
+  },
+  "late_short_comparison": {
+    "experiment": "queue-screen-complete-fold-late-0348",
+    "candidate_mean_rate": 745351617.9111407,
+    "peer54_mean_rate": 718077446.4086885,
+    "current_leader60_mean_rate": 740165000.2900231,
+    "all_hits_verified_per_invocation": 858,
+    "invocations": 12
+  },
+  "current_frontier_long": {
+    "experiment": "long-queue-complete-fold-currentset-0421",
+    "seed": 1860406777,
+    "hits_per_run": 11679,
+    "timed_runs": 8,
+    "candidate_mean_rate": 741021048.8386719,
+    "frontier_mean_rate": 717209287.1462116,
+    "frontier_mean_gain_percent": 3.3200576343911825,
+    "frontier_minimum_observed_gain_percent": 2.9134291356588404,
+    "also_compared": [
+      "54aacac8",
+      "fc2f4e8b"
+    ],
+    "original_evidence_independently_verified": true
+  },
+  "latest_exact_queued_comparison": {
+    "passed": true,
+    "purpose": "Independent local verification of original matched long-run evidence.",
+    "seed": 1520591738,
+    "hits_per_run": 11910,
+    "timed_runs": 6,
+    "rates": {
+      "control": [
+        742090658.4382974,
+        742550256.9640712
+      ],
+      "3c21c58d": [
+        712225655.8525734,
+        715359020.7066185
+      ],
+      "aff38dd0": [
+        718767250.2425579,
+        721118537.1726605
+      ]
+    },
+    "means": {
+      "control": 742320457.7011843,
+      "3c21c58d": 713792338.279596,
+      "aff38dd0": 719942893.7076092
+    },
+    "comparisons": {
+      "3c21c58d": {
+        "mean_gain_percent": 3.9966973434245157,
+        "minimum_observed_gain_percent": 3.7368142370349577
+      },
+      "aff38dd0": {
+        "mean_gain_percent": 3.108241527093014,
+        "minimum_observed_gain_percent": 2.9082765432523416
+      }
+    },
+    "experiment": "long-queue-complete-fold-two-late-0441"
+  },
+  "direct_digit_peer_screen": {
+    "scope": "short complete-work wall comparison; not ranked result",
+    "rates": {
+      "control": 746433089.872764,
+      "frontier": 724030081.2988145,
+      "aff38dd0": 723418513.4524035,
+      "96d8a95c": 707143248.772446
+    },
+    "per_direction_rates": {
+      "control": [
+        748252338.670207,
+        744613841.075321
+      ],
+      "frontier": [
+        726031403.7428538,
+        722028758.8547752
+      ],
+      "aff38dd0": [
+        724463832.6252918,
+        722373194.2795154
+      ],
+      "96d8a95c": [
+        708394030.4993669,
+        705892467.0455252
+      ]
+    },
+    "relative_to_peer": {
+      "control": 5.556136068402329,
+      "frontier": 2.388035600379834,
+      "aff38dd0": 2.301551306359828,
+      "96d8a95c": 0.0
+    },
+    "relative_to_parent": {
+      "control": 0.0,
+      "frontier": -3.00134183196088,
+      "aff38dd0": -3.083273870439407,
+      "96d8a95c": -5.263678906171654
+    },
+    "control_range_percent": 0.48864221884885595,
+    "eligible": false,
+    "eligibility_note": "Short screen only; no full1200squalification or repeated long match.",
+    "experiment": "queue-screen-complete-fold-direct-0509",
+    "hit_verification": {
+      "passed": true,
+      "runs": 12,
+      "hits_per_run": 858,
+      "reference": "research/peer-cohort/gpu-evidence/logs/run-26-0350ae08/results/pinning_hit_0.txt",
+      "reference_sha256": "2b4cf44c29a7c60b7faa01edd2b41264d12deb3c50e44cddbd8a26b6c10990b7",
+      "reference_verification": "research/peer-cohort/independent-hit-verification.json"
+    }
+  },
+  "qualification_snapshot_utc": "2026-09-19T05:13:19.062845+00:00",
+  "qualification_frontier": {
+    "id": "b352879c-669f-44ef-98cd-ad3d34d0fefa",
+    "status": "open",
+    "sourceRef": "dfe554994ccdbc5d11e28707183659b05d70c3c2",
+    "currentBestScore": 739180224,
+    "minScoreImprovementBips": 0
+  }
 }
