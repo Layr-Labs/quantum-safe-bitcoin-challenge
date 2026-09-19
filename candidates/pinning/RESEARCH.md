@@ -1,3 +1,83 @@
+# 0018 research addendum: GLV wide table and by-value cold doubling
+
+Experiment 0018 changes the accepted Pinning fixed-base path while retaining
+the accepted search domain, hash predicates, hit selection, recovery formulas,
+host problem format, and fixed-time wrapper interface.  The comparison
+baseline is accepted commit `0b2c7b064b6de4c55816ffb1ade62195b0c450a2`,
+submission `ff275e40-8abc-474d-a5e7-d29a1073239c`, with official score
+741800702.  This package is prepared for review only.  No native GPU execution,
+timing, throughput, official score, or performance gain is claimed.
+
+The candidate replaces the accepted 15-window regular signed-digit fixed-base
+decoder with the reviewed secp256k1 GLV split.  A raw scalar is reduced and
+split into signed components `k1` and `k2` satisfying
+`k1 + lambda*k2 = k (mod n)`.  Each component is recoded as seven balanced
+radix-2^16 low digits and one bounded wide top digit.  The two top magnitude
+bounds are 41641 and 35429.  Zero digits are skipped before table lookup;
+negative digits negate the stored affine ordinate.
+
+There are sixteen direct-magnitude table segments.  Segments 0--7 contain
+multiples of the problem-dependent point `A=neg_r_inv*G`; segments 8--15
+contain multiples of `phi(A)=lambda*A`.  Every non-top segment contains 32768
+records.  The two top segments contain 41641 and 35429 records, for 535822
+affine records and 34292608 bytes total.  The host builder checks the pinned
+beta/lambda orientation.  Its GPU builder uses independent low/high ladders
+with explicit `hi==0` and `lo==0` handling; the complete OpenSSL fallback uses
+the same direct-magnitude layout.
+
+The point accumulator handles zero digits, accumulator identity, ordinary
+mixed addition, equal points, and opposite points.  The cold equality case
+uses exact normalized field multiplication/squaring.  This variant outlines
+that equality/doubling work through a by-value XYZZ helper.  Source-sequence
+comparison binds its math to the reviewed inline v3 helper.  The ABI keeps the
+ordinary loop accumulator scalarized in PTX, but introduces a cold aggregate
+call frame.  This is an alternate static layout, not proof that the cold call
+is profitable.
+
+The source-bound CPU gate in the frozen value probe passes six tests.  It
+compares 100 raw scalars against an independent OpenSSL oracle, exercises
+nonunit-Z double/equal/opposite/reseed cases and the retained near-prime
+regressions, and rejects four point-control mutants.  The value-helper
+equivalence checker verifies the ordered normalize/square/multiply/add/sub
+sequence and wrapper field copies.  These checks use an exact CPU field model;
+they do not reproduce inherited CUDA carry behavior.
+
+The CUDA 12.8.93 organizer-shaped build and offline `ptxas -arch=sm_89` pass.
+FAST S0 uses 128 registers, one barrier, 12288 bytes shared memory, a 272-byte
+cumulative stack frame, and zero reported spill loads/stores.  FAST S2 uses 70
+registers, zero stack, zero spills, and zero barriers.  The table builder uses
+128 registers, a 120-byte stack frame, and zero reported spills.  These are
+offline static resource facts only.  They are not driver-JIT output or a
+runtime measurement.
+
+The by-value `qsb_glv_xyzz_value` ABI has four bytes of tail padding: 128
+coordinate bytes plus a 32-bit validity member produce a 136-byte structure.
+This is aggregate ABI padding, not shared scratch.  The accepted ordinary
+mixed-add path also retains its inherited raw carry exposure, and the identity
+recovery/filter behavior retains its inherited false-negative risk.  The
+candidate does not claim to repair either inherited boundary.  The 272-byte
+cold frame, aggregate copy/call cost, ABI padding, wider table-build work, and
+changed memory access pattern all require native measurement before any
+performance conclusion.
+
+All other production/license files are byte-identical to accepted `0b2`.  GPL
+notices, `COPYING`, and all inherited author attribution remain intact.  The
+manifest records the complete eleven-file production/license set and current
+bytes.  The package adds no benchmark-conditioned or score-manipulating stop;
+the GLV invariant guard does fail closed if the proven split/range contract is
+violated.  No binary, private fixture, or local benchmark result is added to
+the submitted source tree.
+
+---
+
+## Historical accepted-source material below
+
+The remainder is inherited verbatim from the accepted Pinning research note.
+Its native-GPU runs, submission statements, old source hashes, eight-file
+counts, byte totals, and historical performance claims describe that earlier
+accepted submission, not experiment 0018.  Current 0018 claims and limitations
+are only those in the addendum above and the package records.
+
 # Pinning: signed digit decoding and weighted cofactor recovery
 
 This candidate removes work from the fixed-base scalar decoder, point-chain

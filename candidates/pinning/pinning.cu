@@ -226,105 +226,26 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #include "GPUHash.h"
 
-/* Mixed regular odd digits: widths [18,17,...,17], 15 chunks.
- * Chunk c starts at bit 0 when c=0, otherwise 17*c+1. Entry d is
- * (2*d+1)*2^offset*(A/2). Every digit is odd and nonzero; the reconstruction
- * is 2*k modulo the group order, as in the original regular recoder.
- * First chunk has 2^17 entries, others 2^16: 2^20 points, 64 MiB total. */
-#define GT_CHUNKS 15
-#define GT_TOTAL_ENTRIES (1u << 20)
+/* GLV signed radix-2^16 digits: seven balanced low digits and one complete
+ * top digit for each component. Entry d is (d+1)*2^shift*A for component 0,
+ * and (d+1)*2^shift*phi(A) for component 1. Zero digits never index the table.
+ * Proven top-magnitude bounds are 41641 and 35429, not power-of-two masks. */
+#define GT_CHUNKS 16
+#define GT_TOTAL_ENTRIES 535822u
 #define GT_LO 256
-#define GT_HI 1024
+#define GT_HI 163
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    return c == 0 ? (1u << 17) : (1u << 16);
+    return c % 8 != 7 ? 32768u : (c == 7 ? 41641u : 35429u);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return c == 0 ? 0u : (unsigned)(c+1) << 16;
+    return c < 8 ? (unsigned)c * 32768u : 271017u + (unsigned)(c-8) * 32768u;
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
-    return c == 0 ? 0 : 17*c+1;
+    return 16 * (c % 8);
 }
-static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
-              "mixed table must contain exactly 64 MiB");
+static_assert(GT_TOTAL_ENTRIES*64ULL == 34292608ULL,
+              "GLV table must contain exactly 535822 affine points");
 
-/* n = secp256k1 group order, little-endian limbs */
-__device__ __constant__ uint64_t GT_ORDER_N[4] = {
-    0xBFD25E8CD0364141ULL, 0xBAAEDCE6AF48A03BULL,
-    0xFFFFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFFFFFULL
-};
-
-/* k -> 15 signed odd digits. Branchless (no data-dependent BRA) so warps stay
- * convergent; correctness mirrored on CPU by the same source. */
-/* Recode state: the odd 2k-representative M (4 limbs) plus a global sign.
- * gt_recode_setup computes it once; gt_mixed_step peels one signed odd digit
- * per chunk and advances M. The window multiply carries this 32-byte state and
- * peels digits on the fly, so the 15-entry digit array never materialises
- * (that array was the largest single spill source). gt_recode_signed keeps the
- * array form for the CPU cross-check; both share the same step logic. */
-__device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
-    const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
-    __uint128_t s;
-    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
-     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
-     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
-     * < n this is a no-op. */
-    /* A raw SHA scalar is at least n with probability (2^256-n)/2^256. Keep
-     * that exact case, but let the overwhelmingly common path avoid a
-     * four-limb subtract and four selects. Donor: @scarletbright e7a648c7. */
-    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
-    if (k3 == n3 &&
-        (k2 > n2 ||
-         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
-        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
-    }
-    uint64_t t0=k0<<1;
-    uint64_t t1=(k1<<1)|(k0>>63);
-    uint64_t t2=(k2<<1)|(k1>>63);
-    uint64_t t3=(k3<<1)|(k2>>63);
-    uint64_t tc=(k3>>63);
-    s=(__uint128_t)t0-n0;    uint64_t d0=(uint64_t)s; uint64_t br=(s>>64)&1;
-    s=(__uint128_t)t1-n1-br; uint64_t d1=(uint64_t)s; br=(s>>64)&1;
-    s=(__uint128_t)t2-n2-br; uint64_t d2=(uint64_t)s; br=(s>>64)&1;
-    s=(__uint128_t)t3-n3-br; uint64_t d3=(uint64_t)s; br=(s>>64)&1;
-    uint64_t ge = tc | (1u - (uint64_t)br);
-    uint64_t gm = 0 - ge;
-    uint64_t m0=(t0&~gm)|(d0&gm), m1=(t1&~gm)|(d1&gm), m2=(t2&~gm)|(d2&gm), m3=(t3&~gm)|(d3&gm);
-    uint64_t odd = m0 & 1ULL;
-    s=(__uint128_t)n0-m0;    uint64_t p0=(uint64_t)s; br=(s>>64)&1;
-    s=(__uint128_t)n1-m1-br; uint64_t p1=(uint64_t)s; br=(s>>64)&1;
-    s=(__uint128_t)n2-m2-br; uint64_t p2=(uint64_t)s; br=(s>>64)&1;
-    s=(__uint128_t)n3-m3-br; uint64_t p3=(uint64_t)s;
-    uint64_t om = 0 - odd;
-    M[0]=(m0&om)|(p0&~om); M[1]=(m1&om)|(p1&~om); M[2]=(m2&om)|(p2&~om); M[3]=(m3&om)|(p3&~om);
-    *sign = (int)odd*2 - 1;
-}
-
-template<int BITS>
-__device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
-    int32_t digit=(int32_t)(M[0]&((1u<<(BITS+1))-1))-(1<<BITS);
-    uint64_t r0=(M[0]>>(BITS+1))|(M[1]<<(63-BITS));
-    uint64_t r1=(M[1]>>(BITS+1))|(M[2]<<(63-BITS));
-    uint64_t r2=(M[2]>>(BITS+1))|(M[3]<<(63-BITS));
-    uint64_t r3=M[3]>>(BITS+1);
-    M[0]=(r0<<1)|1ULL; M[1]=(r1<<1)|(r0>>63);
-    M[2]=(r2<<1)|(r1>>63); M[3]=(r3<<1)|(r2>>63);
-    return sign*digit;
-}
-__device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
-    uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
-    e[0]=gt_mixed_step<18>(M,sign);
-    #pragma unroll
-    for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<17>(M,sign);
-    e[GT_CHUNKS-1]=sign*(int32_t)M[0];
-}
-
-/* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
- * Branchless: y is selected between y and p-y by a mask. */
-/* Mask-taking variant used by the direct-digit path: the caller already has
- * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
@@ -341,240 +262,13 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
 }
 
-__device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
-                                                     uint32_t base, uint32_t idx,
-                                                     uint64_t neg,
-                                                     uint64_t *__restrict__ gx,
-                                                     uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
-    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
-    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
-    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
-    uint64_t m=0ULL-neg;
-    uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
-    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
-    UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
-    gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
-}
-
-__device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
-                                                int c, uint32_t idx, uint64_t neg,
-                                                uint64_t gx[4], uint64_t gy[4]) {
-    gt_load_signed_flat(gTable, gt_offset(c), idx, neg, gx, gy);
-}
-
-/* Decode one signed table digit. */
-__device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t *neg) {
-    uint32_t ae = (uint32_t)(ec < 0 ? -ec : ec);   /* branchless SEL, not BRA */
-    *idx = (ae - 1) >> 1;
-#if QSB_PROBE_MASK
-    *idx &= (uint32_t)QSB_PROBE_MASK;
-#endif
-    *neg = (ec < 0) ? 1ULL : 0ULL;
-}
-
-
-/* Direct regular-digit extraction (donor @dun999, public submission f535811)
- * with the digit window carried in registers (idea from the subset track's
- * 9f712c0). Chunk c's signed odd digit is 2f+1-2^w for the w-bit field f of the
- * recode setup value M starting at bit 17c+2 (bit 1 for chunk 0), so the 15
- * table indices depend only on the setup state instead of a serial
- * gt_mixed_step recurrence, and the limb pair that feeds the extractor is
- * shifted down on a warp-uniform branch instead of re-selected per chunk. */
-#ifndef QSB_DIRECT_DIGITS
-#define QSB_DIRECT_DIGITS 1
-#endif
-#if QSB_DIRECT_DIGITS && (QSB_PREFETCH || QSB_S0_SHM || QSB_EARLY_LOAD)
-#undef QSB_DIRECT_DIGITS
-#define QSB_DIRECT_DIGITS 0
-#endif
-struct qsb_digit_window {
-    uint64_t w0, w1, w2, w3;
-    unsigned sh;
-    __device__ __forceinline__ void init(const uint64_t *M, unsigned pos) {
-        w0 = M[0]; w1 = M[1]; w2 = M[2]; w3 = M[3]; sh = pos;
-        while (sh >= 64u) { w0 = w1; w1 = w2; w2 = w3; w3 = 0ULL; sh -= 64u; }
-    }
-    __device__ __forceinline__ uint32_t peek() const {
-        return (uint32_t)((w0 >> sh) | ((w1 << 1) << (63u - sh)));
-    }
-    __device__ __forceinline__ void advance(unsigned bits) {
-        sh += bits;
-        if (sh >= 64u) { w0 = w1; w1 = w2; w2 = w3; w3 = 0ULL; sh -= 64u; }
-    }
-};
-
-/* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
- * y=Y/ZZZ). Seed the first two chunks with a deferred-Y mmadd (3M+2S), adjust
- * each next point's y by the preceding affine anchor, and defer the new anchor
- * term through every intermediate addition. Only the final addition resolves
- * Y exactly. This costs 3M+2S + 12*(7M+2S) + 8M+2S = 95M+28S across all
- * 15 points instead of 108M+28S. Fully unrolling
- * inlines the asm multiply ~150x past ptxas' budget); the back-edge is a
- * uniform loop-counter
- * branch, and every signed odd digit is non-zero so there is NO data-dependent
- * branch and no chunk is skipped. Next chunk's table point loaded one step ahead.
- *
- * Production consumes the raw XYZZ output directly. This avoids the three
- * field multiplications formerly used to convert it to homogeneous projective
- * form before recovery. */
-__device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
-                                      uint64_t *ZZ, uint64_t *ZZZ,
-                                      const int32_t e[GT_CHUNKS],
-                                      const uint8_t *gTable) {
-    uint32_t idx; uint64_t neg;
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    gt_digit_idx(e[0], &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    gt_digit_idx(e[1], &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-    _PointAddXYZZ_mm(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
-    /* No software prefetch: keeping the next table point live alongside the
-     * 128-byte XYZZ accumulator raised spills (92/64 -> measured worse). Load
-     * each chunk just-in-time; the loads are still independent (indices known
-     * from the recoded digits) so the hardware overlaps them. */
-    uint64_t cx[4],cy[4];
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS;c++){
-        gt_digit_idx(e[c], &idx, &neg); gt_load_signed(gTable,c,idx,neg,cx,cy);
-        _PointAddXYZZ(X,Y,ZZ,ZZZ, cx,cy, y0, c != GT_CHUNKS-1);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-    }
-}
-
-#if QSB_EARLY_LOAD
-/* Mixed addition with the next record's loads issued as soon as the current
- * record is consumed: X2 dies after U2, Y2 after S2. The next digit is peeled
- * one step ahead (one register); the loaded point lands in nx/ny while the
- * remaining 5M+2S of this addition execute. */
-__device__ __forceinline__ void _PointAddXYZZ_early(
-    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
-    const uint64_t *X2, const uint64_t *Y2, const uint64_t *Yoff, bool defer_y,
-    bool do_load, const uint8_t *gTable, uint32_t nbase, uint32_t nidx, uint64_t nneg,
-    uint64_t *nx, uint64_t *ny)
-{
-  uint64_t U2[4], S2[4], P[4], R[4], PP[4], PPP[4], Q[4], T[4];
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-#if QSB_LAZY
-  _ModAddLazy(S2, Y2, Yoff);
-#else
-  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
-#endif
-  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  if (do_load) gt_load_signed_flat(gTable, nbase, nidx, nneg, nx, ny);
-  _ModSub256(P, U2, X1);
-  _ModSub256(R, S2, Y1);
-  _ModSqr(PP, P);
-  _ModMult(PPP, PP, P);
-  _ModMult(Q, U2, PP);
-  _ModMult(ZZ1, PP);
-  _ModSqr(T, R);
-#if QSB_LAZY
-  _ModX3Fused(T, T, PPP, Q);
-#else
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);
-#endif
-  _ModMult(ZZZ1, PPP);
-  _ModSub256(Q, Q, T);
-  _ModMult(Q, R);
-  if (defer_y) {
-    Load256(Y1, Q);
-  } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);
-    _ModSub256(Y1, Q, S2);
-  }
-  Load256(X1, T);
-}
-#endif
-
-/* Production scalar-entry form: consume the mixed signed digits as they are
- * generated instead of materializing an address-taken digit array. */
-
-// First used as 15 per-lane digit planes (7.5 KiB) plus an optional ordinate
-// plane (4 KiB); after the handoff, the same 12 KiB holds the cofactor tree.
+// GLV digits use 16 uint32 planes per lane; the later cofactor tree reuses
+// this existing 12*QSB_TREE_N uint64 arena after the prepare handoff barrier.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
     __shared__ uint64_t storage[12*QSB_TREE_N];return storage;
 }
-__device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
-    const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
-    __uint128_t s;
-    /* Reduce the input mod n first: the caller may pass a raw hash z (>= n).
-     * k < 2^256 < 2n, so one conditional subtract suffices; then 2*(k mod n) < 2n
-     * and the 2k-mod-n step below (one more subtract) is exact. For a k already
-     * < n this is a no-op. */
-    /* A raw SHA scalar is at least n with probability (2^256-n)/2^256. Keep
-     * that exact case, but let the overwhelmingly common path avoid a
-     * four-limb subtract and four selects. Donor: @scarletbright e7a648c7. */
-    uint64_t k0=k[0], k1=k[1], k2=k[2], k3=k[3];
-    if (k3 == n3 &&
-        (k2 > n2 ||
-         (k2 == n2 && (k1 > n1 || (k1 == n1 && k0 >= n0))))) {
-        s=(__uint128_t)k0-n0; k0=(uint64_t)s; uint64_t kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k1-n1-kb; k1=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
-        s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
-    }
-    // C=2^256-n. d=(2*k-n) mod2^256 = low(2*k)+C.
-    // Its sign is positive iff the original top bit or this addition carries.
-    // Keep the raw signed residue. Digit extraction consumes it directly.
-    const uint64_t c0=0x402DA1732FC9BEBFULL,c1=0x4551231950B75FC4ULL;
-    uint64_t t0=k0<<1,t1=(k1<<1)|(k0>>63);
-    uint64_t t2=(k2<<1)|(k1>>63),t3=(k3<<1)|(k2>>63);
-    s=(__uint128_t)t0+c0;uint64_t d0=(uint64_t)s,carry=(uint64_t)(s>>64);
-    s=(__uint128_t)t1+c1+carry;uint64_t d1=(uint64_t)s;carry=(uint64_t)(s>>64);
-    s=(__uint128_t)t2+1+carry;uint64_t d2=(uint64_t)s;carry=(uint64_t)(s>>64);
-    s=(__uint128_t)t3+carry;uint64_t d3=(uint64_t)s;carry=(uint64_t)(s>>64);
-    M[0]=d0;M[1]=d1;M[2]=d2;M[3]=d3;
-    *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
-}
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
-    uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++) {
-        const unsigned pos=c==0?1u:17u*c+2u;
-        const unsigned j=pos/64u,sh=pos%64u;
-        uint64_t value=M[j]>>sh;
-        if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
-        uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
-    }
-}
-__device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
-    unsigned base,uint64_t *x,uint64_t *y) {
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    gt_load_signed_flat_m(table,base,code&0x1ffffu,0ULL-(code>>31),x,y);
-}
-
-__device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
-    uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
-    unsigned base=gt_offset(2);
-    #pragma unroll 1
-    for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
-        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-        Load256(y0,y1);
-        base+=1u<<16;
-    }
-    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
-}
-
-
-/* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
+#include "glv_split.h"
 
 /* DER checks */
 __device__ int gpu_is_valid_der(const uint8_t *d, int l) {
@@ -883,6 +577,8 @@ __device__ __forceinline__ void qsb_field_normalize(uint64_t *r) {
         r[1] = r[2] = r[3] = 0;
     }
 }
+
+#include "glv_point.cuh"
 
 /* qsb_warp_inverse: removed -- it has no caller. */
 
@@ -1393,8 +1089,13 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
-    /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
+    /* u1*G as exact XYZZ via the two GLV components. The packed prepare
+     * handoff has a CTA barrier before reusing this same shared arena. */
+    if (!qsb_glv_fixed_base(qx,qy,qzz,qzzz,z,d_gt,
+                            reinterpret_cast<uint32_t *>(qsb_digit_arena()))) {
+        asm volatile("trap;");
+        return;
+    }
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -1632,45 +1333,19 @@ static void launch_pinning_pipeline(
     }
 }
 
-/* ============================================================
- * Fixed-base table construction on the GPU (signed-digit table)
- *
- * Entry (ch, d) is (2d+1) * 2^gt_shift(ch) * (A/2) in affine form, limbs
- * little-endian -- the layout _FixedBaseSignedXYZZScalar indexes it.
- *
- * Building it on the host would cost a modular inversion per entry through
- * OpenSSL. Split the odd index instead: with m = 2d+1 = hi*256 + lo,
- *
- *     m*base_c = hi*(256*base_c) + lo*base_c = H[hi] + L[lo]
- *
- * so the host only produces two short ladders per chunk (L[lo]=lo*base_c,
- * H[hi]=hi*256*base_c) and every table entry is ONE independent mixed addition
- * plus one inversion -- perfectly parallel, one inversion per thread.
- *
- * m is odd so lo is odd (never 0); L[0] is never referenced. H[0] is the
- * identity (m < 256) -> copy L[lo]. H[hi] == +-L[lo] would need m == 0 (mod n),
- * impossible for m below 2^18. Base A/2 uses A=neg_r_inv*G.
- * ============================================================ */
-
-/* Mixed geometry (GT_CHUNKS/GT_TOTAL_ENTRIES/GT_LO/GT_HI) is defined once near the top,
- * beside gt_recode_signed / _FixedBaseSignedXYZZScalar. Base of chunk c is
- * base_c = 2^gt_shift(c) * (A/2). Entry (c,d) = (2d+1)*base_c with m odd;
- * split m = hi*256 + lo, lo odd in [1,255], hi below 1024:
- *     m*base_c = H[hi] + L[lo],  L[lo] = lo*base_c,  H[hi] = hi*256*base_c.
- * H[0] is the identity (m < 256) -> copy L[lo]; lo is always odd so never 0,
- * so L[0] is never referenced. H[hi] == +-L[lo] would need m == 0 (mod n),
- * impossible for m below 2^18. */
+/* Direct-magnitude GLV table. Each launch builds one segment with m=d+1:
+ * m*base = H[m>>8] + L[m&255]. Copy the nonidentity ladder when hi or lo
+ * is zero. Otherwise the two points cannot be equal or opposite: their
+ * positive scalar multipliers are distinct and their sum is below n. */
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
-    uint8_t * __restrict__ gTable)
+    uint8_t * __restrict__ gTable, int ch)
 {
-    uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= GT_TOTAL_ENTRIES) return;
-    int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
-    int d=(int)(t-gt_offset(ch));
-    int m  = 2*d + 1;                        /* odd multiple below 2^18 */
-    int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 1024 */
+    unsigned d = blockIdx.x * blockDim.x + threadIdx.x;
+    if (d >= gt_entries(ch)) return;
+    unsigned m = d + 1u;
+    unsigned hi = m >> 8, lo = m & 255u;
 
     const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
@@ -1678,6 +1353,8 @@ __global__ void kernel_build_gtable(
     uint64_t rx[4], ry[4];
     if (hi == 0) {
         for (int k = 0; k < 4; k++) { rx[k] = Lp[k]; ry[k] = Lp[4 + k]; }
+    } else if (lo == 0) {
+        for (int k = 0; k < 4; k++) { rx[k] = Hp[k]; ry[k] = Hp[4 + k]; }
     } else {
         uint64_t px[4], py[4], pz[5] = {1, 0, 0, 0, 0}, qx[4], qy[4];
         for (int k = 0; k < 4; k++) {
@@ -1708,18 +1385,49 @@ extern "C" {
 #include <openssl/obj_mac.h>
 }
 
+static void gt_require(bool ok, const char *operation) {
+    if (!ok) { fprintf(stderr,"GTable %s failed\n",operation); exit(2); }
+}
+
+/* Build A=neg_r_inv*G and phi(A)=lambda*A, and check the pinned beta/lambda
+ * orientation using affine coordinates. Both components are rebuilt from
+ * the current problem; neither table is cached across problem instances. */
+static void gt_component_bases(EC_GROUP *grp, BN_CTX *ctx,
+                               const uint8_t neg_r_inv[32],
+                               EC_POINT *base, EC_POINT *phi) {
+    BN_CTX_start(ctx);
+    BIGNUM *scalar=BN_CTX_get(ctx), *order=BN_CTX_get(ctx),
+           *lambda=BN_CTX_get(ctx), *beta=BN_CTX_get(ctx), *prime=BN_CTX_get(ctx),
+           *x=BN_CTX_get(ctx), *y=BN_CTX_get(ctx),
+           *px=BN_CTX_get(ctx), *py=BN_CTX_get(ctx), *want=BN_CTX_get(ctx);
+    gt_require(want!=NULL,"base temporaries");
+    gt_require(BN_lebin2bn(neg_r_inv,32,scalar)!=NULL &&
+               EC_GROUP_get_order(grp,order,ctx) &&
+               BN_nnmod(scalar,scalar,order,ctx) && !BN_is_zero(scalar),
+               "base scalar");
+    gt_require(BN_hex2bn(&lambda,
+        "5363AD4CC05C30E0A5261C028812645A122E22EA20816678DF02967C1B23BD72") &&
+        BN_hex2bn(&beta,
+        "7AE96A2B657C07106E64479EAC3434E99CF0497512F58995C1396C28719501EE"),
+        "endomorphism constants");
+    gt_require(EC_POINT_mul(grp,base,scalar,NULL,NULL,ctx) &&
+               EC_POINT_mul(grp,phi,NULL,base,lambda,ctx) &&
+               EC_GROUP_get_curve(grp,prime,NULL,NULL,ctx) &&
+               EC_POINT_get_affine_coordinates(grp,base,x,y,ctx) &&
+               EC_POINT_get_affine_coordinates(grp,phi,px,py,ctx) &&
+               BN_mod_mul(want,x,beta,prime,ctx) &&
+               BN_cmp(want,px)==0 && BN_cmp(y,py)==0,
+               "endomorphism orientation");
+    BN_CTX_end(ctx);
+}
+
 /* Affine (x,y) of a point, as the 4+4 little-endian limbs the table uses. */
 static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
                               BN_CTX *ctx, uint64_t out[8]) {
-    uint8_t xb[32], yb[32];
-    memset(xb, 0, 32); memset(yb, 0, 32);
-    EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
-    BN_bn2bin(x, xb + (32 - BN_num_bytes(x)));
-    BN_bn2bin(y, yb + (32 - BN_num_bytes(y)));
-    for (int j = 0; j < 16; j++) { uint8_t t = xb[j]; xb[j] = xb[31-j]; xb[31-j] = t; }
-    for (int j = 0; j < 16; j++) { uint8_t t = yb[j]; yb[j] = yb[31-j]; yb[31-j] = t; }
-    memcpy(out,     xb, 32);
-    memcpy(out + 4, yb, 32);
+    gt_require(EC_POINT_get_affine_coordinates(grp,pt,x,y,ctx) &&
+               BN_bn2lebinpad(x,(unsigned char *)out,32)==32 &&
+               BN_bn2lebinpad(y,(unsigned char *)(out+4),32)==32,
+               "affine encoding");
 }
 
 /* Batch-affine ladder build (delta C, jacklightChen e582bda4, after PR46):
@@ -1727,8 +1435,10 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
  * inversion per point by one batched inversion per ladder. */
 static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
                             uint64_t *out, BIGNUM *x, BIGNUM *y, BN_CTX *ctx) {
-    EC_POINT *points[GT_HI];
-    if(count<1 || count>=GT_HI) { fprintf(stderr,"Invalid ladder size\n");exit(2); }
+    EC_POINT *points[GT_LO > GT_HI ? GT_LO : GT_HI];
+    if(count<1 || count>=(GT_LO > GT_HI ? GT_LO : GT_HI)) {
+        fprintf(stderr,"Invalid ladder size\n");exit(2);
+    }
     for(int i=0;i<count;i++) {
         points[i]=EC_POINT_new(grp);
         if(!points[i]) { fprintf(stderr,"Ladder allocation failed\n");exit(2); }
@@ -1745,41 +1455,35 @@ static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
     }
 }
 
-/* The two ladders the GPU builder needs: L[ch][lo] = lo * base_ch and
- * H[ch][hi] = hi * 256 * base_ch. Index 0 of each is the identity and is
- * left zeroed; the kernel treats it as such. 12,002 real points, against the
- * 1,048,576 the host would otherwise have to make affine one at a time. */
-/* Build the ladders for base A/2 where A = neg_r_inv * G (problem-dependent).
- * With the table on base A, recoding z directly gives z*A = z*neg_r_inv*G =
- * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
- * comes from the runtime problem (little-endian 32 bytes), so the ladders are
- * rebuilt per instance and NOT cached across problems (anti-replay). */
+/* L[ch][lo]=lo*base_ch and H[ch][hi]=hi*256*base_ch. Index zero is the
+ * identity and remains zeroed; the GPU builder never adds an identity. */
 static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
-           *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp);
-    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
-    EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
-    BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
-    BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
-    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
+    gt_require(grp && ctx,"ladder context");
+    BIGNUM *x=BN_new(), *y=BN_new(), *shift=BN_new();
+    EC_POINT *a=EC_POINT_new(grp), *phi=EC_POINT_new(grp),
+             *base=EC_POINT_new(grp), *step=EC_POINT_new(grp);
+    gt_require(x && y && shift && a && phi && base && step,"ladder allocation");
+    gt_component_bases(grp,ctx,neg_r_inv,a,phi);
     memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
-        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        gt_batch_ladder(grp,base,GT_LO-1,                    /* L[lo] = lo * B */
+        if (ch % 8 == 0) {
+            gt_require(EC_POINT_copy(base,ch==0 ? a : phi),"component reset");
+        } else {
+            gt_require(BN_set_word(shift,65536u) &&
+                       EC_POINT_mul(grp,base,NULL,base,shift,ctx),"segment shift");
+        }
+        gt_batch_ladder(grp,base,GT_LO-1,
             hL+(size_t)ch*GT_LO*8,x,y,ctx);
-        BN_set_word(shift, 256);                             /* step = 256 * B */
-        EC_POINT_mul(grp, step, NULL, base, shift, ctx);
-        gt_batch_ladder(grp,step,(ch==0?1024:512)-1,         /* H[hi] = hi * 256 * B */
+        gt_require(BN_set_word(shift,256u) &&
+                   EC_POINT_mul(grp,step,NULL,base,shift,ctx),"high ladder step");
+        gt_batch_ladder(grp,step,(int)(gt_entries(ch)>>8),
             hH+(size_t)ch*GT_HI*8,x,y,ctx);
     }
-    BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
-    BN_free(nri); BN_free(bscal);
-    EC_POINT_free(base); EC_POINT_free(step);
+    BN_free(x); BN_free(y); BN_free(shift);
+    EC_POINT_free(a); EC_POINT_free(phi); EC_POINT_free(base); EC_POINT_free(step);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
 }
 
@@ -1791,34 +1495,39 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
                          const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *inv2 = BN_new(), *order = BN_new(),
-           *nri = BN_new(), *half_nri = BN_new();
+    gt_require(grp && ctx,"check context");
+    BIGNUM *x=BN_new(), *y=BN_new(), *k=BN_new(), *order=BN_new(),
+           *nri=BN_new(), *lambda=BN_new();
     EC_POINT *pt = EC_POINT_new(grp);
+    gt_require(x && y && k && order && nri && lambda && pt,"check allocation");
     uint64_t want[8];
     int ok = 1;
     unsigned seed = 0x9e3779b9u;
-    EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(k, 2); BN_mod_inverse(inv2, k, order, ctx);   /* inv2 = 2^-1 mod n */
-    BN_lebin2bn(neg_r_inv, 32, nri);
-    BN_mod_mul(half_nri, inv2, nri, order, ctx);              /* (2^-1 * neg_r_inv) mod n = A/2 scalar */
+    gt_require(EC_GROUP_get_order(grp,order,ctx) &&
+               BN_lebin2bn(neg_r_inv,32,nri)!=NULL &&
+               BN_hex2bn(&lambda,
+                "5363AD4CC05C30E0A5261C028812645A122E22EA20816678DF02967C1B23BD72"),
+               "check constants");
+    if (samples < GT_CHUNKS*8) samples = GT_CHUNKS*8;
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
-        if (t < GT_CHUNKS * 4) {
-            ch = t / 4;
-            const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
-            i = corner[t % 4];
+        if (t < GT_CHUNKS * 8) {
+            ch = t / 8;
+            const int corner[8] = {0,1,254,255,256,(int)gt_entries(ch)/2,
+                                   (int)gt_entries(ch)-2,(int)gt_entries(ch)-1};
+            i = corner[t % 8];
         } else {
             seed = seed * 1664525u + 1013904223u;
             ch = (int)(seed >> 28) % GT_CHUNKS;
-            i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
+            i  = (int)((seed >> 4) % gt_entries(ch));
         }
-        /* want = (2i+1) * 2^gt_shift(ch) * (A/2). */
-        BN_one(k);
-        BN_lshift(k, k, gt_shift(ch));
-        BN_mul_word(k, (BN_ULONG)(2*i + 1));
-        BN_mod_mul(k, k, half_nri, order, ctx);
-        EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
+        /* Independent scalar multiplication, without the ladder recurrence. */
+        gt_require(BN_set_word(k,(BN_ULONG)(i+1)) &&
+                   BN_lshift(k,k,gt_shift(ch)) && BN_mod_mul(k,k,nri,order,ctx),
+                   "check scalar");
+        if (ch>=8) gt_require(BN_mod_mul(k,k,lambda,order,ctx),"check phi scalar");
+        gt_require(EC_POINT_mul(grp,pt,k,NULL,NULL,ctx),"check point");
         gt_point_to_limbs(grp, pt, x, y, ctx, want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
         if (memcmp(gTable + off,      want,     32) != 0 ||
@@ -1827,47 +1536,42 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
             ok = 0;
         }
     }
-    BN_free(x); BN_free(y); BN_free(k); BN_free(inv2); BN_free(order); BN_free(nri); BN_free(half_nri);
+    BN_free(x); BN_free(y); BN_free(k); BN_free(order); BN_free(nri); BN_free(lambda);
     EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
     return ok;
 }
 
-/* OpenSSL fallback builder (only if the GPU builder's spot check fails). Emits
- * the signed table: entry (ch,d) = (2d+1) * 2^gt_shift(ch) * (A/2). Walks odd
- * multiples by stepping 2*base_c per entry (acc = base_c, 3base_c, ...). */
+/* Complete CPU fallback with the same direct-magnitude layout. */
 static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
-    /* No cache: base A/2 is problem-dependent (neg_r_inv fresh per instance). */
     printf("  Computing GTable (OpenSSL fallback)...\n");
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(), *order = BN_new(),
-           *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp), *two_base = EC_POINT_new(grp);
-    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
-    EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
-    BN_lebin2bn(neg_r_inv, 32, nri);
-    BN_mod_mul(bscal, inv2, nri, order, ctx);
-    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);
+    gt_require(grp && ctx,"fallback context");
+    BIGNUM *x=BN_new(), *y=BN_new(), *shift=BN_new();
+    EC_POINT *a=EC_POINT_new(grp), *phi=EC_POINT_new(grp),
+             *base=EC_POINT_new(grp), *pt=EC_POINT_new(grp);
+    gt_require(x && y && shift && a && phi && base && pt,"fallback allocation");
+    gt_component_bases(grp,ctx,neg_r_inv,a,phi);
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
-        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        BN_set_word(shift, 2); EC_POINT_mul(grp, two_base, NULL, base, shift, ctx);  /* 2*base_c */
-        EC_POINT_copy(pt, base);                                                     /* (2*0+1)*base_c */
+        if (ch % 8 == 0) {
+            gt_require(EC_POINT_copy(base,ch==0 ? a : phi),"fallback component reset");
+        } else {
+            gt_require(BN_set_word(shift,65536u) &&
+                       EC_POINT_mul(grp,base,NULL,base,shift,ctx),"fallback shift");
+        }
+        gt_require(EC_POINT_copy(pt,base),"fallback seed");
         for (unsigned d = 0; d < gt_entries(ch); d++) {
-            EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
-            uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
-            BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
-            BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
-            for(int j=0;j<16;j++){uint8_t t=xb[j];xb[j]=xb[31-j];xb[31-j]=t;}
-            for(int j=0;j<16;j++){uint8_t t=yb[j];yb[j]=yb[31-j];yb[31-j]=t;}
+            uint64_t limbs[8];
+            gt_point_to_limbs(grp,pt,x,y,ctx,limbs);
             size_t off = ((size_t)gt_offset(ch) + d) * 64;
-            memcpy(gTable + off,      xb, 32);
-            memcpy(gTable + off + 32, yb, 32);
-            if (d < gt_entries(ch) - 1) EC_POINT_add(grp, pt, pt, two_base, ctx);
+            memcpy(gTable+off,limbs,64);
+            if (d+1 < gt_entries(ch)) {
+                gt_require(EC_POINT_add(grp,pt,pt,base,ctx),"fallback step");
+            }
         }
     }
-    BN_free(x);BN_free(y);BN_free(shift);BN_free(inv2);BN_free(order);BN_free(nri);BN_free(bscal);
-    EC_POINT_free(base);EC_POINT_free(pt);EC_POINT_free(two_base);
+    BN_free(x);BN_free(y);BN_free(shift);
+    EC_POINT_free(a);EC_POINT_free(phi);EC_POINT_free(base);EC_POINT_free(pt);
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
 
@@ -1955,46 +1659,61 @@ int main(int argc, char **argv) {
 
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
-    uint8_t *d_gt;
-    cudaMalloc(&d_gt,gt_sz);
+    uint8_t *d_gt=NULL;
+    cudaError_t table_alloc=cudaMalloc(&d_gt,gt_sz);
+    if(table_alloc!=cudaSuccess){
+        fprintf(stderr,"GTable allocation failed: %s\n",cudaGetErrorString(table_alloc));
+        return 1;
+    }
     {
-        /* Build the fixed-base table on the GPU. The host only produces the two
-         * small ladders; the million entries are one parallel addition each.
-         * The result is then spot-checked against OpenSSL, and anything that
-         * does not match falls back to the original host builder -- a wrong
-         * table yields zero verifiable hits, so it must never reach the run. */
+        /* Build each GLV segment from short runtime-dependent ladders. Both
+         * the GPU result and any CPU fallback must pass the OpenSSL check. */
         struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
         size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
         size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
         gt_build_ladders(hL,hH,pp.neg_r_inv);
-        uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
-        cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
-        cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
+        uint64_t *dL=NULL,*dH=NULL;
+        cudaError_t gerr=cudaMalloc(&dL,lb);
+        if(gerr==cudaSuccess)gerr=cudaMalloc(&dH,hb);
+        if(gerr==cudaSuccess)gerr=cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
+        if(gerr==cudaSuccess)gerr=cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
-        cudaDeviceSynchronize();
-        cudaError_t gerr = cudaGetLastError();
-        cudaFree(dL); cudaFree(dH);
+        for(int ch=0;ch<GT_CHUNKS && gerr==cudaSuccess;ch++){
+            kernel_build_gtable<<<(gt_entries(ch)+255)/256,256>>>(dL,dH,d_gt,ch);
+            gerr=cudaGetLastError();
+        }
+        cudaError_t joined=cudaDeviceSynchronize();
+        if(gerr==cudaSuccess)gerr=joined;
+        if(dL)cudaFree(dL);
+        if(dH)cudaFree(dH);
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv);
+            gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+            gt_ok = gerr==cudaSuccess &&
+                gt_spot_check(chk_table,GT_CHUNKS*8+192,pp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
         if(gt_ok){
-            printf("  GTable built on GPU in %.2fs (%d points, %.0f MiB total, spot check passed)\n",
+            printf("  GTable built on GPU in %.2fs (%d points, %.2f MiB total, spot check passed)\n",
                    gt_secs, gt_total, (double)gt_sz/(1024*1024));
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
             compute_gtable(chk_table,pp.neg_r_inv);
-            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            if(!gt_spot_check(chk_table,GT_CHUNKS*8+192,pp.neg_r_inv)){
+                fprintf(stderr,"GTable CPU fallback rejected\n");return 1;
+            }
+            gerr=cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            if(gerr!=cudaSuccess){
+                fprintf(stderr,"GTable fallback upload failed: %s\n",cudaGetErrorString(gerr));
+                return 1;
+            }
         }
         fflush(stdout);
         free(chk_table);
