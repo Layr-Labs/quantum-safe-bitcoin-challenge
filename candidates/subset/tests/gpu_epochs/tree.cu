@@ -483,7 +483,7 @@ __device__ __forceinline__ void qsb_complete_last_add(
         return;
     }
     _ModSqr(PP,P);_ModMult(PPP,PP,P);_ModMult(Q,U2,PP);_ModMult(ZZ1,PP);
-    _ModSqr(T,R);_ModAdd256(T,T,PPP);_ModSub256(T,T,Q);_ModSub256(T,T,Q);
+    _ModSqr(T,R);_ModX3Fused(T,T,PPP,Q);
     _ModMult(ZZZ1,PPP);_ModSub256(Q,Q,T);_ModMult(Q,R);
     _ModMult(S2,(uint64_t*)Y2,ZZZ1);_ModSub256(Y1,Q,S2);Load256(X1,T);
 }
