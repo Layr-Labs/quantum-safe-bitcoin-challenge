@@ -24,7 +24,7 @@
  * Leaves are returned as exact residues below 2^256, the same contract as
  * every _ModMult output that feeds the finish. */
 #ifndef ZLAB_TREE
-#define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
+#define ZLAB_TREE 1  /* selected default layout; override remains available for audits */
 #endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
