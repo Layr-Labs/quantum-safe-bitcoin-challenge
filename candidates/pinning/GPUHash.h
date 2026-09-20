@@ -1166,3 +1166,4 @@ __device__ __noinline__ void _GetHashKeccak160(uint64_t* x, uint64_t* y, uint32_
 	hash[3] = e.d[6];
 	hash[4] = e.d[7];
 }
+#define GAUNTLET_REDRAW_7b0a15be_20260920T122917Z 1
