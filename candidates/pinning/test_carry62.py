@@ -254,6 +254,96 @@ def audit_c31_predicates():
     }
 
 
+K32 = (1 << 32) + 977
+
+
+def even_fold_overflow(r3, x14, cin=0):
+    """f8 != 0 iff the even 977-chain overflows 64 bits."""
+    return r3 + x14 * 977 + cin >= (1 << 64)
+
+
+def odd_fold_overflow(x14, x15, cin=0):
+    """g8 != 0 iff x15*(2^32+977)+x14+cin overflows 64 bits (~x15 >= 2^32-977)."""
+    return x15 * K32 + x14 + cin >= (1 << 64)
+
+
+def sqr_second_fold_sfq(z8, z9, rp):
+    """Low 32 bits of the second-fold start. RP_SQR ignores z9."""
+    if rp:
+        return z8 & WORD_MASK
+    return (z8 + z9 * 977) & WORD_MASK
+
+
+def audit_rpsqr_predicates():
+    """Host model of the QSB_RP_SQR overflow predicates. No PTX, no GPU."""
+    # Even-fold f8: overflow iff r3 + 977*x14 + cin >= 2^64.
+    f8_cases = 0
+    f8_diffs = 0
+    for x14 in list(range(8)) + [977, (1 << 32) - 1, (1 << 32) - 977]:
+        for cin in (0, 1):
+            # r3 just below / at / above the overflow threshold
+            thresh = (1 << 64) - x14 * 977 - cin
+            for r3 in [0, 1, max(0, thresh - 1), thresh % (1 << 64), (1 << 64) - 1]:
+                f8_cases += 1
+                overflow = even_fold_overflow(r3, x14, cin)
+                # RP_SQR writes z8 without f8; complete writes z8+f8. Differ iff overflow.
+                if overflow:
+                    f8_diffs += 1
+                    assert even_fold_overflow(r3, x14, cin)
+                else:
+                    assert not even_fold_overflow(r3, x14, cin)
+
+    # Odd-fold g8: overflow when x15 is within 977 of 2^32.
+    g8_cases = 0
+    g8_diffs = 0
+    for x15 in list(range(0, 4)) + list(range((1 << 32) - 980, 1 << 32)):
+        for x14 in (0, 1, 977, (1 << 32) - 1):
+            for cin in (0, 1):
+                g8_cases += 1
+                if odd_fold_overflow(x14, x15, cin):
+                    g8_diffs += 1
+
+    # Square second-fold start: mad.lo(z9*977+z8) vs z8.
+    sf_cases = 0
+    sf_diffs = 0
+    for z8 in (0, 1, 977, WORD_MASK):
+        for z9 in (0, 1, 2, 3):
+            sf_cases += 1
+            complete = sqr_second_fold_sfq(z8, z9, rp=False)
+            rp = sqr_second_fold_sfq(z8, z9, rp=True)
+            if complete != rp:
+                sf_diffs += 1
+                assert z9 != 0
+            else:
+                assert z9 == 0 or ((z8 + z9 * 977) & WORD_MASK) == (z8 & WORD_MASK)
+
+    rng = random.Random(0x52505351)
+    rand_f8 = rand_g8 = 0
+    for _ in range(200_000):
+        r3 = rng.randrange(1 << 64)
+        x14 = rng.randrange(1 << 32)
+        x15 = rng.randrange(1 << 32)
+        if even_fold_overflow(r3, x14, 0):
+            rand_f8 += 1
+        if odd_fold_overflow(x14, x15, 0):
+            rand_g8 += 1
+
+    return {
+        "rpsqr_f8_boundary_cases": f8_cases,
+        "rpsqr_f8_boundary_overflows": f8_diffs,
+        "rpsqr_g8_boundary_cases": g8_cases,
+        "rpsqr_g8_boundary_overflows": g8_diffs,
+        "rpsqr_sfq_cases": sf_cases,
+        "rpsqr_sfq_differences": sf_diffs,
+        "rpsqr_random_samples": 200_000,
+        "rpsqr_random_f8_overflows": rand_f8,
+        "rpsqr_random_g8_overflows": rand_g8,
+        "rpsqr_f8_predicate": "r3 + 977*x14 + cin >= 2^64 (~2^-23)",
+        "rpsqr_g8_predicate": "x15*(2^32+977)+x14+cin >= 2^64 (~x15 >= 2^32-977, ~2^-23)",
+        "rpsqr_sfq_predicate": "mad.lo(z8, 977*z9) differs from z8 iff z9 != 0",
+    }
+
+
 def audit_source():
     source = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_CARRY62 1" in source
@@ -264,9 +354,17 @@ def audit_source():
     assert "#define QSB_SECOND_FOLD_TAIL \"\"" in source
     assert "sub.u64 t0,t0,k;" in source
     assert "add.u64 t0,t0,k;" in source
+    assert "#if QSB_RP_SQR && QSB_SHORT_CARRY" in source
+    assert "-DQSB_RP_SQR=0 restores" in source
+    assert 'QSB_MUL_Z8 "\\taddc.u32 z8, 0, w7;\\n"' in source
+    assert 'QSB_SQR_SF_HEAD "mov.u32 sfq, z8;\\n"' in source
+    assert "QSB_SAS_Z89" in source
     cu = (HERE / "pinning.cu").read_text()
     assert "#define QSB_HOST_GATE 1" in cu
     assert "#define QSB_C31 1" in cu
+    assert "#define QSB_RP_SQR 0" in cu
+    assert "#define QSB_FKIENE 1" in cu
+    assert "#error \"QSB_RP_SQR requires QSB_HOST_GATE" in cu
     return hashlib.sha256(source.encode()).hexdigest()
 
 
@@ -275,6 +373,7 @@ def main():
     boundaries = audit_32bit_boundaries()
     random_differences = audit_random()
     c31 = audit_c31_predicates()
+    rpsqr = audit_rpsqr_predicates()
     source_sha256 = audit_source()
     result = {
         "test": "exact changed carry and borrow word operations",
@@ -294,6 +393,8 @@ def main():
         "c31_fold_difference_predicate": "z2+sfc >= 2^32 (~2^-31)",
         "c31_split3p_difference_predicate": "low64 < 3K (~2^-30.4)",
         "c31_klimb_difference_predicate": "K add/sub carries out of t0 (~2^-33 with P(k=K)~1/2)",
+        "rpsqr_f8_difference_predicate": "even-fold overflow f8 != 0 (~2^-23)",
+        "rpsqr_g8_difference_predicate": "odd-fold overflow g8 != 0 on a square (~2^-23)",
         "GPUMath_sha256": source_sha256,
         "cuda_compiled": False,
         "gpu_executed": False,
@@ -301,6 +402,7 @@ def main():
         "speedup": None,
     }
     result.update(c31)
+    result.update(rpsqr)
     print(json.dumps(result, indent=2))
 
 
