@@ -213,3 +213,46 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+
+## This submission (on top of the promoted 208bbcb6 / commit 03e399c)
+
+Ten changes, each exact or with a stated bound, each tested before it was bundled:
+
+1. **Host-precomputed tail rounds** (`QSB_TAIL_PRE`): rounds 0-3 of the locktime tail block are
+   folded on the host from the per-sequence midstate and the run-constant W2 and passed as a
+   by-value kernel parameter. 262,144-case unit test against the original transform and OpenSSL.
+2. **Lazy packed recovery** (`QSB_LAZY_REC`): u, v stay raw and m, sum use the carry-folding lazy
+   add; x1/x2 and the parity inputs are still canonical. 1,048,576-case unit test.
+3. **Second fold fused**: `z += c33*(2^32+977)` as `z8*977 + {z0, z8+977*z9}` (z9 <= 1 and z9 = 1
+   implies z8 <= 981). Bit-identical on a 1,572,928-input differential test.
+4. **SqrAddSub2 constant split** (`QSB_SAS_SPLIT3P`): the 3*2^256 of 3p rides in the z8 limb and 3K
+   is subtracted after the two q subtractions, its borrow kept through z4. Bit-identical, plus
+   100,000 constructed inputs that reach the z4 cut.
+5. **Offset table ordinates** (`QSB_YOFF`): the table stores y + (K-1)/2, so a signed load is one
+   XOR; the anchor sum subtracts K-1 with a limb-1 short carry. 2,097,152-case unit test.
+6. **Sign mask from one arithmetic shift**: `(int32_t)code >> 31` feeds both 32-bit halves.
+   Identical mask values by construction.
+7. **Raw recovery denominator** (`QSB_RAW_DEN`): X is not normalised and the leaf stays raw; the
+   result differs only on the 2^-224 class X >= p.
+8. **Parities from the pre-"+a" products** (`QSB_PARITY_SUM`): with r_i = x_i - a, a - x_i = -r_i,
+   so the two y-parities are par(+-(w+b) mod p) computed from one carry chain (k in {0,1,2} and the
+   y = 0 case handled exactly in a 2^-192 branch). 1,048,576-case differential on the finish and
+   1,370,616 constructed cases against a big-integer reference, including S = p, 2p, 2^256 and
+   2^256+p (+-3) with small and near-p b. It removes two short-carry subtractions, so it is strictly
+   less truncating than the code it replaces.
+9. **16-byte block-root loads** (`QSB_ROOT_V2`): the finish reads the two 4-limb root records as
+   vectors instead of eight scalar loads.
+10. **Merged cofactor-tree top** (`QSB_TREE_TOP2`): the block root n0*n1 is computed in the same
+    warp-multiply as the first excluded level (E(n0) = n1, E(n1) = n0 need no multiply), which drops
+    the root level and the copy level. Same operands in the same order, so every excluded product
+    and every root is bit-identical; checked on 8192 blocks x 128 leaves including identity, p-1 and
+    raw leaves, with root = prod(leaves) and out_i * leaf_i = root re-checked in Python.
+
+Local measurement against the promoted binary (interleaved 45 s runs, per-sequence progress):
+**+1.38%** over six rounds (+1.478% and +1.275% in two independent three-round A/Bs). Two 120 s
+harness runs at different problem seeds verified every hit on the CPU (10836/10836 and 10912/10912)
+and produced hit sets identical to the promoted build's over the common prefix.
+
+Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main `pinning.cu` SHA-256 is
+`ac8ef14d78be769c290b0d10be6457af2bbb227a71e8801a2ad6474bc2d5ef3a`. The nine source/license files total 324529 bytes before documentation.
