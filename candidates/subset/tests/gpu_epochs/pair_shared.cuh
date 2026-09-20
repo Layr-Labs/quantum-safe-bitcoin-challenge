@@ -18,6 +18,13 @@ __device__ __forceinline__ void qsb_k2s_pre(
     _ModMult(m2, ZZ);
 }
 
+/* QSB_NEG_ANCHOR_K2S (kill switch): as in qsb_xyzz_finish_precomputed, both
+ * recovered-y chains are anchored at -yR, so the product s*(m-c) is reused as
+ * x - xR instead of rebuilding xR - x with a second subtraction.  0 restores
+ * the frontier chain exactly. */
+#ifndef QSB_NEG_ANCHOR_K2S
+#define QSB_NEG_ANCHOR_K2S 1
+#endif
 __device__ __forceinline__ uint32_t qsb_k2s_post(
     uint64_t *m1, uint64_t *m2, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -27,6 +34,21 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
     _ModMult(m1, inv);
     _ModMult(m2, inv);
     _ModAdd256(sum, m1, m2);
+#if QSB_NEG_ANCHOR_K2S
+    uint64_t ny[4], p1[4];
+    _ModNeg256(ny, yR);          /* -yR mod p; yR != 0 */
+    _ModSub256(t, m1, cc);
+    _ModMult(p1, sum, t);        /* p1 = x1 - xR */
+    _ModAdd256(x1, p1, xR);
+    _ModMult(p1, m1);
+    _ModSub256(t, ny, p1);       /* y1 = -yR - lambda1*(x1-xR) */
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    _ModSub256(t, m2, cc);
+    _ModMult(p1, sum, t);        /* p1 = x2 - xR */
+    _ModAdd256(x2, p1, xR);
+    _ModMult(p1, m2);
+    _ModSub256(t, ny, p1);       /* -y2 */
+#else
     _ModSub256(t, m1, cc);
     _ModMult(x1, sum, t);
     _ModAdd256(x1, x1, xR);
@@ -40,6 +62,7 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
     _ModSub256(t, xR, x2);
     _ModMult(t, m2);
     _ModSub256(t, yR);
+#endif
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
@@ -80,6 +103,11 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 }
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
  * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
+/* QSB_NEG_ANCHOR_K2S3 (kill switch) for the filter-only copy; 0 restores the
+ * frontier chain. */
+#ifndef QSB_NEG_ANCHOR_K2S3
+#define QSB_NEG_ANCHOR_K2S3 1
+#endif
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -90,6 +118,21 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(m1, n, n + 8);
     QSB_FMUL(m2, n + 4, n + 8);
     QSB_FADD(sum, m1, m2);
+#if QSB_NEG_ANCHOR_K2S3
+    uint64_t ny[4], p1[4];
+    _ModNeg256(ny, yR);            /* -yR mod p, exact; yR != 0 */
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(p1, sum, t);          /* p1 = x1 - xR */
+    QSB_FADD(x1, p1, xR);
+    QSB_FMUL(p1, p1, m1);
+    QSB_FSUB(t, ny, p1);           /* y1 = -yR - lambda1*(x1-xR) */
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(p1, sum, t);          /* p1 = x2 - xR */
+    QSB_FADD(x2, p1, xR);
+    QSB_FMUL(p1, p1, m2);
+    QSB_FSUB(t, ny, p1);           /* -y2 */
+#else
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);
     QSB_FADD(x1, x1, xR);
@@ -103,6 +146,7 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FSUB(t, xR, x2);
     QSB_FMUL(t, t, m2);
     QSB_FSUB(t, t, yR);
+#endif
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }

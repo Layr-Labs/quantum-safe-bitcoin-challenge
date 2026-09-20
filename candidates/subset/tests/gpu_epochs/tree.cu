@@ -85,6 +85,10 @@ __device__ __constant__ uint64_t QSB_U2R[8];
  * finish derive both x-coordinates from the two slopes alone (see
  * qsb_xyzz_finish_precomputed). Uploaded next to QSB_U2R. */
 __device__ __constant__ uint64_t QSB_U2R_C[4];
+/* -yR mod p for R = u2R. The recovery finish anchors both y-chains at -yR
+ * instead of negating the x-difference and subtracting yR afterwards, so the
+ * two (xR - x) subtractions disappear. Uploaded next to QSB_U2R_C. */
+__device__ __constant__ uint64_t QSB_U2R_NY[4];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -1457,6 +1461,12 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare(
  *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
  * 8M+0S (was 7M+2S here plus 1M+1S for C in the caller).
  * Returns the two y parities in bits 0 and 1; ZZ is reused as scratch. */
+/* QSB_NEG_ANCHOR (kill switch): anchor both recovered-y chains at -yR instead
+ * of rebuilding xR - x after x is formed. 0 = the frontier chain byte for
+ * byte. */
+#ifndef QSB_NEG_ANCHOR
+#define QSB_NEG_ANCHOR 1
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
     uint64_t *inv, uint64_t *xR, uint64_t *yR,
@@ -1474,6 +1484,27 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModMult(m2, ZZ);            /* m2 = (yR*B+Y)*h = -lambda2 */
     _ModAdd256(s, m1, m2);       /* lambda1+m2 = 2*yR/(xR-xP) */
 
+#if QSB_NEG_ANCHOR
+    /* x1 - xR = (lambda1+m2)*(lambda1-c) =: p1, so xR - x1 = -p1 exactly and
+     *   y1 = lambda1*(xR-x1) - yR = -yR - lambda1*p1 = ny - lambda1*p1.
+     * Keeping p1 instead of re-deriving xR - x1 removes one _ModSub256 per
+     * branch; every operand stays canonical (_ModSub256 of canonical inputs is
+     * canonical), so the parity bits are bit-identical to the chain above. */
+    uint64_t ny[4]={QSB_U2R_NY[0],QSB_U2R_NY[1],QSB_U2R_NY[2],QSB_U2R_NY[3]};
+    uint64_t p1[4];
+    _ModSub256(t, m1, cc);
+    _ModMult(p1, s, t);
+    _ModAdd256(x1, p1, xR);      /* x1 = (lambda1+m2)*(lambda1-c) + xR */
+    _ModMult(p1, m1);
+    _ModSub256(t, ny, p1);       /* y1 = -yR - lambda1*(x1-xR) */
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+
+    _ModSub256(t, m2, cc);
+    _ModMult(p1, s, t);
+    _ModAdd256(x2, p1, xR);      /* x2 = (lambda1+m2)*(m2-c) + xR */
+    _ModMult(p1, m2);
+    _ModSub256(t, ny, p1);       /* -y2 = -yR - m2*(x2-xR) */
+#else
     _ModSub256(t, m1, cc);
     _ModMult(x1, s, t);
     _ModAdd256(x1, x1, xR);      /* x1 = (lambda1+m2)*(lambda1-c) + xR */
@@ -1488,6 +1519,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModSub256(t, xR, x2);
     _ModMult(t, m2);
     _ModSub256(t, yR);           /* y2 = -(m2*(xR-x2) - yR) */
+#endif
     /* y2=-t. Since p is odd, field negation flips its parity. */
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
@@ -2817,6 +2849,15 @@ int main(int argc, char **argv) {
         if(BN_bn2lebinpad(bc,(uint8_t*)h_c,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_C encode failed\n");return 1;}
         if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
             fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
+        }
+        /* QSB_U2R_NY = -yR mod p; yR != 0 on a prime-order curve, so this is
+         * the canonical p - yR and negating it back reproduces yR exactly. */
+        BN_lebin2bn(dp.u2r_y,32,by);
+        BN_mod_sub(by,bp,by,bp,ctx);
+        uint64_t h_ny[4];
+        if(BN_bn2lebinpad(by,(uint8_t*)h_ny,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_NY encode failed\n");return 1;}
+        if(cudaMemcpyToSymbol(QSB_U2R_NY,h_ny,sizeof(h_ny))!=cudaSuccess){
+            fprintf(stderr,"ERROR: QSB_U2R_NY upload failed\n");return 1;
         }
         BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
     }
