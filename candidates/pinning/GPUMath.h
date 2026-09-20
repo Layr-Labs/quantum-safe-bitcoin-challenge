@@ -1794,10 +1794,11 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #endif
 #endif
 
+  _ModSub256(Q, Q, T);                 // V - X3; T/V die before the Z updates
+  Load256(X1, T);                      // X3
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, T);                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
@@ -1805,8 +1806,6 @@ __device__ __forceinline__ void _PointAddXYZZT(
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
-
-  Load256(X1, T);                      // X3
 }
 
 // Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3,
