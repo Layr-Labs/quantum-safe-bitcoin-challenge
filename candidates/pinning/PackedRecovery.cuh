@@ -23,7 +23,7 @@ __device__ __forceinline__ uint32_t qsb_difference_parity(
 // Exact full-width residue; callers normalize before additions/parity.
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
-    uint64_t tmp[5];qsb_field_mul_sc(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
+    uint64_t tmp[5];qsb_field_mul(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
     Load256(out,tmp);
 }
 

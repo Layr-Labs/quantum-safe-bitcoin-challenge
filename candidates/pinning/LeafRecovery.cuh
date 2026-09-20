@@ -15,7 +15,7 @@ static_assert(QSB_RECOVERY_N==128 || QSB_RECOVERY_N==256,"supported tree width")
 __device__ __forceinline__ void qsb_recovery_mul(
     uint64_t *out, const uint64_t *a, const uint64_t *b) {
     uint64_t tmp[5];
-    qsb_field_mul_sc(tmp, const_cast<uint64_t *>(a), const_cast<uint64_t *>(b));
+    qsb_field_mul(tmp, const_cast<uint64_t *>(a), const_cast<uint64_t *>(b));
     qsb_field_normalize(tmp);
     Load256(out,tmp);
 }
@@ -30,7 +30,7 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     // X<p, while the exact product d may use any256-bit representative.
     // Thus d-X>-p. A borrow-corrected subtraction stays congruent and fits.
     // The next exact full-width multiply accepts d without normalization.
-    uint64_t raw[5];qsb_field_mul_sc(raw,const_cast<uint64_t*>(a),U);
+    uint64_t raw[5];qsb_field_mul(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
     _ModSub256(d,X);
     qsb_recovery_mul(W,V,d);       // W = V*(a*U-X), with U=ZZ and V=ZZZ.
@@ -72,7 +72,7 @@ __device__ __forceinline__ void qsb_recovery_product_checkpoint(
                 b[k]=products[k][offset+half+tid];
             }
             a[4]=b[4]=0;
-            qsb_field_mul_sc(out,a,b);
+            qsb_field_mul(out,a,b);
             const int node=offset+count+tid;
             #pragma unroll
             for(int k=0;k<4;k++){
@@ -117,7 +117,7 @@ __device__ __forceinline__ void qsb_recovery_pair_inverse(
                 sibling[k]=products[k][offset+(tid^half)-QSB_RECOVERY_N];
             }
             parent[4]=sibling[4]=0;
-            qsb_field_mul_sc(child,parent,sibling);
+            qsb_field_mul(child,parent,sibling);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-QSB_RECOVERY_N+tid]=child[k];
         }
