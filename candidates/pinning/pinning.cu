@@ -1,6 +1,3 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
-#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -27,8 +24,14 @@
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
+#ifndef QSB_RP_SQR
+#define QSB_RP_SQR 1     /* 743 odd-fold tail on squares + even-fold f8; needs HOST_GATE */
+#endif
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_RP_SQR && !QSB_HOST_GATE
+#error "QSB_RP_SQR requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
@@ -2866,8 +2869,9 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
-    printf("  Host publication gate: %s; C31 approx: %s\n",
-           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
+    printf("  Host publication gate: %s; C31 approx: %s; RP_SQR: %s\n",
+           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off",
+           QSB_RP_SQR ? "on" : "off");
 
     /* The ranked problem geometry is fixed by harness/gen_problem.py
      * (PIN_SUFFIX_LEN=75, PIN_SEQ_OFFSET=31, 155 midstate blocks -> 9995 B),

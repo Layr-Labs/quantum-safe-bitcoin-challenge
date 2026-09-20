@@ -147,7 +147,9 @@ def audit_source():
     mathh = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_HOST_GATE 1" in cu
     assert "#define QSB_C31 1" in cu
+    assert "#define QSB_RP_SQR 1" in cu
     assert "#error \"QSB_C31 requires QSB_HOST_GATE" in cu
+    assert "#error \"QSB_RP_SQR requires QSB_HOST_GATE" in cu
     assert "qsb_gate_accept" in cu
     assert cu.count("qsb_gate_accept(") >= 3  # definition + two writers
     assert "BN_lebin2bn(pp.neg_r_inv" in cu
