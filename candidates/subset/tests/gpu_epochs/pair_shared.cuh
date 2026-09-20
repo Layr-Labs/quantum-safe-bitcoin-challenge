@@ -58,13 +58,27 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #define ZLAB_K2S3M 1
 #endif
 #if ZLAB_K2S3M
+// Research: owizdom 4f367236, carried in DPZZxlz cbcb7bb and fkiene 2cf35a3.
+// Only speculative paired preparation changes; exact replay uses original helpers.
+#ifndef QSB_SPEC_PREPARE_PAIR
+#define QSB_SPEC_PREPARE_PAIR 1
+#endif
+#if QSB_SPEC_PREPARE_PAIR
+#define QSB_PRE_MUL QSB_FMUL
+#define QSB_PRE_SUB QSB_FSUB
+#define QSB_PRE_ADD QSB_FADD
+#else
+#define QSB_PRE_MUL X_FMUL
+#define QSB_PRE_SUB X_FSUB
+#define QSB_PRE_ADD X_FADD
+#endif
 __device__ __forceinline__ void qsb_k2s_pre3(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
     uint64_t yb[4];
-    X_FMUL(yb, yR, ZZZ);
-    X_FSUB(n, yb, Y);
-    X_FADD(n + 4, yb, Y);
+    QSB_PRE_MUL(yb, yR, ZZZ);
+    QSB_PRE_SUB(n, yb, Y);
+    QSB_PRE_ADD(n + 4, yb, Y);
     Load256(n + 8, ZZ);
 }
 /* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
@@ -72,12 +86,15 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    X_FMUL(t, xR, ZZ);
-    X_FSUB(t, t, X_D);
+    QSB_PRE_MUL(t, xR, ZZ);
+    QSB_PRE_SUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    X_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    QSB_PRE_MUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
 }
+#undef QSB_PRE_MUL
+#undef QSB_PRE_SUB
+#undef QSB_PRE_ADD
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
  * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
