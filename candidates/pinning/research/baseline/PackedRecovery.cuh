@@ -66,14 +66,10 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    // Public d=a-x route (EvanYan1024). Form both d values before parity
-    // so sum/c die before the raw ordinate multiplication.
-    _ModSub256(t,c,l); qsb_recovery_mul(x1,sum,t);
-    _ModSub256(t,c,m); qsb_recovery_mul(x2,sum,t);
-    qsb_packed_raw_mul(s,l,x1); qsb_parity_boundary(s,b);
+    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
+    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
+    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(x1,a,x1);
-    qsb_packed_raw_mul(s,m,x2); qsb_parity_boundary(s,b);
-    _ModSub256(x2,a,x2);
+    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
     return parity|(qsb_difference_parity(b,s)<<1);
 }

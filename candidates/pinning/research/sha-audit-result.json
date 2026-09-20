@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "three_transform_cases": 16384,
+  "full_9995_byte_hashes": 96,
+  "byte_permutation_cases": 68352,
+  "negative_controls": 3,
+  "native_compile": false,
+  "gpu_timing": null,
+  "limitations": "Python executes source assignment semantics, not nvcc/SASS. Source checks cover allocation sizes and stream ordering, not CUDA runtime races.",
+  "sha256": {
+    "pinning.cu": "3c585f344d3753e8c3598cbc78993d145d18bd433865323ce6d079cd2c131b90",
+    "ExactSha.cuh": "b97954f8345cfdf1934b0fada7ae5c971f6b80bee5e03b6bd2416f86c923cb63"
+  }
+}

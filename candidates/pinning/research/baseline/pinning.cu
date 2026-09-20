@@ -626,7 +626,239 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 }
 
 
-#include "ExactSha.cuh"
+/* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block
+ * (delta B, scarletbright 7f965b4d). Pad shape: W[0..2] live, W[3..14]=0,
+ * W[15]=9995*8=79960. Continues from an existing midstate. The first 16
+ * rounds and the first in-place WMIX drop zero addends; later rounds use the
+ * generic SHA256_RND / WMIX schedule. Bit-identical to _SHA256Transform on
+ * that padded block. */
+__device__ __forceinline__ void _SHA256TransformFastTail11(
+    uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2)
+{
+    const uint32_t L = 9995u * 8u; /* 79960 */
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = state[0];
+    uint32_t b = state[1];
+    uint32_t c = state[2];
+    uint32_t d = state[3];
+    uint32_t e = state[4];
+    uint32_t f = state[5];
+    uint32_t g = state[6];
+    uint32_t h = state[7];
+
+    uint32_t w[16];
+    w[0] = w0;
+    w[1] = w1;
+    w[2] = w2;
+#pragma unroll
+    for (int i = 3; i < 15; i++) w[i] = 0;
+    w[15] = L;
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[4], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[5], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[6], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[7], 0u);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], L);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(L) + s0(w[2]);
+        w[2] += s1(w[0]);
+        w[3]  = s1(w[1]);
+        w[4]  = s1(w[2]);
+        w[5]  = s1(w[3]);
+        w[6]  = s1(w[4]) + L;
+        w[7]  = s1(w[5]) + w[0];
+        w[8]  = s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(L);
+        w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+}
+
+/* Sparse-schedule SHA-256 for the SHA256d second compression (delta D,
+ * preludebrace bc77eb42): 32-byte message = first digest as eight words,
+ * fixed pad W[8]=0x80000000, W[9..14]=0, W[15]=256, from the SHA-256 IV.
+ * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
+__device__ __forceinline__ void _SHA256TransformDigest32(
+    uint32_t out[8], const uint32_t m[8])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = 0x6a09e667u;
+    uint32_t b = 0xbb67ae85u;
+    uint32_t c = 0x3c6ef372u;
+    uint32_t d = 0xa54ff53au;
+    uint32_t e = 0x510e527fu;
+    uint32_t f = 0x9b05688cu;
+    uint32_t g = 0x1f83d9abu;
+    uint32_t h = 0x5be0cd19u;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 8; i++) w[i] = m[i];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], 0x80000000u);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 256u);
+
+    {
+        /* First schedule expansion; w[9..14]=0 and w[8]/w[15] are the fixed
+         * pad words. s0(0)=s1(0)=0, so zero terms vanish. */
+        w[0] += s0(w[1]);
+        w[1] += s1(256u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 256u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
+        w[8]  = 0x80000000u + s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(256u);
+        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+
+    out[0] = 0x6a09e667u + a;
+    out[1] = 0xbb67ae85u + b;
+    out[2] = 0x3c6ef372u + c;
+    out[3] = 0xa54ff53au + d;
+    out[4] = 0x510e527fu + e;
+    out[5] = 0x9b05688cu + f;
+    out[6] = 0x1f83d9abu + g;
+    out[7] = 0x5be0cd19u + h;
+}
+
+/* Sparse-schedule SHA-256 for the 33-byte compressed public key (delta D):
+ * live words pb[0..8], W[9..14]=0, W[15]=0x108, from the SHA-256 IV.
+ * Bit-identical to _SHA256Initialize + _SHA256Transform on that block. */
+__device__ __forceinline__ void _SHA256TransformPubkey33(
+    uint32_t out[8], const uint32_t m[9])
+{
+    uint32_t t1;
+    uint32_t t2;
+
+    uint32_t a = 0x6a09e667u;
+    uint32_t b = 0xbb67ae85u;
+    uint32_t c = 0x3c6ef372u;
+    uint32_t d = 0xa54ff53au;
+    uint32_t e = 0x510e527fu;
+    uint32_t f = 0x9b05688cu;
+    uint32_t g = 0x1f83d9abu;
+    uint32_t h = 0x5be0cd19u;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 9; i++) w[i] = m[i];
+
+    S2Round(a, b, c, d, e, f, g, h, K[0], w[0]);
+    S2Round(h, a, b, c, d, e, f, g, K[1], w[1]);
+    S2Round(g, h, a, b, c, d, e, f, K[2], w[2]);
+    S2Round(f, g, h, a, b, c, d, e, K[3], w[3]);
+    S2Round(e, f, g, h, a, b, c, d, K[4], w[4]);
+    S2Round(d, e, f, g, h, a, b, c, K[5], w[5]);
+    S2Round(c, d, e, f, g, h, a, b, K[6], w[6]);
+    S2Round(b, c, d, e, f, g, h, a, K[7], w[7]);
+    S2Round(a, b, c, d, e, f, g, h, K[8], w[8]);
+    S2Round(h, a, b, c, d, e, f, g, K[9], 0u);
+    S2Round(g, h, a, b, c, d, e, f, K[10], 0u);
+    S2Round(f, g, h, a, b, c, d, e, K[11], 0u);
+    S2Round(e, f, g, h, a, b, c, d, K[12], 0u);
+    S2Round(d, e, f, g, h, a, b, c, K[13], 0u);
+    S2Round(c, d, e, f, g, h, a, b, K[14], 0u);
+    S2Round(b, c, d, e, f, g, h, a, K[15], 0x108u);
+
+    {
+        /* First schedule expansion; w[9..14]=0 and w[15]=0x108 is fixed. */
+        w[0] += s0(w[1]);
+        w[1] += s1(0x108u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(w[8]);
+        w[8] += s1(w[6]) + w[1];
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(0x108u);
+        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+    SHA256_RND(16);
+    /* Scheduling-only experiment: interleave the two dense schedule expansions
+     * with their compression rounds. All 64 SHA-256 rounds remain intact. */
+    QSB_SHA_INTERLEAVED_16(32);
+    QSB_SHA_INTERLEAVED_16(48);
+
+    out[0] = 0x6a09e667u + a;
+    out[1] = 0xbb67ae85u + b;
+    out[2] = 0x3c6ef372u + c;
+    out[3] = 0xa54ff53au + d;
+    out[4] = 0x510e527fu + e;
+    out[5] = 0x9b05688cu + f;
+    out[6] = 0x1f83d9abu + g;
+    out[7] = 0x5be0cd19u + h;
+}
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -1102,9 +1334,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #if QSB_SPARSE_TAIL
         /* W[0..2] live locktime-patched words; W[3..14]=0; W[15]=79960. */
         uint32_t w0 = pin_tail_words[0] | (lt & 0xffu);
-        uint32_t w1 = __byte_perm(lt, pin_tail_words[1], 0x1234);
+        uint32_t w1 = ((lt & 0xff00u) << 16) | (lt & 0xff0000u) |
+                ((lt >> 16) & 0xff00u) | pin_tail_words[1];
         uint32_t w2 = pin_tail_words[2];
-        _SHA256TransformFastTail11(state, w0, w1, w2, d_midstate);
+        _SHA256TransformFastTail11(state, w0, w1, w2);
 #else
         uint32_t blk[16] = {
             pin_tail_words[0] | (lt & 0xffu),
@@ -1783,7 +2016,7 @@ int main(int argc, char **argv) {
     }
 
     /* Upload midstate */
-    uint32_t *d_mid; cudaMalloc(&d_mid, QSB_SHA_STATE_WORDS*sizeof(uint32_t));
+    uint32_t *d_mid; cudaMalloc(&d_mid, 32);
     cudaMemcpy(d_mid, pp.midstate, 32, cudaMemcpyHostToDevice);
 
     /* Build suffix template. In the NEW pipeline format (combined_suffix), the
@@ -1874,7 +2107,6 @@ int main(int argc, char **argv) {
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    uint32_t tail_word2 = 0;
     const bool fast_tail = single_hash && !easy && pp.suffix_len == 75 &&
         pp.seq_offset == 31 && pp.lt_offset == 67 && pp.total_preimage_len == 9995;
     if (fast_tail) {
@@ -1885,7 +2117,6 @@ int main(int argc, char **argv) {
             ((uint32_t)pp.suffix[72]<<24) | ((uint32_t)pp.suffix[73]<<16) |
                 ((uint32_t)pp.suffix[74]<<8) | 0x80u
         };
-        tail_word2 = words[2];
         cudaError_t copy_err = cudaMemcpyToSymbol(pin_tail_words, words, sizeof(words));
         if (copy_err != cudaSuccess) {
             fprintf(stderr, "Failed to upload fixed SHA tail: %s\n",
@@ -1959,13 +2190,13 @@ int main(int argc, char **argv) {
     {
         cudaError_t se = cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*sizeof(uint32_t), cudaHostAllocDefault);
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_hit_idx, QSB_SLOTS*64*sizeof(uint32_t), cudaHostAllocDefault);
-        if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*QSB_SHA_STATE_WORDS*sizeof(uint32_t), cudaHostAllocDefault);
+        if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
-            if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], QSB_SHA_STATE_WORDS*sizeof(uint32_t));
+            if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 32);
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
         }
         if (se != cudaSuccess) {
@@ -2148,7 +2379,7 @@ int main(int argc, char **argv) {
     }
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
     int slot_busy[QSB_SLOTS];
-    uint32_t cur_mid[QSB_SHA_STATE_WORDS];
+    uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
     auto drain_slot = [&](int s) -> int {
@@ -2194,8 +2425,6 @@ int main(int argc, char **argv) {
             for(int i=0;i<8;i++) cur_mid[i]=pp.midstate[i];
         }
 
-        qsb_sha_tail_precompute(cur_mid, tail_word2);
-
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
@@ -2206,8 +2435,8 @@ int main(int argc, char **argv) {
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
-            memcpy(h_mid + (size_t)s*QSB_SHA_STATE_WORDS, cur_mid, sizeof(cur_mid));
-            cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*QSB_SHA_STATE_WORDS, sizeof(cur_mid), cudaMemcpyHostToDevice, st);
+            memcpy(h_mid + (size_t)s*8, cur_mid, 32);
+            cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
 
             launch_pinning_pipeline<true>(
@@ -2267,10 +2496,7 @@ int main(int argc, char **argv) {
             SHA256_Init(&ctx);
             for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
             SHA256_Transform(&ctx,block);
-            uint32_t mid_pre[QSB_SHA_STATE_WORDS];
-            for(int i=0;i<8;i++) mid_pre[i]=ctx.h[i];
-            qsb_sha_tail_precompute(mid_pre, tail_word2);
-            cudaError_t copy_err = cudaMemcpy(d_mid,mid_pre,sizeof(mid_pre),cudaMemcpyHostToDevice);
+            cudaError_t copy_err = cudaMemcpy(d_mid,ctx.h,32,cudaMemcpyHostToDevice);
             if (copy_err != cudaSuccess) {
                 fprintf(stderr, "Failed to upload per-sequence SHA state: %s\n",
                         cudaGetErrorString(copy_err));
