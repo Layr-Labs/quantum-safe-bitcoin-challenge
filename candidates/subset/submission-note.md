@@ -1,108 +1,40 @@
-Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
+# Subset: exact paired SHA second-window unrolling
 
-# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
+## Model
 
-Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
-boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
-triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
-predeclared decision bands, dispatch review).
+Codex, working with the dedicated RTX 4090 host.
 
-## Context and goal
+## Harness
 
-`eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
-(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
-At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
-`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
+The repository's default `nvcc` build, unchanged problem generator, GPU bridge, and independent CPU verifier were used. Fixed-work stop instrumentation and timing scripts live only in `/tmp/qsb-subset-pr707-bench`; they are absent from this source archive. Every timing below used the ranked `single_hash` path with `QSB_ZEROS_N=24` and default `sm_52` compilation. The score formula, verifier, target, runtime limit, and pinning source are unchanged.
 
-## Hypothesis and approach selection
+## Source and attribution
 
-The promoted frontier carries the carry-tail truncation of the speculative filter's field
-pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
-loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
-square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
-The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
-removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
-promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
-variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
-do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
-(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
-materially dead remains in the hot path).
+The base is promoted main `043b65024acd4c21da044e5993958079fc70b663`, official subset score 588,762,499. At preparation time the 100-bips promotion floor is 594,650,124. The base includes previous promoted work from ercumentyildirim, dukemawex, Meganpark980320, owizdom, odinfree, and other cited contributors in the inherited source; this package does not claim those mechanisms.
 
-## Change (behind `QSB_SHORT_CARRY2`, default `1`)
+The seven added lines in `tests/gpu_epochs/window_schedule_shared.cuh` are copied exactly from public [PR #707](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/707), source commit `e7621a31de259c3e89ba8c22c8fadc748450efde`, submitted by ercumentyildirim. That submission publicly reports about +0.30% short local throughput and a clock-normalized +0.21% improvement, with a separate 10,138-hit CPU verification. Our contribution is the isolated current-main port, matched-work replication, and independent CPU check. If PR #707 promotes first, this byte-identical change has no remaining incremental runtime gain.
 
-The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
-retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
-sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
-byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
-not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
-the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
-a hit instead of fabricating one, so the score can only be understated, never inflated.
+## Change and exactness
 
-## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
+The paired epoch SHA second-window loop uses `#pragma unroll` instead of `#pragma unroll 1` under `QSB_PAIR_SHA_UNROLL_WINDOW`, default on. All 64 rounds, message words, constants, state updates, and subsequent exact hit replay are unchanged. Defining the macro to zero retains the base loop form. The production source differs from main in this header and this note only. No diagnostic executable, build stamp, cubin, problem instance, or script is included.
 
-| region | chain-loop body base → this tree | Δ |
-|---|---|---|
-| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
-| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
-| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
+The default `nvcc -O3 -DQSB_ZEROS_N=24` build passed. `kernel_digest` uses 128 registers per thread, 49,152 bytes of shared memory per CTA, and zero stack or reported spills, the same resource class as the control. For the official earlier seed 526487517, every fixed-work arm exited normally, printed `Done short-epoch`, completed the declared work, and published exactly the same parsed `(indices, recid)` hit set as the control. The independent CPU verifier re-derived all 2,020 hits in the final 128-batch candidate arm: 2,020 verified, zero failures, no warning. This checks the emitted hits; full SHA semantic equivalence follows from the unchanged loop body and trip count.
 
-Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
-pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
-stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
-structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
-container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
-required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
-inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
-driver-JIT layers.
+The original loop executes eight groups of eight SHA-256 rounds. The patch changes only the compiler directive before that loop; it does not replace a round, omit a state feed-forward, modify the shared second-window words, or change the slot address. Both the ordinary `QSB_PAIR_SHA_UNROLL_CONST` branch and the exact verification kernel remain as they were on main. This is a compiler scheduling experiment rather than an arithmetic approximation. The public donor also performed a separate long hit-set check, but our local check below is the evidence for this particular current-main build. The CPU verifier parsed the GPU bridge's hit records and recomputed each candidate against the seed-526487517 problem JSON, instead of trusting the GPU's tentative-hit predicate.
 
-## Correctness
+## Local matched-work measurements
 
-- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
-  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
-  boundary rows — zero mismatches, all four flag combinations.
-- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
-- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
-  candidate run; 12,028–12,038 per base run).
-- Course corrections during qualification, disclosed: two of our own census scanning bugs
-  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
-  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
-  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
-  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
-  base as well as the candidate, so the operative check is spills, which are zero.
+Both arms used the same seed, sequence 2445458527, locktime 2228745406, GPU, build flags, and `single_hash` command. Warm whole-batch wall time is the comparison metric; each batch contains 134,217,728 candidate attempts. Hit set equality was checked after parsing records, independent of atomic output order.
 
-## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
+| Run | Control wall ms/batch | Unrolled wall ms/batch | Work per arm | Hits per arm | Throughput change |
+|---|---:|---:|---:|---:|---:|
+| First 64-batch pair | 183.296863 | 183.104663 | 8,589,934,592 | 1,014 | +0.105% |
+| Reverse 128-batch BAAB means | 183.680886 | 183.336025 | 17,179,869,184 | 2,020 | +0.188% |
 
-Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
-any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
-Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
-documented first-run position effect on this host (~0.13% at half weight in block 1; measured
-across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
-blocks bound rather than hide.
+The four chronological 128-batch arm times were unrolled 183.116216, control 183.429404, control 183.932367, and unrolled 183.555834 ms/batch. The same hit set was published in all four arms. This is a small, repeatable local signal, not a demonstrated 1% improvement. A 1,200-second official score can differ because of runner load, clock drift, startup amortization, and hit-count variation. Our earlier source scored 590,723,362 officially and failed the current 594,650,124 floor; this change is too small to predict that it will close the gap. Any submission decision must recheck the live main, floor, and PR #707 status first.
 
-## Transfer caveats, stated plainly
-
-This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
-below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
-the mechanism is exact and fully verified; the class has informative local/official calibration
-pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
-loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
-chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
-on exactly those operands). If the ranked runner prices the loop the way the fast host does,
-this lands marginally positive; if the margin is not recognized, the census packet above stands
-as the record of the mechanism and of where the remaining carry work actually lives.
+The diagnostic commands passed the same problem binary and the arguments `0 2445458527 2228745406 1 0 single_hash` to each binary. A fixed-work marker in the scratch host copy stopped after 64 or 128 complete batches and printed the actual batch count, warm wall time, attempts, and hit count. Each arm's process exit code, completion line, and expected attempt count were mandatory gates before its timing entered the table. We parsed unique index sets and recovery IDs rather than comparing output-file byte order, because GPU atomics may publish the same hits in a different order. There was no count truncation at this N=24 hit rate. The 128-batch means use one arm at each end and two control arms in the middle, which reduces a linear time-position bias; it does not eliminate frequency or thermal noise. The first pair and reverse sequence point in the same direction, but the observed gain is only about one-fifth of the official one-percent promotion requirement.
 
 ## Reproduction
 
-```
-git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
-# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
-# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
-yukon setup --track subset && yukon run --track subset
-```
-
-## Credits
-
-Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
-co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
-Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
-5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**
+From this source tree, `./setup.sh subset` performs the default production build and verifier smoke test; `./benchmark.sh subset` runs the normal benchmark. The fixed-work comparison used diagnostic copies and is intentionally outside this archive. The main-only source diff is seven lines in `window_schedule_shared.cuh`.
