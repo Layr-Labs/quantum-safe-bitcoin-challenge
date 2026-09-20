@@ -32,7 +32,6 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         #pragma unroll
         for(int k=0;k<4;k++) {
             roots[(size_t)blockIdx.x*4+k]=products[k][2*N-2];
-            excluded[k][N-2]=k==0?1:0;
         }
     }
     __syncwarp();
