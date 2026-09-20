@@ -25,7 +25,9 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     const uint64_t *a, uint64_t *W) {
     // U, Y and V are consumed only by carry-complete full-width multiplies
     // in this cofactor path. Keep X canonical for the subtraction; a*U may be raw.
+#if !QSB_RAW_DEN
     qsb_field_normalize(X);
+#endif
     uint64_t d[4];
     // X<p, while the exact product d may use any256-bit representative.
     // Thus d-X>-p. A borrow-corrected subtraction stays congruent and fits.
@@ -33,7 +35,11 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     uint64_t raw[5];qsb_field_mul_sc(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
     _ModSub256(d,X);
+#if QSB_RAW_DEN
+    { uint64_t rw[5]; qsb_field_mul_sc(rw,V,d); Load256(W,rw); }   // P8: raw leaf, W = V*(a*U-X)
+#else
     qsb_recovery_mul(W,V,d);       // W = V*(a*U-X), with U=ZZ and V=ZZZ.
+#endif
     W[4]=0;
 }
 
