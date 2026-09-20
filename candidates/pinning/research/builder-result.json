@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "built_point_checks": 865,
+  "hi_zero_cases": 441,
+  "PTX_normalized_points": 31,
+  "collective_inverse_checks": 2560,
+  "tail_batches": [
+    1,
+    2,
+    31,
+    32,
+    33,
+    127,
+    128,
+    255,
+    256
+  ],
+  "negative_control": "JacobianZpowers rejected; builderhomogeneousX/Z,Y/Z confirmed",
+  "production_hash": "e984118bb26ec0838be5fce0cb42e97a0e88e6aa7794772074030ad2467a8cbd",
+  "limits": "Sourcecall fieldcontractmodel; actualnewnormalizePTX sampled; no nativecompile/GPUbenchmark or inheritedshortcarrycertification."
+}
