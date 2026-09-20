@@ -58,13 +58,39 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #define ZLAB_K2S3M 1
 #endif
 #if ZLAB_K2S3M
+/* QSB_SPEC_PREPARE (kill switch; 0 restores the promoted code exactly).
+ * Carried from owizdom's public submission 4f367236-4a3c-49de-a81b-1730e6f0d889
+ * (commit 878eb25e4470da77446b398889aab2f65ba0eadd), which moved the pre-inverse
+ * prepare and pre3 off the exact field ops and onto the same unguarded speculative
+ * ops that the filter chain (qsb_filter_point_add, qsb_filter_last_add) and the
+ * post-inverse qsb_k2s_post3 on this frontier already use. Same formulas, same
+ * operand order, same operation count; only the carry/borrow guard differs.
+ * Correctness argument is the one already stated at the top of filter_tail_sc.cuh:
+ * a dropped carry here can only corrupt this candidate's (or, through the block
+ * inverse product, this block's) speculative x-coordinates, which loses tentative
+ * hits; it can never publish one, because every tentative hit is recomputed by
+ * kernel_verify_pair_hits on the unchanged exact chain.
+ * Not touched: qsb_k2s_front, qsb_k2s_front_exact, qsb_k2s_pre,
+ * qsb_xyzz_finish_prepare, qsb_k2s_post, qsb_pair_verify_candidate. */
+#ifndef QSB_SPEC_PREPARE
+#define QSB_SPEC_PREPARE 1
+#endif
+#if QSB_SPEC_PREPARE
+#define QSB_PRE_FMUL(r,a,b) QSB_FMUL(r,a,b)
+#define QSB_PRE_FSUB(r,a,b) QSB_FSUB(r,a,b)
+#define QSB_PRE_FADD(r,a,b) QSB_FADD(r,a,b)
+#else
+#define QSB_PRE_FMUL(r,a,b) X_FMUL(r,a,b)
+#define QSB_PRE_FSUB(r,a,b) X_FSUB(r,a,b)
+#define QSB_PRE_FADD(r,a,b) X_FADD(r,a,b)
+#endif
 __device__ __forceinline__ void qsb_k2s_pre3(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
     uint64_t yb[4];
-    X_FMUL(yb, yR, ZZZ);
-    X_FSUB(n, yb, Y);
-    X_FADD(n + 4, yb, Y);
+    QSB_PRE_FMUL(yb, yR, ZZZ);
+    QSB_PRE_FSUB(n, yb, Y);
+    QSB_PRE_FADD(n + 4, yb, Y);
     Load256(n + 8, ZZ);
 }
 /* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
@@ -72,10 +98,10 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    X_FMUL(t, xR, ZZ);
-    X_FSUB(t, t, X_D);
+    QSB_PRE_FMUL(t, xR, ZZ);
+    QSB_PRE_FSUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    X_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
 }
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
