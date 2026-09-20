@@ -240,9 +240,22 @@ ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
  * Row rule: lane even  new P = a*P + b*Q ; lane odd new P = d*P + c*Q  (same as c*u+d*v).
  * Collectives per batch: 2 coefficients + 1 sign + 1 zero flag + 9 partner limbs. */
 #ifdef __CUDA_ARCH__
-ZI_DEV uint32_t zi_x(uint32_t v,int src){return (uint32_t)__shfl_sync(0xFu,(unsigned int)v,src);}
+/* The 4-lane root inverse sits in the serial section the whole 256-thread
+ * block waits on. CUDA lowers __shfl_sync(0xF, v, src) to a predicated
+ * shfl.sync.idx with register clamp/membermask; ptxas then outlines all 29
+ * exchanges as CALL.REL.NOINC into __cuda_sm70_shflsync_idx_p. Immediate
+ * clamp and no predicate destination emit a plain SHFL.IDX. One syncwarp
+ * at the function's only divergent point (the lane<2 divstep) reconverges
+ * lanes 0..3 before the raw shuffles. Semantics match the intrinsic. */
+ZI_DEV uint32_t zi_x(uint32_t v,int src){
+    uint32_t r;
+    asm volatile("shfl.idx.b32 %0, %1, %2, 0x1f;" : "=r"(r) : "r"(v), "r"(src));
+    return r;
+}
+ZI_DEV void zi_conv(){__syncwarp(0x0000000fu);}
 #else
 uint32_t zi_x(uint32_t v,int src);
+static inline void zi_conv(){}
 #endif
 /* p limbs, little-endian 32-bit (limb 8 = 0). Kept as an initialised local array in every
  * user so it folds to immediates in device code instead of a constant-bank load. */
@@ -313,6 +326,8 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
             const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
             delta=zi_divstep30_by(delta,f0,g0,&a,&b,&c,&d);
         }
+        /* Only divergent region: reconverge before the raw shuffles. */
+        zi_conv();
         int32_t ka=odd?d:a,kb=odd?c:b;
         ka=(int32_t)zi_x((uint32_t)ka,lane&1);
         kb=(int32_t)zi_x((uint32_t)kb,lane&1);
