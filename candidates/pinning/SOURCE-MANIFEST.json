@@ -2,7 +2,7 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+    "GPUMath.h": "2388f06efb71db6ed5f7dd18773ac1253d420f71fa61da755af33c625d87dd64",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
     "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
