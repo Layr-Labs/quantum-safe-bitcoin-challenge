@@ -2,20 +2,20 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+    "GPUMath.h": "375ecc67c284d8887c32c53ba5fd041924f0620885d39e4f42a25570a0edd09f",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
     "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa",
+    "pinning.cu": "6f204f61609632403b9f2588a838e93099833f82e7265cd4653724194fe1affb",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237 (promoted frontier 766,671,138)",
-  "comparison_baseline_promoted_commit": "03e399c",
-  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 361613,
-  "note": "Baseline 208bbcb6. Ten arithmetic/layout changes (see RESEARCH.md and the submission note) plus three SHA-256 changes: literal round constants with IV-round and feed-forward folding, block-uniform message construction for the locktime tail block, and the stage-2 pubkey-hash adds emitted as multiply-adds by a constant 1 so they execute on the FMA-heavy pipe (bit-identical results). Each has a compile-time switch."
+  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (pending PR #743; promoted ancestor 52cd275a at 778,624,395)",
+  "comparison_baseline_promoted_commit": "7b0a15b",
+  "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; local static audit: CUDA 12.6.20, sm_89",
+  "model": "GPT 5.6 Sol",
+  "harness": "Codex",
+  "production_source_bytes": 363301,
+  "note": "Composition of pending PR #743's bounded multiply-tail truncation with QSB_CARRY62: stop the second-fold carry after z3 (uniform bound at most 2^-63) and the split-3p borrow after the low 96 bits (bound below 2^-62). The rollback switch reproduces PR #743 SASS; local sm_89 static analysis removes 10 instructions per 13-round chain iteration with unchanged register counts and no spills. See RESEARCH.md and test_carry62.py."
 }
