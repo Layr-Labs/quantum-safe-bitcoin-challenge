@@ -58,13 +58,39 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #define ZLAB_K2S3M 1
 #endif
 #if ZLAB_K2S3M
+/* QSB_SPEC_PREPARE (kill switch; 0 restores the promoted code exactly).
+ * Carried from owizdom's public submission 4f367236-4a3c-49de-a81b-1730e6f0d889
+ * (commit 878eb25e4470da77446b398889aab2f65ba0eadd), which moved the pre-inverse
+ * prepare and pre3 off the exact field ops and onto the same unguarded speculative
+ * ops that the filter chain (qsb_filter_point_add, qsb_filter_last_add) and the
+ * post-inverse qsb_k2s_post3 on this frontier already use. Same formulas, same
+ * operand order, same operation count; only the carry/borrow guard differs.
+ * Correctness argument is the one already stated at the top of filter_tail_sc.cuh:
+ * a dropped carry here can only corrupt this candidate's (or, through the block
+ * inverse product, this block's) speculative x-coordinates, which loses tentative
+ * hits; it can never publish one, because every tentative hit is recomputed by
+ * kernel_verify_pair_hits on the unchanged exact chain.
+ * Not touched: qsb_k2s_front, qsb_k2s_front_exact, qsb_k2s_pre,
+ * qsb_xyzz_finish_prepare, qsb_k2s_post, qsb_pair_verify_candidate. */
+#ifndef QSB_SPEC_PREPARE
+#define QSB_SPEC_PREPARE 1
+#endif
+#if QSB_SPEC_PREPARE
+#define QSB_PRE_FMUL(r,a,b) QSB_FMUL(r,a,b)
+#define QSB_PRE_FSUB(r,a,b) QSB_FSUB(r,a,b)
+#define QSB_PRE_FADD(r,a,b) QSB_FADD(r,a,b)
+#else
+#define QSB_PRE_FMUL(r,a,b) X_FMUL(r,a,b)
+#define QSB_PRE_FSUB(r,a,b) X_FSUB(r,a,b)
+#define QSB_PRE_FADD(r,a,b) X_FADD(r,a,b)
+#endif
 __device__ __forceinline__ void qsb_k2s_pre3(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
     uint64_t yb[4];
-    X_FMUL(yb, yR, ZZZ);
-    X_FSUB(n, yb, Y);
-    X_FADD(n + 4, yb, Y);
+    QSB_PRE_FMUL(yb, yR, ZZZ);
+    QSB_PRE_FSUB(n, yb, Y);
+    QSB_PRE_FADD(n + 4, yb, Y);
     Load256(n + 8, ZZ);
 }
 /* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
@@ -72,14 +98,37 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    X_FMUL(t, xR, ZZ);
-    X_FSUB(t, t, X_D);
+    QSB_PRE_FMUL(t, xR, ZZ);
+    QSB_PRE_FSUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    X_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
 }
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
  * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
+/* QSB_NEGFOLD_PARITY (kill switch; 0 restores the promoted tail exactly).
+ * x1 = p1 + xR with p1 = (lambda1+m2)*(lambda1-c), so xR - x1 = -p1 and
+ *   y1 = lambda1*(xR-x1) - yR = -(p1*lambda1 + yR),
+ * and symmetrically y2 = -(m2*(xR-x2) - yR) = p2*m2 + yR with p2 = x2 - xR.
+ * Each branch therefore needs ONE additive field op after the x product where
+ * the promoted tail needed two (t = xR - x, then t -= yR), and the parity
+ * multiply no longer waits on the x-coordinate add: it consumes p directly, so
+ * the two 256-bit multiplies of each branch are back to back.  p is parked in
+ * the x output itself and becomes the final x after that multiply, so no new
+ * 256-bit temporary and no extra register pair is introduced.
+ * Parity: p is odd, so parity(-v) = 1 ^ parity(v) for every v != 0 -- the
+ * promoted tail already relies on exactly this at the y2 site.  For a real
+ * candidate v = 0 is impossible, not merely improbable: v = 0 is a recovered
+ * y-coordinate of 0, i.e. a point of order 2, and #E(secp256k1) is an odd
+ * prime, so x^3+7 has no root in F_p.  On a carry-truncated speculative
+ * operand the representative of v and of -v can differ by p only when the
+ * value is below 2^256 - p = 2^32 + 977 (<= 2^-223 per candidate), and that,
+ * like every other truncation on this path, can only drop a tentative hit:
+ * kernel_verify_pair_hits recomputes every published hit through
+ * qsb_k2s_front_exact/qsb_k2s_post, which are untouched. */
+#ifndef QSB_NEGFOLD_PARITY
+#define QSB_NEGFOLD_PARITY 1
+#endif
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -90,6 +139,20 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(m1, n, n + 8);
     QSB_FMUL(m2, n + 4, n + 8);
     QSB_FADD(sum, m1, m2);
+#if QSB_NEGFOLD_PARITY
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
+    QSB_FMUL(t, x1, m1);           /* p1*lambda1 */
+    QSB_FADD(t, t, yR);            /* -y1 */
+    uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
+    QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
+    QSB_FMUL(t, x2, m2);           /* p2*m2 */
+    QSB_FADD(t, t, yR);            /* y2 */
+    parities |= (uint32_t)((t[0] & 1ULL) << 1);
+    QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
+#else
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);
     QSB_FADD(x1, x1, xR);
@@ -104,6 +167,7 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(t, t, m2);
     QSB_FSUB(t, t, yR);
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+#endif
     return parities;
 }
 #endif
@@ -277,6 +341,30 @@ w[14] += s1(w[12]) + w[7] + s0(w[15]); w[15] += s1(w[13]) + w[8] + s0(w[0]); }
     QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
     QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
     QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) QSB_GP_R2(b,c,d,e,f,g,h,a,k,15) }
+/* QSB_GATE_WORD0 (kill switch; 0 restores all eight output words and the
+ * gpu_bench_valid_words calls below).
+ * The ranked gate is leading-zero bits on the big-endian digest, i.e.
+ * gpu_bench_valid_words, which for QSB_ZEROS_N <= 32 reads digest word 0 and
+ * nothing else (its whole-word loop runs QSB_ZEROS_N/32 = 0 times and the tail
+ * test is hs[0] >> (32 - QSB_ZEROS_N)).  Words 1..7 of BOTH digests are dead on
+ * every candidate, yet the promoted body stores them unconditionally: 14 uint32
+ * adds, 14 extra live registers across the store, and -- because the stores
+ * keep b..h live to the end -- no dead-code elimination of the final round's
+ * non-`a` state updates (the last QSB_GP_R2 pair's `d += t1`).  Word 0 is
+ * bit-identical to the promoted word 0: same 64 rounds, same schedule, same
+ * I[0] + a.  Nothing on the ranked path reads the other words; the byte-digest
+ * diagnostics live on the non-QSB_GATE_PAIR branch and are untouched, as is the
+ * exact re-check in kernel_verify_pair_hits (it reaches the gate through this
+ * same word-0 test, so a hit that the gate accepts is still re-derived from the
+ * exact chain before publication). */
+#ifndef QSB_GATE_WORD0
+#define QSB_GATE_WORD0 1
+#endif
+#if QSB_GATE_WORD0 && defined(QSB_ZEROS_N) && (QSB_ZEROS_N <= 32)
+#define QSB_GATE_W0_ACTIVE 1
+#else
+#define QSB_GATE_W0_ACTIVE 0
+#endif
 /* Two independent single-block SHA-256 compressions from the initial state, interleaved round by round. */
 __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
     uint32_t t1, t2;
@@ -286,8 +374,13 @@ __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uin
     QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
     QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
     QSB_GP_RND(48);
+#if QSB_GATE_W0_ACTIVE
+    o0[0]=I[0]+a0;
+    o1[0]=I[0]+a1;
+#else
     o0[0]=I[0]+a0;o0[1]=I[1]+b0;o0[2]=I[2]+c0;o0[3]=I[3]+d0;o0[4]=I[4]+e0;o0[5]=I[5]+f0;o0[6]=I[6]+g0;o0[7]=I[7]+h0;
     o1[0]=I[0]+a1;o1[1]=I[1]+b1;o1[2]=I[2]+c1;o1[3]=I[3]+d1;o1[4]=I[4]+e1;o1[5]=I[5]+f1;o1[6]=I[6]+g1;o1[7]=I[7]+h1;
+#endif
 }
 #undef QSB_GP_RND
 #undef QSB_GP_R2
@@ -295,6 +388,16 @@ __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uin
 #endif
 __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
 #if QSB_GATE_PAIR
+#if QSB_GATE_W0_ACTIVE
+    uint32_t pb0[16], pb1[16], hs0[1], hs1[1];
+    qsb_gate_block(pb0, q1x, y_parities);
+    qsb_gate_block(pb1, q2x, y_parities>>1);
+    qsb_sha256_init_transform_pair(hs0, pb0, hs1, pb1);
+    /* Identical predicate to gpu_bench_valid_words for QSB_ZEROS_N <= 32. */
+    if((hs0[0] >> (32 - QSB_ZEROS_N)) == 0u){*recid_out=0;return 1;}
+    if((hs1[0] >> (32 - QSB_ZEROS_N)) == 0u){*recid_out=1;return 1;}
+    return 0;
+#else
     uint32_t pb0[16], pb1[16], hs0[8], hs1[8];
     qsb_gate_block(pb0, q1x, y_parities);
     qsb_gate_block(pb1, q2x, y_parities>>1);
@@ -302,6 +405,7 @@ __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32
     if(gpu_bench_valid_words(hs0)){*recid_out=0;return 1;}
     if(gpu_bench_valid_words(hs1)){*recid_out=1;return 1;}
     return 0;
+#endif
 #else
     for(int ri=0;ri<2;ri++){
         uint64_t sx0=ri ? q2x[0] : q1x[0];
