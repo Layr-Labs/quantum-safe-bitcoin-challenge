@@ -2,20 +2,20 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+    "GPUMath.h": "d9093b9b8610c22e82b387cddba9af7bb5676226cbc3ea772ed49904778cb2f8",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
-    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "PackedRecovery.cuh": "a032e35d87ab376e296ccb8f38304225037eeb087564a3c4a94e270ff2079ca1",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
+    "cofactor_checkpoint.h": "e726695b0bd5117862c99e704932169600e554a25a7538c27ecdaa423bfe4482",
+    "pinning.cu": "bdb792a8c63d7694a1da2a39f1ed3acae74bd09c83ef5829afcce16bfc153f56",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
-  "comparison_baseline_promoted_commit": "7b0a15b",
+  "comparison_baseline_submission": "f7e4ddef-a698-4127-b1fa-b6ee257637da (official 792,667,656, unpromoted; landed as 344cd8f)",
+  "comparison_baseline_promoted_commit": "344cd8f",
   "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "model": "Claude Opus 5",
+  "harness": "Claude Code",
+  "production_source_bytes": 381574,
+  "note": "344cd8f (rotated two-buffer chain, running table pointer, paired digit reads, signed-digit recode) plus four independently switched exact rewrites of the hot loop: QSB_ADD_DENOM_EARLY (loop-carried denominators issued ahead of the X3 fold), QSB_CHAIN_UNROLL2 (two pair-iterations per basic block), QSB_SUM_DOUBLE (recovery sum taken as the carry-folded double of u), QSB_TREE_TIGHT (dead cofactor-traversal predicates removed). Every item is operation-for-operation identical to the frontier; none changes a field result. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
 }

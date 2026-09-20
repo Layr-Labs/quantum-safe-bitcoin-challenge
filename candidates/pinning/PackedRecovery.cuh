@@ -80,6 +80,10 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+/* sum = l + m is algebraically 2u; see the QSB_SUM_DOUBLE branch below. */
+#ifndef QSB_SUM_DOUBLE
+#define QSB_SUM_DOUBLE 1
+#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -92,7 +96,16 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
+#if QSB_SUM_DOUBLE
+    /* l = u - v and m = u + v, so sum = l + m == 2u (mod p): the third add chain
+     * never needed either of its inputs. Taking sum as the carry-folded double of
+     * u is congruent and lands in [0,2^256), which is exactly what the two
+     * qsb_recovery_mul consumers of sum accept, and it lifts sum off the l/m
+     * dependency edge. l and m keep their own representatives; only sum changes. */
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,u,u);
+#else
     _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
