@@ -23,7 +23,7 @@ __device__ __forceinline__ uint32_t qsb_difference_parity(
 // Exact full-width residue; callers normalize before additions/parity.
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
-    uint64_t tmp[5];qsb_field_mul_sc(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
+    uint64_t tmp[5];qsb_field_mul(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
     Load256(out,tmp);
 }
 
@@ -44,17 +44,13 @@ __device__ __forceinline__ void qsb_packed_prepare(
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
-#if QSB_STREAM2
-        qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
-        qsb_st_v2(&saved[1*s+i],vbar[2],vbar[3]);
-        qsb_st_v2(&saved[2*s+i],tbar[0],tbar[1]);
-        qsb_st_v2(&saved[3*s+i],tbar[2],tbar[3]);
-#else
-        saved[0*s+i]=make_ulonglong2(vbar[0],vbar[1]);
-        saved[1*s+i]=make_ulonglong2(vbar[2],vbar[3]);
-        saved[2*s+i]=make_ulonglong2(tbar[0],tbar[1]);
-        saved[3*s+i]=make_ulonglong2(tbar[2],tbar[3]);
-#endif
+        /* Production vbar/tbar planes are the ~2 GiB/batch pipeline state.
+         * QSB_STREAM's .cs helpers were live on the checkpoint and the dead
+         * TREE_OFFLOAD W-plane; these four planes still used cached stores. */
+        qsb_st_v2(&saved[0*s+i], vbar[0], vbar[1]);
+        qsb_st_v2(&saved[1*s+i], vbar[2], vbar[3]);
+        qsb_st_v2(&saved[2*s+i], tbar[0], tbar[1]);
+        qsb_st_v2(&saved[3*s+i], tbar[2], tbar[3]);
     }
 }
 
@@ -65,11 +61,17 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
+    _ModSubCanonicalRhs(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+    // Keep d=a-x=sum*(c-slope) directly for the parity products.
+    // u,v,l,m,sum,c and each multiplication result are canonical. The
+    // canonical-RHS subtraction helpers therefore retain their valid domain.
+    // Public identity: e4efcc74 (1eea69acec2e056d9cf7e59fc6b09067cc16bf56).
+    _ModSubCanonicalRhs(t,c,l); qsb_recovery_mul(x1,sum,t);
+    _ModSubCanonicalRhs(t,c,m); qsb_recovery_mul(x2,sum,t);
+    qsb_packed_raw_mul(s,l,x1); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
+    _ModSubCanonicalRhs(x1,a,x1);
+    qsb_packed_raw_mul(s,m,x2); qsb_parity_boundary(s,b);
+    _ModSubCanonicalRhs(x2,a,x2);
     return parity|(qsb_difference_parity(b,s)<<1);
 }

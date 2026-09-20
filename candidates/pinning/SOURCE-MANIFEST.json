@@ -1,20 +1,1027 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413",
-    "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
-    "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
-    "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  "status": "Locally qualified with a fresh GO; official upload must recheck all live sources.",
+  "runtime": {
+    "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d",
+    "files": {
+      "pinning.cu": "46edcdf39bec1d4deda05c9d3621bb2640ca25f0969347231f15be8aa8941c5e",
+      "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+      "GPUMath.h": "71666b9ae6e54acbffdcf8c28f0232914f3f95574fb822db2192a1c24cf28e47",
+      "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+      "PointZero.cuh": "c5a96e24e7930f5588d284e07e1be449ad5a0a5061470ced4133a40a9fc6496f",
+      "FinalAffineGuard.cuh": "d6b4f62778e965f1698e24b67b8676b64a13fc6cf266e7191040a8550299f0f3",
+      "LeafRecovery.cuh": "b30303a0910a97a5249ad27b437fb90246c8db76a8d52344775800e97bb02f13",
+      "cofactor_checkpoint.h": "7d0a6b4f0ad80215190eea5eba67611ff897f487354aaf5b1cf1d3f1dc66e884",
+      "PackedRecovery.cuh": "8e8c41cc20c9705e471bf691fac7f8b3910048e380c022809779954d05b5e74e"
+    }
   },
-  "comparison_baseline_submission": "547a64cf-71fb-45f2-babb-fe6c85cad2bf (promoted frontier 741,852,708)",
-  "comparison_baseline_promoted_commit": "57b4c69",
-  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 309453,
-  "note": "Baseline 547a64cf. Exact stray-carry cleanup in the square and multiply schedules (five provably-zero square carries removed; adjacent odd/even multiply row carries merged into one exact 64-bit addend), ZZ1*PP reordered after ZZZ1*PPP, and the per-candidate tree/recovery products use the promoted QSB_SHORT_CARRY multiply (QSB_FIELD_SC=0 restores carry-complete)."
+  "schedule_cpu_proof": {
+    "path": "research/paired-tree-ycore-latez-0355/cpu-schedule-proof.json",
+    "sha256": "53be9a488b059cd6e9b08e9b9c2573099e5846f33076c0e582bb30e12e3fa4e5"
+  },
+  "qualification_snapshot": {
+    "checked_at": "2026-09-20T10:27:09.627754+00:00",
+    "benchmark": {
+      "id": "b352879c-669f-44ef-98cd-ad3d34d0fefa",
+      "status": "open",
+      "sourceRef": "043b65024acd4c21da044e5993958079fc70b663",
+      "currentBestScore": 766671138,
+      "minScoreImprovementBips": 100
+    },
+    "peers": [
+      {
+        "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103",
+        "files": {
+          "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
+          "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413"
+        },
+        "label": "frontier",
+        "commit": "043b65024acd4c21da044e5993958079fc70b663",
+        "own": false
+      },
+      {
+        "digest": "5cd74a3cc555c4d438d9864e3a5657d6dc941a8535a1b45304cc83bb102d4841",
+        "files": {
+          "pinning.cu": "3c585f344d3753e8c3598cbc78993d145d18bd433865323ce6d079cd2c131b90",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "98f0577b29ada9ceeea5fcbcb7dbfae30d7cc40739904edd4aa353c20f068b8e",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "ExactSha.cuh": "b97954f8345cfdf1934b0fada7ae5c971f6b80bee5e03b6bd2416f86c923cb63",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "605c058f2194e44536ce8dcf6a202611b9e10a77bffa45449bdb8d3ede6835af",
+          "Top16Exact.cuh": "601cdabde9bc467a57b7998a8544b43cb8cc11bf7f80be83e9aadd78752eb788",
+          "PackedRecovery.cuh": "f0c301f3b826fa9b88f54984248dac2393fe4519a9470e1a7323819571a986bf"
+        },
+        "label": "2e0c663c-2550-42b9-9f41-694943786305",
+        "commit": "83e6d93dd7fbc993ad16b8af4a5c3213d89064af",
+        "own": false
+      },
+      {
+        "digest": "fd51aff80807ae7b4dd350a54c10ef6c4cfb82aa0ed1d4298c83fb77c64117ad",
+        "files": {
+          "pinning.cu": "96079e254160bc29e859374e4704766ad5a53363b7db21e75b9d813f78f234b5",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "054badebc2c22128dbdd1df2b0ad914255d95042af71e8cc4241bef84f02540e",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "64895b2b580bb29031eb2fa474ab69a7505433e9455b3252f405abe14ebd2aac",
+          "PackedRecovery.cuh": "ae599d1d56e44eaf0baafa20cb2a86b2ba11235f9b08fafdf704aa96a650063b"
+        },
+        "label": "358b5b93-c793-4524-8c50-d039841e8450",
+        "commit": "82deb49d59c7c1993b15aa39684ba448d8ae41e2",
+        "own": false
+      },
+      {
+        "digest": "6916b0c1e8dd24726d1c4e6a9f5935bad99d05ebf0564da424b23ea9b3971a9a",
+        "files": {
+          "pinning.cu": "5afa47d588616ad1fee238f6f1456ed293498a92b3e75bcf7547917ed3e0cd9e",
+          "RecoveryConstant.h": "3af62499aa292f6ba30066327ca3e0c1f984301def265d21f27a7a0134e77cf9",
+          "GPUMath.h": "a0ff5edf0ff0c477eb6310b791f6ad79973cbf677c3dacf4abc81069a394f56c",
+          "sha_schedule_interleaved.cuh": "45182529cf459d47953adbe2ea3a447dc00310d85363b1083ed47484b778fa40",
+          "GPUHash.h": "f8107cfd6909733aefc497eb0437048aa8025404c04101a46d25c3c8238b7f49",
+          "LeafRecovery.cuh": "5ffba857c43380c37c57adb19cd36ed6a86201f7c31a54924aaeee3b5083b885",
+          "cofactor_checkpoint.h": "54afe991c52e7d75cf8f025ed5844a0304644fbd4a81655a02257e77430692d7",
+          "PackedRecovery.cuh": "209135820308f7f10123e32354db65722a596390fcad91f524836e35e3799fb9"
+        },
+        "label": "316b6c6e-5243-4fcb-ae1e-7218f3584968",
+        "commit": "f6aa09c4eb314a80300f3652f160e2b3163a92cb",
+        "own": false
+      },
+      {
+        "digest": "3c4d50d200340b5b3ce08d1480a9f8c283bff851cf5f9e82a2d74199e5dfb93a",
+        "files": {
+          "pinning.cu": "7b5b032e714228d4c6fc1d6634be32fcaeb8e353150e9b340af49260cf91def8",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "5a907dabccf193e8846be697e8d01fe21f6759078d850d6a69386de7635924b8",
+          "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413"
+        },
+        "label": "5d094a84-6a6f-4967-b29d-4c3ab8bb7f2a",
+        "commit": "6a46da593f3ecb6721efe98089a99ec1abc99064",
+        "own": false
+      },
+      {
+        "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef",
+        "files": {
+          "pinning.cu": "43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+          "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+          "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+          "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f"
+        },
+        "label": "52cd275a-d385-401b-815b-49a6ab4fc0af",
+        "commit": "7b0a15bedac7dd533eaf1359e6d102ba8bb4275f",
+        "own": false
+      }
+    ],
+    "unavailable_sources": [],
+    "own_pending": [],
+    "previously_sent_digests": [
+      "e265d339cce6e4fd40a70ef5da3f00070a834b621583a55e08d5773482e356fa",
+      "630dceda7e56ab857449aed66f811cf3dee9bfeadeebac8125222c09683c6c58",
+      "a9fe0901c435f1964a4c91d34fbf446598e4adc189bb545fb05e0f9c7a34cfcd",
+      "bf3c902095fa20c6658522e9906058c8f1241cc76f3df4f9d5529e1ebe4c54f5",
+      "e4568aca296d96412d7346ce60399dd9f8180d027dd8d20d195a612d65d09276",
+      "9a5bf73974c19955f8a75ca5ce88fdeaf2d25f1991d3c52f64b80546ad9bad9e",
+      "9bb3bc72456089a36a9d6bfd2b374357c08ec5a9d3322e8d3193c6960f7f8668",
+      "4abfbd769d47d2848b4e0af120568912fdeab4c5c39b598f3c3839db9975a266",
+      "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+    ]
+  },
+  "evidence_registry": "research/competitive-evidence-latez-submission-20260920-1028.json",
+  "registry_sha256": "f4bb12c464a4ac39b85f4f4bdf75a48ca677e174c7b67d7543050ffdf93049db",
+  "native_evidence": [
+    {
+      "path": "research/native-table-guard-paired-tree-ycore-latez-0409/native-summary.json",
+      "sha256": "f9764d48532d7a519c2032fe2af59910fb1970de3ff1971a305ccdac48ce487b"
+    },
+    {
+      "path": "research/native-table-guard-paired-tree-ycore-latez-0409/extra-field-native-summary.json",
+      "sha256": "bbaad481fae50804d1c8cb807a2233a3eec9e6bed9629881f847c05630bafdbd"
+    }
+  ],
+  "full_qualification": {
+    "source_directory": "research/full-only-treeboth-20260920-072206/gpu-evidence/candidate/candidates/pinning",
+    "result": {
+      "path": "research/full-only-treeboth-20260920-072206/gpu-evidence/logs/full-qualification.json",
+      "sha256": "b17447576e5d0dbb04de0edd92b6d4bc9ac80bae70d99fa46d9e9703303d1c5b"
+    },
+    "proof": {
+      "path": "research/full-only-treeboth-20260920-072206/gpu-evidence/logs/full-candidate/openssl-verification.json",
+      "sha256": "0797c4852c02ebbbc3562ad6a771fd2498b600de9cd27d99dc5cd3604101d090"
+    },
+    "correctness_gates": [
+      {
+        "path": "research/native-table-guard-paired-tree-ycore-latez-0409/native-summary.json",
+        "sha256": "f9764d48532d7a519c2032fe2af59910fb1970de3ff1971a305ccdac48ce487b"
+      },
+      {
+        "path": "research/native-table-guard-paired-tree-ycore-latez-0409/extra-field-native-summary.json",
+        "sha256": "bbaad481fae50804d1c8cb807a2233a3eec9e6bed9629881f847c05630bafdbd"
+      }
+    ],
+    "artifact": {
+      "path": "research/full-only-treeboth-20260920-072206/gpu-evidence/logs/full-candidate/run.json",
+      "sha256": "4368dd5e57c0fec34cefacf939c040129e302201c734d22c4b834c1c4aa33d2a"
+    },
+    "problem": {
+      "path": "research/full-only-treeboth-20260920-072206/gpu-evidence/logs/full-problem/pinning.json",
+      "sha256": "3b2d7b7e2cd7bdbe447cd57868effd278fad0b7247e466d2322b1f7add47d239"
+    },
+    "manifest": {
+      "path": "research/full-only-treeboth-20260920-072206/gpu-evidence/manifest.json",
+      "sha256": "6cfc2af16cea58fe09bbd49b612aea715e4c830ea55101d11c10a68f89ec88b7"
+    }
+  },
+  "independent_full_review": {
+    "path": "research/full-only-treeboth-20260920-072206/independent-full-review.json",
+    "sha256": "820037c81a70ae1865b0406c91795fd0f1bb4f51c116609cae3425e37f69fd88"
+  },
+  "cohorts": [
+    {
+      "experiment": "queue-screen-mergedtop2-next-research-0406",
+      "long": false,
+      "candidate_variant": "latez",
+      "rates": {
+        "adaptive": [
+          771265477.4407293,
+          771279928.0222683
+        ],
+        "addtail": [
+          771943689.6068186,
+          771096874.7331682
+        ],
+        "cold": [
+          771398707.3273146,
+          771303351.070533
+        ],
+        "control": [
+          768313620.429452,
+          771085719.7558542
+        ],
+        "frontier": [
+          740081022.471965,
+          746206701.7220488
+        ],
+        "latez": [
+          772245891.1927058,
+          772967516.6785582
+        ],
+        "latezzz": [
+          769295882.1597958,
+          766616891.4810584
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-mergedtop2-next-research-0406/gpu-evidence/logs/summary.json",
+        "sha256": "7c388e564029be6e46712d7b1dc3f559062cd8de3bb0623718c31f1f14c09d0c"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-mergedtop2-next-research-0406/independent-hit-equivalence.json",
+        "sha256": "57021a456cb9a51eaafd6dbe83e7e6f53edbd2e2a2ef0c65f6a46ce9e68919fe"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/control",
+          "digest": "5efcdd046a2360ec0ab3994bd4e6abd796bfe550be08f728f0d0deaa04ed15d9"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "adaptive": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/adaptive",
+          "digest": "b64e9df6300dac15991bb2b52cb4414ff20faddd684592b84d472c6de0e43caa"
+        },
+        "addtail": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/addtail",
+          "digest": "85e581246415a3384d416468851dab9ae6d668f90b16be170d862d895754c097"
+        },
+        "cold": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/cold",
+          "digest": "7541125dc3f701fb9f059eef5c3af083f66a1cb46c4e6fb7279ebcdc4a98f7fa"
+        },
+        "latez": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/latez",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "latezzz": {
+          "directory": "research/queue-screen-mergedtop2-next-research-0406/latezzz",
+          "digest": "05627ce3aca9aea381f3d20e516d35921fcb3e83700b53b67c9db54c19c22c1d"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-mergedtop2-research-finalists-0537",
+      "long": true,
+      "candidate_variant": "latez",
+      "rates": {
+        "adaptive": [
+          766843172.3002106,
+          766801548.8386177
+        ],
+        "addtail": [
+          767439575.9264231,
+          767718910.146384
+        ],
+        "control": [
+          766526855.711902,
+          766338442.9486173
+        ],
+        "frontier": [
+          745288550.7515106,
+          741055667.3174758
+        ],
+        "latez": [
+          767905974.5351682,
+          768697112.1712422
+        ],
+        "native": [
+          765359298.1388178,
+          767196502.060435
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10297,
+      "summary": {
+        "path": "research/long-queue-mergedtop2-research-finalists-0537/gpu-evidence/logs/summary.json",
+        "sha256": "691ad54eaea3a588b3bc40e4cec8aaa70e68a244f4b1035ea8e5cdf7af6bca1d"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-mergedtop2-research-finalists-0537/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "3e71c77793a5b3199894818ac2220dcb3c5d84d14aabeaab33b6893abfbaa664"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-mergedtop2-research-finalists-0537/control",
+          "digest": "5efcdd046a2360ec0ab3994bd4e6abd796bfe550be08f728f0d0deaa04ed15d9"
+        },
+        "frontier": {
+          "directory": "research/long-queue-mergedtop2-research-finalists-0537/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "adaptive": {
+          "directory": "research/long-queue-mergedtop2-research-finalists-0537/adaptive",
+          "digest": "b64e9df6300dac15991bb2b52cb4414ff20faddd684592b84d472c6de0e43caa"
+        },
+        "native": {
+          "directory": "research/long-queue-mergedtop2-research-finalists-0537/native",
+          "digest": "170c3170c21fcbb68a9a754f713069701914772ad3c40454f23c8bf803ade6b5"
+        },
+        "latez": {
+          "directory": "research/long-queue-mergedtop2-research-finalists-0537/latez",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "addtail": {
+          "directory": "research/long-queue-mergedtop2-research-finalists-0537/addtail",
+          "digest": "85e581246415a3384d416468851dab9ae6d668f90b16be170d862d895754c097"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-latez-public-close-0643",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "736a5884": [
+          757813654.2997881,
+          754597901.4379839
+        ],
+        "753cf574": [
+          749125773.3899571,
+          744802473.6063066
+        ],
+        "a296916a": [
+          769239071.8143741,
+          766275437.5570353
+        ],
+        "c7a8eaa8": [
+          747207089.6435119,
+          744192496.5563073
+        ],
+        "control": [
+          771991244.6045202,
+          770979085.2679616
+        ],
+        "frontier": [
+          739264881.238864,
+          744942663.6527689
+        ],
+        "qualified": [
+          771177457.8907982,
+          771344032.7264007
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-latez-public-close-0643/gpu-evidence/logs/summary.json",
+        "sha256": "7425326d8e4e93276a9b4186afcf24f2bb32fc180c6e1047eda933b6b3d4fd30"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-latez-public-close-0643/independent-hit-equivalence.json",
+        "sha256": "57021a456cb9a51eaafd6dbe83e7e6f53edbd2e2a2ef0c65f6a46ce9e68919fe"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-latez-public-close-0643/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-latez-public-close-0643/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "a296916a": {
+          "directory": "research/queue-screen-latez-public-close-0643/a296916a",
+          "digest": "3a18ed3fd00a957f1f840e20a9a465e0af83c496a3620c03a61b50e5430f59ca"
+        },
+        "c7a8eaa8": {
+          "directory": "research/queue-screen-latez-public-close-0643/c7a8eaa8",
+          "digest": "02e90625d023763b857ed0bf024fd88c11491606be44c4d7fa80eb5f9b01cb7a"
+        },
+        "753cf574": {
+          "directory": "research/queue-screen-latez-public-close-0643/753cf574",
+          "digest": "1f376fcfa53c56c5939ef6e7a2d6af1d3940e9ae80b7914cd73d86a818de784c"
+        },
+        "736a5884": {
+          "directory": "research/queue-screen-latez-public-close-0643/736a5884",
+          "digest": "8ace01dd58e206d39373469a7ccc8a239b252f3464facb9286faa542f7fb110d"
+        },
+        "qualified": {
+          "directory": "research/queue-screen-latez-public-close-0643/qualified",
+          "digest": "5efcdd046a2360ec0ab3994bd4e6abd796bfe550be08f728f0d0deaa04ed15d9"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-latez-public-close-0643",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "a296916a": [
+          760628380.5348134,
+          763183677.2696985
+        ],
+        "control": [
+          767939878.2413905,
+          768470626.7184826
+        ],
+        "frontier": [
+          741024523.8798072,
+          737707113.5200351
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10422,
+      "summary": {
+        "path": "research/long-queue-latez-public-close-0643/gpu-evidence/logs/summary.json",
+        "sha256": "c059b00ac63d5bb222829297ead976e89c0549753d703ae03ace2a15ad44e80a"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-latez-public-close-0643/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "0d56a88ad4d0524dd3c5b8a4572a2c353dc0418a506d4bb0927bf9d5481406d1"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-latez-public-close-0643/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/long-queue-latez-public-close-0643/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "a296916a": {
+          "directory": "research/long-queue-latez-public-close-0643/a296916a",
+          "digest": "3a18ed3fd00a957f1f840e20a9a465e0af83c496a3620c03a61b50e5430f59ca"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-latez-compact-current-0815",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "1660605f": [
+          750045771.5266348,
+          756205828.176808
+        ],
+        "4ae03b7a": [
+          750465510.9269571,
+          750104592.1591171
+        ],
+        "control": [
+          769440205.0737307,
+          769868604.2131151
+        ],
+        "f1d902a6": [
+          761083882.5927377,
+          754871702.3775624
+        ],
+        "frontier": [
+          751347798.4053868,
+          752207668.313324
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-latez-compact-current-0815/gpu-evidence/logs/summary.json",
+        "sha256": "7f8755f9716f387a0f90350023e7500bc01c9baa041c18c4e3970565741539ca"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-latez-compact-current-0815/independent-hit-equivalence.json",
+        "sha256": "3459aef4ca7865cce15eceac26142b940fcb93a186ee98ad0ba0b0060215a51f"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-latez-compact-current-0815/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-latez-compact-current-0815/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "4ae03b7a": {
+          "directory": "research/queue-screen-latez-compact-current-0815/4ae03b7a",
+          "digest": "e5e1510e2575e92dfd900bfb2d07ac46cce01f3ac34c253e0e76bde120b514f8"
+        },
+        "f1d902a6": {
+          "directory": "research/queue-screen-latez-compact-current-0815/f1d902a6",
+          "digest": "38191c87114cfc8515dcb8e0d6538a06e43cf1e3e2f0cc1d7da8bfcdcceb1465"
+        },
+        "1660605f": {
+          "directory": "research/queue-screen-latez-compact-current-0815/1660605f",
+          "digest": "af018fb8a34b1a2adc5f057df63f42f90c059cf52076a2b93e840ec3bb261820"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-latez-compact-current-0815",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "1660605f": [
+          753306692.2090662,
+          748647651.9283674
+        ],
+        "4ae03b7a": [
+          750659220.4337658,
+          741125153.9066256
+        ],
+        "control": [
+          770077197.5118743,
+          768344654.9822481
+        ],
+        "f1d902a6": [
+          753526529.6704471,
+          747272518.7999275
+        ],
+        "frontier": [
+          747730047.1112484,
+          742488976.9233243
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10326,
+      "summary": {
+        "path": "research/long-queue-latez-compact-current-0815/gpu-evidence/logs/summary.json",
+        "sha256": "1299dbc8dd5581245eb5433efbf5c16774c13cb3d0166aba5638bcbf0dd508d9"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-latez-compact-current-0815/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "50a096b9732b48f5f1b5ec211ef4c31813bc728b157e4b5f67cb7f2920633bbc"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-latez-compact-current-0815/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/long-queue-latez-compact-current-0815/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "4ae03b7a": {
+          "directory": "research/long-queue-latez-compact-current-0815/4ae03b7a",
+          "digest": "e5e1510e2575e92dfd900bfb2d07ac46cce01f3ac34c253e0e76bde120b514f8"
+        },
+        "f1d902a6": {
+          "directory": "research/long-queue-latez-compact-current-0815/f1d902a6",
+          "digest": "38191c87114cfc8515dcb8e0d6538a06e43cf1e3e2f0cc1d7da8bfcdcceb1465"
+        },
+        "1660605f": {
+          "directory": "research/long-queue-latez-compact-current-0815/1660605f",
+          "digest": "af018fb8a34b1a2adc5f057df63f42f90c059cf52076a2b93e840ec3bb261820"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-latez-dda-8d5-0833",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "8d5c1b77": [
+          758317606.7996553,
+          762858659.5008377
+        ],
+        "control": [
+          770905342.2479893,
+          771897570.6672018
+        ],
+        "dda70024": [
+          753285562.4718957,
+          760894826.3525455
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-latez-dda-8d5-0833/gpu-evidence/logs/summary.json",
+        "sha256": "76f667cac62188e641ce7307a615b8afbc79af87d9030e673b1d92cc5ffa910d"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-latez-dda-8d5-0833/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-latez-dda-8d5-0833/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "dda70024": {
+          "directory": "research/queue-screen-paired-late-latez-dda-8d5-0833/dda70024",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "8d5c1b77": {
+          "directory": "research/queue-screen-paired-late-latez-dda-8d5-0833/8d5c1b77",
+          "digest": "8ace01dd58e206d39373469a7ccc8a239b252f3464facb9286faa542f7fb110d"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-latez-dda-8d5-0833",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "8d5c1b77": [
+          750385237.1302885,
+          752635927.9395237
+        ],
+        "control": [
+          768000387.4503334,
+          768245174.1822957
+        ],
+        "dda70024": [
+          754203243.6297468,
+          753041344.5960243
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10574,
+      "summary": {
+        "path": "research/long-queue-paired-late-latez-dda-8d5-0833/gpu-evidence/logs/summary.json",
+        "sha256": "096ef7f5bd0b4e962ae3a34f0cc4402306a40d96f4d137f8d779b7c9f9581379"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-latez-dda-8d5-0833/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "a24763eddb06ac5c92d565e504935b300d07bcda72f9f79223ec7fbe3645f798"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-latez-dda-8d5-0833/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "dda70024": {
+          "directory": "research/long-queue-paired-late-latez-dda-8d5-0833/dda70024",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "8d5c1b77": {
+          "directory": "research/long-queue-paired-late-latez-dda-8d5-0833/8d5c1b77",
+          "digest": "8ace01dd58e206d39373469a7ccc8a239b252f3464facb9286faa542f7fb110d"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-latez-7f85-0901",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "7f85dc65": [
+          766342434.3621455,
+          757322159.8097328
+        ],
+        "control": [
+          770204132.6854163,
+          772147278.8073976
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-latez-7f85-0901/gpu-evidence/logs/summary.json",
+        "sha256": "8dd6dc87f4dc1420b4e46d7cc09d29b30f8dda77ee87eb5573ba4af01b729f27"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-latez-7f85-0901/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-latez-7f85-0901/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "7f85dc65": {
+          "directory": "research/queue-screen-paired-late-latez-7f85-0901/7f85dc65",
+          "digest": "4ac3207107cf7dc05eb8a7e8744217506c497c5630b3464c1d3efafbcf06ffa6"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-latez-7f85-0901",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "7f85dc65": [
+          756415919.4872266,
+          755628658.7240192
+        ],
+        "control": [
+          768429079.742035,
+          769916258.2106076
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10425,
+      "summary": {
+        "path": "research/long-queue-paired-late-latez-7f85-0901/gpu-evidence/logs/summary.json",
+        "sha256": "04f02d08f63916911200a088ba320ec6be40388795d3d2db799a0f50ad70cd64"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-latez-7f85-0901/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "c0a3dcdc9ebeccee876aa62d4b8e8cbd7f958e3098e9850ec2abf4b5572af52a"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-latez-7f85-0901/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "7f85dc65": {
+          "directory": "research/long-queue-paired-late-latez-7f85-0901/7f85dc65",
+          "digest": "4ac3207107cf7dc05eb8a7e8744217506c497c5630b3464c1d3efafbcf06ffa6"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-latez-remaining-0921",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "224f1d38": [
+          751426453.0281807,
+          749848484.2602894
+        ],
+        "2e0c663c": [
+          760960181.0299203,
+          754592605.9015384
+        ],
+        "control": [
+          775007919.8379084,
+          773247253.0460064
+        ],
+        "f4dc95e6": [
+          732978643.3325706,
+          725593343.3715717
+        ],
+        "frontier": [
+          747850115.9488623,
+          747034113.6721827
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-latez-remaining-0921/gpu-evidence/logs/summary.json",
+        "sha256": "500bc3cb582c6512a6d2cfd6211f592bcbabe6eee02c462b263285e6f8a60f4a"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-latez-remaining-0921/independent-hit-equivalence.json",
+        "sha256": "3459aef4ca7865cce15eceac26142b940fcb93a186ee98ad0ba0b0060215a51f"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-latez-remaining-0921/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-latez-remaining-0921/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "224f1d38": {
+          "directory": "research/queue-screen-latez-remaining-0921/224f1d38",
+          "digest": "469fbd3924123223c0db2bde7069600b0859fe18bdc419297940911f3f8702ad"
+        },
+        "f4dc95e6": {
+          "directory": "research/queue-screen-latez-remaining-0921/f4dc95e6",
+          "digest": "1fb0dc313441339275a2f05808649aecf97b27f33bacba84ca69b2ba78f03126"
+        },
+        "2e0c663c": {
+          "directory": "research/queue-screen-latez-remaining-0921/2e0c663c",
+          "digest": "5cd74a3cc555c4d438d9864e3a5657d6dc941a8535a1b45304cc83bb102d4841"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-latez-remaining-0921",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "2e0c663c": [
+          749006308.260105,
+          749139586.0016297
+        ],
+        "control": [
+          769641140.712384,
+          768842326.6745754
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10517,
+      "summary": {
+        "path": "research/long-queue-latez-remaining-0921/gpu-evidence/logs/summary.json",
+        "sha256": "b254e1422cfdb2bbc47ad2dd3ee257608d4043bbb36dcdd5a7f61e7a11b80247"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-latez-remaining-0921/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "86cd7f73d8de58e65612176b951972424b62d19d0eeefb3d3a9ab64f4cc609e7"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-latez-remaining-0921/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "2e0c663c": {
+          "directory": "research/long-queue-latez-remaining-0921/2e0c663c",
+          "digest": "5cd74a3cc555c4d438d9864e3a5657d6dc941a8535a1b45304cc83bb102d4841"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-latez-358-387-0937",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "358b5b93": [
+          751035138.9512643,
+          759663607.9474657
+        ],
+        "38720e9a": [
+          764006536.2097381,
+          760027653.8254114
+        ],
+        "control": [
+          774608336.3688043,
+          771989887.5601877
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-latez-358-387-0937/gpu-evidence/logs/summary.json",
+        "sha256": "d697026a7df1904b5dc7da885fa3da648b94549b4bededa364c88e8136e93975"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-latez-358-387-0937/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-latez-358-387-0937/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "358b5b93": {
+          "directory": "research/queue-screen-paired-late-latez-358-387-0937/358b5b93",
+          "digest": "fd51aff80807ae7b4dd350a54c10ef6c4cfb82aa0ed1d4298c83fb77c64117ad"
+        },
+        "38720e9a": {
+          "directory": "research/queue-screen-paired-late-latez-358-387-0937/38720e9a",
+          "digest": "35bcf6f14c2a8d16305e3c2ec7ea1f5c9e353585325c7ee44f89ed46cd1152fb"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-latez-358-387-0937",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "358b5b93": [
+          748046107.7587417,
+          753496301.4211265
+        ],
+        "38720e9a": [
+          759192777.9285678,
+          752404865.9216999
+        ],
+        "control": [
+          769775393.4254515,
+          768473141.4233088
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10242,
+      "summary": {
+        "path": "research/long-queue-paired-late-latez-358-387-0937/gpu-evidence/logs/summary.json",
+        "sha256": "ec9e1357822bc04f9faff32617d9591e04007fcaa4ff618d3fcb5c63ccbb0429"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-latez-358-387-0937/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "ce10aa5faa6fb466d13604ba35368837a2100bb9d24769059901fa3a56d212b6"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-latez-358-387-0937/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "358b5b93": {
+          "directory": "research/long-queue-paired-late-latez-358-387-0937/358b5b93",
+          "digest": "fd51aff80807ae7b4dd350a54c10ef6c4cfb82aa0ed1d4298c83fb77c64117ad"
+        },
+        "38720e9a": {
+          "directory": "research/long-queue-paired-late-latez-358-387-0937/38720e9a",
+          "digest": "35bcf6f14c2a8d16305e3c2ec7ea1f5c9e353585325c7ee44f89ed46cd1152fb"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-latez-316-5d-0955",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "316b6c6e": [
+          736616807.6262276,
+          727795188.9127398
+        ],
+        "5d094a84": [
+          749125342.3303548,
+          749736869.3384862
+        ],
+        "control": [
+          774238056.891352,
+          772582411.7545273
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-latez-316-5d-0955/gpu-evidence/logs/summary.json",
+        "sha256": "4aca09550d833995b3de22f99a0503469de4ea66bc9fd8c75bd20a38f1895ca0"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-latez-316-5d-0955/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-latez-316-5d-0955/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "316b6c6e": {
+          "directory": "research/queue-screen-paired-late-latez-316-5d-0955/316b6c6e",
+          "digest": "6916b0c1e8dd24726d1c4e6a9f5935bad99d05ebf0564da424b23ea9b3971a9a"
+        },
+        "5d094a84": {
+          "directory": "research/queue-screen-paired-late-latez-316-5d-0955/5d094a84",
+          "digest": "3c4d50d200340b5b3ce08d1480a9f8c283bff851cf5f9e82a2d74199e5dfb93a"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-latez-316-5d-0955",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "316b6c6e": [
+          724384290.195104,
+          730964207.0533732
+        ],
+        "5d094a84": [
+          744115383.8115841,
+          745176527.3837751
+        ],
+        "control": [
+          768428540.8936316,
+          769420035.7425301
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10251,
+      "summary": {
+        "path": "research/long-queue-paired-late-latez-316-5d-0955/gpu-evidence/logs/summary.json",
+        "sha256": "a9558351978b907d735724c085318bd8e3f6f88c9151eb99b4860d55d1c84219"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-latez-316-5d-0955/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "960e2e02ba2919bca1a7729b662357dfc5db1572979d468e255eeb6a84f186d3"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-latez-316-5d-0955/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "316b6c6e": {
+          "directory": "research/long-queue-paired-late-latez-316-5d-0955/316b6c6e",
+          "digest": "6916b0c1e8dd24726d1c4e6a9f5935bad99d05ebf0564da424b23ea9b3971a9a"
+        },
+        "5d094a84": {
+          "directory": "research/long-queue-paired-late-latez-316-5d-0955/5d094a84",
+          "digest": "3c4d50d200340b5b3ce08d1480a9f8c283bff851cf5f9e82a2d74199e5dfb93a"
+        }
+      }
+    }
+  ],
+  "cohort_count": 16,
+  "comparison_count": 46,
+  "auxiliary_files": {
+    "CANONICAL-CONTRACTS.md": "615c61f6d63960ee754079680907419802c9757078ed38200f7ee18ba40580a3",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "FINAL-WINDOW-PROOF.md": "056e0b0b266e753e053fb7edeff3a03e45068f43f07c8328b8c97c58ff1d219b",
+    "MERGED-LOW-FOLD-TREE.md": "f1980be9beefae1d31f0739a7837057a6476710ddbfad8572fc96cca3c3a566c",
+    "PAIRED-CARRY-PROOF.md": "53a005513f99b97ecf8dcd02ecba5ec1bcb0e65cf3b564f97c3d2ea8bb6e99de",
+    "REPRODUCTION.md": "ba0b7f08aa2faf268ce783ac2948a4ea678aa3baf6e3ceb2b8e7d4e283eed491",
+    "RESEARCH.md": "a7d4be0b3081af6e642fb9dd29b219fc3ff03971c1f9e415bad733342fb75759",
+    "SMALL-FIELD-PROOF.md": "f2115052b2e9e2bf982c056013efd7a1bc91671a7f879a6368db21bc469ae9d4",
+    "TREE-FOLD-PROOF.md": "e13bab5f7d249d84d9f4fc30f69667a57cc19ae1a376a4a0eb97b289757f4f77",
+    "TREE-SQUARE-OCCUPANCY.md": "5181d2e4e10cf384d9f57ad084b2c922ca2215adee39dfe48e758b220b4cf136",
+    "UPPER-FOLD-RECOVERY.md": "900b4237443153aa62ef80b309159bd9c90c898cbc44fee48eb71a02fd8664b0",
+    "YCORE-SCHEDULE.md": "76df1eb9a761ed68bb439bd4788f70147885a69fe5f16262a8d07c4819e1e866",
+    "audit_conditional_small_tail.py": "362a4a4f46aa5ea8ec47c28ecb98248be1f01785049aa11cc1061ef3173ee8b3",
+    "audit_final_fold.cu": "e1dbafeea826001accf5b88ac5fe8632acb1fd589997dabeaf55eeb5878f2c3e",
+    "audit_final_fold.py": "ded36076d805de37e2a8241b97bce6d362bb06645742ebf3be2dfbd524e525a3",
+    "audit_paired_native.py": "52abf735d53db2d636c6d1af3bf03c24e0321b62372243fc26161454a423a586",
+    "audit_paired_upper_fold.py": "04235fd2de3430563d66ade0a00c48051e5a604d942783b519829e3d14668f07",
+    "audit_ptx_model.py": "a246a34035aa4eccf71e43088f19559fefcd2bad429798afb7a2655586a8980b",
+    "audit_signed_points.cu": "a7e6265e95f4e58b5717323cd9d1b05a3f2d0e8d58c3712dddfcfff10892dadf",
+    "audit_signed_points.py": "16bc7c4d691bf1bc3b2d3621d3c0a5b29e2d4b2e3d467d0769cf9b87669a1814",
+    "audit_small_fields.py": "a61c580a3b746dbbd447ea3b893c8895bad1fe09871edcebbae1016f887bde7d",
+    "audit_small_ptx.py": "071ad819441aea58e9b61bb6a4ae172dad2afbd485b9775092cde18d3c4aa80a",
+    "canonical_helper_audit.cu": "c9088098fd07a3aa6667d787895024a572b28269b0447eac52ab8cd670ed226d",
+    "field_core_audit.cu": "f532559f391a8468ec361a2771022c7a5e1394451f62e67c177204e023e371ba",
+    "small_field_audit.cu": "96f5ddb71f6ded840f8314b0de689a3905b7f4136bfa0b11187020e369eb6526",
+    "sum_audit.cu": "28b93e96019b975288bba43dddc3ac080ecae5e9863628d5963097c548b3afe6",
+    "verify_small_field_native.py": "dc8908bf846f5f0145961c942c5cf7080e9c120a83613db1eaed99bc0725ecc4"
+  }
 }

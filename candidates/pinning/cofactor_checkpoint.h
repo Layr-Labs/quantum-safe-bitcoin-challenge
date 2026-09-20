@@ -15,20 +15,38 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     __syncthreads();
     int offset=0;
     #pragma unroll 1
-    for(int count=N;count>1;count>>=1) {
+    for(int count=N;count>(N>=16?2:1);count>>=1) {
         int half=count>>1;
         if(tid<half) {
             uint64_t a[5],b[5],out[5];
             #pragma unroll
             for(int k=0;k<4;k++){a[k]=products[k][offset+tid];b[k]=products[k][offset+half+tid];}
-            a[4]=b[4]=0;qsb_field_mul_sc(out,a,b);
+            a[4]=b[4]=0;qsb_field_mul(out,a,b);
             #pragma unroll
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
     }
-    if(tid==0) {
+    // Root and four exclusions use exactly the original ordered operands.
+    // Lanes 0..4 share a warp; the barrier publishes all four exclusions.
+    if(N>=16) {
+        if(tid<5) {
+            uint64_t a[5],b[5],out[5];
+            const int ia=tid<4 ? 2*N-4+((tid&1)^1) : 2*N-4;
+            const int ib=tid<4 ? 2*N-8+(tid^2) : 2*N-3;
+            #pragma unroll
+            for(int k=0;k<4;k++){a[k]=products[k][ia];b[k]=products[k][ib];}
+            a[4]=b[4]=0;qsb_field_mul(out,a,b);
+            if(tid<4) {
+                #pragma unroll
+                for(int k=0;k<4;k++)excluded[k][N-8+tid]=out[k];
+            } else {
+                #pragma unroll
+                for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=out[k];
+            }
+        }
+    } else if(tid==0) {
         #pragma unroll
         for(int k=0;k<4;k++) {
             roots[(size_t)blockIdx.x*4+k]=products[k][2*N-2];
@@ -36,9 +54,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         }
     }
     __syncwarp();
-    offset=2*N-4;
+    offset=N>=16?2*N-16:2*N-4;
     #pragma unroll 1
-    for(int count=2;count<N;count<<=1) {
+    for(int count=N>=16?8:2;count<N;count<<=1) {
         int half=count>>1;
         if(tid<count) {
             uint64_t parent[5],sibling[5],out[5];
@@ -48,7 +66,7 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
-            if(count==2){Load256(out,sibling);}else{qsb_field_mul_sc(out,parent,sibling);}
+            if(count==2){Load256(out,sibling);}else{qsb_field_mul(out,parent,sibling);}
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }
@@ -62,6 +80,6 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         sibling[k]=products[k][tid^(N/2)];
     }
     parent[4]=sibling[4]=0;
-    if(N==2){Load256(value,sibling);}else{qsb_field_mul_sc(value,parent,sibling);}
+    if(N==2){Load256(value,sibling);}else{qsb_field_mul(value,parent,sibling);}
     value[4]=0;
 }
