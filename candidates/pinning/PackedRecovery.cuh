@@ -62,9 +62,18 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#ifndef QSB_MASK_HC
+#define QSB_MASK_HC 1
+#endif
+#if QSB_MASK_HC
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -109,13 +118,23 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
 #endif
 #if QSB_PARITY_SUM
+#ifndef QSB_LAZY_PARITY_X
+#define QSB_LAZY_PARITY_X 1
+#endif
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_LAZY_PARITY_X
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t); qsb_packed_raw_mul(u,l,s);
+    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t); qsb_packed_raw_mul(v,m,s);
+    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
     qsb_packed_raw_mul(u,l,s);
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
     qsb_packed_raw_mul(v,m,s);
+#endif
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
 }
 #else
