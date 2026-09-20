@@ -177,12 +177,54 @@ gate. They cannot reach the verifier.
 `-DQSB_C31=0` restores the carry62 tails and the two-limb K correction.
 `-DQSB_CARRY62=0 -DQSB_C31=0` restores PR #743.
 
+## QSB_SAS_Z9SUB_ALL (stacked on C31, behind the same gate)
+
+The second-fold z9 lane is the bit-288 carry/borrow tail that PR #743 already
+retired from `_ModMultCore` but left in the two `_ModSqr` square bodies and in
+the fused `_ModSqrAddSub2`. It is dead for the same reason: z9 is read only by
+`mad.lo.u32 sfq, z9, 977, z8` / `addc.u32 sfc, z9, 0`, and its producers are
+the g3-fold carry `g8` (measured ~2^-23 on squares), the z8 assembly carry
+(~2^-32), and, in `_ModSqrAddSub2` under `QSB_SAS_SPLIT3P`, the +3*2^256 bias
+wrap and the q-subtraction borrow (~2^-31 each). The union is a ~2^-22-class
+corrupted-candidate rate; every wrong z9 corrupts only that candidate's GPU
+point, and the exact host gate drops the false nomination. A prior submission
+(`59d364e2`, 763,727,445, rejected below the 789,011,576 frontier) removed the
+`_ModSqrAddSub2` copy alone behind `QSB_SAS_Z9SUB`; this archive generalises
+that to one flag covering all three copies.
+
+Removed per emitted call:
+
+| Site | Removed ops | Per-call count |
+| --- | --- | ---: |
+| `_ModSqr` (both bodies) | `addc.u32 g8, 0, 0`, `addc.u32 z9, g8, 0` | 2 |
+| `_ModSqr` (both bodies) | `mad.lo.u32 sfq, z9, 977, z8` -> `mov.u32 sfq, z8` | 1-for-1 (IMAD -> MOV) |
+| `_ModSqr` (both bodies) | `addc.u32 sfc, z9, 0` -> `addc.u32 sfc, 0, 0` | 1-for-1 |
+| `_ModSqrAddSub2` | `addc.u32 g8, 0, 0`, `addc.u32 z9, g8, 0` | 2 |
+| `_ModSqrAddSub2` | two `subc.u32 z9, z9, 0` | 2 |
+| `_ModSqrAddSub2` | `addc.u32 z9, z9, 0` (+3 bias) | 1 |
+| `_ModSqrAddSub2` | `mad.lo.u32 sfq, z9, 977, z8` -> `mov.u32 sfq, z8` | 1-for-1 (IMAD -> MOV) |
+| `_ModSqrAddSub2` | `addc.u32 sfc, z9, 0` -> `addc.u32 sfc, 0, 0` | 1-for-1 |
+
+Per candidate the fixed-base chain does one `_PointAddXYZZ_mm` (two `_ModSqr`)
+plus 13 `_PointAddXYZZT<true>` (one `_ModSqr` + one `_ModSqrAddSub2` each), so
+the cut removes 2*15 + 5*13 = **95 dynamic serial instructions/candidate** on
+the default `QSB_SHORT_CARRY=1`, `QSB_FUSE_SQRADDSUB2=1` build, and converts 28
+IMADs to MOVs. `_ModMultCore` is untouched (already clean after PR #743).
+
+`-DQSB_SAS_Z9SUB_ALL=0` restores every removed op byte for byte;
+`QSB_SAS_SPLIT3P=0` also keeps the whole lane. There is no local `nvcc`, so the
+byte-identity claim is checked by pre-processing `GPUMath.h` with
+`__CUDA_ARCH__` defined and comparing the concatenated asm string literals
+(`verify_z9sub_all.py` in the work tree); the ranked hit verification remains
+the end-to-end test.
+
 ## Implementation
 
 Production edits:
 
 - `GPUMath.h`: `QSB_C31` switch; empty `QSB_SECOND_FOLD_TAIL`; 64-bit
-  split-3p; C31 `_ModSub256` / `_ModAddLazy`.
+  split-3p; C31 `_ModSub256` / `_ModAddLazy`; `QSB_SAS_Z9SUB_ALL` switch and
+  its six tail macros, applied to both `_ModSqr` bodies and `_ModSqrAddSub2`.
 - `pinning.cu`: `QSB_HOST_GATE` / `QSB_C31` defaults, compile-time
   coupling, `qsb_host_exact_hit` / `qsb_gate_accept`, gate on both hit
   writers.
@@ -207,6 +249,25 @@ predicates, by modeling the exact changed word operations:
 | K-limb 64-bit boundaries | 98 | exact predicate |
 | 2e5 random K-limb add/sub | 200,000 | 0 differences (expected; 2^-32) |
 
+`test_sas_z9sub_all.py` models the exact changed z9-lane word operations for
+all three copies (the two `_ModSqr` fold lanes and the `_ModSqrAddSub2`
+split-3p lane):
+
+| Audit cohort | Cases | Result |
+| --- | ---: | --- |
+| exhaustive 4-bit `_ModSqr` fold analogue | 1,024 | exact predicate |
+| 1e6 mechanism + 1e6 production `_ModSqr` fold draws | 2e6 | 0 predicate mismatches |
+| exhaustive 4-bit `_ModSqrAddSub2` analogue | 583,680 | exact predicate |
+| 32-bit split-3p / bias boundaries | 1,624 | exact predicate |
+| 1e6 mechanism + 1e6 production AddSub2 draws | 2e6 | 0 predicate mismatches |
+
+`verify_z9sub_all.py` (work tree) pre-processes `GPUMath.h` with
+`__CUDA_ARCH__=890` for `QSB_SHORT_CARRY` 1 and 0 and confirms the
+concatenated asm string literals are byte-identical between the unmodified
+HEAD source and `QSB_SAS_Z9SUB_ALL=0`, that `=1` removes all six z9
+producers/consumers from the emitted device asm, and that `QSB_SAS_SPLIT3P=0`
+also restores the lane.
+
 `test_host_gate.py`: 64/64 SHA-256d midstate continuations match hashlib of
 the full preimage; `pinning.bin` layout matches `pinning.json`; one full
 OpenSSL-style recovery round-trip matches `candidate_hash` and
@@ -224,21 +285,24 @@ authoritative end-to-end test.
 
 ## Performance hypothesis
 
-| Piece | Evidence | Modeled vs 778,624,395 |
+| Piece | Evidence | Modeled gain |
 |---|---|---|
 | PR #743 multiply tail | official **+0.997%** (786,386,945) | +0.997% |
 | `QSB_CARRY62` | −10 loop insns/round, 0.0045%/insn | +0.585% |
 | C31 fold + 64-bit split-3p | ~−9 loop insns/round on the same ruler | +0.53% |
 | C31 one-limb K | one 64-bit addc dropped per sub/add | extra serial-chain cut, not separately listed |
+| `QSB_SAS_Z9SUB_ALL` | 95 insns/candidate on the same 0.0045%/insn ruler | +0.43% |
 | Host gate | ~93 exact recoveries/s on the idle slot | ~0, with a small risk of drain stall |
 
-Multiplicative composition of the three measured/modeled arithmetic pieces
-is about **+2.12%**, center near **795 M/s**, about 1.1% of headroom over
-the 786.4 M floor. That is a hypothesis, not a claimed score. CUDA 12.6
-local listings vs ranked 12.8.93, ~0.3% hit-sampling sigma, and up to 3.7%
-host spread can all move the official number. The submission is justified
-because every piece is either already official (743) or a serial-chain
-deletion with an explicit bound and an exact publication filter.
+Multiplicative composition of the measured/modeled arithmetic pieces is about
+**+2.56%** over the C31 baseline, which the promoted `dcd0147c` / `66fede0`
+lineage scored at **789,011,576**. That is a hypothesis, not a claimed score.
+The prior `_ModSqrAddSub2`-only submission (`59d364e2`) scored 763,727,445,
+below that frontier; the ranked host spread and ~0.3% hit-sampling sigma are
+larger than the modeled incremental gain of the two added `_ModSqr` lanes, so
+this archive is as much a ruler calibration as a score attempt. It is still
+justified because every piece is either already official (743) or a
+serial-chain deletion with an explicit bound and an exact publication filter.
 
 If the official score is correct but below the floor, it still calibrates
 the C31 ruler. If the gate is wrong, the run scores near zero (no verified
@@ -252,6 +316,7 @@ recovery host tests exist specifically to make that failure mode unlikely.
 python3 candidates/pinning/test_carry62.py
 python3 candidates/pinning/test_host_gate.py
 python3 candidates/pinning/test_sha_interleave.py
+python3 candidates/pinning/test_sas_z9sub_all.py
 yukon setup --track pinning
 yukon run --track pinning
 ```
@@ -268,7 +333,10 @@ retained. PR #743 multiply-tail and its local +0.627% ± 0.100% mirrored
 4090 comparison belong to ercumentyildirim; this submission names that
 solver as coauthor. Carry62 bounds, the host gate, C31 predicates, the
 K-limb cut, and the decision to compose them after the official 743 / SHA /
-top-16 results are the new work.
+top-16 results are the new work. The `_ModSqrAddSub2`-only z9 lane removal
+(`QSB_SAS_Z9SUB`, submission `59d364e2`, commit `132fe78`) is the prior
+account's rejected attempt; `QSB_SAS_Z9SUB_ALL` generalises it to both
+`_ModSqr` bodies and is the new work in this archive.
 
 Do not retry on this runtime without new evidence:
 
