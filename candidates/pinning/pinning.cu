@@ -1013,6 +1013,15 @@ template<int N>
 __device__ __forceinline__ void qsb_block_product_checkpoint(
     uint64_t *value, uint64_t *roots, uint64_t *checkpoint, uint64_t (*products)[2*N]
 ) {
+#ifndef QSB_TREE_LEAF_REG
+#define QSB_TREE_LEAF_REG 1       /* 1: the first up-tree level takes its own leaf from registers */
+#endif
+#ifndef QSB_TREE_ROOT_DIRECT
+#define QSB_TREE_ROOT_DIRECT 1    /* 1: publish the root from registers, never through the plane */
+#endif
+#ifndef QSB_TREE_SCOPED_BARRIER
+#define QSB_TREE_SCOPED_BARRIER 1 /* 1: warp-scoped barrier while a level lives inside warp zero */
+#endif
     int tid=threadIdx.x;
     size_t block_base=(size_t)blockIdx.x*4u*N;
 
@@ -1021,8 +1030,31 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
     __syncthreads();
 
     int offset=0;
+#if QSB_TREE_LEAF_REG
+    static_assert(N>=4,"peeled leaf and root levels need two internal levels");
+    /* Lane tid < N/2 multiplies its own leaf, still live in value[], by lane
+     * tid+N/2's; only the sibling comes back out of the plane. Node N+tid is
+     * below 2N-2 for every such lane, so the checkpoint store is unconditional. */
+    if(tid<(N>>1)){
+        uint64_t a[5],b[5],out[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){a[k]=value[k];b[k]=products[k][(N>>1)+tid];}
+        a[4]=b[4]=0;
+        qsb_field_mul(out,a,b);
+        #pragma unroll
+        for(int k=0;k<4;k++){
+            products[k][N+tid]=out[k];
+            qsb_st_u64(&checkpoint[block_base+(size_t)k*N+tid],out[k]);
+        }
+    }
+    offset=N;
+    if((N>>1)>32)__syncthreads();else __syncwarp();
     #pragma unroll 1
-    for(int count=N;count>1;count>>=1){
+    for(int count=N>>1;count>2;count>>=1){
+#else
+    #pragma unroll 1
+    for(int count=N;count>2;count>>=1){
+#endif
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
@@ -1037,17 +1069,38 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
             #pragma unroll
             for(int k=0;k<4;k++){
                 products[k][node]=out[k];
-                if(node<2*N-2)
-                    qsb_st_u64(&checkpoint[block_base+(size_t)k*N+node-N],out[k]);
+                qsb_st_u64(&checkpoint[block_base+(size_t)k*N+node-N],out[k]);
             }
         }
         offset+=count;
-        if(count>2)__syncthreads();
+#if QSB_TREE_SCOPED_BARRIER
+        /* Producers are lanes < half and the next level's consumers are lanes
+         * < half/2, so both sides sit in warp zero once half fits in a warp. */
+        if(half>32)__syncthreads();else __syncwarp();
+#else
+        __syncthreads();
+#endif
     }
 
+    /* The root level is lane zero alone, and node 2N-2 has no reader: the
+     * downward pass restores nodes N..2N-3 and the root inverse arrives from
+     * global memory. Its two operands are the last pair the loop wrote. */
     if(tid==0){
+        uint64_t a[5],b[5],out[5];
         #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+        a[4]=b[4]=0;
+        qsb_field_mul(out,a,b);
+#if QSB_TREE_ROOT_DIRECT
+        #pragma unroll
+        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=out[k];
+#else
+        #pragma unroll
+        for(int k=0;k<4;k++){
+            products[k][2*N-2]=out[k];
+            roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        }
+#endif
     }
 }
 template<int N>
@@ -1097,7 +1150,14 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
+#if QSB_TREE_SCOPED_BARRIER
+        /* This level's producers are lanes < count and the next level's
+         * consumers are lanes < 2*count, so warp zero owns both sides until
+         * 2*count leaves the warp. */
+        if((count<<1)>32)__syncthreads();else __syncwarp();
+#else
         __syncthreads();
+#endif
     }
 
     uint64_t parent_inv[5],sibling[5];
