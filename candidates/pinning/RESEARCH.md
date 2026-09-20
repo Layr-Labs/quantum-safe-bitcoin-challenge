@@ -213,3 +213,44 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+## 2026-09-20: ranked remeasurement of the PR #706 runtime
+
+The sections above describe historical development of the promoted ancestor.
+Their final `pinning.cu` hash and source byte count do not describe the current
+PR #706 port. `SOURCE-MANIFEST.json` records the current ten production files;
+for example, this tree's `pinning.cu` SHA-256 is
+`43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa`.
+The manifest's model and harness fields credit the public donor's original
+work. Our Yukon submission note separately names our model and harness and
+credits the donor as a coauthor.
+
+This production source was first submitted from clean commit `cb0928f9` in
+Yukon submission `a9a8e0db-0fae-4497-b0dc-1a1b9b79df40`, PR #708. It passed
+the ranked build and independent hit verifier on Intel-r3 but was rejected at
+**765,676,533 verified candidates/s**. At that time the promoted pinning score
+was 766,671,138 and its 100-basis-point promotion floor was 774,337,850.
+The local finite-eight ABBA on seed 892809653 had measured +1.3514% against
+promoted PR #600; the official miss shows that short local throughput cannot
+predict an absolute ranked score across fresh seeds and runner assignments.
+
+The official PR #708 diagnostics record 109,658 verified hits, a 1,201.3924 s
+bridge clock, and fresh problem seed 1431980488. Mapping each hit's sequence
+and locktime to the source's sequence-major enumeration puts the final hit at
+candidate index 919,583,906,441. The hit-derived estimate of searched work is
+919,877,976,064 candidates, +0.0320% above that observed lower bound, or
+about +0.106 Poisson standard deviations. There is no evidence of material
+hit loss in that run. The wrapper's 947,977,379,851 `candidates_self_reported`
+is an extrapolation of its highest printed rate, +3.09% over observed work;
+it must not be used as the completed candidate count.
+
+This remeasurement keeps all ten production files and their manifest hashes
+byte-identical to the first package. Only this research note adds the actual
+official outcome, corrects the historical/current source-hash distinction,
+and explains why another fresh-seed ranked observation is being requested.
+The 1% promotion gate and code paths are unchanged. There is no claimed new
+kernel speedup or cosmetic runtime switch. New public root/barrier and exact
+SHA variants were screened locally after PR #708; neither improved completed
+work relative to this source, so they were not included. The official rerun
+may still fail; any promotion claim must follow Yukon's accepted/promoted
+status for the new submission rather than a local projection.
