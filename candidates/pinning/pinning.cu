@@ -558,8 +558,8 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
-    uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    uint64_t *W,const uint64_t *a) {
+    qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
@@ -573,7 +573,26 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
-    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    /* y0*ZZZ and a*ZZ are independent: both read the final Z powers and
+     * neither writes them. Overlap the recovery first product with the
+     * deferred-Y resolve, then W = ZZZ*(a*ZZ-X) is the cofactor leaf. */
+    uint64_t d[4];
+    _ModMult(x1,y0,V);
+    _ModMult(d,(uint64_t *)a,U);
+    _ModSub256(Y,Y,x1);
+    if ((X[1] & X[2] & X[3]) == UINT64_MAX &&
+        X[0] >= 0xFFFFFFFEFFFFFC2FULL) {
+        X[0] -= 0xFFFFFFFEFFFFFC2FULL;
+        X[1] = X[2] = X[3] = 0;
+    }
+    _ModSub256(d,X);
+    _ModMult(W,V,d);
+    if ((W[1] & W[2] & W[3]) == UINT64_MAX &&
+        W[0] >= 0xFFFFFFFEFFFFFC2FULL) {
+        W[0] -= 0xFFFFFFFEFFFFFC2FULL;
+        W[1] = W[2] = W[3] = 0;
+    }
+    W[4]=0;
 }
 
 
@@ -1408,17 +1427,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
-    /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
-
-    /* Recover P+R and P-R together with one shared denominator inverse. The
-     * prepare-only xR copy dies before the collective; reload R afterward so
-     * its eight limbs do not lengthen the inverse's already pressured state. */
-    {
-        uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
-                             pin_u2rx_words[2],pin_u2rx_words[3]};
-        qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
-    }
+    /* u1*G as raw XYZZ via the signed 64 MiB A-table. a*ZZ overlaps the
+     * deferred-Y resolve; prod is W = ZZZ*(a*ZZ-X), the cofactor leaf. */
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,prod,pin_u2rx_words);
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
