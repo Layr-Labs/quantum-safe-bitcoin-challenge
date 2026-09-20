@@ -66,7 +66,13 @@ __device__ __forceinline__ void qsb_packed_prepare(
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
-#if QSB_STREAM2
+#if QSB_SAVED_V4
+        /* Same 64 bytes per candidate as the four 16-byte planes, re-cut as two
+         * naturally aligned 32-byte records: record 0 = vbar, record 1 = tbar.
+         * Lane stride is 32 B, so the warp's accesses stay fully coalesced. */
+        qsb_st_v4(&saved[2*i],vbar);
+        qsb_st_v4(&saved[2*s+2*i],tbar);
+#elif QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
         qsb_st_v2(&saved[1*s+i],vbar[2],vbar[3]);
         qsb_st_v2(&saved[2*s+i],tbar[0],tbar[1]);

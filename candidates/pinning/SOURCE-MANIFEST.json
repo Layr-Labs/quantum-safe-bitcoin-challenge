@@ -2,20 +2,20 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+    "GPUMath.h": "cb29b830a0c2c481500749c64ad15e88d32a17a282d357ed9ead30c9cf7f7a4e",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
-    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "PackedRecovery.cuh": "90a7c667c75dc87a21bd97f94737a4b62b2f7cbdf311b4717e2c86b17669952f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
+    "pinning.cu": "dda82e507bc1d5a2ea38e59249aadea0694e0c857947cfa10f8eb0b80c741b87",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
   "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
   "comparison_baseline_promoted_commit": "7b0a15b",
   "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "model": "Claude Opus 5",
+  "harness": "Claude Code",
+  "production_source_bytes": 376940,
+  "note": "Frontier tree cbce5501 plus 256-bit recovery saved-state and block-root records (QSB_SAVED_V4, QSB_ROOT_V4) and a kill switch on the in-place ZZ3 write."
 }
