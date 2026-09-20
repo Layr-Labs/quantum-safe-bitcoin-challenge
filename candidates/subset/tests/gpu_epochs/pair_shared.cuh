@@ -2,6 +2,10 @@
 // Shared pre-inverse finish derived from dun999 PR258, ac9a6164.
 // Window SHA cache is inherited from odinfree; retain all parent notices.
 #pragma once
+#include "fixed_padding_sha.cuh"
+#ifndef QSB_FIXED_PADDING_SHA
+#define QSB_FIXED_PADDING_SHA 1
+#endif
 #ifndef QSB_PAIR_SHARED
 #define QSB_PAIR_SHARED 1
 #endif
@@ -192,8 +196,20 @@ __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if QSB_FIXED_PADDING_SHA
+    // Keep scalar second hashes sequential: the near-frontier donor reports
+    // a paired second-compression experiment slower on its measured GPU.
+    qsb_sha32_sparse(stateA,stateA);
+    qsb_sha32_sparse(stateB,stateB);
+    #pragma unroll
+    for(int k=0;k<4;k++){
+        out.a[k]=((uint64_t)stateA[6-2*k]<<32)|stateA[7-2*k];
+        out.b[k]=((uint64_t)stateB[6-2*k]<<32)|stateB[7-2*k];
+    }
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
@@ -324,6 +340,22 @@ __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32
     return 0;
 #endif
 }
+// Specialized speculative gate only; independent exact replay uses the parent gate.
+__device__ __forceinline__ int qsb_k2s_gate_fixed(
+    uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
+#if QSB_FIXED_PADDING_SHA && QSB_GATE_PAIR
+    uint32_t pb0[16],pb1[16],hs0[8],hs1[8];
+    qsb_gate_block(pb0,q1x,y_parities);
+    qsb_gate_block(pb1,q2x,y_parities>>1);
+    qsb_sha33_sparse_pair(hs0,pb0,hs1,pb1);
+    if(gpu_bench_valid_words(hs0)){*recid_out=0;return 1;}
+    if(gpu_bench_valid_words(hs1)){*recid_out=1;return 1;}
+    return 0;
+#else
+    return qsb_k2s_gate(q1x,q2x,y_parities,recid_out);
+#endif
+}
+
 
 struct QsbPairFront {uint64_t words[12];int ok;};
 __device__ __noinline__ QsbPairFront qsb_pair_front_value(
@@ -407,7 +439,7 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t q1x[4],q2x[4];int recid=0;
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
-    return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
+    return qsb_k2s_gate_fixed(q1x,q2x,par,&recid) ? recid+1 : 0;
 }
 #endif
 #endif
