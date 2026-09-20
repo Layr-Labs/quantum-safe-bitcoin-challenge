@@ -83,7 +83,7 @@ __device__ __forceinline__ void qsb_packed_prepare(
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
-    uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
+    const uint64_t *a,const uint64_t *b,const uint64_t *c,uint64_t *x1,uint64_t *x2) {
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
 #if QSB_LAZY_REC
     /* u, v, l, m and sum only feed multiplies and borrow-corrected subtractions, which
