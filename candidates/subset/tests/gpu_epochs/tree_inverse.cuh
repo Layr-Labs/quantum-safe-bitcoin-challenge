@@ -26,6 +26,13 @@
 #ifndef ZLAB_TREE
 #define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
 #endif
+/* Carry a thread's just-produced packed-tree node across the level barrier.
+ * The next level's low half otherwise reloads that exact shared-memory word.
+ * This is the subset adaptation of fkiene's public pinning PR786 research;
+ * setting the switch to 0 restores the promoted shared-load path. */
+#ifndef QSB_TREE_REGISTER_CARRY
+#define QSB_TREE_REGISTER_CARRY 1
+#endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t tree[4][512];
@@ -162,17 +169,35 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
     // formed by lanes < count/2 and read by lanes < count/4.
     int offset=0;
+#if QSB_TREE_REGISTER_CARRY
+    uint64_t up_carry[5];
+    #pragma unroll
+    for(int k=0;k<4;k++)up_carry[k]=value[k];
+    up_carry[4]=0;
+#endif
     #pragma unroll 1
     for(int count=n;count>2;count>>=1){
         int half=count>>1;
         if(tid<half){
             uint64_t a[5],b[5],out[5];
             #pragma unroll
-            for(int k=0;k<4;k++){a[k]=products[k][offset+tid];b[k]=products[k][offset+half+tid];}
+            for(int k=0;k<4;k++){
+#if QSB_TREE_REGISTER_CARRY
+                a[k]=up_carry[k];
+#else
+                a[k]=products[k][offset+tid];
+#endif
+                b[k]=products[k][offset+half+tid];
+            }
             a[4]=b[4]=0;
             QSB_TREE_MUL(out,a,b);
             #pragma unroll
-            for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
+            for(int k=0;k<4;k++){
+                products[k][offset+count+tid]=out[k];
+#if QSB_TREE_REGISTER_CARRY
+                up_carry[k]=out[k];
+#endif
+            }
         }
         offset+=count;
         if(half>32)__syncthreads();else __syncwarp();
@@ -245,6 +270,14 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // Level count (4..n/2): lanes < count read parent inverses written by
     // lanes < count/2 and write inverses read by lanes < 2*count.
     offset-=4;   /* level count=4 */
+#if QSB_TREE_REGISTER_CARRY
+    uint64_t down_carry[5];
+    if(tid<2){
+        #pragma unroll
+        for(int k=0;k<4;k++)down_carry[k]=inverses[k][offset+4-n+tid];
+        down_carry[4]=0;
+    }
+#endif
     #pragma unroll 1
     for(int count=4;count<n;count<<=1){
         int half=count>>1;
@@ -252,13 +285,22 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
             uint64_t parent_inv[5],sibling[5],child_inv[5];
             #pragma unroll
             for(int k=0;k<4;k++){
+#if QSB_TREE_REGISTER_CARRY
+                parent_inv[k]=tid<half?down_carry[k]:inverses[k][offset+count-n+(tid&(half-1))];
+#else
                 parent_inv[k]=inverses[k][offset+count-n+(tid&(half-1))];
+#endif
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
             QSB_TREE_MUL(child_inv,parent_inv,sibling);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child_inv[k];
+            for(int k=0;k<4;k++){
+                inverses[k][offset-n+tid]=child_inv[k];
+#if QSB_TREE_REGISTER_CARRY
+                down_carry[k]=child_inv[k];
+#endif
+            }
         }
         offset-=count<<1;
         if((count<<1)>32)__syncthreads();else __syncwarp();
@@ -269,7 +311,11 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         uint64_t parent_inv[5],sibling[5];
         #pragma unroll
         for(int k=0;k<4;k++){
+#if QSB_TREE_REGISTER_CARRY
+            parent_inv[k]=tid<half?down_carry[k]:inverses[k][tid&(half-1)];
+#else
             parent_inv[k]=inverses[k][tid&(half-1)];
+#endif
             sibling[k]=products[k][tid^half];
         }
         parent_inv[4]=sibling[4]=0;
