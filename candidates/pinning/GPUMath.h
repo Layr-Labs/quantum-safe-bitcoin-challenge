@@ -1777,8 +1777,8 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSqr(PP, P);                      // PP = P^2
+  _ModMult(Q, U2, PP);                 // V  = U2*PP; independent of PPP, kills U2
   _ModMult(PPP, PP, P);                // PPP = P*PP
-  _ModMult(Q, U2, PP);                 // V  = U2*PP
 
 #if QSB_FUSE_SQRADDSUB2
   /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
