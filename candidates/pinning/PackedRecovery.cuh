@@ -98,27 +98,37 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     qsb_recovery_mul(v,vbar,root_inv);
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
 #endif
-#if QSB_RAW_X
-    /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
-     * subtraction in _ModAdd256 still yields canonical x (qsb_add_boundary keeps the
-     * normalisation for the other case). */
-    _ModSub256(t,l,c); qsb_packed_raw_mul(x1,sum,t); qsb_add_boundary(x1,a); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_packed_raw_mul(x2,sum,t); qsb_add_boundary(x2,a); _ModAdd256(x2,x2,a);
-#elif !QSB_PARITY_SUM
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-#endif
 #if QSB_PARITY_SUM
-    /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
-     * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
-     * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
-    _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
+    /* P9: r_i = x_i - a == sum*(l or m - c). Parity from l*r and m*r.
+     * QSB_RAW_X: skip qsb_field_normalize on those two products. s stays a
+     * [0,2^256) representative; qsb_add_boundary canonicalizes only when
+     * a[3]==2^64-1 (raw+a may exceed 2p). qsb_sum_parity already accepts raw w. */
+    _ModSub256(t,l,c);
+#if QSB_RAW_X
+    qsb_packed_raw_mul(s,sum,t); qsb_add_boundary(s,a);
+#else
+    qsb_recovery_mul(s,sum,t);
+#endif
+    _ModAdd256(x1,s,a);
     qsb_packed_raw_mul(u,l,s);
-    _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
+    _ModSub256(t,m,c);
+#if QSB_RAW_X
+    qsb_packed_raw_mul(s,sum,t); qsb_add_boundary(s,a);
+#else
+    qsb_recovery_mul(s,sum,t);
+#endif
+    _ModAdd256(x2,s,a);
     qsb_packed_raw_mul(v,m,s);
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
 }
 #else
+#if QSB_RAW_X
+    _ModSub256(t,l,c); qsb_packed_raw_mul(x1,sum,t); qsb_add_boundary(x1,a); _ModAdd256(x1,x1,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(x2,sum,t); qsb_add_boundary(x2,a); _ModAdd256(x2,x2,a);
+#else
+    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
+    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
+#endif
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
     _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);

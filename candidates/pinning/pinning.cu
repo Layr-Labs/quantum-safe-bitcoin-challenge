@@ -1,6 +1,3 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
-#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -27,14 +24,26 @@
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
+#ifndef QSB_RP_SQR
+#define QSB_RP_SQR 0     /* b0fbfb1a official +0.26%; includes f8. Do not retry. */
+#endif
+#ifndef QSB_FKIENE
+#define QSB_FKIENE 0     /* 4ce3607 official 762.3M (-3.39%). Do not retry. */
+#endif
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_RP_SQR && !QSB_HOST_GATE
+#error "QSB_RP_SQR requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_FKIENE != 0 && QSB_FKIENE != 1
+#error QSB_FKIENE must be 0 or 1
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
 #endif
 #ifndef QSB_RAW_X
-#define QSB_RAW_X 0
+#define QSB_RAW_X 1      /* finish x products skip qsb_field_normalize; P7 */
 #endif
 #ifndef QSB_RAW_DEN
 #define QSB_RAW_DEN 1
@@ -620,43 +629,90 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
+/* 64-bit funnel right: bits [sh, sh+63] of {hi, lo}. sh is warp-uniform
+ * (chunk position). sh==0 is a uniform branch. Matches (lo>>sh)|(hi<<(64-sh)). */
+__device__ __forceinline__ uint64_t qsb_funnel_r64(uint64_t lo, uint64_t hi, unsigned sh) {
+    if (sh == 0u) return lo;
+    return (lo >> sh) | (hi << (64u - sh));
+}
+
+__device__ __forceinline__ uint32_t qsb_extract_field(const uint64_t M[4], unsigned pos, unsigned bits) {
+    unsigned j = pos >> 6;
+    unsigned sh = pos & 63u;
+    uint64_t lo = M[j];
+    uint64_t hi = (j < 3u) ? M[j + 1] : 0ull;
+    return (uint32_t)qsb_funnel_r64(lo, hi, sh) & ((1u << bits) - 1u);
+}
+
+/* Same idx/neg packing as qsb_decode_to_shared. Sign of a non-last window is
+ * the field's top bit (tm = (f>>(bits-1))-1), last window uses recode sign. */
+__device__ __forceinline__ uint32_t qsb_digit_code(const uint64_t M[4], int negative, int c) {
+    const unsigned pos = (c == 0) ? 1u : 17u * (unsigned)c + 2u;
+    const unsigned bits = (c == 0) ? 18u : 17u;
+    uint32_t f = qsb_extract_field(M, pos, bits);
+    int32_t tm = (c == GT_CHUNKS - 1) ? -negative : (int32_t)(f >> (bits - 1u)) - 1;
+    uint32_t idx = (f ^ (uint32_t)tm) & ((1u << (bits - 1u)) - 1u);
+    uint32_t neg = (uint32_t)(tm < 0);
+    return idx | (neg << 31);
+}
+
 __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
-        const unsigned pos=c==0?1u:17u*c+2u;
-        const unsigned j=pos/64u,sh=pos%64u;
-        uint64_t value=M[j]>>sh;
-        if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
-        uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=qsb_digit_code(M,negative,c);
     }
 }
+
+#if QSB_FKIENE
+__device__ __forceinline__ void qsb_decode_to_regs(const uint64_t *k, uint32_t codes[GT_CHUNKS]) {
+    uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++) codes[c]=qsb_digit_code(M,negative,c);
+}
+#endif
+
+__device__ __forceinline__ void qsb_load_code(const uint8_t *table, unsigned base,
+    uint32_t code, uint64_t *x, uint64_t *y) {
+    uint32_t m32=(uint32_t)((int32_t)code>>31);
+    gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y);
+}
+
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    qsb_load_code(table,base,codes[(size_t)c*QSB_TREE_N+threadIdx.x],x,y);
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;
+#if QSB_FKIENE
+    uint32_t codes[GT_CHUNKS];
+    qsb_decode_to_regs(k, codes);
+#else
+    qsb_decode_to_shared(k);
+#endif
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_FKIENE
+    qsb_load_code(table,gt_offset(0),codes[0],x0,y0);
+    qsb_load_code(table,gt_offset(1),codes[1],x1,y1);
+#else
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+#endif
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
+#if QSB_FKIENE
+        qsb_load_code(table,base,codes[c],x1,y1);
+#else
         qsb_load_decoded(table,c,base,x1,y1);
+#endif
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
         base+=1u<<16;
@@ -2866,8 +2922,10 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
-    printf("  Host publication gate: %s; C31 approx: %s\n",
-           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
+    printf("  Host publication gate: %s; C31 approx: %s; RP_SQR: %s; FKIENE: %s; RAW_X: %s\n",
+           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off",
+           QSB_RP_SQR ? "on" : "off", QSB_FKIENE ? "on" : "off",
+           QSB_RAW_X ? "on" : "off");
 
     /* The ranked problem geometry is fixed by harness/gen_problem.py
      * (PIN_SUFFIX_LEN=75, PIN_SEQ_OFFSET=31, 155 midstate blocks -> 9995 B),
