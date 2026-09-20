@@ -136,7 +136,13 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
+#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+                               * 3rd slot adds ~0.5 GiB pipeline state + 4 MiB roots + 2 MiB checkpoints
+                               * on a 24 GiB RTX 4090 - ample. Deeper host-side pipelining: the host
+                               * waits only on the slot it is about to reuse, so with 3 slots the
+                               * next-next batch's prepare can already be queued while slot A's tail
+                               * kernels (3 root kernels + finish) still run. Same mechanism the
+                               * SLOTPIPE delta itself validated (+0.5157% going single->2 slots). */
 #endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
