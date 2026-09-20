@@ -59,12 +59,26 @@ __device__ __forceinline__ void qsb_packed_prepare(
     uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();
     uint64_t (*excluded)[QSB_RECOVERY_N]=(uint64_t (*)[QSB_RECOVERY_N])(qsb_digit_arena()+8*QSB_TREE_N);
     qsb_cofactor_prepare<QSB_RECOVERY_N>(D,roots,products,excluded);
+#ifndef QSB_MASK_HC
+#define QSB_MASK_HC 1 /* 1: zero the shared factor, not each of the two products */
+#endif
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_MASK_HC
+        /* vbar and tbar are Y*hc and V*hc, so zeroing the single shared factor
+         * zeroes both. A product with an all-zero operand has all-zero partial
+         * products, so the schoolbook result is exactly zero, not a nonzero
+         * representative of zero: the finish kernel's zero test on the stored
+         * tbar therefore still rejects the lane. Four selects, not eight. */
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);

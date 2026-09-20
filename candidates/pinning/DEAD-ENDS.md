@@ -25,7 +25,8 @@ Official and public negatives that must not be retried without new evidence.
 
 ## Still open (not dead)
 
-- Exact host publication gate + C31 (fold / 64-bit split-3p / one-limb K) on top of 743+carry62 — this submit.
-- Further *per-candidate* 2^-31-class tails from the carry-chain census, only behind the gate, only after this official score.
+- Exact host publication gate + C31 (fold / 64-bit split-3p / one-limb K) on top of 743+carry62 — **promoted** `dcd0147c` at 789,011,576.
+- `QSB_RP_SQR` (743 odd-fold on squares + SAS g8 + even-fold f8) behind the same gate — this submit.
+- Further *per-candidate* tails (`RAW_X=1`, remaining census) only after this official score.
 - CUDA graphs / further JIT trim as bundle fillers only.
 - Do **not** drop `_ModAddLazyOff` t1 (`mk` is frequently −1).

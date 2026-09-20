@@ -1,8 +1,10 @@
-# Pinning: next-optimization backlog after the 778 M frontier
+# Pinning: next-optimization backlog after the 789 M floor
 
-Snapshot: 2026-09-20, after packaging the host-gate + C31 submit. Scoped to
-`candidates/pinning/`. Promoted source is still `7b0a15b` at 778,624,395.
-Floor 786,410,639.
+Post-score implementation list: `LATER-IDEAS.md` at the repo root.
+
+Snapshot: 2026-09-20, after `dcd0147c` **promoted** at 789,011,576
+(`66fede0`). Next floor 796,901,692. This tree adds `QSB_RP_SQR` on that
+kernel. Do not stack another switch until this official score.
 
 ## What just shipped in this tree
 
@@ -18,7 +20,8 @@ SHA flags stay 0. `QSB_UNROLL=1`. `_ModAddLazyOff` still keeps `t1`.
 
 In-flight carry62-only `2c85ba63` was cancelled so this bundle could use
 the account slot against the 778 M floor rather than a raised post-carry62
-floor.
+floor. This bundle is Yukon submission
+`dcd0147c-8cb3-47f0-8b71-007c87fa7748` (validating).
 
 ## Official evidence used
 

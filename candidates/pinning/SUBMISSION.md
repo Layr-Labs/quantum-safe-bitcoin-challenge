@@ -1,200 +1,149 @@
-# Pinning: exact host gate + C31 tails on the measured multiply-tail + carry62 stack
+# Pinning: QSB_RP_SQR on the promoted host-gate + C31 stack
 
-Effort: xhigh. Kernel composition, host-gate design, C31 predicates and the
-submit decision: Grok 4.6. Carry62 proof and the first host-word audit of
-those two tails: GPT 5.6 Sol / Codex. PR #743 multiply-tail: ercumentyildirim.
-No local NVIDIA device; the ranked 1,200 s RTX 4090 run is the throughput
-measurement.
+## Result we are stacking on
 
-## Why this archive, and why it replaces the in-flight carry62-only run
+`dcd0147c-8cb3-47f0-8b71-007c87fa7748` **promoted** at **789,011,576**
+verified candidates/s (`gpu: RTX_4090`). Landed commit `66fede0`. That is
+the current pinning floor.
 
-The promoted pinning source is still `52cd275a` / `7b0a15b` at
-**778,624,395/s**. The 100-bips floor is **786,410,639/s**. Between that
-floor and this packaging time, four official results selected the stack:
+| ID | What | Official | vs then-floor |
+|---|---|---|---|
+| `52cd275a` | previous floor | 778,624,395 | — |
+| `960da801` / PR #743 | `_ModMultCore` odd-fold tail only | 786,386,945 | +0.997% (rejected) |
+| `dcd0147c` | 743 + carry62 + host gate + C31 | **789,011,576** | **+1.33%, promoted** |
 
-| Submission | Change | Official score | vs 778,624,395 | Decision |
-|---|---|---:|---:|---|
-| `f034a9c4` (this account) | `QSB_TAIL_TAB=1` + `QSB_SHA_SMEM_W1=1` | **750,065,705** | **−3.67%** | Keep both SHA flags **off**. 107,375 verified hits. Drop matches the LeaderGPU vs intel-r5 host gap (~3.7%, Issue #505). Not a reason to compose SHA. |
-| `960da801` / PR #743 (ercumentyildirim) | bounded `_ModMultCore` tail truncation only | **786,386,945** | **+0.997%** | Keep it. Missed the floor by **23,694/s**. The mechanism is real. |
-| `eb6d9871` (jacklightChen) | exact four-wave complete top-16 (63 products vs 43) | **769,172,989** | **−1.21%** | Dead. Do not compose. |
-| `2c85ba63` (this account) | PR #743 + `QSB_CARRY62` only | validating at packaging | n/a | **Cancelled** in favour of this larger bundle. Carry62 alone is modeled at +0.585% on top of 743, which is only ~0.21% of modeled headroom over the floor and can miss on host noise. |
+Next promotion needs **796,901,692** (+1.00% / +7,890,116). This archive is
+one more gated serial-chain cut on that tree. SHA flags stay off. GLV,
+unroll, top-16, and `_ModAddLazyOff` t1 stay retired.
 
-This archive is PR #743 + `QSB_CARRY62` + an exact host publication gate +
-`QSB_C31` (empty second-fold tail, 64-bit split-3p, one-limb K correction on
-`_ModSub256`/`_ModAddLazy`). SHA flags stay 0. `QSB_UNROLL=1`. The GLV /
-joint-comb family stays retired (public 674.7 / 722.8 / 714.3 / 523.5 M).
+## Why this cut, and not the others
 
-Submitting the full stack against the 778 M floor is strictly better than
-landing carry62 first. If carry62-only promoted, the next floor would move
-to about 796 M and C31 would have to clear a raised bar. One ranked shot
-against 786.4 M with every remaining serial-chain cut behind an exact gate
-is the win attempt.
+`LATER-IDEAS.md` said: after the official score, pick **one** row. The
+promoted kernel already has the empty second-fold tail, 64-bit split-3p, and
+one-limb K correction (C31), all behind `QSB_HOST_GATE`. The next listed
+item is the carry-chain census: remaining `addc`/`subc` suffixes, one 2^-31
+class tail, own switch, host audit.
 
-## Goal
+Census of the hot path after C31:
 
-`eigenlabs/quantum-safe-bitcoin-challenge/pinning` ranks verified candidates
-per second on one RTX 4090 over 1,200 s, fresh seed. Score is
-`verified_hits × 2^24 / 2 / elapsed`. Any false published hit zeroes the
-run. The kernel may approximate internally; only exact hits may be written.
+| Site | Still live? | Bound | Action |
+|---|---|---|---|
+| Second-fold `z3` | no (C31 empty) | 2^-31 | already shipped |
+| Split-3p through 64 bits | no (C31) | 2^-30.4 | already shipped |
+| K-correction `t1` on `_ModSub256`/`_ModAddLazy` | no (C31) | 2^-33 | already shipped |
+| `_ModAddLazyOff` `t1` | yes | **~1/2** (`mk` often −1) | **do not cut** |
+| 743 odd-fold (`g8`/`z9`) on `_ModMultCore` | already dropped | 2^-44 (two operands) | keep |
+| Same odd-fold on `_ModSqr` / SAS | **yes** | **~2^-23** (one operand) | **this submit** |
+| Even-fold overflow `f8` on mul/sqr/SAS | **yes** | **~2^-23** | **this submit** |
+| SAS running `z9` after `+e-2q` | yes | not rare | leave; it is a 2^256-place accumulator |
+| `RAW_X=1` | written, default off | exact-ish finish | finish-only; not 1% |
+| Zakura Sinsemilla / Eisenstein GLV | n/a | — | different problem; GLV already dead here |
+| SHA `TAIL_TAB` / `SMEM_W1` | off | official −3.67% | stay off |
 
-## Review of the remaining search space
+PR #743's own comment in `GPUMath.h` is the reason squares were left
+behind: the odd-fold overflow is exact unless **both** multiply operands
+lie within 2^-22 of 2^256 (2^-44 per product). A square has **one**
+operand, so the same tail is ~2^-23, "two million times more likely and
+not admissible" without a publication gate. We now have that gate, and
+the official 789 M run showed it is cheap (~94 hits/s, OpenSSL, not a
+drain stall). Applying 743's tail to squares is the census item that
+comment reserved.
 
-The 778 M lineage already closed table width, cache hints, prefetch, launch
-geometry, packed recodes, batched inversion, parity-only finish, top-two
-tree merge, fused prepare+finish, Karatsuba, chain unroll 2/3/4, L1
-prefetch/bypass, and the public SHA variants. Issue #505 documents ~3.7%
-pinning host spread, so a 1% official win has to be a real kernel delta, not
-a runner draw.
+The even-fold overflow `f8` is the same first-fold 64-bit 977-chain
+overflow on the *even* half (`r3 + 977*x14`). Same ~2^-23 bound, still
+present on every hot product including the 743 mul. Bundling it with the
+square odd-fold is the same family as C31 (three related tails, one
+switch), not a new curve formula.
 
-The useful remaining ruler is PR #743's dependency-chain measurement:
-off-chain deletions were neutral or negative, while serial field-reduction
-instructions tracked at about **0.0045% per instruction per candidate**.
-Carry62 removed 10 loop instructions/round (130 dynamic/candidate) at a
-2^-62 new error budget. C31 removes the next serial limbs of those same
-chains, which is only safe because an exact gate now sits between the GPU
-hit queue and the output file.
+Zakura / position-weighted Sinsemilla / Eisenstein recoding were checked
+and do not apply: we already have a signed-odd comb (the Horner-table
+analogue), and Eisenstein GLV is variable-base. Incomplete-add skipping
+is a discrete-log argument, not a 2^-23 arithmetic miss.
 
-Subset already proved the architecture: a fast approximate path may
-nominate, only exact results may be published. Pinning previously wrote
-stage-2 tentative indices straight to the 1024-entry hit buffer.
+## What `QSB_RP_SQR` changes
 
-## Exact host publication gate (`QSB_HOST_GATE=1`)
+Default on in `pinning.cu`. `GPUMath.h` defaults the flag off so a
+header-only build is bit-identical to C31. Compile error if `QSB_RP_SQR`
+is on without `QSB_HOST_GATE`. `-DQSB_RP_SQR=0` restores the promoted
+C31/carry62 tails.
 
-Expected true-hit rate at 778 M/s is about
+Under `QSB_RP_SQR && QSB_SHORT_CARRY`:
 
-```text
-778e6 candidates/s * 2 recids / 2^24 ~= 93 tentative hits/s
-```
+1. **`_ModSqr` (the 13-round `PP = P^2`, plus the mmadd seed squares)**
+   uses the 743 mul reduction tail: no `g8`, no `z9`, `mov.u32 sfq, z8`
+   instead of `mad.lo.u32 sfq, z9, 977, z8`, `sfc` from 0. Differ iff the
+   odd 977-chain overflows 64 bits (`x15*(2^32+977)+x14 >= 2^64`), i.e.
+   `x15 >= 2^32-977` up to a 64-bit add, **~2^-23** for a uniform high
+   limb, matching the 743 comment for a single extreme operand.
 
-Each drain reconstructs the candidate from `pinning2.bin` constants that the
-binary already carries (midstate, 75-byte suffix, `neg_r_inv`, `u2R`) and
-keeps only records that the harness verifier would accept.
+2. **`_ModSqrAddSub2`** (fused `R^2+PPP-2V`, one per madd) drops `g8`
+   only. `z9` stays as the running high limb through `+e+3p-2q` (that
+   limb is not a 2^-23 overflow; it is the 2^256-place of a 3p correction).
+   `z9` is seeded from the `z8` carry alone (`addc.u32 z9, 0, 0`).
 
-### SHA-256d
+3. **Even-fold `f8` on `_ModMultCore`, `_ModSqr`, `_ModSqrAddSub2`.**
+   `addc.u32 f8, 0, 0` is omitted and `z8` is `w7` plus the incoming
+   carry, not `f8+w7`. Differ iff `r3 + 977*x14 >= 2^64`, **~2^-23**.
 
-The 155-block prefix is midstated. The host copies the 75-byte suffix,
-patches `sequence` at offset 31 and `locktime` at offset 67, writes SHA-256
-padding (`0x80`, zeros, 64-bit bit-length `9995*8`), and runs
-`SHA256_Transform` on the two remaining 64-byte blocks from the midstate,
-exactly as the GPU slow path and the per-sequence fast-tail host continuation
-do. The 8 state words are serialized big-endian and hashed once more.
+Host `__uint128_t` transcriptions stay exact, same as 743. Tree-root
+`qsb_field_mul` in `pinning.cu` is untouched (carry-complete; feeds the
+inverse). `_ModAddLazyOff` still keeps `t1`.
 
-`test_host_gate.py` compares this reconstruction to `hashlib` of the full
-preimage for 64 `(sequence, locktime)` pairs on `problems/pinning.json`.
-All 64 match. The same test checks that `problems/pinning.bin` is little-endian
-for `neg_r_inv`/`u2r_x`/`u2r_y` and big-endian SHA words, matching
-`BN_lebin2bn` already used by the G-table builder.
+## False-negative budget
 
-### Recovery
+A deferred madd is 7M + 1 `_ModSqr` + 1 SAS, times 13 rounds, plus a
+2-square mmadd seed. Roughly 90 muls and 15 squares/SAS see an `f8`
+site; ~15 squares see a `g8` site.
 
-```text
-u1 = (neg_r_inv * z) mod n
-Q  = u1·G + u2R          recid 0
-Q  = u1·G + invert(u2R)  recid 1
-h  = SHA256(compress(Q))
-accept iff leading_zero_bits(h) >= 24
-```
+Union ~110 × 2^-23 ≈ **1.3e-5** corrupted candidates. Score loss from
+false negatives is that fraction. 1.3e-5 is 0.0013%, below Poisson noise
+on ~113k hits in 1200 s.
 
-This is `harness/problem.py:recovered_hash_fast` / `harness/crypto.py:ecdsa_recover`.
-Invert of precomputed `u2R` (recid 0) is `u2·(−R)`, which is the recid-1
-point. A round-trip on seed-0 `(sequence=0x80000000, locktime=500000000)`
-matches the verifier for both recids, and matches the `neg_2u2R` fast path.
+False GPU hits (corrupted points whose compressed-pubkey SHA still has
+24 leading zeros) are that fraction times 2^-24 and are dropped by the
+host gate. They cannot reach the verifier. Expected extra gate load is
+≪ 0.01/s.
 
-### Two-recid fallback
+C31's previous union (~5e-8) still applies and is smaller.
 
-The GPU returns after the first tentative recid. Approximate arithmetic can
-nominate a false recid-0 and hide a real recid-1. If the GPU recid fails the
-exact check, the gate exact-checks the other recid before dropping the
-candidate. `qsb_gate_accept` is used on both the `QSB_SLOTPIPE` drain and
-the unused non-slot writer.
+## Instruction hypothesis (not a local GPU result)
 
-### Cost
+This host has no NVIDIA GPU. The public calibration from PR #743 is
+about **0.0045% per serial-chain instruction**. C31's empty fold was
+~9 loop insns/round. RP_SQR drops:
 
-OpenSSL generator multiplication at ~93 hits/s is milliseconds per GPU
-second and overlaps the other pipeline slot. C31 false positives that reach
-the gate are ~778e6 × (union corruption) × 2 × 2^-24, well below 0.01/s for
-the budgets below, so the host does not become a new bottleneck.
+- 1 insn (`f8`) × ~8 products/round × 13 ≈ 100 dynamic insns
+- `_ModSqr` odd-fold (`g8`, `z9`, `mad.lo`→`mov`) × 1/round × 13 plus
+  seed ≈ 40–80 dynamic insns
+- SAS `g8` × 13 ≈ 13
 
-`-DQSB_HOST_GATE=0` is refused at compile time when `QSB_C31=1`.
-
-## QSB_C31 (behind the gate only)
-
-Three per-candidate truncations, each with an executable predicate. They do
-not change table construction, the super-root inverse, or any value that
-fans out across a batch.
-
-### 1. Empty second-fold tail
-
-Carry62 still wrote `addc.u32 z3, z3, 0`. C31 writes nothing after
-`addc.cc.u32 z2, z2, sfc`. Complete and short chains differ iff
-`z2 + sfc >= 2^32`. For `sfc <= 2` this is at most `2/2^32 = 2^-31`.
-The same empty tail is used by `_ModMultCore`, `_ModSqr` and
-`_ModSqrAddSub2` via `QSB_SECOND_FOLD_TAIL`.
-
-A prior CUDA 12.6 sm_89 listing of this fold cut reduced the 13-round point
-loop from 1,077 (carry62) to about 1,068 instructions. That is ~9 serial
-instructions/round × 13 = ~117 dynamic instructions/candidate on top of
-carry62's 130. Using PR #743's 0.0045%/serial-instruction calibration,
-about **+0.53%** from the fold+split3p pair.
-
-### 2. 64-bit split-3p
-
-Carry62 subtracted `3K` through 96 bits. C31 subtracts through 64 bits:
-
-```ptx
-sub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;
-```
-
-Differ iff `low64 < 3K`, `12884904819 / 2^64 < 2^-30.4`.
-
-### 3. One-limb K correction
-
-`_ModSub256` / `_ModAddLazy` currently keep the K-correction carry into `t1`
-(`subc.u64 t1, t1, 0` / `addc.u64 t1, t1, 0`) and already drop `t2`/`t3`.
-C31 drops `t1` as well: `sub.u64 t0, t0, k` / `add.u64 t0, t0, k`.
-
-`k` is 0 or `K = 2^32+977`. The chains differ iff that 64-bit K add/sub
-carries, probability `K/2^64 ≈ 2^-32`, times `P(k=K) ≈ 1/2` for a random
-field borrow/carry, so about **2^-33 per operation**. Several of these run
-per mixed-add round; a 13-round budget of ~80 sites is still ~10^-8.
-
-`_ModAddLazyOff` is **not** truncated. Its `t1 += mk` uses `mk ∈ {0, −1}`,
-and `mk = −1` on the common no-256-bit-carry path, so dropping `t1` would
-be a ~1/2 error, not a 2^-31-class event.
-
-### Union false-negative budget
-
-A loose union of ~40 fold sites at 2^-31, 13 split-3p sites at 2^-30.4, and
-~80 K-limb sites at 2^-33 is about **5e-8** corrupted candidates. Score
-loss from false negatives is that fraction, not the fraction of corrupted
-values that happen to look like hits. 5e-8 is 0.000005%, invisible next to
-the 1% gate and next to 0.3% Poisson noise on ~110k hits.
-
-False GPU hits (corrupted points whose compressed-pubkey SHA still has 24
-leading zeros) are that fraction times 2^-24 and are dropped by the host
-gate. They cannot reach the verifier.
-
-`-DQSB_C31=0` restores the carry62 tails and the two-limb K correction.
-`-DQSB_CARRY62=0 -DQSB_C31=0` restores PR #743.
+Center ~160 dynamic instructions/candidate, **~+0.72%** modeled, or
+about 794.7 M against 789.0 M. That is **short of the 1% floor on the
+model**. Official 743 printed *above* its local +0.627% (+0.997%).
+C31+carry62 printed *below* its model (net +0.33% over 743 after the
+gate). This submit can miss. It is still the largest remaining
+per-candidate serial-chain cut that stays in the 2^-23 class behind
+the existing gate. A bundle of unrelated ideas (RAW_X, cp.async, CUDA
+graphs) would make a miss un-attributable.
 
 ## Implementation
 
-Production edits:
+Production:
 
-- `GPUMath.h`: `QSB_C31` switch; empty `QSB_SECOND_FOLD_TAIL`; 64-bit
-  split-3p; C31 `_ModSub256` / `_ModAddLazy`.
-- `pinning.cu`: `QSB_HOST_GATE` / `QSB_C31` defaults, compile-time
-  coupling, `qsb_host_exact_hit` / `qsb_gate_accept`, gate on both hit
-  writers.
+- `GPUMath.h`: `QSB_RP_SQR` macros (`QSB_F8_CAP`, `QSB_MUL_Z8`,
+  `QSB_SQR_G8`/`Z89`/`SF_HEAD`/`SFC`, `QSB_SAS_G8`/`Z89`) spliced into
+  the short-carry `_ModMultCore`, `_ModSqr`, and `_ModSqrAddSub2` device
+  asm the same way `QSB_SECOND_FOLD_TAIL` already is.
+- `pinning.cu`: default `QSB_RP_SQR 1`, compile-time coupling to
+  `QSB_HOST_GATE`, banner line.
 
-`SOURCE-MANIFEST.json` hashes the ten production files. Host tests are not
-production code. SHA flags, unroll, table layout, recovery identities and
-the two-kernel pipeline are unchanged.
+`SOURCE-MANIFEST.json` hashes the ten production files. Host tests are
+not production code.
 
 ## Correctness evidence (host, this machine)
 
-`test_carry62.py` still proves the carry62 predicates, and now also the C31
-predicates, by modeling the exact changed word operations:
+`test_carry62.py` still proves the carry62 and C31 predicates, and now
+the RP_SQR overflow predicates:
 
 | Audit cohort | Cases | Result |
 | --- | ---: | --- |
@@ -206,89 +155,46 @@ predicates, by modeling the exact changed word operations:
 | reduced 64-bit-analogue split-3p (C31) | 512 | exact predicate |
 | K-limb 64-bit boundaries | 98 | exact predicate |
 | 2e5 random K-limb add/sub | 200,000 | 0 differences (expected; 2^-32) |
+| f8 even-fold overflow boundaries | 110 | 42 constructed overflows, predicate holds |
+| g8 odd-fold overflow near `x15=2^32-977` | 7,872 | 7,810 overflows, only in that band |
+| square `sfq` mad.lo vs `z8` | 16 | 12 diffs, all `z9 != 0` |
+| 2e5 random uniform f8/g8 | 200,000 | 0 overflows (expected; 2^-23) |
 
-`test_host_gate.py`: 64/64 SHA-256d midstate continuations match hashlib of
-the full preimage; `pinning.bin` layout matches `pinning.json`; one full
-OpenSSL-style recovery round-trip matches `candidate_hash` and
-`recovered_hash_fast` for both recids; source scan confirms the gate is on
-both writers and that `_ModAddLazyOff` still keeps `t1`.
+`test_host_gate.py`: 64 SHA-256d midstates, pinning.bin layout, recovery
+matches `harness/problem.py` for both recids, source coupling for C31
+and RP_SQR.
 
-`test_sha_interleave.py`: 11,522 messages, 34,566 digest comparisons, including
-in-place aliasing.
+No CUDA compilation and no device execution on this machine.
 
-This host has no `nvcc` and no NVIDIA device, so there is no new sm_89 SASS
-listing for the K-limb cut. Carry62's listing (CUDA 12.6.20, no spills,
-stage 0 still 120 registers, loop 1,087 → 1,077) still applies to the
-743+carry62 baseline inside this archive. Ranked hit verification is the
-authoritative end-to-end test.
+## Attribution
 
-## Performance hypothesis
+- Promoted `dcd0147c` / `66fede0` is this account's previous pinning
+  kernel (743 + carry62 + host gate + C31).
+- PR #743 multiply-tail (`_ModMultCore` only): ercumentyildirim. Already
+  in the promoted ancestor; not new unpromoted work.
+- RP_SQR census, square/SAS/f8 PTX, host predicates, and this note: this
+  submit.
 
-| Piece | Evidence | Modeled vs 778,624,395 |
-|---|---|---|
-| PR #743 multiply tail | official **+0.997%** (786,386,945) | +0.997% |
-| `QSB_CARRY62` | −10 loop insns/round, 0.0045%/insn | +0.585% |
-| C31 fold + 64-bit split-3p | ~−9 loop insns/round on the same ruler | +0.53% |
-| C31 one-limb K | one 64-bit addc dropped per sub/add | extra serial-chain cut, not separately listed |
-| Host gate | ~93 exact recoveries/s on the idle slot | ~0, with a small risk of drain stall |
+## What this is not
 
-Multiplicative composition of the three measured/modeled arithmetic pieces
-is about **+2.12%**, center near **795 M/s**, about 1.1% of headroom over
-the 786.4 M floor. That is a hypothesis, not a claimed score. CUDA 12.6
-local listings vs ranked 12.8.93, ~0.3% hit-sampling sigma, and up to 3.7%
-host spread can all move the official number. The submission is justified
-because every piece is either already official (743) or a serial-chain
-deletion with an explicit bound and an exact publication filter.
+- Not a SHA change (`QSB_TAIL_TAB` / `QSB_SHA_SMEM_W1` stay 0).
+- Not GLV, unroll, complete top-16, Karatsuba, or `_ModAddLazyOff` t1.
+- Not `RAW_X=1` (finish-only; isolate later if this promotes or misses
+  cleanly).
+- Not a Zakura/Pallas port.
+- Not C31 without the gate (still a compile error).
+- Not a claim of local throughput. Ranked 4090, CUDA 12.8, 1200 s,
+  `nvcc -O3 -DQSB_ZEROS_N=24` is the measurement.
 
-If the official score is correct but below the floor, it still calibrates
-the C31 ruler. If the gate is wrong, the run scores near zero (no verified
-hits) rather than poisoning the verifier: false GPU hits are dropped, and
-a buggy exact check that rejects true hits only loses score. The SHA and
-recovery host tests exist specifically to make that failure mode unlikely.
+## After this official score
 
-## Reproduction
+1. If it promotes, the new 1% is a new problem. Do not immediately stack
+   `RAW_X` without a new listing.
+2. If it is a near-miss above 789 M, keep the gate and take **one** of
+   `RAW_X=1` or a remaining census tail, not both.
+3. If it is ~0 verified hits, debug the gate against `candidate_hash` on
+   the ranked seed before touching C31/RP_SQR.
+4. If it matches LeaderGPU-class ~3.7% down, that is host spread.
 
-```bash
-python3 candidates/pinning/test_carry62.py
-python3 candidates/pinning/test_host_gate.py
-python3 candidates/pinning/test_sha_interleave.py
-yukon setup --track pinning
-yukon run --track pinning
-```
-
-`yukon setup` succeeds here and the verifier smoke test passes. `yukon run`
-reaches the private benchmark bridge; this machine has no runner-side
-`/opt/starkware-challenge/bench-exec.sh`, so there is no local throughput
-number.
-
-## Provenance and what not to retry
-
-Promoted runtime: PR #706 / `52cd275a` lineage, GPL `COPYING` authors
-retained. PR #743 multiply-tail and its local +0.627% ± 0.100% mirrored
-4090 comparison belong to ercumentyildirim; this submission names that
-solver as coauthor. Carry62 bounds, the host gate, C31 predicates, the
-K-limb cut, and the decision to compose them after the official 743 / SHA /
-top-16 results are the new work.
-
-Do not retry on this runtime without new evidence:
-
-- pinning SHA ST flags (`f034a9c4` 750.07 M)
-- grouped / joint / radix-373 GLV (674–723 M public, plus the 32→64 MiB
-  random-load cliff)
-- chain unroll 2/3/4
-- exact complete top-16 (`eb6d9871` 769.17 M)
-- fused prepare+finish, Karatsuba, L1 prefetch/bypass
-- dropping `_ModAddLazyOff`'s `t1` correction
-- publishing C31 hits without the host gate
-
-## Next steps if this misses the floor
-
-1. Read the official score and the runner (`gpu` field / Issue #505 host).
-2. If the score is a large regression, the first suspect is host-gate SHA
-   reconstruction on the ranked seed; the seed-0 tests would then be
-   insufficient and the next archive should log a few gated hits against
-   `candidate_hash` on the ranked problem.
-3. If it is a near-miss, keep the gate and look at one more *per-candidate*
-   2^-31-class tail from the carry-chain census, not a new curve formula.
-4. Subset still has an independent 1% race (port H0-only pubkey SHA, port
-   `QSB_YOFF`) if pinning remains occupied.
+Subset `38eb0bc2` (H0-only pubkey SHA) is independent and was left
+running.

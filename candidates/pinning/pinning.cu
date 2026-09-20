@@ -1,6 +1,3 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
-#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -27,8 +24,14 @@
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
+#ifndef QSB_RP_SQR
+#define QSB_RP_SQR 1     /* 743 odd-fold tail on squares + even-fold f8; needs HOST_GATE */
+#endif
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_RP_SQR && !QSB_HOST_GATE
+#error "QSB_RP_SQR requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
@@ -2008,11 +2011,22 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
      * its eight limbs do not lengthen the inverse's already pressured state. */
+#ifndef QSB_CONST_RECOVERY_ARGS
+#define QSB_CONST_RECOVERY_ARGS 1 /* 1: read the fixed R where it is used */
+#endif
+#if QSB_CONST_RECOVERY_ARGS
+    /* xR is four words of __constant__ storage and qsb_recovery_denominator
+     * takes that operand as const. The local copy pins four registers across
+     * the block-wide inverse; a constant-bank operand is read at the point of
+     * use and broadcast to the warp. Identical four words, read-only. */
+    qsb_recovery_denominator(qx,qzz,qy,qzzz,pin_u2rx_words,prod);
+#else
     {
         uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                              pin_u2rx_words[2],pin_u2rx_words[3]};
         qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
     }
+#endif
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
@@ -2048,6 +2062,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     prod[4]=0;
     (void)tree;
+#if QSB_CONST_RECOVERY_ARGS
+    /* Same for the finish: xR, yR and c are twelve run-constant words whose
+     * only uses are one subtract, one add plus its boundary test, and the
+     * parity fold's second operand. As locals they are twelve registers live
+     * across the whole recovery tail. */
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_packed_finish(
+        qy,qzzz,prod,weighted_inv,
+        (uint64_t *)pin_u2rx_words,(uint64_t *)pin_u2ry_words,
+        (uint64_t *)pin_recovery_c,q1x,q2x);
+#else
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
@@ -2057,6 +2082,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+#endif
 
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
@@ -2866,8 +2892,9 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
-    printf("  Host publication gate: %s; C31 approx: %s\n",
-           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
+    printf("  Host publication gate: %s; C31 approx: %s; RP_SQR: %s\n",
+           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off",
+           QSB_RP_SQR ? "on" : "off");
 
     /* The ranked problem geometry is fixed by harness/gen_problem.py
      * (PIN_SUFFIX_LEN=75, PIN_SEQ_OFFSET=31, 155 midstate blocks -> 9995 B),
