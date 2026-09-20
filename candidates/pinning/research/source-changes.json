@@ -1,0 +1,102 @@
+[
+  [
+    "pinning.cu",
+    "#if QSB_TREE_N != 256 && QSB_S0_THREADS == 256\n#undef QSB_S0_THREADS\n#define QSB_S0_THREADS QSB_TREE_N\n#undef QSB_S0_BLOCKS\n#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */\n#endif\n#if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD\n#error \"prepare block size must equal the tree width unless the tree is offloaded\"\n#endif",
+    "// Two logical128-leaf trees per physical256-thread prepare block.\nstatic_assert(QSB_TREE_N==128 && QSB_S0_THREADS==256 && QSB_S0_BLOCKS==2,\n              \"interleaved prepare geometry\");\nstatic_assert(!QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2 && !QSB_S0_SHM &&\n              !QSB_SHA_SMEM_W1 && !QSB_TAIL_TAB && QSB_TREE_TOP2,\n              \"grouped collective requires the audited production path\");\n__device__ __forceinline__ unsigned qsb_prepare_candidate_index() {\n    return blockIdx.x*256u+(threadIdx.x&1u)*128u+(threadIdx.x>>1);\n}"
+  ],
+  [
+    "pinning.cu",
+    "// First used as 15 per-lane digit planes (7.5 KiB) plus an optional ordinate\n// plane (4 KiB); after the handoff, the same 12 KiB holds the cofactor tree.",
+    "//15 physical-lane digit planes use15KiB; after the handoff, two128-leaf\n// trees reuse the same16KiB arena, overwriting consumed sibling slots."
+  ],
+  [
+    "pinning.cu",
+    "storage[12*QSB_TREE_N]",
+    "storage[8*QSB_S0_THREADS]"
+  ],
+  [
+    "pinning.cu",
+    "codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);",
+    "codes[(size_t)c*QSB_S0_THREADS+threadIdx.x]=idx|(neg<<31);"
+  ],
+  [
+    "pinning.cu",
+    "uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];",
+    "uint32_t code=codes[(size_t)c*QSB_S0_THREADS+threadIdx.x];"
+  ],
+  [
+    "pinning.cu",
+    "    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,\n    uint64_t (*unused)[2*QSB_TREE_N]) {\n    (void)unused;qsb_decode_to_shared(k);",
+    "    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {\n    qsb_decode_to_shared(k);"
+  ],
+  [
+    "pinning.cu",
+    "/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)\n * is dead during the fixed-base chain, so the chain may park cold per-thread\n * state there when QSB_S0_SHM is set. */\n__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {\n    __shared__ uint64_t products[4][2*QSB_TREE_N];\n    return products;\n}",
+    "// The live prepare path uses only qsb_digit_arena; no unused scratch allocation."
+  ],
+  [
+    "pinning.cu",
+    "    uint32_t lt_hi = (start_lt >> 8) + (uint32_t)(blockIdx.x >> 1);\n    w0 = pin_tail_words[0] | (uint32_t)(((blockIdx.x & 1u) << 7) | threadIdx.x);",
+    "    uint32_t lt_hi = (start_lt >> 8) + (uint32_t)blockIdx.x;\n    uint32_t low = (threadIdx.x&1u)*128u+(threadIdx.x>>1);\n    w0 = pin_tail_words[0] | low;"
+  ],
+  [
+    "pinning.cu",
+    "#include \"PackedRecovery.cuh\"",
+    "#include \"InterleavedCarry.cuh\"\n#include \"PackedRecovery.cuh\""
+  ],
+  [
+    "pinning.cu",
+    "static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128",
+    "static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==256 && QSB_S2_THREADS==128"
+  ],
+  [
+    "pinning.cu",
+    "    int idx = blockIdx.x * blockDim.x + threadIdx.x;",
+    "    int idx = STAGE==0 ? (int)qsb_prepare_candidate_index() : (int)(blockIdx.x*blockDim.x+threadIdx.x);"
+  ],
+  [
+    "pinning.cu",
+    "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());",
+    "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);"
+  ],
+  [
+    "pinning.cu",
+    "static_assert(QSB_S0_THREADS == 128 && (QSB_BATCH % 256) == 0,",
+    "static_assert(QSB_S0_THREADS == 256 && (QSB_BATCH % 256) == 0,"
+  ],
+  [
+    "pinning.cu",
+    "\"QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch\"",
+    "\"QSB_SHA_UNIF needs interleaved256-thread prepare blocks and a256-aligned batch\""
+  ],
+  [
+    "PackedRecovery.cuh",
+    "    uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();\n    uint64_t (*excluded)[QSB_RECOVERY_N]=(uint64_t (*)[QSB_RECOVERY_N])(qsb_digit_arena()+8*QSB_TREE_N);\n    qsb_cofactor_prepare<QSB_RECOVERY_N>(D,roots,products,excluded);",
+    "    uint64_t (*products)[4*QSB_RECOVERY_N]=(uint64_t (*)[4*QSB_RECOVERY_N])qsb_digit_arena();\n    qsb_interleaved_carry<QSB_RECOVERY_N,2>(D,roots,products,((size_t)n+127u)/128u);"
+  ],
+  [
+    "PackedRecovery.cuh",
+    "size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;",
+    "size_t i=(size_t)qsb_prepare_candidate_index(),s=(size_t)n;"
+  ],
+  [
+    "pinning.cu",
+    " *   lt = start_lt + 128*blockIdx.x + threadIdx.x\n *      = 256*((start_lt>>8) + (blockIdx.x>>1)) + (((blockIdx.x&1)<<7) | threadIdx.x),\n * i.e. lt>>8 (all of W1) is block-uniform and byte 0 of lt is ((blockIdx.x&1)<<7)|threadIdx.x.",
+    " *   lt = start_lt +256*blockIdx.x +128*(threadIdx.x&1)+(threadIdx.x>>1).\n * Hence W1 is block-uniform and the low byte follows the interleaved candidate index."
+  ],
+  [
+    "pinning.cu",
+    "the stage-0 block must be 128 threads.",
+    "the stage-0 block must be256 interleaved threads."
+  ],
+  [
+    "pinning.cu",
+    "QSB_BATCH = 2^23, QSB_S0_THREADS = 128).",
+    "QSB_BATCH = 2^23, QSB_S0_THREADS =256)."
+  ],
+  [
+    "pinning.cu",
+    "start_lt is a multiple of 256, with 128-thread stage-0 blocks, so",
+    "start_lt is a multiple of256, with256-thread interleaved prepare blocks, so"
+  ]
+]

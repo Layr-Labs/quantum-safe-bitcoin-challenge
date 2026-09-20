@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "source_closure_changes": 20,
+  "unchanged_runtime_files": 7,
+  "SHA_index_wrap_checks": 27648,
+  "old_index_negative_control_differences": 27496,
+  "global_store_sector_comparisons": 8,
+  "arena_bytes": 16384,
+  "digit_bytes": 15360,
+  "root_and_active_tail_bounds": "PASS",
+  "native_compile": false,
+  "performance_measured": false
+}

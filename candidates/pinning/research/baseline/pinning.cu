@@ -210,15 +210,15 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_STREAM_PARM
 #define QSB_STREAM_ARG
 #endif
-// Two logical128-leaf trees per physical256-thread prepare block.
-static_assert(QSB_TREE_N==128 && QSB_S0_THREADS==256 && QSB_S0_BLOCKS==2,
-              "interleaved prepare geometry");
-static_assert(!QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2 && !QSB_S0_SHM &&
-              !QSB_SHA_SMEM_W1 && !QSB_TAIL_TAB && QSB_TREE_TOP2,
-              "grouped collective requires the audited production path");
-__device__ __forceinline__ unsigned qsb_prepare_candidate_index() {
-    return blockIdx.x*256u+(threadIdx.x&1u)*128u+(threadIdx.x>>1);
-}
+#if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
+#undef QSB_S0_THREADS
+#define QSB_S0_THREADS QSB_TREE_N
+#undef QSB_S0_BLOCKS
+#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */
+#endif
+#if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD
+#error "prepare block size must equal the tree width unless the tree is offloaded"
+#endif
 
 __device__ __forceinline__ void qsb_prefetch_l2(const void *p) {
     asm volatile("prefetch.global.L2 [%0];" :: "l"(p));
@@ -582,10 +582,10 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
 
-//15 physical-lane digit planes use15KiB; after the handoff, two128-leaf
-// trees reuse the same16KiB arena, overwriting consumed sibling slots.
+// First used as 15 per-lane digit planes (7.5 KiB) plus an optional ordinate
+// plane (4 KiB); after the handoff, the same 12 KiB holds the cofactor tree.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
-    __shared__ uint64_t storage[8*QSB_S0_THREADS];return storage;
+    __shared__ uint64_t storage[12*QSB_TREE_N];return storage;
 }
 __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
@@ -634,19 +634,20 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
         int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
         uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
         uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_S0_THREADS+threadIdx.x]=idx|(neg<<31);
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
     }
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_S0_THREADS+threadIdx.x];
+    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
-    qsb_decode_to_shared(k);
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
@@ -1511,7 +1512,13 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
-// The live prepare path uses only qsb_digit_arena; no unused scratch allocation.
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
 
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
@@ -1777,18 +1784,18 @@ __device__ __forceinline__ void qsb_tail_w1_block(uint32_t start_lt, const qsb_t
 /* Live words W0, W1 of the locktime tail block for this thread's candidate.
  * Generic form: W0 = tail0 | (lt & 0xff), W1 = bytes 1..3 of lt in big-endian order
  * over tail1 (one byte).  QSB_SHA_UNIF form: the host launches only batches whose
- * start_lt is a multiple of256, with256-thread interleaved prepare blocks, so
- *   lt = start_lt +256*blockIdx.x +128*(threadIdx.x&1)+(threadIdx.x>>1).
- * Hence W1 is block-uniform and the low byte follows the interleaved candidate index.
+ * start_lt is a multiple of 256, with 128-thread stage-0 blocks, so
+ *   lt = start_lt + 128*blockIdx.x + threadIdx.x
+ *      = 256*((start_lt>>8) + (blockIdx.x>>1)) + (((blockIdx.x&1)<<7) | threadIdx.x),
+ * i.e. lt>>8 (all of W1) is block-uniform and byte 0 of lt is ((blockIdx.x&1)<<7)|threadIdx.x.
  * Identical words for every in-range lane; lanes with idx >= batch_size hash a locktime
  * past the end of the batch instead of start_lt, and their results are discarded by
  * `usable`/`active` exactly as before. */
 __device__ __forceinline__ void qsb_tail_message(uint32_t start_lt, uint32_t lt,
                                                  uint32_t &w0, uint32_t &w1) {
 #if QSB_SHA_UNIF
-    uint32_t lt_hi = (start_lt >> 8) + (uint32_t)blockIdx.x;
-    uint32_t low = (threadIdx.x&1u)*128u+(threadIdx.x>>1);
-    w0 = pin_tail_words[0] | low;
+    uint32_t lt_hi = (start_lt >> 8) + (uint32_t)(blockIdx.x >> 1);
+    w0 = pin_tail_words[0] | (uint32_t)(((blockIdx.x & 1u) << 7) | threadIdx.x);
     w1 = __byte_perm(lt_hi, pin_tail_words[1], 0x0124);
     (void)lt;
 #else
@@ -1805,9 +1812,8 @@ __device__ __constant__ uint64_t pin_recovery_c[4];
 
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
-#include "InterleavedCarry.cuh"
 #include "PackedRecovery.cuh"
-static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==256 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
+static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 
 /* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
  * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
@@ -1879,7 +1885,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
 ) {
-    int idx = STAGE==0 ? (int)qsb_prepare_candidate_index() : (int)(blockIdx.x*blockDim.x+threadIdx.x);
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (blockIdx.x * blockDim.x >= batch_size) return;
     int active = idx < batch_size;
     uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
@@ -1997,7 +2003,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2880,12 +2886,12 @@ int main(int argc, char **argv) {
     }
 #if QSB_SHA_UNIF
     /* QSB_SHA_UNIF derives the tail block's locktime bytes from blockIdx/threadIdx: every
-     * launched batch must start at a multiple of 256 and the stage-0 block must be256 interleaved threads.
+     * launched batch must start at a multiple of 256 and the stage-0 block must be 128 threads.
      * The batch size is checked here; the batch start (LT_MIN) is checked below, where it is
      * defined. Both hold for the ranked geometry (LT_MIN = 500000000 = 256*1953125,
-     * QSB_BATCH = 2^23, QSB_S0_THREADS =256). */
-    static_assert(QSB_S0_THREADS == 256 && (QSB_BATCH % 256) == 0,
-                  "QSB_SHA_UNIF needs interleaved256-thread prepare blocks and a256-aligned batch");
+     * QSB_BATCH = 2^23, QSB_S0_THREADS = 128). */
+    static_assert(QSB_S0_THREADS == 128 && (QSB_BATCH % 256) == 0,
+                  "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);

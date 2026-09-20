@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "symbolic_ordered_leaves": 768,
+  "raw_leaves": 50688,
+  "actual_PTX_leaves": 256,
+  "stats": {
+    "2": {
+      "scalar_shared_field_reads": 1016,
+      "warp_shared_field_read_issues": 37,
+      "max_bank_conflict": 1,
+      "read_edges": 1016
+    },
+    "4": {
+      "scalar_shared_field_reads": 2032,
+      "warp_shared_field_read_issues": 66,
+      "max_bank_conflict": 1,
+      "read_edges": 2032
+    }
+  },
+  "native_compile": false,
+  "production_integrated": true,
+  "limits": "Bank simulation assumes64bit16lane transactions. Source binding targeted, not full C++ interpreter. Candidate permutation and call sites are covered separately by audit_integration.py."
+}

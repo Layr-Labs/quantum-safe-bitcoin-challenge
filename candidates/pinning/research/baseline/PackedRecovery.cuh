@@ -56,15 +56,16 @@ __device__ __forceinline__ void qsb_packed_prepare(
     bool usable, bool active, int n, ulonglong2 *saved, uint64_t *roots) {
     // All lanes finish reading their digits/anchor before tree overwrites.
     __syncthreads();
-    uint64_t (*products)[4*QSB_RECOVERY_N]=(uint64_t (*)[4*QSB_RECOVERY_N])qsb_digit_arena();
-    qsb_interleaved_carry<QSB_RECOVERY_N,2>(D,roots,products,((size_t)n+127u)/128u);
+    uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();
+    uint64_t (*excluded)[QSB_RECOVERY_N]=(uint64_t (*)[QSB_RECOVERY_N])(qsb_digit_arena()+8*QSB_TREE_N);
+    qsb_cofactor_prepare<QSB_RECOVERY_N>(D,roots,products,excluded);
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
-        size_t i=(size_t)qsb_prepare_candidate_index(),s=(size_t)n;
+        size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
         qsb_st_v2(&saved[1*s+i],vbar[2],vbar[3]);
