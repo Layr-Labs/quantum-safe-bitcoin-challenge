@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "split_cases": 21033,
+  "coefficient_checks": 46132,
+  "rounding_boundary_inputs": 258,
+  "split_correction_branches": {
+    "0": 22009,
+    "-v2": 495,
+    "-v1": 22,
+    "+v2": 514,
+    "+v1": 26
+  },
+  "quotient_high_histogram": [
+    13120,
+    29227,
+    3785
+  ],
+  "final_quotient_corrections": 256,
+  "end_to_end_fixed_word_cases": 2033,
+  "max_quotient_high_proved": 2,
+  "single_comparison_bound_proved": true,
+  "cuda_constant_checks": 10,
+  "source_u32_multiply_count": "coefficient 32+20+5=57 each; split low160 products 14 each x4=56; total170 before compiler zero-constant folding",
+  "scope": "Exact u32 semantic mirror and bigint oracle. Integrated source; no local C++/CUDA compile or GPU timing."
+}

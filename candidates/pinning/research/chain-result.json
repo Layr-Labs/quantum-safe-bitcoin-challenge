@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "table_entries_ranked": 785209,
+  "host_rows": 5232,
+  "host_ladder_point_checks": 260,
+  "full_scalar_instance_checks": 80,
+  "oriented_table_point_checks": 1120,
+  "exceptional_sequences": 142,
+  "state_events": {
+    "identity_skip": 647,
+    "first": 266,
+    "seed": 228,
+    "madd": 1726,
+    "double": 52,
+    "seed_opposite": 15,
+    "madd_opposite": 36
+  },
+  "scope": "Exact-field source-shaped chain model and independent EC oracle. Production arithmetic retains promoted approximate field operations; this is not native CUDA execution."
+}
