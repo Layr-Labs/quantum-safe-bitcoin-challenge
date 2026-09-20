@@ -1794,11 +1794,10 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #endif
 #endif
 
-  _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
-                                       // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, T);                 // V - X3
+  _ModSub256(Q, Q, T);                 // V - X3; Ycore does not read ZZ3/ZZZ3
   _ModMult(Q, R);                      // R*(V - X3)
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModMult(ZZ1, PP);                   // ZZ3 (after Ycore: R dies before the Z updates)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
