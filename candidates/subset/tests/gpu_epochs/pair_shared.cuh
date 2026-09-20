@@ -204,13 +204,71 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
     z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
 }
+/* QSB_EPOCH_SHA_PAIR (kill switch; 0 restores the two serial calls exactly).
+ * Both epochs of a paired block need the same shape of second-block SHA-256:
+ * one 64-round compression from the IV over a 16-word block whose first eight
+ * words are that epoch's window midstate and whose last eight are fixed
+ * padding (0x80000000, six zero words, length 0x100).  The promoted body runs
+ * them one after the other, so the lane sits on two strictly serial 64-round
+ * dependency chains - 128 dependent rounds, each waiting on the previous t1,
+ * with no independent work to hide the S1/Ch/S0/Maj latency.
+ * This routes both through the interleaved round schedule the tree already
+ * ships for the two recovery-id gate blocks (QSB_GATE_PAIR's QSB_GP_RND /
+ * QSB_GP_R2 / QSB_GP_WMIX via qsb_sha256_init_transform_pair), which emits
+ * round i of stream 0 and round i of stream 1 back to back out of two disjoint
+ * register sets.  That wrapper already writes all eight digest words, so no
+ * new round code is introduced; it is forward-declared here because its
+ * definition sits further down, after the macros.
+ * Exactness is exhaustive over the expansion, not statistical: per stream the
+ * emitted arithmetic is identical to _SHA256Transform from the IV (same
+ * I[0..7], same K[i] per round, same message words, the same three 16-word
+ * schedule mixes before rounds 16/32/48, same final I[j]+state[j] for all
+ * eight words), and the two streams share no variable (each round macro is
+ * expanded once on the 0-suffixed and once on the 1-suffixed registers, each
+ * QSB_GP_WMIX touches one schedule).  Both scalars are therefore bit-identical
+ * for every input, so the tentative-hit set is unchanged and
+ * kernel_verify_pair_hits re-derives exactly the same records.
+ * qsb_pair_second_sha_z stays in place, unmodified, for the kill-switch path
+ * and for qsb_k2s_front3 / qsb_k2s_front_exact. */
+#ifndef QSB_GATE_PAIR
+#define QSB_GATE_PAIR 1
+#endif
+#ifndef QSB_EPOCH_SHA_PAIR
+#define QSB_EPOCH_SHA_PAIR 1
+#endif
+#if QSB_EPOCH_SHA_PAIR && QSB_GATE_PAIR
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1);
+__device__ __forceinline__ void qsb_pair_pad_block(uint32_t *b2, const uint32_t *state){
+    #pragma unroll
+    for(int i=0;i<8;i++)b2[i]=state[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for(int i=9;i<15;i++)b2[i]=0;
+    b2[15]=0x00000100;
+}
+__device__ __forceinline__ void qsb_pair_z_from_state(uint64_t *z, const uint32_t *s2){
+    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+}
+#endif
 __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     const uint32_t*firstA,const uint32_t*firstB,int lane){
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if QSB_EPOCH_SHA_PAIR && QSB_GATE_PAIR
+    uint32_t bA[16],bB[16],sA[8],sB[8];
+    qsb_pair_pad_block(bA,stateA);
+    qsb_pair_pad_block(bB,stateB);
+    qsb_sha256_init_transform_pair(sA,bA,sB,bB);
+    qsb_pair_z_from_state(out.a,sA);
+    qsb_pair_z_from_state(out.b,sB);
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
