@@ -20,32 +20,10 @@ __device__ __forceinline__ uint32_t qsb_difference_parity(
     return (uint32_t)((a[0]^b[0]^uint64_t(borrow))&1u);
 }
 
-#if QSB_PARITY_SUM
-// P9 parity of (+-(w+b)) mod p for raw w in [0,2^256) and canonical b != 0 (b = y(u2*R): secp256k1
-// has no point with y = 0). With c the carry of w+b and S its low 256 bits, w+b = y + k*p where
-// y = (w+b) mod p and k in {0,1,2}: k = c unless S[1..3] are all ones (a 2^-192 event), where
-// k = c + [S >= (c ? 2^256-2K : p)] and y = 0 exactly when S equals that bound. p is odd, so
-// par(y) = (w0^b0^k)&1 and par(-y mod p) = y ? 1^par(y) : 0.
-__device__ __forceinline__ uint32_t qsb_sum_parity(const uint64_t *w,const uint64_t *b,uint32_t neg) {
-    uint64_t s0,s1,s2,s3,c;
-    asm("add.cc.u64 %0,%5,%9;\n\taddc.cc.u64 %1,%6,%10;\n\taddc.cc.u64 %2,%7,%11;\n\t"
-        "addc.cc.u64 %3,%8,%12;\n\taddc.u64 %4,0,0;"
-        : "=l"(s0),"=l"(s1),"=l"(s2),"=l"(s3),"=l"(c)
-        : "l"(w[0]),"l"(w[1]),"l"(w[2]),"l"(w[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
-    uint32_t k=(uint32_t)c,zero=0u;
-    if((s1&s2&s3)==UINT64_MAX) {
-        const uint64_t lim=c ? 0xFFFFFFFDFFFFF85EULL : 0xFFFFFFFEFFFFFC2FULL;
-        if(s0>=lim){k+=1u;zero=(s0==lim);}
-    }
-    const uint32_t par=((uint32_t)(w[0]^b[0])^k)&1u;
-    return zero ? 0u : (par^neg);
-}
-#endif
-
 // Exact full-width residue; callers normalize before additions/parity.
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
-    uint64_t tmp[5];qsb_field_mul_sc(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
+    uint64_t tmp[5];qsb_field_mul(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
     Load256(out,tmp);
 }
 
@@ -66,17 +44,13 @@ __device__ __forceinline__ void qsb_packed_prepare(
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
-#if QSB_STREAM2
-        qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
-        qsb_st_v2(&saved[1*s+i],vbar[2],vbar[3]);
-        qsb_st_v2(&saved[2*s+i],tbar[0],tbar[1]);
-        qsb_st_v2(&saved[3*s+i],tbar[2],tbar[3]);
-#else
-        saved[0*s+i]=make_ulonglong2(vbar[0],vbar[1]);
-        saved[1*s+i]=make_ulonglong2(vbar[2],vbar[3]);
-        saved[2*s+i]=make_ulonglong2(tbar[0],tbar[1]);
-        saved[3*s+i]=make_ulonglong2(tbar[2],tbar[3]);
-#endif
+        /* Production vbar/tbar planes are the ~2 GiB/batch pipeline state.
+         * QSB_STREAM's .cs helpers were live on the checkpoint and the dead
+         * TREE_OFFLOAD W-plane; these four planes still used cached stores. */
+        qsb_st_v2(&saved[0*s+i], vbar[0], vbar[1]);
+        qsb_st_v2(&saved[1*s+i], vbar[2], vbar[3]);
+        qsb_st_v2(&saved[2*s+i], tbar[0], tbar[1]);
+        qsb_st_v2(&saved[3*s+i], tbar[2], tbar[3]);
     }
 }
 
@@ -85,43 +59,19 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *weighted_inv,
     uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
-#if QSB_LAZY_REC
-    /* u, v, l, m and sum only feed multiplies and borrow-corrected subtractions, which
-     * accept any representative in [0,2^256); only x1/x2 (hashed) and the parity inputs
-     * need [0,p). So u and v stay raw and m, sum use the carry-folding lazy add
-     * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
-    qsb_packed_raw_mul(u,tbar,weighted_inv);
-    qsb_packed_raw_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
-#else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
-#endif
-#if QSB_RAW_X
-    /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
-     * subtraction in _ModAdd256 still yields canonical x (qsb_add_boundary keeps the
-     * normalisation for the other case). */
-    _ModSub256(t,l,c); qsb_packed_raw_mul(x1,sum,t); qsb_add_boundary(x1,a); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_packed_raw_mul(x2,sum,t); qsb_add_boundary(x2,a); _ModAdd256(x2,x2,a);
-#elif !QSB_PARITY_SUM
-    _ModSub256(t,l,c); qsb_recovery_mul(x1,sum,t); _ModAdd256(x1,x1,a);
-    _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
-#endif
-#if QSB_PARITY_SUM
-    /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
-     * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
-     * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
-    _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
-    qsb_packed_raw_mul(u,l,s);
-    _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
-    qsb_packed_raw_mul(v,m,s);
-    return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
-}
-#else
-    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
+    _ModSubCanonicalRhs(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+    // Keep d=a-x=sum*(c-slope) directly for the parity products.
+    // u,v,l,m,sum,c and each multiplication result are canonical. The
+    // canonical-RHS subtraction helpers therefore retain their valid domain.
+    // Public identity: e4efcc74 (1eea69acec2e056d9cf7e59fc6b09067cc16bf56).
+    _ModSubCanonicalRhs(t,c,l); qsb_recovery_mul(x1,sum,t);
+    _ModSubCanonicalRhs(t,c,m); qsb_recovery_mul(x2,sum,t);
+    qsb_packed_raw_mul(s,l,x1); qsb_parity_boundary(s,b);
     uint32_t parity=qsb_difference_parity(s,b);
-    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t); qsb_parity_boundary(s,b);
+    _ModSubCanonicalRhs(x1,a,x1);
+    qsb_packed_raw_mul(s,m,x2); qsb_parity_boundary(s,b);
+    _ModSubCanonicalRhs(x2,a,x2);
     return parity|(qsb_difference_parity(b,s)<<1);
 }
-#endif

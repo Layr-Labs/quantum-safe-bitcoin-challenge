@@ -1,21 +1,2050 @@
 {
-  "production_source_sha256": {
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
-    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
-    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
-    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  "status": "Locally qualified with a fresh GO; upload must recheck all live sources.",
+  "runtime": {
+    "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973",
+    "files": {
+      "pinning.cu": "092a6aee46de85c7bdf8153f6d9b1b9c9187703bea0f898cb5618225271496ab",
+      "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+      "GPUMath.h": "71666b9ae6e54acbffdcf8c28f0232914f3f95574fb822db2192a1c24cf28e47",
+      "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+      "PointZero.cuh": "c5a96e24e7930f5588d284e07e1be449ad5a0a5061470ced4133a40a9fc6496f",
+      "FinalAffineGuard.cuh": "d6b4f62778e965f1698e24b67b8676b64a13fc6cf266e7191040a8550299f0f3",
+      "LeafRecovery.cuh": "b30303a0910a97a5249ad27b437fb90246c8db76a8d52344775800e97bb02f13",
+      "cofactor_checkpoint.h": "7d0a6b4f0ad80215190eea5eba67611ff897f487354aaf5b1cf1d3f1dc66e884",
+      "PackedRecovery.cuh": "8e8c41cc20c9705e471bf691fac7f8b3910048e380c022809779954d05b5e74e"
+    }
   },
-  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
-  "comparison_baseline_promoted_commit": "7b0a15b",
-  "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "sha_cpu_proof": {
+    "path": "research/paired-tree-latez-tailprecompute-1035/cpu-sha-review.json",
+    "sha256": "eead188a13c660adce5d506b1667ee54c51e3423c7809a593649ba59c8bfb374"
+  },
+  "shipped_sha_cpu_proof": {
+    "path": "research/tail-package-cpu-sha-1200/proof.json",
+    "sha256": "096e3f534b3e1450e07a49d8c9e454ddc86756771a38f8e681badf27c0be1d98"
+  },
+  "qualification_snapshot": {
+    "checked_at": "2026-09-20T20:10:05.171663+00:00",
+    "benchmark": {
+      "id": "b352879c-669f-44ef-98cd-ad3d34d0fefa",
+      "status": "open",
+      "sourceRef": "e876032f79e6f4f3af2732bbba39403e29f0e227",
+      "currentBestScore": 789011576,
+      "minScoreImprovementBips": 100
+    },
+    "peers": [
+      {
+        "digest": "7d72bebd20bdf4058fda6e3cc81675804cdf6417f488f42d21d15451fd1c5256",
+        "files": {
+          "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+          "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+          "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+          "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f"
+        },
+        "label": "frontier",
+        "commit": "e876032f79e6f4f3af2732bbba39403e29f0e227",
+        "own": false
+      },
+      {
+        "digest": "fa9d92771659563b7b75873f6f440167a75f4ee86a2e759587da285c5818c6d0",
+        "files": {
+          "pinning.cu": "a197e26811c7336c1b945c9350cab51134134b5509ee333839f9ef34d0016b13",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "f4e31de1158ec0456cdabc336020b974c8d296dbb0946669aff65fa98a5eacd8",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+          "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+          "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+          "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f"
+        },
+        "label": "07b61e21-3d00-47d6-a083-c892daefb433",
+        "commit": "04773bf7ea6aefbef043dcc301d2984be583e556",
+        "own": false
+      },
+      {
+        "digest": "d1f6eb904cbdb1c00c202eb99bed173ee705007e8ac451741e1eeac457649fa2",
+        "files": {
+          "pinning.cu": "dba584433305883b7d9064010b29987e28d6b1c173d723daf695a925bb543c7b",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+          "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+          "cofactor_checkpoint.h": "64041c05c618e1ed84fd3dd8e50dc6c4ae47e9c18a1a52c4a3c14e144bb093dc",
+          "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f"
+        },
+        "label": "23cca647-0caf-44ad-bfb6-6d17e209b1d5",
+        "commit": "d191f837b0eea9b7c1ed915c719e373a72d1aa66",
+        "own": false
+      }
+    ],
+    "unavailable_sources": [],
+    "own_pending": [],
+    "previously_sent_digests": [
+      "e265d339cce6e4fd40a70ef5da3f00070a834b621583a55e08d5773482e356fa",
+      "630dceda7e56ab857449aed66f811cf3dee9bfeadeebac8125222c09683c6c58",
+      "a9fe0901c435f1964a4c91d34fbf446598e4adc189bb545fb05e0f9c7a34cfcd",
+      "bf3c902095fa20c6658522e9906058c8f1241cc76f3df4f9d5529e1ebe4c54f5",
+      "e4568aca296d96412d7346ce60399dd9f8180d027dd8d20d195a612d65d09276",
+      "9a5bf73974c19955f8a75ca5ce88fdeaf2d25f1991d3c52f64b80546ad9bad9e",
+      "9bb3bc72456089a36a9d6bfd2b374357c08ec5a9d3322e8d3193c6960f7f8668",
+      "4abfbd769d47d2848b4e0af120568912fdeab4c5c39b598f3c3839db9975a266",
+      "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea",
+      "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+    ]
+  },
+  "evidence_registry": "research/competitive-evidence-tail-submission-20260920-2010.json",
+  "registry_sha256": "ca20e60b91b47ea5824336d711bbc3884ece234ce7a729459eba20820b438641",
+  "native_evidence": [
+    {
+      "path": "research/native-table-guard-latez-tail-1056/native-summary.json",
+      "sha256": "12b3bda1c8d4a85a230aab1d9279acfcdeaa7068d925750fe74b3177c33a3396"
+    },
+    {
+      "path": "research/native-table-guard-latez-tail-1056/extra-field-native-summary.json",
+      "sha256": "15a87b963b1bd98b7a70be7fcef482171a22c78b9f40dfb36fdb0f3d9b416272"
+    }
+  ],
+  "full_qualification": {
+    "source_directory": "research/full-only-treeboth-20260920-120605/gpu-evidence/candidate/candidates/pinning",
+    "result": {
+      "path": "research/full-only-treeboth-20260920-120605/gpu-evidence/logs/full-qualification.json",
+      "sha256": "bf1031e660da6b68eb48adf769287e6cae3a9d035b5ab545f7c0448ae24963b6"
+    },
+    "proof": {
+      "path": "research/full-only-treeboth-20260920-120605/gpu-evidence/logs/full-candidate/openssl-verification.json",
+      "sha256": "9816fa0d2f73319e08e9a3f6f74ec6051afdb3198c967193d9faf8885ee66dff"
+    },
+    "correctness_gates": [
+      {
+        "path": "research/native-table-guard-latez-tail-1056/native-summary.json",
+        "sha256": "12b3bda1c8d4a85a230aab1d9279acfcdeaa7068d925750fe74b3177c33a3396"
+      },
+      {
+        "path": "research/native-table-guard-latez-tail-1056/extra-field-native-summary.json",
+        "sha256": "15a87b963b1bd98b7a70be7fcef482171a22c78b9f40dfb36fdb0f3d9b416272"
+      }
+    ],
+    "artifact": {
+      "path": "research/full-only-treeboth-20260920-120605/gpu-evidence/logs/full-candidate/run.json",
+      "sha256": "91ddfdd1f09e17810663b2e317bba346e4dc4284298a8bff04daaaebecbe323d"
+    },
+    "problem": {
+      "path": "research/full-only-treeboth-20260920-120605/gpu-evidence/logs/full-problem/pinning.json",
+      "sha256": "a8964d13bf0d91c4e5446e8493e650180608f8e46011c908d441d53361ba1f8e"
+    },
+    "manifest": {
+      "path": "research/full-only-treeboth-20260920-120605/gpu-evidence/manifest.json",
+      "sha256": "c69913c13fc609876295d3d00284ab7bb9e0f2969e7529452bcc3f622962eb2a"
+    }
+  },
+  "independent_full_review": {
+    "path": "research/full-only-treeboth-20260920-120605/independent-full-review.json",
+    "sha256": "c30eb408de827da7c3d821a940c5d06d1d83fde95d3523804bf145ed0b4b506e"
+  },
+  "cohorts": [
+    {
+      "experiment": "queue-screen-latez-tail-research-1042",
+      "long": false,
+      "candidate_variant": "tail",
+      "rates": {
+        "control": [
+          772844744.3550394,
+          774476255.2442216
+        ],
+        "frontier": [
+          752491091.0429757,
+          748208401.8388544
+        ],
+        "tail": [
+          774556866.2796085,
+          772395871.9373373
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-latez-tail-research-1042/gpu-evidence/logs/summary.json",
+        "sha256": "8bcb2d846450987e7e8275158f976eea7b0560e82c4d28c614f26b365bfcacb0"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-latez-tail-research-1042/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-latez-tail-research-1042/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-latez-tail-research-1042/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "tail": {
+          "directory": "research/queue-screen-latez-tail-research-1042/tail",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-latez-tail-research-1042",
+      "long": true,
+      "candidate_variant": "tail",
+      "rates": {
+        "control": [
+          768941590.7632912,
+          768866115.696239
+        ],
+        "frontier": [
+          748920138.4698505,
+          740473675.1098573
+        ],
+        "tail": [
+          772027736.0738075,
+          770851550.4182198
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10311,
+      "summary": {
+        "path": "research/long-queue-latez-tail-research-1042/gpu-evidence/logs/summary.json",
+        "sha256": "e3660f9e4d991952bf1a8659c17793ab75f758e9bba7bd887c2d79947f5ddb15"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-latez-tail-research-1042/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "1fe32a1e2e76c19a306b3d1bf775b088b13d5bdfb550ef4ef3443e694f5b9fc9"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-latez-tail-research-1042/control",
+          "digest": "88567233f2d92041106d87309551cc31e6ba7aa6bb258b68b277a51f17b8e10d"
+        },
+        "frontier": {
+          "directory": "research/long-queue-latez-tail-research-1042/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "tail": {
+          "directory": "research/long-queue-latez-tail-research-1042/tail",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-current-1130",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "52cd275a": [
+          763373660.9911693,
+          755667188.1899576
+        ],
+        "5d094a84": [
+          747358847.1722808,
+          747577584.1506084
+        ],
+        "99b2a927": [
+          759836604.0370272,
+          758235812.3151243
+        ],
+        "ac3aa5b5": [
+          752610723.8552964,
+          748077051.1404663
+        ],
+        "control": [
+          773418606.2208321,
+          772467074.0056456
+        ],
+        "frontier": [
+          744882016.7183496,
+          742976053.9393882
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-current-1130/gpu-evidence/logs/summary.json",
+        "sha256": "c83ec864f8bd2e9fd9e2544b3ed6e07c9f78659c8867bdefe8e3fdd113324c24"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-current-1130/independent-hit-equivalence.json",
+        "sha256": "ca1cf2dd59f7ec25a076b13c0d658c4287895f85fd91d5f9a31b5c9a16fff71c"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-current-1130/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-tail-current-1130/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "5d094a84": {
+          "directory": "research/queue-screen-tail-current-1130/5d094a84",
+          "digest": "3c4d50d200340b5b3ce08d1480a9f8c283bff851cf5f9e82a2d74199e5dfb93a"
+        },
+        "52cd275a": {
+          "directory": "research/queue-screen-tail-current-1130/52cd275a",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "ac3aa5b5": {
+          "directory": "research/queue-screen-tail-current-1130/ac3aa5b5",
+          "digest": "af018fb8a34b1a2adc5f057df63f42f90c059cf52076a2b93e840ec3bb261820"
+        },
+        "99b2a927": {
+          "directory": "research/queue-screen-tail-current-1130/99b2a927",
+          "digest": "a25a926b7abc98c97108a44d194b86645caf7cc67eab2059f1d420b7b30d4143"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-current-1130",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "52cd275a": [
+          759394462.45797,
+          753522424.1061592
+        ],
+        "99b2a927": [
+          758799149.7804043,
+          755182713.4226137
+        ],
+        "control": [
+          770241848.5853249,
+          770528135.4502158
+        ],
+        "frontier": [
+          741308249.131665,
+          749176589.0837038
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10330,
+      "summary": {
+        "path": "research/long-queue-tail-current-1130/gpu-evidence/logs/summary.json",
+        "sha256": "768fdc1c5751a220d9ec02b462d1ff1ae2322a49df3b4871d4ae0900e025277f"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-current-1130/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "c4e648161f98d42a749bef99af53b3c4a8baea9ba7582a4c8c721e45d0867a70"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-current-1130/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "frontier": {
+          "directory": "research/long-queue-tail-current-1130/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "52cd275a": {
+          "directory": "research/long-queue-tail-current-1130/52cd275a",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "99b2a927": {
+          "directory": "research/long-queue-tail-current-1130/99b2a927",
+          "digest": "a25a926b7abc98c97108a44d194b86645caf7cc67eab2059f1d420b7b30d4143"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-9f78-6127-1209",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "61278ed3": [
+          756180236.3971828,
+          756727131.8316298
+        ],
+        "9f78b02e": [
+          744900515.1980283,
+          740978953.5605935
+        ],
+        "control": [
+          772904106.1281744,
+          771836256.7223023
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-9f78-6127-1209/gpu-evidence/logs/summary.json",
+        "sha256": "ae80cfef43073492867c8f6ac7c2bca68daf4083464481aac727d375f91c222f"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-9f78-6127-1209/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-9f78-6127-1209/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "9f78b02e": {
+          "directory": "research/queue-screen-paired-late-tail-9f78-6127-1209/9f78b02e",
+          "digest": "0b642541d7392a34cb14c5705747d4d544a0bd5e891d488725f93f1784a7257f"
+        },
+        "61278ed3": {
+          "directory": "research/queue-screen-paired-late-tail-9f78-6127-1209/61278ed3",
+          "digest": "96602bcfda96fe191131773c837c62be6f03694f617606004287956156382216"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-9f78-6127-1209",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "61278ed3": [
+          749338942.9351003,
+          749025454.8726329
+        ],
+        "9f78b02e": [
+          733076345.4950227,
+          736226128.5015159
+        ],
+        "control": [
+          768043596.5706142,
+          769870848.6465771
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10404,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-9f78-6127-1209/gpu-evidence/logs/summary.json",
+        "sha256": "a3ddfcdd4a6dcaca0be340c64c59b68909e2f00c1a7a890dacc179ccfc2ec34d"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-9f78-6127-1209/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "bff14c2156e0e2f1614f83c13d9409e276dd319f4f92d870e2ba21d838f9cbaa"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-9f78-6127-1209/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "9f78b02e": {
+          "directory": "research/long-queue-paired-late-tail-9f78-6127-1209/9f78b02e",
+          "digest": "0b642541d7392a34cb14c5705747d4d544a0bd5e891d488725f93f1784a7257f"
+        },
+        "61278ed3": {
+          "directory": "research/long-queue-paired-late-tail-9f78-6127-1209/61278ed3",
+          "digest": "96602bcfda96fe191131773c837c62be6f03694f617606004287956156382216"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-public-five-1243",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "6efddf37": [
+          765040623.0423956,
+          749274934.2361155
+        ],
+        "6fe3a564": [
+          750252996.9552883,
+          757969207.2317754
+        ],
+        "960da801": [
+          760444093.9435593,
+          766159955.6594067
+        ],
+        "control": [
+          771865443.4377834,
+          774708894.6324253
+        ],
+        "eb6d9871": [
+          760337829.4666559,
+          762913582.3198721
+        ],
+        "f034a9c4": [
+          753343399.6792175,
+          763829454.4344547
+        ],
+        "frontier": [
+          747117652.6541462,
+          759706439.2442652
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-public-five-1243/gpu-evidence/logs/summary.json",
+        "sha256": "bd5fc1451304aee8df0095ca342369a2fec2539fff8f55d5e5934835424cbe1c"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-public-five-1243/independent-hit-equivalence.json",
+        "sha256": "57021a456cb9a51eaafd6dbe83e7e6f53edbd2e2a2ef0c65f6a46ce9e68919fe"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-public-five-1243/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-tail-public-five-1243/frontier",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "960da801": {
+          "directory": "research/queue-screen-tail-public-five-1243/960da801",
+          "digest": "f4f7cd9fe3425dcda25504ed2ceea737567032bea47c6ace17001ec07aa6056d"
+        },
+        "f034a9c4": {
+          "directory": "research/queue-screen-tail-public-five-1243/f034a9c4",
+          "digest": "19ccb40d2a7f164b865e69bbf6f19ac04783e4b916ce3001149b6436df481798"
+        },
+        "eb6d9871": {
+          "directory": "research/queue-screen-tail-public-five-1243/eb6d9871",
+          "digest": "a54f42036625a2b78631e8b7bf0e4fa2ce38e1dbb19f8f99f464c0c59442c2d8"
+        },
+        "6efddf37": {
+          "directory": "research/queue-screen-tail-public-five-1243/6efddf37",
+          "digest": "0488a127cf2b9253f9bb3634f085ce8f171f28d204eb3e9c7dc0305928acb782"
+        },
+        "6fe3a564": {
+          "directory": "research/queue-screen-tail-public-five-1243/6fe3a564",
+          "digest": "dbdb14624c0fc7dc9e67e8a64924463b8f1d310b50e5c361350d7ac1a6955713"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-public-five-1243",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "6efddf37": [
+          747465138.5347801,
+          747882228.60533
+        ],
+        "960da801": [
+          758793126.5154532,
+          759298686.0116398
+        ],
+        "control": [
+          768869801.6858346,
+          769130595.0706323
+        ],
+        "eb6d9871": [
+          748919702.9826255,
+          751759098.7519466
+        ],
+        "f034a9c4": [
+          746253183.5682607,
+          750138639.6080996
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10510,
+      "summary": {
+        "path": "research/long-queue-tail-public-five-1243/gpu-evidence/logs/summary.json",
+        "sha256": "5a666bc52002e3180cb4da4907d764f4fa0c5d5a9841acade756d4493d500b3e"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-public-five-1243/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "2ac7e2557a743372ff8c286f85c2fb46586d2e4c963390444243b4902d04d19e"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-public-five-1243/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "960da801": {
+          "directory": "research/long-queue-tail-public-five-1243/960da801",
+          "digest": "f4f7cd9fe3425dcda25504ed2ceea737567032bea47c6ace17001ec07aa6056d"
+        },
+        "f034a9c4": {
+          "directory": "research/long-queue-tail-public-five-1243/f034a9c4",
+          "digest": "19ccb40d2a7f164b865e69bbf6f19ac04783e4b916ce3001149b6436df481798"
+        },
+        "eb6d9871": {
+          "directory": "research/long-queue-tail-public-five-1243/eb6d9871",
+          "digest": "a54f42036625a2b78631e8b7bf0e4fa2ce38e1dbb19f8f99f464c0c59442c2d8"
+        },
+        "6efddf37": {
+          "directory": "research/long-queue-tail-public-five-1243/6efddf37",
+          "digest": "0488a127cf2b9253f9bb3634f085ce8f171f28d204eb3e9c7dc0305928acb782"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-8b7a-1257",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "8b7a1b46": [
+          747119207.3316251,
+          744192328.3537948
+        ],
+        "control": [
+          773237265.3273689,
+          772258789.9417206
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-8b7a-1257/gpu-evidence/logs/summary.json",
+        "sha256": "b18bc3ead547aa0d4d8c1c6ef86b726ab3ba6486f37b9e4579bd96fc2b77015e"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-8b7a-1257/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-8b7a-1257/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "8b7a1b46": {
+          "directory": "research/queue-screen-paired-late-tail-8b7a-1257/8b7a1b46",
+          "digest": "a79c8dda009a84ef8657908e70188c896aad399787b2d0a0e1fb7d1f17064a5a"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-8b7a-1257",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "8b7a1b46": [
+          743647736.3444833,
+          745194226.6182672
+        ],
+        "control": [
+          770206189.9317164,
+          768068244.607516
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10434,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-8b7a-1257/gpu-evidence/logs/summary.json",
+        "sha256": "65b24054e56612f88526c5846debd63542e4554f151632ff1f3ffe39d9a47e49"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-8b7a-1257/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "fbd2c5c122924d9474750b52b15eac8464c364c02cf16a189cc3a236a2a5fe3b"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-8b7a-1257/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "8b7a1b46": {
+          "directory": "research/long-queue-paired-late-tail-8b7a-1257/8b7a1b46",
+          "digest": "a79c8dda009a84ef8657908e70188c896aad399787b2d0a0e1fb7d1f17064a5a"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-d9dd-1324",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          764040730.8063217,
+          773395507.1197132
+        ],
+        "d9dd0e75": [
+          760694241.554829,
+          759362564.9313089
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-d9dd-1324/gpu-evidence/logs/summary.json",
+        "sha256": "901ef32b4c2999b4830a527a3fd99529cc5dafde12c5252fa6330e5e3560928b"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-d9dd-1324/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-d9dd-1324/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "d9dd0e75": {
+          "directory": "research/queue-screen-paired-late-tail-d9dd-1324/d9dd0e75",
+          "digest": "68933abd45f5ba038a932ce8b281d700af0fcf008340d66168dfaef143ed235e"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-d9dd-1324",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          769964399.6970761,
+          770451186.2569703
+        ],
+        "d9dd0e75": [
+          751769951.3767484,
+          753566974.9305933
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10259,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-d9dd-1324/gpu-evidence/logs/summary.json",
+        "sha256": "fe7cf41624b0fc78db08b0c2423dc3488ad1ea554cb4c65d754bbf9dea794600"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-d9dd-1324/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "b05f7226865b17f401cebf199fdbcbd1d5cdb8e8dc8dc48026fee5a269e057c1"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-d9dd-1324/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "d9dd0e75": {
+          "directory": "research/long-queue-paired-late-tail-d9dd-1324/d9dd0e75",
+          "digest": "68933abd45f5ba038a932ce8b281d700af0fcf008340d66168dfaef143ed235e"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-current-three-1353",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "33a4c797": [
+          764727713.6806697,
+          757282011.5935556
+        ],
+        "control": [
+          774053857.2512534,
+          772009807.3574064
+        ],
+        "dcd0147c": [
+          755221952.3349122,
+          758257193.4770857
+        ],
+        "e6fe4c62": [
+          769474745.913802,
+          760969639.847375
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-current-three-1353/gpu-evidence/logs/summary.json",
+        "sha256": "ec23b601840edb23c846082587c458abc28a0d6e0d14bbf719a35bc18205f5b2"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-current-three-1353/independent-hit-equivalence.json",
+        "sha256": "c8043771c67ffa2d54ae09ebdbdf884d6bd0ded6316fa66a80f417f28a132f5c"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-current-three-1353/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "dcd0147c": {
+          "directory": "research/queue-screen-tail-current-three-1353/dcd0147c",
+          "digest": "7d72bebd20bdf4058fda6e3cc81675804cdf6417f488f42d21d15451fd1c5256"
+        },
+        "e6fe4c62": {
+          "directory": "research/queue-screen-tail-current-three-1353/e6fe4c62",
+          "digest": "80cedc366a0a2bd29f6d0eff8f0521c2bc13ed3258577a297e27bca5582b6def"
+        },
+        "33a4c797": {
+          "directory": "research/queue-screen-tail-current-three-1353/33a4c797",
+          "digest": "c6763497415d0d60bf400de1b5e7ce397b5be90a902fed8d346a38e6eabde7f2"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-current-three-1353",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "33a4c797": [
+          758857581.6339934,
+          755312100.8643793
+        ],
+        "control": [
+          769435671.1116043,
+          770220763.0107373
+        ],
+        "e6fe4c62": [
+          764434006.6997038,
+          757779139.5029137
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10226,
+      "summary": {
+        "path": "research/long-queue-tail-current-three-1353/gpu-evidence/logs/summary.json",
+        "sha256": "6c1664a847bbdc9463ba6a675f328ed12cc4e85b93cb7487192ef822c89077eb"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-current-three-1353/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "0b437fe10a2104181cb245de2ec061dac8e3ade5dc19760c0acfce52d4f1e02e"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-current-three-1353/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "e6fe4c62": {
+          "directory": "research/long-queue-tail-current-three-1353/e6fe4c62",
+          "digest": "80cedc366a0a2bd29f6d0eff8f0521c2bc13ed3258577a297e27bca5582b6def"
+        },
+        "33a4c797": {
+          "directory": "research/long-queue-tail-current-three-1353/33a4c797",
+          "digest": "c6763497415d0d60bf400de1b5e7ce397b5be90a902fed8d346a38e6eabde7f2"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-dcd0-5293-1421",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "5293208a": [
+          759746215.1397791,
+          760822174.5299115
+        ],
+        "control": [
+          769077807.60334,
+          773878698.9836652
+        ],
+        "dcd0147c": [
+          754602962.2280934,
+          760978348.9834774
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-dcd0-5293-1421/gpu-evidence/logs/summary.json",
+        "sha256": "916835f768390787f0e7b1104d3e2a8a58ac7794fbb696f7c6826608c16e6e19"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-dcd0-5293-1421/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-dcd0-5293-1421/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "dcd0147c": {
+          "directory": "research/queue-screen-tail-dcd0-5293-1421/dcd0147c",
+          "digest": "7d72bebd20bdf4058fda6e3cc81675804cdf6417f488f42d21d15451fd1c5256"
+        },
+        "5293208a": {
+          "directory": "research/queue-screen-tail-dcd0-5293-1421/5293208a",
+          "digest": "aabc91da0484613013cf07e50b4aea9d074654ca690688f1b6e1f815ba371346"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-dcd0-5293-1421",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "5293208a": [
+          753262872.0259353,
+          753727452.3714598
+        ],
+        "control": [
+          770235632.1285876,
+          767650855.50975
+        ],
+        "dcd0147c": [
+          746623856.4473205,
+          749738610.9237655
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10429,
+      "summary": {
+        "path": "research/long-queue-tail-dcd0-5293-1421/gpu-evidence/logs/summary.json",
+        "sha256": "6cf932ef03c093dcc0622a4280cd6e19e59757dce0020a63339fc095ff1dd862"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-dcd0-5293-1421/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "9e8943a31560f2db29a4e5f6ef836e6f2fc9ac47e3064e3dcb490e27e87b5522"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-dcd0-5293-1421/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "dcd0147c": {
+          "directory": "research/long-queue-tail-dcd0-5293-1421/dcd0147c",
+          "digest": "7d72bebd20bdf4058fda6e3cc81675804cdf6417f488f42d21d15451fd1c5256"
+        },
+        "5293208a": {
+          "directory": "research/long-queue-tail-dcd0-5293-1421/5293208a",
+          "digest": "aabc91da0484613013cf07e50b4aea9d074654ca690688f1b6e1f815ba371346"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-top16-private-1322",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          772406229.568385,
+          773036888.1213983
+        ],
+        "frontier": [
+          774200879.8442476,
+          761232094.3470031
+        ],
+        "top16": [
+          774406181.6991498,
+          771941056.0533911
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-top16-private-1322/gpu-evidence/logs/summary.json",
+        "sha256": "481fb65d786a9cca4e3be93e7234aa615f11dd2fe11fcf3ee753de6bdc560ce5"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-top16-private-1322/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-top16-private-1322/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-tail-top16-private-1322/frontier",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "top16": {
+          "directory": "research/queue-screen-tail-top16-private-1322/top16",
+          "digest": "af5499356e75894680c2a6717fc327b6af70ea3c35266347ce2658484e091de8"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-3fcd-1432",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "3fcda0f6": [
+          756188370.9506059,
+          758182927.1250019
+        ],
+        "control": [
+          775865829.8486984,
+          775119770.4064599
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-3fcd-1432/gpu-evidence/logs/summary.json",
+        "sha256": "bb59e718076a2474816b408391e35ad3207aa7976562b863859f94a00f8ebc1a"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-3fcd-1432/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-3fcd-1432/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "3fcda0f6": {
+          "directory": "research/queue-screen-paired-late-tail-3fcd-1432/3fcda0f6",
+          "digest": "6175aa23d63a143ecbc2a5e2fe28d5825d32ed08a7b77dd349e2139ae5d021f4"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-3fcd-1432",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "3fcda0f6": [
+          755806966.0838425,
+          756430718.9425411
+        ],
+        "control": [
+          769527088.3274592,
+          769801786.4858466
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10421,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-3fcd-1432/gpu-evidence/logs/summary.json",
+        "sha256": "775fd2736d9e972fab27d05f5976709889b8c6416991f5da7d0b15436e0ed9e2"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-3fcd-1432/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "97380344a6d12004ee48d3143a16d07f5587923c3b3493e6eb2d0949eb343fbb"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-3fcd-1432/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "3fcda0f6": {
+          "directory": "research/long-queue-paired-late-tail-3fcd-1432/3fcda0f6",
+          "digest": "6175aa23d63a143ecbc2a5e2fe28d5825d32ed08a7b77dd349e2139ae5d021f4"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-8e54-1450",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "8e54223c": [
+          761856709.484767,
+          751261682.9482
+        ],
+        "control": [
+          774033584.4020815,
+          772786978.2629863
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-8e54-1450/gpu-evidence/logs/summary.json",
+        "sha256": "93c10d12b2875413a198ccfce680960e642ac7a083a326ecb5bc79d0a356ce09"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-8e54-1450/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-8e54-1450/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "8e54223c": {
+          "directory": "research/queue-screen-paired-late-tail-8e54-1450/8e54223c",
+          "digest": "ddd6b54af68f6fde72521ee6311a976963b1a4ce5dad0a3e16d6f62946111d82"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-8e54-1450",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "8e54223c": [
+          755904218.1903642,
+          754284388.0805695
+        ],
+        "control": [
+          770273722.1579297,
+          769102080.3122206
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10429,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-8e54-1450/gpu-evidence/logs/summary.json",
+        "sha256": "4e3f22f2dcd07083f6b50304b44b203f62a36a700d6f640d41b4af7a98ba8b7a"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-8e54-1450/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "9e8943a31560f2db29a4e5f6ef836e6f2fc9ac47e3064e3dcb490e27e87b5522"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-8e54-1450/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "8e54223c": {
+          "directory": "research/long-queue-paired-late-tail-8e54-1450/8e54223c",
+          "digest": "ddd6b54af68f6fde72521ee6311a976963b1a4ce5dad0a3e16d6f62946111d82"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-top16-private-1425",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          769787278.6538869,
+          771013078.930077
+        ],
+        "frontier": [
+          761805324.800309,
+          754060718.7102889
+        ],
+        "top16": [
+          768678600.1227186,
+          769039277.1531664
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10382,
+      "summary": {
+        "path": "research/long-queue-tail-top16-private-1425/gpu-evidence/logs/summary.json",
+        "sha256": "feb5b4801fd1ae13c3e8461b58b821acac30c81a828b24ca80dcedcd0e59c069"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-top16-private-1425/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "dae21f2bd55defa3efe558dea4f4fad08809119d9bb9584892220f9bf1cefbce"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-top16-private-1425/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "frontier": {
+          "directory": "research/long-queue-tail-top16-private-1425/frontier",
+          "digest": "261f82645f28335616673ca010ad1f9a61dd1286f0d113bb9bdd35107ecc16ef"
+        },
+        "top16": {
+          "directory": "research/long-queue-tail-top16-private-1425/top16",
+          "digest": "af5499356e75894680c2a6717fc327b6af70ea3c35266347ce2658484e091de8"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-public-two-1604",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "993294ca": [
+          757592156.8272374,
+          759280174.7769135
+        ],
+        "b0fbfb1a": [
+          765291178.7967491,
+          760459340.2993135
+        ],
+        "control": [
+          773440623.2069598,
+          774041738.2559913
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-public-two-1604/gpu-evidence/logs/summary.json",
+        "sha256": "550200b66c00ef8e6321fe21e84618a1bf96c5bd508e67ddd8de14293b5cc0cd"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-public-two-1604/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-public-two-1604/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "b0fbfb1a": {
+          "directory": "research/queue-screen-tail-public-two-1604/b0fbfb1a",
+          "digest": "c38cc14742f711a0a66dd7b51ce6671fe37252d231016667b36f37ba636b3863"
+        },
+        "993294ca": {
+          "directory": "research/queue-screen-tail-public-two-1604/993294ca",
+          "digest": "c267e4f890ee194f1f1536eb3e0b94a184fdfd8d237b1a942c5577bfe440a0c4"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-public-research-long-1604",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "993294ca": [
+          754623044.4408545,
+          751184878.8295764
+        ],
+        "b0fbfb1a": [
+          760573201.770824,
+          755514350.460007
+        ],
+        "control": [
+          769747940.8632616,
+          769691778.2599987
+        ],
+        "explicit": [
+          770937748.5670686,
+          769554209.2054278
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10309,
+      "summary": {
+        "path": "research/long-queue-tail-public-research-long-1604/gpu-evidence/logs/summary.json",
+        "sha256": "0f5a87bfddda5f06d211fe0683339053b6aafbdb3cc6e2be8e8782358beeb08f"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-public-research-long-1604/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "c4c2490c899e0e790d917f9fa9acc131ccea4f3857035f6893177d7582a37ebd"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-public-research-long-1604/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "b0fbfb1a": {
+          "directory": "research/long-queue-tail-public-research-long-1604/b0fbfb1a",
+          "digest": "c38cc14742f711a0a66dd7b51ce6671fe37252d231016667b36f37ba636b3863"
+        },
+        "993294ca": {
+          "directory": "research/long-queue-tail-public-research-long-1604/993294ca",
+          "digest": "c267e4f890ee194f1f1536eb3e0b94a184fdfd8d237b1a942c5577bfe440a0c4"
+        },
+        "explicit": {
+          "directory": "research/long-queue-tail-public-research-long-1604/explicit",
+          "digest": "02f82f4181072b813a5f00602bab73298f0140d1c959d856f4d9cce9e994936a"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-top16-explicit-private-1453",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          773967818.893192,
+          772550158.6795276
+        ],
+        "explicit": [
+          774919111.1284484,
+          771723625.2285392
+        ],
+        "frontier": [
+          766134903.4037249,
+          759411676.6473712
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-top16-explicit-private-1453/gpu-evidence/logs/summary.json",
+        "sha256": "975932464d2d5e6f0ae005f3d86e701cbc1a6df14179f3be56b66029861c9035"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-top16-explicit-private-1453/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-top16-explicit-private-1453/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-tail-top16-explicit-private-1453/frontier",
+          "digest": "7d72bebd20bdf4058fda6e3cc81675804cdf6417f488f42d21d15451fd1c5256"
+        },
+        "explicit": {
+          "directory": "research/queue-screen-tail-top16-explicit-private-1453/explicit",
+          "digest": "02f82f4181072b813a5f00602bab73298f0140d1c959d856f4d9cce9e994936a"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-42b8-1610",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "42b8009c": [
+          762740280.3420738,
+          760321536.7523601
+        ],
+        "control": [
+          774980705.7139689,
+          774085697.3874614
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-42b8-1610/gpu-evidence/logs/summary.json",
+        "sha256": "9def4fd933eec48fee4603d300d0268a740672fc1d174c0b19d1f9fb24c27c57"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-42b8-1610/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-42b8-1610/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "42b8009c": {
+          "directory": "research/queue-screen-paired-late-tail-42b8-1610/42b8009c",
+          "digest": "abf54fcc3e0024659ef70b596300f9642229bddce8befe835b45454b094f2d4c"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-42b8-1610",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "42b8009c": [
+          758851681.3171322,
+          752665205.0589461
+        ],
+        "control": [
+          770004438.9536082,
+          767498149.7079662
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10646,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-42b8-1610/gpu-evidence/logs/summary.json",
+        "sha256": "7faf06ad6d3a03084abef5a4a348749d2e09601ca0c96e6dab314f2974abc7c9"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-42b8-1610/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "4696d182c4b9ea0939b06bcd130a5376312ae9840a4798552bf2c018b07833f5"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-42b8-1610/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "42b8009c": {
+          "directory": "research/long-queue-paired-late-tail-42b8-1610/42b8009c",
+          "digest": "abf54fcc3e0024659ef70b596300f9642229bddce8befe835b45454b094f2d4c"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-cbce-1631",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "cbce5501": [
+          771437796.2518456,
+          766523095.0207498
+        ],
+        "control": [
+          771167602.6494774,
+          774229954.6490822
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-cbce-1631/gpu-evidence/logs/summary.json",
+        "sha256": "ad189ade01aa07566bac2eddf22cc577ef456e0340840275ef1b4791b1706ab4"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-cbce-1631/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-cbce-1631/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "cbce5501": {
+          "directory": "research/queue-screen-paired-late-tail-cbce-1631/cbce5501",
+          "digest": "8095e3acf2192bde6348e29d7856e1f8cdba0c8787e4662ce6d1294dfccef81a"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-cbce-1631",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "cbce5501": [
+          762835966.0376781,
+          753415877.2172647
+        ],
+        "control": [
+          769052813.9057437,
+          769332571.6767658
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10451,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-cbce-1631/gpu-evidence/logs/summary.json",
+        "sha256": "5b2198cb40723b8428f8d2d24ffa9338bac1e41f862ca8d4713aaae24baa9949"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-cbce-1631/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "ce28c630ef7c8c1279edc79df37c78e2a4c109a4c52fc903f46a52f41455be8a"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-cbce-1631/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "cbce5501": {
+          "directory": "research/long-queue-paired-late-tail-cbce-1631/cbce5501",
+          "digest": "8095e3acf2192bde6348e29d7856e1f8cdba0c8787e4662ce6d1294dfccef81a"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-6976-4ce3-1641",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "4ce3607f": [
+          747016983.1799263,
+          752967259.7672182
+        ],
+        "69769298": [
+          749957942.9493787,
+          751137914.3806508
+        ],
+        "control": [
+          771024309.6222676,
+          772682721.9365951
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-6976-4ce3-1641/gpu-evidence/logs/summary.json",
+        "sha256": "beff7e320ab6e8401f4443d02fb6837be07dd38a25b1e21b5b08152d54f8dc65"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-6976-4ce3-1641/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-6976-4ce3-1641/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "69769298": {
+          "directory": "research/queue-screen-tail-6976-4ce3-1641/69769298",
+          "digest": "615106d750300c411be277f1ff8098d07e5ef4c5a256008bb3cd7bd75a11a8de"
+        },
+        "4ce3607f": {
+          "directory": "research/queue-screen-tail-6976-4ce3-1641/4ce3607f",
+          "digest": "cb6fa52e70dafd407b852f1c98c93a103ffba76763cdfa73a5165c0b04177898"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-6976-4ce3-1641",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "4ce3607f": [
+          742021971.7488496,
+          747255529.6890811
+        ],
+        "69769298": [
+          757287864.5640606,
+          753958508.5360732
+        ],
+        "control": [
+          768348641.1935261,
+          769985390.7643259
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10379,
+      "summary": {
+        "path": "research/long-queue-tail-6976-4ce3-1641/gpu-evidence/logs/summary.json",
+        "sha256": "fe21b3cccaa4147760be3d9b027af5bd24af45c0ba027ce39761fbc85c5ae223"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-6976-4ce3-1641/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "41f11086156c0578b3556b038238853e09c9c348ff378caffcc136edb2ff58f3"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-6976-4ce3-1641/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "69769298": {
+          "directory": "research/long-queue-tail-6976-4ce3-1641/69769298",
+          "digest": "615106d750300c411be277f1ff8098d07e5ef4c5a256008bb3cd7bd75a11a8de"
+        },
+        "4ce3607f": {
+          "directory": "research/long-queue-tail-6976-4ce3-1641/4ce3607f",
+          "digest": "cb6fa52e70dafd407b852f1c98c93a103ffba76763cdfa73a5165c0b04177898"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-d37e-defc-1703",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          773840744.1496698,
+          772383888.6857815
+        ],
+        "d37e3975": [
+          758755842.3064407,
+          755938586.1292207
+        ],
+        "defcba82": [
+          757036849.5739855,
+          763413003.191939
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-d37e-defc-1703/gpu-evidence/logs/summary.json",
+        "sha256": "d71d1a1852c5f7c26ad3bce38f311289c7c2e682f6b0690a1fd433709230d32d"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-d37e-defc-1703/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-d37e-defc-1703/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "d37e3975": {
+          "directory": "research/queue-screen-paired-late-tail-d37e-defc-1703/d37e3975",
+          "digest": "65aad9d9c98248bf5bd9e3d67e68286f099db54fc6cbe9f65c6bbd973e418964"
+        },
+        "defcba82": {
+          "directory": "research/queue-screen-paired-late-tail-d37e-defc-1703/defcba82",
+          "digest": "42fed8743f794fb22a3d52a6c9af0a2fd5a0c4405a65ff8347ac6298ecf7d36f"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-d37e-defc-1703",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "control": [
+          768653498.4088602,
+          767722904.7532094
+        ],
+        "d37e3975": [
+          750268180.0032419,
+          752219500.3626927
+        ],
+        "defcba82": [
+          755055027.84613,
+          750624966.1567473
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10372,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-d37e-defc-1703/gpu-evidence/logs/summary.json",
+        "sha256": "9de7ff494517f2e900c71b013db3578b3bdd6465b51196fdaf45e9d6c43fa82a"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-d37e-defc-1703/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "235e854b19aef26b2fc9b84583e6afe6500bb74841d2ad65990fae6b6dbac339"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-d37e-defc-1703/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "d37e3975": {
+          "directory": "research/long-queue-paired-late-tail-d37e-defc-1703/d37e3975",
+          "digest": "65aad9d9c98248bf5bd9e3d67e68286f099db54fc6cbe9f65c6bbd973e418964"
+        },
+        "defcba82": {
+          "directory": "research/long-queue-paired-late-tail-d37e-defc-1703/defcba82",
+          "digest": "42fed8743f794fb22a3d52a6c9af0a2fd5a0c4405a65ff8347ac6298ecf7d36f"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-356f-1726",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "356fa57d": [
+          757722314.2415072,
+          753406527.9034522
+        ],
+        "control": [
+          772541695.5152878,
+          771601239.4447198
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-356f-1726/gpu-evidence/logs/summary.json",
+        "sha256": "93d7d15267c33ab994a513b8f9367b3a0a2bef3e495c51fb52e2a24c5e0cc1bf"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-356f-1726/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-356f-1726/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "356fa57d": {
+          "directory": "research/queue-screen-paired-late-tail-356f-1726/356fa57d",
+          "digest": "30226e61808cb28d9ed9a8e97b748dc4ede373df4740b5d0815d0de9652f24bb"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-4b28-1735",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "4b28ec4c": [
+          763966799.9800038,
+          762690461.3009362
+        ],
+        "control": [
+          773789133.5509684,
+          772772409.6188642
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-4b28-1735/gpu-evidence/logs/summary.json",
+        "sha256": "5ceac5c6f85148b27c286abc2cd55b21780d181b4a782ccf4f3b11d044d5ca26"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-4b28-1735/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-4b28-1735/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "4b28ec4c": {
+          "directory": "research/queue-screen-tail-4b28-1735/4b28ec4c",
+          "digest": "00d273c09b090bb369517ad9aa2be46ad13d6bc81fb29fbce723ae0115a2fb03"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-4b28-1735",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "4b28ec4c": [
+          751109420.591886,
+          754508021.581403
+        ],
+        "control": [
+          768219331.7699809,
+          768361482.9160422
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10483,
+      "summary": {
+        "path": "research/long-queue-tail-4b28-1735/gpu-evidence/logs/summary.json",
+        "sha256": "728007aa31f5d59440fa047bae130f44ab9367e4a81aac8d96d97137e0e968f5"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-4b28-1735/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "0cd96fa75cc451b980dfe2dcbae204a2d77eea82643c09a2dc9909df76aa32ab"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-4b28-1735/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "4b28ec4c": {
+          "directory": "research/long-queue-tail-4b28-1735/4b28ec4c",
+          "digest": "00d273c09b090bb369517ad9aa2be46ad13d6bc81fb29fbce723ae0115a2fb03"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-d0f9-b251-1759",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "b251535b": [
+          761343059.75865,
+          763960033.0889714
+        ],
+        "control": [
+          773248121.8583373,
+          770499200.289108
+        ],
+        "d0f90bc2": [
+          762639722.4324751,
+          760250318.1041476
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-d0f9-b251-1759/gpu-evidence/logs/summary.json",
+        "sha256": "c5f98ddcb216fb7d242c2c22f828e7873c73a721bd5d9a2e58ad1d31abc16233"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-d0f9-b251-1759/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-d0f9-b251-1759/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "d0f90bc2": {
+          "directory": "research/queue-screen-paired-late-tail-d0f9-b251-1759/d0f90bc2",
+          "digest": "e99cf890b25c1c50e91266780048032d47890b3bdc156069c864445d76baa7cb"
+        },
+        "b251535b": {
+          "directory": "research/queue-screen-paired-late-tail-d0f9-b251-1759/b251535b",
+          "digest": "4a3b6d2dc482d86ae7573a4fbf3360e8a30cc2fdd8ca0e247c6364cc71b6103b"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-d0f9-b251-1759",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "b251535b": [
+          750458161.8002297,
+          752804353.2744887
+        ],
+        "control": [
+          769290020.1923858,
+          768830925.5212456
+        ],
+        "d0f90bc2": [
+          755521270.5681263,
+          756785084.1429856
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10416,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-d0f9-b251-1759/gpu-evidence/logs/summary.json",
+        "sha256": "3446e3bf9a9c111651967562cfd591976da2eeb6b66a4253ea3564e887c4e0b2"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-d0f9-b251-1759/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "92174339ce324b9cf158f4352b0d3a6f26615062de2d21942154dfdba0330543"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-d0f9-b251-1759/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "d0f90bc2": {
+          "directory": "research/long-queue-paired-late-tail-d0f9-b251-1759/d0f90bc2",
+          "digest": "e99cf890b25c1c50e91266780048032d47890b3bdc156069c864445d76baa7cb"
+        },
+        "b251535b": {
+          "directory": "research/long-queue-paired-late-tail-d0f9-b251-1759/b251535b",
+          "digest": "4a3b6d2dc482d86ae7573a4fbf3360e8a30cc2fdd8ca0e247c6364cc71b6103b"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-tail-bdbf-3fe1-1923",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "3fe1c58f": [
+          764251636.7294123,
+          761371254.72332
+        ],
+        "bdbf5d40": [
+          752785073.5338111,
+          763839622.3831234
+        ],
+        "control": [
+          769730838.3298802,
+          773674479.4776411
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-tail-bdbf-3fe1-1923/gpu-evidence/logs/summary.json",
+        "sha256": "d4a0198f567a5fe7b44b326431f738c129bb499783a5c52e26b4f3dd873f9915"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-tail-bdbf-3fe1-1923/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-tail-bdbf-3fe1-1923/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "bdbf5d40": {
+          "directory": "research/queue-screen-tail-bdbf-3fe1-1923/bdbf5d40",
+          "digest": "da5fbbe3e3d808199db3eb2528898238eec73e9a79acf18d5ac40a81e1f6ee55"
+        },
+        "3fe1c58f": {
+          "directory": "research/queue-screen-tail-bdbf-3fe1-1923/3fe1c58f",
+          "digest": "508bbe2d39c4f3d9a5e17571074ead504470f330152d8d3c0e71c26963ae102a"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-tail-bdbf-3fe1-1923",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "3fe1c58f": [
+          764874149.6801493,
+          756870712.5363103
+        ],
+        "bdbf5d40": [
+          755992283.0629296,
+          753083953.7829819
+        ],
+        "control": [
+          768347497.4821391,
+          769861449.2783848
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10453,
+      "summary": {
+        "path": "research/long-queue-tail-bdbf-3fe1-1923/gpu-evidence/logs/summary.json",
+        "sha256": "4ec84e9ad0a8f0a2bb9cd054d448d47b847ba83f4b9e8345255db8962a417cba"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-tail-bdbf-3fe1-1923/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "2db58269d5b5ad06d7a3d230ae4dc7b8812b69b42b9930fd43e5c5479799d314"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-tail-bdbf-3fe1-1923/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "bdbf5d40": {
+          "directory": "research/long-queue-tail-bdbf-3fe1-1923/bdbf5d40",
+          "digest": "da5fbbe3e3d808199db3eb2528898238eec73e9a79acf18d5ac40a81e1f6ee55"
+        },
+        "3fe1c58f": {
+          "directory": "research/long-queue-tail-bdbf-3fe1-1923/3fe1c58f",
+          "digest": "508bbe2d39c4f3d9a5e17571074ead504470f330152d8d3c0e71c26963ae102a"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-07b6-1942",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "07b61e21": [
+          764341894.8976662,
+          753013304.2561213
+        ],
+        "control": [
+          773636537.3388327,
+          773871854.4868668
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-07b6-1942/gpu-evidence/logs/summary.json",
+        "sha256": "f1e0c8960a66327e2341d28f186d868cdc9409f4a2deae68f37eef462d30de42"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-07b6-1942/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-07b6-1942/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "07b61e21": {
+          "directory": "research/queue-screen-paired-late-tail-07b6-1942/07b61e21",
+          "digest": "fa9d92771659563b7b75873f6f440167a75f4ee86a2e759587da285c5818c6d0"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-07b6-1942",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "07b61e21": [
+          752386606.9512106,
+          763843778.4586531
+        ],
+        "control": [
+          769348202.8809777,
+          770439591.6785885
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10352,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-07b6-1942/gpu-evidence/logs/summary.json",
+        "sha256": "c4527f9a54a0cb60679be292230bdfb2676b95d03336ef6b592747fa93b5438c"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-07b6-1942/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "2234217e0a9d72cde80204bdd0204b5492fb3e87d5d354b45cea22a15a8db8f7"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-07b6-1942/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "07b61e21": {
+          "directory": "research/long-queue-paired-late-tail-07b6-1942/07b61e21",
+          "digest": "fa9d92771659563b7b75873f6f440167a75f4ee86a2e759587da285c5818c6d0"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-tail-23cc-1953",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "23cca647": [
+          764080034.6117942,
+          758548227.0667615
+        ],
+        "control": [
+          774754107.4196558,
+          773315474.0869533
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-tail-23cc-1953/gpu-evidence/logs/summary.json",
+        "sha256": "085b5ac7c2e57f081d20bdfd625ddff7944878427e2ccdd8bf7700ca37d9c89f"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-tail-23cc-1953/independent-hit-equivalence.json",
+        "sha256": "162a39732f6c9b4dcda711d993a9325fcddd3482c1326fbe96dbd55c34374972"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-tail-23cc-1953/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "23cca647": {
+          "directory": "research/queue-screen-paired-late-tail-23cc-1953/23cca647",
+          "digest": "d1f6eb904cbdb1c00c202eb99bed173ee705007e8ac451741e1eeac457649fa2"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-tail-23cc-1953",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "23cca647": [
+          756917968.6939523,
+          756035006.1862855
+        ],
+        "control": [
+          769611239.1615577,
+          769918186.6343683
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10212,
+      "summary": {
+        "path": "research/long-queue-paired-late-tail-23cc-1953/gpu-evidence/logs/summary.json",
+        "sha256": "ef002c9f071f2edfc0e7e247b5747fa441f304bbdc5141306bc4dca28b50d56a"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-tail-23cc-1953/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "beee143094c4fa10165da88caf2569d1e0bc199a2d3ca72e85e813caa7a0df9b"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-tail-23cc-1953/control",
+          "digest": "6048058e853dceb2d90f1a8fe59654a803e3fde91823f525e11498e763c50973"
+        },
+        "23cca647": {
+          "directory": "research/long-queue-paired-late-tail-23cc-1953/23cca647",
+          "digest": "d1f6eb904cbdb1c00c202eb99bed173ee705007e8ac451741e1eeac457649fa2"
+        }
+      }
+    }
+  ],
+  "cohort_count": 44,
+  "comparison_count": 81,
+  "incomplete_comparison": {
+    "investigation": {
+      "path": "research/tail-356f-long-mismatch-investigation-1746.json",
+      "sha256": "2b2c763835da3a553850c91ccc5f258e6ae9678a4761652be7e21d7dbf5ac8cd"
+    },
+    "originals": {
+      "path": "research/tail-356f-failed-originals-1744/preservation.json",
+      "sha256": "399351174249ef6bf55af606891d11fe7ec2779a8d2a2c06a1fbb1b43b178961"
+    },
+    "controller_review": {
+      "path": "research/tail-bounded-1643-incomplete-review-1747.json",
+      "sha256": "e3d7ed66583b2c5e2c50596141c7a7e0373c60eab9f5480a8196645023cf67ef"
+    }
+  },
+  "incomplete_short_comparison": {
+    "investigation": {
+      "path": "research/tail-db0e-short-mismatch-investigation-1830.json",
+      "sha256": "96f45e5446c5ace3af642a2606106662e3837021143f6ccdac82cc4fff46a721"
+    },
+    "originals": {
+      "path": "research/tail-db0e-failed-originals-1829/preservation.json",
+      "sha256": "3320dee098351bc56325739a898328cc91d16414900759f52be690fab3b99d3e"
+    },
+    "controller_review": {
+      "path": "research/tail-bounded-1735-incomplete-review-1831.json",
+      "sha256": "3a662bf27efea25ea180b24face255b5283c0515cb508d467b4936f9b773efa5"
+    }
+  },
+  "auxiliary_files": {
+    "CANONICAL-CONTRACTS.md": "615c61f6d63960ee754079680907419802c9757078ed38200f7ee18ba40580a3",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "FINAL-WINDOW-PROOF.md": "056e0b0b266e753e053fb7edeff3a03e45068f43f07c8328b8c97c58ff1d219b",
+    "MERGED-LOW-FOLD-TREE.md": "f1980be9beefae1d31f0739a7837057a6476710ddbfad8572fc96cca3c3a566c",
+    "PAIRED-CARRY-PROOF.md": "53a005513f99b97ecf8dcd02ecba5ec1bcb0e65cf3b564f97c3d2ea8bb6e99de",
+    "REPRODUCTION.md": "8385f0020f1988a22e3029b25c3a0b0a18d8927bdad43b8b794bd1afd9751b48",
+    "RESEARCH.md": "8314ff15243f9862586b10edbde6db4f4220b0bac189653f7ef4955c91d262af",
+    "SMALL-FIELD-PROOF.md": "f2115052b2e9e2bf982c056013efd7a1bc91671a7f879a6368db21bc469ae9d4",
+    "TAIL-SHA-PROOF.md": "4bb5f7f6e2c0e7c01fa0dfdd3163e12536186bf4a44869bb75b348c08eb01e40",
+    "TREE-FOLD-PROOF.md": "e13bab5f7d249d84d9f4fc30f69667a57cc19ae1a376a4a0eb97b289757f4f77",
+    "TREE-SQUARE-OCCUPANCY.md": "5181d2e4e10cf384d9f57ad084b2c922ca2215adee39dfe48e758b220b4cf136",
+    "UPPER-FOLD-RECOVERY.md": "900b4237443153aa62ef80b309159bd9c90c898cbc44fee48eb71a02fd8664b0",
+    "YCORE-SCHEDULE.md": "76df1eb9a761ed68bb439bd4788f70147885a69fe5f16262a8d07c4819e1e866",
+    "audit_conditional_small_tail.py": "362a4a4f46aa5ea8ec47c28ecb98248be1f01785049aa11cc1061ef3173ee8b3",
+    "audit_final_fold.cu": "e1dbafeea826001accf5b88ac5fe8632acb1fd589997dabeaf55eeb5878f2c3e",
+    "audit_final_fold.py": "ded36076d805de37e2a8241b97bce6d362bb06645742ebf3be2dfbd524e525a3",
+    "audit_paired_native.py": "52abf735d53db2d636c6d1af3bf03c24e0321b62372243fc26161454a423a586",
+    "audit_paired_upper_fold.py": "04235fd2de3430563d66ade0a00c48051e5a604d942783b519829e3d14668f07",
+    "audit_ptx_model.py": "a246a34035aa4eccf71e43088f19559fefcd2bad429798afb7a2655586a8980b",
+    "audit_signed_points.cu": "a7e6265e95f4e58b5717323cd9d1b05a3f2d0e8d58c3712dddfcfff10892dadf",
+    "audit_signed_points.py": "16bc7c4d691bf1bc3b2d3621d3c0a5b29e2d4b2e3d467d0769cf9b87669a1814",
+    "audit_small_fields.py": "a61c580a3b746dbbd447ea3b893c8895bad1fe09871edcebbae1016f887bde7d",
+    "audit_small_ptx.py": "071ad819441aea58e9b61bb6a4ae172dad2afbd485b9775092cde18d3c4aa80a",
+    "audit_tail_sha.py": "fb7c5d9242c56671b8dfa11d0f07962d3716c2534103371fd1e98d87720d46c1",
+    "canonical_helper_audit.cu": "c9088098fd07a3aa6667d787895024a572b28269b0447eac52ab8cd670ed226d",
+    "field_core_audit.cu": "f532559f391a8468ec361a2771022c7a5e1394451f62e67c177204e023e371ba",
+    "small_field_audit.cu": "96f5ddb71f6ded840f8314b0de689a3905b7f4136bfa0b11187020e369eb6526",
+    "sum_audit.cu": "28b93e96019b975288bba43dddc3ac080ecae5e9863628d5963097c548b3afe6",
+    "verify_small_field_native.py": "dc8908bf846f5f0145961c942c5cf7080e9c120a83613db1eaed99bc0725ecc4"
+  }
 }
