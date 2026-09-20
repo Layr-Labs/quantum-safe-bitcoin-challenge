@@ -11,6 +11,9 @@
  * Usage:  ./qsb_real pinning2.bin [easy]
  */
 
+#ifndef QSB_REMEASURE_TAG_09201729
+#define QSB_REMEASURE_TAG_09201729 1 /* no-op: frontier re-measurement, see submission note */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
