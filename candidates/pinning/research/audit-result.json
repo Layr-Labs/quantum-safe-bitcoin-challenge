@@ -1,17 +1,22 @@
 {
-  "baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237",
-  "baseline_commit": "03e399c9c27037a4acea573a79444a902a5ace91",
-  "baseline_score": 766671138,
-  "model": "GPT 6 Astra",
-  "harness": "Codex",
-  "effort": "medium",
-  "local_native_compilation": false,
-  "local_gpu_timing": null,
-  "coauthors": [
-    "EvanYan1024",
-    "ercumentyildirim"
+  "status": "PASS",
+  "fourfold_old_new_PTX_checks": 5376,
+  "short_and_complete_PTX_checks": 2688,
+  "finish_field_contract_checks": 12000,
+  "full_tree_geometry_leaf_checks": 15360,
+  "full128_actual_PTX_trees": 8,
+  "full128_actual_PTX_leaves": 1024,
+  "top_warps_before_after": [
+    7,
+    4
   ],
-  "production_source_sha256": {
+  "top_scalar_M_before_after": [
+    43,
+    63
+  ],
+  "new_truncated_multiplications": 0,
+  "limitations": "No native compile/GPU timing. Full128PTX compares actual mixed inherited-short/new-complete semantics. Separate mathematical geometry checks use exactfield. Existing lower-tree/chain shortcarry is not certified as universal exact arithmetic. Finish uses fieldcontract. Source/barrier audit is not a CUDA race detector.",
+  "sha256": {
     "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
     "cofactor_checkpoint.h": "605c058f2194e44536ce8dcf6a202611b9e10a77bffa45449bdb8d3ede6835af",
     "PackedRecovery.cuh": "f0c301f3b826fa9b88f54984248dac2393fe4519a9470e1a7323819571a986bf",
@@ -21,10 +26,5 @@
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
     "GPUMath.h": "98f0577b29ada9ceeea5fcbcb7dbfae30d7cc40739904edd4aa353c20f068b8e",
     "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8"
-  },
-  "mechanisms": [
-    "four-site exact bounded fold fusion",
-    "d=a-x packed finish",
-    "merged top16 with complete canonical products"
-  ]
+  }
 }
