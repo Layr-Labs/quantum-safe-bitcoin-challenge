@@ -1773,8 +1773,8 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1; ×ZZ1 overlaps ×ZZZ1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSqr(PP, P);                      // PP = P^2
   _ModMult(PPP, PP, P);                // PPP = P*PP
