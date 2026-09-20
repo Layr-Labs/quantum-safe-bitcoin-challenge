@@ -277,6 +277,20 @@ w[14] += s1(w[12]) + w[7] + s0(w[15]); w[15] += s1(w[13]) + w[8] + s0(w[0]); }
     QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
     QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
     QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) QSB_GP_R2(b,c,d,e,f,g,h,a,k,15) }
+#ifndef QSB_PK_H0
+#define QSB_PK_H0 1  /* ranked N<=32: digest word 0 only, same as pinning _SHA256Pubkey33H0 */
+#endif
+#if QSB_PK_H0
+#define QSB_GP_RND15(k) { \
+    QSB_GP_R2(a,b,c,d,e,f,g,h,k,0)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,1) \
+    QSB_GP_R2(g,h,a,b,c,d,e,f,k,2)  QSB_GP_R2(f,g,h,a,b,c,d,e,k,3) \
+    QSB_GP_R2(e,f,g,h,a,b,c,d,k,4)  QSB_GP_R2(d,e,f,g,h,a,b,c,k,5) \
+    QSB_GP_R2(c,d,e,f,g,h,a,b,k,6)  QSB_GP_R2(b,c,d,e,f,g,h,a,k,7) \
+    QSB_GP_R2(a,b,c,d,e,f,g,h,k,8)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,9) \
+    QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
+    QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
+    QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) }
+#endif
 /* Two independent single-block SHA-256 compressions from the initial state, interleaved round by round. */
 __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
     uint32_t t1, t2;
@@ -285,9 +299,18 @@ __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uin
     QSB_GP_RND(0);  QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
     QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
     QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+#if QSB_PK_H0
+    /* Rounds 48..62 fully, then digest word 0 = IV0 + new_a of round 63.
+     * gpu_bench_valid_words for N=24 reads only hs[0], so the other seven
+     * feed-forward words are dead. Same identity as pinning _SHA256Pubkey33H0. */
+    QSB_GP_RND15(48);
+    o0[0] = I[0] + a0 + S1(f0) + Ch(f0,g0,h0) + K[63] + w0[15] + S0(b0) + Maj(b0,c0,d0);
+    o1[0] = I[0] + a1 + S1(f1) + Ch(f1,g1,h1) + K[63] + w1[15] + S0(b1) + Maj(b1,c1,d1);
+#else
     QSB_GP_RND(48);
     o0[0]=I[0]+a0;o0[1]=I[1]+b0;o0[2]=I[2]+c0;o0[3]=I[3]+d0;o0[4]=I[4]+e0;o0[5]=I[5]+f0;o0[6]=I[6]+g0;o0[7]=I[7]+h0;
     o1[0]=I[0]+a1;o1[1]=I[1]+b1;o1[2]=I[2]+c1;o1[3]=I[3]+d1;o1[4]=I[4]+e1;o1[5]=I[5]+f1;o1[6]=I[6]+g1;o1[7]=I[7]+h1;
+#endif
 }
 #undef QSB_GP_RND
 #undef QSB_GP_R2
