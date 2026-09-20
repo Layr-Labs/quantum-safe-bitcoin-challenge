@@ -759,9 +759,50 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_DIGIT_SHIFT
 #define QSB_DIGIT_SHIFT 1
 #endif
+/* QSB_CHAIN_UNROLL: chunk steps emitted per back edge in the speculative chain.
+ * 2 pairs the two steps so the affine-y anchor (Load256(y0,cy)) alternates
+ * registers instead of being copied every step, and the two table address
+ * chains issue together.  Arithmetic and issue order inside each step are
+ * unchanged; only the copy and the back edge disappear.  1 = the rolled form. */
 #ifndef QSB_CHAIN_UNROLL
-#define QSB_CHAIN_UNROLL 1
+#define QSB_CHAIN_UNROLL 2
 #endif
+/* QSB_DIGIT_SIGN_FOLD (kill switch): the digit's sign is t^1^sflag with both
+ * t and sflag in {0,1}; XOR is associative, so 1^sflag is a per-candidate
+ * constant.  Folding it into a 32-bit constant removes one 64-bit XOR from
+ * every chunk step.  0 = the per-step two-XOR form. */
+#ifndef QSB_DIGIT_SIGN_FOLD
+#define QSB_DIGIT_SIGN_FOLD 1
+#endif
+/* QSB_DIGIT_TAPER (kill switch): the shifted scalar S = M >> 36 satisfies
+ * S < 2^220 because M < 2^256.  After j chunk steps the live value is
+ * S >> 17j < 2^(220-17j): after 4 steps < 2^152 (five 32-bit words), after 8
+ * steps < 2^84 (three words).  The funnel shifts of the words above those
+ * bounds therefore move only zeros and are dead.  Three stages of four chunks
+ * carry 7, 5 and 3 words; the digits produced are bit-identical to the flat
+ * seven-word chain.  0 = seven words for all twelve steps. */
+#ifndef QSB_DIGIT_TAPER
+#define QSB_DIGIT_TAPER 1
+#endif
+#define QSB_DIG_SH7() { w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); \
+    w2=__funnelshift_r(w2,w3,W2); w3=__funnelshift_r(w3,w4,W2);                     \
+    w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2; }
+#define QSB_DIG_SH5() { w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); \
+    w2=__funnelshift_r(w2,w3,W2); w3=__funnelshift_r(w3,w4,W2); w4>>=W2; }
+#define QSB_DIG_SH3() { w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2>>=W2; }
+#if QSB_DIGIT_SIGN_FOLD
+#define QSB_DIG_NEG(t) ((uint64_t)((t)^snz))
+#else
+#define QSB_DIG_NEG(t) ((uint64_t)((t)^1u)^sflag)
+#endif
+#define QSB_CHAIN_STEP(SH) {                                                 \
+    { const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);                       \
+      idx=(f^(t-1u))&((1u<<(W2-1u))-1u); neg=QSB_DIG_NEG(t); }               \
+    SH                                                                       \
+    gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);                  \
+    qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);                   \
+    Load256(y0, cy);                /* current affine y anchors next madd */ \
+    table_base += 1u << 16; }
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -847,21 +888,22 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
         w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
     }
+#if QSB_DIGIT_SIGN_FOLD
+    const uint32_t snz=(uint32_t)sflag^1u;   /* 1 ^ global recode sign */
+#endif
     constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
+#if QSB_DIGIT_TAPER
+    static_assert(GT_CHUNKS==15,"tapered digit stages assume the 15-chunk geometry");
     #pragma unroll (kChainUnroll)
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        {
-            const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
-            idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
-            neg=(uint64_t)(t^1u)^sflag;
-        }
-        w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
-        w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
-        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
+    for (int c=2;c<6;c++)  QSB_CHAIN_STEP(QSB_DIG_SH7())      /* S < 2^220: 7 words */
+    #pragma unroll (kChainUnroll)
+    for (int c=6;c<10;c++) QSB_CHAIN_STEP(QSB_DIG_SH5())      /* S < 2^152: 5 words */
+    #pragma unroll (kChainUnroll)
+    for (int c=10;c<GT_CHUNKS-1;c++) QSB_CHAIN_STEP(QSB_DIG_SH3())  /* S < 2^84: 3 words */
+#else
+    #pragma unroll (kChainUnroll)
+    for (int c=2;c<GT_CHUNKS-1;c++) QSB_CHAIN_STEP(QSB_DIG_SH7())
+#endif
     {
         const uint32_t f=w0&((1u<<W2)-1u);
         idx=f&((1u<<(W2-1u))-1u); neg=sflag;
@@ -909,6 +951,11 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
+#undef QSB_CHAIN_STEP
+#undef QSB_DIG_NEG
+#undef QSB_DIG_SH3
+#undef QSB_DIG_SH5
+#undef QSB_DIG_SH7
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     // The original scalar survives even if an output aliases the input k.
