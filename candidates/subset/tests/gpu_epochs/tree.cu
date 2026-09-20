@@ -520,13 +520,22 @@ __device__ __forceinline__ void qsb_complete_last_add(
 #include "filter_tail_sc.cuh"
 // Speculative final point step: retain the packed PTX body, then resolve Y.
 // The complete/exact chains and output checker do not call this helper.
+#ifndef QSB_SPEC_LAST_RESOLVE
+#define QSB_SPEC_LAST_RESOLVE 1
+#endif
 __device__ __forceinline__ void qsb_filter_last_add(
     uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
     const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
     uint64_t scaled_y[4];
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
+#if QSB_SPEC_LAST_RESOLVE
+    /* The deferred-Y resolution was the one exact borrow chain left inside the
+     * speculative last step; its product operand is already speculative. */
+    QSB_FSUB(Y,Y,scaled_y);
+#else
     _ModSub256(Y,Y,scaled_y);
+#endif
 }
 __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
@@ -1445,6 +1454,27 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare(
     W[4] = 0;
 }
 
+/* QSB_SPEC_PREPARE_MAIN (kill switch; 0 restores the promoted call exactly):
+ * the producer kernel's own pre-inverse prepare on the speculative operators,
+ * matching what the parked filter copy (qsb_xyzz_finish_prepare_f) already
+ * does on this frontier. Same formulas, same operand order, same operation
+ * count; only the carry/borrow guard differs. The exact chains
+ * (qsb_k2s_front_exact, qsb_pair_verify_candidate, the replay chain and the
+ * audit harness) keep calling qsb_xyzz_finish_prepare above. */
+#ifndef QSB_SPEC_PREPARE_MAIN
+#define QSB_SPEC_PREPARE_MAIN 1
+#endif
+__device__ __forceinline__ void qsb_xyzz_finish_prepare_spec(
+    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
+) {
+    uint64_t t[4];
+    QSB_FMUL(t, xR, ZZ);
+    QSB_FSUB(t, t, X_D);
+    Load256(X_D, t);             /* X_D becomes d */
+    QSB_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    W[4] = 0;
+}
+
 /* Stage 2. W=ZZZ*d, inv=1/W. h=inv*ZZ=A/(B*d) is the common slope scale:
  *   lambda1 = (yR*B-Y)*h = (yR-yP)/(xR-xP),   m2 = (yR*B+Y)*h = -lambda2.
  * The x-coordinates no longer need delta=xR-xP (so C=ZZ*d^2 and its post-
@@ -1457,6 +1487,11 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare(
  *   y1 = lambda1*(xR-x1)-yR,   y2 = -(m2*(xR-x2)-yR).
  * 8M+0S (was 7M+2S here plus 1M+1S for C in the caller).
  * Returns the two y parities in bits 0 and 1; ZZ is reused as scratch. */
+/* QSB_SPEC_FINISH_MAIN (kill switch; 0 restores the promoted body exactly):
+ * the producer kernel's post-inverse finish on the speculative operators. */
+#ifndef QSB_SPEC_FINISH_MAIN
+#define QSB_SPEC_FINISH_MAIN 1
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
     uint64_t *inv, uint64_t *xR, uint64_t *yR,
@@ -1465,6 +1500,35 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     uint64_t yb[4], m1[4], m2[4], t[4], s[4];
     uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
 
+#if QSB_SPEC_FINISH_MAIN
+    /* Same eight products and same six additive steps as the exact body in the
+     * #else arm, on the speculative operators the parked copy qsb_k2s_post3
+     * already runs on this frontier. Every operand of this finish is consumed
+     * only by the speculative x-coordinates and their parity bits. */
+    QSB_FMUL(yb, yR, ZZZ);       /* yR*B */
+    QSB_FMUL(ZZ, ZZ, inv);       /* h = A/(B*d), kept in ZZ */
+
+    QSB_FSUB(m1, yb, Y);
+    QSB_FMUL(m1, m1, ZZ);        /* lambda1 = (yR*B-Y)*h */
+    QSB_FADD(m2, yb, Y);
+    QSB_FMUL(m2, m2, ZZ);        /* m2 = (yR*B+Y)*h = -lambda2 */
+    QSB_FADD(s, m1, m2);         /* lambda1+m2 = 2*yR/(xR-xP) */
+
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(x1, s, t);
+    QSB_FADD(x1, x1, xR);        /* x1 = (lambda1+m2)*(lambda1-c) + xR */
+    QSB_FSUB(t, xR, x1);
+    QSB_FMUL(t, t, m1);
+    QSB_FSUB(t, t, yR);          /* y1 = lambda1*(xR-x1) - yR */
+    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(x2, s, t);
+    QSB_FADD(x2, x2, xR);        /* x2 = (lambda1+m2)*(m2-c) + xR */
+    QSB_FSUB(t, xR, x2);
+    QSB_FMUL(t, t, m2);
+    QSB_FSUB(t, t, yR);          /* y2 = -(m2*(xR-x2) - yR) */
+#else
     _ModMult(yb, yR, ZZZ);       /* yR*B */
     _ModMult(ZZ, inv);           /* h = A/(B*d), kept in ZZ */
 
@@ -1488,6 +1552,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     _ModSub256(t, xR, x2);
     _ModMult(t, m2);
     _ModSub256(t, yR);           /* y2 = -(m2*(xR-x2) - yR) */
+#endif
     /* y2=-t. Since p is odd, field negation flips its parity. */
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
@@ -1851,7 +1916,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     /* Both recovery flags from one shared-denominator inverse, in XYZZ:
      * W = ZZZ*d with d = xR*ZZ - X; the block inverts W. */
     uint64_t prod[5];
+#if QSB_SPEC_PREPARE_MAIN
+    qsb_xyzz_finish_prepare_spec(qx,qzz,qzzz,u2rx,prod); /* qx -> d, prod -> W = ZZZ*d */
+#else
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);   /* qx -> d, prod -> W = ZZZ*d */
+#endif
     bool usable = active && ((prod[0]|prod[1]|prod[2]|prod[3]) != 0);
     /* d and W are not needed after the inverse: the finish derives both
      * x-coordinates from the two slopes and the constant QSB_U2R_C. */
