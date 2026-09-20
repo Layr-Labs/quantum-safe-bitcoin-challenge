@@ -393,6 +393,25 @@ __device__ __forceinline__ void _ModAdd256(uint64_t *r,uint64_t *a,uint64_t *b){
 #endif
 }
 
+// R²+PPP in the deferred XYZZ X3 tail: both operands are _ModSqr/_ModMult
+// residues in [0,p) after the existing cold fold, so their sum is in [0,2p).
+// One 2^256-carry fold by K=2^32+977 is exact (QSB_LAZY donor 1a22808 /
+// promoted a68c2967). Not the affine Y2+Yoff add.
+__device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, const uint64_t *b)
+{
+    uint64_t c;
+    UADDO(r[0], a[0], b[0]);
+    UADDC(r[1], a[1], b[1]);
+    UADDC(r[2], a[2], b[2]);
+    UADDC(r[3], a[3], b[3]);
+    UADD(c, 0ULL, 0ULL);
+    c = (0ULL - c) & 0x1000003D1ULL;    /* K when the add carried, else 0 */
+    UADDO1(r[0], c);
+    UADDC1(r[1], 0ULL);
+    UADDC1(r[2], 0ULL);
+    UADD1(r[3], 0ULL);
+}
+
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
 {
     uint64_t t;
@@ -1321,7 +1340,7 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
   _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
+  _ModAddLazy(T, T, PPP);
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
 
