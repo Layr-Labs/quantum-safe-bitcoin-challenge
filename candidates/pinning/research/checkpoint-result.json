@@ -1,0 +1,31 @@
+{
+  "status": "PASS",
+  "leaf_inverse_checks": 31640,
+  "checkpoint_bytes_per_candidate": 64,
+  "old_checkpoint_bytes_per_candidate": 256,
+  "logical_extra_checkpoint_roundtrip_bytes": 128,
+  "arithmetic_per_candidate_excluding_O_1_over_N": {
+    "first_local_product_M": 6,
+    "global_exclusion_tree_M": 3,
+    "local_inverse_expand_M": 1,
+    "recomputed_prefix_M": 5,
+    "reverse_local_inverse_M": 12,
+    "inverse_work_total_M": 27,
+    "affine_pair_finish_M": 14,
+    "affine_pair_finish_S": 7,
+    "eight_point_chain_M": 46,
+    "eight_point_chain_S": 14,
+    "total_M": 87,
+    "total_S": 21,
+    "baseline_M": 95,
+    "baseline_S": 28
+  },
+  "prefix_shared_bytes": {
+    "32": 6144,
+    "64": 12288,
+    "128": 24576
+  },
+  "root_overwrite_negative_control": "Detected: lane0 must not overwrite first root until all lanes loaded it. Explicit block barrier or separate root arrays required before qsb_packed_prepare root publication.",
+  "state_alias": "Per-lane64B checkpoint may be overwritten by final64B state after own reads; no other lane depends on those fields. Distinct slots per lane verified under shuffled execution.",
+  "limits": "Assumes nonzero effective pair denominators; exceptional pairs require proof or fallback. Field model only, no native/GPU validation. Live registers, table traffic, and occupancy remain implementation obligations."
+}

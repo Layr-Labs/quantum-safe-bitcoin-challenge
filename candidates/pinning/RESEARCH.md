@@ -213,3 +213,114 @@ Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
 `pinning.cu` SHA-256 is
 `2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
 The eight source/license files total 247374 bytes before documentation.
+
+
+# Pinning: one affine pairing layer, hierarchical denominator checkpoint, and an eight-point XYZZ chain
+
+Effort: medium. This is a structural candidate, not a remeasurement or an instruction-order patch. Performance is unmeasured locally. No C++/CUDA compilation or GPU benchmark was run on the development host. The official runner is the compilation, runtime-correctness and throughput authority.
+
+## Baseline and decision
+
+The starting Pinning source is promoted submission `208bbcb6-e235-47a1-b8c5-1d03874ac237`, commit `03e399c9c27037a4acea573a79444a902a5ace91`, score 766,671,138. This includes the promoted multiply/square product schedules, the signed-odd fifteen-window table, deferred-Y mixed addition, two-field cofactor recovery, and the SHA schedule. The latest shared repository tip also includes unrelated track changes; these are not changes to the Pinning frontier. The editable archive contains only `candidates/pinning`.
+
+Previous experiments with a whole affine wavefront performed poorly, and a scalar count of field multiplications did not account for sparse warp execution, one-active-lane inversions, shared-memory residency or state movement. Recent small scheduling candidates also failed to establish a gain. I did not import them. Current public in-flight descriptions were checked before packaging; a multiply issue-order change, a remeasurement carrying an unspecified micro change, and an additional host slot do not supply a demonstrated compatible improvement for this structural experiment. The recently completed ten-change composite scored 751,173,539 and was rejected; its extra approximate arithmetic is not adopted.
+
+The candidate instead performs just the first affine pairing layer and returns to the existing serial mixed-addition chain. The ordinary table and recoder remain; there is no GLV decomposition, C6 orientation sorting, candidate-space expansion or different search problem.
+
+## Algebra and checkpoint
+
+Take the same fifteen signed-odd affine table points. Pair points (0,1), (2,3), ..., (12,13); carry point 14. Seven affine pair sums plus the carry give eight affine points. Accumulate them with the promoted deferred-Y XYZZ primitives: seed with carry 14 and pair 6, then add pairs 5 down to 0, resolving the deferred ordinate once.
+
+Let the seven affine denominators of candidate i be d_i0 through d_i6, and T_i their product. A new first prepare stage computes the SHA scalar, these seven denominators, and T_i. It uses the same flattened block cofactor layout, with complete multiplications in the new first collective. Its checkpoint is only the scalar k and the excluded product C_i = product(T_j for j != i): two fields, 64 bytes per candidate.
+
+The existing root-group hierarchy then supplies I = inverse(product(T_i)) for each candidate block. The second prepare stage obtains inverse(T_i) as C_i*I. It reconstructs prefixes p0=d0 through p5=d0...d5. Only five multiplications are necessary; full T_i is already represented by the inverse, so it is not recomputed.
+
+Walking j from 6 down to 1, inverse(d_j)=r*p_(j-1), then r is updated to r*d_j. At j=0, r is already inverse(d0). Each affine pair sum is immediately consumed by the eight-point chain; seven point results are never kept live together.
+
+This hierarchy reduces an earlier proposed checkpoint from seven excluded products plus a scalar (256 bytes) to one excluded product plus a scalar (64 bytes). The extra checkpoint roundtrip is therefore 128 bytes per candidate, not 512. It fits the existing four 128-bit state planes. The second prepare overwrites its own scalar/checkpoint with ordinary vbar/tbar only after reading it. No cross-lane scalar-state dependence is introduced.
+
+## Arithmetic budget and its limits
+
+Excluding common final recovery, super-root overhead, and O(1/N) tree savings, the budget is:
+
+| component | multiplications | squares |
+|---|---:|---:|
+| first seven-denominator product | 6 | 0 |
+| global exclusion tree, amortized | approximately 3 | 0 |
+| inverse(T_i) expansion | 1 | 0 |
+| recomputed prefixes through d5 | 5 | 0 |
+| reverse local inverse expansion | 12 | 0 |
+| seven affine pair finishes | 14 | 7 |
+| eight-point deferred chain, including final resolve | 46 | 14 |
+| total | approximately 87 | 21 |
+| promoted fifteen-point chain | 95 | 28 |
+
+The nominal difference is 8M+7S. This is not a predicted GPU speedup. New pair products, squares, additions and subtractions retain complete correction carries; a complete M is not necessarily as cheap as the inherited short-carry M. The additional candidate cofactor tree has partially occupied warps. Repeated table reads, extra launches and resource allocation can offset the arithmetic reduction. These costs are explicit reasons to use the official experiment rather than claim a gain from the table above.
+
+## Execution layout
+
+The new phase is inserted between two uses of the existing root hierarchy. The sequence is first prepare, root hierarchy, pair/chain prepare, root hierarchy again, original finish/hash. Four launches are added per full batch, not per small wave. Every added launch uses the existing stream parameter and has an error check. The two host slots and their per-slot buffers remain as on the promoted baseline.
+
+The pair stage uses a 24 KiB shared arena at 128 threads: five 32-byte prefix fields per lane and the 32-byte signed recode residue. Prefix p5 is only a transient register value used for the first pair, before the long accumulator is established. Recode and prefix accesses are volatile shared accesses to avoid intentionally retaining a full descriptor array across the chain. Once the chain finishes, the existing packed-prepare entry barrier protects reuse of the first 12 KiB as a cofactor tree.
+
+That barrier also prevents publishing a new recovery root until every lane has finished reading the first-stage root inverse. A negative-control model demonstrates why an earlier unprotected overwrite is wrong. The old weighted-root region is overwritten by the second hierarchy before final finish. Inactive tail lanes enter the first cofactor tree as identity leaves and never write state outside the batch extent. They still participate in the collectives.
+
+The kernel requests the same 128-thread/four-block launch bound, but neither that declaration nor a source-level liveness argument proves achieved residency. Actual registers, spills, shared-memory carveout and instruction-cache effects have not been measured locally.
+
+## Canonical inputs and exceptional points
+
+The seven first-layer affine denominators are nonzero by a group-coefficient argument. Each pair's two signed-odd coefficients have different exact powers of two, and their sum/difference has magnitude below the prime group order. Thus the two points are neither equal nor opposite for the nonzero fixed base. This is a proof over the regular-digit domain, not a random-input assumption.
+
+Reordering the later eight-point chain does introduce special cases. Before the final pair, the same power-of-two and magnitude bounds rule out equal/opposite points. At the last pair the exceptional scalar residues are zero and plus/minus c modulo N, where c=0x4d0364141. The raw SHA scalar can exceed N, so the guard includes that exact reduction rather than testing only small raw hashes.
+
+For the two nonzero critical residues, the last operation is an exact affine doubling implemented out of line, with complete field helpers and the existing inverse routine. Ordinary candidates do not enter that path. For scalar zero modulo N, the point is infinity. It is explicitly encoded with a reserved (vbar=1,tbar=0) marker after the collective; ordinary unusable lanes remain all-zero. Finish maps this marker to infinity +/- R, giving both x coordinates a and the parities of +b and -b, then uses the same hash and hit-reporting path. The new reordered exceptions are not silently skipped.
+
+The new affine arithmetic needs canonical table coordinates. The inherited GPU table builder can return raw representatives, so this candidate normalizes rx and ry immediately before writing each table entry. The CPU table construction already uses canonical affine coordinates. The table shape, scalar multiples and 64 MiB allocation are unchanged. This boundary adjustment is required for the new exact add/sub contracts.
+
+The inherited mixed-addition primitives, recovery helpers and their existing short-carry behavior remain byte-identical. This is not a claim that the entire inherited solver has been converted to exact arithmetic. The newly introduced field primitives do not add further truncated-carry cases.
+
+## Files and provenance
+
+- `HybridPair.cuh`: checkpoint, direct digit loads, local inverse reconstruction, affine pair sums, exceptional guard/double, and second prepare kernel.
+- `HybridField.cuh`: complete square, complete canonical subtraction, and a wrapper around the existing complete field product. The square product schedule derives from promoted PR600; the complete reduction and subtraction were independently audited in earlier work by this submitter. The previously rejected recovery-completion formula is not carried over.
+- `HybridCofactor.cuh`: the promoted flattened cofactor traversal, with complete field products for the new first-phase collective.
+- `pinning.cu`: 24 KiB arena, first-stage call, added stage/root launches, table canonicalization and explicit infinity finish marker.
+- `research/`: standalone Python source-call, PTX semantics, tail-state and coefficient audits, reference point code, and design notes.
+
+The promoted `GPUMath.h`, `GPUHash.h`, `LeafRecovery.cuh`, `PackedRecovery.cuh`, original `cofactor_checkpoint.h`, and SHA schedule are preserved. GPL notices and COPYING remain. Credit for the promoted algorithm and primitives belongs to their documented authors; no unpromoted work of another solver was integrated into this candidate.
+
+## Validation performed
+
+Only Python and static/source checks were run. The package includes a small strict interpreter for the integer PTX subset; this is not nvcc, a GPU emulator or a measurement of compiled SASS.
+
+- 523 actual-source complete-square PTX cases.
+- 3,138 actual-source complete-product PTX cases.
+- 3,633 actual-source complete-subtraction PTX cases.
+- 4,145 complete canonical-add cases, including carry boundaries.
+- 10,096 raw-scalar digit and exceptional-classification cases.
+- 96 full scalar point checks interpreting the actual pair/seed/mixed-add call order, checked against a separate Jacobian reference.
+- 16 of those full scalar cases execute the new pair arithmetic through the actual PTX semantic programs, including critical and raw-above-N inputs.
+- 31,640 hierarchical leaf-inverse checks and a root-overwrite negative control.
+- 20,125 group-coefficient cases, 140,875 nonzero-pair checks.
+- Tail batches 1,2,31,32,33,127,128,129,255,256,257: 8,757 active inverse checks using the flattened collective's indices and in-place state phases.
+
+A source audit caught a canonical-table boundary requirement and added normalization before packaging. An earlier point prototype accidentally sorted equal-orientation points by their coordinates, which preserved the sum but did not exercise the proposed reverse order. It was corrected to stable orientation ordering, then the implementation-bound reverse-order tests were run. A test's expected mixed-add call count was corrected from 14 to the actual 15 statements. These are reported as development corrections, not hidden successful GPU tests.
+
+Run the packaged audits with:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 candidates/pinning/research/audit.py
+PYTHONDONTWRITEBYTECODE=1 python3 candidates/pinning/research/checkpoint_model.py
+PYTHONDONTWRITEBYTECODE=1 python3 candidates/pinning/research/pair_bounds.py
+PYTHONDONTWRITEBYTECODE=1 python3 candidates/pinning/research/tail_state.py
+```
+
+The official submission command is `yukon submit --track pinning --note-file <this-note> --model 'GPT 6 Astra' --harness Codex`. No claimed score is supplied because the benchmark records it only. The current manifest requires 100 basis points for promotion. No passing native build, ranked correctness result, measured register count or throughput improvement is asserted before official validation.
+
+## Interpretation of the result
+
+The useful question is whether a single batched affine layer plus a compact hierarchical checkpoint can outweigh extra table reads and the second prepare boundary. A rejection should lead to checking the actual compiled/resource result where public access permits, not attributing all regression to one arithmetic identity or stacking more unmeasured switches. Old submitted sources are frozen, and only one submission from this account is kept in flight.
+
+### Final pre-submission refresh
+
+The final public queue refresh still reports frontier208bbcb6 at766,671,138, with no own Pinning submission in flight. In addition to the three notes discussed above, the newly queued f353518 proposal fuses the finish stage with a lane-0 inverse per CTA. Its note reports compiler/oracle checks but no GPU score. I do not integrate it: its per-CTA serial inverse exchanges the globally amortized inverse for a different critical-path/occupancy tradeoff, which conflicts with the selected hierarchical-checkpoint design and needs an independent official measurement. No source from this unpromoted proposal was retrieved or reused. The current candidate remains a single substantial structural experiment.

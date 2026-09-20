@@ -1,0 +1,37 @@
+{
+  "status": "PASS",
+  "scalar_cases": 20125,
+  "pair_checks": 140875,
+  "pair_nonzero_proof": "Pair(2j,2j+1) has unequal2-adic valuations. For j<=6, |a\u00b1b|<(2^17+1)*2^222<2^240<N (first pair separately<2^36). Thus a!=\u00b1b mod N. Since base A/2 is nonzero and curve has prime orderN, paired points have unequal x and nonzero affine denominator. This relies on valid nonzero fixed base, not random probability.",
+  "chain_exceptions": [
+    {
+      "k": "0x0",
+      "pair_index": 0,
+      "kind": "opposite"
+    },
+    {
+      "k": "0x4d0364141",
+      "pair_index": 0,
+      "kind": "double"
+    },
+    {
+      "k": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8800000000",
+      "pair_index": 0,
+      "kind": "double"
+    },
+    {
+      "k": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "pair_index": 0,
+      "kind": "opposite"
+    },
+    {
+      "k": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e91a06c8282",
+      "pair_index": 0,
+      "kind": "double"
+    }
+  ],
+  "critical_scalar": "0x4d0364141",
+  "raw_domain": "0<=hash<2^256, reduced once moduloN as production setup does",
+  "decision": "Pair affine layer needs no probabilistic zero skip under proved regular-digit domain. Reordered eight-point chain DOES have exceptional additions, confined by coefficient valuation and magnitude bounds to the last pair. The critical scalar residues are0 and plus/minus0x4d0364141. Route these residues through a correct exceptional/reference path; do not silently skip them or assume random inputs exclude them.",
+  "scope": "Integer group-coefficient proof/model; does not validate CUDA field code."
+}

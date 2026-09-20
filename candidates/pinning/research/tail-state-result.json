@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "batch_sizes": [
+    1,
+    2,
+    31,
+    32,
+    33,
+    127,
+    128,
+    129,
+    255,
+    256,
+    257
+  ],
+  "active_leaf_inverse_checks": 8757,
+  "inactive_leaves": "identity in first cofactor tree; no intermediate/final state writes outside n",
+  "scope": "Exact flattened tree indices and sequential kernel-phase model. Not GPU memory-race execution."
+}

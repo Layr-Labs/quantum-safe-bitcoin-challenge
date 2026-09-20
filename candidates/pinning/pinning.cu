@@ -494,10 +494,10 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
 
-// First used as 15 per-lane digit planes (7.5 KiB) plus an optional ordinate
-// plane (4 KiB); after the handoff, the same 12 KiB holds the cofactor tree.
+// Hybrid prepare uses five prefix planes plus the scalar residue (24 KiB).
+// After the entry barrier, the first12 KiB are reused by the cofactor tree.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
-    __shared__ uint64_t storage[12*QSB_TREE_N];return storage;
+    __shared__ uint64_t storage[24*QSB_TREE_N];return storage;
 }
 __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
     const uint64_t n0=GT_ORDER_N[0], n1=GT_ORDER_N[1], n2=GT_ORDER_N[2], n3=GT_ORDER_N[3];
@@ -1245,6 +1245,7 @@ __device__ __constant__ uint64_t pin_recovery_c[4];
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
 #include "PackedRecovery.cuh"
+#include "HybridPair.cuh"
 static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 
 /* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
@@ -1408,20 +1409,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
-    /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
-
-    /* Recover P+R and P-R together with one shared denominator inverse. The
-     * prepare-only xR copy dies before the collective; reload R afterward so
-     * its eight limbs do not lengthen the inverse's already pressured state. */
-    {
-        uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
-                             pin_u2rx_words[2],pin_u2rx_words[3]};
-        qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
-    }
-    bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
-    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
-    qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
+    // First checkpoint contains scalar and excluded seven-denominator product.
+    hy_checkpoint(z,d_gt,active,batch_size,saved,roots);
     (void)tree;
     return;
     } else {
@@ -1437,7 +1426,11 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
-    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+    bool hy_identity=false;
+    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
+        if(qy[0]!=1 || (qy[1]|qy[2]|qy[3])!=0)return;
+        hy_identity=true;qy[0]=0;
+    }
     for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
     prod[4]=0;
     uint64_t weighted_inv[4];
@@ -1453,6 +1446,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+    // u=v=0 above gives both x coordinates a; infinity +/-R has y=+/-b.
+    if(hy_identity)y_parities=(uint32_t)(u2ry[0]&1ULL)|((uint32_t)((u2ry[0]&1ULL)^1ULL)<<1);
 
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
@@ -1626,6 +1621,32 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+    hy_pair_prepare<<<blocks,QSB_TREE_N QSB_STREAM_ARG>>>(d_gt,saved,roots,batch_size);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Hybrid pair prepare launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+    qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
+        roots,blocks,super_roots,root_checkpoint);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+    qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+    qsb_root_group_finish<<<root_groups,256 QSB_STREAM_ARG>>>(
+        roots,blocks,super_roots,root_checkpoint);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
 #if QSB_TREE_OFFLOAD2
     qsb_leaf_tree_finish<<<blocks,256 QSB_STREAM_ARG>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
@@ -1704,6 +1725,8 @@ __global__ void kernel_build_gtable(
         _ModMult(px, pz); _ModMult(py, pz);
         for (int k = 0; k < 4; k++) { rx[k] = px[k]; ry[k] = py[k]; }
     }
+    // New affine pair helpers require canonical table coordinates.
+    qsb_field_normalize(rx);qsb_field_normalize(ry);
     /* Limbs are little-endian in memory, which is exactly the table's byte
      * order, so the store is a straight copy. */
     size_t off = ((size_t)gt_offset(ch) + d) * 64;

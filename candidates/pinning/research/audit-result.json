@@ -1,21 +1,27 @@
 {
-  "baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237",
-  "baseline_promoted_commit": "03e399c9c27037a4acea573a79444a902a5ace91",
-  "mechanism": "one affine pairing layer with64B hierarchical checkpoint",
-  "local_native_compile": false,
-  "local_GPU_measured": false,
-  "production_source_sha256": {
+  "status": "PASS",
+  "source_field_programs": "new square,subtraction and unchanged full multiply actual PTX semantics audited",
+  "square_PTX_cases": 523,
+  "multiply_PTX_cases": 3138,
+  "sub_PTX_cases": 3633,
+  "canonical_add_cases": 4145,
+  "raw_scalar_digit_exception_cases": 10096,
+  "source_call_full_scalar_cases": 96,
+  "source_call_PTX_pair_scalar_cases": 16,
+  "shared_arena_bytes": 24576,
+  "kernels_added": 4,
+  "source_SHA256": {
     "pinning.cu": "b3cf8f641faf4e63c48fd7889b3bf89b28f9ac81798bb816a1a509d695dccf2c",
     "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
     "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413",
     "HybridPair.cuh": "b90f213c20649869c1d2bfc6823f26ae3747a6aa4a58411e473202a55c4700bc",
     "HybridField.cuh": "fa753cd858c744eea0d160332c4941e7278363341d11a4acaec007dec435d6bb",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
     "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
     "HybridCofactor.cuh": "e63049672c42d31159b2a6e19a37f9cbe52ea9f82db03dc2ec40e2a1caf20ec5",
     "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8"
-  }
+  },
+  "limits": "No native compile/GPU benchmark. Inherited mixed-add/seed arithmetic modeled under field contract, not certified exact; GPU scheduling/registers not modeled."
 }
