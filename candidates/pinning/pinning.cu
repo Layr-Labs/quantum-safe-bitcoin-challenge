@@ -33,6 +33,11 @@
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
 #endif
+#ifndef QSB_ABSORB_ANCHOR
+#define QSB_ABSORB_ANCHOR 1  /* Q288: defer the final-anchor resolve; qsb_packed_prepare
+                                forms vbar = Y_def*hc - y0*tbar (loop6-q288-gauge premise,
+                                1e8 z incl. EC reconstruction == k*G) */
+#endif
 #ifndef QSB_RAW_X
 #define QSB_RAW_X 0
 #endif
@@ -81,6 +86,9 @@
 #ifndef QSB_SHA_OPT
 #define QSB_SHA_OPT 1    /* constant-folded SHA transforms (sha_pinsha.cuh): literal K, IV round-1 Maj,
                           * feed-forward folded into round 63, word-0-only pubkey hash */
+#endif
+#ifndef QSB_SHA_SIBLING_INTERLEAVE
+#define QSB_SHA_SIBLING_INTERLEAVE 1
 #endif
 #include "sha_schedule_interleaved.cuh"
 
@@ -646,7 +654,7 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
-    uint64_t (*unused)[2*QSB_TREE_N]) {
+    uint64_t (*unused)[2*QSB_TREE_N],uint64_t *y0_out) {
     (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
@@ -664,7 +672,18 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
+#if QSB_ABSORB_ANCHOR
+    /* Q288: defer the resolve. Y stays the raw deferred-chain output Y_def
+     * (== Y_true + y1*ZZZ3 convention) and the converted anchor ordinate is
+     * handed to the consumer, which forms vbar = Y_def*hc - y0*tbar with
+     * tbar = V*hc (exact field identity, loop6-q288-gauge: 1e8 z,
+     * absorb_mismatch = 0, EC reconstruction == k*G). The resolve mul
+     * _ModMult(x1,y0,V);_ModSub256(Y,Y,x1) is absorbed there. */
+    Load256(y0_out, y0);
+#else
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    (void)y0_out;
+#endif
 }
 
 
@@ -784,10 +803,17 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
     }
 
     SHA256_RND(16);
+#if QSB_SHA_SIBLING_INTERLEAVE
+    /* Q237: the proven PK33 schedule/compression interleave applied to the
+     * locktime-tail sibling. Scheduling-only; all 64 rounds intact. */
+    QSB_SHA_INTERLEAVED_16(32);
+    QSB_SHA_INTERLEAVED_16(48);
+#else
     WMIX();
     SHA256_RND(32);
     WMIX();
     SHA256_RND(48);
+#endif
 
     state[0] += a;
     state[1] += b;
@@ -999,10 +1025,17 @@ __device__ __forceinline__ void _SHA256TransformDigest32(
     }
 
     SHA256_RND(16);
+#if QSB_SHA_SIBLING_INTERLEAVE
+    /* Q237: the proven PK33 schedule/compression interleave applied to the
+     * SHA256d second-compression sibling. Scheduling-only; all 64 rounds. */
+    QSB_SHA_INTERLEAVED_16(32);
+    QSB_SHA_INTERLEAVED_16(48);
+#else
     WMIX();
     SHA256_RND(32);
     WMIX();
     SHA256_RND(48);
+#endif
 
     out[0] = 0x6a09e667u + a;
     out[1] = 0xbb67ae85u + b;
@@ -1079,6 +1112,14 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
     QSB_SHA_INTERLEAVED_16(32);
     QSB_SHA_INTERLEAVED_16(48);
 
+#if QSB_ZEROS_N / 32 == 0 && (QSB_ZEROS_N % 32) != 0
+    /* Q272 first-word gate short-circuit: for N < 32 gpu_bench_valid_words
+     * reads only out[0], and under single_hash the second recovered-key hash
+     * is dead, so the seven remaining IV adds are dead work. The <false>
+     * (easy_mode) specialization is not instantiated at the frontier; if it
+     * ever returns, the #else below restores the full digest. */
+    out[0] = 0x6a09e667u + a;
+#else
     out[0] = 0x6a09e667u + a;
     out[1] = 0xbb67ae85u + b;
     out[2] = 0x3c6ef372u + c;
@@ -1087,6 +1128,7 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
     out[5] = 0x9b05688cu + f;
     out[6] = 0x1f83d9abu + g;
     out[7] = 0x5be0cd19u + h;
+#endif
 }
 
 #include "sha_pinsha.cuh"
@@ -1166,10 +1208,17 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     }
 
     QSB_RND16L(16);
+#if QSB_SHA_SIBLING_INTERLEAVE
+    /* Q237: schedule/compression interleave, literal-K form (QSB_STEPL). */
+    QSB_INTERLEAVED16L(32);
+    QSB_INTERLEAVED15L(48);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);   /* W63 completion (plain WMIX carried it; round 63 reads it) */
+#else
     QSB_WMIX_Z();
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
@@ -1274,8 +1323,14 @@ __device__ __forceinline__ void _SHA256TransformFastTail11S(
         w[15] += s1(w[13]) + w[8] + s0(w[0]);
     }
     QSB_RND16L(32);
-    QSB_WMIX_Z();
-    QSB_RND15L(48);
+    #if QSB_SHA_SIBLING_INTERLEAVE
+        /* Q237: rounds 48-63 interleave, literal-K form (Tail11S keeps its sa/sb W-blocks). */
+        QSB_INTERLEAVED15L(48);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);   /* W63 completion (plain WMIX carried it; round 63 reads it) */
+    #else
+        QSB_WMIX_Z();
+        QSB_RND15L(48);
+    #endif
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
@@ -2003,7 +2058,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
+    uint64_t anchor_y0[4];
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch(),anchor_y0);
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2015,7 +2071,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
-    qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
+    qsb_packed_prepare(prod,qzz,qy,qzzz,anchor_y0,usable,active,batch_size,saved,roots);
     (void)tree;
     return;
     } else {

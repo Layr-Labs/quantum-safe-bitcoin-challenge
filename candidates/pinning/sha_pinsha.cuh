@@ -16,6 +16,10 @@
 #ifndef QSB_SHA_PINSHA_CUH
 #define QSB_SHA_PINSHA_CUH
 
+#ifndef QSB_SHA_SIBLING_INTERLEAVE
+#define QSB_SHA_SIBLING_INTERLEAVE 1
+#endif
+
 __host__ __device__ __forceinline__ constexpr uint32_t qsb_klit(int i)
 {
     constexpr uint32_t k[64] = {
@@ -251,10 +255,17 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     }
 
     QSB_RND16L(16);
+#if QSB_SHA_SIBLING_INTERLEAVE
+    /* Q237: schedule/compression interleave, literal-K form (QSB_STEPL). */
+    QSB_INTERLEAVED16L(32);
+    QSB_INTERLEAVED15L(48);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);   /* W63 completion (plain WMIX carried it; round 63 reads it) */
+#else
     WMIX();
     QSB_RND16L(32);
     WMIX();
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
     out[1] = QSB_IV1 + b;
     out[2] = QSB_IV2 + c;

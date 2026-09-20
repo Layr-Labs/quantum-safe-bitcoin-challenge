@@ -53,7 +53,7 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
     uint64_t *D, const uint64_t *U, const uint64_t *Y, const uint64_t *V,
-    bool usable, bool active, int n, ulonglong2 *saved, uint64_t *roots) {
+    const uint64_t *y0, bool usable, bool active, int n, ulonglong2 *saved, uint64_t *roots) {
     // All lanes finish reading their digits/anchor before tree overwrites.
     __syncthreads();
     uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();
@@ -62,8 +62,22 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
-        qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
+#if QSB_ABSORB_ANCHOR
+        /* Q288: Y arrives as the deferred-chain output Y_def (the resolve mul
+         * in _FixedBaseSignedXYZZScalar is absorbed here): with hc = U*D and
+         * tbar = V*hc, vbar = Y_def*hc - y0*tbar == (Y_def - y0*V)*hc (mod p),
+         * the exact field identity verified at 1e8 z incl. EC reconstruction
+         * == k*G (data/artifacts/loop6-q288-gauge). -DQSB_ABSORB_ANCHOR=0
+         * restores the shipped resolve-mul path (Y then arrives resolved). */
+        uint64_t yh[4],y0t[4];
+        qsb_packed_raw_mul(yh,Y,hc);
+        qsb_packed_raw_mul(y0t,y0,tbar);
+        _ModSub256(vbar,yh,y0t);
+#else
+        (void)y0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+#endif
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2

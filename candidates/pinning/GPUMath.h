@@ -89,6 +89,24 @@
 #ifndef QSB_SAS_SPLIT3P
 #define QSB_SAS_SPLIT3P 1
 #endif
+/* QSB_SAS_FUSE (Q296 variant B, loop7): fuse the _ModSqrAddSub2 reduction tail.
+ * The split-3p u-add, the two q-subtraction chains and the trailing 3K sub are
+ * reassociated into ONE 10-limb sub of S = (2v + 3K) - (u + 3*2^256): the merge
+ * chain and the second-fold block are untouched, and the pre-fold value is the
+ * canonical 320-bit residue of z + u + 3p - 2q - 3K, so the tail is EXACT (the
+ * shipped C31 3K-borrow truncation, ~2^-30.5/site, disappears). S is built in
+ * 28 off-chain insns (no serial depth, no new registers: u/v/m0/m1 recycled)
+ * during the e/o product phase. -DQSB_SAS_FUSE=0 restores the shipped tail
+ * byte for byte. Requires QSB_SAS_SPLIT3P. */
+#ifndef QSB_SAS_FUSE
+#define QSB_SAS_FUSE 1
+#endif
+#if QSB_SAS_FUSE != 0 && QSB_SAS_FUSE != 1
+#error QSB_SAS_FUSE must be 0 or 1
+#endif
+#if QSB_SAS_FUSE && !QSB_SAS_SPLIT3P
+#error QSB_SAS_FUSE requires QSB_SAS_SPLIT3P
+#endif
 #ifndef QSB_FUSE_SQRADDSUB2
 #define QSB_FUSE_SQRADDSUB2 1
 #endif
@@ -1494,6 +1512,34 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmov.b64 {u4,u5}, %10; mov.b64 {u6,u7}, %11;\n"
         "\tmov.b64 {v0,v1}, %12; mov.b64 {v2,v3}, %13;\n"
         "\tmov.b64 {v4,v5}, %14; mov.b64 {v6,v7}, %15;\n"
+#if QSB_SAS_FUSE && QSB_SAS_SPLIT3P
+        /* Q296 variant B: S = (2v + 3K) - (u + 3*2^256), built off-chain in the
+         * recycled u/v registers (plus dead m0/m1), then ONE 10-limb borrow
+         * chain. Replaces the u-add (10 serial) + two q-subs (20) + 3K sub (2)
+         * with a single 10-serial sub after the unchanged merge chain, and is
+         * exact: the pre-fold 320-bit residue is z+u+3p-2q-3K with no dropped
+         * 3K borrow. All 28 S-construction insns depend only on the u/q inputs
+         * and issue during the e/o product phase. */
+        "\tshr.u32 m0, v7, 31;\n"                                   /* 2v limb8 */
+        "\tshf.l.wrap.b32 v7, v6, v7, 1; shf.l.wrap.b32 v6, v5, v6, 1;\n"
+        "\tshf.l.wrap.b32 v5, v4, v5, 1; shf.l.wrap.b32 v4, v3, v4, 1;\n"
+        "\tshf.l.wrap.b32 v3, v2, v3, 1; shf.l.wrap.b32 v2, v1, v2, 1;\n"
+        "\tshf.l.wrap.b32 v1, v0, v1, 1; add.u32 v0, v0, v0;\n"      /* 2v = v << 1 */
+        "\tadd.cc.u32 v0, v0, 0xb73; addc.cc.u32 v1, v1, 3;\n"       /* + 3K = 3*2^32 + 0xB73 */
+        "\taddc.cc.u32 v2, v2, 0; addc.cc.u32 v3, v3, 0; addc.cc.u32 v4, v4, 0;\n"
+        "\taddc.cc.u32 v5, v5, 0; addc.cc.u32 v6, v6, 0; addc.cc.u32 v7, v7, 0;\n"
+        "\taddc.u32 m0, m0, 0;\n"
+        "\tsub.cc.u32 u0, v0, u0; subc.cc.u32 u1, v1, u1;\n"         /* S = 2v+3K - u - 3*2^256 */
+        "\tsubc.cc.u32 u2, v2, u2; subc.cc.u32 u3, v3, u3;\n"
+        "\tsubc.cc.u32 u4, v4, u4; subc.cc.u32 u5, v5, u5;\n"
+        "\tsubc.cc.u32 u6, v6, u6; subc.cc.u32 u7, v7, u7;\n"
+        "\tsubc.cc.u32 m0, m0, 3; subc.u32 m1, 0, 0;\n"
+        "\tsub.cc.u32 z0, z0, u0; subc.cc.u32 z1, z1, u1;\n"         /* z -= S */
+        "\tsubc.cc.u32 z2, z2, u2; subc.cc.u32 z3, z3, u3;\n"
+        "\tsubc.cc.u32 z4, z4, u4; subc.cc.u32 z5, z5, u5;\n"
+        "\tsubc.cc.u32 z6, z6, u6; subc.cc.u32 z7, z7, u7;\n"
+        "\tsubc.cc.u32 z8, z8, m0; subc.u32 z9, z9, m1;\n"
+#else
 #if QSB_SAS_SPLIT3P
         /* 3p = 3*2^256 - 3K: add the 3*2^256 inside the e-chain's z8 limb (free) and subtract
          * 3K = 0x3_00000B73 after the two q subtractions (the value never drops below 2^256
@@ -1537,6 +1583,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z3, z3, 0; subc.u32 z4, z4, 0;\n"
 #endif
 #endif
+#endif  /* QSB_SAS_FUSE */
         "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\nmad.lo.u32 sfq, z9, 977, z8;\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\naddc.u32 sfc, z9, 0;\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, sfc; }\n\n"
 #if QSB_SHORT_CARRY
         QSB_SECOND_FOLD_TAIL
