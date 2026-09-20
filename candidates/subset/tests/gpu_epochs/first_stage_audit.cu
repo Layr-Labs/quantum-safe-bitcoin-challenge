@@ -1,4 +1,4 @@
-// Audit the actual PR212 producer against OpenSSL's independent compression.
+// Audit the active flat first-stage producer against OpenSSL compression.
 #define main qsb_production_main
 #include "tree.cu"
 #undef main
@@ -35,7 +35,9 @@ int main() {
         CUDA_CHECK(cudaMemcpy(device_epochs,input.data(),input.size()*sizeof(epoch_desc_t),cudaMemcpyHostToDevice));
         for(int count:counts) {
             CUDA_CHECK(cudaMemset(device_first,0xa5,actual.size()*sizeof(uint32_t)));
-            kernel_build_first<<<epochs,count>>>(device_epochs,device_first);
+            const unsigned nthr=(unsigned)epochs*(unsigned)count;
+            kernel_build_first_flat<<<(nthr+255)/256,256>>>(
+                device_epochs,device_first,(unsigned)epochs,(unsigned)count);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaMemcpy(actual.data(),device_first,actual.size()*sizeof(uint32_t),cudaMemcpyDeviceToHost));
             for(int e=0;e<epochs;e++)for(int c=0;c<QSB_FIRST_SLOTS;c++) {

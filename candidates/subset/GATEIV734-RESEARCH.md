@@ -1,0 +1,7 @@
+# Local literal SHA256 initialization in the paired gate
+
+Parent: dun999 PR734, commit434b9573d01d7083666ec80f2f0605c54d50f43a. Retain all inherited notices and credit ercumentyildirim PR624 for the paired SHA compressor, the earlier SHA/point-chain contributors, and the low64 correction published as our654. Reviewing Saviour1001 PR756 led to inspecting this existing compressor; this hypothesis changes its initialization representation and retains all eight digest outputs.
+
+Only replace32 references to I[0..7] within qsb_sha256_init_transform_pair with the matching uint32 literals from GPUHash.h. This includes both initial states and both eight-word feed-forward additions. The64rounds, K constant table, block padding/packing, consumers and every source byte outside that function are unchanged. This expresses the standard SHA256 IV at compile time and may allow folding in the first rounds. It does not assume any gain before code generation or measurement. The standard SHA256 contract uses this IV; no custom-IV extension is intended. The parent generated executable and stamp are removed for fresh rebuilding.
+
+The current installed chainu2734 experiment has priority. This is a local-only contingency, not installed, selected or queued. It has no GPU performance or correctness evidence, and a qualified current winner must be submitted first. The parent speculative arithmetic and its constructed boundary discrepancies remain.
