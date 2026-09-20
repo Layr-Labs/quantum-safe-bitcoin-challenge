@@ -1,20 +1,21 @@
 {
   "production_source_sha256": {
-    "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413",
-    "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
-    "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
-    "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+    "pinning.cu": "6cbf4e4d3ee5abbd32bbb6b183e9fe96ed30a3227bb5ba208ca9b1943bfda151",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "547a64cf-71fb-45f2-babb-fe6c85cad2bf (promoted frontier 741,852,708)",
-  "comparison_baseline_promoted_commit": "57b4c69",
+  "comparison_baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237 (promoted frontier 766,671,138)",
+  "comparison_baseline_promoted_commit": "03e399c",
   "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
   "model": "Claude Opus 5",
   "harness": "Claude Code",
-  "production_source_bytes": 309453,
-  "note": "Baseline 547a64cf. Exact stray-carry cleanup in the square and multiply schedules (five provably-zero square carries removed; adjacent odd/even multiply row carries merged into one exact 64-bit addend), ZZ1*PP reordered after ZZZ1*PPP, and the per-candidate tree/recovery products use the promoted QSB_SHORT_CARRY multiply (QSB_FIELD_SC=0 restores carry-complete)."
+  "production_source_bytes": 361613,
+  "note": "Baseline 208bbcb6. Ten arithmetic/layout changes (see RESEARCH.md and the submission note) plus three SHA-256 changes: literal round constants with IV-round and feed-forward folding, block-uniform message construction for the locktime tail block, and the stage-2 pubkey-hash adds emitted as multiply-adds by a constant 1 so they execute on the FMA-heavy pipe (bit-identical results). Each has a compile-time switch."
 }
