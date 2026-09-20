@@ -8,9 +8,7 @@ constexpr int QSB_PREFIX_KEEP=(64*QSB_PREFIX_BLOCKS+9)/10;
 constexpr int QSB_PREFIX_BITS=QSB_PREFIX_KEEP+6;
 constexpr int QSB_PREFIX_ENTRIES=1<<QSB_PREFIX_BITS;
 struct __align__(16) QSBPrefixRecord { uint4 lo,hi,tail; };
-#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
 __device__ QSBPrefixRecord QSB_PREFIX_CACHE[QSB_PREFIX_ENTRIES];
-#endif
 
 __host__ __device__ inline bool qsb_prefix_eligible(int n,int start,int t,int fast,int rem){
     return fast==QSB_FAST_N_INC && rem==0 && t>=0 && t<=6 && start>=0 && n-start>=QSB_PREFIX_BITS;
@@ -38,7 +36,6 @@ __device__ __forceinline__ void qsb_emit_pushes(uint32_t *state,uint32_t *W,uint
     }
 }
 
-#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED   /* only the legacy (non-pair) host path launches it */
 __global__ void qsb_prepare_prefix_cache(const uint32_t *mid,int start,int t){
     unsigned mask=blockIdx.x*blockDim.x+threadIdx.x;
     if(mask>=QSB_PREFIX_ENTRIES || __popc(mask)>t)return;
@@ -56,9 +53,7 @@ __global__ void qsb_prepare_prefix_cache(const uint32_t *mid,int start,int t){
     record.tail=make_uint4(W[0],W[1],pos,0);
     QSB_PREFIX_CACHE[mask]=record;
 }
-#endif
 
-#if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_fast_window_hash(uint32_t *state,const uint8_t *skip,
         int t,int early,int start,bool cached,const uint32_t *constant_words){
     uint32_t W[16];
@@ -90,4 +85,3 @@ __device__ __forceinline__ void qsb_fast_window_hash(uint32_t *state,const uint8
     }
     qsb_compress_constant_rolled(state);
 }
-#endif
