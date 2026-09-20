@@ -392,6 +392,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         ".reg .u32 f1_outcarry;\n"
         "\n"
         "\t.reg .u64 f1_h,f1_t;\n"
+#if QSB_YOFF
+        "\tadd.cc.u64 S0,AY0,OFF0;\n"
+        "\taddc.cc.u64 S1,AY1,OFF1;\n"
+        "\taddc.cc.u64 S2,AY2,OFF2;\n"
+        "\taddc.cc.u64 S3,AY3,OFF3;\n"
+        "\taddc.u64 f1_h,0,0;\n"
+        "\tsub.u64 f1_h,f1_h,1;\n"
+        "\tand.b64 f1_t,f1_h,0xFFFFFFFEFFFFFC2F;\n"
+        "\tadd.u64 f1_t,f1_t,1;\n"
+        "\tadd.cc.u64 S0,S0,f1_t;\n"
+        "\taddc.u64 S1,S1,f1_h;\n"
+#else
         "\tadd.cc.u64 S0,AY0,OFF0;\n"
         "\taddc.cc.u64 S1,AY1,OFF1;\n"
         "\taddc.cc.u64 S2,AY2,OFF2;\n"
@@ -401,6 +413,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tand.b64 f1_t,f1_h,0x1000003d1;\n"
         "\tadd.cc.u64 S0,S0,f1_t;\n"
         "\taddc.u64 S1,S1,0;\n"
+#endif
         "\t\n"
         ".reg .u32 f2_outcarry;\n"
         "\n"
@@ -1584,7 +1597,11 @@ __device__ __forceinline__ void qsb_filter_point_add(
   uint64_t T[4];
 
   qsb_filter_mul(U2, (uint64_t *)X2, ZZ1,bad);   // U2 = X2*ZZ1
+#if QSB_YOFF
+  _ModAddLazyOff(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#else
   qsb_filter_add(S2, (uint64_t *)Y2, (uint64_t *)Yoff,bad);
+#endif
   qsb_filter_mul(S2, ZZZ1,bad);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
@@ -1604,7 +1621,14 @@ __device__ __forceinline__ void qsb_filter_point_add(
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
+#if QSB_YOFF
+    uint64_t yreal[4];
+    Load256(yreal, Y2);
+    qsb_yoff_to_y(yreal);
+    qsb_filter_mul(S2, yreal, ZZZ1,bad);
+#else
     qsb_filter_mul(S2, (uint64_t *)Y2, ZZZ1,bad);// affine Y2*ZZZ3
+#endif
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 

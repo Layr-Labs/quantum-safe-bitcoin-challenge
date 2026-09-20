@@ -48,6 +48,9 @@
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
 
+#ifndef QSB_YOFF
+#define QSB_YOFF 1  /* table y+c; signed load is XOR; pinning P9 port */
+#endif
 #include "../../GPUMath.h"
 
 #define MAX_LEN_WORD_PRIME 20
@@ -376,8 +379,10 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
+#if !QSB_YOFF
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
     UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
+#endif
     gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
 }
 
@@ -405,11 +410,29 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
+#if QSB_YOFF
+    gy[0]=y0.x^m; gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
+#else
     gy[0]=(y0.x^m)+(0xFFFFFFFEFFFFFC30ULL&m); gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
+#endif
 #else
     gt_load_signed_flat(gTable, base, idx, neg, gx, gy);
 #endif
 }
+
+#if QSB_YOFF
+/* Table post-pass: y += c for every entry (exact: y < p so y + c < 2^256).
+ * Signed loads then become a pure XOR; see pinning P9 / QSB_YOFF. */
+__global__ void qsb_table_offset_y(uint8_t *gTable) {
+    uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= GT_TOTAL_ENTRIES) return;
+    uint64_t *y = (uint64_t *)(gTable + t * 64 + 32);
+    uint64_t a0 = y[0], a1 = y[1], a2 = y[2], a3 = y[3];
+    asm("add.cc.u64 %0, %0, 0x800001E8;\n\taddc.cc.u64 %1, %1, 0;\n\taddc.cc.u64 %2, %2, 0;\n\taddc.u64 %3, %3, 0;"
+        : "+l"(a0), "+l"(a1), "+l"(a2), "+l"(a3));
+    y[0] = a0; y[1] = a1; y[2] = a2; y[3] = a3;
+}
+#endif
 
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
  * 16 signed digits -> 1 seed load + 15 mixed adds; the next chunk's load is
@@ -499,10 +522,22 @@ __device__ __forceinline__ void qsb_complete_last_add(
     const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff){
     uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4],T[4];
     _ModMult(U2,(uint64_t*)X2,ZZ1);
-    _ModAdd256(S2,(uint64_t*)Y2,(uint64_t*)Yoff);_ModMult(S2,ZZZ1);
+#if QSB_YOFF
+    _ModAddLazyOff(S2,(uint64_t*)Y2,(uint64_t*)Yoff);
+#else
+    _ModAdd256(S2,(uint64_t*)Y2,(uint64_t*)Yoff);
+#endif
+    _ModMult(S2,ZZZ1);
     _ModSub256(P,U2,X1);_ModSub256(R,S2,Y1);
     if(!(P[0]|P[1]|P[2]|P[3])){
-        if(!(R[0]|R[1]|R[2]|R[3])) qsb_double_affine(X1,Y1,ZZ1,ZZZ1,X2,Y2);
+        if(!(R[0]|R[1]|R[2]|R[3])) {
+#if QSB_YOFF
+            uint64_t yreal[4]; Load256(yreal,Y2); qsb_yoff_to_y(yreal);
+            qsb_double_affine(X1,Y1,ZZ1,ZZZ1,X2,yreal);
+#else
+            qsb_double_affine(X1,Y1,ZZ1,ZZZ1,X2,Y2);
+#endif
+        }
         else {
             #pragma unroll
             for(int i=0;i<4;i++){X1[i]=0;Y1[i]=(i==0);ZZ1[i]=ZZZ1[i]=0;}
@@ -512,7 +547,13 @@ __device__ __forceinline__ void qsb_complete_last_add(
     _ModSqr(PP,P);_ModMult(PPP,PP,P);_ModMult(Q,U2,PP);_ModMult(ZZ1,PP);
     _ModSqr(T,R);_ModAdd256(T,T,PPP);_ModSub256(T,T,Q);_ModSub256(T,T,Q);
     _ModMult(ZZZ1,PPP);_ModSub256(Q,Q,T);_ModMult(Q,R);
-    _ModMult(S2,(uint64_t*)Y2,ZZZ1);_ModSub256(Y1,Q,S2);Load256(X1,T);
+#if QSB_YOFF
+    { uint64_t yreal[4]; Load256(yreal,Y2); qsb_yoff_to_y(yreal);
+      _ModMult(S2,yreal,ZZZ1); }
+#else
+    _ModMult(S2,(uint64_t*)Y2,ZZZ1);
+#endif
+    _ModSub256(Y1,Q,S2);Load256(X1,T);
 }
 // Delayed dispatch only: either the original path is identical, or its exact chain is replayed.
 #include "../../chain_replay_field.cuh"
@@ -529,7 +570,12 @@ __device__ __forceinline__ void qsb_filter_last_add(
     const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
     uint64_t scaled_y[4];
+#if QSB_YOFF
+    { uint64_t yreal[4]; Load256(yreal,y); qsb_yoff_to_y(yreal);
+      qsb_filter_mul(scaled_y,yreal,ZZZ,bad); }
+#else
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
+#endif
 #if QSB_SPEC_LAST_RESOLVE
     QSB_FSUB(Y,Y,scaled_y);
 #else
@@ -2716,6 +2762,12 @@ int main(int argc, char **argv) {
         }
         fflush(stdout);
         free(chk_table);
+#if QSB_YOFF
+        qsb_table_offset_y<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt);
+        cudaError_t yerr = cudaDeviceSynchronize();
+        if (yerr == cudaSuccess) yerr = cudaGetLastError();
+        if (yerr != cudaSuccess) { fprintf(stderr, "Table offset pass failed: %s\n", cudaGetErrorString(yerr)); return 1; }
+#endif
     }
 
     /* Upload params */

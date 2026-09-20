@@ -393,6 +393,50 @@ __device__ __forceinline__ void _ModAdd256(uint64_t *r,uint64_t *a,uint64_t *b){
 #endif
 }
 
+#ifndef QSB_YOFF
+#define QSB_YOFF 0
+#endif
+#if QSB_YOFF
+/* Anchor sum of two offset ordinates y+c: r = a+b-(K-1) == y2+yoff (mod p). */
+__device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+#ifdef __CUDA_ARCH__
+    uint64_t r0,r1,r2,r3;
+    asm("{\n.reg .u64 t0,t1,t2,t3,k,mk,c0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u64 k,0,0; sub.u64 mk,k,1; and.b64 c0,mk,0xFFFFFFFEFFFFFC2F; add.u64 c0,c0,1;\nadd.cc.u64 t0,t0,c0; addc.u64 t1,t1,mk;\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+#else
+    __uint128_t s = (__uint128_t)a[0] + b[0];
+    uint64_t t0 = (uint64_t)s;
+    s = (__uint128_t)a[1] + b[1] + (s >> 64);
+    uint64_t t1 = (uint64_t)s;
+    s = (__uint128_t)a[2] + b[2] + (s >> 64);
+    uint64_t t2 = (uint64_t)s;
+    s = (__uint128_t)a[3] + b[3] + (s >> 64);
+    uint64_t t3 = (uint64_t)s;
+    uint64_t k = (uint64_t)(s >> 64);
+    uint64_t mk = k - 1ULL;
+    uint64_t c0 = (mk & 0xFFFFFFFEFFFFFC2FULL) + 1ULL;
+    uint64_t t0n = t0 + c0;
+    uint64_t cy = (uint64_t)(t0n < t0);
+    r[0] = t0n;
+    r[1] = t1 + mk + cy;
+    r[2] = t2;
+    r[3] = t3;
+#endif
+}
+__device__ __forceinline__ void qsb_yoff_to_y(uint64_t *y) {
+    uint64_t r0, r1;
+#ifdef __CUDA_ARCH__
+    asm("{\nsub.cc.u64 %0, %2, 0x800001E8;\nsubc.u64 %1, %3, 0;\n}"
+        : "=l"(r0), "=l"(r1) : "l"(y[0]), "l"(y[1]));
+#else
+    r0 = y[0] - 0x800001E8ULL; r1 = y[1] - (y[0] < 0x800001E8ULL);
+#endif
+    y[0] = r0; y[1] = r1;
+}
+#endif
+
 __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
 {
     uint64_t t;
@@ -1311,7 +1355,11 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
   uint64_t T[4];
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
+#if QSB_YOFF
+  _ModAddLazyOff(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
@@ -1331,7 +1379,14 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
+#if QSB_YOFF
+    uint64_t yreal[4];
+    Load256(yreal, Y2);
+    qsb_yoff_to_y(yreal);
+    _ModMult(S2, yreal, ZZZ1);
+#else
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+#endif
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
