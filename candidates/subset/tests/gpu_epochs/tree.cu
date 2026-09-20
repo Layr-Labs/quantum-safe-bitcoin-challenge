@@ -85,6 +85,7 @@ __device__ __constant__ uint64_t QSB_U2R[8];
  * finish derive both x-coordinates from the two slopes alone (see
  * qsb_xyzz_finish_precomputed). Uploaded next to QSB_U2R. */
 __device__ __constant__ uint64_t QSB_U2R_C[4];
+__device__ __constant__ uint64_t QSB_U2R_NY[4];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -2807,6 +2808,15 @@ int main(int argc, char **argv) {
         BN_bin2bn(p_be,32,bp);
         BN_lebin2bn(dp.u2r_x,32,bx);
         BN_lebin2bn(dp.u2r_y,32,by);
+        // Canonical -yR, including yR == 0; do not consume the doubled y below.
+        if(!BN_sub(bc,bp,by) || !BN_nnmod(bc,bc,bp,ctx)) {
+            fprintf(stderr,"ERROR: QSB_U2R_NY reduction failed\n");return 1;
+        }
+        uint64_t h_ny[4];
+        if(BN_bn2lebinpad(bc,(uint8_t*)h_ny,32)!=32 ||
+           cudaMemcpyToSymbol(QSB_U2R_NY,h_ny,sizeof(h_ny))!=cudaSuccess) {
+            fprintf(stderr,"ERROR: QSB_U2R_NY upload failed\n");return 1;
+        }
         BN_mod_add(by,by,by,bp,ctx);                 /* 2*yR */
         if(BN_mod_inverse(by,by,bp,ctx)==NULL){fprintf(stderr,"ERROR: QSB_U2R_C inverse failed\n");return 1;}
         BN_mod_sqr(bc,bx,bp,ctx);                     /* xR^2 */

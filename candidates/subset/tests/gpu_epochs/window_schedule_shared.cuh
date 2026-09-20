@@ -190,7 +190,15 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
 } while(0)
     QSB_PAIR_STATE_LOAD();
+// Research: ercumentyildirim fa620f6; independently applied from public notes.
+#ifndef QSB_PAIR_SHA_UNROLL_WINDOW
+#define QSB_PAIR_SHA_UNROLL_WINDOW 1
+#endif
+#if QSB_PAIR_SHA_UNROLL_WINDOW
+    #pragma unroll
+#else
     #pragma unroll 1
+#endif
     for(int r=0;r<64;r+=8){
         {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
