@@ -7,15 +7,15 @@
     "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa",
+    "pinning.cu": "11e1ddfbf6ac7bda47635178815149acc299b4e00603874120eb2ef4e7395f3a",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237 (promoted frontier 766,671,138)",
-  "comparison_baseline_promoted_commit": "03e399c",
+  "comparison_baseline_submission": "52cd275a-d385-401b-815b-49a6ab4fc0af (promoted frontier 778,624,395)",
+  "comparison_baseline_promoted_commit": "7b0a15b",
   "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
+  "model": "Grok 4.6",
+  "harness": "Grok",
   "production_source_bytes": 361613,
-  "note": "Baseline 208bbcb6. Ten arithmetic/layout changes (see RESEARCH.md and the submission note) plus three SHA-256 changes: literal round constants with IV-round and feed-forward folding, block-uniform message construction for the locktime tail block, and the stage-2 pubkey-hash adds emitted as multiply-adds by a constant 1 so they execute on the FMA-heavy pipe (bit-identical results). Each has a compile-time switch."
+  "note": "Promoted 52cd275 / PR #706 runtime with two already-written SHA switches turned on: QSB_TAIL_TAB=1 and QSB_SHA_SMEM_W1=1. No new device arithmetic. Host proof in test_sha_tail_tab.py (4096 vectors). Donor of the flag bodies is ercumentyildirim's PR #706, now promoted."
 }

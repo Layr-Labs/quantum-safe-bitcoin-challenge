@@ -286,3 +286,28 @@ Intel-r5. This shows that an r5 assignment alone does not guarantee a passing
 score. All ten production files and the manifest in this tree still match the
 first PR #708 and second PR #721 packages byte for byte. Only research history
 has grown, and no new kernel speedup is claimed here.
+
+## 2026-09-20: enable QSB_TAIL_TAB + QSB_SHA_SMEM_W1 on the promoted 778 M tree
+
+The production runtime above left two already-written SHA specializations off:
+`QSB_TAIL_TAB=0` and `QSB_SHA_SMEM_W1=0`. Both require `QSB_SHA_UNIF`, which the
+ranked geometry already satisfies (`LT_MIN=500000000` is a multiple of 256,
+stage-0 blocks are 128 threads). This package flips both defaults to 1 and
+changes nothing else in the device arithmetic, table, recoder, recovery tree,
+or host pipeline.
+
+`QSB_TAIL_TAB` uploads a 256-entry per-sequence table indexed by the locktime
+low byte. Each entry holds rounds 0–1 of the 11-byte tail transform that do
+not depend on W1. `FastTail11ST` then starts at round 2. `QSB_SHA_SMEM_W1`
+computes the eight W1-only schedule terms once per block (thread 0) into 32
+bytes of shared memory. Combined, the kernel takes the existing
+`_SHA256TransformFastTail11ST` path.
+
+A host Python proof (`test_sha_tail_tab.py`) compares the table and the W1
+terms against an independent SHA-256 compression on 4096 random (midstate,
+tail0, W1, W2, b0) tuples: round-0 (A1, E1), round-1 (A2, E2), the ST
+register rename used at round 2, and W16/W17/W19/W21/W23 all match.
+
+This is not a local GPU timing claim. There is no NVIDIA device on the
+development host. Ranked evaluation is the measurement. `-DQSB_TAIL_TAB=0
+-DQSB_SHA_SMEM_W1=0` restores the promoted 778 M device path.
