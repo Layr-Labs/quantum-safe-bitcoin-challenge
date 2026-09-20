@@ -1,0 +1,44 @@
+{
+  "date": "2026-09-19/20",
+  "refreshed_at": "2026-09-20 ~session v7 start (post d83b6aa0 resolution)",
+  "frontier_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237 (ercumentyildirim)",
+  "frontier_commit": "03e399c9c27037a4acea573a79444a902a5ace91",
+  "frontier_score": 766671138,
+  "frontier_self_rep": "787.46M/s this draw (946.89e9 cand / 1202.1972s); same-kernel family draws 771-780M",
+  "promotion_floor": "official >= 774,337,845 (minScoreImprovementBips=100 restored, commit d830642)",
+  "frontier_mechanism": "547a64c + exact stray-carry cleanup in field mul/sqr SASS + qsb_field_mul_sc on tree/recovery products",
+  "self_rep_targets_vs_bar": {
+    "median_yield_0.9734": "~795.5M self-rep needed for promotion",
+    "session_goal_800_810M_official": "~825-840M self-rep (25M rule: self-rep target = official target + ~25M)",
+    "yield_model": "yield = official/self_rep = verified_hits*8388608/candidates_self_reported; family norm 0.973-0.980; anomalies 0.954-0.956 = ~2% hit loss; low-throughput submissions skew higher (0.98-1.00)"
+  },
+  "our_v6_verdict": {
+    "id": "d83b6aa0-eb80-4ae1-9f58-1f8dd5cb6099",
+    "status": "rejected with score",
+    "official": 760584069,
+    "self_rep": "781.39M/s",
+    "yield": 0.9734,
+    "measured_delta": "+0.8-1.4% real (predicted +1-3%)",
+    "decision": "QSB_CHAIN_PIPE KEPT enabled; base = bad3d6b (tip 03e399c + chain pipe)",
+    "gap_to_bar": "+1.8% self-rep for promotion; +5.5% for session goal 825M"
+  },
+  "pending_validating": [
+    {"id": "0d7aac0", "solver": "anamdongparkjinhyeong", "submitted": "19/9 23:38Z", "claims": "public artifact resubmit of fkiene cf841f0 (740.4M rejected) - lottery class"},
+    {"id": "5cd8069", "solver": "fkiene", "submitted": "20/9 00:04Z", "claims": "overlap a*ZZ with deferred-Y resolve (cofactor leaf in scalar) on crown parent bab0617"},
+    {"id": "9579c93", "solver": "DPZZxlz", "submitted": "20/9 00:22Z", "claims": "inert-diff re-measurement of promoted frontier - pure seed lottery"},
+    {"id": "7cb2974", "solver": "ercumentyildirim", "submitted": "20/9 00:43Z", "claims": "TEN exact/bounded arithmetic+layout changes on own crown 208bbcb6 - DANGER: crown owner big bundle"}
+  ],
+  "dead_mechanisms_do_not_resurrect": [
+    "root-group 3-kernel merge (-1.4% measured)", "fused root inversion tail (~-0.3%)",
+    "GLV (2 deaths)", "EARLY_LOAD dedicated regs (+16 regs spilled)", "S2_BLOCKS=8",
+    "TREE_N=256", "SLOTS=3", "BATCH != 8/16M", ".cs/__ldcg/prefetch in table",
+    "14-chunk/wide tables", "warp-barriers in tree", "host-I/O", "WORD0_ONLY",
+    "Digest32-only interleave", "one-line hit records (loses hits)"
+  ],
+  "our_candidate": {
+    "status": "v7 swarm in progress - designing >=825M self-rep candidate",
+    "base": "bad3d6b = 03e399c + QSB_CHAIN_PIPE",
+    "our_submissions": "6 total: 2 process-failed, 4 scored-rejected (721.16M, 704.56M, 722.86M, 760.58M); best self-rep 781.4M"
+  },
+  "scoring_model_reminder": "officialScore = verified_hits x 8388608 / elapsed (hit-draw luck +-2-3%); self_rep = real throughput. Never compare self-rep vs others' official."
+}

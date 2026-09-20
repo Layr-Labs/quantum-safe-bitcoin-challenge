@@ -90,6 +90,19 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_EARLY_LOAD
 #define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
+#ifndef QSB_CHAIN_PIPE
+#define QSB_CHAIN_PIPE 1      /* 1: depth-1 gather software pipeline inside the signed-digit chain;
+                               * the next point lands in the registers that die mid-add (zero net
+                               * register growth) instead of dedicated prefetch registers. */
+#endif
+#ifndef QSB_FUSED
+#define QSB_FUSED 1           /* 1: single-kernel pipeline -- the prepare kernel runs its own
+                               * 128-leaf cofactor inverse (one _ModInv per block) and the packed
+                               * recovery finish, so the saved[] state planes, the global root
+                               * hierarchy and the finish kernel boundary all disappear.  The
+                               * field/SHA/emit semantics are byte-identical to the split path;
+                               * 0 restores the five-kernel split. */
+#endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
 #endif
@@ -556,6 +569,79 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     gt_load_signed_flat_m(table,base,code&0x1ffffu,0ULL-(code>>31),x,y);
 }
 
+#if QSB_CHAIN_PIPE
+/* Mixed addition identical to _PointAddXYZZT except the next chunk's table
+ * point is gathered the moment both of its target registers die: X2 after
+ * U2 = X2*ZZ1 and Yoff after S2 = (Y2+Yoff)*ZZZ1. The remaining ~5M+2S of
+ * this addition cover the next gather's L2 latency, so the loop never waits
+ * on a load at its head. The load lands in X2 and Yoff, which the caller
+ * rotates: after the call (x,y,o) holds (next x, dead anchor slot, current
+ * y) so the next iteration consumes (x,o,y) -- y and o trade roles each
+ * step. Zero net register growth: the prefetch reuses registers that are
+ * already dead, unlike the dedicated nx/ny buffers of the retired
+ * QSB_EARLY_LOAD experiment (which spilled, 92/64). */
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZT_pipe(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    uint64_t *X2, uint64_t *Y2, uint64_t *Yoff,
+    const uint8_t *table, unsigned nc)
+{
+  uint64_t U2[4];
+  uint64_t S2[4];
+  uint64_t P[4];
+  uint64_t R[4];
+  uint64_t PP[4];
+  uint64_t PPP[4];
+  uint64_t Q[4];
+  uint64_t T[4];
+  volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+  uint32_t ncode=codes[(size_t)nc*QSB_TREE_N+threadIdx.x];
+
+#if QSB_LAZY
+  _ModAddLazy(S2, Y2, Yoff);
+#else
+  _ModAdd256(S2, Y2, Yoff);
+#endif
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1 ; Yoff dead
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModMult(U2, X2, ZZ1);               // U2 = X2*ZZ1          ; X2 dead
+  gt_load_signed_flat_m(table, gt_offset(nc), ncode&0x1ffffu,
+                        0ULL-(ncode>>31), X2, Yoff);   // next point -> dead regs
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  _ModSqr(PP, P);                      // PP = P^2
+  _ModMult(PPP, PP, P);                // PPP = P*PP
+  _ModMult(Q, U2, PP);                 // V  = U2*PP
+
+#if QSB_FUSE_SQRADDSUB2
+  /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
+  _ModSqrAddSub2(T, R, PPP, Q);        // X3 = R^2 + PPP - 2V
+#else
+  _ModSqr(T, R);                       // R^2
+#if QSB_LAZY
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
+#else
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
+#endif
+
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
+                                       // on the paired-carry schedule without predicate spills)
+  _ModSub256(Q, Q, T);                 // V - X3
+  _ModMult(Q, R);                      // R*(V - X3)
+  if (DEFER_Y) {
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+  } else {
+    _ModMult(S2, Y2, ZZZ1);            // affine Y2*ZZZ3
+    _ModSub256(Y1, Q, S2);             // exact Y3
+  }
+
+  Load256(X1, T);                      // X3
+}
+#endif
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
@@ -565,6 +651,26 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_CHAIN_PIPE
+    /* Rotating point buffers: iteration consumes (x,y,o) and prefetches the
+     * next chunk into (x,o); the following iteration therefore consumes
+     * (x,o,y) -- y and o trade roles each step. The role swap also absorbs
+     * the old Load256(y0,y1) anchor copy for free. The final iteration uses
+     * the classic body (nothing left to prefetch), and the anchor copy it
+     * would have produced is exactly the last point's y, already in y. */
+    uint64_t x[4],y[4],o[4];
+    Load256(o,y0);                     /* deferred-Y anchor = first point's y (the
+                                        * affine anchor of the mm seed), matching the
+                                        * classic loop's y0 carried into iteration 2. */
+    qsb_load_decoded(table,2,gt_offset(2),x,y);
+    #pragma unroll 1
+    for(int c=2;c+1<GT_CHUNKS;c+=2) {
+        _PointAddXYZZT_pipe<true>(X,Y,U,V,x,y,o,table,(unsigned)c+1u);
+        _PointAddXYZZT_pipe<true>(X,Y,U,V,x,o,y,table,(unsigned)c+2u);
+    }
+    _PointAddXYZZT<true>(X,Y,U,V,x,y,o);
+    _ModMult(x1,y,V);_ModSub256(Y,Y,x1);
+#else
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -574,6 +680,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         base+=1u<<16;
     }
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
@@ -1114,7 +1221,11 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
 /* Batch the per-search-CTA roots one level further. Groups of 256 roots use
  * the same checkpointed tree helpers, then one 256-lane CTA batch-inverts all
  * group roots. A full 16M candidate batch therefore executes one _ModInv
- * instead of 65,536 independent inversions. */
+ * instead of 65,536 independent inversions.  Under QSB_FUSED these kernels
+ * are never launched, so they are compiled out of the module entirely --
+ * shrinking the PTX the driver JITs inside the measured window. */
+__device__ __constant__ uint64_t pin_u2ry_words[4];
+#if !QSB_FUSED
 __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
     const uint64_t *roots, int count, uint64_t *super_roots,
     uint64_t *root_checkpoint
@@ -1146,7 +1257,6 @@ __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
     }
 }
 
-__device__ __constant__ uint64_t pin_u2ry_words[4];
 __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
     uint64_t *roots, int count, const uint64_t *super_roots,
     const uint64_t *root_checkpoint
@@ -1169,6 +1279,7 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
         for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
     }
 }
+#endif /* !QSB_FUSED */
 
 
 /* Shared-denominator recovery directly from XYZZ coordinates.
@@ -1298,6 +1409,144 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
+#if QSB_FUSED
+/* Fused per-block inverse + packed recovery finish (QSB_FUSED).
+ *
+ * The split pipeline amortises one _ModInv across ~65K candidates through a
+ * three-kernel global root hierarchy and pays a 64-byte-per-candidate
+ * saved[] round-trip for it.  The cofactor exclusion tree already runs
+ * inside this kernel (qsb_packed_prepare), so the only missing piece is the
+ * root inverse itself.  One _ModInv per 128-candidate block (~10Kcy on lane
+ * zero, hidden by the three other resident CTAs) replaces the entire
+ * global-memory state exchange.
+ *
+ * Identical algebra to the split path: with D_i the shared recovery
+ * denominator and excl_i = prod_{j!=i} D_j from qsb_cofactor_prepare,
+ *     v_i = vbar_i * rinv  = Y*U*D_i^-1   (since excl_i * (prod_j D_j)^-1 = D_i^-1)
+ *     u_i = tbar_i * winv  = b*V*U*D_i^-1 (winv = b*rinv, b = yR)
+ * which are exactly the two slope inputs qsb_packed_finish expects.
+ * Unusable lanes enter the tree as the multiplicative identity (prod=1,
+ * set by the caller) and leave before the finish, so a zero denominator
+ * can never poison the block root or emit a record.
+ *
+ * Barrier discipline: every __syncthreads/__syncwarp inside
+ * qsb_cofactor_prepare is reached by all lanes (no early return before this
+ * point); the single broadcast barrier below is the last collective point,
+ * so dead lanes may exit afterwards. */
+template<bool FAST_TAIL>
+__device__ __forceinline__ void qsb_fused_finish(
+    uint64_t *D, const uint64_t *U, const uint64_t *Y, const uint64_t *V,
+    bool usable, uint32_t idx, int easy_mode, int single_hash,
+    uint32_t *hit_cnt, uint32_t *hit_idx, uint64_t *roots)
+{
+    /* All lanes finish reading their digits/anchor before the tree reuses
+     * the shared arena (same ordering requirement as qsb_packed_prepare). */
+    __syncthreads();
+    uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();
+    uint64_t (*excluded)[QSB_RECOVERY_N]=(uint64_t (*)[QSB_RECOVERY_N])(qsb_digit_arena()+8*QSB_TREE_N);
+    qsb_cofactor_prepare<QSB_RECOVERY_N>(D,roots,products,excluded);
+    /* D is now this lane's exclusion product.  The block root stays in
+     * smem (products[k][2N-2]); invert it in place instead of routing it
+     * through the global root hierarchy. */
+    __shared__ uint64_t fused_inv[8];
+    if (threadIdx.x==0) {
+        uint64_t r[5]={products[0][2*QSB_RECOVERY_N-2],products[1][2*QSB_RECOVERY_N-2],
+                       products[2][2*QSB_RECOVERY_N-2],products[3][2*QSB_RECOVERY_N-2],0};
+        qsb_field_normalize(r);
+        _ModInv(r);
+        uint64_t b[5]={pin_u2ry_words[0],pin_u2ry_words[1],
+                       pin_u2ry_words[2],pin_u2ry_words[3],0};
+        uint64_t w[5];qsb_field_mul(w,r,b);      /* weighted twin: b*rinv */
+        #pragma unroll
+        for(int k=0;k<4;k++){fused_inv[k]=r[k];fused_inv[4+k]=w[k];}
+    }
+    __syncthreads();
+    if(!usable)return;
+    uint64_t rinv[4],winv[4];
+    #pragma unroll
+    for(int k=0;k<4;k++){rinv[k]=fused_inv[k];winv[k]=fused_inv[4+k];}
+    /* The packing muls of qsb_packed_prepare, kept in registers. */
+    uint64_t hc[4],vbar[4],tbar[4];
+    qsb_packed_raw_mul(hc,U,D);
+    qsb_packed_raw_mul(vbar,Y,hc);
+    qsb_packed_raw_mul(tbar,V,hc);
+    uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
+                      pin_u2rx_words[2],pin_u2rx_words[3]};
+    uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
+                      pin_u2ry_words[2],pin_u2ry_words[3]};
+    uint64_t recovery_c[4]={pin_recovery_c[0],pin_recovery_c[1],
+                            pin_recovery_c[2],pin_recovery_c[3]};
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_packed_finish(
+        vbar,tbar,rinv,winv,u2rx,u2ry,recovery_c,q1x,q2x);
+
+    /* Hit predicate and record encoding identical to the split finish. */
+#if QSB_PK_UNROLL
+    #pragma unroll
+#else
+    #pragma unroll 1
+#endif
+    for(int ri=0;ri<2;ri++){
+        uint64_t sx0=ri ? q2x[0] : q1x[0];
+        uint64_t sx1=ri ? q2x[1] : q1x[1];
+        uint64_t sx2=ri ? q2x[2] : q1x[2];
+        uint64_t sx3=ri ? q2x[3] : q1x[3];
+        uint32_t x0=(uint32_t)sx0, x1=(uint32_t)(sx0>>32);
+        uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
+        uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
+        uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
+        uint32_t pb[16];
+        pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
+        pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
+        pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
+        pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
+        pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
+        uint32_t hs[8];
+#if QSB_SPARSE_D
+        _SHA256TransformPubkey33(hs,pb);
+#else
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        _SHA256Initialize(hs);_SHA256Transform(hs,pb);
+#endif
+        int vv;
+        if (!FAST_TAIL && easy_mode) {
+            uint8_t h[32];
+            for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+                h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+            vv=gpu_is_der_easy(h,32);
+        } else {
+            vv=gpu_bench_valid_words(hs);
+        }
+        if(vv){
+            uint32_t pos=atomicAdd(hit_cnt,1);
+            if(pos<1024)hit_idx[pos]=idx|(ri<<30);
+            return;
+        }
+        if (FAST_TAIL || single_hash) continue;
+        uint8_t h[32];
+        for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
+        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
+            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
+        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
+        if (!FAST_TAIL && easy_mode) {
+            uint8_t h2[32];
+            for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
+                h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
+            vv=gpu_is_der_easy(h2,32);
+        } else {
+            vv=gpu_bench_valid_words(h2s);
+        }
+        if(vv){
+            uint32_t pos=atomicAdd(hit_cnt,1);
+            if(pos<1024)hit_idx[pos]=idx|(ri<<30)|(1u<<31);
+            return;
+        }
+    }
+}
+#endif
+
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
@@ -1421,8 +1670,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+#if QSB_FUSED
+    qsb_fused_finish<FAST_TAIL>(prod,qzz,qy,qzzz,usable,(uint32_t)idx,
+                              easy_mode,single_hash,d_hit_cnt,d_hit_idx,roots);
+    (void)saved;
+    (void)tree;
+#else
     qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
     (void)tree;
+#endif
     return;
     } else {
 
@@ -1605,6 +1861,7 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #endif
+#if !QSB_FUSED
     int root_groups=(blocks+255)/256;
     qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
@@ -1645,6 +1902,8 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Pipeline finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#endif
+    (void)blocks;
 }
 
 /* ============================================================
@@ -2144,6 +2403,27 @@ int main(int argc, char **argv) {
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
 
+#if QSB_FUSED
+    /* The fused kernel carries ~12.4 KB of shared memory per 128-thread CTA;
+     * the launch_bounds target of QSB_S0_BLOCKS CTAs/SM needs ~24.8 KB (and
+     * any occupancy headroom the registers allow), above the smaller carveout
+     * levels a driver may pick when maximizing L1 instead.  Ask for
+     * the full carveout: the 64 MiB gather stream is served from L2, so the
+     * surrendered L1 capacity is nearly worthless to this kernel.  Then log
+     * the occupancy the driver actually grants -- the previous ledger's
+     * "1 CTA/SM" figure was inferred from register-file arithmetic, never
+     * measured through the occupancy API. */
+    cudaFuncSetAttribute((const void *)kernel_pinning_pipeline<true,0>,
+                         cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+    {
+        int fused_occ = 0;
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(&fused_occ,
+            (const void *)kernel_pinning_pipeline<true,0>, QSB_S0_THREADS, 0);
+        printf("  fused prepare: occupancy %d CTA/SM (target %d)\n",
+               fused_occ, (int)QSB_S0_BLOCKS);
+    }
+#endif
+
     /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
      * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
      * per-candidate state through the same cache every 16M batch, which evicts
@@ -2260,11 +2540,23 @@ int main(int argc, char **argv) {
     ulonglong2 *d_pipeline_state[QSB_SLOTS];
     uint64_t *d_pipeline_roots[QSB_SLOTS],*d_pipeline_tree[QSB_SLOTS];
     uint64_t *d_super_roots[QSB_SLOTS],*d_root_checkpoint[QSB_SLOTS];
+#if QSB_FUSED
+    /* The fused kernel never touches the per-candidate state planes or the
+     * root hierarchy -- shrink them to token allocations.  roots stays
+     * full-size: qsb_cofactor_prepare still publishes each block root there
+     * (dead weight, kept so the verified helper stays byte-identical). */
+    size_t pipeline_state_bytes=64;
+    size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
+    size_t pipeline_tree_bytes=0;
+    size_t super_root_bytes=64;
+    size_t root_checkpoint_bytes=64;
+#else
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
     size_t pipeline_tree_bytes=0;
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+#endif
     for (int s = 0; s < QSB_SLOTS; s++) {
         d_pipeline_state[s]=NULL; d_pipeline_roots[s]=NULL; d_pipeline_tree[s]=NULL;
         d_super_roots[s]=NULL; d_root_checkpoint[s]=NULL;
@@ -2288,11 +2580,19 @@ int main(int argc, char **argv) {
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
+#if QSB_FUSED
+    size_t pipeline_state_bytes=64;
+    size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
+    size_t pipeline_tree_bytes=0;
+    size_t super_root_bytes=64;
+    size_t root_checkpoint_bytes=64;
+#else
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
     size_t pipeline_tree_bytes=0;
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+#endif
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
