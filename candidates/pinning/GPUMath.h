@@ -89,6 +89,50 @@
 #ifndef QSB_SAS_SPLIT3P
 #define QSB_SAS_SPLIT3P 1
 #endif
+/* QSB_SAS_Z9SUB drops the two bit-288 borrow tails on _ModSqrAddSub2's pair of
+ * q-subtractions. Under the split-3p layout the +3*2^256 bias lands in z8, so
+ * each subtraction enters with a 288-bit prefix >= ~3*2^256 and a borrow can
+ * cross into z9 only when z8 == 0 with an incoming low borrow -- the +3 wrap
+ * corner (z8 + carry_e == 0xfffffffd before the bias lands) jointly with
+ * low256 < v, a ~2^-31-class event. In that corner a stale z9 feeds the fold
+ * and the GPU point is wrong for that candidate: a real hit can be lost, a
+ * false one is rejected by the QSB_HOST_GATE exact check -- the same exposure
+ * class QSB_C31 already ships. The same reasoning retires the whole z9 lane
+ * here -- the exact recipe PR #743 proved on _ModMultCore and left off the
+ * square bodies only because the pre-gate 2^-23-class square corner could
+ * reject a run; QSB_HOST_GATE now drops those false GPU hits before they can
+ * reach the verifier, and a lost real hit is bounded by the same budget:
+ *   - `addc.u32 g8, 0, 0` and `addc.u32 z9, g8, 0`: g8/z9 record only the
+ *     carry out of the g3 fold and the z8 assembly wrap, ~2^-23 (g8 == 1 on
+ *     squares) + ~2^-32 + ~2^-31 per call.
+ *   - the final fold's `mad.lo.u32 sfq, z9, 977, z8` / `addc.u32 sfc, z9, 0`
+ *     read z9 only to fold a nonzero 288-bit lane that exists iff one of those
+ *     corners fired; they become `mov.u32 sfq, z8` / `addc.u32 sfc, 0, 0`.
+ * Union exposure ~2^-22-class corrupted candidates; every wrong z9 makes the
+ * GPU point wrong for that candidate only, which the exact host gate filters.
+ * -DQSB_SAS_Z9SUB=0 restores every removed op byte for byte; all of them are
+ * also kept when QSB_SAS_SPLIT3P=0. */
+#ifndef QSB_SAS_Z9SUB
+#define QSB_SAS_Z9SUB 1
+#endif
+#if QSB_SAS_Z9SUB != 0 && QSB_SAS_Z9SUB != 1
+#error QSB_SAS_Z9SUB must be 0 or 1
+#endif
+#if QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB
+#define QSB_SAS_SUB_TAIL ""
+#define QSB_SAS_Z9ADD_TAIL ""
+#define QSB_SAS_G8_TAIL ""
+#define QSB_SAS_Z9INIT ""
+#define QSB_SAS_SFQ "mov.u32 sfq, z8;"
+#define QSB_SAS_SFC "addc.u32 sfc, 0, 0;"
+#else
+#define QSB_SAS_SUB_TAIL " subc.u32 z9, z9, 0;"
+#define QSB_SAS_Z9ADD_TAIL " addc.u32 z9, z9, 0;"
+#define QSB_SAS_G8_TAIL "\taddc.u32 g8, 0, 0;\n"
+#define QSB_SAS_Z9INIT " addc.u32 z9, g8, 0;"
+#define QSB_SAS_SFQ "mad.lo.u32 sfq, z9, 977, z8;"
+#define QSB_SAS_SFC "addc.u32 sfc, z9, 0;"
+#endif
 #ifndef QSB_FUSE_SQRADDSUB2
 #define QSB_FUSE_SQRADDSUB2 1
 #endif
@@ -1484,12 +1528,12 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n"
         "\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n"
         "\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n"
-        "\taddc.u32 g8, 0, 0;\n"
+        QSB_SAS_G8_TAIL
         "\tmov.b64 {z0,z1}, f0; mov.b64 {z2,z3}, f1; mov.b64 {z4,z5}, f2; mov.b64 {z6,z7}, f3;\n"
         "\tmov.b64 {w0,w1}, g0; mov.b64 {w2,w3}, g1; mov.b64 {w4,w5}, g2; mov.b64 {w6,w7}, g3;\n"
         "\tadd.cc.u32 z1, z1, w0; addc.cc.u32 z2, z2, w1; addc.cc.u32 z3, z3, w2;\n"
         "\taddc.cc.u32 z4, z4, w3; addc.cc.u32 z5, z5, w4; addc.cc.u32 z6, z6, w5;\n"
-        "\taddc.cc.u32 z7, z7, w6; addc.cc.u32 z8, f8, w7; addc.u32 z9, g8, 0;\n"
+        "\taddc.cc.u32 z7, z7, w6; addc.cc.u32 z8, f8, w7;" QSB_SAS_Z9INIT "\n"
         "\tmov.b64 {u0,u1}, %8; mov.b64 {u2,u3}, %9;\n"
         "\tmov.b64 {u4,u5}, %10; mov.b64 {u6,u7}, %11;\n"
         "\tmov.b64 {v0,v1}, %12; mov.b64 {v2,v3}, %13;\n"
@@ -1503,7 +1547,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\taddc.cc.u32 z2, z2, u2; addc.cc.u32 z3, z3, u3;\n"
         "\taddc.cc.u32 z4, z4, u4; addc.cc.u32 z5, z5, u5;\n"
         "\taddc.cc.u32 z6, z6, u6; addc.cc.u32 z7, z7, u7;\n"
-        "\taddc.cc.u32 z8, z8, 3; addc.u32 z9, z9, 0;\n"
+        "\taddc.cc.u32 z8, z8, 3;" QSB_SAS_Z9ADD_TAIL "\n"
 #else
         "\tadd.cc.u32 z0, z0, 0xfffff48d; addc.cc.u32 z1, z1, 0xfffffffc;\n"
         "\taddc.cc.u32 z2, z2, 0xffffffff; addc.cc.u32 z3, z3, 0xffffffff;\n"
@@ -1521,12 +1565,12 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
         "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
         "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
-        "\tsubc.cc.u32 z8, z8, 0; subc.u32 z9, z9, 0;\n"
+        "\tsubc.cc.u32 z8, z8, 0;" QSB_SAS_SUB_TAIL "\n"
         "\tsub.cc.u32 z0, z0, v0; subc.cc.u32 z1, z1, v1;\n"
         "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
         "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
         "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
-        "\tsubc.cc.u32 z8, z8, 0; subc.u32 z9, z9, 0;\n"
+        "\tsubc.cc.u32 z8, z8, 0;" QSB_SAS_SUB_TAIL "\n"
 #if QSB_SAS_SPLIT3P
 #if QSB_C31 && QSB_SHORT_CARRY
         "\tsub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;\n"
@@ -1537,7 +1581,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z3, z3, 0; subc.u32 z4, z4, 0;\n"
 #endif
 #endif
-        "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\nmad.lo.u32 sfq, z9, 977, z8;\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\naddc.u32 sfc, z9, 0;\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, sfc; }\n\n"
+        "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\n" QSB_SAS_SFC "\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, sfc; }\n\n"
 #if QSB_SHORT_CARRY
         QSB_SECOND_FOLD_TAIL
 #else

@@ -1,4 +1,24 @@
-# Pinning: exact host gate + C31 tails on the measured multiply-tail + carry62 stack
+# Pinning: + z9-lane removal in _ModSqrAddSub2 on the validated C31 stack
+
+This archive is the previous C31 stack unchanged plus `QSB_SAS_Z9SUB=1`:
+inside `_ModSqrAddSub2` under the split-3p invariant, every producer and
+consumer of the ninth accumulator limb is dropped -- `addc.u32 g8, 0, 0`,
+`addc.u32 z9, g8, 0`, the +3 bias propagate `addc.u32 z9, z9, 0`, both
+`subc.u32 z9, z9, 0` borrow tails, and the fold's `mad.lo.u32 sfq, z9, 977, z8`
+/ `addc.u32 sfc, z9, 0` become `mov.u32 sfq, z8` / `addc.u32 sfc, 0, 0`.  This
+is the same recipe PR #743 proved on `_ModMultCore` (officially +0.997%),
+applied to the square body the gate had been holding back.  Divergence iff the
+z9 lane would be nonzero: g8 = 1 (~2^-23 on squares), a z8 assembly wrap
+(~2^-32), the +3 bias wrap (~2^-31), or a borrow across bit 288 -- all wrong
+only for that candidate and filtered by the exact host gate.
+`-DQSB_SAS_Z9SUB=0` restores the baseline byte for byte.
+`test_sas_z9sub.py` audits the exact changed word operations: a reduced
+exhaustive state sweep, 32-bit boundary cases, a uniform-flags mechanism
+cohort and a production-distribution cohort (0 differences in 1e6 calls).
+
+Below is the original C31 submission text, which still describes the stack.
+
+Pinning: exact host gate + C31 tails on the measured multiply-tail + carry62 stack
 
 Effort: xhigh. Kernel composition, host-gate design, C31 predicates and the
 submit decision: Grok 4.6. Carry62 proof and the first host-word audit of
