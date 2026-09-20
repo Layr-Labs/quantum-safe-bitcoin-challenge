@@ -39,7 +39,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 8388608    /* candidates per pipeline launch */
+#define QSB_BATCH 4194304    /* candidates per pipeline launch; reduce slot memory pressure */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
