@@ -752,7 +752,10 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #define QSB_DIGIT_SHIFT 1
 #endif
 #ifndef QSB_CHAIN_UNROLL
-#define QSB_CHAIN_UNROLL 1
+/* 2 lets the next chunk's __ldg table load issue while the current mixed-add
+ * asm block is still in flight; the rolled loop serializes load latency behind
+ * the field-add dependency chain. Same digits, same adds, same order. */
+#define QSB_CHAIN_UNROLL 2
 #endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {

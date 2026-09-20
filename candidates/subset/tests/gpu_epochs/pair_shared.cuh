@@ -58,13 +58,39 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #define ZLAB_K2S3M 1
 #endif
 #if ZLAB_K2S3M
+/* QSB_SPEC_PREPARE (kill switch; 0 restores the promoted code exactly).
+ * Carried from owizdom's public submission 4f367236-4a3c-49de-a81b-1730e6f0d889
+ * (commit 878eb25e4470da77446b398889aab2f65ba0eadd), which moved the pre-inverse
+ * prepare and pre3 off the exact field ops and onto the same unguarded speculative
+ * ops that the filter chain (qsb_filter_point_add, qsb_filter_last_add) and the
+ * post-inverse qsb_k2s_post3 on this frontier already use. Same formulas, same
+ * operand order, same operation count; only the carry/borrow guard differs.
+ * Correctness argument is the one already stated at the top of filter_tail_sc.cuh:
+ * a dropped carry here can only corrupt this candidate's (or, through the block
+ * inverse product, this block's) speculative x-coordinates, which loses tentative
+ * hits; it can never publish one, because every tentative hit is recomputed by
+ * kernel_verify_pair_hits on the unchanged exact chain.
+ * Not touched: qsb_k2s_front, qsb_k2s_front_exact, qsb_k2s_pre,
+ * qsb_xyzz_finish_prepare, qsb_k2s_post, qsb_pair_verify_candidate. */
+#ifndef QSB_SPEC_PREPARE
+#define QSB_SPEC_PREPARE 1
+#endif
+#if QSB_SPEC_PREPARE
+#define QSB_PRE_FMUL(r,a,b) QSB_FMUL(r,a,b)
+#define QSB_PRE_FSUB(r,a,b) QSB_FSUB(r,a,b)
+#define QSB_PRE_FADD(r,a,b) QSB_FADD(r,a,b)
+#else
+#define QSB_PRE_FMUL(r,a,b) X_FMUL(r,a,b)
+#define QSB_PRE_FSUB(r,a,b) X_FSUB(r,a,b)
+#define QSB_PRE_FADD(r,a,b) X_FADD(r,a,b)
+#endif
 __device__ __forceinline__ void qsb_k2s_pre3(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
     uint64_t yb[4];
-    X_FMUL(yb, yR, ZZZ);
-    X_FSUB(n, yb, Y);
-    X_FADD(n + 4, yb, Y);
+    QSB_PRE_FMUL(yb, yR, ZZZ);
+    QSB_PRE_FSUB(n, yb, Y);
+    QSB_PRE_FADD(n + 4, yb, Y);
     Load256(n + 8, ZZ);
 }
 /* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
@@ -72,10 +98,10 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    X_FMUL(t, xR, ZZ);
-    X_FSUB(t, t, X_D);
+    QSB_PRE_FMUL(t, xR, ZZ);
+    QSB_PRE_FSUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    X_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
 }
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
@@ -187,15 +213,6 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
     z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
 }
-__device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
-    const uint32_t*firstA,const uint32_t*firstB,int lane){
-    uint32_t stateA[8],stateB[8];
-    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
-    QsbPairEpochZ out;
-    qsb_pair_second_sha_z(stateA,out.a);
-    qsb_pair_second_sha_z(stateB,out.b);
-    return out;
-}
 __device__ __forceinline__ int qsb_k2s_front3_z(
     const uint64_t*z,const uint8_t*d_gt,uint64_t*u2rx,uint64_t*u2ry,
     uint64_t*prod,uint64_t*n){
@@ -293,6 +310,47 @@ __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uin
 #undef QSB_GP_R2
 #undef QSB_GP_WMIX
 #endif
+#if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+/* QSB_PAIR_ZSHA (kill switch; 0 = two serial compressions): the two epoch
+ * digests are independent single-block SHA-256 compressions from the IV --
+ * exactly the shape qsb_sha256_init_transform_pair already runs for the gate.
+ * Interleaving them round-by-round doubles ILP on the serial SHA dependency
+ * chain. Identical arithmetic per stream: same block bytes, same round order,
+ * same feed-forward; only the issue interleave changes. The digest words are
+ * repacked into the same (hi,lo) u64 order qsb_pair_second_sha_z produced. */
+#ifndef QSB_PAIR_ZSHA
+#define QSB_PAIR_ZSHA 1
+#endif
+__device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
+    const uint32_t*firstA,const uint32_t*firstB,int lane){
+    uint32_t stateA[8],stateB[8];
+    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
+    QsbPairEpochZ out;
+#if QSB_PAIR_ZSHA && QSB_GATE_PAIR
+    uint32_t bA[16],bB[16],hA[8],hB[8];
+    #pragma unroll
+    for(int i=0;i<8;i++){bA[i]=stateA[i];bB[i]=stateB[i];}
+    bA[8]=0x80000000;bB[8]=0x80000000;
+    #pragma unroll
+    for(int i=9;i<15;i++){bA[i]=0;bB[i]=0;}
+    bA[15]=0x00000100;bB[15]=0x00000100;
+    qsb_sha256_init_transform_pair(hA,bA,hB,bB);
+    out.a[0]=((uint64_t)hA[6]<<32)|(uint64_t)hA[7];
+    out.a[1]=((uint64_t)hA[4]<<32)|(uint64_t)hA[5];
+    out.a[2]=((uint64_t)hA[2]<<32)|(uint64_t)hA[3];
+    out.a[3]=((uint64_t)hA[0]<<32)|(uint64_t)hA[1];
+    out.b[0]=((uint64_t)hB[6]<<32)|(uint64_t)hB[7];
+    out.b[1]=((uint64_t)hB[4]<<32)|(uint64_t)hB[5];
+    out.b[2]=((uint64_t)hB[2]<<32)|(uint64_t)hB[3];
+    out.b[3]=((uint64_t)hB[0]<<32)|(uint64_t)hB[1];
+#else
+    qsb_pair_second_sha_z(stateA,out.a);
+    qsb_pair_second_sha_z(stateB,out.b);
+#endif
+    return out;
+}
+#endif
+
 __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
 #if QSB_GATE_PAIR
     uint32_t pb0[16], pb1[16], hs0[8], hs1[8];
@@ -367,8 +425,23 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 #if ZLAB_K2S3M
 
 struct QsbPairFront3 {uint64_t words[16];int ok;};
+/* QSB_PAIR_INLINE (kill switch; 0 restores __noinline__): the live dual-epoch
+ * path calls qsb_pair_front3_z_value twice per block and qsb_pair_tail3_value
+ * per surviving candidate. __noinline__ forces the 128-byte QsbPairFront3
+ * return through a caller-allocated local buffer plus a full copy back, and
+ * marshals 24 u64 tail arguments through the ABI. Inlining keeps prod/n in
+ * registers end to end; identical arithmetic, identical order. */
+#ifndef QSB_PAIR_INLINE
+#define QSB_PAIR_INLINE 1
+#endif
+#if QSB_PAIR_INLINE
+#define QSB_PAIR_FN __forceinline__
+#else
+#define QSB_PAIR_FN __noinline__
+#endif
+
 #if ZLAB_DUAL_EPOCH_SHA
-__device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
+__device__ QSB_PAIR_FN QsbPairFront3 qsb_pair_front3_z_value(
     uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
     uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
     uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
@@ -395,7 +468,7 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
     return out;
 }
 
-__device__ __noinline__ int qsb_pair_tail3_value(
+__device__ QSB_PAIR_FN int qsb_pair_tail3_value(
     uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
     uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,

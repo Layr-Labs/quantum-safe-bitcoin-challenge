@@ -123,13 +123,26 @@ __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
 }
 #endif
+/* QSB_FIRST_LDG (kill switch; 0 restores plain loads): d_first is written by
+ * kernel_build_first_flat before the consumer launches and is read-only for the
+ * whole consumer grid, so the non-coherent texture path is exact. Same words,
+ * same order; only the load opcode changes. */
+#ifndef QSB_FIRST_LDG
+#define QSB_FIRST_LDG 1
+#endif
+#if QSB_FIRST_LDG
+#define QSB_FIRST_LOAD(p) __ldg(p)
+#else
+#define QSB_FIRST_LOAD(p) (*(p))
+#endif
+
 
 __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         const epoch_desc_t *epoch, int lane, const uint32_t *first) {
     (void)epoch;
     const int first_slot=QSB_FIRST_CLASS[lane];
     #pragma unroll
-    for(int j=0;j<8;j++)state[j]=first[first_slot*8+j];
+    for(int j=0;j<8;j++)state[j]=QSB_FIRST_LOAD(first+first_slot*8+j);
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
@@ -172,8 +185,8 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     const int slot=QSB_WINDOW_CLASS[lane];
     #pragma unroll
     for(int j=0;j<8;j++){
-        stateA[j]=firstA[first_slot*8+j];
-        stateB[j]=firstB[first_slot*8+j];
+        stateA[j]=QSB_FIRST_LOAD(firstA+first_slot*8+j);
+        stateB[j]=QSB_FIRST_LOAD(firstB+first_slot*8+j);
     }
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
