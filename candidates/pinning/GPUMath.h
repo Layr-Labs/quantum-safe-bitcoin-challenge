@@ -1876,3 +1876,4 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }
+#define GAUNTLET_REDRAW_7b0a15be_20260920T113919Z 1
