@@ -520,13 +520,20 @@ __device__ __forceinline__ void qsb_complete_last_add(
 #include "filter_tail_sc.cuh"
 // Speculative final point step: retain the packed PTX body, then resolve Y.
 // The complete/exact chains and output checker do not call this helper.
+#ifndef QSB_SPEC_LAST_RESOLVE
+#define QSB_SPEC_LAST_RESOLVE 1
+#endif
 __device__ __forceinline__ void qsb_filter_last_add(
     uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
     const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
     uint64_t scaled_y[4];
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
+#if QSB_SPEC_LAST_RESOLVE
+    QSB_FSUB(Y,Y,scaled_y);
+#else
     _ModSub256(Y,Y,scaled_y);
+#endif
 }
 __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
