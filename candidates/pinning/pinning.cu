@@ -2008,11 +2008,22 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
      * its eight limbs do not lengthen the inverse's already pressured state. */
+#ifndef QSB_CONST_RECOVERY_ARGS
+#define QSB_CONST_RECOVERY_ARGS 1 /* 1: read the fixed R where it is used */
+#endif
+#if QSB_CONST_RECOVERY_ARGS
+    /* xR is four words of __constant__ storage and qsb_recovery_denominator already
+     * takes that operand as const. The local copy pins four registers across the
+     * block-wide inverse; a constant-bank operand is read at the point of use and
+     * broadcast to the warp. Same four words, read-only on every path. */
+    qsb_recovery_denominator(qx,qzz,qy,qzzz,pin_u2rx_words,prod);
+#else
     {
         uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                              pin_u2rx_words[2],pin_u2rx_words[3]};
         qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
     }
+#endif
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
@@ -2048,6 +2059,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     prod[4]=0;
     (void)tree;
+#if QSB_CONST_RECOVERY_ARGS
+    /* Same for the finish: xR, yR and c are twelve run-constant words whose only uses
+     * are one subtraction, one addition plus its boundary test, and the parity fold's
+     * second operand. As locals they are twelve registers live across the whole
+     * recovery tail. */
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_packed_finish(
+        qy,qzzz,prod,weighted_inv,
+        (uint64_t *)pin_u2rx_words,(uint64_t *)pin_u2ry_words,
+        (uint64_t *)pin_recovery_c,q1x,q2x);
+#else
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
@@ -2057,6 +2079,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+#endif
 
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL

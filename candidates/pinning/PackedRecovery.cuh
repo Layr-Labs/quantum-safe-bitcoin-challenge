@@ -59,12 +59,27 @@ __device__ __forceinline__ void qsb_packed_prepare(
     uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();
     uint64_t (*excluded)[QSB_RECOVERY_N]=(uint64_t (*)[QSB_RECOVERY_N])(qsb_digit_arena()+8*QSB_TREE_N);
     qsb_cofactor_prepare<QSB_RECOVERY_N>(D,roots,products,excluded);
+#ifndef QSB_MASK_HC
+#define QSB_MASK_HC 1 /* 1: zero the shared factor, not each of the two products */
+#endif
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_MASK_HC
+        /* vbar and tbar are Y*hc and V*hc, so zeroing the one shared factor zeroes both.
+         * Every partial product of the schoolbook multiply carries a 32-bit word of hc,
+         * so an all-zero hc gives all-zero partial products, all-zero accumulation chains
+         * and an all-zero reduction tail: the stored words are exactly zero, not a nonzero
+         * representative of zero, so the finish kernel's zero test on tbar still rejects
+         * the lane. Four conditional moves instead of eight. */
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -109,13 +124,31 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     _ModSub256(t,m,c); qsb_recovery_mul(x2,sum,t); _ModAdd256(x2,x2,a);
 #endif
 #if QSB_PARITY_SUM
+#ifndef QSB_LAZY_PARITY_X
+#define QSB_LAZY_PARITY_X 1 /* 1: r_i stays raw; the fixed-a boundary rule canonicalises x_i */
+#endif
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_LAZY_PARITY_X
+    /* r_i has exactly two consumers: the "+a" that forms the hashed x_i, and a full-width
+     * multiply by l or m. The multiply and qsb_sum_parity both accept any representative
+     * in [0,2^256), so the unconditional normalisation exists only for the addition —
+     * and that is the P7 boundary rule, already used for x1/x2 on the raw-x arm: for raw
+     * < 2^256 and a[3] != 2^64-1 we have a < 2^256-2^192, so raw+a < 2^257-2^192 < 2p
+     * (2^192 > 2K) and _ModAdd256's single conditional subtraction lands in [0,p).
+     * a = xR is fixed for the whole run, so the guard is a uniform, loop-invariant test
+     * and the normalisation disappears entirely for every a outside that top range. */
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t); qsb_packed_raw_mul(u,l,s);
+    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t); qsb_packed_raw_mul(v,m,s);
+    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
     qsb_packed_raw_mul(u,l,s);
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
     qsb_packed_raw_mul(v,m,s);
+#endif
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
 }
 #else
