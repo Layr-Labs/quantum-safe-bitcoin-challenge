@@ -1,20 +1,677 @@
 {
-  "production_source_sha256": {
-    "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413",
-    "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
-    "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
-    "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  "status": "Locally qualified with a fresh GO; official upload must recheck all live sources.",
+  "runtime": {
+    "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea",
+    "files": {
+      "pinning.cu": "19d4d572dbbef7250359e5a383669b83dcc55feabc2935a7e29847862934b110",
+      "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+      "GPUMath.h": "602abca2f2174d24ed34178ca0b612efcca0bf04553670a2301bc9ddc184e9e6",
+      "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+      "PointZero.cuh": "c5a96e24e7930f5588d284e07e1be449ad5a0a5061470ced4133a40a9fc6496f",
+      "FinalAffineGuard.cuh": "d6b4f62778e965f1698e24b67b8676b64a13fc6cf266e7191040a8550299f0f3",
+      "LeafRecovery.cuh": "b30303a0910a97a5249ad27b437fb90246c8db76a8d52344775800e97bb02f13",
+      "cofactor_checkpoint.h": "81115ad8e6f535eb4a496ba31fbbfba3c5fa528d2562b9295af45057ba36256a",
+      "PackedRecovery.cuh": "8e8c41cc20c9705e471bf691fac7f8b3910048e380c022809779954d05b5e74e"
+    }
   },
-  "comparison_baseline_submission": "547a64cf-71fb-45f2-babb-fe6c85cad2bf (promoted frontier 741,852,708)",
-  "comparison_baseline_promoted_commit": "57b4c69",
-  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 309453,
-  "note": "Baseline 547a64cf. Exact stray-carry cleanup in the square and multiply schedules (five provably-zero square carries removed; adjacent odd/even multiply row carries merged into one exact 64-bit addend), ZZ1*PP reordered after ZZZ1*PPP, and the per-candidate tree/recovery products use the promoted QSB_SHORT_CARRY multiply (QSB_FIELD_SC=0 restores carry-complete)."
+  "qualification_snapshot": {
+    "checked_at": "2026-09-20T01:19:53.730365+00:00",
+    "benchmark": {
+      "id": "b352879c-669f-44ef-98cd-ad3d34d0fefa",
+      "status": "open",
+      "sourceRef": "043b65024acd4c21da044e5993958079fc70b663",
+      "currentBestScore": 766671138,
+      "minScoreImprovementBips": 100
+    },
+    "peers": [
+      {
+        "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103",
+        "files": {
+          "pinning.cu": "decbd43200c3cfaaa32faa8eb7f3ba603aad01a5282e8140f4bd7b5bf1ca8e09",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
+          "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413"
+        },
+        "label": "frontier",
+        "commit": "043b65024acd4c21da044e5993958079fc70b663",
+        "own": false
+      },
+      {
+        "digest": "cd6a30ff30ca383678fd317bf203f49654cf00887489a3f7de88c1d8562c9b44",
+        "files": {
+          "pinning.cu": "d4adda76669d70c5f0427ea9e44c16e40c8f8733d53d2508a5eb249cb5dd551c",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "68717e37488c611bf8b9742eeb139864550fe21ec40daee414c379d9bbde1054",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
+          "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413"
+        },
+        "label": "9579c93c-463f-475d-93ca-7ce241e09bf1",
+        "commit": "2dc9e4cb4a56d0d19ad65500671f7ef3f9b776d3",
+        "own": false
+      },
+      {
+        "digest": "6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6",
+        "files": {
+          "pinning.cu": "ac8ef14d78be769c290b0d10be6457af2bbb227a71e8801a2ad6474bc2d5ef3a",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+          "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+          "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f"
+        },
+        "label": "7cb2974d-5093-4be5-ad57-a6be0b3dc926",
+        "commit": "93fbd7f5a91077a71fe1616abd16649b370ad521",
+        "own": false
+      },
+      {
+        "digest": "a79c8dda009a84ef8657908e70188c896aad399787b2d0a0e1fb7d1f17064a5a",
+        "files": {
+          "pinning.cu": "765f2c4fc70917c77c29865ca9c5143fffa3a6d0bb6352cbe47c321d69447c48",
+          "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+          "GPUMath.h": "de7035c42c41dfb5c0a569b6a79e8c8a1da22bf1737b26a37a103619a2c3deb1",
+          "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+          "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+          "LeafRecovery.cuh": "a654bab8ecbac83b99a8c2c5b6cfea6b5f8d8163cf384bd50a8c3da67451d9e8",
+          "cofactor_checkpoint.h": "3377fd660fb8039a34f661fc66bac9e58000f12339db6c43a99a076f90de4961",
+          "PackedRecovery.cuh": "932941bb0d3d9f9a08397a74bb243e9e99e0f8902767e286fc769db4562d2413"
+        },
+        "label": "2cd6ba4b-150e-4b1d-9af9-b84dbb836517",
+        "commit": "bd36b0155c9a35009362631c2c9503e7d6dcab08",
+        "own": false
+      }
+    ],
+    "unavailable_sources": [],
+    "own_pending": [],
+    "previously_sent_digests": [
+      "e265d339cce6e4fd40a70ef5da3f00070a834b621583a55e08d5773482e356fa",
+      "630dceda7e56ab857449aed66f811cf3dee9bfeadeebac8125222c09683c6c58",
+      "a9fe0901c435f1964a4c91d34fbf446598e4adc189bb545fb05e0f9c7a34cfcd",
+      "bf3c902095fa20c6658522e9906058c8f1241cc76f3df4f9d5529e1ebe4c54f5",
+      "e4568aca296d96412d7346ce60399dd9f8180d027dd8d20d195a612d65d09276",
+      "9a5bf73974c19955f8a75ca5ce88fdeaf2d25f1991d3c52f64b80546ad9bad9e",
+      "9bb3bc72456089a36a9d6bfd2b374357c08ec5a9d3322e8d3193c6960f7f8668",
+      "4abfbd769d47d2848b4e0af120568912fdeab4c5c39b598f3c3839db9975a266"
+    ]
+  },
+  "registry_sha256": "ca2a76019bc9b96f666bb055bfb2e3820f8442e703c75b0fc65cf09046f109f2",
+  "native_evidence": [
+    {
+      "path": "research/native-table-guard-paired-tree-upper-squareprep5-2115/native-summary.json",
+      "sha256": "cb20320335013e627e48168ff37d5df9397c1870009295b2c50cee955be5bb6c"
+    },
+    {
+      "path": "research/native-table-guard-paired-tree-upper-squareprep5-2115/extra-field-native-summary.json",
+      "sha256": "01091d17702b66e818d7108124402c3d6481d66c9aeb718f2c110fcd0575735b"
+    }
+  ],
+  "full_qualification": {
+    "source_directory": "research/full-only-treeboth-2359/gpu-evidence/candidate/candidates/pinning",
+    "result": {
+      "path": "research/full-only-treeboth-2359/gpu-evidence/logs/full-qualification.json",
+      "sha256": "335843d7adc52fda5d9b28ab422d9236ba4a8c49a5908649a1d852c7b0dbab74"
+    },
+    "proof": {
+      "path": "research/full-only-treeboth-2359/gpu-evidence/logs/full-candidate/openssl-verification.json",
+      "sha256": "2883975f5eef57bb761a2a894470721e0c7778a6efdf39b6ab1382a878a8b318"
+    },
+    "correctness_gates": [
+      {
+        "path": "research/native-table-guard-paired-tree-upper-squareprep5-2115/native-summary.json",
+        "sha256": "cb20320335013e627e48168ff37d5df9397c1870009295b2c50cee955be5bb6c"
+      },
+      {
+        "path": "research/native-table-guard-paired-tree-upper-squareprep5-2115/extra-field-native-summary.json",
+        "sha256": "01091d17702b66e818d7108124402c3d6481d66c9aeb718f2c110fcd0575735b"
+      }
+    ],
+    "artifact": {
+      "path": "research/full-only-treeboth-2359/gpu-evidence/logs/full-candidate/run.json",
+      "sha256": "bcfdf8309f3f1766781ef606dee41c5c47744c21f515c794e26dd53e0590d275"
+    },
+    "problem": {
+      "path": "research/full-only-treeboth-2359/gpu-evidence/logs/full-problem/pinning.json",
+      "sha256": "92c83ee05e4d898d6358c837e09b2d96fe9bc2d646b6124267b9c29d18e95c45"
+    },
+    "manifest": {
+      "path": "research/full-only-treeboth-2359/gpu-evidence/manifest.json",
+      "sha256": "23dea76c20acebd88c65b2bff205b2e0bc36db95a227326c8d240ec8eff328ff"
+    }
+  },
+  "independent_full_review": {
+    "path": "research/full-only-treeboth-2359/independent-full-review.json",
+    "sha256": "1069de7d5fa5aabcd93bbdb039355c0539a288f84227bfa6eba15cd7e777212a"
+  },
+  "cohorts": [
+    {
+      "experiment": "queue-screen-paired-future-screen-2138",
+      "long": false,
+      "candidate_variant": "treeboth",
+      "rates": {
+        "6be54dbb": [
+          748643127.4149318,
+          742137682.4973156
+        ],
+        "6f4a00f8": [
+          741489290.2892184,
+          749484580.30923
+        ],
+        "83eb2e6f": [
+          736390128.0019875,
+          751606612.5411924
+        ],
+        "992a20f3": [
+          745504514.8568946,
+          746435243.5294467
+        ],
+        "control": [
+          758237088.0601461,
+          757493626.051138
+        ],
+        "finish6": [
+          756631755.7528397,
+          757017535.5235375
+        ],
+        "frontier": [
+          743616986.7269868,
+          763629103.7717595
+        ],
+        "lazydouble": [
+          756840228.9193953,
+          756288285.1034116
+        ],
+        "lazysum": [
+          756130622.1901307,
+          756166900.2523544
+        ],
+        "mixed56": [
+          763703663.8600589,
+          762696065.0689975
+        ],
+        "prepare5": [
+          761607152.6168681,
+          761805664.7352933
+        ],
+        "rolled": [
+          755937472.4916595,
+          755450311.5156279
+        ],
+        "squaredelta": [
+          754845677.8812857,
+          755165580.3144464
+        ],
+        "squaremix": [
+          765384932.279418,
+          764325044.770331
+        ],
+        "squarezero": [
+          757993183.4481798,
+          757485529.4325355
+        ],
+        "treeboth": [
+          766475994.164775,
+          764008971.3351381
+        ],
+        "treeprepare": [
+          764828008.024268,
+          763839012.6103115
+        ],
+        "treesquare": [
+          760179570.1360009,
+          760440149.8584604
+        ],
+        "treetail": [
+          758563532.4959675,
+          758655173.7586397
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-future-screen-2138/gpu-evidence/logs/summary.json",
+        "sha256": "4a4cc927054a2947cdb2a8c05067493e92cf1757f628f76feeda492ce8a72ff3"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-future-screen-2138/independent-hit-equivalence.json",
+        "sha256": "30e201b73d97dd00d407272a7a9e641bae4b06725d5cc36097b002ac27bd8a60"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-future-screen-2138/control",
+          "digest": "fa744fffe22a9667662fea00f5cb9623ed824ddd1033060920a4b45e941547d6"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-paired-future-screen-2138/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "83eb2e6f": {
+          "directory": "research/queue-screen-paired-future-screen-2138/83eb2e6f",
+          "digest": "e9903e5720084d5a506af18c57711b2aef1a5f0165ddeda638687c3fc89047ed"
+        },
+        "6be54dbb": {
+          "directory": "research/queue-screen-paired-future-screen-2138/6be54dbb",
+          "digest": "6a2f450a3c39fcaf1303c503021565f2bf0c991e34ae7b233285d9b9d5681bac"
+        },
+        "6f4a00f8": {
+          "directory": "research/queue-screen-paired-future-screen-2138/6f4a00f8",
+          "digest": "92a549d20800b7af573fda164b2fea3a8a449c1c5fad72bc41ebcc3a6ff2e643"
+        },
+        "992a20f3": {
+          "directory": "research/queue-screen-paired-future-screen-2138/992a20f3",
+          "digest": "6833870b4acceab7e2e7dca8b95781ffc694c9054f1ac9a739d11fc9e4bc1c75"
+        },
+        "prepare5": {
+          "directory": "research/queue-screen-paired-future-screen-2138/prepare5",
+          "digest": "e954b9da504e69839e856e093e962b45c82b73953f9c61d8e61427ca2ef3f3c5"
+        },
+        "finish6": {
+          "directory": "research/queue-screen-paired-future-screen-2138/finish6",
+          "digest": "4142193318249426c3068fcd15d6583847cf3ef8bce51b447d57aa63bfd750e4"
+        },
+        "mixed56": {
+          "directory": "research/queue-screen-paired-future-screen-2138/mixed56",
+          "digest": "1a94b619cb0887a32af388ee210b4760ead563747ad36b005a611825ef2d633f"
+        },
+        "squarezero": {
+          "directory": "research/queue-screen-paired-future-screen-2138/squarezero",
+          "digest": "7eab3a0b4288fa65c820f9d85d60eab8a13349440d679d9e2332b0ffb4036974"
+        },
+        "squaremix": {
+          "directory": "research/queue-screen-paired-future-screen-2138/squaremix",
+          "digest": "462c55a6aa636e9d35b815c571938c031cd35da3702bdb033cfddcb83a27bfce"
+        },
+        "lazysum": {
+          "directory": "research/queue-screen-paired-future-screen-2138/lazysum",
+          "digest": "d933aaa6457f0fb66dcf5841eeeb1d60ee789f3919633e6691e6059fc4f0fa08"
+        },
+        "lazydouble": {
+          "directory": "research/queue-screen-paired-future-screen-2138/lazydouble",
+          "digest": "aa6312631eac82947b64becc52aa0eea729a219d5c20ad66ddc93284264d7ae9"
+        },
+        "rolled": {
+          "directory": "research/queue-screen-paired-future-screen-2138/rolled",
+          "digest": "3735816cd560f8049a44f9e3a32832b838816e9fcd0d3d3cd581a4b8f7535f57"
+        },
+        "squaredelta": {
+          "directory": "research/queue-screen-paired-future-screen-2138/squaredelta",
+          "digest": "b257d3dec7b9bd4c2c87368938512da1574aeb9323dc168d1e3065e68087359d"
+        },
+        "treetail": {
+          "directory": "research/queue-screen-paired-future-screen-2138/treetail",
+          "digest": "f9ff9dcdaecf81880aeceaf08f48506d376d628e6b27a574f21648b0feb86152"
+        },
+        "treesquare": {
+          "directory": "research/queue-screen-paired-future-screen-2138/treesquare",
+          "digest": "412bee54746b54003bf8195e9d4f4a4a43f395af5e1523236d3b190cba9c72df"
+        },
+        "treeprepare": {
+          "directory": "research/queue-screen-paired-future-screen-2138/treeprepare",
+          "digest": "fb9073b276bae796d307adfad370374977a457e84a9538504ba8907e02e5446f"
+        },
+        "treeboth": {
+          "directory": "research/queue-screen-paired-future-screen-2138/treeboth",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-treeboth-current-2319",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "2399b234": [
+          737828864.7706693,
+          742233727.3552182
+        ],
+        "2ed2c0b0": [
+          740261990.5367104,
+          742660266.4267361
+        ],
+        "41f53e47": [
+          740541215.2800096,
+          742699660.6581023
+        ],
+        "control": [
+          767505879.6012456,
+          766170214.9918593
+        ],
+        "d83b6aa0": [
+          731519140.1515021,
+          730181945.6735721
+        ],
+        "frontier": [
+          742150049.7670463,
+          748066392.6269749
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-treeboth-current-2319/gpu-evidence/logs/summary.json",
+        "sha256": "06146c8f753f53a88b58271b7569b4ecd3d5f29a695386087ec197abd8da2439"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-treeboth-current-2319/independent-hit-equivalence.json",
+        "sha256": "ca1cf2dd59f7ec25a076b13c0d658c4287895f85fd91d5f9a31b5c9a16fff71c"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-treeboth-current-2319/control",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-treeboth-current-2319/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "41f53e47": {
+          "directory": "research/queue-screen-treeboth-current-2319/41f53e47",
+          "digest": "c4445e4744e0c947ca44bcfa0e1117d4f8d2fddf578c3351bd943167f25c4f39"
+        },
+        "2399b234": {
+          "directory": "research/queue-screen-treeboth-current-2319/2399b234",
+          "digest": "e9903e5720084d5a506af18c57711b2aef1a5f0165ddeda638687c3fc89047ed"
+        },
+        "d83b6aa0": {
+          "directory": "research/queue-screen-treeboth-current-2319/d83b6aa0",
+          "digest": "229dddfbfcbf1e2d9cb9629aa568e0d52c68755c1588ccbfbba26655b6187532"
+        },
+        "2ed2c0b0": {
+          "directory": "research/queue-screen-treeboth-current-2319/2ed2c0b0",
+          "digest": "d99a2f7e2538a27b547daaae68e46cb41e768a6ad0a7e86eafc38f6a2aa180a8"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-treeboth-current-2319",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "2399b234": [
+          744762451.3810781,
+          740800020.7837162
+        ],
+        "2ed2c0b0": [
+          737351026.8975989,
+          739058764.3477885
+        ],
+        "41f53e47": [
+          745632754.534205,
+          746754422.2821287
+        ],
+        "control": [
+          763070860.3428125,
+          763376960.9632429
+        ],
+        "frontier": [
+          734464837.5455711,
+          743335320.9040055
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10371,
+      "summary": {
+        "path": "research/long-queue-treeboth-current-2319/gpu-evidence/logs/summary.json",
+        "sha256": "352d6540b6eb14ef74cd1918debfe2c4f6f7236fa377031751c38f96847ae8f0"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-treeboth-current-2319/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "e0c1d5da2d80191d3b5b530327dc8409f8664dc22fa46b41c754bd1615223d53"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-treeboth-current-2319/control",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        },
+        "frontier": {
+          "directory": "research/long-queue-treeboth-current-2319/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "41f53e47": {
+          "directory": "research/long-queue-treeboth-current-2319/41f53e47",
+          "digest": "c4445e4744e0c947ca44bcfa0e1117d4f8d2fddf578c3351bd943167f25c4f39"
+        },
+        "2399b234": {
+          "directory": "research/long-queue-treeboth-current-2319/2399b234",
+          "digest": "e9903e5720084d5a506af18c57711b2aef1a5f0165ddeda638687c3fc89047ed"
+        },
+        "2ed2c0b0": {
+          "directory": "research/long-queue-treeboth-current-2319/2ed2c0b0",
+          "digest": "d99a2f7e2538a27b547daaae68e46cb41e768a6ad0a7e86eafc38f6a2aa180a8"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-paired-late-treeboth-0015",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "5cd80693": [
+          750360872.5749441,
+          750349749.7761209
+        ],
+        "73e8593e": [
+          756171834.4057239,
+          757668350.2015606
+        ],
+        "control": [
+          766034990.4703387,
+          766662650.3783615
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-paired-late-treeboth-0015/gpu-evidence/logs/summary.json",
+        "sha256": "654d8d6a5609215b81c2430f6faa9541c3610cd4bfe060be4e557b8b3fb0933d"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-paired-late-treeboth-0015/independent-hit-equivalence.json",
+        "sha256": "8bef5f1910fbfb0346931a22b41c11bd7020dc22ddcedc1de5763620a91a5725"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-paired-late-treeboth-0015/control",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        },
+        "73e8593e": {
+          "directory": "research/queue-screen-paired-late-treeboth-0015/73e8593e",
+          "digest": "6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6"
+        },
+        "5cd80693": {
+          "directory": "research/queue-screen-paired-late-treeboth-0015/5cd80693",
+          "digest": "696c311e26d552ad7d2cbcd0571b7ec9e503f7f25ef46de8a92d8fd76d92bbf3"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-paired-late-treeboth-0015",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "5cd80693": [
+          746737786.9702681,
+          752873670.9003452
+        ],
+        "73e8593e": [
+          758613783.4807843,
+          761241095.9918505
+        ],
+        "control": [
+          762183612.4354473,
+          764498831.0968586
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10389,
+      "summary": {
+        "path": "research/long-queue-paired-late-treeboth-0015/gpu-evidence/logs/summary.json",
+        "sha256": "61e45371c60cd7b7a2b902d2baae8a11eccfda3671b293bf560ed73bb69bb862"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-paired-late-treeboth-0015/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "cfa3493dc682de2fbb9605e8233b3b72341eb22162970617218d90095eb2c5b5"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-paired-late-treeboth-0015/control",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        },
+        "73e8593e": {
+          "directory": "research/long-queue-paired-late-treeboth-0015/73e8593e",
+          "digest": "6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6"
+        },
+        "5cd80693": {
+          "directory": "research/long-queue-paired-late-treeboth-0015/5cd80693",
+          "digest": "696c311e26d552ad7d2cbcd0571b7ec9e503f7f25ef46de8a92d8fd76d92bbf3"
+        }
+      }
+    },
+    {
+      "experiment": "queue-screen-treeboth-after-full-0026",
+      "long": false,
+      "candidate_variant": "control",
+      "rates": {
+        "0d7aac05": [
+          752983558.1612985,
+          751273878.7706906
+        ],
+        "5cd80693": [
+          750901497.9427251,
+          752209295.1639439
+        ],
+        "9579c93c": [
+          756670758.0069163,
+          758257467.8807356
+        ],
+        "a2f81415": [
+          751609741.7909259,
+          756277206.2384992
+        ],
+        "control": [
+          766690422.2474302,
+          766421897.0211542
+        ],
+        "e6d8c0c3": [
+          742014767.921792,
+          744738251.1010367
+        ],
+        "frontier": [
+          752951842.7059232,
+          745831203.0524602
+        ]
+      },
+      "completed_work_per_timed_sample": 4978400000,
+      "verified_hits_per_run": 858,
+      "summary": {
+        "path": "research/queue-screen-treeboth-after-full-0026/gpu-evidence/logs/summary.json",
+        "sha256": "df8a5bd6fc798d3e96d655c8e939890f91d9285cea67d804047fbc4f39995967"
+      },
+      "hit_verification": {
+        "path": "research/queue-screen-treeboth-after-full-0026/independent-hit-equivalence.json",
+        "sha256": "57021a456cb9a51eaafd6dbe83e7e6f53edbd2e2a2ef0c65f6a46ce9e68919fe"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/control",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        },
+        "frontier": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/frontier",
+          "digest": "34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103"
+        },
+        "0d7aac05": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/0d7aac05",
+          "digest": "a79c8dda009a84ef8657908e70188c896aad399787b2d0a0e1fb7d1f17064a5a"
+        },
+        "e6d8c0c3": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/e6d8c0c3",
+          "digest": "2a255426ffa69bc43cb4c18018a756b450d18c8531f92ec37a7ff5de43e600b2"
+        },
+        "5cd80693": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/5cd80693",
+          "digest": "696c311e26d552ad7d2cbcd0571b7ec9e503f7f25ef46de8a92d8fd76d92bbf3"
+        },
+        "a2f81415": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/a2f81415",
+          "digest": "6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6"
+        },
+        "9579c93c": {
+          "directory": "research/queue-screen-treeboth-after-full-0026/9579c93c",
+          "digest": "cd6a30ff30ca383678fd317bf203f49654cf00887489a3f7de88c1d8562c9b44"
+        }
+      }
+    },
+    {
+      "experiment": "long-queue-treeboth-after-full-0026",
+      "long": true,
+      "candidate_variant": "control",
+      "rates": {
+        "9579c93c": [
+          751072825.7696165,
+          746242976.8814361
+        ],
+        "control": [
+          763950269.9663926,
+          762625378.0622493
+        ]
+      },
+      "completed_work_per_timed_sample": 74676000000,
+      "verified_hits_per_run": 10457,
+      "summary": {
+        "path": "research/long-queue-treeboth-after-full-0026/gpu-evidence/logs/summary.json",
+        "sha256": "423c5cc04c1b9abaea431a548772e6c9975186879f0a47a906c267bfa9c0b7bd"
+      },
+      "hit_verification": {
+        "path": "research/long-queue-treeboth-after-full-0026/gpu-evidence/logs/long-hit-verification.json",
+        "sha256": "2f2ec833eedbc2b69ba8daa731f104b7f35864a5c840099d543ed5a062057fb4"
+      },
+      "sources": {
+        "control": {
+          "directory": "research/long-queue-treeboth-after-full-0026/control",
+          "digest": "e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea"
+        },
+        "9579c93c": {
+          "directory": "research/long-queue-treeboth-after-full-0026/9579c93c",
+          "digest": "cd6a30ff30ca383678fd317bf203f49654cf00887489a3f7de88c1d8562c9b44"
+        }
+      }
+    }
+  ],
+  "cohort_count": 7,
+  "comparison_count": 38,
+  "auxiliary_files": {
+    "CANONICAL-CONTRACTS.md": "615c61f6d63960ee754079680907419802c9757078ed38200f7ee18ba40580a3",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "FINAL-WINDOW-PROOF.md": "056e0b0b266e753e053fb7edeff3a03e45068f43f07c8328b8c97c58ff1d219b",
+    "PAIRED-CARRY-PROOF.md": "53a005513f99b97ecf8dcd02ecba5ec1bcb0e65cf3b564f97c3d2ea8bb6e99de",
+    "REPRODUCTION.md": "ba0b7f08aa2faf268ce783ac2948a4ea678aa3baf6e3ceb2b8e7d4e283eed491",
+    "RESEARCH.md": "8f20f06362fc78361e4a8484c6921a73a7c87c5fd5f1b563ac84c533d40d3972",
+    "SMALL-FIELD-PROOF.md": "f2115052b2e9e2bf982c056013efd7a1bc91671a7f879a6368db21bc469ae9d4",
+    "TREE-FOLD-PROOF.md": "e13bab5f7d249d84d9f4fc30f69667a57cc19ae1a376a4a0eb97b289757f4f77",
+    "TREE-SQUARE-OCCUPANCY.md": "3d8f30ee728b01e8255bdf239bd789ea2eb8e104406b1ca6932adf9b6ea225a3",
+    "UPPER-FOLD-RECOVERY.md": "900b4237443153aa62ef80b309159bd9c90c898cbc44fee48eb71a02fd8664b0",
+    "audit_conditional_small_tail.py": "362a4a4f46aa5ea8ec47c28ecb98248be1f01785049aa11cc1061ef3173ee8b3",
+    "audit_final_fold.cu": "e1dbafeea826001accf5b88ac5fe8632acb1fd589997dabeaf55eeb5878f2c3e",
+    "audit_final_fold.py": "ded36076d805de37e2a8241b97bce6d362bb06645742ebf3be2dfbd524e525a3",
+    "audit_paired_native.py": "52abf735d53db2d636c6d1af3bf03c24e0321b62372243fc26161454a423a586",
+    "audit_paired_upper_fold.py": "04235fd2de3430563d66ade0a00c48051e5a604d942783b519829e3d14668f07",
+    "audit_ptx_model.py": "a246a34035aa4eccf71e43088f19559fefcd2bad429798afb7a2655586a8980b",
+    "audit_signed_points.cu": "a7e6265e95f4e58b5717323cd9d1b05a3f2d0e8d58c3712dddfcfff10892dadf",
+    "audit_signed_points.py": "16bc7c4d691bf1bc3b2d3621d3c0a5b29e2d4b2e3d467d0769cf9b87669a1814",
+    "audit_small_fields.py": "a61c580a3b746dbbd447ea3b893c8895bad1fe09871edcebbae1016f887bde7d",
+    "audit_small_ptx.py": "071ad819441aea58e9b61bb6a4ae172dad2afbd485b9775092cde18d3c4aa80a",
+    "canonical_helper_audit.cu": "c9088098fd07a3aa6667d787895024a572b28269b0447eac52ab8cd670ed226d",
+    "field_core_audit.cu": "f532559f391a8468ec361a2771022c7a5e1394451f62e67c177204e023e371ba",
+    "small_field_audit.cu": "96f5ddb71f6ded840f8314b0de689a3905b7f4136bfa0b11187020e369eb6526",
+    "sum_audit.cu": "28b93e96019b975288bba43dddc3ac080ecae5e9863628d5963097c548b3afe6",
+    "verify_small_field_native.py": "dc8908bf846f5f0145961c942c5cf7080e9c120a83613db1eaed99bc0725ecc4"
+  }
 }

@@ -1,215 +1,181 @@
-# Pinning: signed digit decoding and weighted cofactor recovery
+This submission improves the public Yukon QSB pinning CUDA implementation on
+organizer-generated benchmark inputs. Native correctness, repeated matched
+comparisons, the full 1,200-second production run and a fresh source-bound
+competitive check passed locally. Official promotion remains unconfirmed.
 
-This candidate removes work from the fixed-base scalar decoder, point-chain
-scheduling and public cofactor recovery pipeline. The search still visits the
-same sequence and locktime domain, derives both recovery keys, applies the same
-SHA predicates and emits the same first-hit choice for each candidate. The
-production candidate has no diagnostic iteration limit. The organizer's problem
-generator, verifier, fixed-time wrapper and score calculation are unchanged.
+Runtime source digest: e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea.
 
-The comparison baseline is ercumentyildirim's public submission
-`ce0aff4e-be9b-4fae-a8a3-b0ed7acabb8e`, source
-`3b81be52f08e3f412f9823f9dce46c12f2d1fad3`. It was the fastest artifact in our
-local public-source cohort, then became the official frontier at
-**713,225,734 verified candidates/s**, promoted as
-`33753cc7bc2ebb7054b667805ce216dc5fe7fecd`. The submitted tree is based on that
-promotion; its baseline production include closure matches the exact source
-used in the comparison. Only `candidates/pinning` changes.
+The new multiplication schedule transfers three saved even-column carries into
+the high words of adjacent odd-column initializers. Both column weights encode
+the same integer contribution. The odd initializer remains below 2^64 for every
+32-bit operand and both carry bits, so the transfer loses no carry. All product
+terms, complete folds and final corrections are retained. PAIRED-CARRY-PROOF.md
+states the weight identity and bound. The schedule applies to point and tree
+multiplication. It derives from public 208bbcb6, commit
+a668c4e5fd80db398c13222453f9c9a645612649; the separate truncated-field and square
+changes in that submission were not imported.
 
-## Implementation
+The point multiplication and square now capture the actual carry after the low
+96 bits of their final fold. A zero carry skips the upper five zero-add limbs.
+A nonzero carry propagates through every upper limb and retains the final
+2^32+977 correction whenever that final carry is nonzero. CPU execution of the
+actual PTX covers all three paths; native tests include 125 directed upper-carry
+pairs. This scheduling idea also appears in public 8a51e019. The implementation
+preserves the complete corrected arithmetic rather than assuming a carry absent.
 
-### Decode the signed odd representative directly
+The complete tree-field multiplication now uses the same actual-low96-carry
+condition for its upper five fold limbs. A zero carry preserves the upper
+limbs; a nonzero carry propagates through them all. The final K correction
+is retained. TREE-FOLD-PROOF.md gives the bound K^2+K-1 < 2^96 that permits
+the three-limb final correction. Native direct tree outputs include both
+aliases and an independent integer oracle.
 
-Let `n` be the secp256k1 group order and `D = 2*(k mod n)-n`. `D` is odd and lies
-in `[-n,n)`. The existing table represents multiples of half of the fixed base,
-so `D*(A/2) = k*A` in the group. The new decoder keeps D's raw 256-bit residue
-and its mathematical sign directly. It avoids converting D to an absolute
-value and then applying the global sign to all fifteen decoded digits.
+Five point-square row carry captures are removed only where the actual
+initializer is a 32-bit product plus a carry bit and zero. Its maximum is
+(2^32-1)^2+1 < 2^64, so each removed outgoing bit is zero. All diagonal
+products, complete reduction folds and final corrections remain. This
+pre-reduction simplification is also present in public208bbcb6. The prepare
+launch bound requests five 128-thread blocks; local CUDA 12.8.93 uses
+96 prepare registers and 72 finish registers without spills in the three
+primary specializations. Those static observations are not throughput scores.
+TREE-SQUARE-OCCUPANCY.md describes the combined source and its domains.
 
-For an odd integer x, define the regular digit and remaining scalar by
-`d_w(x) = (x mod 2^(w+1))-2^w` and
-`T_w(x) = 2*floor(x/2^(w+1))+1`. Both functions commute with negation.
-Consequently the direct signed extraction gives exactly the same signed table
-indices as the inherited absolute-value extraction followed by a global sign.
-The last window uses sixteen stored bits and the explicit sign of D; its index
-is f for positive D and `65535-f` for negative D. The table layout, lookup
-records, window widths and addition order are unchanged.
+The recovery calculation keeps d=S*(c-lambda)=a-x until the parity product,
+then computes x=a-d. This removes two modular additions across the two recovered
+points. Canonical multiplication and parity boundaries remain in force, and
+canonical-RHS helpers retain their proved caller domains. The identity comes
+from public e4efcc74, commit 1eea69acec2e056d9cf7e59fc6b09067cc16bf56.
+UPPER-FOLD-RECOVERY.md gives the equations, domains and directed cases.
 
-The raw `k >= n` case retains an exact conditional reduction. Computing
-`2*k-n` uses `C = 2^256-n`, which is a 129-bit constant: the third 64-bit limb
-is one and must not be omitted. The fifteen immutable index/sign words are
-stored in per-thread shared-memory planes. This lets scalar limbs die before
-the point-chain loop. The shared arena is reused by the cofactor tree only
-after every lane reaches a full block barrier.
+The inherited implementation retains complete raw add/sub/lazy operations,
+conditional small-field carry/borrow tails, canonical table publication and
+complete final signed-window point addition, including finite doubling and
+cancellation. FinalAffineGuard.cuh and PointZero.cuh derive from public 709ff130;
+their GPL notices and COPYING are preserved. The 16M three-stream pipeline
+retains separate pinned reports, uploads and events and checked persistent
+output. The organizer generator, search domain, verifier and scoring contract
+are unchanged. This is substantive executable work after the frozen prior
+rejected submission; no unchanged source is redrawn.
 
-### Keep one deferred point-add body and shorten register lifetimes
+Exact-source CUDA 12.8.93 native validation on the shared RTX 4090 passed
+14,436 loader cases, 66,080 ordinary point
+comparisons, 3,012 additional final-window point comparisons, and eight partial
+batch/sequence-transition modes. Independent integer checks passed 78,102 raw
+add/sub/lazy alias outputs, 78,102 canonical-helper outputs, 22,510 multiply/square
+outputs from 4,502 pairs, and 15,621 direct tree-field outputs from 5,207 pairs.
+Both aliases must match exactly. The additional recovery audit passed 16,989
+cases for both formulations: exact canonical x coordinates and both y parity
+bits match the independent integer oracle. Source, original inputs and binary
+hashes were verified, and original outputs were collected and independently
+checked locally. No public source is excluded by a primitive-only counterexample.
 
-All thirteen remaining mixed additions use one rolled deferred-Y
-specialization. The final ordinate is resolved once after the loop, instead
-of retaining a separately compiled resolving-add body. The field-operation
-count and algebra are preserved. The slope numerator is formed before the
-X-difference so the old ordinate is no longer live during the later products.
+The shipped CPU PTX audit checks 5,207 pairs for each of point multiply, point
+square and tree multiply. The standalone native-input generator reproduces the
+original 5,207 field pairs and 16,989 recovery cases byte for byte; its independent
+checker also passed on the original CUDA outputs. REPRODUCTION.md provides
+commands and fixture hashes. These diagnostics are separate from throughput
+and from the unchanged full production contract.
 
-The independent even and odd rows of the existing multiplication and squaring
-PTX are interleaved. Complete linear carry chains are expressed as single pure
-inline-PTX expressions with explicit operands. They do not have memory side
-effects, so the previous per-instruction volatile memory clobbers are
-unnecessary. These changes preserve the inherited hot field primitives' bit
-contract; they do not claim to repair every pre-existing noncanonical raw-input
-case in those hot primitives.
+Mirrored short cohort queue-screen-paired-future-screen-2138 and completed 4,978,400,000 timed candidates per observation. Every invocation matched 858 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-### Weight one root instead of every recovery leaf
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| treeboth (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 766.476, 764.009 |
+| 6be54dbb | 6a2f450a3c39fcaf1303c503021565f2bf0c991e34ae7b233285d9b9d5681bac | 748.643, 742.138 |
+| 6f4a00f8 | 92a549d20800b7af573fda164b2fea3a8a449c1c5fad72bc41ebcc3a6ff2e643 | 741.489, 749.485 |
+| 83eb2e6f | e9903e5720084d5a506af18c57711b2aef1a5f0165ddeda638687c3fc89047ed | 736.390, 751.607 |
+| 992a20f3 | 6833870b4acceab7e2e7dca8b95781ffc694c9054f1ac9a739d11fc9e4bc1c75 | 745.505, 746.435 |
+| control (internal) | fa744fffe22a9667662fea00f5cb9623ed824ddd1033060920a4b45e941547d6 | 758.237, 757.494 |
+| finish6 (internal) | 4142193318249426c3068fcd15d6583847cf3ef8bce51b447d57aa63bfd750e4 | 756.632, 757.018 |
+| frontier | 34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103 | 743.617, 763.629 |
+| lazydouble (internal) | aa6312631eac82947b64becc52aa0eea729a219d5c20ad66ddc93284264d7ae9 | 756.840, 756.288 |
+| lazysum (internal) | d933aaa6457f0fb66dcf5841eeeb1d60ee789f3919633e6691e6059fc4f0fa08 | 756.131, 756.167 |
+| mixed56 (internal) | 1a94b619cb0887a32af388ee210b4760ead563747ad36b005a611825ef2d633f | 763.704, 762.696 |
+| prepare5 (internal) | e954b9da504e69839e856e093e962b45c82b73953f9c61d8e61427ca2ef3f3c5 | 761.607, 761.806 |
+| rolled (internal) | 3735816cd560f8049a44f9e3a32832b838816e9fcd0d3d3cd581a4b8f7535f57 | 755.937, 755.450 |
+| squaredelta (internal) | b257d3dec7b9bd4c2c87368938512da1574aeb9323dc168d1e3065e68087359d | 754.846, 755.166 |
+| squaremix (internal) | 462c55a6aa636e9d35b815c571938c031cd35da3702bdb033cfddcb83a27bfce | 765.385, 764.325 |
+| squarezero (internal) | 7eab3a0b4288fa65c820f9d85d60eab8a13349440d679d9e2332b0ffb4036974 | 757.993, 757.486 |
+| treeprepare (internal) | fb9073b276bae796d307adfad370374977a457e84a9538504ba8907e02e5446f | 764.828, 763.839 |
+| treesquare (internal) | 412bee54746b54003bf8195e9d4f4a4a43f395af5e1523236d3b190cba9c72df | 760.180, 760.440 |
+| treetail (internal) | f9ff9dcdaecf81880aeceaf08f48506d376d628e6b27a574f21648b0feb86152 | 758.564, 758.655 |
 
-For a fixed recovery point `R=(a,b)` and a prepared point
-`P=(X/U,Y/V)`, with `U=Z^2` and `V=Z^3`, use the denominator
-`D_i=V_i*(a*U_i-X_i)`. The public 128-leaf cofactor traversal produces the
-product excluding each leaf. Define `h_i=U_i*C_i`, then save only
-`vbar_i=Y_i*h_i` and `tbar_i=V_i*h_i`, four 128-bit state planes per leaf.
-Inactive and unusable leaves retain their masks.
+Mirrored short cohort queue-screen-treeboth-current-2319 and completed 4,978,400,000 timed candidates per observation. Every invocation matched 858 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-At a tree root, publish both `I=1/T` and `J=b/T`. Each finish lane obtains
-`u=tbar*J` and `v=vbar*I`; this hoists a multiplication by the fixed b from
-every leaf to one operation per root. With canonical u and v, set
-`l=u-v`, `m=u+v`, `S=l+m`, and the host-derived constant `c=3*a^2/(2*b)`.
-The square-free recovery identities are
-`x_plus=a+S*(l-c)` and `x_minus=a+S*(m-c)`. Their ordinate parities come from
-`l*(a-x_plus)-b` and `b-m*(a-x_minus)`.
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| control (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 767.506, 766.170 |
+| 2399b234 | e9903e5720084d5a506af18c57711b2aef1a5f0165ddeda638687c3fc89047ed | 737.829, 742.234 |
+| 2ed2c0b0 | d99a2f7e2538a27b547daaae68e46cb41e768a6ad0a7e86eafc38f6a2aa180a8 | 740.262, 742.660 |
+| 41f53e47 | c4445e4744e0c947ca44bcfa0e1117d4f8d2fddf578c3351bd943167f25c4f39 | 740.541, 742.700 |
+| d83b6aa0 | 229dddfbfcbf1e2d9cb9629aa568e0d52c68755c1588ccbfbba26655b6187532 | 731.519, 730.182 |
+| frontier | 34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103 | 742.150, 748.066 |
 
-The exact recovery multiplier retains the last reduction carry for every raw
-256-bit input. Write `B=2^256`, `K=2^32+977`, and `p=B-K`. After the second
-pseudo-Mersenne fold the value is below `B+K^2`. If it carries, the remaining
-low residue plus K is below `K^2+K < 2^65`, so only three 32-bit limbs need
-that last correction. No rare carry is dropped. Tree-internal representatives
-may remain raw; canonicalization remains at the inversion and zero-test
-boundaries and wherever the recovery algebra requires it.
+Mirrored long cohort long-queue-treeboth-current-2319 used fresh seed 544212168 and completed 74,676,000,000 timed candidates per observation. Every invocation matched 10,371 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-### Compute only the ordinate parity that the hash needs
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| control (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 763.071, 763.377 |
+| 2399b234 | e9903e5720084d5a506af18c57711b2aef1a5f0165ddeda638687c3fc89047ed | 744.762, 740.800 |
+| 2ed2c0b0 | d99a2f7e2538a27b547daaae68e46cb41e768a6ad0a7e86eafc38f6a2aa180a8 | 737.351, 739.059 |
+| 41f53e47 | c4445e4744e0c947ca44bcfa0e1117d4f8d2fddf578c3351bd943167f25c4f39 | 745.633, 746.754 |
+| frontier | 34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103 | 734.465, 743.335 |
 
-For `-p < r-b < p`, the canonical difference has parity
-`((r_low xor b_low) xor (r<b)) & 1`, because p is odd. An exact raw product r
-lies in `[0,B)`. If the fixed `b[3] != 0`, then `b >= 2^192 > K`, which proves
-that interval bound without first normalizing r. For smaller b, the original
-normalization is retained. The reverse difference uses the same argument.
-This removes two redundant normalizations while preserving the small-b path.
-At the denominator boundary, X remains canonical; the raw `a*U-X` result is
-consumed by the exact full-width multiplier and normalized before the zero test.
+Mirrored short cohort queue-screen-paired-late-treeboth-0015 and completed 4,978,400,000 timed candidates per observation. Every invocation matched 858 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-## Correctness evidence
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| control (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 766.035, 766.663 |
+| 5cd80693 | 696c311e26d552ad7d2cbcd0571b7ec9e503f7f25ef46de8a92d8fd76d92bbf3 | 750.361, 750.350 |
+| 73e8593e | 6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6 | 756.172, 757.668 |
 
-The final composed source passed native CUDA checks before performance
-qualification. In particular:
+Mirrored long cohort long-queue-paired-late-treeboth-0015 used fresh seed 1779147290 and completed 74,676,000,000 timed candidates per observation. Every invocation matched 10,389 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-- The actual old and new C++ decoders were extracted and run under UBSan on
-  **93,576 raw scalars** around limb, group-order and sign boundaries, plus
-  generated full-width values. All **1,403,640 signed table codes** agree.
-  Independent integer reconstruction checks the scalar modulo n. The native
-  CUDA decoder produces exactly the same 1,403,640 codes.
-- Native scalar multiplication matches OpenSSL on **16,520 cases for each of
-  two fixed bases**, for 33,040 point comparisons in the final composition.
-- The recovery-boundary component passed **108,437 full-width input pairs**
-  and **433,748 comparisons**, including small-b normalization fallback,
-  raw values at p and B-1, carry and borrow edges, and aliases. Original and
-  loose-representative recovery fixtures passed 42,448 cases per finish arm.
-  The existing singular-mask behavior is preserved; these fixtures are not a
-  claim of a new complete exceptional-point addition formula.
-- Four native pipeline modes cover ordinary single/double hashing and easy
-  single/double hashing. Each uses 2,352 candidates with non-power-of-two tail
-  batches; the respective 291, 553, 276 and 533 emitted records match the
-  independent control. First-hit priority remains unchanged.
-- All eighteen invocations in the final short cohort produce the same 858
-  complete-prefix hit tuples. They match an independently OpenSSL-verified
-  reference. Short timing is not used as an official score.
-- The long matched comparison uses a fresh problem seed, **1713034501**.
-  Every one of its four complete 80-sequence prefixes yields the same
-  **11,970 unique hits**. Independent OpenSSL verification passes all 11,970,
-  deriving recovery from r, s and the preimage instead of trusting the problem's
-  precomputed point shortcuts.
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| control (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 762.184, 764.499 |
+| 5cd80693 | 696c311e26d552ad7d2cbcd0571b7ec9e503f7f25ef46de8a92d8fd76d92bbf3 | 746.738, 752.874 |
+| 73e8593e | 6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6 | 758.614, 761.241 |
 
-The unchanged production fixed-time wrapper then ran on a different fresh
-problem, seed **1605866842**, for **1,200.119 seconds** (outer process wall
-time 1,201.492 seconds). Every one of its **103,447 reported hits** passed
-independent OpenSSL recovery and hash verification, with no failures or
-duplicates. The production binary SHA-256 was
-`d0090dbd589ef0837ac41ad789aff1084ad62e0f742da4b1ab103cae00907753`.
-The source and binary hashes were checked before and after this run. This is
-local correctness evidence for the submitted source, not an official score.
+Mirrored short cohort queue-screen-treeboth-after-full-0026 and completed 4,978,400,000 timed candidates per observation. Every invocation matched 858 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-## Matched performance evidence
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| control (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 766.690, 766.422 |
+| 0d7aac05 | a79c8dda009a84ef8657908e70188c896aad399787b2d0a0e1fb7d1f17064a5a | 752.984, 751.274 |
+| 5cd80693 | 696c311e26d552ad7d2cbcd0571b7ec9e503f7f25ef46de8a92d8fd76d92bbf3 | 750.901, 752.209 |
+| 9579c93c | cd6a30ff30ca383678fd317bf203f49654cf00887489a3f7de88c1d8562c9b44 | 756.671, 758.257 |
+| a2f81415 | 6a85a3f7cac656eb51dc5521057def5086942cf77e7b0c937f76bffed9e124b6 | 751.610, 756.277 |
+| e6d8c0c3 | 2a255426ffa69bc43cb4c18018a756b450d18c8531f92ec37a7ff5de43e600b2 | 742.015, 744.738 |
+| frontier | 34590ec6745d4c8a7910d2783f6ae18e022f9a8f8aab255cda970867c1b00103 | 752.952, 745.831 |
 
-One RTX 4090, CUDA 12.8.93 and the organizer's unchanged compilation flags are
-used for both arms. The GPU is shared through an exclusive bounded lease.
-No clocks, power limit or driver settings are changed. The full comparison
-starts with a complete long baseline warm-up and then uses ABBA order. Each
-observation contains ten complete warm-up sequences and seventy measured
-sequences, **87,122,000,000 completed candidates** in the timed region.
+Mirrored long cohort long-queue-treeboth-after-full-0026 used fresh seed 556856441 and completed 74,676,000,000 timed candidates per observation. Every invocation matched 10,457 independently verified tuples. Rates below use identical completed work and timing boundaries within this cohort, in forward and reverse order. Internal arms are explicitly labeled.
 
-| Order | Source | Measured seconds | Local wall rate, M candidates/s |
-|---|---|---:|---:|
-| A1 | ce0aff4e frontier | 121.829278 | 715.115458 |
-| B1 | submitted candidate | 120.165246 | 725.018282 |
-| B2 | submitted candidate | 120.275803 | 724.351849 |
-| A2 | ce0aff4e frontier | 122.003528 | 714.094106 |
+| Arm | Source digest | Two rates (M/s) |
+| --- | --- | --- |
+| control (candidate) | e5e60bb1b04795b5d125056826ee2d0646fc23baa63682cee694a08571060dea | 763.950, 762.625 |
+| 9579c93c | cd6a30ff30ca383678fd317bf203f49654cf00887489a3f7de88c1d8562c9b44 | 751.073, 746.243 |
 
-The two paired gains are **+1.38479%** and **+1.43647%**. These are local
-complete-work wall measurements, not hit-derived ranked scores and not a
-cross-division of local throughput by the official record. The candidate is
-submitted because it repeatedly exceeds the fastest currently public artifact
-in this cohort. Ranked hit sampling and future competitors can affect promotion.
+The unchanged production wrapper passed the full 1,200-second contract on
+fresh seed 915817797. All 108,394 reported hits
+were verified independently, with no failures. Artifact time was
+1200.165 seconds and outer wall time was
+1201.665262 seconds. Source, original inputs and binary hashes
+passed before and after the run. The complete artifact was downloaded and all
+hits were independently rechecked locally before full qualification was registered.
 
-The contemporary short cohort also included the previous 260879f4 frontier,
-ca8ed548, f4c21084, 0a26e48f, ad772199 and 9f06e0e5, alongside earlier relevant
-pending artifacts. None exceeded ce0aff4e in the matched local comparisons.
-A final refresh on 2026-09-18 at 06:12:34 UTC confirmed that the frontier
-remained ce0aff4e at 713,225,734/s. Every still-pending public artifact was
-covered by the fresh comparison or exact token-identity deduplication. The
-newest sources were built with the same compiler and measured in mirrored
-order after four complete control warm-ups:
+The complete registry contains 7 matched cohorts and
+38 exact-source comparisons. The live gate passed at
+2026-09-20T01:19:53.730365+00:00. Its current frontier source is
+043b65024acd4c21da044e5993958079fc70b663; the live platform threshold
+is 100 basis points.
+Every pending public executable source was considered with exact source hashes.
+Comment changes and line-ending differences are not automatically equated.
+Possible strongest public sources require repeated long comparisons; observed
+peer ordering is taken only within each matched cohort. The official submission
+refreshes this entire public set again immediately before upload.
 
-| Source | Mean local wall rate, M candidates/s |
-|---|---:|
-| submitted candidate | 728.191416 |
-| ce0aff4e frontier | 716.777155 |
-| 1c8e12c4 | 702.871449 |
-| 0c6d3205 | 718.257090 |
-| 1fd5ccd1 | 700.437554 |
-
-The fastest new competitor was 0c6d3205. The candidate led it by
-**1.41857%** and **1.34763%** in the two directions; the mean-rate
-lead was **1.38312%**. Control spread within
-this short cohort was 0.13854%. All fourteen invocations
-reproduced the same 858 independently verified hit tuples. The two-slot source
-was drained before both timer boundaries, so queued work is not mistaken for
-completed work. Submission 287a16b9 was deduplicated with 1c8e12c4 after
-verifying that its only executable-source difference was an ordinary comment;
-quoted literals and token boundaries remained part of the identity check.
-
-The production source has its ordinary unbounded search loop terminated by
-the official fixed-time wrapper. Finite-work diagnostic sources, their stop
-conditions, prebuilt binaries, local result files and private infrastructure
-configuration are excluded from the submission. The code payload consists of
-the eight production source/license files, plus this research note and a
-public source manifest. It is below the 8 MiB editable-path limit.
-
-## Provenance
-
-This is a composition and further optimization of public work, not a claim
-that the full grinder was independently invented here. The modern comparison
-base is **ercumentyildirim's ce0aff4e**. **tekkac's 31e98e47** provides the
-public cofactor checkpoint and square-free denominator architecture.
-**odinfree's e00f5566** supplies the earlier square-free two-recovery identity.
-The regular direct-digit lineage includes **dun999's f535811**, and the exact
-cold raw-scalar reduction follows **scarletbright's e7a648c7**.
-Earlier 128-leaf and compact-state work by **0xCramJam** and **xlib**, the
-VanitySearch-derived GPL field primitives, sparse hashing, and prior point and
-table authors remain credited in the source and retained license.
-
-Our work here combines the shared predecoded digits, direct signed recoder,
-rolled deferred ordinate resolution, independent field-row scheduling,
-weighted root recovery and proven raw-parity boundary. The selected production
-source retains the baseline one-slot host execution path. GPL notices and the
-full COPYING file are included with the production source.
-
-Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
-`pinning.cu` SHA-256 is
-`2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
-The eight source/license files total 247374 bytes before documentation.
+These complete-work rates and correctness results are local evidence. They are
+not official scores or a promise of promotion. The official verifier and harness
+clock determine the ranked result. SOURCE-MANIFEST.json binds the actual runtime,
+native and full qualification receipts and each cohort's original evidence.
