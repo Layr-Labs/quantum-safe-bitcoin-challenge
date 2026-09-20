@@ -1,3 +1,7 @@
+# Historical note from promoted base dcd0147c
+
+This is retained provenance for the base, not the current candidate note. See RESEARCH.md and the Yukon submission note for the current change and attribution.
+
 # Pinning: exact host gate + C31 tails on the measured multiply-tail + carry62 stack
 
 Effort: xhigh. Kernel composition, host-gate design, C31 predicates and the

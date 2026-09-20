@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "current_frontier_PTX_symmetry_and_model_pairs": 2221,
+  "full_tree_bitwise_leaf_checks": 46080,
+  "actual_full_PTX_trees": 10,
+  "actual_full_PTX_leaves": 1920,
+  "decoder_exhaustive_field_checks": 524288,
+  "decoder_raw_scalars": 8008,
+  "decoder_digit_comparisons": 120120,
+  "basis_vectors_and_signs": 516,
+  "negative_controls": 2,
+  "new_carry_omissions": 0,
+  "native_compile": false,
+  "GPU_timing": false,
+  "source_sha256": {
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "pinning.cu": "1873114c208eeca19b3714e26735edd140e66e00ff2fa94b06f4b93539110ccc",
+    "cofactor_checkpoint.h": "a7ffbbbe125acb3908f93fd53336f97b42ff941450750d0963862af09cca6dad",
+    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "Top16Registers.cuh": "e81bf9330448a1ca824c944fb14fe6ddca2a92cc017ef87280f7fba5c9cba0df",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3"
+  },
+  "limitations": "Tests prove source-modeled equality to the latest promoted raw bit contract; inherited C31/truncations are not certified as exact field arithmetic. Host gate unchanged. Source/barrier audit is not a GPU race detector or compiler check."
+}
