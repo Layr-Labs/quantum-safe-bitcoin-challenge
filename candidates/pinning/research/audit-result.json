@@ -1,0 +1,42 @@
+{
+  "status": "PASS",
+  "complete_fused_vs_frontier_PTX_pairs": 9936,
+  "short_PTX_vs_integer_model_pairs": 9936,
+  "full_tree_cases": 168,
+  "full_tree_leaf_checks": 20160,
+  "actual128_leaf_PTX_trees": 11,
+  "actual128_leaf_PTX_leaves": 1408,
+  "top_warp_multiply_waves_current_frontier_to_candidate": [
+    6,
+    4
+  ],
+  "top_scalar_multiplications_current_frontier_to_candidate": [
+    43,
+    63
+  ],
+  "normalizations_vs_previous_complete_top16": [
+    63,
+    17
+  ],
+  "normalization_wave_count": [
+    4,
+    1
+  ],
+  "negative_controls": 2,
+  "native_compile": false,
+  "GPU_performance_measured": false,
+  "limitations": "PTX semantic model and source-bound tree indexing are not native compilation, a race detector, or a GPU timing. Lower-tree and point-chain short-carry approximations are inherited. New top reassociation uses complete products; boundary outputs equal canonical top16 for all modeled inputs.",
+  "source_sha256": {
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "pinning.cu": "43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa",
+    "cofactor_checkpoint.h": "605c058f2194e44536ce8dcf6a202611b9e10a77bffa45449bdb8d3ede6835af",
+    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "Top16Mul.cuh": "66420bfc38b0ff92fc8bbc5a97d7d79cde087de38c0be9d2a732673e38b6a977",
+    "Top16Exact.cuh": "9279a5a91e275bc8827bc47c3c7ce5769bec6379fb4e31e3d5e9f4e7c7595f5a",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3"
+  }
+}

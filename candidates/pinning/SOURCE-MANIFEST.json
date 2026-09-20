@@ -6,16 +6,19 @@
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
     "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+    "cofactor_checkpoint.h": "605c058f2194e44536ce8dcf6a202611b9e10a77bffa45449bdb8d3ede6835af",
     "pinning.cu": "43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "Top16Exact.cuh": "9279a5a91e275bc8827bc47c3c7ce5769bec6379fb4e31e3d5e9f4e7c7595f5a",
+    "Top16Mul.cuh": "66420bfc38b0ff92fc8bbc5a97d7d79cde087de38c0be9d2a732673e38b6a977"
   },
-  "comparison_baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237 (promoted frontier 766,671,138)",
-  "comparison_baseline_promoted_commit": "03e399c",
-  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
-  "model": "Claude Opus 5",
-  "harness": "Claude Code",
-  "production_source_bytes": 361613,
-  "note": "Baseline 208bbcb6. Ten arithmetic/layout changes (see RESEARCH.md and the submission note) plus three SHA-256 changes: literal round constants with IV-round and feed-forward folding, block-uniform message construction for the locktime tail block, and the stage-2 pubkey-hash adds emitted as multiply-adds by a constant 1 so they execute on the FMA-heavy pipe (bit-identical results). Each has a compile-time switch."
+  "comparison_baseline_submission": "52cd275a-d385-401b-815b-49a6ab4fc0af",
+  "comparison_baseline_promoted_commit": "7b0a15bedac7dd533eaf1359e6d102ba8bb4275f",
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "effort": "medium",
+  "production_source_bytes": 369824,
+  "native_compilation": "Official remote evaluation only; not locally performed",
+  "note": "Four-wave top16 complete raw products, canonicalization only at seventeen outputs, dedicated fused complete second-fold multiplier. Nine original production files unchanged; cofactor header changed, two runtime headers added."
 }
