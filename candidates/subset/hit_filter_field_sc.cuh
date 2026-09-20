@@ -1673,7 +1673,6 @@ __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3,
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
-  uint64_t T[4];
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -1681,10 +1680,9 @@ __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3,
   qsb_filter_mul(ZZZ3, ZZ3, P,bad);                          // ZZZ3 = PPP = P*PP
   qsb_filter_mul(Q, (uint64_t *)X1, ZZ3,bad);                // Q = X1*PP
 
-  qsb_filter_sqr(T, R,bad);                                   // R^2
-  qsb_filter_seed_x3(T,T,ZZZ3,Q,bad); // guarded R^2 - PPP - 2Q
+  qsb_filter_sqr(X3, R,bad);                                   // R^2 directly into X3
+  qsb_filter_seed_x3(X3,X3,ZZZ3,Q,bad); // guarded R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, T);                             // Q - X3
+  _ModSub256(Q, Q, X3);                             // Q - X3
   qsb_filter_mul(Y3, Q, R,bad);                              // deferred R*(Q-X3)
-  Load256(X3, T);                                  // X3
 }

@@ -1303,39 +1303,37 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
 {
   uint64_t U2[4];
   uint64_t S2[4];
-  uint64_t P[4];
   uint64_t R[4];
   uint64_t PP[4];
   uint64_t PPP[4];
   uint64_t Q[4];
-  uint64_t T[4];
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  uint64_t *P = S2;                    // reuse S2 registers for P
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSqr(PP, P);                      // PP = P^2
   _ModMult(PPP, PP, P);                // PPP = P*PP
   _ModMult(Q, U2, PP);                 // V  = U2*PP
   _ModMult(ZZ1, PP);                   // ZZ3; PP dies before the R^2/Y3 tail
 
-  _ModSqr(T, R);                       // R^2
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+  _ModSqr(X1, R);                      // R^2 directly into X1
+  _ModAdd256(X1, X1, PPP);
+  _ModSub256(X1, X1, Q);
+  _ModSub256(X1, X1, Q);               // X3 = R^2 + PPP - 2V
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
-  _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
+  _ModSub256(Q, Q, X1);                // V - X3
   if (DEFER_Y) {
-    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+    _ModMult(Y1, R, Q);                // actual Y3 = R*(V - X3) directly into Y1
   } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
-    _ModSub256(Y1, Q, S2);             // exact Y3
+    _ModMult(Q, R);
+    uint64_t Y2Z[4];
+    _ModMult(Y2Z, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+    _ModSub256(Y1, Q, Y2Z);            // exact Y3
   }
-
-  Load256(X1, T);                      // X3
 }
 
 // Runtime-bool dispatcher for any remaining non-specialized call sites.
@@ -1362,7 +1360,6 @@ __device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, 
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
-  uint64_t T[4];
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -1370,14 +1367,13 @@ __device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, 
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
-  _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+  _ModSqr(X3, R);                                  // R^2 directly into X3
+  _ModSub256(X3, X3, ZZZ3);
+  _ModSub256(X3, X3, Q);
+  _ModSub256(X3, X3, Q);                           // X3 = R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, T);                             // Q - X3
+  _ModSub256(Q, Q, X3);                            // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
-  Load256(X3, T);                                  // X3
 }
 
 // EFD "mmadd-2008-s" -- affine (X1,Y1) + affine (X2,Y2) -> XYZZ, 4M + 2S (ZZ1 = ZZZ1 = 1):
@@ -1391,7 +1387,6 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
-  uint64_t T[4];
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -1399,14 +1394,13 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
-  _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+  _ModSqr(X3, R);                                  // R^2 directly into X3
+  _ModSub256(X3, X3, ZZZ3);
+  _ModSub256(X3, X3, Q);
+  _ModSub256(X3, X3, Q);                           // X3 = R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, T);                             // Q - X3
+  _ModSub256(Q, Q, X3);                            // Q - X3
   _ModMult(Q, R);                                  // R*(Q - X3)
   _ModMult(R, (uint64_t *)Y1, ZZZ3);               // Y1*PPP
   _ModSub256(Y3, Q, R);                            // Y3 = R*(Q - X3) - Y1*PPP
-  Load256(X3, T);                                  // X3
 }

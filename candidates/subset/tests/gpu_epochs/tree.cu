@@ -369,7 +369,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
                                                      uint64_t neg,
                                                      uint64_t *__restrict__ gx,
                                                      uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
+    uint32_t off = (base + idx) << 6;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
@@ -399,7 +399,7 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
                                                        uint64_t *__restrict__ gx,
                                                        uint64_t *__restrict__ gy) {
 #if QSB_NEG_SHORT
-    size_t off = ((size_t)base + idx) * 64;
+    uint32_t off = (base + idx) << 6;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
@@ -759,21 +759,24 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
-    uint64_t x0[4],y0[4],x1[4],y1[4];
+    uint64_t y0[4];
 #if ZLAB_T14
+    {
+        uint64_t x0[4],x1[4],y1[4];
 #if ZLAB_DIRDIG
-    uint64_t sflag=(uint64_t)(sign<0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
-    gt_load_signed(gTable,0,idx,neg,x0,y0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
-    gt_load_signed(gTable,1,idx,neg,x1,y1);
+        uint64_t sflag=(uint64_t)(sign<0);
+        gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+        gt_load_signed(gTable,0,idx,neg,x0,y0);
+        gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+        gt_load_signed(gTable,1,idx,neg,x1,y1);
 #else
-    int32_t ec=gt_mixed_step<19>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<19>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+        int32_t ec=gt_mixed_step<19>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+        ec=gt_mixed_step<19>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
 #endif
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+        qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    }
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
 #if ZLAB_DIRDIG
@@ -818,11 +821,14 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #else
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
-    gt_load_signed_flat_f(gTable,gt_offset(0),idx,neg,x0,y0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
-    gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    {
+        uint64_t x0[4],x1[4],y1[4];
+        gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+        gt_load_signed_flat_f(gTable,gt_offset(0),idx,neg,x0,y0);
+        gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+        gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
+        qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    }
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
 #if QSB_DIGIT_SHIFT
@@ -839,8 +845,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
         w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
     }
-    constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
-    #pragma unroll (kChainUnroll)
+    #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
         {
             const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
@@ -878,11 +883,14 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     }
 #endif
 #else
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    {
+        uint64_t x0[4],x1[4],y1[4];
+        int32_t ec=gt_mixed_step<18>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+        ec=gt_mixed_step<17>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+        qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    }
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
