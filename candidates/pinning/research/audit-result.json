@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "primitive_pair_checks": 11683,
+  "second_fold_boundary_checks": 1155,
+  "finish_field_contract_checks": 12507,
+  "tree_leaf_checks": 50400,
+  "PTX_counts": [
+    [
+      225,
+      226
+    ],
+    [
+      228,
+      229
+    ],
+    [
+      186,
+      187
+    ],
+    [
+      189,
+      190
+    ],
+    [
+      234,
+      235
+    ],
+    [
+      242,
+      243
+    ],
+    [
+      233,
+      234
+    ]
+  ],
+  "new_carry_omissions": 0,
+  "scope": "Python source/PTX semantics only; no native build or GPU measurements. Existing baseline short-carry remains. Finish proof is field-contract equivalence, not certification of inherited rare arithmetic errors. Tree uses non-associative oracle to certify unchanged grouping.",
+  "sha256": {
+    "GPUMath.h": "8e9f9c74b300e8445e03dc193f67812733e8192adf3581553c0467b3737b5663",
+    "pinning.cu": "fe4e405447c54c05d9f520108814fbcc71af4efb3bec957e746c478a9c67cd53",
+    "PackedRecovery.cuh": "f0c301f3b826fa9b88f54984248dac2393fe4519a9470e1a7323819571a986bf",
+    "cofactor_checkpoint.h": "1d56c34033d308217210220708826a7805a801e2181da87bd84905fd617b5f53"
+  }
+}

@@ -1,215 +1,82 @@
-# Pinning: signed digit decoding and weighted cofactor recovery
+# Pinning: bounded second-fold fusion and packed tree-top arithmetic
 
-This candidate removes work from the fixed-base scalar decoder, point-chain
-scheduling and public cofactor recovery pipeline. The search still visits the
-same sequence and locktime domain, derives both recovery keys, applies the same
-SHA predicates and emits the same first-hit choice for each candidate. The
-production candidate has no diagnostic iteration limit. The organizer's problem
-generator, verifier, fixed-time wrapper and score calculation are unchanged.
+Effort: medium. This candidate was developed with GPT 6 Astra in Codex. The base is the promoted Pinning submission `208bbcb6-e235-47a1-b8c5-1d03874ac237`, score 766,671,138, landed at `03e399c9c27037a4acea573a79444a902a5ace91`. The shared branch's later `043b650` tip did not change the Pinning frontier. This is an independently implemented combination developed from public submission descriptions, with source-level proofs and Python PTX semantic checks. There is no local CUDA compilation, GPU execution, ptxas report, or measured speedup for this combination. The official remote run is the first native validation.
 
-The comparison baseline is ercumentyildirim's public submission
-`ce0aff4e-be9b-4fae-a8a3-b0ed7acabb8e`, source
-`3b81be52f08e3f412f9823f9dce46c12f2d1fad3`. It was the fastest artifact in our
-local public-source cohort, then became the official frontier at
-**713,225,734 verified candidates/s**, promoted as
-`33753cc7bc2ebb7054b667805ce216dc5fe7fecd`. The submitted tree is based on that
-promotion; its baseline production include closure matches the exact source
-used in the comparison. Only `candidates/pinning` changes.
+## Route selection and attribution
 
-## Implementation
+The previous independent wide-window experiment, PR678, verified but scored 476,983,800, approximately 37.8% below the frontier. Its larger table and changed table builder are discarded. The earlier extra affine-stage checkpoint candidate is also discarded. This package restores the frontier's 64 MiB table, fifteen windows, existing kernel pipeline, batch size, launch bounds, and state layout.
 
-### Decode the signed odd representative directly
+I screened the public descriptions of the current in-flight Pinning submissions before selecting mechanisms. No other solver's candidate source, executable, cubin, or benchmark log bundle was downloaded for this package. In particular:
 
-Let `n` be the secp256k1 group order and `D = 2*(k mod n)-n`. `D` is odd and lies
-in `[-n,n)`. The existing table represents multiples of half of the fixed base,
-so `D*(A/2) = k*A` in the group. The new decoder keeps D's raw 256-bit residue
-and its mathematical sign directly. It avoids converting D to an absolute
-value and then applying the global sign to all fifteen decoded digits.
+* EvanYan1024's `fcc17544` / PR686 describes the exact second-fold fusion originating in ercumentyildirim's unpromoted work, combined with EvanYan1024's `d = a - x` packed-finish route. Their note reports a small positive local combined result, while fusion alone is slightly negative. Those are the author's measurements, not measurements of this package, and are not an official guarantee.
+* ercumentyildirim's `599d98bc` / PR689 describes a larger ten-change combination, including the second-fold fusion and a merged cofactor-tree top. I selected those exact mechanisms, and independently continued the tree-top route with explicit warp packing of the root multiplication. I did not select the new lazy recovery or raw-denominator approximations described in items 2 and 7.
+* `cfed259f` / PR682 focuses on startup and sequence dead time, including a shipped native cubin. I did not adopt it: the candidate-count ratio alone cannot isolate startup, and I have no native execution evidence for its initialization changes. No binary was retrieved.
+* `6a98530a` / PR683 hoists operand moves; `29d3d6f3` / PR687 changes register aliases, scopes and addressing. Their claimed source-register savings are not measurements of physical registers. Neither was mixed into this arithmetic combination without evidence.
+* `a296916` proposes a third pipeline slot without GPU measurements; the extra allocation and scheduling change are not adopted.
+* `56dd1ca1` / PR685 is described as an inert remeasurement with an unspecified carried micro-change. It supplies no selected mechanism.
 
-For an odd integer x, define the regular digit and remaining scalar by
-`d_w(x) = (x mod 2^(w+1))-2^w` and
-`T_w(x) = 2*floor(x/2^(w+1))+1`. Both functions commute with negation.
-Consequently the direct signed extraction gives exactly the same signed table
-indices as the inherited absolute-value extraction followed by a global sign.
-The last window uses sixteen stored bits and the explicit sign of D; its index
-is f for positive D and `65535-f` for negative D. The table layout, lookup
-records, window widths and addition order are unchanged.
+At screening, no completed submission was below the current frontier by strictly less than 0.1% using the actual score ratio. The apparent near miss 765,880,643 is about 0.1031% below and does not meet that strict cutoff. The 770,009,416 rejected submission is above the frontier but below the 1% promotion threshold; its public description is an artifact remeasurement, not a new research result to integrate. CLI displayed diff percentages were not used as score-relative percentages.
 
-The raw `k >= n` case retains an exact conditional reduction. Computing
-`2*k-n` uses `C = 2^256-n`, which is a 129-bit constant: the third 64-bit limb
-is one and must not be omitted. The fifteen immutable index/sign words are
-stored in per-thread shared-memory planes. This lets scalar limbs die before
-the point-chain loop. The shared arena is reused by the cofactor tree only
-after every lane reaches a full block barrier.
+Coauthor credit is assigned to EvanYan1024 and ercumentyildirim for the unpromoted mechanisms that materially informed this work. The promoted base retains the earlier authors' attribution. The extensions below are not attributed as measured improvements by those authors.
 
-### Keep one deferred point-add body and shorten register lifetimes
+## 1. Extend bounded second-fold fusion to all six relevant sites
 
-All thirteen remaining mixed additions use one rolled deferred-Y
-specialization. The final ordinate is resolved once after the loop, instead
-of retaining a separately compiled resolving-add body. The field-operation
-count and algebra are preserved. The slope numerator is formed before the
-X-difference so the old ordinate is no longer live during the later products.
+Let B = 2^256, K = 2^32 + 977, and p = B - K. After the first sparse reduction the words represent L + K*H. The old second-fold prefix constructs c*K, where c is the word above bit 255, then adds its three low words into z0, z1 and z2. The selected route instead incorporates z0 and the shifted component of c*K into the existing 64-bit addition:
 
-The independent even and odd rows of the existing multiplication and squaring
-PTX are interleaved. Complete linear carry chains are expressed as single pure
-inline-PTX expressions with explicit operands. They do not have memory side
-effects, so the previous per-instruction volatile memory clobbers are
-unnecessary. These changes preserve the inherited hot field primitives' bit
-contract; they do not claim to repair every pre-existing noncanonical raw-input
-case in those hot primitives.
+```
+sfq = z9*977 + z8
+sfz = concatenate(sfq, z0)
+sft = z8*977 + sfz            // complete 64-bit add, carry retained
+sfc = z9 + carry64
+z0 = low32(sft)
+z1:z2 += high32(sft):sfc     // original continuation consumes this carry
+```
 
-### Weight one root instead of every recovery leaf
+The actual implementation is inline PTX with `add.cc.u64` and `addc.u32`, not an unchecked C++ overflowing expression. `mov` and `mul` between carry production and consumption do not overwrite CC. The existing carry propagation after z2 is preserved byte-for-byte in the decoded PTX. No new short-carry omission is introduced.
 
-For a fixed recovery point `R=(a,b)` and a prepared point
-`P=(X/U,Y/V)`, with `U=Z^2` and `V=Z^3`, use the denominator
-`D_i=V_i*(a*U_i-X_i)`. The public 128-leaf cofactor traversal produces the
-product excluding each leaf. Define `h_i=U_i*C_i`, then save only
-`vbar_i=Y_i*h_i` and `tbar_i=V_i*h_i`, four 128-bit state planes per leaf.
-Inactive and unusable leaves retain their masks.
+This changes the two `_ModMultCore` variants, two `_ModSqr` variants, the fused `_ModSqrAddSub2`, and the standalone `qsb_field_mul`. The latter keeps its original downstream correction policy. The production short-carry setting is inherited from the promoted baseline; this work does not certify that inherited approximation as universally exact.
 
-At a tree root, publish both `I=1/T` and `J=b/T`. Each finish lane obtains
-`u=tbar*J` and `v=vbar*I`; this hoists a multiplication by the fixed b from
-every leaf to one operation per root. With canonical u and v, set
-`l=u-v`, `m=u+v`, `S=l+m`, and the host-derived constant `c=3*a^2/(2*b)`.
-The square-free recovery identities are
-`x_plus=a+S*(l-c)` and `x_minus=a+S*(m-c)`. Their ordinate parities come from
-`l*(a-x_plus)-b` and `b-m*(a-x_minus)`.
+The additional proof needed for the fused square is its 3p+e-2q term. For arbitrary raw 256-bit e and q, the folded integer is nonnegative because 3p-2(B-1)>0. A deliberately conservative independent-L/H upper bound gives c <= K+4, hence c < K+5. Therefore z9 is either zero or one. With z9=0, sfq=z8 fits u32. With z9=1, z8<=981, so sfq<=1958 also fits u32. There is no truncation in forming sfq even for the biased fused-square case. This extension keeps both short and non-short compile-time branches.
 
-The exact recovery multiplier retains the last reduction carry for every raw
-256-bit input. Write `B=2^256`, `K=2^32+977`, and `p=B-K`. After the second
-pseudo-Mersenne fold the value is below `B+K^2`. If it carries, the remaining
-low residue plus K is below `K^2+K < 2^65`, so only three 32-bit limbs need
-that last correction. No rare carry is dropped. Tree-internal representatives
-may remain raw; canonicalization remains at the inversion and zero-test
-boundaries and wherever the recovery algebra requires it.
+An initial draft wrote the stronger strict c<K+4 bound. The executable bound assertion rejected it; the implementation's actual required no-overflow condition still holds under the corrected c<K+5 bound. The final code, tests and this note use the corrected conservative bound.
 
-### Compute only the ordinate parity that the hash needs
+The PTX statement count increases by one at each site because this is a regrouping intended for backend wide-multiply/add fusion, not a source-instruction deletion. The author's reported SASS savings for the simpler combination cannot be transferred to this package without compiling it. Actual instruction selection, registers and throughput remain open remote questions.
 
-For `-p < r-b < p`, the canonical difference has parity
-`((r_low xor b_low) xor (r<b)) & 1`, because p is odd. An exact raw product r
-lies in `[0,B)`. If the fixed `b[3] != 0`, then `b >= 2^192 > K`, which proves
-that interval bound without first normalizing r. For smaller b, the original
-normalization is retained. The reverse difference uses the same argument.
-This removes two redundant normalizations while preserving the small-b path.
-At the denominator boundary, X remains canonical; the raw `a*U-X` result is
-consumed by the exact full-width multiplier and normalized before the zero test.
+## 2. Preserve d = a - x through packed recovery
 
-## Correctness evidence
+The old finish forms x=a+sum*(slope-c), then reconstructs a-x for the ordinate product. The new finish instead computes d=sum*(c-slope), uses d directly for the ordinate product, and then forms x=a-d. Both d values are computed before either parity product so that sum and c need not survive across the parity products.
 
-The final composed source passed native CUDA checks before performance
-qualification. In particular:
+This removes two field additions without adding multiplication, state storage, table reads or kernel launches. The four `qsb_recovery_mul` calls retain their normalization, and `qsb_parity_boundary` is unchanged. Inputs and canonical boundary handling are unchanged. The algebraic comparison is proven under the field-helper contract and checked from the actual ordered source calls. It is not a universal bit-for-bit claim about inherited rare short-carry errors when the multiplication operands are negated; that distinction is recorded in the audit output.
 
-- The actual old and new C++ decoders were extracted and run under UBSan on
-  **93,576 raw scalars** around limb, group-order and sign boundaries, plus
-  generated full-width values. All **1,403,640 signed table codes** agree.
-  Independent integer reconstruction checks the scalar modulo n. The native
-  CUDA decoder produces exactly the same 1,403,640 codes.
-- Native scalar multiplication matches OpenSSL on **16,520 cases for each of
-  two fixed bases**, for 33,040 point comparisons in the final composition.
-- The recovery-boundary component passed **108,437 full-width input pairs**
-  and **433,748 comparisons**, including small-b normalization fallback,
-  raw values at p and B-1, carry and borrow edges, and aliases. Original and
-  loose-representative recovery fixtures passed 42,448 cases per finish arm.
-  The existing singular-mask behavior is preserved; these fixtures are not a
-  claim of a new complete exceptional-point addition formula.
-- Four native pipeline modes cover ordinary single/double hashing and easy
-  single/double hashing. Each uses 2,352 candidates with non-power-of-two tail
-  batches; the respective 291, 553, 276 and 533 emitted records match the
-  independent control. First-hit priority remains unchanged.
-- All eighteen invocations in the final short cohort produce the same 858
-  complete-prefix hit tuples. They match an independently OpenSSL-verified
-  reference. Short timing is not used as an official score.
-- The long matched comparison uses a fresh problem seed, **1713034501**.
-  Every one of its four complete 80-sequence prefixes yields the same
-  **11,970 unique hits**. Independent OpenSSL verification passes all 11,970,
-  deriving recovery from r, s and the preimage instead of trusting the problem's
-  precomputed point shortcuts.
+## 3. Merge the cofactor-tree top, then pack the root into lane 4
 
-The unchanged production fixed-time wrapper then ran on a different fresh
-problem, seed **1605866842**, for **1,200.119 seconds** (outer process wall
-time 1,201.492 seconds). Every one of its **103,447 reported hits** passed
-independent OpenSSL recovery and hash verification, with no failures or
-duplicates. The production binary SHA-256 was
-`d0090dbd589ef0837ac41ad789aff1084ad62e0f742da4b1ab103cae00907753`.
-The source and binary hashes were checked before and after this run. This is
-local correctness evidence for the submitted source, not an official score.
+The production tree has 128 leaves per block. Its old top computes two half roots, computes the full root with only lane 0, publishes an identity exclusion, copies sibling half roots into exclusion storage, and then calculates the next four exclusions. Those operations require intermediate shared-memory publication and warp barriers.
 
-## Matched performance evidence
+The new traversal stops its generic upward loop at count=4, computes the two half roots in lanes 0 and 1, and synchronizes the warp. At that point five products are independent: the full root and four next-level exclusion products. Instead of issuing a lane-0-only root multiplication followed by a separate four-lane multiplication, this implementation puts the four exclusions in lanes 0..3 and the root in lane 4. They execute one shared `qsb_field_mul_sc` call site. Lane 4 publishes the same block root; lanes 0..3 publish the exclusions. The downward traversal resumes at count=8.
 
-One RTX 4090, CUDA 12.8.93 and the organizer's unchanged compilation flags are
-used for both arms. The GPU is shared through an exclusive bounded lease.
-No clocks, power limit or driver settings are changed. The full comparison
-starts with a complete long baseline warm-up and then uses ABBA order. Each
-observation contains ten complete warm-up sequences and seventy measured
-sequences, **87,122,000,000 completed candidates** in the timed region.
+This is a continuation of the merged-tree-top research route, beyond merely copying the described identity handoff. It removes one warp invocation of field multiplication per block while preserving the scalar multiplication count, and removes two top-path warp barriers. Root ownership is internal: later kernels read the global root after normal stream ordering, never the old lane identifier. Shared storage size and output addresses are unchanged. All block participants still reach the existing block barriers. The template now explicitly requires a power-of-two N>=8; the only production instantiation remains N=128.
 
-| Order | Source | Measured seconds | Local wall rate, M candidates/s |
-|---|---|---:|---:|
-| A1 | ce0aff4e frontier | 121.829278 | 715.115458 |
-| B1 | submitted candidate | 120.165246 | 725.018282 |
-| B2 | submitted candidate | 120.275803 | 724.351849 |
-| A2 | ce0aff4e frontier | 122.003528 | 714.094106 |
+The product association and operand order are exactly the old ones. That matters because the promoted multiplier uses raw short-carry representatives: arbitrary reassociation would require stronger equivalence claims. A non-associative test oracle verifies the same tree grouping, in addition to ordinary finite-field cofactor/root identities. The first-warp-only work rejoins the unchanged block-wide boundary before any cross-warp consumers need it.
 
-The two paired gains are **+1.38479%** and **+1.43647%**. These are local
-complete-work wall measurements, not hit-derived ranked scores and not a
-cross-division of local throughput by the official record. The candidate is
-submitted because it repeatedly exceeds the fastest currently public artifact
-in this cohort. Ranked hit sampling and future competitors can affect promotion.
+## Validation and reproducibility
 
-The contemporary short cohort also included the previous 260879f4 frontier,
-ca8ed548, f4c21084, 0a26e48f, ad772199 and 9f06e0e5, alongside earlier relevant
-pending artifacts. None exceeded ce0aff4e in the matched local comparisons.
-A final refresh on 2026-09-18 at 06:12:34 UTC confirmed that the frontier
-remained ce0aff4e at 713,225,734/s. Every still-pending public artifact was
-covered by the fresh comparison or exact token-identity deduplication. The
-newest sources were built with the same compiler and measured in mirrored
-order after four complete control warm-ups:
+Only files under `candidates/pinning` are submitted. Runtime changes are confined to GPUMath.h, pinning.cu, PackedRecovery.cuh and cofactor_checkpoint.h; pinning.cu changes only the standalone multiplication fold. The original source versions required by the semantic audit are included under research/baseline. The self-contained audit reads actual inline PTX and actual recovery call order. It fails on unknown opcodes or uninitialized registers; it is an integer semantics model, not a CUDA assembler or GPU emulator.
 
-| Source | Mean local wall rate, M candidates/s |
+Run from the repository root:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 candidates/pinning/research/audit.py
+```
+
+Final result:
+
+| Check | Cases |
 |---|---:|
-| submitted candidate | 728.191416 |
-| ce0aff4e frontier | 716.777155 |
-| 1c8e12c4 | 702.871449 |
-| 0c6d3205 | 718.257090 |
-| 1fd5ccd1 | 700.437554 |
+| Old/new actual-PTX primitive comparisons, both compile-time variants | 11,683 |
+| Direct second-fold high-word and low-word boundary checks | 1,155 |
+| Actual-source finish calls versus baseline field-contract equations | 12,507 |
+| Tree leaf comparisons with field and non-associative multiplication | 50,400 |
 
-The fastest new competitor was 0c6d3205. The candidate led it by
-**1.41857%** and **1.34763%** in the two directions; the mean-rate
-lead was **1.38312%**. Control spread within
-this short cohort was 0.13854%. All fourteen invocations
-reproduced the same 858 independently verified hit tuples. The two-slot source
-was drained before both timer boundaries, so queued work is not mistaken for
-completed work. Submission 287a16b9 was deduplicated with 1c8e12c4 after
-verifying that its only executable-source difference was an ordinary comment;
-quoted literals and token boundaries remained part of the identity check.
+All passed. Tree sizes 8,16,32,64,128,256 are covered, including all-identity inputs. The arithmetic corpus includes raw inputs at and above p, all-zero/all-one edges, and deterministic random full-width words. The audit also normalizes decoded PTX strings and verifies that the only arithmetic edits are the six selected second-fold prefixes; unrelated SHA, table, recoding and scalar point logic remain the promoted base.
 
-The production source has its ordinary unbounded search loop terminated by
-the official fixed-time wrapper. Finite-work diagnostic sources, their stop
-conditions, prebuilt binaries, local result files and private infrastructure
-configuration are excluded from the submission. The code payload consists of
-the eight production source/license files, plus this research note and a
-public source manifest. It is below the 8 MiB editable-path limit.
-
-## Provenance
-
-This is a composition and further optimization of public work, not a claim
-that the full grinder was independently invented here. The modern comparison
-base is **ercumentyildirim's ce0aff4e**. **tekkac's 31e98e47** provides the
-public cofactor checkpoint and square-free denominator architecture.
-**odinfree's e00f5566** supplies the earlier square-free two-recovery identity.
-The regular direct-digit lineage includes **dun999's f535811**, and the exact
-cold raw-scalar reduction follows **scarletbright's e7a648c7**.
-Earlier 128-leaf and compact-state work by **0xCramJam** and **xlib**, the
-VanitySearch-derived GPL field primitives, sparse hashing, and prior point and
-table authors remain credited in the source and retained license.
-
-Our work here combines the shared predecoded digits, direct signed recoder,
-rolled deferred ordinate resolution, independent field-row scheduling,
-weighted root recovery and proven raw-parity boundary. The selected production
-source retains the baseline one-slot host execution path. GPL notices and the
-full COPYING file are included with the production source.
-
-Production source hashes are recorded in `SOURCE-MANIFEST.json`. The main
-`pinning.cu` SHA-256 is
-`2459223ae4692b1850b279bd3dc492275a5aa337149b5e167739d396907c6a98`.
-The eight source/license files total 247374 bytes before documentation.
+`SOURCE-MANIFEST.json` records the final production source hashes and explicitly records no local GPU measurement. `git diff --check` is clean. This source package has no new binary artifact, no scoring or harness change, no reported local score, and no duplicate-measurement nonce. A successful Python check establishes the scope above, not successful CUDA compilation or a winning benchmark score. Official verification and timing are authoritative. If this combination regresses, its source will be frozen and the official result will guide the next research step rather than silently retuning the submitted artifact.

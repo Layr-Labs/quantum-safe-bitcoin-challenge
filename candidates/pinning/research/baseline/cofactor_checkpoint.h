@@ -8,14 +8,14 @@
 // All N lanes participate in every barrier; one block publishes one raw root.
 template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     uint64_t *value,uint64_t *roots,uint64_t (*products)[2*N],uint64_t (*excluded)[N]) {
-    static_assert(N>=8 && !(N&(N-1)),"power-of-two tree");
+    static_assert(N>=2 && !(N&(N-1)),"power-of-two tree");
     int tid=threadIdx.x;
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
     __syncthreads();
     int offset=0;
     #pragma unroll 1
-    for(int count=N;count>4;count>>=1) {
+    for(int count=N;count>1;count>>=1) {
         int half=count>>1;
         if(tid<half) {
             uint64_t a[5],b[5],out[5];
@@ -28,45 +28,17 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         offset+=count;
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
     }
-    // Merge the two top levels and their exclusion handoff (public route:
-    // ercumentyildirim). Keep the original product association and operand
-    // order, including raw short-carry representatives. No extra M operations.
-    if(tid<2) {
-        uint64_t a[5],b[5],out[5];
+    if(tid==0) {
         #pragma unroll
         for(int k=0;k<4;k++) {
-            a[k]=products[k][2*N-8+tid];
-            b[k]=products[k][2*N-6+tid];
+            roots[(size_t)blockIdx.x*4+k]=products[k][2*N-2];
+            excluded[k][N-2]=k==0?1:0;
         }
-        a[4]=b[4]=0;qsb_field_mul_sc(out,a,b);
-        #pragma unroll
-        for(int k=0;k<4;k++)products[k][2*N-4+tid]=out[k];
     }
     __syncwarp();
-    // Root and four exclusions are independent now. Assign the root to
-    // lane 4 so all five products share ONE warp arithmetic invocation.
-    // This avoids a lane-0-only multiplication followed by another invocation.
-    if(tid<5) {
-        uint64_t parent[5],sibling[5],out[5];
-        int left=tid==4 ? 2*N-4 : 2*N-4+((tid&1)^1);
-        int right=tid==4 ? 2*N-3 : 2*N-8+(tid^2);
-        #pragma unroll
-        for(int k=0;k<4;k++) {
-            parent[k]=products[k][left];sibling[k]=products[k][right];
-        }
-        parent[4]=sibling[4]=0;qsb_field_mul_sc(out,parent,sibling);
-        if(tid==4) {
-            #pragma unroll
-            for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=out[k];
-        } else {
-            #pragma unroll
-            for(int k=0;k<4;k++)excluded[k][N-8+tid]=out[k];
-        }
-    }
-    if(N==8)__syncthreads();else __syncwarp();
-    offset=2*N-16;
+    offset=2*N-4;
     #pragma unroll 1
-    for(int count=8;count<N;count<<=1) {
+    for(int count=2;count<N;count<<=1) {
         int half=count>>1;
         if(tid<count) {
             uint64_t parent[5],sibling[5],out[5];
