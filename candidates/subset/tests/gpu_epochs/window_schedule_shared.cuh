@@ -190,7 +190,21 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
 } while(0)
     QSB_PAIR_STATE_LOAD();
+/* ZLAB_WSU (kill switch, default off): fully unroll the paired second-window
+ * block, matching what QSB_PAIR_SHA_UNROLL_CONST already does for the four
+ * constant blocks immediately below. Removes the loop counter and the per-pair
+ * r+k index arithmetic; identical rounds, identical message words, identical
+ * digests. Mechanism credit: PR 707, which measured 690.6 -> 692.7 M/s
+ * (+0.30%) on a 450 W RTX 4090. Counter-evidence: PR 553/572 measured the same
+ * idea at -1.06% on T4s, so this needs a 4090 read of its own. */
+#ifndef ZLAB_WSU
+#define ZLAB_WSU 0
+#endif
+#if ZLAB_WSU
+    #pragma unroll
+#else
     #pragma unroll 1
+#endif
     for(int r=0;r<64;r+=8){
         {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
