@@ -51,6 +51,18 @@
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
+#ifndef QSB_TREE_NOCOPY
+#define QSB_TREE_NOCOPY 1  /* P15: the count==2 copy level of the exclusion down-sweep is
+                            * unreachable once QSB_TREE_TOP2 merges the top pair */
+#endif
+#ifndef QSB_PF_DEADH
+#define QSB_PF_DEADH 1     /* P16: mask the shared cofactor factor of an unusable lane once,
+                            * instead of masking both saved planes after the multiplies */
+#endif
+#ifndef QSB_DIGIT_PRIV
+#define QSB_DIGIT_PRIV 1   /* P17: each lane reads back only the digit-code slot it wrote itself,
+                            * so the chain's shared read needs no volatile memory ordering */
+#endif
 #include "GPUMath.h"
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
@@ -642,7 +654,16 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
+#if QSB_DIGIT_PRIV
+    /* P17: qsb_decode_to_shared writes slot [c][threadIdx.x] and this lane is the only
+     * reader of that slot, so the value is private to the thread and no other lane
+     * writes the digit arena before the chain ends.  A plain shared load therefore
+     * returns the same bits as the volatile one while leaving ptxas free to place the
+     * LDS ahead of the address-dependent table load. */
+    const uint32_t *codes=(const uint32_t*)qsb_digit_arena();
+#else
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+#endif
     uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }

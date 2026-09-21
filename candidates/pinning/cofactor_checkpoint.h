@@ -79,7 +79,15 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
+#if QSB_TREE_TOP2 && QSB_TREE_NOCOPY
+            /* P15: the merged top pair already publishes the four excluded products of the
+             * level below, so this rolled sweep is entered at count=8 and the count==2 copy
+             * level cannot occur.  Dropping it removes the per-level compare and the second
+             * (copy) destination path from the body; every level is the same multiply. */
+            qsb_field_mul_sc(out,parent,sibling);
+#else
             if(count==2){Load256(out,sibling);}else{qsb_field_mul_sc(out,parent,sibling);}
+#endif
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }
