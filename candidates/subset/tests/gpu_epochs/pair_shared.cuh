@@ -2,6 +2,7 @@
 // Shared pre-inverse finish derived from dun999 PR258, ac9a6164.
 // Window SHA cache is inherited from odinfree; retain all parent notices.
 #pragma once
+#include "parity_window.cuh"
 #ifndef QSB_PAIR_SHARED
 #define QSB_PAIR_SHARED 1
 #endif
@@ -111,16 +112,30 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(x1, sum, t);
     QSB_FADD(x1, x1, xR);
     QSB_FSUB(t, xR, x1);
-    QSB_FMUL(t, t, m1);
-    QSB_FSUB(t, t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
+    uint32_t parity1;
+#if QSB_PARITY_WINDOW
+    if(!qsb_pw_sub(&parity1, t, m1, yR))
+#endif
+    {
+        QSB_FMUL(t, t, m1);
+        QSB_FSUB(t, t, yR);
+        parity1=(uint32_t)(t[0]&1ULL);
+    }
+    uint32_t parities = parity1;
     QSB_FSUB(t, m2, cc);
     QSB_FMUL(x2, sum, t);
     QSB_FADD(x2, x2, xR);
     QSB_FSUB(t, xR, x2);
-    QSB_FMUL(t, t, m2);
-    QSB_FSUB(t, t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+    uint32_t parity2;
+#if QSB_PARITY_WINDOW
+    if(!qsb_pw_sub(&parity2, t, m2, yR))
+#endif
+    {
+        QSB_FMUL(t, t, m2);
+        QSB_FSUB(t, t, yR);
+        parity2=(uint32_t)(t[0]&1ULL);
+    }
+    parities |= (parity2 ^ 1U) << 1;
     return parities;
 }
 #endif
