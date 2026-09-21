@@ -9,3 +9,4 @@ Before the first marked guard, the trial is bit-for-bit identical to the origina
 The source-bound CPU audit checks 15,060 literal PTX operations and 75,300 sticky-flag cases, with independent arbitrary-precision expected residues. It includes boundaries which fail without replay. Exact fallback body and unchanged parent field source are hash-bound. These are CPU checks; actual CUDA audits and matched solver timing are required separately.
 
 Native CUDA13 sm89 diagnostic: 124 registers, no stack/spills, 32 KiB shared, 19,192 digest instructions versus 13,976 parent. Cold code duplication increases static size by37.3%; this count is not runtime-weighted and is not a speed claim. The normal official build uses CUDA12.8.93 with default architecture. No submission qualification is claimed here.
+<!-- redraw marker 2026-09-21T03:54:46Z -->
