@@ -201,6 +201,12 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
+#ifndef QSB_SLOT_SKIP_MID_UPLOAD
+#define QSB_SLOT_SKIP_MID_UPLOAD 1
+#endif
+#ifndef QSB_SLOT_PACKED_READBACK
+#define QSB_SLOT_PACKED_READBACK 1
+#endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
 #endif
@@ -3056,16 +3062,27 @@ int main(int argc, char **argv) {
     cudaStream_t slot_stream[QSB_SLOTS];
     cudaEvent_t  slot_done[QSB_SLOTS];
     uint32_t *d_hit_cnt_s[QSB_SLOTS], *d_hit_idx_s[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
-    uint32_t *h_hit_cnt=NULL, *h_hit_idx=NULL, *h_mid=NULL;
+    uint32_t *h_hit_cnt=NULL, *h_hit_idx=NULL, *h_mid=NULL, *h_hit_report=NULL;
     {
+#if QSB_SLOT_PACKED_READBACK
+        // One counter followed by the same first 64 hit indices per slot.
+        cudaError_t se = cudaHostAlloc((void**)&h_hit_report, QSB_SLOTS*65*sizeof(uint32_t), cudaHostAllocDefault);
+#else
         cudaError_t se = cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*sizeof(uint32_t), cudaHostAllocDefault);
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_hit_idx, QSB_SLOTS*64*sizeof(uint32_t), cudaHostAllocDefault);
+#endif
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
+#if QSB_SLOT_PACKED_READBACK
+            // Retain capacity for all 1024 device writes; only 64 are copied.
+            if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], 1025*sizeof(uint32_t));
+            if (se==cudaSuccess) d_hit_idx_s[s] = d_hit_cnt_s[s] + 1;
+#else
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
+#endif
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 32);
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
         }
@@ -3279,9 +3296,17 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_SLOT_PACKED_READBACK
+        uint32_t h_hit = h_hit_report[(size_t)s*65];
+#else
         uint32_t h_hit = h_hit_cnt[s];
+#endif
         if (h_hit > 0) {
+#if QSB_SLOT_PACKED_READBACK
+            const uint32_t *hits = h_hit_report + (size_t)s*65 + 1;
+#else
             const uint32_t *hits = h_hit_idx + (size_t)s*64;
+#endif
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
             mkdir("results", 0755);
             char fname[256];
@@ -3352,8 +3377,12 @@ int main(int argc, char **argv) {
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
+#if !QSB_SLOT_SKIP_MID_UPLOAD || !QSB_TAIL_PRE
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);
             cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
+#endif
+            // FAST_TAIL=true with QSB_TAIL_PRE reads tp.mid passed by value.
+            // The device midstate buffer is unused in that specialization.
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
 
             launch_pinning_pipeline<true>(
@@ -3367,10 +3396,15 @@ int main(int argc, char **argv) {
                 batch_sz, easy, single_hash,
                 d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
                 d_super_roots[s],d_root_checkpoint[s], cur_tp, st);
+#if QSB_SLOT_PACKED_READBACK
+            cudaMemcpyAsync(h_hit_report + (size_t)s*65, d_hit_cnt_s[s], 65*sizeof(uint32_t),
+                            cudaMemcpyDeviceToHost, st);
+#else
             cudaMemcpyAsync(h_hit_cnt + s, d_hit_cnt_s[s], sizeof(uint32_t),
                             cudaMemcpyDeviceToHost, st);
             cudaMemcpyAsync(h_hit_idx + (size_t)s*64, d_hit_idx_s[s], 64*sizeof(uint32_t),
                             cudaMemcpyDeviceToHost, st);
+#endif
             cudaEventRecord(slot_done[s], st);
             slot_busy[s] = 1;
 
