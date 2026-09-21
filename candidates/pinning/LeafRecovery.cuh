@@ -29,20 +29,11 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     qsb_field_normalize(X);
 #endif
     uint64_t d[4];
-    // X<p, while d may use any 256-bit representative.  Under the problem
-    // isomorphism a is exactly +/-1, so select U or p-U with four cheap limbs
-    // instead of a full field multiply.  The next multiply accepts the raw
-    // congruent representative.
-#if QSB_ISO_XR
-    (void)a;
-    uint64_t mask=0ULL-(uint64_t)pin_iso_xneg;
-    d[0]=U[0]^mask;d[1]=U[1]^mask;d[2]=U[2]^mask;d[3]=U[3]^mask;
-    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&mask;
-    UADDO1(d[0],c0);UADDC1(d[1],mask);UADDC1(d[2],mask);UADD1(d[3],mask);
-#else
+    // X<p, while the exact product d may use any256-bit representative.
+    // Thus d-X>-p. A borrow-corrected subtraction stays congruent and fits.
+    // The next exact full-width multiply accepts d without normalization.
     uint64_t raw[5];qsb_field_mul_sc(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
-#endif
     _ModSub256(d,X);
 #if QSB_RAW_DEN
     { uint64_t rw[5]; qsb_field_mul_sc(rw,V,d); Load256(W,rw); }   // P8: raw leaf, W = V*(a*U-X)
