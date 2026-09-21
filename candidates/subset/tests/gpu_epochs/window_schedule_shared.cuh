@@ -2,15 +2,15 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
-#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+#define QSB_FIRST_SLOTS 64
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
-__device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
-__device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
-__device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
-__device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
-__device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
+__device__ uint32_t QSB_WINDOW_FIRST[14][256];
+__device__ uint32_t QSB_WINDOW_SECOND[64][256];
+__device__ uint32_t QSB_WINDOW_CLASS[256];
+__device__ uint32_t QSB_FIRST_CLASS[256];
+__device__ uint32_t QSB_FIRST_UNIQUE[14][256];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
 
@@ -29,14 +29,14 @@ static uint32_t qsb_window_first_key(const uint8_t w[3]) {
 }
 
 static int qsb_prepare_window_schedule(const uint8_t *rows,
-        const uint8_t windows[QSB_SE_PER_EPOCH][3], const uint32_t *constant) {
-    uint32_t first[14][QSB_SE_PER_EPOCH], second[64][QSB_SE_PER_EPOCH]={}, round_k[64];
-    uint32_t classes[QSB_SE_PER_EPOCH], unique[QSB_SE_PER_EPOCH][16];
-    uint32_t first_classes[QSB_SE_PER_EPOCH], first_unique[QSB_SE_PER_EPOCH][14], transposed[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS]={};
+        const uint8_t windows[256][3], const uint32_t *constant) {
+    uint32_t first[14][256], second[64][256]={}, round_k[64];
+    uint32_t classes[256], unique[256][16];
+    uint32_t first_classes[256], first_unique[256][14], transposed[14][256]={};
     int first_distinct=0;
     int distinct=0;
     if (cudaMemcpyFromSymbol(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
-    for (int lane=0; lane<QSB_SE_PER_EPOCH; lane++) {
+    for (int lane=0; lane<256; lane++) {
         uint8_t bytes[128]={};
         int pos=8, sel=0;
         for (int i=137; i<150; i++) {
@@ -69,7 +69,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
         }
         for (int j=0; j<64; j++) second[j][slot]=expanded[j]+round_k[j];
     }
-    printf("Window schedule classes: first=%d second=%d of %d\n",first_distinct,distinct,QSB_SE_PER_EPOCH);
+    printf("Window schedule classes: first=%d second=%d of 256\n",first_distinct,distinct);
     qsb_first_class_count=first_distinct;
     if(first_distinct>QSB_FIRST_SLOTS)return 1;
     for(int slot=0;slot<first_distinct;slot++)
@@ -159,9 +159,6 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 }
 
 #if ZLAB_DUAL_EPOCH_SHA
-#ifndef QSB_PAIR_SHA_UNROLL_WINDOW
-#define QSB_PAIR_SHA_UNROLL_WINDOW 1
-#endif
 #ifndef QSB_PAIR_SHA_UNROLL_CONST
 #define QSB_PAIR_SHA_UNROLL_CONST 1
 #endif
@@ -193,11 +190,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
 } while(0)
     QSB_PAIR_STATE_LOAD();
-#if QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
-    #pragma unroll
-#else
     #pragma unroll 1
-#endif
     for(int r=0;r<64;r+=8){
         {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
