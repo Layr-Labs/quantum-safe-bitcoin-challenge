@@ -257,7 +257,7 @@ def audit_c31_predicates():
 def audit_source():
     source = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_CARRY62 1" in source
-    assert source.count("QSB_SECOND_FOLD_TAIL") == 6  # three definitions, three uses
+    assert source.count("QSB_SECOND_FOLD_TAIL") == 7  # three definitions, four live uses on the f7 tree
     assert "subc.u32 z2, z2, 0;\\n\"" in source
     assert "-DQSB_CARRY62=0 restores" in source
     assert "#if QSB_C31 && QSB_SHORT_CARRY" in source
