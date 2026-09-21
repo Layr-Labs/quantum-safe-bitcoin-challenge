@@ -1,6 +1,3 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
-#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -27,8 +24,14 @@
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
+#ifndef QSB_RP_SQR
+#define QSB_RP_SQR 1     /* 743 odd-fold tail on squares + even-fold f8; needs HOST_GATE */
+#endif
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_RP_SQR && !QSB_HOST_GATE
+#error "QSB_RP_SQR requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
@@ -388,14 +391,16 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
-__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
-                                                      uint32_t base, uint32_t idx,
+/* Pointer form: the caller already holds the byte address of the chunk plane,
+ * so the step only scales the 17-bit entry. The chain walks the planes with a
+ * running pointer and the +2^22 sibling plane folds into the LDG immediate. */
+__device__ __forceinline__ void gt_load_signed_flat_p(const uint8_t *__restrict__ plane,
+                                                      uint32_t idx,
                                                       uint64_t m,
                                                       uint64_t *__restrict__ gx,
                                                       uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
-    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
-    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+    const ulonglong2 *tx=(const ulonglong2 *)(plane+(idx<<6));
+    const ulonglong2 *ty=(const ulonglong2 *)(plane+(idx<<6)+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -405,13 +410,21 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
 #endif
     gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
 }
+__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
+                                                      uint32_t base, uint32_t idx,
+                                                      uint64_t m,
+                                                      uint64_t *__restrict__ gx,
+                                                      uint64_t *__restrict__ gy) {
+    /* (base+idx)<<6 == (base<<6)+(idx<<6): both products stay below 2^26. */
+    gt_load_signed_flat_p(gTable+(base<<6), idx, m, gx, gy);
+}
 
 __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
                                                      uint64_t neg,
                                                      uint64_t *__restrict__ gx,
                                                      uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
+    uint32_t off = (base + idx) << 6;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
@@ -620,39 +633,175 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
+/* Field extraction, digit sign and the seed hand-off are the three schedules
+ * between the recode setup and the chain. Each is switched on its own so any
+ * one of them can return to the frontier form without touching the others. */
+#ifndef QSB_DIGIT_WINDOW32
+#define QSB_DIGIT_WINDOW32 1  /* 1: one 32-bit funnel shift per signed digit field */
+#endif
+#ifndef QSB_DIGIT_SIGN_FOLD
+#define QSB_DIGIT_SIGN_FOLD 1 /* 1: take the digit sign from the field's own top bit */
+#endif
+#ifndef QSB_DIGIT_SEED_REG
+#define QSB_DIGIT_SEED_REG 1  /* 1: the two seed digits stay in registers */
+#endif
+#ifndef QSB_CHAIN_ROT2
+#define QSB_CHAIN_ROT2 1  /* 1: two-buffer chain rotation, no back-edge ordinate copy */
+#endif
+#ifndef QSB_CHAIN_PTR
+#define QSB_CHAIN_PTR 1   /* 1: the chain walks the table planes with a running pointer */
+#endif
+#ifndef QSB_DIGIT_PAIRLDS
+#define QSB_DIGIT_PAIRLDS 1 /* 1: pair-adjacent digit codes, one 64-bit shared read per pair */
+#endif
+#if QSB_CHAIN_ROT2
+static_assert(((GT_CHUNKS-3)&1)==0,"the rotated chain peels chunk 2 and pairs the rest");
+#endif
+/* Digit-code slot of chunk c for lane t inside the 3072-word arena.
+ * Plain layout: one 128-word plane per chunk (max word 1919).
+ * Paired layout: the two chunks of a chain pair (3,4),(5,6),...,(13,14) share
+ * one aligned 64-bit word at (pair<<8)+(t<<1) (max word 1535); chunks 0..2,
+ * which the chain consumes outside a pair, keep planes above that region
+ * (words 1536..1919). Both layouts stay inside the 12 KiB arena and are
+ * written and read through this one macro, so either switch position is
+ * self-consistent. */
+#if QSB_DIGIT_PAIRLDS
+#define QSB_CODE_SLOT(c,t) ((unsigned)(c)<3u ? (1536u+((unsigned)(c)<<7)+(unsigned)(t)) \
+    : (((((unsigned)(c)-3u)>>1)<<8)+((unsigned)(t)<<1)+(((unsigned)(c)-3u)&1u)))
+#else
+#define QSB_CODE_SLOT(c,t) (((unsigned)(c)<<7)+(unsigned)(t))
+#endif
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k
+#if QSB_DIGIT_SEED_REG
+    ,uint32_t *seed0,uint32_t *seed1
+#endif
+) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t *codes=(uint32_t*)qsb_digit_arena();
+#if QSB_DIGIT_WINDOW32
+    uint32_t Mw[8];
+    #pragma unroll
+    for(int j=0;j<4;j++){Mw[2*j]=(uint32_t)M[j];Mw[2*j+1]=(uint32_t)(M[j]>>32);}
+#endif
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
         const unsigned pos=c==0?1u:17u*c+2u;
+        const unsigned bits=c==0?18u:17u;
+#if QSB_DIGIT_WINDOW32
+        const unsigned wi=pos>>5,ws=pos&31u;
+        uint32_t f=(wi<7u?__funnelshift_r(Mw[wi],Mw[(wi+1u)&7u],ws):(Mw[7]>>ws))
+                   &((1u<<bits)-1u);
+#else
         const unsigned j=pos/64u,sh=pos%64u;
         uint64_t value=M[j]>>sh;
         if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
         uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+#endif
+#if QSB_DIGIT_SIGN_FOLD
+        const uint32_t ftop=f<<(32u-bits);
+        const int32_t tm=c==GT_CHUNKS-1?-negative:((int32_t)(~ftop)>>31);
+        const uint32_t sign_bit=c==GT_CHUNKS-1?((uint32_t)(tm<0)<<31)
+                                              :((~ftop)&0x80000000u);
+#else
+        const int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+        const uint32_t sign_bit=(uint32_t)(tm<0)<<31;
+#endif
+        const uint32_t code=((f^(uint32_t)tm)&((1u<<(bits-1u))-1u))|sign_bit;
+#if QSB_DIGIT_SEED_REG
+        if(c==0)*seed0=code;
+        else if(c==1)*seed1=code;
+        else codes[QSB_CODE_SLOT(c,threadIdx.x)]=code;
+#else
+        codes[QSB_CODE_SLOT(c,threadIdx.x)]=code;
+#endif
     }
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    uint32_t *codes=(uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[QSB_CODE_SLOT(c,threadIdx.x)];
+    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    (void)unused;
+    uint64_t y0[4];
+    {
+        uint64_t x0[4], x1[4], y1[4];
+#if QSB_DIGIT_SEED_REG
+        uint32_t seed0, seed1;
+        qsb_decode_to_shared(k, &seed0, &seed1);
+        { uint32_t m32=(uint32_t)((int32_t)seed0>>31);
+          gt_load_signed_flat_m(table,gt_offset(0),seed0&0x1ffffu,((uint64_t)m32<<32)|m32,x0,y0); }
+        { uint32_t m32=(uint32_t)((int32_t)seed1>>31);
+          gt_load_signed_flat_m(table,gt_offset(1),seed1&0x1ffffu,((uint64_t)m32<<32)|m32,x1,y1); }
+#else
+        qsb_decode_to_shared(k);
+        qsb_load_decoded(table,0,gt_offset(0),x0,y0);
+        qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+#endif
+        // INIT_ANCHOR
+        _PointAddXYZZ_mm(X,Y,U,V, x0,y0, x1,y1);
+    }
+#if QSB_CHAIN_ROT2
+    /* Two table-point buffers alternate, so the ordinate the next step needs
+     * as its offset still sits in the buffer that step does not overwrite: the
+     * per-step 256-bit back-edge copy disappears and ptxas may issue the
+     * second fetch of a pair while the first addition is still in flight.
+     * Chunk 2 is peeled so the remaining twelve steps form six pairs; the
+     * sequence of additions and their operands is bit-identical. */
+    uint64_t xa[4], ya[4], xb[4], yb[4];
+#if QSB_CHAIN_PTR
+    const uint8_t *tp = table + ((size_t)gt_offset(2) << 6);
+#define QSB_CHAIN_FETCH(delta,codeexpr,gx,gy) do { \
+        uint32_t qc_=(codeexpr); uint32_t qm_=(uint32_t)((int32_t)qc_>>31); \
+        gt_load_signed_flat_p(tp+(delta), qc_&0x1ffffu, ((uint64_t)qm_<<32)|qm_, gx, gy); \
+    } while(0)
+#else
+    unsigned base = gt_offset(2);
+#define QSB_CHAIN_FETCH(delta,codeexpr,gx,gy) do { \
+        uint32_t qc_=(codeexpr); uint32_t qm_=(uint32_t)((int32_t)qc_>>31); \
+        gt_load_signed_flat_m(table, base+(unsigned)((delta)>>6), qc_&0x1ffffu, \
+                              ((uint64_t)qm_<<32)|qm_, gx, gy); \
+    } while(0)
+#endif
+    const uint32_t *codes=(const uint32_t*)qsb_digit_arena();
+    QSB_CHAIN_FETCH((size_t)0, codes[QSB_CODE_SLOT(2,threadIdx.x)], xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, y0);
+    #pragma unroll 1
+    for(int c=3;c<GT_CHUNKS;c+=2) {
+        uint32_t c0,c1;
+#if QSB_DIGIT_PAIRLDS
+        { uint2 cc=*(const uint2*)(codes+((((unsigned)c-3u)>>1)<<8)+(threadIdx.x<<1));
+          c0=cc.x; c1=cc.y; }
+#else
+        c0=codes[QSB_CODE_SLOT(c,threadIdx.x)];
+        c1=codes[QSB_CODE_SLOT(c+1,threadIdx.x)];
+#endif
+#if QSB_CHAIN_PTR
+        tp += (size_t)(1u<<22);
+#else
+        base += 1u<<16;
+#endif
+        QSB_CHAIN_FETCH((size_t)0, c0, xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH((size_t)(1u<<22), c1, xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+#if QSB_CHAIN_PTR
+        tp += (size_t)(1u<<22);
+#else
+        base += 1u<<16;
+#endif
+    }
+#undef QSB_CHAIN_FETCH
+#if QSB_YOFF
+    qsb_yoff_to_y(ya);
+#endif
+    _ModMult(xb,ya,V);_ModSub256(Y,Y,xb);
+#else
+    uint64_t x1[4], y1[4];
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -665,6 +814,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
@@ -2866,8 +3016,15 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
-    printf("  Host publication gate: %s; C31 approx: %s\n",
-           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
+    printf("  Host publication gate: %s; C31 approx: %s; RP_SQR: %s; SAS_Z9SUB_ALL: %s\n",
+           QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off",
+           QSB_RP_SQR ? "on" : "off",
+#if defined(QSB_SAS_Z9SUB_ALL)
+           QSB_SAS_Z9SUB_ALL ? "on" : "off"
+#else
+           "n/a"
+#endif
+           );
 
     /* The ranked problem geometry is fixed by harness/gen_problem.py
      * (PIN_SUFFIX_LEN=75, PIN_SEQ_OFFSET=31, 155 midstate blocks -> 9995 B),
