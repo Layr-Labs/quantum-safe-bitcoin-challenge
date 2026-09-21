@@ -1,3 +1,6 @@
+#ifndef QSB_PACKED_CORRECTION
+#define QSB_PACKED_CORRECTION 1
+#endif
 #ifndef QSB_SHORT_CARRY2
 #define QSB_SHORT_CARRY2 1
 #endif
@@ -595,9 +598,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u64 S1,AY1,OFF1;\n"
         "\taddc.cc.u64 S2,AY2,OFF2;\n"
         "\taddc.cc.u64 S3,AY3,OFF3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_f1_c,packed_f1_lo;\n"
+        "addc.u32 packed_f1_c,0,0;\n"
+        "mul.lo.u32 packed_f1_lo,packed_f1_c,977;\n"
+        "mov.b64 f1_t,{packed_f1_lo,packed_f1_c};\n"
+#else
         "\taddc.u64 f1_h,0,0;\n"
         "\tneg.s64 f1_h,f1_h;\n"
         "\tand.b64 f1_t,f1_h,0x1000003d1;\n"
+#endif
         "\tadd.cc.u64 S0,S0,f1_t;\n"
         "\taddc.u64 S1,S1,0;\n"
         "\t\n"
@@ -905,8 +915,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "subc.cc.u64 D1,U1,XX1;\n"
         "subc.cc.u64 D2,U2,XX2;\n"
         "subc.cc.u64 D3,U3,XX3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_sub3_b,packed_sub3_lo,packed_sub3_hi;\n"
+        "subc.u32 packed_sub3_b,0,0;\n"
+        "and.b32 packed_sub3_lo,packed_sub3_b,977;\n"
+        "and.b32 packed_sub3_hi,packed_sub3_b,1;\n"
+        "mov.b64 sub3_lo,{packed_sub3_lo,packed_sub3_hi};\n"
+#else
         "subc.u64 sub3_borrow,0,0;\n"
         "and.b64 sub3_lo,sub3_borrow,0x1000003D1;\n"
+#endif
         "sub.cc.u64 D0,D0,sub3_lo;\n"
         "subc.u64 D1,D1,0;\n"
         ".reg .u64 sub4_borrow,sub4_lo;\n"
@@ -914,8 +932,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "subc.cc.u64 R1,S1,YY1;\n"
         "subc.cc.u64 R2,S2,YY2;\n"
         "subc.cc.u64 R3,S3,YY3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_sub4_b,packed_sub4_lo,packed_sub4_hi;\n"
+        "subc.u32 packed_sub4_b,0,0;\n"
+        "and.b32 packed_sub4_lo,packed_sub4_b,977;\n"
+        "and.b32 packed_sub4_hi,packed_sub4_b,1;\n"
+        "mov.b64 sub4_lo,{packed_sub4_lo,packed_sub4_hi};\n"
+#else
         "subc.u64 sub4_borrow,0,0;\n"
         "and.b64 sub4_lo,sub4_borrow,0x1000003D1;\n"
+#endif
         "sub.cc.u64 R0,R0,sub4_lo;\n"
         "subc.u64 R1,R1,0;\n"
         ".reg .u32 f5_outcarry;\n"
@@ -2237,6 +2263,26 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t\n"
         ".reg .u64 x3_high;\n"
         "\n"
+#if QSB_PACKED_CORRECTION
+        "\t.reg .u64 x3_t,x3_ext; .reg .s32 packed_x3_h,packed_x3_sign; .reg .u32 packed_x3_lo,packed_x3_hi;\n"
+        "\tadd.cc.u64 T0,T0,PPP0;\n"
+        "\taddc.cc.u64 T1,T1,PPP1;\n"
+        "\taddc.cc.u64 T2,T2,PPP2;\n"
+        "\taddc.cc.u64 T3,T3,PPP3;\n"
+        "\taddc.u32 packed_x3_h,0,0;\n"
+        "\tsub.cc.u64 T0,T0,Q0;\n"
+        "\tsubc.cc.u64 T1,T1,Q1;\n"
+        "\tsubc.cc.u64 T2,T2,Q2;\n"
+        "\tsubc.cc.u64 T3,T3,Q3;\n"
+        "\tsubc.u32 packed_x3_h,packed_x3_h,0;\n"
+        "\tsub.cc.u64 T0,T0,Q0;\n"
+        "\tsubc.cc.u64 T1,T1,Q1;\n"
+        "\tsubc.cc.u64 T2,T2,Q2;\n"
+        "\tsubc.cc.u64 T3,T3,Q3;\n"
+        "\tsubc.u32 packed_x3_h,packed_x3_h,0;\n"
+        "\tshr.s32 packed_x3_sign,packed_x3_h,31; mov.b64 x3_ext,{packed_x3_sign,packed_x3_sign};\n"
+        "\tmul.wide.s32 x3_t,packed_x3_h,977; mov.b64 {packed_x3_lo,packed_x3_hi},x3_t; add.u32 packed_x3_hi,packed_x3_hi,packed_x3_h; mov.b64 x3_t,{packed_x3_lo,packed_x3_hi};\n"
+#else
         "\t.reg .u64 x3_h,x3_t,x3_ext;\n"
         "\tadd.cc.u64 T0,T0,PPP0;\n"
         "\taddc.cc.u64 T1,T1,PPP1;\n"
@@ -2255,6 +2301,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tsubc.u64 x3_h,x3_h,0;\n"
         "\tshr.s64 x3_ext,x3_h,63;\n"
         "\tmul.lo.u64 x3_t,x3_h,0x1000003d1;\n"
+#endif
         "\tadd.cc.u64 T0,T0,x3_t;\n"
         "\t"
 #if QSB_SHORT_CARRY2
@@ -2574,8 +2621,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "subc.cc.u64 Q1,Q1,T1;\n"
         "subc.cc.u64 Q2,Q2,T2;\n"
         "subc.cc.u64 Q3,Q3,T3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_sub14_b,packed_sub14_lo,packed_sub14_hi;\n"
+        "subc.u32 packed_sub14_b,0,0;\n"
+        "and.b32 packed_sub14_lo,packed_sub14_b,977;\n"
+        "and.b32 packed_sub14_hi,packed_sub14_b,1;\n"
+        "mov.b64 sub14_lo,{packed_sub14_lo,packed_sub14_hi};\n"
+#else
         "subc.u64 sub14_borrow,0,0;\n"
         "and.b64 sub14_lo,sub14_borrow,0x1000003D1;\n"
+#endif
         "sub.cc.u64 Q0,Q0,sub14_lo;\n"
         "subc.u64 Q1,Q1,0;\n"
         ".reg .u32 f15_outcarry;\n"
