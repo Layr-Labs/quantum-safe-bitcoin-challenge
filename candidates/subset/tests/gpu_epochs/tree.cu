@@ -45,6 +45,54 @@
 #endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
+/* QSB_SLOTPIPE (kill switch, default on): slotted multi-stream batch pipeline for the
+ * ranked short-epoch loop.  Batch k runs on slot k % QSB_SLOTS with its own non-blocking
+ * stream, epoch descriptors, group records, first-block states, tentative and verified
+ * hit buffers and a pinned host mirror of the verified buffer.  The host never
+ * synchronises the device: it waits only on the slot it is about to reuse, so the next
+ * batch's producer kernels, digest and single-block verify kernel are already queued
+ * behind the current batch, and the per-launch serial gap (verify<<<1,64>>> running alone
+ * on 128 SMs, the blocking D2H copy, host bookkeeping, producer launch latency and the
+ * digest wave tail) overlaps the previous batch instead of idling the GPU.  Device code
+ * is byte-for-byte unchanged: this switch moves only host orchestration and buffer
+ * ownership, and 0 restores the single-stream donor loop.  The same mechanism on the
+ * pinning track (QSB_SLOTPIPE in candidates/pinning) measured +0.5157% on the official
+ * RTX 4090 runner (31e98e47 -> 260879f4, device code byte-identical). */
+#ifndef QSB_SLOTPIPE
+#define QSB_SLOTPIPE 1
+#endif
+#ifndef QSB_SLOTS
+#define QSB_SLOTS 2            /* batches in flight; per-slot device state is ~0.85 GiB at 128 windows */
+#endif
+#if QSB_SLOTPIPE && QSB_SLOTS < 2
+#error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
+#endif
+/* QSB_L2_PERSIST (kill switch, default on): persisting-L2 access-policy window over the
+ * 64 MiB fixed-base table, ported from the pinning frontier where it has been carried
+ * through the whole modern lineage (installed on the legacy stream, re-installed on each
+ * slot stream in 2dc7228, QSB_L2_SKIP added in ce0aff4).  The subset track never had it.
+ * Every candidate reads the table 15 times at random; every batch also writes and then
+ * reads back ~1.7 GB of write-once/read-once producer state (d_first 512 MiB, d_groups
+ * 256 MiB, d_epochs 64 MiB, each side) through the same 72 MB AD102 L2, which under the
+ * default normal policy displaces table lines to DRAM.  The window marks the table
+ * persisting and everything else streaming for the digest stream.  Purely advisory: a
+ * device or driver that refuses leaves the run unaffected, and no computed value changes.
+ * QSB_L2_SKIP=1 starts the window after chunk 0 (2^17 entries read once per candidate,
+ * so a byte there is half as hot as one in chunks 1..14) exactly as on pinning. */
+#ifndef QSB_L2_PERSIST
+#define QSB_L2_PERSIST 1
+#endif
+#ifndef QSB_L2_SKIP
+#define QSB_L2_SKIP 1
+#endif
+/* QSB_STREAM_FIRST (default off, sweep option): st.global.cs evict-first stores for the
+ * d_first write stream in kernel_build_first_flat (window_schedule_shared.cuh).  Producer
+ * kernel only; kernel_digest is untouched.  Pinning's record on this operator is mixed
+ * (+0.3% on its 4 MB checkpoint, -0.9% then -0.02% on its 1 GB planes), so it stays off
+ * until the 4090 sweep says otherwise. */
+#ifndef QSB_STREAM_FIRST
+#define QSB_STREAM_FIRST 0
+#endif
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
 
@@ -2332,6 +2380,44 @@ static uint64_t qsb_host_rank(const uint8_t *c, int k, int n) {
     return r;
 }
 /* Overflow-free comparison helper for the parameter search. */
+/* Install the persisting-L2 window over the table on one stream (QSB_L2_PERSIST).  The
+ * device-wide persisting-partition limit is set once (set_limit), the per-stream access
+ * policy on every stream that launches kernel_digest: the attribute does not propagate
+ * from the legacy stream to non-blocking slot streams. */
+static void qsb_install_l2_window(cudaStream_t st, const uint8_t *d_gt, size_t gt_sz,
+                                  int gpu_index, int set_limit, int verbose) {
+#if QSB_L2_PERSIST
+    int max_persist = 0, max_window = 0;
+    cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+    cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+    size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+    const size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+    if (want > gt_sz - skip) want = gt_sz - skip;
+    if (want == 0 || max_window <= 0) {
+        if (verbose) { printf("  L2 persistence: unavailable on this device\n"); fflush(stdout); }
+        return;
+    }
+    if (set_limit) cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+    cudaStreamAttrValue av = {};
+    av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
+    av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+    av.accessPolicyWindow.hitRatio  = 1.0f;
+    av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+    av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+    cudaError_t pe = cudaStreamSetAttribute(st, cudaStreamAttributeAccessPolicyWindow, &av);
+    if (verbose) {
+        printf("  L2 persistence: %.0f MiB pinned from chunk %d (max %.0f MiB, window %.0f MiB) %s\n",
+               (double)av.accessPolicyWindow.num_bytes/(1024*1024), QSB_L2_SKIP ? 1 : 0,
+               (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
+               pe==cudaSuccess?"ok":cudaGetErrorString(pe));
+        fflush(stdout);
+    }
+    (void)cudaGetLastError();   /* advisory: never let a refused attribute poison the loop */
+#else
+    (void)st; (void)d_gt; (void)gt_sz; (void)gpu_index; (void)set_limit; (void)verbose;
+#endif
+}
+
 static double binom_d(int n, int k) {
     if (k < 0 || n < 0 || k > n) return 0.0;
     if (k > n - k) k = n - k;
@@ -2740,6 +2826,9 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
     }
+    /* Pin the table in L2 for the legacy stream (covers the single-stream loops); the
+     * slot streams get the same window when they are created. */
+    qsb_install_l2_window(0, d_gt, gt_sz, gpu_index, /*set_limit=*/1, /*verbose=*/1);
 
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
@@ -3087,6 +3176,206 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if ZLAB_HITPATH && QSB_EPOCH_GROUPS && QSB_SLOTPIPE
+        /* ---- Slotted multi-stream pipeline (see QSB_SLOTPIPE above). ----
+         * Slot 0 adopts the buffers already allocated for the single-stream loop; slots
+         * 1..QSB_SLOTS-1 get their own.  Every kernel of a batch is enqueued on its slot's
+         * stream in the donor order (groups -> epochs -> first -> digest -> verify), then an
+         * async D2H of the verified buffer and an event.  The host blocks only on the event
+         * of the slot it is about to reuse, so the other slot's batch is always queued. */
+        (void)zh_host; (void)zh_cnt; (void)zh_idx; (void)zh_combos;
+        cudaStream_t sp_stream[QSB_SLOTS];
+        cudaEvent_t  sp_done[QSB_SLOTS];
+        epoch_desc_t *sp_epochs[QSB_SLOTS];
+        uint32_t     *sp_first[QSB_SLOTS];
+        qsb_group_t  *sp_groups[QSB_SLOTS];
+#if QSB_EPOCH_FAST
+        uint32_t     *sp_epoch_group[QSB_SLOTS];
+#endif
+        uint8_t      *sp_hitbuf[QSB_SLOTS], *sp_verified[QSB_SLOTS], *sp_host[QSB_SLOTS];
+        int           sp_busy[QSB_SLOTS], sp_epochs_n[QSB_SLOTS];
+        const size_t  sp_hostbytes = 4 + (size_t)64 * ZLAB_HIT_REC;   /* count + 64 full records */
+        {
+            cudaError_t se = cudaSuccess;
+            for (int s = 0; s < QSB_SLOTS; s++) {
+                sp_busy[s] = 0; sp_epochs_n[s] = 0;
+                if (s == 0) {
+                    sp_epochs[0] = d_epochs; sp_first[0] = d_first; sp_groups[0] = d_groups;
+#if QSB_EPOCH_FAST
+                    sp_epoch_group[0] = d_epoch_group;
+#endif
+                    sp_hitbuf[0] = d_hitbuf; sp_verified[0] = d_verified_hitbuf;
+                } else {
+                    if (se == cudaSuccess) se = cudaMalloc((void**)&sp_epochs[s],
+                        (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
+                    if (se == cudaSuccess) se = cudaMalloc((void**)&sp_first[s],
+                        (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * QSB_FIRST_SLOTS * 8 * sizeof(uint32_t));
+                    if (se == cudaSuccess) se = cudaMalloc((void**)&sp_groups[s],
+                        ((size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) * sizeof(qsb_group_t));
+#if QSB_EPOCH_FAST
+                    if (se == cudaSuccess) se = cudaMalloc((void**)&sp_epoch_group[s],
+                        (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(uint32_t));
+#endif
+                    if (se == cudaSuccess) se = cudaMalloc((void**)&sp_hitbuf[s],   4 + (size_t)1024 * ZLAB_HIT_REC);
+                    if (se == cudaSuccess) se = cudaMalloc((void**)&sp_verified[s], 4 + (size_t)1024 * ZLAB_HIT_REC);
+                }
+                if (se == cudaSuccess) se = cudaHostAlloc((void**)&sp_host[s], sp_hostbytes, cudaHostAllocDefault);
+                if (se == cudaSuccess) se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming);
+                /* Per-stream attribute: the legacy-stream window does not reach this stream. */
+                if (se == cudaSuccess) qsb_install_l2_window(sp_stream[s], d_gt, gt_sz, gpu_index, 0, 0);
+            }
+            if (se != cudaSuccess) {
+                fprintf(stderr, "ERROR: slot pipeline setup failed: %s\n", cudaGetErrorString(se));
+                return 1;
+            }
+        }
+        /* Table build, symbol uploads and every earlier legacy-stream copy must be
+         * complete before the non-blocking slot streams start reading them. */
+        cudaDeviceSynchronize();
+        printf("  Slot pipeline: %d batches in flight\n", (int)QSB_SLOTS);
+        fflush(stdout);
+
+        /* Wait for a slot's batch, account it, and publish its verified hits.  The verified
+         * buffer was already mirrored into pinned host memory by the slot's own stream. */
+        auto sp_drain = [&](int s) -> int {
+            cudaError_t err = cudaEventSynchronize(sp_done[s]);
+            if (err == cudaSuccess) err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "CUDA error (slot %d): %s\n", s, cudaGetErrorString(err));
+                return 1;
+            }
+            sp_busy[s] = 0;
+            total_searched += (uint64_t)sp_epochs_n[s] * QSB_SE_PER_EPOCH;
+            /* Publish only completed batches to the termination-time diagnostic. */
+            g_total_searched = total_searched;
+            uint32_t h_hit; memcpy(&h_hit, sp_host[s], 4);
+            if (h_hit > 0) {
+                int nh = (h_hit > 64) ? 64 : (int)h_hit;
+                char wb[64 * 96];
+                int wl = 0;
+                for (int h = 0; h < nh; h++) {
+                    uint32_t raw; memcpy(&raw, sp_host[s] + 4 + h * ZLAB_HIT_REC, 4);
+                    const uint8_t *combo = sp_host[s] + 8 + h * ZLAB_HIT_REC;
+                    wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
+                                   combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
+                                   (int)((raw >> 30) & 1));
+                }
+                const char *wp = wb;
+                while (wl > 0) {
+                    ssize_t k = write(zh_fd, wp, (size_t)wl);
+                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                    wp += k; wl -= (int)k;
+                }
+                hit_counter += (uint64_t)nh;
+                g_hit_counter = hit_counter;
+            }
+            return 0;
+        };
+
+        int sp_cur = 0;
+        while (1) {
+            uint64_t epochs_left = n_epochs - epoch_base;
+            const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
+            const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
+            int nblk=(epochs_in_batch+QSB_PAIR_MUL-1)/QSB_PAIR_MUL;
+            int batch_pos = nblk * QSB_SE_BLOCK;
+            const int s = sp_cur;
+            if (sp_busy[s] && sp_drain(s)) return 1;
+            cudaStream_t st = sp_stream[s];
+            uint32_t *s_cnt    = (uint32_t *)sp_hitbuf[s];
+            uint32_t *s_idx    = (uint32_t *)(sp_hitbuf[s] + 4);
+            uint8_t  *s_combos = sp_hitbuf[s] + 8;
+            {
+                uint8_t h_o[MAX_T];
+                qsb_host_unrank(epoch_base, window_start, s_early, h_o);
+                const uint64_t r5a = qsb_host_rank(h_o, s_early - 1, window_start);
+                qsb_host_unrank(epoch_base + (uint64_t)epochs_in_batch - 1, window_start, s_early, h_o);
+                const uint64_t r5b = qsb_host_rank(h_o, s_early - 1, window_start);
+                const uint64_t n_groups64 = r5b - r5a + 1;
+                const uint32_t n_groups = (uint32_t)n_groups64;
+                if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
+                    /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
+                    kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256, 0, st>>>(
+                        epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
+                        d_mid, d_prem, (int)dp.prefix_remainder_len,
+                        d_dsigs, sp_epochs[s], s_cnt);
+                } else {
+                kernel_epoch_groups<<<(n_groups + 255) / 256, 256, 0, st>>>(
+                    r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
+                    d_dsigs, sp_groups[s]
+#if QSB_EPOCH_FAST
+                    , sp_epoch_group[s], epoch_base, epoch_base+(uint64_t)epochs_in_batch
+#endif
+                    );
+                kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256, 0, st>>>(
+                    epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
+                    d_dsigs, sp_groups[s], r5a, sp_epochs[s], s_cnt
+#if QSB_EPOCH_FAST
+                    , sp_epoch_group[s]
+#endif
+                    );
+                }
+            }
+            { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
+              kernel_build_first_flat<<<(nthr+255)/256,256,0,st>>>(sp_epochs[s],sp_first[s],(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+            kernel_digest<<<nblk, QSB_SE_BLOCK, 0, st>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                s_cnt, s_idx,
+                s_combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, sp_epochs[s], sp_first[s], epochs_in_batch);
+            kernel_verify_pair_hits<<<1,64,0,st>>>(sp_hitbuf[s],sp_verified[s],sp_epochs[s],sp_first[s],d_gt,epochs_in_batch);
+            cudaMemcpyAsync(sp_host[s], sp_verified[s], sp_hostbytes, cudaMemcpyDeviceToHost, st);
+            cudaEventRecord(sp_done[s], st);
+            {
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            }
+            sp_busy[s] = 1; sp_epochs_n[s] = epochs_in_batch;
+            epoch_base += epochs_in_batch;
+            sp_cur = (sp_cur + 1) % QSB_SLOTS;
+
+            struct timespec t_now;
+            clock_gettime(CLOCK_MONOTONIC, &t_now);
+            double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
+                + (t_now.tv_nsec - t_last_se.tv_nsec) / 1e9;
+            if (secs_since >= 15.0) {
+                double elapsed_total = (t_now.tv_sec - t0.tv_sec)
+                    + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
+                double rate = total_searched / elapsed_total;
+                printf("  [GPU %d] epoch=%llu/%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
+                       gpu_index,
+                       (unsigned long long)epoch_base, (unsigned long long)n_epochs,
+                       (unsigned long long)(total_searched/1000000),
+                       (unsigned long long)(global_total/1000000),
+                       rate/1e6, elapsed_total);
+                fflush(stdout);
+                if (summary_f) {
+                    time_t now_epoch = time(NULL);
+                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                            (long)now_epoch, (unsigned long long)total_searched,
+                            rate/1e6, elapsed_total, (unsigned long long)hit_counter);
+                    fflush(summary_f);
+                }
+                t_last_se = t_now;
+            }
+            if (epoch_base >= n_epochs) break;
+        }
+        /* Drain every in-flight slot in issue order so the hit file is complete. */
+        for (int i = 0; i < QSB_SLOTS; i++) {
+            const int s = (sp_cur + i) % QSB_SLOTS;
+            if (sp_busy[s] && sp_drain(s)) return 1;
+        }
+#else  /* single-stream donor loop */
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
@@ -3275,6 +3564,7 @@ int main(int argc, char **argv) {
             }
             if (epoch_base >= n_epochs) break;
         }
+#endif /* QSB_SLOTPIPE */
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,

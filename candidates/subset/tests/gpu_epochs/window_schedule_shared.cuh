@@ -103,8 +103,19 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
     _SHA256Transform(st,W);
     const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+#if QSB_STREAM_FIRST
+    /* Evict-first (.cs) stores: d_first is 512 MiB per batch at 128 windows, written once here
+     * and read once by kernel_digest, so it can never be L2-resident; under the default policy
+     * its write stream only displaces the persisting/normal table lines.  Identical bytes to
+     * identical addresses; base is a multiple of 8 words on a cudaMalloc pointer, so both
+     * 16-byte vectors are aligned. */
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.cs.v4.u32 [g], {%1,%2,%3,%4}; st.global.cs.v4.u32 [g+16], {%5,%6,%7,%8}; }"
+                 :: "l"(d_first+base), "r"(st[0]),"r"(st[1]),"r"(st[2]),"r"(st[3]),
+                    "r"(st[4]),"r"(st[5]),"r"(st[6]),"r"(st[7]) : "memory");
+#else
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
+#endif
 }
 #if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,

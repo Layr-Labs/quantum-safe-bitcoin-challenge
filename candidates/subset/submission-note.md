@@ -1,60 +1,74 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: two host-side mechanisms ported from the pinning frontier — the slotted two-stream batch pipeline and the persisting-L2 window over the 64 MiB table — on the exact promoted 623.5M source, with `kernel_digest` byte-identical
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+Effort: high
 
 ## Base and attribution
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+This candidate is Akashneelesh's promoted record `7aef224` (commit `9ac2515`, 623,518,629 verified candidates/s) with two host-orchestration mechanisms added on top and nothing else touched. Every inherited kill switch keeps its inherited default (`QSB_CHAIN_MUL_LEAN=1`, `QSB_CHAIN_ANCHOR_UPDATE=1`, `QSB_FINAL_CARRY=1`, `QSB_SE_WINDOWS=128`, `QSB_EPOCH_FAST=1`, `ZLAB_PAIRSHA=0`, `ZLAB_T14=0`, and so on). `kernel_digest`, the speculative filter, the exact replay kernel `kernel_verify_pair_hits`, the table geometry (15 chunks, 64 MiB) and the launch geometry (256 threads, 2 blocks/SM, 49,152 B shared, 262,144 blocks per launch) are unchanged; the device code of the hot kernel compiles to the same SASS as the donor because no source it depends on changed.
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+Both mechanisms are ports from the **pinning** track, where they have been measured on the official RTX 4090 runner and carried by every subsequent promoted pinning submission:
+
+- **Slotted multi-stream host pipeline.** Introduced on pinning by draheemking (`11ba7e43`, rejected only for base drift), adopted into the promoted line by tekkac → hybridnoise (`31e98e47` 702,050,398 → `260879f4` 705,670,530, **+0.5157%** with device code byte-identical), and re-worked by ercumentyildirim in `2dc7228` (724,568,034), whose note documents the two pitfalls this port carries over: the `cudaDeviceSynchronize()` before the slot loop, and the fact that a persisting-L2 access-policy window is a **per-stream** attribute that must be re-installed on every non-blocking slot stream.
+- **Persisting-L2 access-policy window over the fixed-base table.** In the pinning frontier since before `2dc7228`; `QSB_L2_SKIP=1` (start the window after chunk 0) added by ercumentyildirim in `ce0aff4` (713,225,734). The subset track never had either the window or the skip.
+
+Credit: Akashneelesh (base), terrapinelf, dun999, ercumentyildirim, EvanYan1024, jacklightChen, Meganpark980320 and the rest of the subset lineage listed in the base note (all retained below the fold in the source comments); draheemking, tekkac, hybridnoise, ercumentyildirim, jrcarlos2000, otaliptus for the pinning mechanisms and their measurements, which I read from the public submission notes. All inherited source, license and attribution notices are retained.
 
 ## What is new
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+Three compile-time switches, each `#ifndef`-guarded so that `=0` restores the donor bytes for that region. The official build line (`nvcc -O3 -DQSB_ZEROS_N=24`, no `-D` overrides) therefore compiles the defaults below.
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+### 1. `QSB_SLOTPIPE` (default 1), `QSB_SLOTS` (default 2) — `tests/gpu_epochs/tree.cu`
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+The ranked short-epoch loop in the donor is fully serialized on the legacy stream: for every launch it enqueues `kernel_epoch_groups` → `kernel_build_epochs_inc` → `kernel_build_first_flat` → `kernel_digest` → `kernel_verify_pair_hits<<<1,64>>>`, then does a **blocking** `cudaMemcpy` of the verified hit buffer, formats and writes hits, and only then enqueues the next launch. Between the end of one `kernel_digest` and the start of the next, the GPU therefore runs: one 64-thread block of exact recovery (127 of 128 SMs idle), a D2H copy, host bookkeeping, launch latency, and three producer kernels at low occupancy (the group producer is a few thousand threads; the epoch and first-block producers are memory-bound). Against a ~215 ms digest launch the gap is on the order of 0.5–1 ms, i.e. 0.3–0.6% of wall time — the same order as the +0.5157% the identical change measured on pinning.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+The new loop gives batch `k` slot `k % QSB_SLOTS`. Each slot owns a `cudaStreamNonBlocking` stream, a completion event, its own `d_epochs` (64 MiB), `d_first` (512 MiB at 128 windows), `d_groups` (256 MiB), `d_epoch_group` (4 MiB), tentative and verified hit buffers, and a pinned host mirror of the verified buffer. Slot 0 adopts the buffers the donor already allocates; the other slots allocate their own (~0.85 GiB per additional slot on a 24 GiB card). The batch's kernels are enqueued on the slot stream in donor order, followed by a `cudaMemcpyAsync` of count + 64 full records into the pinned mirror and a `cudaEventRecord`. The host blocks **only** on the event of the slot it is about to reuse, so while it formats batch `k`'s hits and enqueues batch `k+2`, batch `k+1` is already queued behind `k` on the device and the gap above is filled.
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+Details carried over from the pinning notes:
 
-## Static evidence (no GPU on the authoring host)
+- `cudaDeviceSynchronize()` runs once before the slot loop: the table build, `cudaMemcpyToSymbol(WIN3)`, the constant-schedule upload and every parameter copy happen on the legacy stream, and non-blocking streams are not ordered against it.
+- `total_searched` / `g_total_searched` are advanced only when a slot drains (completed batches only), exactly as the donor's "publish only completed batches" rule requires; the SIGTERM handler's `STATUS=KILLED` line therefore never over-reports.
+- The hit file is written from the pinned mirror, one `write()` per drained batch, same line format (`indices=... recid=...`) the bridge parses. All in-flight slots are drained in issue order after the loop, so an exhausted run loses nothing.
+- Under `timeout` (the ranked mode) at most two partial batches are in flight when SIGTERM lands; the harness scores a timeout kill as `max(reported, rate × elapsed)`, so that costs nothing in the score, and in any case it is ~0.4 s of a 1200 s window.
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+### 2. `QSB_L2_PERSIST` (default 1), `QSB_L2_SKIP` (default 1) — `tests/gpu_epochs/tree.cu`
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+`kernel_digest` reads the 64 MiB fixed-base table 15 times per candidate at effectively random 64-byte addresses. The kernel runs 16 warps per SM and its chain loop is a dependent sequence of table load → point add, so it is latency-bound and a table line that has been displaced to DRAM costs directly. The table is sized to live in AD102's 72 MB L2 — but every batch also **writes and then reads back** about 1.7 GB of write-once/read-once producer state through the same L2 under the default normal policy: `d_first` 512 MiB, `d_groups` 256 MiB, `d_epochs` 64 MiB, each written by a producer and consumed once by the digest. On pinning, the corresponding stream is ~1.07 GB per batch and the persisting window has been kept through every re-measurement of the modern lineage.
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+The port sets `cudaLimitPersistingL2CacheSize` once to `min(table, maxPersisting)` and installs a `cudaAccessPolicyWindow` (`hitRatio 1.0`, `hitProp Persisting`, `missProp Streaming`) over the table on the legacy stream **and on every slot stream** (`qsb_install_l2_window`, called from slot setup). With `QSB_L2_SKIP=1` the window starts after chunk 0: chunk 0 holds 2^17 entries for one read per candidate where chunks 1–14 hold 2^16 each for one read per candidate, so a byte of chunk 0 is half as hot, and the 50-odd MiB the device allows as persisting are spent on the 56 MiB of dense chunks — the same arithmetic as `ce0aff4`. The whole thing is advisory: a device or driver that refuses the attribute leaves the run exactly as before, and the return code is cleared so a refusal cannot poison the loop's error checks.
 
-## What does not pay (census-verified, all left off or removed)
+### 3. `QSB_STREAM_FIRST` (default **0**) — `tests/gpu_epochs/window_schedule_shared.cuh`
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
-
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
-
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+An evict-first (`st.global.cs.v4.u32`) store for the `d_first` write stream in `kernel_build_first_flat`, the largest of the producer streams. Producer kernel only; `kernel_digest` does not see it. It is **off** because pinning's record on this operator is mixed: +0.30% on a 4 MB checkpoint (`67b4968`, jrcarlos2000), −0.9%/−1.1% then −0.02% on its 1 GB state planes (`aeadf37`, ercumentyildirim). It is included, guarded and documented so that the next author can A/B it in one `-D` without re-deriving the store alignment; the persisting window makes most of what it would protect already protected.
 
 ## Correctness
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+No arithmetic changes. The pipeline changes only which stream a kernel is enqueued on and which of two identical buffer sets it uses; every kernel receives the same arguments it received in the donor, per slot. Cross-slot sharing is limited to read-only inputs (`d_gt`, `d_dsigs`, `d_mid`, `d_prem`, `d_tail`, `d_suf`, `d_const_words`, the recovery constants) and to the legacy diagnostic pointers (`d_hit_sighash` etc.) that the ranked pair path never writes. Per-slot state (`d_epochs`, `d_first`, `d_groups`, `d_epoch_group`, both hit buffers) is written and read only within a slot's own stream, so there is no inter-stream race; the tentative-hit counter is reset by that slot's own producer kernel, as in the donor. The L2 window changes cache retention policy only: identical bytes are moved to and from identical addresses. The unchanged exact replay kernel recomputes every tentative hit before it is published, and `harness/verify.py` re-derives every published hit on the CPU, so a defect in either mechanism could only lose a tentative hit, never publish a bad one.
 
-## Expectations and limits
+Static checks on the authoring host (no GPU): preprocessor nesting balanced over the whole translation unit; the slot block and the helper are brace/paren balanced; `QSB_SLOTPIPE=0` leaves the donor loop textually intact inside the `#else`.
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+## Measurement
+
+No local throughput measurement is claimed: the authoring host has no CUDA device. The official validator decides. The expected result is the donor score plus the pipeline's overlap gain (order +0.3–0.6%, by analogy with the measured pinning delta) plus whatever fraction of table reads currently miss L2 on subset, which only the runner knows; the promotion floor is +1.00%. If the result is below the donor, `-DQSB_SLOTPIPE=0 -DQSB_L2_PERSIST=0` restores it byte for byte.
+
+## Reproduction
+
+```bash
+./setup.sh subset
+nvcc -O3 -DQSB_ZEROS_N=24 -o candidates/subset/subset candidates/subset/subset.cu -lcrypto -lm
+./benchmark.sh subset
+# donor bytes for A/B:
+nvcc -O3 -DQSB_ZEROS_N=24 -DQSB_SLOTPIPE=0 -DQSB_L2_PERSIST=0 -o /tmp/subset_base candidates/subset/subset.cu -lcrypto -lm
+```
+
+The startup log prints `L2 persistence: <n> MiB pinned from chunk 1 (...) ok` and `Slot pipeline: 2 batches in flight` when both mechanisms are active.
+
+## Next steps for whoever builds on this
+
+- `QSB_SLOTS=3` costs another 0.85 GiB and buys nothing unless the drain path ever stalls; sweep it once and leave it at 2 otherwise.
+- `QSB_L2_SKIP=0` versus `1` is worth one A/B on subset because the chain here handles chunks 0 and 1 in the front stage, not the loop; the density argument still favours skipping chunk 0.
+- `QSB_STREAM_FIRST=1` is the obvious one-flag experiment; if it pays, `d_groups` (`kernel_epoch_groups`) is the next store stream to mark.
+- Launch geometry (`ZLAB_LAUNCH_BLOCKS` 131072 / 524288) interacts with the pipeline (finer overlap versus more launches) and has not been re-swept since the donor fixed it at 262144 on a single-stream loop.
 
 ## Packaging
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+Only `candidates/subset` changes (`tests/gpu_epochs/tree.cu`, `tests/gpu_epochs/window_schedule_shared.cuh`, this note). No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
