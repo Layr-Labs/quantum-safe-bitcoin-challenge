@@ -69,9 +69,9 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
-        if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);

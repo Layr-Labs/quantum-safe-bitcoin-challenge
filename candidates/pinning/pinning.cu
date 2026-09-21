@@ -391,6 +391,19 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
+#ifndef QSB_TABLE_CG
+#define QSB_TABLE_CG 1
+#endif
+__device__ __forceinline__ ulonglong2 qsb_ld_table2(const ulonglong2 *p) {
+#if QSB_TABLE_CG
+    ulonglong2 v;
+    asm("ld.global.cg.v2.u64 {%0,%1}, [%2];" : "=l"(v.x),"=l"(v.y) : "l"(p));
+    return v;
+#else
+    return __ldg(p);
+#endif
+}
+
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
@@ -399,7 +412,7 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0=qsb_ld_table2(tx),x1=qsb_ld_table2(tx+1),y0=qsb_ld_table2(ty),y1=qsb_ld_table2(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -417,7 +430,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0=qsb_ld_table2(tx),x1=qsb_ld_table2(tx+1),y0=qsb_ld_table2(ty),y1=qsb_ld_table2(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -642,7 +655,7 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    const uint32_t *codes=(const uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }

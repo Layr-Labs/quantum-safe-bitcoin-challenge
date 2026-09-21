@@ -1,170 +1,45 @@
-# Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
+# Pinning: cache-path and exact schedule integration on promoted 07009ac
 
-Model: **GPT 5.6 Sol**. Harness: **Codex**.
+Effort: medium. Developed with GPT 6 Astra in Codex. No local NVIDIA device, CUDA compilation, native host compilation or GPU benchmark was used for this candidate. The official remote build and verified-throughput run are the first native evaluation. No claimed score is supplied.
 
-## Source and attribution
+## Base, result-driven rollback, and hypothesis
 
-This source-only candidate starts from local composition
-`c2431ea9bdb9ee667f113dcf637f5eb93bca903a`, itself based on promoted pinning
-commit `e876032f79e6f4f3af2732bbba39403e29f0e227`, and adds one new mechanism to
-its two independently published components:
+This candidate starts directly from terrapinelf's promoted submission 07009ac3-94a4-428e-b030-1f6ce317ccb7, commit94abdd0d72847b780c7d4f99da4f367e6f9f0fd1. The current official score at preparation is797,446,582 verified candidates/s. It retains the promoted64MiB/15window signed table, original serial point chain, isomorphic recovery xR=plus/minus1, PR827 field schedule, bounded27-product parity window, cofactor factor association, stream/slot geometry, SHA paths and exact host publication gate.
 
-1. `GPUMath.h` is copied byte-for-byte from public PR #827, head `87a770a`,
-   by @stffinfcti. It removes the carry-only `z9` lane from the active square
-   and fused-square short-carry reductions.
-2. `PackedRecovery.cuh` and `ParityWindow.cuh` carry only the bounded parity
-   window published by @EvanYan1024 in public PR #885, head `3e166ba`. Each of
-   the two final parity-only full products is replaced by a 27-cross-product
-   window; an inconclusive bound executes the inherited full product.
-3. The new `QSB_ISO_XR` path selects a problem-wide field element `u` with
-   `u²*xR = ±1`, maps the fixed-base table by `(x,y) -> (u²*x,u³*y)`, and
-   replaces the hot per-candidate `xR*ZZ` field multiplication with a signed
-   limb selection. This mechanism and code were developed locally for this
-   submission; no private source or external implementation was used.
+My previous integrated32MiB/16window candidate57315428 scored760,948,528 with verified=true,108,982verifiedhits in1201.4049seconds, seed259040505. That is3.5567% below its original789,011,576 baseline and4.5769% below the new frontier. Earlier infrastructure failures did not provide a score; this one does. The result rejects that entire composition as a ranked improvement; it does not isolate which component was responsible. Accordingly none of its32MiBgeometry, new scalar exceptions/bitmap, direct coordinate destinations or25-product parity implementation is carried into this candidate. In particular the new frontier's already-measured27-product implementation is preserved byte-for-byte.
 
-The cofactor tree, signed-digit chain, table geometry, SHA code, exact OpenSSL
-host publication gate, benchmark and verifier otherwise remain on the c243
-lineage. In particular this package deliberately retains e876's
-`cofactor_checkpoint.h` byte-for-byte: it does **not** include PR863/PR885
-`QSB_TREE_TOP16`. It also excludes PR885's direct-destination point-add
-rewrite. Those components were separated because their interactions were not
-positive in prior matched tests. All retained source and license notices
-remain. `SOURCE-MANIFEST.json` records the exact production-source hashes.
+The main new experiment changes the cache path of every fixed-base table fetch while allowing same-thread digit reads to be scheduled normally. This is a memory-system experiment over the full hot chain, combined with three exact operation/masking simplifications. It is not a remeasurement marker, a new carry cutoff or a changed arithmetic association. A different cache path may have a substantial effect on dependent-load latency or may regress; the submission exists to resolve that on the ranked device.
 
-Public PR885's complete stack later scored 776,882,075 candidates/s, below the
-789,011,576 crown. This candidate is a different, narrower composition selected
-from matched component measurements; it is not a rerun of PR885.
+## Table fetches and lane-private digit reads
 
-## New isomorphism and exact scaling
+Amal-David's public submission d2b1ca8 describes replacing the four16-byte __ldg operations in each signed table loader with ld.global.cg.v2.u64. I independently implement that small mechanism in qsb_ld_table2, gated by QSB_TABLE_CG, default1. Setting it to0 restores __ldg for those same addresses. Both flat table loaders use the helper; the small SHA tail table is unchanged. Each record remains64bytes, x at offset0 and y at offset32, with the same signed-y decoding. cudaMalloc alignment and record offsets satisfy the16-byte vector-load alignment. The table is initialized before these kernels and is read-only during the search.
 
-For an XYZZ point, the table map gives
-`(X,Y,ZZ,ZZZ) -> (u^6 X,u^9 Y,u^4 ZZ,u^6 ZZZ)`. Therefore the recovery
-denominator `W=ZZZ*(xR*ZZ-X)` becomes `W'=u^12 W`. For a block with `A`
-active leaves, its excluded product scales by `u^(12(A-1))`; consequently
-the saved packed values `vbar=Y*ZZ*excluded` and
-`tbar=ZZZ*ZZ*excluded` scale by `u^(12A+1)` and `u^(12A-2)`.
+The hypothesis is that L1 bypass and the coherent global load path can improve this random, dependent table access workload. It is NOT established that the old noncoherent load ignored the stream's persisting-L2 policy. NVIDIA's PTX documentation explicitly describes noncoherent loads with cache-policy hints and architecture-dependent tradeoffs; the donor's blanket cache-policy assertion is not used as a premise here. Documentation: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-ld-global-nc . Cache effects are performance hints, not a mathematical throughput guarantee. Requested bytes per candidate are still15*64=960; fewer DRAM bytes are possible only if actual miss behavior improves.
 
-The single outer product-tree inverse is multiplied by `u^-1` before its
-down-sweep. Each block root inverse then scales by `u^(-12A-1)`. Its weighted
-copy uses transformed `yR'=u^3*yR`, so it scales by `u^(-12A+2)`. The two
-stage-2 products therefore recover the original unscaled `u` and `v` exactly,
-and the inherited recovery equations continue with the original `xR`, `yR`
-and `c`. Inactive leaves remain multiplicative identities, so `A` may be any
-partial-block count. The extra root multiplication is paid once per outer
-inverse group, while one full field multiplication is removed per candidate.
+The code reader qsb_load_decoded now uses const uint32_t* instead of volatile uint32_t*. The decoder's writer remains volatile. The slot c*QSB_TREE_N+threadIdx.x is private to the reading/writing lane, production block width is constrained to the tree width, and the later cofactor reuse still starts after the block barrier. No new prefetch, extra live table point, loop unroll, rotated buffer or table-pointer recurrence is introduced. Relaxing a source qualifier may help compiler scheduling, but no claim about generated register count or occupancy is made without ptxas evidence.
 
-The GPU table builder's existing OpenSSL spot check now compares transformed
-coordinates. The OpenSSL publication gate remains on the original curve and
-original problem constants.
+## Exact cofactor and saved-state simplifications
 
-## Local equal-work evidence
+The public8aa35d5 description identifies two compatible changes. In the TOP2 traversal, the exclusion down-sweep begins at8 and doubles untilN. Its count==2 copy case is unreachable. The candidate emits the original multiply directly only under QSB_TREE_TOP2; the nonmerged configuration retains the original conditional. Parent/sibling operand order, product association, offsets, barriers and roots are untouched. No TOP16 reassociation is added.
 
-Tests used CUDA 12.8, an RTX 4090, organizer-default sm52/N24 compilation and
-published problem seed `9072764`. Diagnostic copies differ from this package
-only by a fixed sequence count, precise elapsed output and counters.
+After the cofactor collective, packed preparation computes hc=rawmul(U,D), vbar=rawmul(Y,hc) and tbar=rawmul(V,hc). Instead of masking both result planes when unusable, it zeros hc first and leaves the two products in place. Zero is an exact annihilator of the retained raw multiplier: all cross-products and folds are zero when an operand is zero. Thus usable lanes are unchanged and unusable active lanes store the same eight zero limbs as before. The collective itself still receives the same effective leaves and runs before this mask; there is no change to another lane's factor or to stage2's zero-plane decision. No claim is made that compiler branch/predicate lowering necessarily saves the source-level write count.
 
-The new isomorphism was measured directly against c243 with identical source,
-compiler flags and fixed-work instrumentation except for `QSB_ISO_XR`:
+## Exact fused-X3 doubling
 
-| Fixed work | c243 control | + isomorphic xR | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 11.989849 s | 11.932163 s | **+0.483450%** |
-| 16 sequence passes, A/B/B/A means | 24.104475 s | 23.971506 s | **+0.554698%** |
+fkiene's publicfc334ef description separates an exact self-add doubling from additional arithmetic cutoffs. Only the exact doubling is implemented here. In _ModX3Fused, the256-bit subtrahend2*c previously used shifts/ors and a final top-bit extraction. Four64-bit carry-ordered self-adds and one carry capture now produce the same257bits. All fivewords, including bit256, are retained. The surrounding sum, subtraction, full final fold and output stores are unchanged. The donor's ninth-word removal and shortened correction are not included.
 
-Both fixed16 adjacent comparisons favored the candidate, by +0.186020% and
-+0.923315%. Every fixed8 arm processed exactly 9,956,800,000 candidates and
-the same 1,110 exact-gated hits; their common hit-file SHA-256 is
-`b77c289cdb1eddf307fbe62d4875cb7a7604f721ba5944000734d314bfc3b3c3`.
-Every fixed16 arm processed exactly 19,913,600,000 candidates and the same
-2,271 exact-gated hits; their common hit-file SHA-256 is
-`b9687013e0226e6f815892394568d0a2e9a6cef6355894a5072b04d57b241bdb`.
-There were no missing or extra records.
+The previous preparation checked10,258boundary/random256-bit inputs for this identity, including all single-bit positions, zero and allones. The identity is ordinary integer doubling, not a modular congruence substitution. This matters because inherited approximate raw field routines cannot generally be reassociated just from field equality.
 
-The field component was previously measured directly against e876 for 32
-complete sequence passes per arm. Every arm processed exactly 39,827,200,000
-candidates and emitted the same 4,678 normalized hits. E876 took
-48.517748/48.753249 seconds; the PR827 field source took
-48.269202/48.429232 seconds. The balanced means give **+0.592112%** throughput
-for the field component, and an unchanged CPU verifier passed 4,678/4,678.
+## Necessary checks and validation limits
 
-The new TOP16-free parity composition was then compared directly with that
-PR827 field control:
+The implementation was independently written from public descriptions on a fresh copy of the latest promoted source. Focused checks reverse all seven textual edits to the baseline, confirm the27-product parity header is unchanged, check table vector alignment and TOP2 loop domains at16/32/64/128/256leaves, and preserve the one volatile digit writer. The unchanged host-gate Python check is run from this repository. No repeated deep proof campaign or local native build is represented as necessary evidence for a cache-policy hypothesis.
 
-| Fixed work | PR827 field control | + parity window | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 12.053299 s | 11.987928 s | **+0.545303%** |
-| 16 sequence passes, A/B/B/A means | 24.186549 s | 24.038506 s | **+0.615858%** |
+Only four runtime files change: pinning.cu for the table helper and digit read, cofactor_checkpoint.h for the unreachable copy arm, PackedRecovery.cuh for the factor mask, and GPUMath.h for exact doubling. The repository's manifest, source inventory and public notes describe this final bundle. Model/harness flags identify this implementation and validation work, not authorship of the inherited frontier.
 
-For fixed16, the two adjacent comparisons independently favored the parity
-candidate by +0.450319% and +0.781263%. Every fixed8 arm processed exactly
-9,956,800,000 candidates and the same 1,110 normalized hits. Every fixed16 arm
-processed exactly 19,913,600,000 candidates and the same 2,271 normalized
-hits. The fixed16 common hit-set SHA-256 is
-`bc5c7f61def592cc7992facfe5188cc10bacfe2b10521a9a7d7ca8953399decc`.
-There were no missing or extra records.
+There is no measured gain for this exact combination. The table path may lose the texture path's useful caching/latency behavior, compiler register allocation may change after qualifier removal, and several source simplifications may already be optimized away. The bundle keeps independent conceptual changes localized so a negative result can motivate rollback of the cache/read changes first rather than inventing a field-arithmetic explanation. Do not resubmit unchanged after a valid negative score. Official failure with no numerical result is a separate infrastructure/build outcome.
 
-The complete package was also compared directly against promoted e876 in a
-separate fixed16 E/B/B/E run. E876 took 24.285440/24.387457 seconds
-(mean 24.336449); this package took 24.046334/24.133370 seconds
-(mean 24.089852), a measured **+1.023653% completed-work throughput gain**.
-Both adjacent comparisons favored the package, by +0.994355% and +1.052845%.
-Every arm again processed exactly 19,913,600,000 candidates and emitted the
-same 2,271-hit set with the SHA-256 above.
+## Attribution and screened alternatives
 
-Applying that direct local ratio mechanically to the 789,011,576 crown gives
-about 797.09M/s, only about 186,625 candidates/s above the 796,901,692 floor.
-That margin is narrow and the local measurement is not an official score. The
-1,200-second ranked result decides promotion.
+Baseline credit: terrapinelf's07009ac, stffinfcti'sPR827 field source and EvanYan1024'sPR885 bounded parity, with the entire promoted predecessor chain and original VanitySearch/GPL notices retained. Incremental public descriptions: Amal-David d2b1ca8 for table.cg, fkiene8aa35d5 for the private code read/unreachable copy/factor mask, and fkienefc334ef for exact X3 doubling. Credits are recorded here only; no additional coauthor metadata is requested by the submitting account owner. No other author's unpromoted source archive, binary, diagnostic bundle or private task was fetched.
 
-Raw local evidence is retained outside the package under
-`/tmp/qsb-pin-pr837-newseed/REPORT.md` and
-`/tmp/qsb-pr850-pw-notop16-current/runs/{ABBA,ABBA16,E2B16}`.
-
-## Static and semantic gates
-
-`QSB_ISO_XR=0` builds successfully as the compile-time control. With the
-organizer-default sm52 target, the isomorphic path keeps stage 0 at 101
-registers, 12,288 bytes shared memory and zero stack/spill, while disassembly
-instruction lines fall from 20,502 to 19,626. Native sm89 likewise keeps 128
-registers and zero spill while falling from 5,752 to 5,672 lines. Stage 2 is
-unchanged at 72 registers and zero spill. The cold outer inverse grows because
-it performs the one `u^-1` multiplication.
-
-A fresh deterministic algebra audit covered 64 independently generated
-problems and 64 valid points per problem: all 8,192 recovered compressed
-outputs and SHA-256 inputs matched the original curve exactly, both `+1` and
-`-1` transformed recovery abscissae occurred, and 1,024 additional transformed
-group-law checks passed. The ranked-seed GPU table spot check passed in every
-timed arm. The equal-work hit sets above provide an end-to-end CUDA check.
-
-Organizer-default N24 builds passed. Against the PR827 field control, stage 0
-is byte-identical at 101 registers, 12,288 bytes shared memory and zero stack
-or spill. Stage 2 remains 72 registers while its 24-byte frame disappears.
-Disabling only `QSB_PARITY_WINDOW` restores the field control path.
-
-The parity implementation is byte-identical to PR885's audited function and
-call sites, while this package retains the same PR827 field multiplication
-contract. A CUDA differential over 16,777,216 random and directed rows found
-zero parity mismatches: 16,777,207 used the fast window and nine exercised the
-full-product fallback. An independent bigint audit over 2,000,000 random rows
-and 2,420 valid directed boundary tuples also found zero mismatches.
-
-## Correctness boundary
-
-The isomorphism and exponent cancellation are exact over the secp256k1 field.
-As with the inherited raw-denominator path, device intermediates may use a
-noncanonical 256-bit representative; the unchanged exact host gate checks all
-published nominations on the original curve.
-
-The bounded parity window is designed to reproduce the inherited product
-parity exactly and falls back when its bound is insufficient. The broader
-PR827 device field schedule remains approximate: removing `z9` can change a
-rare top-carry result. The exact host gate independently recovers and hashes
-every GPU nomination, preventing an invalid tentative hit from being
-published. It cannot restore a true hit missed by approximate GPU arithmetic.
-The prior N20 comparison found the same 151,947 published hits as e876 over
-79,654,400,000 candidates, with one extra tentative PR827 nomination rejected
-by the host; finite tests do not prove universal recall.
-
-No generated binary, build stamp, benchmark artifact or problem-specific file
-belongs to this package.
+Other in-flight descriptions were screened before preparation. The latest TOP16 description8740a30 reports positive mirrored local results on this frontier but explicitly changes exclusion association; that is not selected for this exact-schedule composition. Frontier remeasurement5e1e27a supplies no substantive new mechanism. Previously considered14window144MiB variants have poor ranked outcomes on the4090 despite local gains on another GPU. Their larger table and the losing32MiB composition are excluded. The current exact host gate and benchmark/verifier are unchanged.

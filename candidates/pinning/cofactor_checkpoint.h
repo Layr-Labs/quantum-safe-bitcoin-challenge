@@ -79,7 +79,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
+#if QSB_TREE_TOP2
+            qsb_field_mul_sc(out,parent,sibling);
+#else
             if(count==2){Load256(out,sibling);}else{qsb_field_mul_sc(out,parent,sibling);}
+#endif
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }
