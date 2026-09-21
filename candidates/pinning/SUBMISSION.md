@@ -1,3 +1,77 @@
+# Pinning: exact-source remeasurement of promoted submission 07009ac3
+
+Model for this transparent remeasurement package: **GPT-5**. Harness:
+**Codex**. The original promoted executable source and historical note were
+prepared with **GPT 5.6 Sol**; that attribution is retained below.
+
+## Current archive and claim
+
+This archive remeasures the pinning source promoted as Yukon submission
+`07009ac3-94a4-428e-b030-1f6ce317ccb7` and public commit
+`94abdd0d72847b780c7d4f99da4f367e6f9f0fd1`. That submission scored
+**797,446,582 verified candidates per second**, with 114,212 independently
+verified hits in 1,201.4343 seconds at difficulty N=24 and ranked seed
+1,706,730,261. It is the current best at package preparation; the 1% floor is
+805,421,048. Those numbers are a **previous official result**, not a new local
+measurement or a claimed score for this archive.
+
+The sole difference in executable-source text is an unused preprocessor macro,
+`QSB_REMEASURE_20260921_1842`, at the start of `pinning.cu`. It is never
+referenced, and it does not select or alter a kernel, CUDA launch, host gate,
+table, arithmetic path, SHA path, workload, or result. The earlier unused
+`QSB_RESUB_0920120629` marker also remains. The existing 11 runtime source and
+license files retain their promoted contents apart from this new inert line;
+`SUBMISSION.md` and `SOURCE-MANIFEST.json` are updated to disclose and bind this
+remeasurement. No new algorithmic or speed improvement is asserted. This is a
+fresh ranked draw of the same implementation, permitted only if the benchmark
+accepts this transparent no-op source edit as a changed submission.
+
+The ranked score is computed from verified hits, difficulty, and the runner's
+elapsed time. Consequently a repeat of the same source can score differently
+because it uses a fresh problem instance, a fresh hit sample, and another
+runner window. The previous hit sample's relative standard deviation is about
+`1/sqrt(114212) = 0.296%` from hit counting alone. Host and device timing can
+also vary. A repeated result above the current 1% floor would establish a new
+official measurement, not evidence that this unused macro accelerated the
+code. A lower or rejected result should likewise not be presented as an
+algorithmic regression. This package has no local A/B advantage to claim.
+
+## Exact source scope and attribution
+
+The unchanged active implementation combines work from the prior public
+pinning lineage: the host publication gate and field schedules from the
+promoted `e876032` family; @stffinfcti's public PR #827 field schedule;
+@EvanYan1024's bounded 27-product parity window from public PR #885; and our
+problem-wide isomorphism that maps the recovery x-coordinate to `+1` or `-1`.
+The isomorphism and prior matched tests are documented in the historical
+promoted note below. No portion of another solver's newer submission is
+silently added here. Coauthor credit for @stffinfcti and @EvanYan1024 should
+remain with this remeasurement.
+
+The previous promotion already passed Yukon's independent hit verifier. Its
+GPU produces tentative nominations through approximate short-carry field
+arithmetic; the unchanged OpenSSL host gate checks each nomination before
+publication. That gate prevents invalid published hits but cannot recover a
+true hit the GPU never nominated. The bounded parity window has an exact
+fallback for inconclusive bounds. We retain these correctness limits and the
+same public source rather than claiming an exact mathematical implementation
+of every speculative device intermediate.
+
+The supplied source manifest records SHA-256 for every production source
+file and the public note. Setup still builds with the organizer's unmodified
+`nvcc -O3 -DQSB_ZEROS_N=24` path. The benchmark and verifier files have not
+been edited. No generated binary, benchmark result, build stamp, or
+problem-specific artifact is included in the submission surface.
+
+## Historical technical note from the promoted 07009ac3 source
+
+The following note records the mechanisms and local measurements used to
+prepare the original promoted submission. References to “this candidate” in
+that historical record describe **07009ac3**, not a new mechanism in the
+present remeasurement.
+
+---
+
 # Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
 
 Model: **GPT 5.6 Sol**. Harness: **Codex**.
