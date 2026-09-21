@@ -762,6 +762,15 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#ifndef QSB_DIGIT_TAPER
+#define QSB_DIGIT_TAPER 1
+#endif
+#ifndef QSB_DIGIT_SIGN_FOLD
+#define QSB_DIGIT_SIGN_FOLD 1
+#endif
+#ifndef QSB_CHAIN_PINGPONG
+#define QSB_CHAIN_PINGPONG 1
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -839,6 +848,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     /* 15-chunk mixed geometry: chunk c>=1 starts at bit 17c+1, digit field at 17c+2, width 17
      * (gt_shift(2)+1 == 36, gt_width(2) == 17; checked on the host at startup). */
     constexpr unsigned P0=36u, W2=17u;
+    static_assert(GT_CHUNKS==15, "digit-shift chain assumes the 15-chunk mixed geometry");
     /* S = M >> 36 as 7 words (220 bits); one 32-bit funnel shift per word per step. */
     uint32_t w0,w1,w2,w3,w4,w5,w6;
     {
@@ -847,27 +857,67 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
         w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
     }
+#if QSB_DIGIT_SIGN_FOLD
+    /* t is 0 or 1, so (t^1)^sflag == t^(1^sflag): the scalar sign leaves the
+     * per-chunk path and becomes one 32-bit constant. */
+    const uint32_t sx=1u^(uint32_t)sflag;
+#define QSB_CH_NEG(t) ((uint64_t)((t)^sx))
+#else
+#define QSB_CH_NEG(t) ((uint64_t)((t)^1u)^sflag)
+#endif
+/* M < 2^256 so S < 2^220. Each chunk consumes 17 bits, so entering the second
+ * and third four-chunk stage the live width is 152 and 84 bits: the words above
+ * w4 resp. w2 are provably zero and their shifts are dead. */
+#define QSB_CH_SH7() do{ w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2); \
+                         w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2; }while(0)
+#if QSB_DIGIT_TAPER
+#define QSB_CH_SH5() do{ w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); \
+                         w2=__funnelshift_r(w2,w3,W2); w3=__funnelshift_r(w3,w4,W2); w4>>=W2; }while(0)
+#define QSB_CH_SH3() do{ w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2>>=W2; }while(0)
+#else
+#define QSB_CH_SH5() QSB_CH_SH7()
+#define QSB_CH_SH3() QSB_CH_SH7()
+#endif
+#define QSB_CH_STEP(SH,DY,AY) do{ \
+        const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u); \
+        idx=(f^(t-1u))&((1u<<(W2-1u))-1u); neg=QSB_CH_NEG(t); \
+        SH(); \
+        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,DY); \
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,DY, AY,bad); \
+        table_base += 1u << 16; }while(0)
+#if QSB_CHAIN_PINGPONG
+    /* The madd anchor is the previous chunk's affine y: alternate two register
+     * sets instead of copying it back into y0 once per chunk. */
+    uint64_t cy2[4]; Load256(cy2,y0);
+#define QSB_CH_A(SH) QSB_CH_STEP(SH,cy,cy2)
+#define QSB_CH_B(SH) QSB_CH_STEP(SH,cy2,cy)
+#define QSB_CH_ANCHOR cy2
+#else
+#define QSB_CH_A(SH) do{ QSB_CH_STEP(SH,cy,y0); Load256(y0,cy); }while(0)
+#define QSB_CH_B(SH) QSB_CH_A(SH)
+#define QSB_CH_ANCHOR y0
+#endif
     constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
     #pragma unroll (kChainUnroll)
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        {
-            const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
-            idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
-            neg=(uint64_t)(t^1u)^sflag;
-        }
-        w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
-        w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
-        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
+    for (int s=0;s<2;s++){ QSB_CH_A(QSB_CH_SH7); QSB_CH_B(QSB_CH_SH7); }
+    #pragma unroll (kChainUnroll)
+    for (int s=0;s<2;s++){ QSB_CH_A(QSB_CH_SH5); QSB_CH_B(QSB_CH_SH5); }
+    #pragma unroll (kChainUnroll)
+    for (int s=0;s<2;s++){ QSB_CH_A(QSB_CH_SH3); QSB_CH_B(QSB_CH_SH3); }
     {
         const uint32_t f=w0&((1u<<W2)-1u);
         idx=f&((1u<<(W2-1u))-1u); neg=sflag;
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, QSB_CH_ANCHOR,bad);
     }
+#undef QSB_CH_NEG
+#undef QSB_CH_SH7
+#undef QSB_CH_SH5
+#undef QSB_CH_SH3
+#undef QSB_CH_STEP
+#undef QSB_CH_A
+#undef QSB_CH_B
+#undef QSB_CH_ANCHOR
 #else
     unsigned pos=(unsigned)gt_shift(2)+1u;
     #pragma unroll 1
@@ -3017,8 +3067,13 @@ int main(int argc, char **argv) {
         printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
                QSB_SE_LAUNCH_BLOCKS);
 #if QSB_DIGIT_SHIFT && !ZLAB_T14
-        if (gt_shift(2)+1 != 36 || gt_width(2) != 17 || gt_width(13) != 17) {
+        if (gt_shift(2)+1 != 36) {
             fprintf(stderr, "ERROR: digit-shift geometry mismatch\n"); return 1;
+        }
+        for (int c = 2; c <= GT_CHUNKS-1; c++) {
+            if (gt_width(c) != 17) {
+                fprintf(stderr, "ERROR: digit-shift geometry mismatch\n"); return 1;
+            }
         }
 #endif
         fflush(stdout);
