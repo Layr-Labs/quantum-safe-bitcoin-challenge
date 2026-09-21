@@ -95,8 +95,15 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 #undef QSB_PRE_MUL
 #undef QSB_PRE_SUB
 #undef QSB_PRE_ADD
+/* Speculative tail only. The canonical algebra needs no xR-xi subtraction.
+ * Keep the zero boundary explicit; inherited QSB_F arithmetic can still differ
+ * on rare noncanonical/carry boundaries. Exact replay remains unchanged.
+ * Research: fkiene and DrCleverHans, described in submission notes. */
+#ifndef QSB_NEGFOLD_ZERO
+#define QSB_NEGFOLD_ZERO 1
+#endif
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
- * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
+ * original post3 body is retained below as the switch-off fallback. */
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -107,6 +114,21 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(m1, n, n + 8);
     QSB_FMUL(m2, n + 4, n + 8);
     QSB_FADD(sum, m1, m2);
+#if QSB_NEGFOLD_ZERO
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(x1, sum, t);             /* p1 before adding the anchor x. */
+    QSB_FMUL(t, x1, m1);
+    QSB_FADD(t, t, yR);              /* -y1 in canonical field algebra. */
+    uint32_t nz1=(uint32_t)((t[0]|t[1]|t[2]|t[3])!=0ULL);
+    uint32_t parities=(uint32_t)(t[0]&1ULL)^nz1;
+    QSB_FADD(x1, x1, xR);
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(x2, sum, t);             /* p2 before adding the anchor x. */
+    QSB_FMUL(t, x2, m2);
+    QSB_FADD(t, t, yR);              /* y2: no parity inversion needed. */
+    parities|=(uint32_t)((t[0]&1ULL)<<1);
+    QSB_FADD(x2, x2, xR);
+#else
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);
     QSB_FADD(x1, x1, xR);
@@ -121,6 +143,7 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(t, t, m2);
     QSB_FSUB(t, t, yR);
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+#endif
     return parities;
 }
 #endif
