@@ -27,8 +27,14 @@
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
+#ifndef QSB_RP_SQR
+#define QSB_RP_SQR 1     /* 743 odd-fold tail on squares + even-fold f8; needs HOST_GATE */
+#endif
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_RP_SQR && !QSB_HOST_GATE
+#error "QSB_RP_SQR requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
@@ -45,8 +51,56 @@
 #ifndef QSB_TREE_TOP2
 #define QSB_TREE_TOP2 1    /* P12: root and first excluded level in one warp-multiply */
 #endif
+#ifndef QSB_TREE_TOP16
+#define QSB_TREE_TOP16 1   /* the top-16 subtree roots merge up-sweep and exclusion into four waves */
+#endif
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
+#endif
+#ifndef QSB_S2_ROOT_PROD4
+#define QSB_S2_ROOT_PROD4 1 /* the finish's root record carries four limbs */
+#endif
+#ifndef QSB_TREE_SEED_REG
+#define QSB_TREE_SEED_REG 1 /* cofactor up-sweep level 0 keeps its left operand in registers */
+#endif
+#ifndef QSB_TREE_DEADCUT
+#define QSB_TREE_DEADCUT 1  /* drop the count==2 copy leaf the TOP2 down-sweep never reaches */
+#endif
+#ifndef QSB_FINISH_CONSTREF
+#define QSB_FINISH_CONSTREF 1 /* stage 2 reads the three problem constants from the constant bank */
+#endif
+#ifndef QSB_PREP_ZERO_HC
+#define QSB_PREP_ZERO_HC 1  /* unusable lanes zero the shared factor, not both saved planes */
+#endif
+#ifndef QSB_PREP_CONSTREF
+#define QSB_PREP_CONSTREF 1 /* stage 0 reads the recovery abscissa from the constant bank */
+#endif
+#ifndef QSB_S2_SAVED_SPLIT
+#define QSB_S2_SAVED_SPLIT 1 /* stage 2 gates on the tbar plane pair before loading vbar */
+#endif
+#ifndef QSB_S2_ROOT_LDG
+#define QSB_S2_ROOT_LDG 1   /* stage 2 pulls the block-uniform root records through the read-only cache */
+#endif
+#ifndef QSB_S2_GRID_ROOTS
+#define QSB_S2_GRID_ROOTS 1 /* stage 2 takes the root-plane count from the launch geometry */
+#endif
+#ifndef QSB_S2_SAVED_PTR
+#define QSB_S2_SAVED_PTR 1  /* stage 2 walks the four saved planes with one running pointer */
+#endif
+#ifndef QSB_CHAIN_SEXT
+#define QSB_CHAIN_SEXT 1    /* table sign masks come from a 64-bit sign extension of the code */
+#endif
+#ifndef QSB_TREE_UP_REG
+#define QSB_TREE_UP_REG 1   /* the cofactor up-sweep keeps its own node in registers */
+#endif
+#ifndef QSB_TREE_DOWN_REG
+#define QSB_TREE_DOWN_REG 1 /* the exclusion down-sweep keeps its own node in registers */
+#endif
+#if QSB_TREE_DOWN_REG && !(QSB_TREE_TOP2 || QSB_TREE_TOP16)
+#error "QSB_TREE_DOWN_REG inherits the register hand-off from the merged top"
+#endif
+#if QSB_TREE_DEADCUT && !(QSB_TREE_TOP2 || QSB_TREE_TOP16)
+#error "QSB_TREE_DEADCUT only removes a leaf the merged top makes unreachable"
 #endif
 #include "GPUMath.h"
 #ifndef QSB_TAIL_PRE
@@ -147,11 +201,23 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
 #endif
+#if QSB_S2_GRID_ROOTS && QSB_S2_THREADS != QSB_TREE_N
+#error "QSB_S2_GRID_ROOTS identifies gridDim.x with the root-plane count: needs S2_THREADS == TREE_N"
+#endif
 #ifndef QSB_EARLY_LOAD
 #define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
+#endif
+#ifndef QSB_STAGE_CONSTEXPR
+#define QSB_STAGE_CONSTEXPR 1 /* the other stage's body is not instantiated in this one */
+#endif
+#ifndef QSB_TAIL_CONSTEXPR
+#define QSB_TAIL_CONSTEXPR 1  /* the generic suffix builder is not instantiated in the fast tail */
+#endif
+#ifndef QSB_CHAIN_INLINE
+#define QSB_CHAIN_INLINE 1    /* the chain body shares one register allocation with its caller */
 #endif
 #ifndef QSB_PK_UNROLL
 #define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
@@ -388,14 +454,16 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
-__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
-                                                      uint32_t base, uint32_t idx,
+/* Pointer form: the caller already holds the byte address of the chunk plane,
+ * so the step only scales the 17-bit entry. The chain walks the planes with a
+ * running pointer and the +2^22 sibling plane folds into the LDG immediate. */
+__device__ __forceinline__ void gt_load_signed_flat_p(const uint8_t *__restrict__ plane,
+                                                      uint32_t idx,
                                                       uint64_t m,
                                                       uint64_t *__restrict__ gx,
                                                       uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
-    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
-    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+    const ulonglong2 *tx=(const ulonglong2 *)(plane+(idx<<6));
+    const ulonglong2 *ty=(const ulonglong2 *)(plane+(idx<<6)+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -405,13 +473,21 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
 #endif
     gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
 }
+__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
+                                                      uint32_t base, uint32_t idx,
+                                                      uint64_t m,
+                                                      uint64_t *__restrict__ gx,
+                                                      uint64_t *__restrict__ gy) {
+    /* (base+idx)<<6 == (base<<6)+(idx<<6): both products stay below 2^26. */
+    gt_load_signed_flat_p(gTable+(base<<6), idx, m, gx, gy);
+}
 
 __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
                                                      uint64_t neg,
                                                      uint64_t *__restrict__ gx,
                                                      uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
+    uint32_t off = (base + idx) << 6;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
@@ -620,39 +696,692 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
+/* Field extraction, digit sign and the seed hand-off are the three schedules
+ * between the recode setup and the chain. Each is switched on its own so any
+ * one of them can return to the frontier form without touching the others. */
+#ifndef QSB_DIGIT_WINDOW32
+#define QSB_DIGIT_WINDOW32 1  /* 1: one 32-bit funnel shift per signed digit field */
+#endif
+#ifndef QSB_DIGIT_SIGN_FOLD
+#define QSB_DIGIT_SIGN_FOLD 1 /* 1: take the digit sign from the field's own top bit */
+#endif
+#ifndef QSB_DIGIT_SEED_REG
+#define QSB_DIGIT_SEED_REG 1  /* 1: the two seed digits stay in registers */
+#endif
+#ifndef QSB_CHAIN_ROT2
+#define QSB_CHAIN_ROT2 1  /* 1: two-buffer chain rotation, no back-edge ordinate copy */
+#endif
+#ifndef QSB_CHAIN_PTR
+#define QSB_CHAIN_PTR 1   /* 1: the chain walks the table planes with a running pointer */
+#endif
+#ifndef QSB_DIGIT_PAIRLDS
+#define QSB_DIGIT_PAIRLDS 1 /* 1: pair-adjacent digit codes, one 64-bit shared read per pair */
+#endif
+#ifndef QSB_CHAIN_STRIDE2
+#define QSB_CHAIN_STRIDE2 1 /* 1: one plane advance per chain pair, sibling planes as load immediates */
+#endif
+#ifndef QSB_DIGIT_PAIRPTR
+#define QSB_DIGIT_PAIRPTR 1 /* 1: the paired digit codes are read through a running shared pointer */
+#endif
+#if QSB_DIGIT_PAIRPTR && !QSB_DIGIT_PAIRLDS
+#error "QSB_DIGIT_PAIRPTR walks the paired code layout QSB_DIGIT_PAIRLDS defines"
+#endif
+#ifndef QSB_DIGIT_PAIRST
+#define QSB_DIGIT_PAIRST 1 /* 1: the two codes of a chain pair are published as one 64-bit store */
+#endif
+#ifndef QSB_CODE_PACK16
+#define QSB_CODE_PACK16 1 /* 1: paired digit magnitudes share a 32-bit word, signs stay in a register */
+#endif
+#ifndef QSB_PREP_NO_SCRATCH
+#define QSB_PREP_NO_SCRATCH 1 /* 1: the chain takes no shared scratch plane, so none is allocated */
+#endif
+#ifndef QSB_DIGIT_SEED2_REG
+#define QSB_DIGIT_SEED2_REG 1 /* 1: the chunk-2 digit code stays in a register, never in the arena */
+#endif
+#ifndef QSB_CODE_QUAD
+#define QSB_CODE_QUAD 1 /* 1: four chain magnitudes per 64-bit arena word, four fetches per body */
+#endif
+#ifndef QSB_CHAIN_HOIST2
+#define QSB_CHAIN_HOIST2 1 /* 1: the chunk-2 record is fetched before the anchor addition */
+#endif
+#if QSB_DIGIT_SEED2_REG && !(QSB_CODE_PACK16 && QSB_DIGIT_SEED_REG)
+#error "the chunk-2 register hand-off extends the packed seed hand-off"
+#endif
+#if QSB_CODE_QUAD && !(QSB_CODE_PACK16 && QSB_DIGIT_SEED2_REG)
+#error "the quad code layout packs the magnitudes QSB_CODE_PACK16 defines, with chunk 2 in a register"
+#endif
+#if QSB_CHAIN_HOIST2 && !(QSB_DIGIT_SEED2_REG && QSB_CHAIN_PTR && QSB_CHAIN_ROT2)
+#error "the hoisted chunk-2 fetch needs the register-held code and the rotated pointer-walking chain"
+#endif
+#if QSB_CODE_QUAD
+/* Quad layout: the twelve chain chunks (3..14) form three groups of four, and
+ * the four 16-bit magnitudes of group q live in one 64-bit arena word, low
+ * field first. Lane t owns word q*QSB_TREE_N+t, so consecutive lanes read
+ * consecutive 8-byte words (conflict-free 64-bit shared access) and the group
+ * stride is one plane of QSB_TREE_N words. Footprint is 3*QSB_TREE_N words of
+ * the same arena prefix the paired layout used, so the cofactor tree that
+ * later aliases the arena is untouched. */
+#define QSB_QUAD_SLOT(q,t) ((unsigned)(q)*(unsigned)QSB_TREE_N+(unsigned)(t))
+static_assert(((GT_CHUNKS-3)&3)==0,"the quad chain body consumes four chunks");
+#endif
+#if QSB_DIGIT_PAIRST && !(QSB_DIGIT_PAIRLDS && QSB_DIGIT_SEED_REG)
+#error "the paired code store publishes the QSB_DIGIT_PAIRLDS layout for the register-seeded decode"
+#endif
+#if QSB_CODE_PACK16 && !(QSB_DIGIT_PAIRLDS && QSB_DIGIT_SEED_REG && QSB_CHAIN_ROT2 && QSB_CHAIN_STRIDE2 && QSB_CHAIN_PTR)
+#error "the packed-magnitude code layout is read only by the rotated pointer-walking chain"
+#endif
+#if QSB_CHAIN_ROT2
+static_assert(((GT_CHUNKS-3)&1)==0,"the rotated chain peels chunk 2 and pairs the rest");
+#endif
+/* Digit-code slot of chunk c for lane t inside the 3072-word arena.
+ * Plain layout: one 128-word plane per chunk (max word 1919).
+ * Paired layout: the two chunks of a chain pair (3,4),(5,6),...,(13,14) share
+ * one aligned 64-bit word at (pair<<8)+(t<<1) (max word 1535); chunks 0..2,
+ * which the chain consumes outside a pair, keep planes above that region
+ * (words 1536..1919). Both layouts stay inside the 12 KiB arena and are
+ * written and read through this one macro, so either switch position is
+ * self-consistent. */
+#if QSB_DIGIT_PAIRLDS
+#define QSB_CODE_SLOT(c,t) ((unsigned)(c)<3u ? (1536u+((unsigned)(c)<<7)+(unsigned)(t)) \
+    : (((((unsigned)(c)-3u)>>1)<<8)+((unsigned)(t)<<1)+(((unsigned)(c)-3u)&1u)))
+#else
+#define QSB_CODE_SLOT(c,t) (((unsigned)(c)<<7)+(unsigned)(t))
+#endif
+#if QSB_CODE_PACK16
+/* Packed layout: chunk c>=3 belongs to chain pair p=(c-3)>>1 and contributes
+ * only its magnitude, the low half of the word for the even member and the
+ * high half for the odd one, so pair p of lane t owns exactly one 32-bit word
+ * at (p<<7)+t (max word 767). Every 17-bit chunk already masks its magnitude
+ * to bits-1 == 16 bits and every chunk plane holds 2^16 odd multiples, so the
+ * index the loader consumes is bit-identical and no magnitude bit is lost; the
+ * twelve sign bits travel in one register instead of bit 31 of each shared
+ * word. Chunks 0..2, which the chain consumes outside a pair, keep their
+ * planes at words 1536..1919 exactly where the paired layout leaves them. */
+#define QSB_PACK_SLOT(p,t) ((((unsigned)(p))<<7)+(unsigned)(t))
+#endif
+#ifndef QSB_CODE_SIGN_TM
+#define QSB_CODE_SIGN_TM 1 /* the code's sign bit is the top bit of the recoding mask */
+#endif
+#ifndef QSB_CODE_SIGN_BITMASK
+#define QSB_CODE_SIGN_BITMASK 1 /* the packed sign word takes chunk jj's bit from that mask */
+#endif
+#ifndef QSB_CODE_RAWWIN
+#define QSB_CODE_RAWWIN 1 /* the extracted window is not masked to its own width */
+#endif
+#if QSB_CODE_RAWWIN && !QSB_DIGIT_SIGN_FOLD
+#error "the unmasked window relies on the sign taken from the left-justified field"
+#endif
+#ifndef QSB_CODE_MAG_ONLY
+#define QSB_CODE_MAG_ONLY 1 /* a chain chunk's code carries magnitude bits only */
+#endif
+#if QSB_CODE_MAG_ONLY && !(QSB_CODE_PACK16 && QSB_CODE_SIGN_BITMASK)
+#error "the magnitude-only chain code needs the packed layout with the register sign word"
+#endif
+#ifndef QSB_CODE_QUAD32
+#define QSB_CODE_QUAD32 1 /* a quad group is assembled in two 32-bit halves */
+#endif
+#if QSB_CODE_QUAD32 && !QSB_CODE_QUAD
+#error "the half-word group assembly publishes the quad arena layout"
+#endif
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k
+#if QSB_DIGIT_SEED_REG
+    ,uint32_t *seed0,uint32_t *seed1
+#endif
+#if QSB_DIGIT_SEED2_REG
+    ,uint32_t *seed2
+#endif
+#if QSB_CODE_PACK16
+    ,uint32_t *signs
+#endif
+) {
+#if QSB_CODE_PACK16 || QSB_DIGIT_PAIRST
+    uint32_t pend=0;
+#endif
+#if QSB_CODE_PACK16
+    uint32_t sg=0;
+#endif
+#if QSB_CODE_QUAD && !QSB_CODE_QUAD32
+    uint64_t pendq=0;
+#endif
+#if QSB_CODE_QUAD32
+    /* The group word is assembled as its two 32-bit halves: fields 0 and 1 in
+     * the low half, fields 2 and 3 in the high one. A 64-bit register is a
+     * register pair, so the halves are the same two words the 64-bit
+     * accumulator ended up holding -- little-endian, field k at bits 16k --
+     * but every insertion is a 32-bit or/shift instead of a shift of a
+     * register pair by 32 or 48. */
+    uint32_t qlo=0,qhi=0;
+#endif
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t *codes=(uint32_t*)qsb_digit_arena();
+#if QSB_DIGIT_WINDOW32
+    uint32_t Mw[8];
+    #pragma unroll
+    for(int j=0;j<4;j++){Mw[2*j]=(uint32_t)M[j];Mw[2*j+1]=(uint32_t)(M[j]>>32);}
+#endif
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
         const unsigned pos=c==0?1u:17u*c+2u;
+        const unsigned bits=c==0?18u:17u;
+#if QSB_CODE_RAWWIN
+        /* The window needs no mask of its own: both of its readers mask it
+         * again and more narrowly. The sign takes f<<(32-bits), which
+         * discards every bit at or above position bits, and the code takes
+         * (f^tm)&(2^(bits-1)-1), which keeps bits-1 of them; the extraction
+         * itself can therefore deliver the raw 32-bit funnel-shift result.
+         * For the top chunk the shifted word supplies only 16 bits anyway.
+         * Fifteen ANDs disappear and each window reaches its two consumers
+         * one instruction earlier. */
+#endif
+#if QSB_DIGIT_WINDOW32
+        const unsigned wi=pos>>5,ws=pos&31u;
+        uint32_t f=(wi<7u?__funnelshift_r(Mw[wi],Mw[(wi+1u)&7u],ws):(Mw[7]>>ws))
+#if !QSB_CODE_RAWWIN
+                   &((1u<<bits)-1u)
+#endif
+                   ;
+#else
         const unsigned j=pos/64u,sh=pos%64u;
         uint64_t value=M[j]>>sh;
         if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
-        uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+        uint32_t f=(uint32_t)value
+#if !QSB_CODE_RAWWIN
+                   &((1u<<bits)-1u)
+#endif
+                   ;
+#endif
+#if QSB_DIGIT_SIGN_FOLD
+        const uint32_t ftop=f<<(32u-bits);
+        const int32_t tm=c==GT_CHUNKS-1?-negative:((int32_t)(~ftop)>>31);
+#if !QSB_CODE_SIGN_TM
+        const uint32_t sign_bit=c==GT_CHUNKS-1?((uint32_t)(tm<0)<<31)
+                                              :((~ftop)&0x80000000u);
+#endif
+#else
+        const int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+#if !QSB_CODE_SIGN_TM
+        const uint32_t sign_bit=(uint32_t)(tm<0)<<31;
+#endif
+#endif
+#if QSB_CODE_SIGN_TM
+        /* tm is the recoding mask: it is 0 or 2^32-1 in every arm above
+         * (-negative for the top chunk, an arithmetic shift of a 32-bit word
+         * by 31 otherwise), and it is all ones in exactly the cases the two
+         * expressions it replaces produced a set sign bit -- (~ftop)&2^31 is
+         * set iff bit bits-1 of f is clear, which is iff (int32_t)(~ftop)>>31
+         * is all ones, and (uint32_t)(tm<0)<<31 is 2^31 iff tm is all ones.
+         * Taking bit 31 out of the mask therefore yields the same sign bit
+         * for every window, drops the second mask of ~ftop and the top-chunk
+         * select, and leaves the code's only remaining input the mask it
+         * already xors with. */
+        const uint32_t sign_bit=(uint32_t)tm&0x80000000u;
+#endif
+#if QSB_CODE_MAG_ONLY
+        /* Only the three seed codes are read as sign-bearing words (chunks 0,
+         * 1 and 2 go to registers whose reader takes bit 31 as the sign); a
+         * chain chunk's sign travels in the packed register word, and its code
+         * is consumed only as a sixteen-bit magnitude field. Leaving the sign
+         * bit out of those twelve codes therefore changes no fetched address
+         * and no sign mask, and it removes twelve ORs together with the last
+         * use of the sign word in the unrolled chain iterations. */
+        const uint32_t mag=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+        const uint32_t code=c<3?(mag|sign_bit):mag;
+#else
+        const uint32_t code=((f^(uint32_t)tm)&((1u<<(bits-1u))-1u))|sign_bit;
+#endif
+#if QSB_CODE_PACK16
+        if(c==0)*seed0=code;
+        else if(c==1)*seed1=code;
+#if QSB_DIGIT_SEED2_REG
+        /* The chunk-2 word had exactly one reader, the peeled first chain
+         * fetch in this same lane, so publishing it to the arena and reading
+         * it back is a pure round trip: hand it over in a register. */
+        else if(c==2)*seed2=code;
+#else
+        else if(c==2)codes[QSB_CODE_SLOT(2,threadIdx.x)]=code;
+#endif
+        else {
+            const unsigned jj=(unsigned)c-3u;
+#if QSB_CODE_SIGN_BITMASK
+            /* Bit jj of the packed sign word is the code's bit 31, which is
+             * set exactly when tm is all ones; masking the all-ones/all-zero
+             * word with the single bit 1<<jj contributes the same bit with
+             * neither the right shift of the assembled code nor the left
+             * shift back, and it takes the sign word's chain off `code`
+             * entirely (jj is a constant of this unrolled iteration, and the
+             * chain reads only bits 0..11). */
+            sg|=(uint32_t)tm&(1u<<jj);
+#else
+            sg|=(code>>31)<<jj;
+#endif
+#if QSB_CODE_QUAD
+            /* The magnitude of a chain chunk is below 2^16 (bits==17, and the
+             * code keeps bits-1 magnitude bits), so four of them fit one
+             * 64-bit word exactly and the decode publishes three words
+             * instead of six. Same values, same field order, and each word is
+             * complete before it is stored. */
+#if QSB_CODE_MAG_ONLY
+            const uint32_t qm=code;
+#else
+            const uint32_t qm=code&0xffffu;
+#endif
+#if QSB_CODE_QUAD32
+            /* The quad slot is a 64-bit arena word, so its address is eight
+             * byte aligned and the pair (qlo,qhi) is published by the same
+             * single eight-byte shared store the 64-bit accumulator used --
+             * one st.shared.v2.u32 of the identical bytes. */
+            const unsigned qf=jj&3u;
+            if(qf==0u)qlo=qm;
+            else if(qf==1u)qlo|=qm<<16;
+            else if(qf==2u)qhi=qm;
+            else {qhi|=qm<<16;
+                  *(uint2*)(((uint64_t*)codes)+QSB_QUAD_SLOT(jj>>2,threadIdx.x))
+                      =make_uint2(qlo,qhi);}
+#else
+            pendq|=(uint64_t)qm<<(16u*(jj&3u));
+            if((jj&3u)==3u){((uint64_t*)codes)[QSB_QUAD_SLOT(jj>>2,threadIdx.x)]=pendq;pendq=0;}
+#endif
+#else
+            if(!(jj&1u))pend=code;
+            else codes[QSB_PACK_SLOT(jj>>1,threadIdx.x)]=(pend&0xffffu)|(code<<16);
+#endif
+        }
+#elif QSB_DIGIT_PAIRST
+        /* Both codes of a chain pair are live in registers on the unrolled
+         * decode, and the paired layout gives them the two halves of one
+         * eight-byte-aligned shared word ((pair<<8)+(lane<<1) is even), so the
+         * pair is published with a single 64-bit store instead of two 32-bit
+         * stores. Same two words, same values, same order of publication. */
+        if(c==0)*seed0=code;
+        else if(c==1)*seed1=code;
+        else if(c==2)codes[QSB_CODE_SLOT(2,threadIdx.x)]=code;
+        else if(!(((unsigned)c-3u)&1u))pend=code;
+        else *(uint2*)(codes+((((unsigned)c-3u)>>1)<<8)+(threadIdx.x<<1))
+                 =make_uint2(pend,code);
+#elif QSB_DIGIT_SEED_REG
+        if(c==0)*seed0=code;
+        else if(c==1)*seed1=code;
+        else codes[QSB_CODE_SLOT(c,threadIdx.x)]=code;
+#else
+        codes[QSB_CODE_SLOT(c,threadIdx.x)]=code;
+#endif
     }
+#if QSB_CODE_PACK16
+    *signs=sg;
+#endif
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    uint32_t *codes=(uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[QSB_CODE_SLOT(c,threadIdx.x)];
+    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }
 }
 
+/* Sign mask of a signed digit code. Bit 31 of the code marks a negated table
+ * point; the mask is all ones exactly then. QSB_CHAIN_SEXT reads it out of a
+ * single 64-bit sign extension of the code instead of shifting in 32 bits and
+ * packing the result into both halves of a 64-bit word. Both forms produce
+ * exactly 0 or 2^64-1 for the same code and the intermediate has no other
+ * reader, so every table fetch consumes the identical mask. */
+__device__ __forceinline__ uint64_t qsb_code_sign_mask(uint32_t code) {
+#if QSB_CHAIN_SEXT
+    return (uint64_t)((int64_t)(int32_t)code >> 63);
+#else
+    const uint32_t m32=(uint32_t)((int32_t)code>>31);
+    return ((uint64_t)m32<<32)|m32;
+#endif
+}
+#if QSB_CODE_PACK16
+/* Sign mask taken from the low bit of the running sign word: the packed layout
+ * keeps the twelve chain sign bits in a register, bit 2p for the even member of
+ * pair p and bit 2p+1 for the odd one. The mask is all ones exactly when that
+ * bit is set, which is the value bit 31 of the shared code produced. */
+__device__ __forceinline__ uint64_t qsb_sign_mask_bit(uint32_t s) {
+    return (uint64_t)0 - (uint64_t)(s&1u);
+}
+/* Mask of sign bit j of the packed word, taken from one sign extension: the
+ * word is shifted so that bit j lands on bit 63 and the arithmetic shift back
+ * broadcasts it, which is 0 or 2^64-1 exactly when the bit is clear or set --
+ * the value the shift/mask/negate form produced. The packed word is 32 bits
+ * wide and the chain reads bits 0..11, so 63-j is always a legal shift. */
+#ifndef QSB_SIGN_SEXT
+#define QSB_SIGN_SEXT 1
+#endif
+__device__ __forceinline__ uint64_t qsb_sign_mask_at(uint32_t s,unsigned j) {
+#if QSB_SIGN_SEXT
+    return (uint64_t)(((int64_t)((uint64_t)s<<(63u-j)))>>63);
+#else
+    return qsb_sign_mask_bit(s>>j);
+#endif
+}
+/* The four magnitude fields of a group word. A 64-bit shared load lands in a
+ * register pair, so naming the two halves costs nothing, and each field is
+ * then one 32-bit operation on one of them: fields 0 and 2 an AND of the low
+ * or high half, fields 1 and 3 a 32-bit right shift of it. The forms it
+ * replaces shift the register pair by 16 and by 48, which is a funnel shift
+ * of both halves plus, for field 1, a mask. Identical values: field k is bits
+ * 16k..16k+15 of the word, which are bits 16k.. of the low half for k<2 and
+ * bits 16(k-2).. of the high half for k>=2. */
+#ifndef QSB_CHAIN_HALF32
+#define QSB_CHAIN_HALF32 1
+#endif
+#if QSB_CHAIN_HALF32
+#define QSB_QFIELD0(w) ((uint32_t)(w)&0xffffu)
+#define QSB_QFIELD1(w) ((uint32_t)(w)>>16)
+#define QSB_QFIELD2(w) ((uint32_t)((w)>>32)&0xffffu)
+#define QSB_QFIELD3(w) ((uint32_t)((w)>>32)>>16)
+#else
+#define QSB_QFIELD0(w) ((uint32_t)(w)&0xffffu)
+#define QSB_QFIELD1(w) ((uint32_t)((w)>>16)&0xffffu)
+#define QSB_QFIELD2(w) ((uint32_t)((w)>>32)&0xffffu)
+#define QSB_QFIELD3(w) ((uint32_t)((w)>>48))
+#endif
+#endif
+
+/* The chain's shared working set is the digit arena alone. The scratch plane
+ * parameter had no reader left, so taking it keeps an 8 KiB static shared
+ * array alive in both pipeline stages for nothing; dropping the parameter
+ * removes its last reference and with it the allocation, which is the only
+ * change - no arithmetic, no address and no order of operations moves. */
+#ifndef QSB_CHAIN_WPREFETCH
+#define QSB_CHAIN_WPREFETCH 1 /* 1: the quad group's arena word is loaded one group ahead */
+#endif
+#if QSB_CHAIN_WPREFETCH && !(QSB_CODE_QUAD && QSB_CHAIN_HOIST2)
+#error "the group-ahead code word load walks the quad arena layout of the hoisted chain"
+#endif
+#ifndef QSB_CHAIN_PEEL4
+#define QSB_CHAIN_PEEL4 1 /* 1: the three quad groups are named instead of rolled */
+#endif
+#if QSB_CHAIN_PEEL4 && !(QSB_CHAIN_WPREFETCH && QSB_CHAIN_PTR && GT_CHUNKS==15)
+#error "the named quad groups are the three-iteration prefetching pointer body"
+#endif
+/* The chain has exactly one call site, in the stage-0 arm of the pipeline
+ * kernel, and its four 256-bit results are consumed there immediately by the
+ * recovery denominator. Requiring the inline removes the ABI boundary that
+ * would otherwise force those four outputs (and the scalar input) through the
+ * local frame, and lets one allocation cover the chain state and the
+ * epilogue. Pure code placement: no operand, no order and no address moves. */
+#if QSB_CHAIN_INLINE
+__device__ __forceinline__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
+#else
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
-    uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#endif
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table
+#if !QSB_PREP_NO_SCRATCH
+    ,uint64_t (*unused)[2*QSB_TREE_N]
+#endif
+) {
+#if !QSB_PREP_NO_SCRATCH
+    (void)unused;
+#endif
+#if QSB_CODE_PACK16
+    uint32_t signs;
+#endif
+    uint64_t y0[4];
+#if QSB_CHAIN_ROT2
+    /* Two table-point buffers alternate, so the ordinate the next step needs
+     * as its offset still sits in the buffer that step does not overwrite: the
+     * per-step 256-bit back-edge copy disappears and ptxas may issue the
+     * second fetch of a pair while the first addition is still in flight.
+     * Chunk 2 is peeled so the remaining twelve steps form pairs or quads; the
+     * sequence of additions and their operands is bit-identical. The buffers
+     * and the plane pointer are declared ahead of the anchor block so the
+     * peeled fetch can be issued before the anchor addition. */
+    uint64_t xa[4], ya[4], xb[4], yb[4];
+#if QSB_CHAIN_PTR
+    const uint8_t *tp = table + ((size_t)gt_offset(2) << 6);
+#define QSB_CHAIN_FETCH(delta,codeexpr,gx,gy) do { \
+        uint32_t qc_=(codeexpr); \
+        gt_load_signed_flat_p(tp+(delta), qc_&0x1ffffu, qsb_code_sign_mask(qc_), gx, gy); \
+    } while(0)
+#else
+    unsigned base = gt_offset(2);
+#define QSB_CHAIN_FETCH(delta,codeexpr,gx,gy) do { \
+        uint32_t qc_=(codeexpr); \
+        gt_load_signed_flat_m(table, base+(unsigned)((delta)>>6), qc_&0x1ffffu, \
+                              qsb_code_sign_mask(qc_), gx, gy); \
+    } while(0)
+#endif
+#endif
+#if QSB_DIGIT_SEED2_REG
+    uint32_t seed2;
+#endif
+    {
+        uint64_t x0[4], x1[4], y1[4];
+#if QSB_DIGIT_SEED_REG
+        uint32_t seed0, seed1;
+#if QSB_CODE_PACK16 && QSB_DIGIT_SEED2_REG
+        qsb_decode_to_shared(k, &seed0, &seed1, &seed2, &signs);
+#elif QSB_CODE_PACK16
+        qsb_decode_to_shared(k, &seed0, &seed1, &signs);
+#elif QSB_DIGIT_SEED2_REG
+        qsb_decode_to_shared(k, &seed0, &seed1, &seed2);
+#else
+        qsb_decode_to_shared(k, &seed0, &seed1);
+#endif
+        gt_load_signed_flat_m(table,gt_offset(0),seed0&0x1ffffu,
+                              qsb_code_sign_mask(seed0),x0,y0);
+        gt_load_signed_flat_m(table,gt_offset(1),seed1&0x1ffffu,
+                              qsb_code_sign_mask(seed1),x1,y1);
+#else
+        qsb_decode_to_shared(k);
+        qsb_load_decoded(table,0,gt_offset(0),x0,y0);
+        qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+#endif
+#if QSB_CHAIN_HOIST2
+        /* The chunk-2 record lives in read-only table memory and its address
+         * depends only on the register-held chunk-2 code, so the fetch is
+         * independent of the anchor addition and its destination pair is dead
+         * across it. Issuing it first keeps one 64-byte global read in flight
+         * during the anchor's field work instead of starting it afterwards.
+         * The magnitude is below 2^16, so the 17-bit mask of the general fetch
+         * macro is a no-op on it and the fetched address is the same one. */
+        gt_load_signed_flat_p(tp, seed2&0xffffu, qsb_code_sign_mask(seed2), xa, ya);
+#endif
+        // INIT_ANCHOR
+        _PointAddXYZZ_mm(X,Y,U,V, x0,y0, x1,y1);
+    }
+#if QSB_CHAIN_ROT2
+#if !(QSB_CODE_QUAD && QSB_DIGIT_SEED2_REG)
+    const uint32_t *codes=(const uint32_t*)qsb_digit_arena();
+#endif
+#if QSB_CODE_PACK16
+    /* The table index needs no mask: the packed fields are exactly the sixteen
+     * magnitude bits the loader scales by 64. Every fetched address and every
+     * sign mask is the one the sign-bearing code produced. */
+#define QSB_CHAIN_FETCH_P(delta,idxexpr,maskexpr,gx,gy) \
+        gt_load_signed_flat_p(tp+(delta), (idxexpr), (maskexpr), gx, gy)
+#if QSB_CODE_QUAD
+    const uint64_t *qp=qsb_digit_arena()+threadIdx.x;
+#else
+    const uint32_t *cp=codes+threadIdx.x;
+#endif
+    uint32_t sg=signs;
+#endif
+#if QSB_DIGIT_PAIRPTR && !QSB_CODE_PACK16
+    /* The paired layout puts pair p of lane t at word (p<<8)+(t<<1), so the
+     * pair stride is a constant 256 words and the per-step slot arithmetic
+     * (subtract 3, halve, shift by 8, add the doubled lane) is loop-invariant
+     * once the lane term is folded into a running pointer. Same shared words,
+     * same order, one pointer increment instead of the recomputed index. */
+    const uint2 *cp=(const uint2*)(codes+(threadIdx.x<<1));
+#endif
+#if QSB_DIGIT_SEED2_REG
+#if !QSB_CHAIN_HOIST2
+    QSB_CHAIN_FETCH((size_t)0, seed2, xa, ya);
+#endif
+#else
+    QSB_CHAIN_FETCH((size_t)0, codes[QSB_CODE_SLOT(2,threadIdx.x)], xa, ya);
+#endif
+#if QSB_CODE_QUAD && QSB_CHAIN_WPREFETCH
+    /* Group 0's code word is written by this lane before the chain and read by
+     * no other lane, so its load is independent of the peeled addition and of
+     * every table fetch before it. Issued here it resolves during the anchor
+     * and the peeled add instead of stalling the group's first table address. */
+    uint64_t w=*qp; qp+=QSB_TREE_N;
+#endif
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, y0);
+#if QSB_CODE_QUAD
+    /* One 64-bit arena read per four steps instead of one 32-bit read per two,
+     * one plane-pointer advance per four steps, and all four table addresses
+     * of the body available before the first of its additions: the four fetch
+     * deltas +2^22, +2^23, +3*2^22 and +2^24 are compile-time immediates off
+     * the group base, exactly the byte addresses the pair body formed with two
+     * advances of 2^23. The addition order, their operands and the alternating
+     * buffer roles are unchanged, and the sign bits are consumed in the same
+     * chunk order out of the same register word. */
+#if QSB_CHAIN_WPREFETCH
+    /* The word of group g+1 is loop-invariant shared data (same lane, written
+     * once by the decode, never rewritten while the chain runs), so its load
+     * is issued inside group g, behind the first of that group's four
+     * additions, and the four magnitude extractions of a group never wait on
+     * a shared load. The pointer therefore runs one group past the last
+     * group: the final iteration loads arena word 3*QSB_TREE_N+lane, which is
+     * inside the 12*QSB_TREE_N arena and is consumed by nothing (the cofactor
+     * tree only writes the arena after the chain has finished), and discards
+     * it. Every table address, every sign bit, every addition and the
+     * alternating buffer roles are the ones the rolled quad body used. */
+#if QSB_CHAIN_PEEL4
+    /* GT_CHUNKS is fifteen, so this body runs exactly three times, over the
+     * chunk groups (3..6), (7..10) and (11..14). Naming the three groups
+     * turns the loop-carried plane pointer into twelve compile-time byte
+     * deltas off the chunk-2 plane -- group g uses g*2^24 + {2^22, 2^23,
+     * 3*2^22, 2^24}, i.e. the multiples 1..12 of 2^22, which are exactly the
+     * addresses the three advances of 2^24 produced -- turns the running
+     * sign word into twelve fixed bit positions of the register the decode
+     * left behind, and lets the arena word of group g+1 be named rather than
+     * rotated through `w`. With the groups named, the fourth prefetch of the
+     * rolled body has no consumer and is not issued at all. The twelve
+     * fetches, their sign bits, the twelve additions and the alternating
+     * buffer roles are unchanged, in the same order. */
+    QSB_CHAIN_FETCH_P((size_t)(1u<<22), QSB_QFIELD0(w), qsb_sign_mask_at(sg,0), xb, yb);
+    const uint64_t w1=qp[0];
+    _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+    QSB_CHAIN_FETCH_P((size_t)(2u<<22), QSB_QFIELD1(w), qsb_sign_mask_at(sg,1), xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+    QSB_CHAIN_FETCH_P((size_t)(3u<<22), QSB_QFIELD2(w), qsb_sign_mask_at(sg,2), xb, yb);
+    _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+    QSB_CHAIN_FETCH_P((size_t)(4u<<22), QSB_QFIELD3(w), qsb_sign_mask_at(sg,3), xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+
+    QSB_CHAIN_FETCH_P((size_t)(5u<<22), QSB_QFIELD0(w1), qsb_sign_mask_at(sg,4), xb, yb);
+    const uint64_t w2=qp[QSB_TREE_N];
+    _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+    QSB_CHAIN_FETCH_P((size_t)(6u<<22), QSB_QFIELD1(w1), qsb_sign_mask_at(sg,5), xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+    QSB_CHAIN_FETCH_P((size_t)(7u<<22), QSB_QFIELD2(w1), qsb_sign_mask_at(sg,6), xb, yb);
+    _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+    QSB_CHAIN_FETCH_P((size_t)(8u<<22), QSB_QFIELD3(w1), qsb_sign_mask_at(sg,7), xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+
+    QSB_CHAIN_FETCH_P((size_t)(9u<<22), QSB_QFIELD0(w2), qsb_sign_mask_at(sg,8), xb, yb);
+    _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+    QSB_CHAIN_FETCH_P((size_t)(10u<<22), QSB_QFIELD1(w2), qsb_sign_mask_at(sg,9), xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+    QSB_CHAIN_FETCH_P((size_t)(11u<<22), QSB_QFIELD2(w2), qsb_sign_mask_at(sg,10), xb, yb);
+    _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+    QSB_CHAIN_FETCH_P((size_t)(12u<<22), QSB_QFIELD3(w2), qsb_sign_mask_at(sg,11), xa, ya);
+    _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+#else
+    #pragma unroll 1
+    for(int c=3;c<GT_CHUNKS;c+=4) {
+        QSB_CHAIN_FETCH_P((size_t)(1u<<22), (uint32_t)w&0xffffu, qsb_sign_mask_bit(sg), xb, yb);
+        const uint64_t wn=*qp; qp+=QSB_TREE_N;
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH_P((size_t)(1u<<23), (uint32_t)(w>>16)&0xffffu, qsb_sign_mask_bit(sg>>1), xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+        QSB_CHAIN_FETCH_P((size_t)(3u<<22), (uint32_t)(w>>32)&0xffffu, qsb_sign_mask_bit(sg>>2), xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH_P((size_t)(1u<<24), (uint32_t)(w>>48), qsb_sign_mask_bit(sg>>3), xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+        w=wn;
+        sg>>=4;
+        tp += (size_t)(1u<<24);
+    }
+#endif
+#else
+    #pragma unroll 1
+    for(int c=3;c<GT_CHUNKS;c+=4) {
+        const uint64_t w=*qp; qp+=QSB_TREE_N;
+        QSB_CHAIN_FETCH_P((size_t)(1u<<22), (uint32_t)w&0xffffu, qsb_sign_mask_bit(sg), xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH_P((size_t)(1u<<23), (uint32_t)(w>>16)&0xffffu, qsb_sign_mask_bit(sg>>1), xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+        QSB_CHAIN_FETCH_P((size_t)(3u<<22), (uint32_t)(w>>32)&0xffffu, qsb_sign_mask_bit(sg>>2), xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH_P((size_t)(1u<<24), (uint32_t)(w>>48), qsb_sign_mask_bit(sg>>3), xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+        sg>>=4;
+        tp += (size_t)(1u<<24);
+    }
+#endif
+#else
+    #pragma unroll 1
+    for(int c=3;c<GT_CHUNKS;c+=2) {
+        uint32_t c0,c1;
+#if QSB_CODE_PACK16
+        { uint32_t w=*cp; cp+=128; c0=w&0xffffu; c1=w>>16; }
+#elif QSB_DIGIT_PAIRPTR
+        { uint2 cc=*cp; cp+=128; c0=cc.x; c1=cc.y; }
+#elif QSB_DIGIT_PAIRLDS
+        { uint2 cc=*(const uint2*)(codes+((((unsigned)c-3u)>>1)<<8)+(threadIdx.x<<1));
+          c0=cc.x; c1=cc.y; }
+#else
+        c0=codes[QSB_CODE_SLOT(c,threadIdx.x)];
+        c1=codes[QSB_CODE_SLOT(c+1,threadIdx.x)];
+#endif
+#if QSB_CHAIN_STRIDE2
+        /* The two planes of a pair sit at fixed +2^22 and +2^23 from the pair
+         * base, and both deltas are compile-time constants that fold into the
+         * load's address immediate. One advance of 2^23 at the end of the body
+         * therefore replaces the two advances of 2^22 the pair used to make:
+         * every fetched byte address is unchanged, only the arithmetic that
+         * forms it moves out of the loop-carried chain. */
+#if QSB_CODE_PACK16
+        QSB_CHAIN_FETCH_P((size_t)(1u<<22), c0, qsb_sign_mask_bit(sg), xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH_P((size_t)(1u<<23), c1, qsb_sign_mask_bit(sg>>1), xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+        sg>>=2;
+#else
+        QSB_CHAIN_FETCH((size_t)(1u<<22), c0, xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH((size_t)(1u<<23), c1, xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+#endif
+#if QSB_CHAIN_PTR
+        tp += (size_t)(1u<<23);
+#else
+        base += 1u<<17;
+#endif
+#else
+#if QSB_CHAIN_PTR
+        tp += (size_t)(1u<<22);
+#else
+        base += 1u<<16;
+#endif
+        QSB_CHAIN_FETCH((size_t)0, c0, xb, yb);
+        _PointAddXYZZT<true>(X,Y,U,V, xb,yb, ya);
+        QSB_CHAIN_FETCH((size_t)(1u<<22), c1, xa, ya);
+        _PointAddXYZZT<true>(X,Y,U,V, xa,ya, yb);
+#if QSB_CHAIN_PTR
+        tp += (size_t)(1u<<22);
+#else
+        base += 1u<<16;
+#endif
+#endif
+    }
+#endif
+#undef QSB_CHAIN_FETCH
+#if QSB_CODE_PACK16
+#undef QSB_CHAIN_FETCH_P
+#endif
+#if QSB_YOFF
+    qsb_yoff_to_y(ya);
+#endif
+    _ModMult(xb,ya,V);_ModSub256(Y,Y,xb);
+#else
+    uint64_t x1[4], y1[4];
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -665,6 +1394,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
@@ -1096,6 +1826,105 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
  * as disjoint AND terms) and the feed-forward of words 0 and 4 folded into round 63
  * (km63, d4). On return state[] holds the fed-forward chaining value, exactly as
  * _SHA256TransformFastTail11P leaves it. */
+/* QSB_TAILQ_ILV: the live per-thread tail transform (_SHA256TransformFastTail11Q --
+ * the first and, in the ranked single-hash geometry, only SHA-256 compression of every
+ * locktime candidate) still emits its message schedule as three sixteen-word bursts,
+ * each followed by a sixteen-round burst. The QSB_TAIL_ILV blocks below do the rolling
+ * form only for the shared-memory W1 variants, which the ranked build does not
+ * instantiate, so the live transform keeps all sixteen schedule words of a group live
+ * across that group's first round on top of the eight state words. These three blocks
+ * produce each word immediately before the round that consumes it, for the per-thread
+ * W1 form.
+ *
+ * Exactness: the defining statements keep their original order and therefore their
+ * original reads -- a statement reading w[i] with i < j reads the already-updated word
+ * of this group exactly as it did inside the burst, one reading w[i] with i > j reads
+ * the previous group's word exactly as it did -- and a round writes only a..h, never
+ * w[], so moving round 16k+j between the definitions of w[j] and w[j+1] changes no
+ * operand of any expansion and no K_i + W_i any round consumes. Bit-identical group
+ * for group; only the schedule live range changes, from sixteen words to the rolling
+ * window w[j-2], w[j-7], w[j-15] of the recurrence. -DQSB_TAILQ_ILV=0 restores the
+ * burst form. */
+#ifndef QSB_TAILQ_ILV
+#define QSB_TAILQ_ILV 1
+#endif
+#define QSB_TAILQ_ILV16() do { \
+    w[0] += s0(w[1]);                 QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(16) + w[0]); \
+    w[1] += tp.v[5];                  QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(17) + w[1]); \
+    w[2] += s1(w[0]);                 QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(18) + w[2]); \
+    w[3]  = s1(w[1]);                 QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(19) + w[3]); \
+    w[4]  = s1(w[2]);                 QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(20) + w[4]); \
+    w[5]  = s1(w[3]);                 QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(21) + w[5]); \
+    w[6]  = s1(w[4]) + L;             QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(22) + w[6]); \
+    w[7]  = s1(w[5]) + w[0];          QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(23) + w[7]); \
+    w[8]  = s1(w[6]) + w[1];          QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(24) + w[8]); \
+    w[9]  = s1(w[7]) + w[2];          QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(25) + w[9]); \
+    w[10] = s1(w[8]) + w[3];          QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(26) + w[10]); \
+    w[11] = s1(w[9]) + w[4];          QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(27) + w[11]); \
+    w[12] = s1(w[10]) + w[5];         QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(28) + w[12]); \
+    w[13] = s1(w[11]) + w[6];         QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(29) + w[13]); \
+    w[14] = s1(w[12]) + w[7] + s0(L); QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(30) + w[14]); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]); QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(31) + w[15]); \
+} while (0)
+#define QSB_TAILQ_ILVM(base) do { \
+    w[0] += s1(w[14]) + w[9] + s0(w[1]) + QSB_Z;   QSB_RL(a, b, c, d, e, f, g, h, qsb_klit((base) + 0) + w[0]); \
+    w[1] += s1(w[15]) + w[10] + s0(w[2]) + QSB_Z;  QSB_RL(h, a, b, c, d, e, f, g, qsb_klit((base) + 1) + w[1]); \
+    w[2] += s1(w[0]) + w[11] + s0(w[3]) + QSB_Z;   QSB_RL(g, h, a, b, c, d, e, f, qsb_klit((base) + 2) + w[2]); \
+    w[3] += s1(w[1]) + w[12] + s0(w[4]) + QSB_Z;   QSB_RL(f, g, h, a, b, c, d, e, qsb_klit((base) + 3) + w[3]); \
+    w[4] += s1(w[2]) + w[13] + s0(w[5]) + QSB_Z;   QSB_RL(e, f, g, h, a, b, c, d, qsb_klit((base) + 4) + w[4]); \
+    w[5] += s1(w[3]) + w[14] + s0(w[6]) + QSB_Z;   QSB_RL(d, e, f, g, h, a, b, c, qsb_klit((base) + 5) + w[5]); \
+    w[6] += s1(w[4]) + w[15] + s0(w[7]) + QSB_Z;   QSB_RL(c, d, e, f, g, h, a, b, qsb_klit((base) + 6) + w[6]); \
+    w[7] += s1(w[5]) + w[0] + s0(w[8]) + QSB_Z;    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit((base) + 7) + w[7]); \
+    w[8] += s1(w[6]) + w[1] + s0(w[9]) + QSB_Z;    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit((base) + 8) + w[8]); \
+    w[9] += s1(w[7]) + w[2] + s0(w[10]) + QSB_Z;   QSB_RL(h, a, b, c, d, e, f, g, qsb_klit((base) + 9) + w[9]); \
+    w[10] += s1(w[8]) + w[3] + s0(w[11]) + QSB_Z;  QSB_RL(g, h, a, b, c, d, e, f, qsb_klit((base) + 10) + w[10]); \
+    w[11] += s1(w[9]) + w[4] + s0(w[12]) + QSB_Z;  QSB_RL(f, g, h, a, b, c, d, e, qsb_klit((base) + 11) + w[11]); \
+    w[12] += s1(w[10]) + w[5] + s0(w[13]) + QSB_Z; QSB_RL(e, f, g, h, a, b, c, d, qsb_klit((base) + 12) + w[12]); \
+    w[13] += s1(w[11]) + w[6] + s0(w[14]) + QSB_Z; QSB_RL(d, e, f, g, h, a, b, c, qsb_klit((base) + 13) + w[13]); \
+    w[14] += s1(w[12]) + w[7] + s0(w[15]) + QSB_Z; QSB_RL(c, d, e, f, g, h, a, b, qsb_klit((base) + 14) + w[14]); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;  QSB_RL(b, c, d, e, f, g, h, a, qsb_klit((base) + 15) + w[15]); \
+} while (0)
+/* QSB_TAILQ_W63_BAL: the candidate tail block's last schedule word feeds the
+ * folded round 63 whose a-output is digest word 0, so it sits on the exit path
+ * of the only compression every candidate runs. It was emitted as the
+ * left-to-right chain (((w15 + s1(w13)) + w8) + s0(w0)) + Z: four dependent
+ * adds behind s1(w[13]). Pairing the independent halves as
+ * (s1(w13) + w8) + ((w15 + s0(w0)) + Z) issues the same four adds of the same
+ * five terms -- addition mod 2^32 is associative and commutative, so W63 is
+ * bit-identical -- with dependent depth two behind s1(w[13]); the w15/s0/Z
+ * half is ready before round 61 retires. The constant-bank zero addend stays
+ * in the sum, so the emitted instruction mix is unchanged.
+ * -DQSB_TAILQ_W63_BAL=0 restores the chained word. */
+#ifndef QSB_TAILQ_W63_BAL
+#define QSB_TAILQ_W63_BAL 1
+#endif
+#if QSB_TAILQ_W63_BAL && !QSB_TAILQ_ILV
+#error "QSB_TAILQ_W63_BAL reassociates the rolling tail group's last word"
+#endif
+#if QSB_TAILQ_W63_BAL
+#define QSB_TAILQ_W63() w[15] = (s1(w[13]) + w[8]) + ((w[15] + s0(w[0])) + QSB_Z)
+#else
+#define QSB_TAILQ_W63() w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z
+#endif
+/* Last group: rounds 48..62 only; W63 is produced for the folded round 63 below. */
+#define QSB_TAILQ_ILVM15() do { \
+    w[0] += s1(w[14]) + w[9] + s0(w[1]) + QSB_Z;   QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(48) + w[0]); \
+    w[1] += s1(w[15]) + w[10] + s0(w[2]) + QSB_Z;  QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(49) + w[1]); \
+    w[2] += s1(w[0]) + w[11] + s0(w[3]) + QSB_Z;   QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(50) + w[2]); \
+    w[3] += s1(w[1]) + w[12] + s0(w[4]) + QSB_Z;   QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(51) + w[3]); \
+    w[4] += s1(w[2]) + w[13] + s0(w[5]) + QSB_Z;   QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(52) + w[4]); \
+    w[5] += s1(w[3]) + w[14] + s0(w[6]) + QSB_Z;   QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(53) + w[5]); \
+    w[6] += s1(w[4]) + w[15] + s0(w[7]) + QSB_Z;   QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(54) + w[6]); \
+    w[7] += s1(w[5]) + w[0] + s0(w[8]) + QSB_Z;    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(55) + w[7]); \
+    w[8] += s1(w[6]) + w[1] + s0(w[9]) + QSB_Z;    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(56) + w[8]); \
+    w[9] += s1(w[7]) + w[2] + s0(w[10]) + QSB_Z;   QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(57) + w[9]); \
+    w[10] += s1(w[8]) + w[3] + s0(w[11]) + QSB_Z;  QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(58) + w[10]); \
+    w[11] += s1(w[9]) + w[4] + s0(w[12]) + QSB_Z;  QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(59) + w[11]); \
+    w[12] += s1(w[10]) + w[5] + s0(w[13]) + QSB_Z; QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(60) + w[12]); \
+    w[13] += s1(w[11]) + w[6] + s0(w[14]) + QSB_Z; QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(61) + w[13]); \
+    w[14] += s1(w[12]) + w[7] + s0(w[15]) + QSB_Z; QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(62) + w[14]); \
+    QSB_TAILQ_W63(); \
+} while (0)
 __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2, const qsb_tail_pre &tp)
 {
@@ -1146,6 +1975,11 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
+#if QSB_TAILQ_ILV
+    QSB_TAILQ_ILV16();
+    QSB_TAILQ_ILVM(32);
+    QSB_TAILQ_ILVM15();
+#else
     {
         w[0] += s0(w[1]);
         w[1] += tp.v[5];
@@ -1170,7 +2004,8 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
-    QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
+#endif
+    QSB_R63_FF04K(tp.km63, w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
     state[3] = tp.mid[3] + d;
@@ -1181,6 +2016,75 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
 
 /* Per-sequence rounds 0/1 table (QSB_TAIL_TAB), uploaded once per sequence. */
 __device__ uint4 pin_tail_tab[256];
+
+/* QSB_TAIL_ILV: the live tail transform (the first SHA-256 compression of every
+ * locktime candidate) still emits its message schedule as three sixteen-word bursts,
+ * each followed by a sixteen-round burst, so all sixteen schedule words of a group are
+ * live across the group's first round on top of the eight state words. The three
+ * blocks below produce each word immediately before the round that consumes it. The
+ * defining statements keep their original order and their original reads - a statement
+ * that reads w[i] with i < j reads the already-updated word exactly as it did inside
+ * the burst, one with i > j reads the previous-group word exactly as it did - and a
+ * round writes only a..h, never w[], so the interleaved form is bit-identical round for
+ * round. Only the schedule live range changes, from sixteen words to the rolling
+ * window of the recurrence. */
+#ifndef QSB_TAIL_ILV
+#define QSB_TAIL_ILV 1
+#endif
+#define QSB_TAIL_ILV16() do { \
+    w[0] += sa.y;            QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(16) + w[0]); \
+    w[1] += tp.v[5];         QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(17) + w[1]); \
+    w[2] += s1(w[0]);        QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(18) + w[2]); \
+    w[3]  = sa.z;            QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(19) + w[3]); \
+    w[4]  = s1(w[2]);        QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(20) + w[4]); \
+    w[5]  = sa.w;            QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(21) + w[5]); \
+    w[6]  = s1(w[4]) + L;    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(22) + w[6]); \
+    w[7]  = sb.x + w[0];     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(23) + w[7]); \
+    w[8]  = s1(w[6]) + w[1]; QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(24) + w[8]); \
+    w[9]  = s1(w[7]) + w[2]; QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(25) + w[9]); \
+    w[10] = s1(w[8]) + w[3]; QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(26) + w[10]); \
+    w[11] = s1(w[9]) + w[4]; QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(27) + w[11]); \
+    w[12] = s1(w[10]) + w[5]; QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(28) + w[12]); \
+    w[13] = s1(w[11]) + w[6]; QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(29) + w[13]); \
+    w[14] = s1(w[12]) + w[7] + s0(L); QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(30) + w[14]); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]); QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(31) + w[15]); \
+} while (0)
+#define QSB_TAIL_ILV32() do { \
+    w[0] += s1(w[14]) + w[9] + sb.y;      QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(32) + w[0]); \
+    w[1] += s1(w[15]) + w[10] + s0(w[2]); QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(33) + w[1]); \
+    w[2] += s1(w[0]) + w[11] + sb.z;      QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(34) + w[2]); \
+    w[3] += s1(w[1]) + w[12] + s0(w[4]);  QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(35) + w[3]); \
+    w[4] += s1(w[2]) + w[13] + sb.w;      QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(36) + w[4]); \
+    w[5] += s1(w[3]) + w[14] + s0(w[6]);  QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(37) + w[5]); \
+    w[6] += s1(w[4]) + w[15] + s0(w[7]);  QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(38) + w[6]); \
+    w[7] += s1(w[5]) + w[0] + s0(w[8]);   QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(39) + w[7]); \
+    w[8] += s1(w[6]) + w[1] + s0(w[9]);   QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(40) + w[8]); \
+    w[9] += s1(w[7]) + w[2] + s0(w[10]);  QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(41) + w[9]); \
+    w[10] += s1(w[8]) + w[3] + s0(w[11]); QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(42) + w[10]); \
+    w[11] += s1(w[9]) + w[4] + s0(w[12]); QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(43) + w[11]); \
+    w[12] += s1(w[10]) + w[5] + s0(w[13]); QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(44) + w[12]); \
+    w[13] += s1(w[11]) + w[6] + s0(w[14]); QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(45) + w[13]); \
+    w[14] += s1(w[12]) + w[7] + s0(w[15]); QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(46) + w[14]); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);  QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(47) + w[15]); \
+} while (0)
+#define QSB_TAIL_ILV48() do { \
+    w[0] += s1(w[14]) + w[9] + s0(w[1]) + QSB_Z;   QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(48) + w[0]); \
+    w[1] += s1(w[15]) + w[10] + s0(w[2]) + QSB_Z;  QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(49) + w[1]); \
+    w[2] += s1(w[0]) + w[11] + s0(w[3]) + QSB_Z;   QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(50) + w[2]); \
+    w[3] += s1(w[1]) + w[12] + s0(w[4]) + QSB_Z;   QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(51) + w[3]); \
+    w[4] += s1(w[2]) + w[13] + s0(w[5]) + QSB_Z;   QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(52) + w[4]); \
+    w[5] += s1(w[3]) + w[14] + s0(w[6]) + QSB_Z;   QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(53) + w[5]); \
+    w[6] += s1(w[4]) + w[15] + s0(w[7]) + QSB_Z;   QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(54) + w[6]); \
+    w[7] += s1(w[5]) + w[0] + s0(w[8]) + QSB_Z;    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(55) + w[7]); \
+    w[8] += s1(w[6]) + w[1] + s0(w[9]) + QSB_Z;    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(56) + w[8]); \
+    w[9] += s1(w[7]) + w[2] + s0(w[10]) + QSB_Z;   QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(57) + w[9]); \
+    w[10] += s1(w[8]) + w[3] + s0(w[11]) + QSB_Z;  QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(58) + w[10]); \
+    w[11] += s1(w[9]) + w[4] + s0(w[12]) + QSB_Z;  QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(59) + w[11]); \
+    w[12] += s1(w[10]) + w[5] + s0(w[13]) + QSB_Z; QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(60) + w[12]); \
+    w[13] += s1(w[11]) + w[6] + s0(w[14]) + QSB_Z; QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(61) + w[13]); \
+    w[14] += s1(w[12]) + w[7] + s0(w[15]) + QSB_Z; QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(62) + w[14]); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z; \
+} while (0)
 
 /* Tail transform with the block-uniform W1 terms passed in (sa, sb from qsb_tail_w1_block).
  * Identical schedule and rounds to _SHA256TransformFastTail11Q. */
@@ -1235,6 +2139,11 @@ __device__ __forceinline__ void _SHA256TransformFastTail11S(
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
+#if QSB_TAIL_ILV
+    QSB_TAIL_ILV16();
+    QSB_TAIL_ILV32();
+    QSB_TAIL_ILV48();
+#else
     {   /* W16..W31: the W1-only terms come from shared memory */
         w[0] += sa.y;          /* s0(W1) */
         w[1] += tp.v[5];       /* W17 */
@@ -1276,7 +2185,8 @@ __device__ __forceinline__ void _SHA256TransformFastTail11S(
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
-    QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
+#endif
+    QSB_R63_FF04K(tp.km63, w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
     state[3] = tp.mid[3] + d;
@@ -1328,6 +2238,11 @@ __device__ __forceinline__ void _SHA256TransformFastTail11ST(
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
+#if QSB_TAIL_ILV
+    QSB_TAIL_ILV16();
+    QSB_TAIL_ILV32();
+    QSB_TAIL_ILV48();
+#else
     {   /* W16..W31: the W1-only terms come from shared memory */
         w[0] += sa.y;          /* s0(W1) */
         w[1] += tp.v[5];       /* W17 */
@@ -1369,7 +2284,8 @@ __device__ __forceinline__ void _SHA256TransformFastTail11ST(
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
-    QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
+#endif
+    QSB_R63_FF04K(tp.km63, w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
     state[3] = tp.mid[3] + d;
@@ -1514,11 +2430,15 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CAND_STRIDE (QSB_TREE_N)
 /* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
  * is dead during the fixed-base chain, so the chain may park cold per-thread
- * state there when QSB_S0_SHM is set. */
+ * state there when QSB_S0_SHM is set. With QSB_PREP_NO_SCRATCH the chain does
+ * not take the plane at all, so the array is not declared and the prepare and
+ * finish kernels carry only the 12 KiB digit/cofactor arena. */
+#if !QSB_PREP_NO_SCRATCH
 __device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
     __shared__ uint64_t products[4][2*QSB_TREE_N];
     return products;
 }
+#endif
 
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
@@ -1821,6 +2741,26 @@ static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && Q
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
  * coordinates are anchored at R. Returns their parities in bits 0,1.
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+/* QSB_FIN_ADD_LAZY: the two sums that feed only qsb_field_normalize and a
+ * _ModSub256/_ModMult pair (x_minus = F+H and the u+v rebuild) skip the
+ * conditional p-subtraction and fold the 2^256 carry as K instead. The
+ * result stays in [0, 2^256) and congruent mod p; qsb_field_normalize maps
+ * [p, 2^256) to [0, K) exactly, and _ModSub256/_ModMult already accept the
+ * same lazy range elsewhere on this path. The only dropped case is a second
+ * carry after the K fold, a 2^-223-class event for field-random operands --
+ * the same exposure class QSB_C31 ships. -DQSB_FIN_ADD_LAZY=0 restores the
+ * canonicalizing _ModAdd256 at both sites. */
+#ifndef QSB_FIN_ADD_LAZY
+#define QSB_FIN_ADD_LAZY 1
+#endif
+#if QSB_FIN_ADD_LAZY && !QSB_LAZY
+#error "QSB_FIN_ADD_LAZY needs _ModAddLazy, which only exists under QSB_LAZY"
+#endif
+#if QSB_FIN_ADD_LAZY
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
     uint64_t *xR, uint64_t *yR, uint64_t *K,
@@ -1846,7 +2786,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1857,7 +2797,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);
@@ -1866,6 +2806,15 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
+#ifndef QSB_PK_TAIL_CONSTEXPR
+#define QSB_PK_TAIL_CONSTEXPR 1 /* the generic double-hash epilogue is discarded at instantiation */
+#endif
+#ifndef QSB_PK_BLOCK9
+#define QSB_PK_BLOCK9 1 /* the specialized instantiation's pubkey block is nine words */
+#endif
+#ifndef QSB_PK_SLOPE_SEL
+#define QSB_PK_SLOPE_SEL 1 /* the per-key slope is selected by value, not by array address */
+#endif
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
@@ -1891,9 +2840,30 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
 
     uint64_t qx[4], qy[4], qzz[4], qzzz[4], prod[5];
+#if QSB_STAGE_CONSTEXPR
+    /* STAGE is a template argument. Discarding the unreached arm at
+     * instantiation time keeps the other stage's locals -- the 192-byte
+     * suffix buffer and the whole recovery/SHA epilogue on one side, the
+     * chain state and the digit arena on the other -- out of this
+     * instantiation's frame before the frame is sized, instead of relying on
+     * them being eliminated after it has been. The arm that remains is the
+     * one the run-time test selected for this template argument. */
+    if constexpr (STAGE==0) {
+#else
     if (STAGE==0) {
+#endif
     uint32_t state[8];
+#if QSB_TAIL_CONSTEXPR
+    /* Same argument one level down: the ranked geometry instantiates this
+     * kernel with FAST_TAIL true, and that arm reaches the specialized
+     * eleven-byte tail transform. The generic arm builds a 192-byte byte
+     * buffer and runs up to two full SHA-256 blocks over it; discarded at
+     * instantiation time it cannot contribute a stack frame to the fast
+     * specialization at all. The FAST_TAIL-false instantiation keeps it. */
+    if constexpr (FAST_TAIL) {
+#else
     if (FAST_TAIL) {
+#endif
         // This specialization is selected only for single_hash, normal mode.
         easy_mode = 0;
         single_hash = 1;
@@ -2003,18 +2973,40 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
+#if QSB_PREP_NO_SCRATCH
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+#else
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
+#endif
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
      * its eight limbs do not lengthen the inverse's already pressured state. */
     {
+#if QSB_PREP_CONSTREF
+    /* The recovery abscissa is read-only in the prepare, and its only consumer
+     * is the single a*U product inside the denominator. Referencing the
+     * constant-bank array at that product keeps four limb registers out of the
+     * stage-0 epilogue, where the chain state, the anchor and the tree scratch
+     * pointers are all still live. Same four words in the same order. */
+        qsb_recovery_denominator(qx,qzz,qy,qzzz,pin_u2rx_words,prod);
+#else
         uint64_t prep_xR[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                              pin_u2rx_words[2],pin_u2rx_words[3]};
         qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
+#endif
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
+#if QSB_DEN_W4
+    /* The unusable lane's identity denominator needs four limbs: the record's
+     * fifth word is the scaled multiply's carry slot, and every reader of
+     * this record -- the usability test above, the cofactor tree's leaf
+     * publication and both operands of qsb_field_mul_sc -- takes exactly four
+     * limbs. The fifth store has no reader in either stage. */
+    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=0;}
+#else
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+#endif
     qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
     (void)tree;
     return;
@@ -2022,23 +3014,82 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 
     if(!active)return;
     size_t i=(size_t)idx,s=(size_t)batch_size;
-#if QSB_STREAM2
-    ulonglong2 y01=qsb_ld_v2(&saved[0*s+i]),y23=qsb_ld_v2(&saved[1*s+i]);
-    ulonglong2 v01=qsb_ld_v2(&saved[2*s+i]),v23=qsb_ld_v2(&saved[3*s+i]);
+#if QSB_S2_SAVED_PTR
+    /* The four saved planes are one contiguous allocation of `batch_size`
+     * 16-byte records each, so plane k of lane i sits exactly s records after
+     * plane k-1 of the same lane. Forming the lane's plane-0 address once and
+     * stepping it by the plane stride reaches the same four addresses as the
+     * four independent k*s+i index expressions, with the scaled stride
+     * computed once instead of per plane. */
+    const ulonglong2 *sp0=saved+i;
+    const ulonglong2 *sp2=sp0+2*s;
 #else
-    ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
-    ulonglong2 v01=saved[2*s+i],v23=saved[3*s+i];
+    const ulonglong2 *sp0=saved+i;
+    const ulonglong2 *sp2=saved+(2*s+i);
+#endif
+#if QSB_S2_SAVED_SPLIT
+    /* The live-lane gate reads only the tbar plane pair, so those two vector
+     * loads issue first and the vbar pair is not requested at all by a lane
+     * that returns. Identical addresses and identical values: stage 2 never
+     * writes `saved`, so the two pairs are independent reads and only their
+     * issue order and the point of the early return move. */
+#if QSB_STREAM2
+    ulonglong2 v01=qsb_ld_v2(sp2),v23=qsb_ld_v2(sp2+s);
+#else
+    ulonglong2 v01=*sp2,v23=*(sp2+s);
+#endif
+    qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
+    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+#if QSB_STREAM2
+    ulonglong2 y01=qsb_ld_v2(sp0),y23=qsb_ld_v2(sp0+s);
+#else
+    ulonglong2 y01=*sp0,y23=*(sp0+s);
+#endif
+    qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
+#else
+#if QSB_STREAM2
+    ulonglong2 y01=qsb_ld_v2(sp0),y23=qsb_ld_v2(sp0+s);
+    ulonglong2 v01=qsb_ld_v2(sp2),v23=qsb_ld_v2(sp2+s);
+#else
+    ulonglong2 y01=*sp0,y23=*(sp0+s);
+    ulonglong2 v01=*sp2,v23=*(sp2+s);
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+#endif
     uint64_t weighted_inv[4];
+#if QSB_S2_GRID_ROOTS
+    /* The finish kernel is launched with exactly (batch_size + S2_THREADS - 1)
+     * / S2_THREADS blocks and S2_THREADS == TREE_N is enforced above, so the
+     * launch geometry already carries the number of root planes. Reading the
+     * grid special register replaces the rounding division of the batch size
+     * and keeps the second root record's address off the batch-size parameter
+     * load. Same count, same two records. */
+    const size_t root_count=(size_t)gridDim.x;
+#else
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+#endif
 #if QSB_ROOT_V2
     {   /* roots is cudaMalloc'd (256-byte aligned) and indexed in 4-limb (32-byte) records */
         const ulonglong2 *r2=(const ulonglong2 *)roots;
+#if QSB_S2_ROOT_LDG
+        /* Both records are addressed by blockIdx.x alone, so all threads of the
+         * block read the same 64 bytes, and stage 2 writes neither `roots` nor
+         * anything that can alias it (the root planes are written by the
+         * earlier prepare launches, and this kernel's only stores are the
+         * hit counters).
+         * The non-coherent read-only path is therefore legal and lets the four
+         * vector loads broadcast from one cache line per record instead of
+         * being re-issued per warp behind the possible alias with `saved`.
+         * Same four addresses, same sixty-four bytes. */
+        const size_t ra=2ull*blockIdx.x,rb=2ull*(root_count+blockIdx.x);
+        ulonglong2 a01=__ldg(r2+ra),a23=__ldg(r2+ra+1);
+        ulonglong2 b01=__ldg(r2+rb),b23=__ldg(r2+rb+1);
+#else
         ulonglong2 a01=r2[2ull*blockIdx.x],a23=r2[2ull*blockIdx.x+1];
         ulonglong2 b01=r2[2ull*(root_count+blockIdx.x)],b23=r2[2ull*(root_count+blockIdx.x)+1];
+#endif
         prod[0]=a01.x;prod[1]=a01.y;prod[2]=a23.x;prod[3]=a23.y;
         weighted_inv[0]=b01.x;weighted_inv[1]=b01.y;weighted_inv[2]=b23.x;weighted_inv[3]=b23.y;
     }
@@ -2046,8 +3097,33 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
     for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
 #endif
+#if QSB_S2_ROOT_PROD4
+    /* The fifth limb of the stage-0 denominator record is a carry slot of the
+     * scaled field multiply, and the finish reads the root record as four
+     * canonical limbs only (qsb_packed_slopes / qsb_packed_finish take it as
+     * the right operand of one raw product, which loads exactly four words).
+     * The zeroing store therefore has no reader in this kernel. */
+#else
     prod[4]=0;
+#endif
     (void)tree;
+#if QSB_S2_SPLIT_RECOVER
+    /* The shared half of the recovery: the two inverse products and the three
+     * slope words. The per-key half runs inside the loop below, so the second
+     * key's abscissa and parity product are formed after the first key's hash
+     * instead of alongside it. */
+    uint64_t sl[4],sm[4],ssum[4];
+    qsb_packed_slopes(qy,qzzz,prod,weighted_inv,sl,sm,ssum);
+#elif QSB_FINISH_CONSTREF
+    /* The three problem constants xR, yR and c are read-only in the finish, so
+     * each use is a constant-bank load at its own point of use instead of
+     * twelve limb registers held live across the whole recovery epilogue
+     * (two raw multiplies, the two "+a" adds and both parity sums). Same
+     * words, same order of operations. */
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_packed_finish(
+        qy,qzzz,prod,weighted_inv,pin_u2rx_words,pin_u2ry_words,pin_recovery_c,q1x,q2x);
+#else
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
@@ -2057,6 +3133,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+#endif
 
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
@@ -2065,21 +3142,72 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     #pragma unroll 1
 #endif
     for(int ri=0;ri<2;ri++){
+#if QSB_S2_SPLIT_RECOVER
+        uint64_t qrx[4];
+#if QSB_PK_SLOPE_SEL
+        /* Selecting the key's slope by value keeps both slope words in
+         * registers: the pointer form hands the inlined branch an address
+         * that is only known at run time, which forces the two four-limb
+         * slope arrays into local memory for the rolled two-key loop. Four
+         * predicated moves of the same eight words, in the same order, and
+         * the branch reads exactly the four limbs it read before. */
+        uint64_t sk[4];
+        #pragma unroll
+        for(int k=0;k<4;k++)sk[k]=ri ? sm[k] : sl[k];
+        const uint32_t pbit=qsb_packed_branch(sk,ssum,pin_u2rx_words,
+                                              pin_u2ry_words,pin_recovery_c,
+                                              ri ? 0u : 1u,qrx);
+#else
+        const uint32_t pbit=qsb_packed_branch(ri ? sm : sl,ssum,pin_u2rx_words,
+                                              pin_u2ry_words,pin_recovery_c,
+                                              ri ? 0u : 1u,qrx);
+#endif
+        uint64_t sx0=qrx[0],sx1=qrx[1],sx2=qrx[2],sx3=qrx[3];
+#else
+        const uint32_t pbit=(y_parities>>ri)&1u;
         uint64_t sx0=ri ? q2x[0] : q1x[0];
         uint64_t sx1=ri ? q2x[1] : q1x[1];
         uint64_t sx2=ri ? q2x[2] : q1x[2];
         uint64_t sx3=ri ? q2x[3] : q1x[3];
+#endif
         uint32_t x0=(uint32_t)sx0, x1=(uint32_t)(sx0>>32);
         uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
         uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
         uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
+#if QSB_PK_BLOCK9 && QSB_PK_TAIL_CONSTEXPR && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+        /* The specialized transform reads nine words and folds the padding
+         * and the length into its own constants, and with the generic
+         * epilogue discarded at instantiation time nothing in this
+         * instantiation writes words nine through fifteen. Sizing the block
+         * to what is written keeps seven words out of the frame before it is
+         * sized. The generic instantiation keeps all sixteen. */
+        uint32_t pb[FAST_TAIL ? 9 : 16];
+#else
         uint32_t pb[16];
-        pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
+#endif
+        pb[0]=__byte_perm(x7,0x2+(uint8_t)pbit,0x4321);
         pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
         pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
         pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
         pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+#if QSB_PK_TAIL_CONSTEXPR && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+        /* FAST_TAIL is a template argument and the ranked gate either takes
+         * the hit or continues, so the generic double-hash epilogue below is
+         * unreachable in that instantiation -- but its 32-byte digest buffer,
+         * 64-byte second-block buffer and sixteen-word block array are still
+         * counted when the frame is sized. Discarding the arm at
+         * instantiation time removes them from the specialization's frame
+         * instead of relying on them being eliminated after it has been
+         * sized. The generic instantiation keeps the epilogue verbatim. */
+        if constexpr (FAST_TAIL) {
+            if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
+                uint32_t pos=atomicAdd(d_hit_cnt,1);
+                if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
+                return;
+            }
+            continue;
+        } else {
+#elif QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
         if (FAST_TAIL) {
             /* ranked gate: only digest word 0 is read */
             if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
@@ -2132,6 +3260,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
             if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30)|(1u<<31);
             return;
         }
+#if QSB_PK_TAIL_CONSTEXPR && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+        }
+#endif
     }
     }
 }

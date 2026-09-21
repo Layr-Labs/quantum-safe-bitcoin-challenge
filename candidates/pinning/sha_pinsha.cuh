@@ -106,11 +106,32 @@ __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by t
 #endif
 
 /* One round; kw = K_i + W_i (a literal when W_i is constant). */
+/* QSB_RL_BAL0: the ALU-add round is emitted as a balanced sum instead of a
+ * left-to-right chain. h + kw and S1(e) + Ch(e,f,g) are independent, so
+ * pairing them leaves t1 two adds past h rather than three, and the a-slot
+ * output is still one add past t1 because S0(a) + Maj(a,b,c) never depends on
+ * t1. Exactness: the term multisets of t1, of the e-slot word and of the
+ * a-slot word are untouched, and addition mod 2^32 is associative and
+ * commutative, so all three words are bit-identical to the chained form; the
+ * three-input adds still cover the same four-, three- and two-term sums, so
+ * the round issues the same instructions. -DQSB_RL_BAL0=0 restores the chain.
+ */
+#ifndef QSB_RL_BAL0
+#define QSB_RL_BAL0 1
+#endif
+#if QSB_RL_BAL0
+#define QSB_RL(a, b, c, d, e, f, g, h, kw) \
+    t1 = (h + (kw)) + (S1(e) + Ch(e,f,g)); \
+    t2 = S0(a) + Maj(a,b,c); \
+    d += t1 + QSB_Z; \
+    h = t1 + t2;
+#else
 #define QSB_RL(a, b, c, d, e, f, g, h, kw) \
     t1 = h + S1(e) + Ch(e,f,g) + (kw); \
     t2 = S0(a) + Maj(a,b,c); \
     d += t1 + QSB_Z; \
     h = t1 + t2;
+#endif
 
 #define QSB_RND15L(k) {\
 QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(k) + w[0]);\
@@ -201,6 +222,65 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;\
     out0 = t1 + S0(b) + Maj(b,c,d); \
     out4 = e + t1 + (F4mF0);
 
+/* QSB_R63_KSPLIT: the same round with the block-invariant part of KW (K63 + F0
+ * -- a literal for the digest transform, a preloaded midstate word for the
+ * tail transform) kept off W63's dependence. W63 is the last schedule word of
+ * the block, so every other term of round 63 is ready before it is: adding the
+ * invariant to a, and pairing S1(f) + Ch and S0(b) + Maj, leaves W63 two adds
+ * from out0 instead of three. Exactness: out0 keeps the term multiset
+ * {a, KM, W63, S1(f), Ch(f,g,h), S0(b), Maj(b,c,d)} and out4 keeps
+ * {e, F4mF0, a, KM, W63, S1(f), Ch(f,g,h)}; + mod 2^32 is associative and
+ * commutative, so both outputs are bit-identical to the chained form and the
+ * sums still fold into the same number of three-input adds.
+ * -DQSB_R63_KSPLIT=0 emits the chained form over the same operands. */
+#ifndef QSB_R63_KSPLIT
+#define QSB_R63_KSPLIT 1
+#endif
+#if QSB_R63_KSPLIT
+#define QSB_R63_FF04K(KMF0, WL, F4mF0, out0, out4) \
+    t2 = (a + (KMF0)) + (WL); \
+    t1 = t2 + (S1(f) + Ch(f,g,h)); \
+    out0 = t1 + (S0(b) + Maj(b,c,d)); \
+    out4 = (e + (F4mF0)) + t1;
+#else
+#define QSB_R63_FF04K(KMF0, WL, F4mF0, out0, out4) \
+    QSB_R63_FF04((KMF0) + (WL), F4mF0, out0, out4)
+#endif
+
+/* QSB_D32_ILV16 / QSB_D32_ILV32: the SHA256d second compression keeps its message
+ * schedule as three sixteen-word bursts followed by three sixteen-round bursts, so all
+ * sixteen schedule words of a group are live across the group's first round. Each word
+ * is instead produced immediately before the round that consumes it. The defining
+ * statements keep their original order and their original reads (a statement that reads
+ * w[i] with i < j still reads the updated W(16k+i), one with i > j still reads the old
+ * word), and a round only writes a..h, so the interleaved form is bit-identical; only
+ * the schedule live range shrinks from sixteen words to the rolling window.
+ */
+#ifndef QSB_D32_ILV16
+#define QSB_D32_ILV16 1   /* rounds 16..31 of the digest-32 block take their sparse
+                           * schedule word one at a time */
+#endif
+#ifndef QSB_D32_ILV32
+#define QSB_D32_ILV32 1   /* rounds 32..63 of the digest-32 block use the rolling
+                           * QSB_STEPL schedule instead of two WMIX bursts */
+#endif
+/* QSB_D32_W63_BAL: the digest-32 block's last schedule word is the only
+ * schedule step whose consumer is the folded round 63, and it was emitted as
+ * the left-to-right chain ((w15 + s1(w13)) + w8) + s0(w0): three dependent
+ * adds behind s1(w[13]), which is itself two rounds of latency behind the
+ * w[13] step. Pairing the two independent halves as (s1(w13) + w8) +
+ * (w15 + s0(w0)) issues the same three adds of the same four terms with
+ * dependent depth two, and w15 + s0(w0) is ready long before s1(w13) is.
+ * Addition mod 2^32 is associative and commutative, so W63 is bit-identical
+ * and out[0]/out[4] are unchanged. -DQSB_D32_W63_BAL=0 restores the chain. */
+#ifndef QSB_D32_W63_BAL
+#define QSB_D32_W63_BAL 1
+#endif
+#if QSB_D32_W63_BAL && !QSB_D32_ILV32
+#error "QSB_D32_W63_BAL reassociates the rolling digest-32 tail word"
+#endif
+
+
 /* SHA256d second compression of a 32-byte message m[0..7] (pad W8=0x80000000,
  * W9..14=0, W15=256) from the IV. Bit-identical to _SHA256TransformDigest32. */
 __device__ __forceinline__ void _SHA256TransformDigest32Q(
@@ -231,6 +311,40 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
 
+#if QSB_D32_ILV16
+    w[0] += s0(w[1]);
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(16) + w[0]);
+    w[1] += s1(256u) + s0(w[2]);
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(17) + w[1]);
+    w[2] += s1(w[0]) + s0(w[3]);
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(18) + w[2]);
+    w[3] += s1(w[1]) + s0(w[4]);
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(19) + w[3]);
+    w[4] += s1(w[2]) + s0(w[5]);
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(20) + w[4]);
+    w[5] += s1(w[3]) + s0(w[6]);
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(21) + w[5]);
+    w[6] += s1(w[4]) + 256u + s0(w[7]);
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(22) + w[6]);
+    w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(23) + w[7]);
+    w[8]  = 0x80000000u + s1(w[6]) + w[1] + QSB_Z;
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(24) + w[8]);
+    w[9]  = s1(w[7]) + w[2];
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(25) + w[9]);
+    w[10] = s1(w[8]) + w[3];
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(26) + w[10]);
+    w[11] = s1(w[9]) + w[4];
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(27) + w[11]);
+    w[12] = s1(w[10]) + w[5];
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(28) + w[12]);
+    w[13] = s1(w[11]) + w[6];
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(29) + w[13]);
+    w[14] = s1(w[12]) + w[7] + s0(256u);
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(30) + w[14]);
+    w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(31) + w[15]);
+#else
     {
         w[0] += s0(w[1]);
         w[1] += s1(256u) + s0(w[2]);
@@ -251,11 +365,23 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     }
 
     QSB_RND16L(16);
+#endif
+
+#if QSB_D32_ILV32
+    QSB_INTERLEAVED16L(32);
+    QSB_INTERLEAVED15L(48);
+#if QSB_D32_W63_BAL
+    w[15] = (s1(w[13]) + w[8]) + (w[15] + s0(w[0]));
+#else
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);
+#endif
+#else
     WMIX();
     QSB_RND16L(32);
     WMIX();
     QSB_RND15L(48);
-    QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
+#endif
+    QSB_R63_FF04K(qsb_klit(63) + QSB_IV0, w[15], QSB_IV4 - QSB_IV0, out[0], out[4]);
     out[1] = QSB_IV1 + b;
     out[2] = QSB_IV2 + c;
     out[3] = QSB_IV3 + d;
@@ -275,6 +401,29 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
 #else
 #define QSB_S0M(x) S0(x)
 #endif
+/* QSB_RND_BAL: the steered round and schedule step are emitted as balanced addition
+ * trees instead of left-to-right chains. Every qsb_fadd is a*1 + b = a + b mod 2^32, and
+ * addition mod 2^32 is associative and commutative, so each reassociated form produces
+ * exactly the bits the chained form produced, with the same number of IMADs.
+ *  - round: t1 = (h + KW) + (S1(e) + Ch(e,f,g)) has depth 2 over h instead of 3, and the
+ *    a-slot output h = t1 + (S0(a) + Maj(a,b,c)) is one add past t1 instead of two, since
+ *    S0(a) + Maj(a,b,c) does not depend on t1. The state recurrence a_{i+1} <- a_i is the
+ *    critical path of the 64-round compression, so this removes one IMAD latency per round
+ *    from it while issuing the same six instructions.
+ *  - schedule: w[j] = (s1(w[j+14]) + w[j+9]) + (w[j] + s0(w[j+1])) has depth 2 over the
+ *    two-rounds-back word instead of 3, which is the schedule recurrence's own path. */
+#ifndef QSB_RND_BAL
+#define QSB_RND_BAL 1
+#endif
+#if QSB_RND_BAL
+#define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
+    t2 = qsb_fadd(QSB_S1M(e), one, Ch(e,f,g)); \
+    t1 = qsb_fadd(h, one, (kw)); \
+    t1 = qsb_fadd(t1, one, t2); \
+    t2 = qsb_fadd(QSB_S0M(a), one, Maj(a,b,c)); \
+    d  = qsb_fadd(d, one, t1); \
+    h  = qsb_fadd(t1, one, t2);
+#else
 #define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
     t1 = qsb_fadd(h, one, (kw)); \
     t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
@@ -282,6 +431,7 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     d  = qsb_fadd(d, one, t1); \
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
 #define QSB_RND15L_F(k) {\
 QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(k) + w[0]);\
 QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(k + 1) + w[1]);\
@@ -303,12 +453,21 @@ QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(k + 14) + w[14]);\
 QSB_RND15L_F(k);\
 QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
 }
+#if QSB_RND_BAL
+#define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
+    t1 = qsb_fadd(QSB_s1M(w[((j)+14)&15]), one, w[((j)+9)&15]); \
+    t2 = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
+    w[j] = qsb_fadd(t1, one, t2); \
+    QSB_RL_F(a,b,c,d,e,f,g,h,qsb_klit((base)+(j)) + w[j]); \
+} while (0)
+#else
 #define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
     w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
     w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
     w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
     QSB_RL_F(a,b,c,d,e,f,g,h,qsb_klit((base)+(j)) + w[j]); \
 } while (0)
+#endif
 #define QSB_INTERLEAVED15L_F(base) do { \
     QSB_STEPL_F(0,a,b,c,d,e,f,g,h,base); \
     QSB_STEPL_F(1,h,a,b,c,d,e,f,g,base); \
@@ -330,6 +489,26 @@ QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
     QSB_INTERLEAVED15L_F(base); \
     QSB_STEPL_F(15,b,c,d,e,f,g,h,a,base); \
 } while (0)
+#endif
+
+/* QSB_PK_ILV16: rounds 16..31 of the pubkey compression take their schedule word one at
+ * a time. The sixteen sparse expansions of this block were emitted as one burst, so all
+ * sixteen words of the group plus the eight state words are live across round 16; the
+ * rolling form holds only the recurrence window (w[j-2], w[j-7], w[j-15] are the words a
+ * step still needs), which is what the promoted interleave did for rounds 32..63.
+ * Exactness: the burst is a straight-line sequence in the same order as the rounds it
+ * feeds, and a round writes only state words, never w[]. Moving round 16+j between the
+ * assignments of w[j] and w[j+1] therefore leaves every operand of every expansion the
+ * value the burst gave it -- w[0] is already the updated W16 where w[7] and w[15] read
+ * it, exactly as before -- and each round consumes the same K_i + W_i. Bit-identical.
+ * The rolling form has no separate non-steered body, so it is inert without the steered
+ * round macro. */
+#ifndef QSB_PK_ILV16
+#define QSB_PK_ILV16 1
+#endif
+#if QSB_PK_ILV16 && !QSB_SHA_FMA_ADD
+#undef QSB_PK_ILV16
+#define QSB_PK_ILV16 0
 #endif
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
@@ -361,6 +540,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 0x108u);
 
+#if !QSB_PK_ILV16
     {
 #if QSB_SHA_FMA_ADD
         const uint32_t one = pin_one_mul;
@@ -382,13 +562,92 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[14] = QSB_s1M(w[12]) + w[7] + s0(0x108u);
         w[15] = 0x108u + QSB_s1M(w[13]) + w[8] + QSB_s0M(w[0]);
     }
+#endif
 
 #if QSB_SHA_FMA_ADD
     {
         const uint32_t one = pin_one_mul;
+#if QSB_PK_ILV16
+        w[0] += QSB_s0M(w[1]);
+        QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(16) + w[0]);
+        w[1] += s1(0x108u) + QSB_s0M(w[2]);
+        QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(17) + w[1]);
+        w[2] += QSB_s1M(w[0]) + QSB_s0M(w[3]);
+        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(18) + w[2]);
+        w[3] += QSB_s1M(w[1]) + QSB_s0M(w[4]);
+        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(19) + w[3]);
+        w[4] += QSB_s1M(w[2]) + QSB_s0M(w[5]);
+        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(20) + w[4]);
+        w[5] += QSB_s1M(w[3]) + QSB_s0M(w[6]);
+        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(21) + w[5]);
+        w[6] += QSB_s1M(w[4]) + 0x108u + QSB_s0M(w[7]);
+        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(22) + w[6]);
+        w[7] += QSB_s1M(w[5]) + w[0] + QSB_s0M(w[8]);
+        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(23) + w[7]);
+        w[8] += QSB_s1M(w[6]) + w[1];
+        QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(24) + w[8]);
+        w[9]  = QSB_s1M(w[7]) + w[2];
+        QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(25) + w[9]);
+        w[10] = QSB_s1M(w[8]) + w[3];
+        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(26) + w[10]);
+        w[11] = QSB_s1M(w[9]) + w[4];
+        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(27) + w[11]);
+        w[12] = QSB_s1M(w[10]) + w[5];
+        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(28) + w[12]);
+        w[13] = QSB_s1M(w[11]) + w[6];
+        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(29) + w[13]);
+        w[14] = QSB_s1M(w[12]) + w[7] + s0(0x108u);
+        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(30) + w[14]);
+        w[15] = 0x108u + QSB_s1M(w[13]) + w[8] + QSB_s0M(w[0]);
+        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(31) + w[15]);
+#else
         QSB_RND16L_F(16);
+#endif
         QSB_INTERLEAVED16L_F(32);
         QSB_INTERLEAVED15L_F(48);
+/* QSB_RND_BAL2: the balanced tail still puts the round constant on the w[15]
+ * side of the reduction, so the returned word is a + w[15] + K, then + the
+ * round's two term pairs: four dependent adds behind the last schedule word.
+ * a is round 62's output and the folded constant qsb_klit(63) + QSB_IV0 is a
+ * literal, so a + K depends on neither w[13], w[8] nor w[0] and is formed
+ * while the schedule word is still being reduced; the sum then closes as
+ * (a + K) + w[15] and (S1(f) + Ch) + (S0(b) + Maj) in parallel. The same nine
+ * 32-bit additions of the same nine terms are issued -- addition mod 2^32 is
+ * associative and commutative, so the gate word is bit-identical -- with the
+ * dependent depth behind w[15] cut from four to three and the round's own
+ * pair sum lifted off that path entirely. -DQSB_RND_BAL2=0 restores the
+ * chained-constant tail. */
+#ifndef QSB_RND_BAL2
+#define QSB_RND_BAL2 1
+#endif
+#if QSB_RND_BAL2 && !QSB_RND_BAL
+#error "QSB_RND_BAL2 reassociates the balanced round-63 tail"
+#endif
+#if QSB_RND_BAL2
+        const uint32_t ka = qsb_fadd(a, one, qsb_klit(63) + QSB_IV0);
+        t1 = qsb_fadd(s1(w[13]), one, w[8]);
+        t2 = qsb_fadd(w[15], one, s0(w[0]));
+        w[15] = qsb_fadd(t1, one, t2);
+        t1 = qsb_fadd(QSB_S1M(f), one, Ch(f,g,h));
+        t2 = qsb_fadd(QSB_S0M(b), one, Maj(b,c,d));
+        t1 = qsb_fadd(t1, one, t2);
+        t2 = qsb_fadd(ka, one, w[15]);
+        return qsb_fadd(t1, one, t2);
+#elif QSB_RND_BAL
+        /* Same six IMADs as the chained tail, reassociated: the last schedule word and
+         * round 63's a-output are each a sum of independent terms, so pairing them halves
+         * the dependent depth. Addition mod 2^32 is associative, so the returned word is
+         * bit-identical. */
+        t1 = qsb_fadd(s1(w[13]), one, w[8]);
+        t2 = qsb_fadd(w[15], one, s0(w[0]));
+        w[15] = qsb_fadd(t1, one, t2);
+        t1 = qsb_fadd(a, one, w[15]);
+        t1 = qsb_fadd(t1, one, qsb_klit(63) + QSB_IV0);
+        t2 = qsb_fadd(QSB_S1M(f), one, Ch(f,g,h));
+        const uint32_t tm = qsb_fadd(QSB_S0M(b), one, Maj(b,c,d));
+        t2 = qsb_fadd(t2, one, tm);
+        return qsb_fadd(t1, one, t2);
+#else
         w[15] = qsb_fadd(w[15], one, s1(w[13]));
         w[15] = qsb_fadd(w[15], one, w[8]);
         w[15] = qsb_fadd(w[15], one, s0(w[0]));
@@ -399,6 +658,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         r = qsb_fadd(r, one, QSB_S0M(b));
         r = qsb_fadd(r, one, Maj(b,c,d));
         return r;
+#endif
     }
 #else
     QSB_RND16L(16);
