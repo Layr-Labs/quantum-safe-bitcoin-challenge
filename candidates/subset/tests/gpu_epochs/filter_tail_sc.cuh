@@ -8,6 +8,20 @@
 #ifndef QSB_SHORT_CARRY3
 #define QSB_SHORT_CARRY3 1
 #endif
+/* QSB_SHORT_CARRY4 (kill switch, default off): keep the K-correction's
+ * borrow/carry in limb 0 only, dropping the limb-1 propagation that
+ * QSB_SHORT_CARRY3 retains. Removes one instruction from each of qsb_fsub and
+ * qsb_fadd, which are the pre-inverse/post-inverse tail helpers on the
+ * speculative path. Raises the truncation exposure from <= 2^-95 to the
+ * 2^-31 class: limb0 must underflow/overflow for the dropped bit to matter.
+ * Filter-only, so the same safety argument as the rest of this file holds --
+ * a corrupted speculative x-coordinate loses a tentative hit and can never
+ * publish one, because kernel_verify_pair_hits recomputes every tentative hit
+ * with the unchanged exact arithmetic. Mechanism credit: PR 654 (Meganpark980320),
+ * which measured +0.377% over this frontier on a full 1200 s matched pair. */
+#ifndef QSB_SHORT_CARRY4
+#define QSB_SHORT_CARRY4 1
+#endif
 #if QSB_SHORT_CARRY3
 // r = a - b mod p for a,b < 2^256. The borrow correction subtracts K = 2^32+977 from the
 // wrapped difference; its borrow is kept through limb 1 only. It would have to cross limb 1
@@ -21,8 +35,12 @@ __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const u
         "subc.cc.u64 %3,%7,%11;\n\t"
         "subc.u64 brw,0,0;\n\t"
         "and.b64 lo,brw,0x1000003D1;\n\t"
+#if QSB_SHORT_CARRY4
+        "sub.u64 %0,%0,lo;\n\t}"
+#else
         "sub.cc.u64 %0,%0,lo;\n\t"
         "subc.u64 %1,%1,0;\n\t}"
+#endif
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
@@ -38,8 +56,12 @@ __device__ __forceinline__ void qsb_fadd(uint64_t *r, const uint64_t *a, const u
         "addc.cc.u64 %3,%7,%11;\n\t"
         "addc.u64 h,0,0;\n\t"
         "mul.lo.u64 t,h,0x1000003d1;\n\t"
+#if QSB_SHORT_CARRY4
+        "add.u64 %0,%0,t;\n\t}"
+#else
         "add.cc.u64 %0,%0,t;\n\t"
         "addc.u64 %1,%1,0;\n\t}"
+#endif
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
