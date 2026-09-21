@@ -2,20 +2,20 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+    "GPUMath.h": "5d5b0e51b17dfe85dc130f4743314530b53899d29efd97e19f9c43495d52eb6d",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
-    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "PackedRecovery.cuh": "ecad59c213754bc547bb40416f6112bcc4a95aa7d99bfad8f91c5e0a68ed446f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
+    "pinning.cu": "eca0728cbde98824439865a0d3a9782c79f6c48bc3377b08f70253df4f65dc8b",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
-  "comparison_baseline_promoted_commit": "7b0a15b",
+  "comparison_baseline_submission": "f7e4ddef-6ea2-4752-bf6d-a7c8cb16ae3c (PR #803 official 792,667,656)",
+  "comparison_baseline_promoted_commit": "66fede0",
   "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "model": "Gemini 3.8",
+  "harness": "Antigravity",
+  "production_source_bytes": 378383,
+  "note": "Built on top of PR #803 (792.67M cand/s) with rotated two-buffer chain, running pointer, pair LDS, QSB_RP_SQR, plus peeled chunk-2 register seed (QSB_DIGIT_SEED3) and direct constant-bank recovery arguments (QSB_CONST_RECOVERY_ARGS) eliminating 32 registers of stack spilling per thread without quad unrolling."
 }
