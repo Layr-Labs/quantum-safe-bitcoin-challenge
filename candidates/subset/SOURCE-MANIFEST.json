@@ -1,0 +1,69 @@
+{
+  "track": "subset",
+  "source_only": true,
+  "base_package_commit": "347394e9f6567d33b405621fccc12dc8a070c62f",
+  "base_public_commit": "ac53faff38a192d78e9a63f839b6e97c64dc2b66",
+  "base_submission_id": "f8197832-fb79-4765-8b17-70034edaa492",
+  "mechanism_public_pr": 885,
+  "mechanism_public_commit": "3e166ba462b03affb785852589606398b10f32b2",
+  "model": "GPT 5.6 Sol",
+  "harness": "Codex",
+  "runtime_delta_from_base": [
+    "tests/gpu_epochs/pair_shared.cuh",
+    "tests/gpu_epochs/parity_window_subset.cuh"
+  ],
+  "production_source_bytes": 257457,
+  "production_source_sha256": {
+    "submission-note.md": "ca95438c1243dc3f884ff524c88eaaa0f497b89f1134ed3415616c2ce5f55ec7",
+    "subset.cu": "103101573be38d528994aa8c35c35a06ae1a23b0d2d856dcfd5bc606392976a9",
+    "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "tests/gpu_epochs/epoch_groups.cuh": "ae0b03eae7d0c8036020a3af0d7965530372789ed4ee4bdbde7cc44be22a5c10",
+    "tests/gpu_epochs/pair_shared.cuh": "bebdd754b5219eaf99b4afc38755999b3eb65b24bd9155df9409069f73d0cc67",
+    "tests/gpu_epochs/parity_window_subset.cuh": "e0d48dbdb45b639ad0220aa108e336bd2287daf166990f8e0dcde32a47d03737",
+    "tests/gpu_epochs/tree.cu": "5d6c5e555608f1a7804b4fe6d8061b0c4422660138d9ae48145d70968529065b",
+    "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685"
+  },
+  "compile": {
+    "command": "nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm (CUDA 12.8)",
+    "digest_resources": "128 registers/thread, 49152B shared/CTA, 1 barrier, 0 stack, 0 spill",
+    "setup_status": "PASS: QSB_PROBLEM_SEED=777 ./setup.sh subset; CPU verifier smoke PASS; generated files removed and problem files restored",
+    "digest_sass": {
+      "control_instructions": 49304,
+      "candidate_instructions": 49926,
+      "control_sha256": "98c8e32f37bbec5ba980000056c31593d430b05c17f6b7618ae324373ffafc17",
+      "candidate_sha256": "fb7d66a98d26bcdc8d35eade5a0bf84bd07419565e238235ff0546625eaa8d4c"
+    }
+  },
+  "parity_vector": {
+    "rows": 16777216,
+    "mismatches": 0,
+    "fast": 16777207,
+    "fallback": 9
+  },
+  "fixed64_abba": {
+    "problem_seed": 526487517,
+    "zeros": 24,
+    "attempts_per_arm": 8589934592,
+    "control_wall_ms": [
+      180.463236,
+      180.906521
+    ],
+    "candidate_wall_ms": [
+      179.584988,
+      179.617404
+    ],
+    "control_mean_wall_ms": 180.6848785,
+    "candidate_mean_wall_ms": 179.601196,
+    "completed_work_gain_pct": 0.6033827,
+    "adjacent_gain_pct": [
+      0.4890431,
+      0.7177016
+    ],
+    "hits_per_arm": 1096,
+    "raw_hit_sha256": "8dda10dcf41d84faca98fb0da3de20763709a3c15cb4f002da8ae3cc3bba7c4f",
+    "normalized_hit_sha256": "1b5c727cb1380c6ae0438e74011582cb652620bc0d26b7d14ccea59075572c06",
+    "symmetric_difference": 0
+  },
+  "attribution": "Parity-window mechanism ported from public PR885; co-author EvanYan1024. Existing PR871 attribution retained in submission-note.md."
+}
