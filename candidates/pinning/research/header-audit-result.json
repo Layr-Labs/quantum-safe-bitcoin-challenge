@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "header_sha256": "8906f9ac9038a6b112f699424067a301c13218d11ec238e5d18dfce9aba379c0",
+  "source_translated_cases": 128112,
+  "fast": 121056,
+  "fallback": 7056,
+  "product_counts": {
+    "wide": 14,
+    "high": 11,
+    "bit_and": 7,
+    "constant_977": 4
+  },
+  "scope": "Every executable header statement translated to Python with u32/u64 wrap, compared to promoted raw contract. Not CUDA compilation, ABI validation, or GPU performance evidence. Caller must use original full fallback."
+}

@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "parity_cases": 22028,
+  "fast": 20224,
+  "fallback": 1804,
+  "fallback_reasons": {
+    "parity_or_zero_boundary": 628,
+    "product_high_carry": 1104,
+    "fold_carry": 72
+  },
+  "actual_promoted_PTX_contract_cases": 425,
+  "partial_product_terms": 43,
+  "full_product_terms": 64,
+  "tail_bound": "350479306585078893035257665437554146832375547667594466031850450059265/26959946667150639794667015087019630673637144422540572481103610249216",
+  "tail_integer_strict_bound": 13,
+  "scope": "Exact certificate preserves promotedrawproductparity,completefallbackonallambiguousboundaries;Pythonprototypeonly,nativecode/performanceunmeasured."
+}
