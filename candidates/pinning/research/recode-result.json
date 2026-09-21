@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "scalar_input_cases": 10012,
+  "additional_pair_cases": 2081,
+  "round_comparisons": 157209,
+  "final_pair_exhaustive": 223729,
+  "final_table_ranks": 55933,
+  "signed128_negative_controls": 1166,
+  "wrong_inverse_negative_controls": 167796,
+  "max_observed_abs_bits": [
+    128,
+    119,
+    110,
+    101,
+    92,
+    82,
+    73,
+    64,
+    55,
+    45,
+    36,
+    27,
+    18,
+    8
+  ],
+  "scope": "Python fixed-u32 mirror vs independent big-int descriptor and quotient reference; integrated CUDA source is not compiled or executed."
+}

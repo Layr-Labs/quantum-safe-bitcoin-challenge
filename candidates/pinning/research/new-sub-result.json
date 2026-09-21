@@ -1,0 +1,5 @@
+{
+  "status": "PASS",
+  "actual_new_subtract_ptx_cases": 10025,
+  "scope": "integer PTX semantic model, no CUDA compilation"
+}

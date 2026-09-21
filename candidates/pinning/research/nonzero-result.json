@@ -1,0 +1,112 @@
+{
+  "status": "PASS",
+  "exhaustive_digit_pairs": 631808,
+  "coordinate_digit_maxima": {
+    "512": 341,
+    "608": 405
+  },
+  "regular_difference_Q_bounds": [
+    {
+      "digit": 0,
+      "weight": 1,
+      "prefix_bound": 0,
+      "difference_coordinate_bound": 341,
+      "Q_upper": 348843
+    },
+    {
+      "digit": 1,
+      "weight": 512,
+      "prefix_bound": 341,
+      "difference_coordinate_bound": 174933,
+      "Q_upper": 91804663467
+    },
+    {
+      "digit": 2,
+      "weight": 262144,
+      "prefix_bound": 174933,
+      "difference_coordinate_bound": 89566037,
+      "Q_upper": 24066224951656107
+    },
+    {
+      "digit": 3,
+      "weight": 134217728,
+      "prefix_bound": 89566037,
+      "difference_coordinate_bound": 45857811285,
+      "Q_upper": 6308816567552020053675
+    },
+    {
+      "digit": 4,
+      "weight": 68719476736,
+      "prefix_bound": 45857811285,
+      "difference_coordinate_bound": 27877245889365,
+      "Q_upper": 2331422515128353369460309675
+    },
+    {
+      "digit": 5,
+      "weight": 41781441855488,
+      "prefix_bound": 27877245889365,
+      "difference_coordinate_bound": 16949361197362005,
+      "Q_upper": 861842534995922339428113052860075
+    },
+    {
+      "digit": 6,
+      "weight": 25403116648136704,
+      "prefix_bound": 16949361197362005,
+      "difference_coordinate_bound": 10305211603692727125,
+      "Q_upper": 318592158590649686466016600859132296875
+    },
+    {
+      "digit": 7,
+      "weight": 15445094922067116032,
+      "prefix_bound": 10305211603692727125,
+      "difference_coordinate_bound": 6265568655040874720085,
+      "Q_upper": 117772051713092147264683861842276081307221675
+    },
+    {
+      "digit": 8,
+      "weight": 9390617712616806547456,
+      "prefix_bound": 6265568655040874720085,
+      "difference_coordinate_bound": 3809465742264847526439765,
+      "Q_upper": 43536087724468397165164776600967566062208519765675
+    },
+    {
+      "digit": 9,
+      "weight": 5709495569271018380853248,
+      "prefix_bound": 3809465742264847526439765,
+      "difference_coordinate_bound": 2316155171297027291772005205,
+      "Q_upper": 16093724332577885509859809287770226062862274039641276075
+    },
+    {
+      "digit": 10,
+      "weight": 3471373306116779175558774784,
+      "prefix_bound": 2316155171297027291772005205,
+      "difference_coordinate_bound": 1408222344148592593393075792725,
+      "Q_upper": 5949270511678071469080455913638985739582755452029161488776875
+    },
+    {
+      "digit": 11,
+      "weight": 2110594970119001738739735068672,
+      "prefix_bound": 1408222344148592593393075792725,
+      "difference_coordinate_bound": 856199185242344296782985778604885,
+      "Q_upper": 2199231134428962611546135547598277517715626493408253967050837589675
+    },
+    {
+      "digit": 12,
+      "weight": 1283241741832353057153758921752576,
+      "prefix_bound": 856199185242344296782985778604885,
+      "difference_coordinate_bound": 520569104627345332444055349088398165,
+      "Q_upper": 812976578077548034834590637626154872288742684182752151083650216726101675
+    }
+  ],
+  "final_weight": 780210979034070658749485424425566208,
+  "final_prefix_bound": 520569104627345332444055349088398165,
+  "final_sum_Q_upper": 101522417100539499855478122694889675919038361595388469148828598869332150142128,
+  "final_difference_Q_upper": 102674827636476515244151309055588079518596385688136135716945639864644248338348,
+  "order": 115792089237316195423570985008687907852837564279074904382605163141518161494337,
+  "final_difference_bound_ratio": 0.8867171178338805,
+  "sample_scalar_count": 32000,
+  "sample_zero_digit_scalars": 2,
+  "sample_warps_with_fallback": 2,
+  "universal_nonzero_digit_group_certificate": true,
+  "scope": "Exact group theorem with finite exhaustive digit-bound proof. Inherited approximate device field primitives and GPU performance are outside this theorem."
+}
