@@ -5,22 +5,27 @@
     "GPUMath.h": "332beaa52e33ace384f214f4e2df61524ae82a1bf3a1f3640c859bd031a3b93c",
     "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
     "PackedRecovery.cuh": "72287a8d428693bcfd5ecd7f7f2a994d043655eb4af61b22dcfe3922efece1fe",
-    "ParityWindow.cuh": "e1459e314c86fd84d1ebdd90dd0897fff448062123b7629cb40bf4a585db67c0",
+    "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
     "pinning.cu": "1ffefb87484a452eecb6f908495357a2403bcec33a8dd872b7fef2b00b012728",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "SUBMISSION.md": "cf2763f1a4d20f74dade6b7d69a5ae496c6e52585f0e89f10a9b811621cc0625"
+    "SUBMISSION.md": "cf2763f1a4d20f74dade6b7d69a5ae496c6e52585f0e89f10a9b811621cc0625",
+    "NARROW-PARITY.md": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
   },
-  "comparison_baseline_submission": "local c2431ea composition; promoted e876/6dfdb6f8 official 789011576, floor 796901692",
-  "comparison_baseline_promoted_commit": "e876032f79e6f4f3af2732bbba39403e29f0e227",
-  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
-  "model": "GPT 5.6 Sol",
+  "comparison_baseline_submission": "07009ac3-94a4-428e-b030-1f6ce317ccb7; recorded score 797446582",
+  "comparison_baseline_promoted_commit": "94abdd0d72847b780c7d4f99da4f367e6f9f0fd1",
+  "compiler": "nvcc 12.8.93 -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; default sm52 and diagnostic sm89 compiled locally",
+  "model": "GPT 6 Astra",
   "harness": "Codex",
-  "production_source_bytes": 395438,
-  "note": "c243 plus a problem-wide exact curve isomorphism that maps xR to +/-1 and removes one hot field multiplication per candidate. Direct fixed16 c243/isomorphism ABBA measured +0.554698%, both adjacent pairs positive, exact equal work and identical 2271-hit sets. QSB_ISO_XR=0 build and fresh algebra/table checks pass. Inherited composition measured +1.023653% over e876 before this increment. This is local evidence, not an official score.",
-  "public_sources": "PR827 87a770a (@stffinfcti); PR885 3e166ba (@EvanYan1024); promoted parent e876032f",
-  "public_note_file": "SUBMISSION.md",
-  "full_technical_note_file": "SUBMISSION.md"
+  "production_source_bytes": 408334,
+  "note": "Narrow promoted parity window from 27 to 18 cross-products; omitted-column effects bounded by stricter guards; inherited full-product fallback and exact host publication gate retained. CPU differential and CUDA compilation pass. No local GPU execution or measured speedup; remote ranked evaluation pending.",
+  "public_sources": "Promoted 07009ac3 / 94abdd0 by @terrapinelf, including inherited PR827 field arithmetic (@stffinfcti) and PR885 parity window (@EvanYan1024). See SUBMISSION.md for inherited provenance; current experiment is NARROW-PARITY.md.",
+  "public_note_file": "NARROW-PARITY.md",
+  "full_technical_note_file": "NARROW-PARITY.md",
+  "validation_source_sha256": {
+    "test_parity_window.py": "236cec486783d4f1fdd714ebba1de24daf2bdd8213527b5d2e71d7a2755070a0"
+  },
+  "effort": "ultra"
 }
