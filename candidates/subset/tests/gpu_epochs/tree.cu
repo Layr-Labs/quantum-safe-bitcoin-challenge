@@ -1594,6 +1594,28 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int okA, okB;
     {
 #if ZLAB_K2S3M
+#if ZLAB_FRONT3_OUT_PARAMS
+        uint64_t nA[12];
+#if ZLAB_DUAL_EPOCH_SHA
+        okA=qsb_pair_front3_z_out(prodA,nA,zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#else
+        okA=qsb_pair_front3_out(prodA,nA,e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
+        prodA[4]=0;
+        okA=okA && active;
+        if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
+#if ZLAB_DUAL_EPOCH_SHA
+        #pragma unroll
+        for(int k=0;k<8;k++)parkA[k][tid]=nA[k];
+        #pragma unroll
+        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+        #pragma unroll
+        for(int k=0;k<4;k++)parkA[8+k][tid]=nA[8+k];
+#else
+        #pragma unroll
+        for(int k=0;k<12;k++)parkA[k][tid]=nA[k];
+#endif
+#else
 #if ZLAB_DUAL_EPOCH_SHA
         QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
@@ -1613,6 +1635,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         #pragma unroll
         for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
 #endif
+#endif
 #else
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
@@ -1625,6 +1648,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
+#if ZLAB_FRONT3_OUT_PARAMS
+#if ZLAB_DUAL_EPOCH_SHA
+    okB=qsb_pair_front3_z_out(prodB,nB,zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#else
+    okB=qsb_pair_front3_out(prodB,nB,e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
+    prodB[4]=0;
+#else
 #if ZLAB_DUAL_EPOCH_SHA
     QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
@@ -1633,11 +1664,16 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
     for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
+#endif
 #else
     QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
 #endif
+#if ZLAB_K2S3M && ZLAB_FRONT3_OUT_PARAMS
+    okB=okB && active && hasB;
+#else
     okB=fb.ok && active && hasB;
+#endif
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);

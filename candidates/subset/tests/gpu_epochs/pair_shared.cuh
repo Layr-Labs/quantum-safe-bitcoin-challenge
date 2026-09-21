@@ -432,6 +432,36 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 }
 #if ZLAB_K2S3M
 
+/* ZLAB_FRONT3_OUT_PARAMS (kill switch): 1 = inline the front producer into
+ * caller-owned outputs; 0 = the frontier's by-value QsbPairFront3 ABI. */
+#ifndef ZLAB_FRONT3_OUT_PARAMS
+#define ZLAB_FRONT3_OUT_PARAMS 1
+#endif
+
+#if ZLAB_FRONT3_OUT_PARAMS
+/* Keep the sixteen front words in the caller's scalarized prod/n objects.  This
+ * adapter must inline: an outlined pointer-output function would merely trade
+ * the aggregate sret pointer for two other local-memory pointers. */
+#if ZLAB_DUAL_EPOCH_SHA
+__device__ __forceinline__ int qsb_pair_front3_z_out(
+    uint64_t *prod,uint64_t *n,
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
+    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t z[4]={z0,z1,z2,z3};
+    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    return qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+}
+#endif
+__device__ __forceinline__ int qsb_pair_front3_out(
+    uint64_t *prod,uint64_t *n,
+    const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
+    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    return qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
+}
+#else
 struct QsbPairFront3 {uint64_t words[16];int ok;};
 #if ZLAB_DUAL_EPOCH_SHA
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
@@ -460,6 +490,7 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
     for(int k=0;k<12;k++)out.words[4+k]=n[k];
     return out;
 }
+#endif
 
 __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
