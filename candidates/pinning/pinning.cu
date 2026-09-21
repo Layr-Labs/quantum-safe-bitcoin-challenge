@@ -457,6 +457,15 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 #undef QSB_DIRECT_DIGITS
 #define QSB_DIRECT_DIGITS 0
 #endif
+#ifndef QSB_CODE_REG
+#define QSB_CODE_REG 1   /* chunks 0/1 keep their digit code in a register (no shared round trip) */
+#endif
+#ifndef QSB_CODE_PTR
+#define QSB_CODE_PTR 1   /* induction pointer over the shared code planes (no per-step plane IMAD) */
+#endif
+#ifndef QSB_CHAIN_ROT
+#define QSB_CHAIN_ROT 1  /* two-phase anchor rotation: the per-step 4-word anchor copy is naming */
+#endif
 struct qsb_digit_window {
     uint64_t w0, w1, w2, w3;
     unsigned sh;
@@ -623,7 +632,11 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k
+#if QSB_CODE_REG
+                                                     , uint32_t &code0, uint32_t &code1
+#endif
+) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
@@ -637,29 +650,97 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
         int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
         uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
         uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+        uint32_t code=idx|(neg<<31);
+#if QSB_CODE_REG
+        /* The trip count is constant and the loop fully unrolled, so these are
+         * compile-time selects. The two seeding chunks are consumed by this same
+         * lane before any barrier, so their codes never need the arena: the pair
+         * of stores and the pair of loads that followed them both disappear. The
+         * arena planes 2..GT_CHUNKS-1 are written exactly as before. */
+        if(c==0)      code0=code;
+        else if(c==1) code1=code;
+        else          codes[(size_t)c*QSB_TREE_N+threadIdx.x]=code;
+#else
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=code;
+#endif
     }
+}
+/* Decode one stored code into a signed table record. P6: same mask, one SHF. */
+__device__ __forceinline__ void qsb_load_code(const uint8_t *table,unsigned base,
+    uint32_t code,uint64_t *x,uint64_t *y) {
+    uint32_t m32=(uint32_t)((int32_t)code>>31);
+    gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y);
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    qsb_load_code(table,base,codes[(size_t)c*QSB_TREE_N+threadIdx.x],x,y);
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_CODE_REG
+    uint32_t code0,code1;
+    qsb_decode_to_shared(k,code0,code1);
+    qsb_load_code(table,gt_offset(0),code0,x0,y0);
+    qsb_load_code(table,gt_offset(1),code1,x1,y1);
+#else
+    qsb_decode_to_shared(k);
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+#endif
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
+#if QSB_CODE_PTR
+    /* The plane stride is a compile-time constant and the lane offset is loop
+     * invariant, so the per-step (c*QSB_TREE_N+tid) address arithmetic is an
+     * induction variable: one 32-bit add per step instead of an IMAD. */
+    const volatile uint32_t *slot=
+        (const volatile uint32_t*)qsb_digit_arena()+(size_t)2*QSB_TREE_N+threadIdx.x;
+#define QSB_CHAIN_LOAD(c_,xb_,yb_) do{qsb_load_code(table,base,*slot,xb_,yb_);slot+=QSB_TREE_N;}while(0)
+#else
+#define QSB_CHAIN_LOAD(c_,xb_,yb_) qsb_load_decoded(table,(c_),base,xb_,yb_)
+#endif
+#if QSB_CHAIN_ROT
+    /* Two-phase rotation. Every step consumes the previous step's affine
+     * ordinate as its anchor and leaves its own as the next anchor; pairing the
+     * steps lets the even step land in (x1,y1) with anchor y0 and the odd step
+     * in (x0,y0) with anchor y1. The operand sequence, the operand order inside
+     * each addition and the number of table loads are unchanged - only the
+     * 4-word Load256 that carried the anchor across the back edge is gone, and
+     * peak liveness is unchanged because x0/y0 die at the mixed-addition seed. */
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS-1;c+=2) {
+        QSB_CHAIN_LOAD(c,x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        base+=1u<<16;
+        QSB_CHAIN_LOAD(c+1,x0,y0);
+        _PointAddXYZZT<true>(X,Y,U,V,x0,y0,y1);
+        base+=1u<<16;
+    }
+#if (GT_CHUNKS & 1)
+    /* GT_CHUNKS-2 steps is odd: one tail step, whose ordinate is the anchor the
+     * deferred final resolution needs. */
+    QSB_CHAIN_LOAD(GT_CHUNKS-1,x1,y1);
+    _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#if QSB_YOFF
+    qsb_yoff_to_y(y1);
+#endif
+    _ModMult(x1,y1,V);_ModSub256(Y,Y,x1);
+#else
+#if QSB_YOFF
+    qsb_yoff_to_y(y0);
+#endif
+    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
+#else
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
+        QSB_CHAIN_LOAD(c,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
         base+=1u<<16;
@@ -668,6 +749,8 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
+#undef QSB_CHAIN_LOAD
 }
 
 
