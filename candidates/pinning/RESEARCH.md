@@ -407,3 +407,4 @@ A union budget around 5e-8 corrupted candidates is the remaining
 false-negative score loss. False GPU hits are dropped by the gate and
 cannot reach the verifier. `QSB_C31` without `QSB_HOST_GATE` is a compile
 error. SHA flags and `QSB_UNROLL` are unchanged.
+<!-- redraw marker 2026-09-21T03:29:13Z -->
