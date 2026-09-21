@@ -11,6 +11,14 @@ __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
+/* Packed (first_slot<<16)|second_slot per lane, uploaded beside the two
+ * separate class tables it replaces on the ranked path (QSB_LANE_CLASS_PACK).
+ * Lossless by construction: qsb_prepare_window_schedule fails the launch when
+ * first_distinct > QSB_FIRST_SLOTS (64), and the second-block class index is a
+ * slot in a 256-entry table, so both fields are < 2^16 for every legal launch.
+ * The original tables stay live for the kill-switch path and for the
+ * single-epoch consumer. */
+__device__ uint32_t QSB_LANE_CLASS[QSB_SE_PER_EPOCH];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
 
@@ -77,6 +85,11 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
     if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
     if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
+    {   uint32_t packed[QSB_SE_PER_EPOCH];
+        for(int lane=0;lane<QSB_SE_PER_EPOCH;lane++)
+            packed[lane]=(first_classes[lane]<<16)|classes[lane];
+        if(cudaMemcpyToSymbol(QSB_LANE_CLASS,packed,sizeof(packed))!=cudaSuccess)return 1;
+    }
     if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
     if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
     return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
@@ -171,13 +184,39 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     uint32_t *stateA, uint32_t *stateB, int lane,
     const uint32_t *firstA, const uint32_t *firstB) {
+#ifndef QSB_LANE_CLASS_PACK
+#define QSB_LANE_CLASS_PACK 1
+#endif
+#ifndef QSB_FIRST_VEC4
+#define QSB_FIRST_VEC4 1
+#endif
+#ifndef QSB_PAIR_SECOND_UNROLL
+#define QSB_PAIR_SECOND_UNROLL 1
+#endif
+#if QSB_LANE_CLASS_PACK
+    const uint32_t lane_rec=QSB_LANE_CLASS[lane];
+    const int first_slot=(int)(lane_rec>>16);
+    const int slot=(int)(lane_rec&0xffffu);
+#else
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
+#endif
+#if QSB_FIRST_VEC4
+    {   const uint4 *pA=reinterpret_cast<const uint4*>(firstA+first_slot*8);
+        const uint4 *pB=reinterpret_cast<const uint4*>(firstB+first_slot*8);
+        const uint4 vA0=pA[0], vA1=pA[1], vB0=pB[0], vB1=pB[1];
+        stateA[0]=vA0.x;stateA[1]=vA0.y;stateA[2]=vA0.z;stateA[3]=vA0.w;
+        stateA[4]=vA1.x;stateA[5]=vA1.y;stateA[6]=vA1.z;stateA[7]=vA1.w;
+        stateB[0]=vB0.x;stateB[1]=vB0.y;stateB[2]=vB0.z;stateB[3]=vB0.w;
+        stateB[4]=vB1.x;stateB[5]=vB1.y;stateB[6]=vB1.z;stateB[7]=vB1.w;
+    }
+#else
     #pragma unroll
     for(int j=0;j<8;j++){
         stateA[j]=firstA[first_slot*8+j];
         stateB[j]=firstB[first_slot*8+j];
     }
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
@@ -193,7 +232,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
 } while(0)
     QSB_PAIR_STATE_LOAD();
-#if QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
+#if QSB_PAIR_SECOND_UNROLL || QSB_PAIR_SHA_UNROLL_WINDOW
     #pragma unroll
 #else
     #pragma unroll 1
