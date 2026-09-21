@@ -410,6 +410,27 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
     gt_load_signed_flat(gTable, base, idx, neg, gx, gy);
 #endif
 }
+#ifndef QSB_GT_PTRBASE
+#define QSB_GT_PTRBASE 1
+#endif
+#if QSB_GT_PTRBASE
+/* Same load as gt_load_signed_flat_f, addressed from a byte pointer the caller already
+ * advances. The flat form recomputes ((base+idx)*64) per chunk: a 32-bit add plus a widening
+ * shift on the critical address path. With gt_offset(c) = (c+1)<<16 (15-chunk geometry) the
+ * byte base of chunk c is (c+1)<<22, i.e. a fixed +2^22 step, so the entry address is exactly
+ * entry = gTable + ((size_t)gt_offset(c)<<6) + ((size_t)idx<<6) for the same idx. */
+__device__ __forceinline__ void gt_load_signed_entry_f(const uint8_t *__restrict__ entry,
+                                                       uint64_t neg,
+                                                       uint64_t *__restrict__ gx,
+                                                       uint64_t *__restrict__ gy) {
+    const ulonglong2 *tx=(const ulonglong2 *)entry;
+    const ulonglong2 *ty=(const ulonglong2 *)(entry+32);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    uint64_t m=0ULL-neg;
+    gy[0]=(y0.x^m)+(0xFFFFFFFEFFFFFC30ULL&m); gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
+}
+#endif
 
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
  * 16 signed digits -> 1 seed load + 15 mixed adds; the next chunk's load is
@@ -762,6 +783,9 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#ifndef QSB_SEED_CONST_DIGIT
+#define QSB_SEED_CONST_DIGIT 1
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -826,13 +850,38 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #else
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
+#if QSB_SEED_CONST_DIGIT
+    /* 15-chunk geometry: gt_shift(0) == 0 and gt_shift(1) == 18, so chunk 0's 18-bit digit field
+     * starts at bit 1 and chunk 1's 17-bit field at bit 19; the highest bit either reads is 35,
+     * inside M[0]. gt_field_bits_v's four-way limb select and its 64-bit funnel are therefore
+     * dead for both seed digits, and the masked fields are exactly (M[0]>>1)&0x3FFFF and
+     * (M[0]>>19)&0x1FFFF. Index/sign folding below is gt_direct_digit's, specialised to w=18
+     * and w=17 (entry counts 2^17 and 2^16, matching gt_entries). */
+    {
+        const uint32_t f=(uint32_t)(M[0]>>1)&0x3FFFFu, t=f>>17;
+        idx=(f^(t-1u))&0x1FFFFu; neg=(uint64_t)(t^1u)^sflag;
+    }
+    gt_load_signed_flat_f(gTable,gt_offset(0),idx,neg,x0,y0);
+    {
+        const uint32_t f=(uint32_t)(M[0]>>19)&0x1FFFFu, t=f>>16;
+        idx=(f^(t-1u))&0xFFFFu; neg=(uint64_t)(t^1u)^sflag;
+    }
+    gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
+#else
     gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
     gt_load_signed_flat_f(gTable,gt_offset(0),idx,neg,x0,y0);
     gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
     gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
+#endif
     qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
     uint64_t cx[4],cy[4];
+#if QSB_DIGIT_SHIFT && QSB_GT_PTRBASE
+    /* Byte cursor over the chunk tables: gt_offset(c) == (c+1)<<16 entries of 64 B, so the
+     * per-chunk step is a constant +2^22 bytes and the entry address is tptr + (idx<<6). */
+    const uint8_t *tptr=gTable+((size_t)gt_offset(2)<<6);
+#else
     uint32_t table_base=gt_offset(2);
+#endif
 #if QSB_DIGIT_SHIFT
     /* Same digits as gt_direct_digit at pos = gt_shift(c)+1: keep S = M >> pos in registers and
      * shift it by one chunk width per step, instead of selecting limb pos>>6 each iteration. */
@@ -857,15 +906,27 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         }
         w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
         w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+#if QSB_GT_PTRBASE
+        gt_load_signed_entry_f(tptr+((size_t)idx<<6),neg,cx,cy);
+#else
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+#endif
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
         Load256(y0, cy);                /* current affine y anchors next madd */
+#if QSB_GT_PTRBASE
+        tptr += (size_t)1<<22;
+#else
         table_base += 1u << 16;
+#endif
     }
     {
         const uint32_t f=w0&((1u<<W2)-1u);
         idx=f&((1u<<(W2-1u))-1u); neg=sflag;
+#if QSB_GT_PTRBASE
+        gt_load_signed_entry_f(tptr+((size_t)idx<<6),neg,cx,cy);
+#else
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+#endif
         qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
     }
 #else
