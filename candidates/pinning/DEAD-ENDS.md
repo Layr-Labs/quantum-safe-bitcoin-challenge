@@ -29,3 +29,5 @@ Official and public negatives that must not be retried without new evidence.
 - Further *per-candidate* 2^-31-class tails from the carry-chain census, only behind the gate, only after this official score.
 - CUDA graphs / further JIT trim as bundle fillers only.
 - Do **not** drop `_ModAddLazyOff` t1 (`mk` is frequently −1).
+- Exact complete top-16 (`eb6d9871` −1.21%). Do not compose with SAS z9.
+- Dest-write occupancy 4→5 (`cbce5501` 791 M). Already in f7; not a 1% lever.

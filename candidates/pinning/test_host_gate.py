@@ -152,12 +152,14 @@ def audit_source():
     assert cu.count("qsb_gate_accept(") >= 3  # definition + two writers
     assert "BN_lebin2bn(pp.neg_r_inv" in cu
     assert "EC_POINT_invert" in cu
-    assert mathh.count("QSB_SECOND_FOLD_TAIL") == 6
+    assert mathh.count("QSB_SECOND_FOLD_TAIL") == 7
     assert "sub.u64 t0,t0,k;" in mathh
     assert "add.u64 t0,t0,k;" in mathh
     assert "sub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;" in mathh
     # Offset-Y add keeps the t1 correction; dropping it is a ~1/2 error.
     assert "addc.u64 t1,t1,mk;" in mathh
+    assert "#define QSB_SAS_Z9SUB_ALL 1" in cu
+    assert "#error \"QSB_SAS_Z9SUB_ALL requires QSB_HOST_GATE" in cu
     return True
 
 

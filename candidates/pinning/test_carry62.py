@@ -257,16 +257,20 @@ def audit_c31_predicates():
 def audit_source():
     source = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_CARRY62 1" in source
-    assert source.count("QSB_SECOND_FOLD_TAIL") == 6  # three definitions, three uses
+    assert source.count("QSB_SECOND_FOLD_TAIL") == 7  # three definitions, four uses
     assert "subc.u32 z2, z2, 0;\\n\"" in source
     assert "-DQSB_CARRY62=0 restores" in source
     assert "#if QSB_C31 && QSB_SHORT_CARRY" in source
     assert "#define QSB_SECOND_FOLD_TAIL \"\"" in source
     assert "sub.u64 t0,t0,k;" in source
     assert "add.u64 t0,t0,k;" in source
+    assert "#define QSB_SAS_Z9SUB_ALL 0" in source
+    assert "mov.u32 sfq, z8" in source
+    assert "-DQSB_SAS_Z9SUB_ALL=0 restores" in source
     cu = (HERE / "pinning.cu").read_text()
     assert "#define QSB_HOST_GATE 1" in cu
     assert "#define QSB_C31 1" in cu
+    assert "#define QSB_SAS_Z9SUB_ALL 1" in cu
     return hashlib.sha256(source.encode()).hexdigest()
 
 
