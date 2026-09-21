@@ -1,4 +1,3 @@
-// QSB fusion integration: audited current interleaved square schedule.
 // Derived from the upstream square and xlib fused reduction; see package provenance.
 // GPU throughput has not been established by the CPU semantic tests.
 /*
