@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "frozen_previous_files": 38,
+  "cold_chain_body_identical": true,
+  "helpers_identical": true,
+  "loader_reversal": true,
+  "recoder_reversal": true,
+  "split_correction_reversal": true,
+  "constants_recomputed": true,
+  "scope": "Static source audit, not native compilation"
+}

@@ -1,294 +1,69 @@
-# Pinning: exact host gate + C31 tails on the measured multiply-tail + carry62 stack
-
-Effort: xhigh. Kernel composition, host-gate design, C31 predicates and the
-submit decision: Grok 4.6. Carry62 proof and the first host-word audit of
-those two tails: GPT 5.6 Sol / Codex. PR #743 multiply-tail: ercumentyildirim.
-No local NVIDIA device; the ranked 1,200 s RTX 4090 run is the throughput
-measurement.
-
-## Why this archive, and why it replaces the in-flight carry62-only run
-
-The promoted pinning source is still `52cd275a` / `7b0a15b` at
-**778,624,395/s**. The 100-bips floor is **786,410,639/s**. Between that
-floor and this packaging time, four official results selected the stack:
-
-| Submission | Change | Official score | vs 778,624,395 | Decision |
-|---|---|---:|---:|---|
-| `f034a9c4` (this account) | `QSB_TAIL_TAB=1` + `QSB_SHA_SMEM_W1=1` | **750,065,705** | **−3.67%** | Keep both SHA flags **off**. 107,375 verified hits. Drop matches the LeaderGPU vs intel-r5 host gap (~3.7%, Issue #505). Not a reason to compose SHA. |
-| `960da801` / PR #743 (ercumentyildirim) | bounded `_ModMultCore` tail truncation only | **786,386,945** | **+0.997%** | Keep it. Missed the floor by **23,694/s**. The mechanism is real. |
-| `eb6d9871` (jacklightChen) | exact four-wave complete top-16 (63 products vs 43) | **769,172,989** | **−1.21%** | Dead. Do not compose. |
-| `2c85ba63` (this account) | PR #743 + `QSB_CARRY62` only | validating at packaging | n/a | **Cancelled** in favour of this larger bundle. Carry62 alone is modeled at +0.585% on top of 743, which is only ~0.21% of modeled headroom over the floor and can miss on host noise. |
-
-This archive is PR #743 + `QSB_CARRY62` + an exact host publication gate +
-`QSB_C31` (empty second-fold tail, 64-bit split-3p, one-limb K correction on
-`_ModSub256`/`_ModAddLazy`). SHA flags stay 0. `QSB_UNROLL=1`. The GLV /
-joint-comb family stays retired (public 674.7 / 722.8 / 714.3 / 523.5 M).
-
-Submitting the full stack against the 778 M floor is strictly better than
-landing carry62 first. If carry62-only promoted, the next floor would move
-to about 796 M and C31 would have to clear a raised bar. One ranked shot
-against 786.4 M with every remaining serial-chain cut behind an exact gate
-is the win attempt.
-
-## Goal
-
-`eigenlabs/quantum-safe-bitcoin-challenge/pinning` ranks verified candidates
-per second on one RTX 4090 over 1,200 s, fresh seed. Score is
-`verified_hits × 2^24 / 2 / elapsed`. Any false published hit zeroes the
-run. The kernel may approximate internally; only exact hits may be written.
-
-## Review of the remaining search space
-
-The 778 M lineage already closed table width, cache hints, prefetch, launch
-geometry, packed recodes, batched inversion, parity-only finish, top-two
-tree merge, fused prepare+finish, Karatsuba, chain unroll 2/3/4, L1
-prefetch/bypass, and the public SHA variants. Issue #505 documents ~3.7%
-pinning host spread, so a 1% official win has to be a real kernel delta, not
-a runner draw.
-
-The useful remaining ruler is PR #743's dependency-chain measurement:
-off-chain deletions were neutral or negative, while serial field-reduction
-instructions tracked at about **0.0045% per instruction per candidate**.
-Carry62 removed 10 loop instructions/round (130 dynamic/candidate) at a
-2^-62 new error budget. C31 removes the next serial limbs of those same
-chains, which is only safe because an exact gate now sits between the GPU
-hit queue and the output file.
+# Certified GLV608 decoder and nonexceptional common chain
 
-Subset already proved the architecture: a fast approximate path may
-nominate, only exact results may be published. Pinning previously wrote
-stage-2 tentative indices straight to the 1024-entry hit buffer.
-
-## Exact host publication gate (`QSB_HOST_GATE=1`)
-
-Expected true-hit rate at 778 M/s is about
-
-```text
-778e6 candidates/s * 2 recids / 2^24 ~= 93 tentative hits/s
-```
+Effort: medium. This candidate integrates two exact integer cost reductions and a proved common-chain specialization into our GLV608 route on the promoted Pinning frontier. The baseline is promoted submission dcd0147c-8cb3-47f0-8b71-007c87fa7748, commit 66fede0cc10d36ad15041861d3eddaad97481ac6, score 789,011,576. The current shared source tip e876032 has the same Pinning starting bytes. Development used GPT 6 Astra through Codex. No local CUDA/C++ compilation, native host harness or GPU benchmark was performed; the official remote build and validation supply native evidence.
 
-Each drain reconstructs the candidate from `pinning2.bin` constants that the
-binary already carries (midstate, 75-byte suffix, `neg_r_inv`, `u2R`) and
-keeps only records that the harness verifier would accept.
-
-### SHA-256d
-
-The 155-block prefix is midstated. The host copies the 75-byte suffix,
-patches `sequence` at offset 31 and `locktime` at offset 67, writes SHA-256
-padding (`0x80`, zeros, 64-bit bit-length `9995*8`), and runs
-`SHA256_Transform` on the two remaining 64-byte blocks from the midstate,
-exactly as the GPU slow path and the per-sequence fast-tail host continuation
-do. The 8 state words are serialized big-endian and hashed once more.
+## Motivation and the failed previous experiment
 
-`test_host_gate.py` compares this reconstruction to `hashlib` of the full
-preimage for 64 `(sequence, locktime)` pairs on `problems/pinning.json`.
-All 64 match. The same test checks that `problems/pinning.bin` is little-endian
-for `neg_r_inv`/`u2r_x`/`u2r_y` and big-endian SHA words, matching
-`BN_lebin2bn` already used by the G-table builder.
+Our previous PR826, a9bde073-1efb-4a7e-a003-bdfad09f52b0, completed with verified=true and score 520,573,216: 34.0221% below the promoted baseline. It verified 74,535 hits in the reported 1,201.07 seconds. That large regression is real evidence against its overall implementation. It does not identify the individual cause. Public metrics do not give register allocation, spills, cache misses or instruction profiles; the diagnostic artifact was not accessible anonymously. No such explanation is asserted here.
 
-### Recovery
+PR826 reduced the nominal normal-chain field ledger from 95 multiplications and 28 squares to 88 multiplications and 26 squares, but introduced a costly exact scalar decoder, a generic exception state machine and a larger table. This submission makes concrete cumulative corrections to the first two costs. It is not a byte-equivalent remeasurement, an inert macro change or a claimed recovery of the entire 34% loss. The table cost remains and could still dominate. Remote validation is necessary to decide whether the corrected route is competitive.
 
-```text
-u1 = (neg_r_inv * z) mod n
-Q  = u1·G + u2R          recid 0
-Q  = u1·G + invert(u2R)  recid 1
-h  = SHA256(compress(Q))
-accept iff leading_zero_bits(h) >= 24
-```
+## Certified reciprocal head instead of a complete high product
 
-This is `harness/problem.py:recovered_hash_fast` / `harness/crypto.py:ecdsa_recover`.
-Invert of precomputed `u2R` (recid 0) is `u2·(−R)`, which is the recid-1
-point. A round-trip on seed-0 `(sequence=0x80000000, locktime=500000000)`
-matches the verifier for both recids, and matches the `neg_2u2R` fast path.
+For a normalized scalar 0 <= k < N and either positive GLV rounding coefficient b, precompute g=floor(b*2^384/N). Let H be the scaled high-product lower approximation obtained from the ten complete 32-bit products on diagonals i+j>=11 and the five high halves on diagonal i+j=10. The omitted product tail is strictly less than 12 units at scale 2^352. The downward reciprocal error contributes strictly less than one further unit. Therefore
 
-### Two-recid fallback
+    H <= k*b*2^32/N < H+13.
 
-The GPU returns after the first tentative recid. Approximate arithmetic can
-nominate a false recid-0 and hide a real recid-1. If the GPU recid fails the
-exact check, the gate exact-checks the other recid before dropping the
-candidate. `qsb_gate_accept` is used on both the `QSB_SLOTPIPE` drain and
-the unused non-slot writer.
+If the rounded integers at both interval ends agree, that value is the exact nearest-integer coefficient. Otherwise the complete original qsb_round_glv function is mandatory. The device guard tests whether low32(H+2^31) is at least 0xfffffff3. No ambiguous interval is accepted speculatively. Boundary tests contain 512 cases where ignoring this guard would give a wrong coefficient; they are retained as negative controls. The old full coefficient function and its complete carries are still present in Split608.cuh.
 
-### Cost
+Each fast coefficient uses 15 source 32-bit product expressions instead of 57. These are source-level arithmetic counts, not SASS instruction counts and not a speed prediction. The two constants are recomputed from the curve order in the independent audit. Accumulator bounds keep each partial diagonal within unsigned 64-bit range. The input is normalized once as before; all lattice-correction branches and signed five-word output handling remain unchanged.
 
-OpenSSL generator multiplication at ~93 hits/s is milliseconds per GPU
-second and overlaps the other pipeline slot. C31 false positives that reach
-the gate are ~778e6 × (union corruption) × 2 × 2^-24, well below 0.01/s for
-the budgets below, so the host does not become a new bottleneck.
+## Three-product exact residual identity
 
-`-DQSB_HOST_GATE=0` is refused at compile time when `QSB_C31=1`.
+For the GLV basis, A2=A1+B1 and B2=A1. Instead of separately constructing four residual products, compute
 
-## QSB_C31 (behind the gate only)
+    t = A1*(c1+c2)
+    x = k-t-B1*c2
+    y = A2*c1-t.
 
-Three per-candidate truncations, each with an executable predicate. They do
-not change table construction, the super-root inverse, or any value that
-fans out across a batch.
+This is an integer identity before reduction. Its low-160-bit implementation has the same signed output semantics as the previous four-product construction. The sum c1+c2 needs 129 bits; its fifth word is explicitly retained. The former p[5] scratch is reused and y temporarily holds t. The old residual needs 56 source product expressions; the replacement needs 43. Together with the two certified reciprocal heads, the fast split budget changes from 170 to 73 source product expressions. No output range, rounding rule, field carry or correction branch is weakened to obtain this reduction.
 
-### 1. Empty second-fold tail
+## Proved common-chain specialization
 
-Carry62 still wrote `addc.u32 z3, z3, 0`. C31 writes nothing after
-`addc.cc.u32 z2, z2, sfc`. Complete and short chains differ iff
-`z2 + sfc >= 2^32`. For `sfc <= 2` this is at most `2/2^32 = 2^-31`.
-The same empty tail is used by `_ModMultCore`, `_ModSqr` and
-`_ModSqrAddSub2` via `QSB_SECOND_FOLD_TAIL`.
+The digit schedule remains four radix-512 digits, nine radix-608 digits and a final radius-236 digit: fourteen points. The recoder now accumulates a boolean certificate while writing descriptors. It returns true only when all fourteen ranks are nonzero. There is no second shared-memory scan. If any rank is zero, the original complete generic state machine runs as a cold noinline function. Its body, doubling helper, infinity reset, restart, seed and mixed-add exceptions are source-identical to PR826 apart from returning a value object instead of writing caller output arguments. All four coordinate arrays are copied back on that path.
 
-A prior CUDA 12.6 sm_89 listing of this fold cut reduced the 13-round point
-loop from 1,077 (carry62) to about 1,068 instructions. That is ~9 serial
-instructions/round × 13 = ~117 dynamic instructions/candidate on top of
-carry62's 130. Using PR #743's 0.0045%/serial-instruction calibration,
-about **+0.53%** from the fold+split3p pair.
+For nonzero ranks a group-theoretic bound excludes exceptional additions. The scalar eigenvalue obeys lambda^2+lambda+1=0 modulo N. Any relation a+lambda*b=0 modulo N implies a^2-a*b+b^2=0 modulo N. The quadratic form is positive for a nonzero integer pair. When both coordinates have absolute value at most M and 3*M^2<N, such a nonzero relation is impossible.
 
-### 2. 64-bit split-3p
+Exhaustive enumeration of all 631,808 residue pairs establishes digit coordinate bounds floor(2*m/3): 341 for radix 512 and 405 for radix 608, and verifies rank zero exactly means the zero digit. Write W_i for the current radix weight and L_i for the coordinate bound on all prior digits. At every regular step L_i<W_i and 3*(L_i+D_i*W_i)^2<N. A nonzero current digit has at least one coordinate of absolute value >=W_i, so neither the prefix plus nor minus that digit can vanish over the integers. The quadratic bound then excludes infinity, equality and opposition in the exact group.
 
-Carry62 subtracted `3K` through 96 bits. C31 subtracts through 64 bits:
+At the final step W=780210979034070658749485424425566208 and L=520569104627345332444055349088398165. The corrected split coordinate bound is R=183958706508226550111917910514569734124. The final sum is the split pair, and the final difference is twice the prefix minus that pair. Both 3*R^2<N and 3*(R+2*L)^2<N hold; the latter ratio to N is about 0.886717118. Together with L<W and a nonzero final digit this closes the final exceptional cases. The proof is independent of the nonzero instance base.
 
-```ptx
-sub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;
-```
-
-Differ iff `low64 < 3K`, `12884904819 / 2^64 < 2^-30.4`.
+The common path therefore uses the promoted three-multiply seed and a rolled twelve-add deferred XYZZ loop without per-add state or zero-denominator branches. Its operand order and original field helpers are retained. The final ordinate conversion uses the full-carry subtraction helper. This is an exact-group domain certificate, not a proof that inherited approximate field arithmetic is exact. No valid exact-group exception is deliberately discarded. Approximation effects from the existing promoted field routines still require the unchanged exact publication gate and official validation.
 
-### 3. One-limb K correction
+## Retained table and pipeline costs
 
-`_ModSub256` / `_ModAddLazy` currently keep the K-correction carry into `t1`
-(`subc.u64 t1, t1, 0` / `addc.u64 t1, t1, 0`) and already drop `t2`/`t3`.
-C31 drops `t1` as well: `sub.u64 t0, t0, k` / `add.u64 t0, t0, k`.
-
-`k` is 0 or `K = 2^32+977`. The chains differ iff that 64-bit K add/sub
-carries, probability `K/2^64 ≈ 2^-32`, times `P(k=K) ≈ 1/2` for a random
-field borrow/carry, so about **2^-33 per operation**. Several of these run
-per mixed-add round; a 13-round budget of ~80 sites is still ~10^-8.
-
-`_ModAddLazyOff` is **not** truncated. Its `t1 += mk` uses `mk ∈ {0, −1}`,
-and `mk = −1` on the common no-256-bit-carry path, so dropping `t1` would
-be a ~1/2 error, not a 2^-31-class event.
-
-### Union false-negative budget
-
-A loose union of ~40 fold sites at 2^-31, 13 split-3p sites at 2^-30.4, and
-~80 K-limb sites at 2^-33 is about **5e-8** corrupted candidates. Score
-loss from false negatives is that fraction, not the fraction of corrupted
-values that happen to look like hits. 5e-8 is 0.000005%, invisible next to
-the 1% gate and next to 0.3% Poisson noise on ~110k hits.
-
-False GPU hits (corrupted points whose compressed-pubkey SHA still has 24
-leading zeros) are that fraction times 2^-24 and are dropped by the host
-gate. They cannot reach the verifier.
-
-`-DQSB_C31=0` restores the carry62 tails and the two-limb K correction.
-`-DQSB_CARRY62=0 -DQSB_C31=0` restores PR #743.
-
-## Implementation
-
-Production edits:
-
-- `GPUMath.h`: `QSB_C31` switch; empty `QSB_SECOND_FOLD_TAIL`; 64-bit
-  split-3p; C31 `_ModSub256` / `_ModAddLazy`.
-- `pinning.cu`: `QSB_HOST_GATE` / `QSB_C31` defaults, compile-time
-  coupling, `qsb_host_exact_hit` / `qsb_gate_accept`, gate on both hit
-  writers.
-
-`SOURCE-MANIFEST.json` hashes the ten production files. Host tests are not
-production code. SHA flags, unroll, table layout, recovery identities and
-the two-kernel pipeline are unchanged.
-
-## Correctness evidence (host, this machine)
-
-`test_carry62.py` still proves the carry62 predicates, and now also the C31
-predicates, by modeling the exact changed word operations:
-
-| Audit cohort | Cases | Result |
-| --- | ---: | --- |
-| exhaustive 4-bit fold analogue (carry62) | 12,288 | exact predicate |
-| exhaustive reduced split-3p analogue (carry62) | 8,192 | exact predicate |
-| 32-bit fold / split-3p boundaries (carry62) | 680 | exact predicate |
-| 1e6 random fold + 1e6 random split-3p (carry62) | 2e6 | 0 differences |
-| exhaustive 4-bit fold analogue (C31) | 12,288 | exact predicate (768 constructed diffs) |
-| reduced 64-bit-analogue split-3p (C31) | 512 | exact predicate |
-| K-limb 64-bit boundaries | 98 | exact predicate |
-| 2e5 random K-limb add/sub | 200,000 | 0 differences (expected; 2^-32) |
-
-`test_host_gate.py`: 64/64 SHA-256d midstate continuations match hashlib of
-the full preimage; `pinning.bin` layout matches `pinning.json`; one full
-OpenSSL-style recovery round-trip matches `candidate_hash` and
-`recovered_hash_fast` for both recids; source scan confirms the gate is on
-both writers and that `_ModAddLazyOff` still keeps `t1`.
-
-`test_sha_interleave.py`: 11,522 messages, 34,566 digest comparisons, including
-in-place aliasing.
-
-This host has no `nvcc` and no NVIDIA device, so there is no new sm_89 SASS
-listing for the K-limb cut. Carry62's listing (CUDA 12.6.20, no spills,
-stage 0 still 120 registers, loop 1,087 → 1,077) still applies to the
-743+carry62 baseline inside this archive. Ranked hit verification is the
-authoritative end-to-end test.
-
-## Performance hypothesis
-
-| Piece | Evidence | Modeled vs 778,624,395 |
-|---|---|---|
-| PR #743 multiply tail | official **+0.997%** (786,386,945) | +0.997% |
-| `QSB_CARRY62` | −10 loop insns/round, 0.0045%/insn | +0.585% |
-| C31 fold + 64-bit split-3p | ~−9 loop insns/round on the same ruler | +0.53% |
-| C31 one-limb K | one 64-bit addc dropped per sub/add | extra serial-chain cut, not separately listed |
-| Host gate | ~93 exact recoveries/s on the idle slot | ~0, with a small risk of drain stall |
-
-Multiplicative composition of the three measured/modeled arithmetic pieces
-is about **+2.12%**, center near **795 M/s**, about 1.1% of headroom over
-the 786.4 M floor. That is a hypothesis, not a claimed score. CUDA 12.6
-local listings vs ranked 12.8.93, ~0.3% hit-sampling sigma, and up to 3.7%
-host spread can all move the official number. The submission is justified
-because every piece is either already official (743) or a serial-chain
-deletion with an explicit bound and an exact publication filter.
-
-If the official score is correct but below the floor, it still calibrates
-the C31 ruler. If the gate is wrong, the run scores near zero (no verified
-hits) rather than poisoning the verifier: false GPU hits are dropped, and
-a buggy exact check that rejects true hits only loses score. The SHA and
-recovery host tests exist specifically to make that failure mode unlikely.
-
-## Reproduction
-
-```bash
-python3 candidates/pinning/test_carry62.py
-python3 candidates/pinning/test_host_gate.py
-python3 candidates/pinning/test_sha_interleave.py
-yukon setup --track pinning
-yukon run --track pinning
-```
-
-`yukon setup` succeeds here and the verifier smoke test passes. `yukon run`
-reaches the private benchmark bridge; this machine has no runner-side
-`/opt/starkware-challenge/bench-exec.sh`, so there is no local throughput
-number.
-
-## Provenance and what not to retry
-
-Promoted runtime: PR #706 / `52cd275a` lineage, GPL `COPYING` authors
-retained. PR #743 multiply-tail and its local +0.627% ± 0.100% mirrored
-4090 comparison belong to ercumentyildirim; this submission names that
-solver as coauthor. Carry62 bounds, the host gate, C31 predicates, the
-K-limb cut, and the decision to compose them after the official 743 / SHA /
-top-16 results are the new work.
-
-Do not retry on this runtime without new evidence:
-
-- pinning SHA ST flags (`f034a9c4` 750.07 M)
-- grouped / joint / radix-373 GLV (674–723 M public, plus the 32→64 MiB
-  random-load cliff)
-- chain unroll 2/3/4
-- exact complete top-16 (`eb6d9871` 769.17 M)
-- fused prepare+finish, Karatsuba, L1 prefetch/bypass
-- dropping `_ModAddLazyOff`'s `t1` correction
-- publishing C31 hits without the host gate
-
-## Next steps if this misses the floor
-
-1. Read the official score and the runner (`gpu` field / Issue #505 host).
-2. If the score is a large regression, the first suspect is host-gate SHA
-   reconstruction on the ranked seed; the seed-0 tests would then be
-   insufficient and the next archive should log a few gated hits against
-   `candidate_hash` on the ranked problem.
-3. If it is a near-miss, keep the gate and look at one more *per-candidate*
-   2^-31-class tail from the carry-chain census, not a new curve formula.
-4. Subset still has an independent 1% race (port H0-only pubkey SHA, port
-   `QSB_YOFF`) if pinning remains occupied.
+The exact instance-specific table contains 785,209 records of 96 bytes: canonical x, canonical beta*x and offset y+c. Four chunks contain 43,692 records, nine contain 61,612 and the final chunk contains 55,933. Allocation is 75,380,064 bytes, about 71.888 MiB. Orientation two still reads both x coordinates and forms the full-carry negative sum. Estimated logical traffic remains about 8.9% above the old fifteen-point table. This candidate does not establish L2 residency or remove that risk.
+
+The table is rebuilt for each instance using A=neg_r_inv*G, exact OpenSSL point rows and batched affine conversion. Each row endpoint receives an independent scalar multiplication check. No problem answer, table cache across instances or generated native binary is packaged. GPUMath.h, GPUHash.h, LeafRecovery.cuh, PackedRecovery.cuh, cofactor_checkpoint.h, RecoveryConstant.h and both SHA headers remain byte-identical to the promoted baseline. The exact host publication gate, launch dimensions, recovery tree, saved-state layout, SHA decisions and collective barriers are unchanged. No new arithmetic carry omission is included.
+
+## Public candidate screening
+
+All current in-flight public descriptions were reviewed. 5494489 describes a comment-only retry; 781e335 describes a frontier remeasurement with an unspecified micro mechanism. Neither establishes an increment for this route. ce1682b describes a dual-fetch ordinate-buffer hazard fix, but adds register pressure on an unrelated rotated chain without a demonstrated gain here. b1d48f4 describes address and seed-register microchanges; those are not imported from its losing composite. 32ec88c describes the PR827 z9 carry omission, explicitly with directed wrong residues. It is excluded because this integration does not introduce further approximate arithmetic. The completed 94100d4 composite also does not isolate a beneficial contribution. No unpromoted source or binary from another solver was imported. The promoted frontier retains its existing attribution; the GLV/C6 direction derives from user-provided mathematical research and our own implementation. There is no new substantial unpromoted coauthor contribution.
+
+## Audits and reproducibility
+
+Portable models are under candidates/pinning/research. Run them with Python only:
+
+    python3 -B interval_model.py
+    python3 -B residual_model.py
+    python3 -B nonzero_proof.py
+    python3 -B audit_split.py
+    python3 -B audit_recode.py
+    python3 -B audit_chain.py
+    python3 -B audit_new_sub.py
+
+The reciprocal audit passed 225,156 coefficient checks including 1,028 exercised fallback calls and 11,289 full corrected splits. The residual audit passed 100,049 fixed-word cases; 7,336 needed the retained fifth sum word. The nonzero proof exhausts 631,808 residue pairs and checks 32,000 sampled complete scalar sequences, with two zero-digit samples correctly requiring fallback. Those samples are not a universal frequency estimate. The existing exact chain audit covers all table ranks, 5,232 host rows, 80 full scalar-instance combinations and 142 exceptional sequences. The added common-chain model compares full fourteen-point results against an independent Jacobian EC oracle, including zero-digit fallback inputs.
+
+Static source reversal confirms unchanged correction branches, descriptor operations and loader arithmetic. The cold chain and all arithmetic helpers match the previous validated source. Restoring only documented integration hunks reconstructs promoted pinning.cu exactly. New full-carry subtraction PTX was interpreted with explicit carry semantics on 10,025 boundary/random pairs. Include closure, changed-header bracket structure, shared digit layout and preserved barriers were checked. Previous submitted source hashes remain frozen. These checks are necessary preflight evidence, not a native compiler result or throughput measurement.
+
+The official remote result remains the decision point. A verified but slow outcome would reject this corrected combination as a performance route; it would not justify another unchanged retry. A useful next analysis would distinguish decoder/control overhead from the unchanged table and orientation costs using actual runner diagnostics when accessible.

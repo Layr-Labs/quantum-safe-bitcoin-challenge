@@ -157,7 +157,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
-#define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
+#define QSB_L2_SKIP 0         /* GLV first chunks are the densest: keep the window at table start. */
 #endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
@@ -644,29 +644,14 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+#include "GLV608Chain.cuh"
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
-    unsigned base=gt_offset(2);
-    #pragma unroll 1
-    for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
-        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-        Load256(y0,y1);
-        base+=1u<<16;
-    }
-#if QSB_YOFF
-    qsb_yoff_to_y(y0);
-#endif
-    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    (void)unused;
+    static_assert(14*QSB_TREE_N*4<=3*QSB_TREE_N*4*8,"GLV digits fit reused tree arena");
+    qsb_glv14_chain(X,Y,U,V,k,table,(uint32_t*)qsb_digit_arena()+threadIdx.x);
 }
-
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
 
@@ -2002,7 +1987,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
-    /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
+    /* u1*G as raw XYZZ via the 14-digit dual-x GLV table on A. */
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
@@ -2501,6 +2486,8 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
 
+#include "GLV608Table.h"
+
 /* Params loader for pinning2.bin */
 typedef struct {
     uint32_t midstate[8];
@@ -2691,58 +2678,20 @@ int main(int argc, char **argv) {
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
 
-    /* GTable */
-    size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
-    uint8_t *d_gt;
-    cudaMalloc(&d_gt,gt_sz);
-    {
-        /* Build the fixed-base table on the GPU. The host only produces the two
-         * small ladders; the million entries are one parallel addition each.
-         * The result is then spot-checked against OpenSSL, and anything that
-         * does not match falls back to the original host builder -- a wrong
-         * table yields zero verifiable hits, so it must never reach the run. */
-        struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
-        size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
-        size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
-        uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
-        if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
-        gt_build_ladders(hL,hH,pp.neg_r_inv);
-        uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
-        cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
-        cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
-        free(hL); free(hH);
-        int gt_total = GT_TOTAL_ENTRIES;
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
-        cudaDeviceSynchronize();
-        cudaError_t gerr = cudaGetLastError();
-        cudaFree(dL); cudaFree(dH);
-        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
-        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
-        int gt_ok = (gerr==cudaSuccess);
-        if(gt_ok){
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv);
-        }
-        clock_gettime(CLOCK_MONOTONIC, &tb);
-        double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
-        if(gt_ok){
-            printf("  GTable built on GPU in %.2fs (%d points, %.0f MiB total, spot check passed)\n",
-                   gt_secs, gt_total, (double)gt_sz/(1024*1024));
-        } else {
-            printf("  GTable GPU build rejected (%s); using the host builder\n",
-                   gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
-            compute_gtable(chk_table,pp.neg_r_inv);
-            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
-        }
-        fflush(stdout);
-        free(chk_table);
-#if QSB_YOFF
-        qsb_table_offset_y<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt);
-        cudaError_t yerr = cudaDeviceSynchronize();
-        if (yerr == cudaSuccess) yerr = cudaGetLastError();
-        if (yerr != cudaSuccess) { fprintf(stderr, "Table offset pass failed: %s\n", cudaGetErrorString(yerr)); return 1; }
-#endif
-    }
+    /* Instance-specific GLV608 table: exact batched OpenSSL rows and independent row checks. */
+    size_t gt_sz=(size_t)G14_BYTES;
+    uint8_t *d_gt=NULL,*h_gt=(uint8_t*)malloc(gt_sz);
+    if(!h_gt){fprintf(stderr,"OOM: GLV608 table\n");return 1;}
+    struct timespec ta,tb;clock_gettime(CLOCK_MONOTONIC,&ta);
+    g14_build_table(h_gt,pp.neg_r_inv);
+    cudaError_t gt_err=cudaMalloc(&d_gt,gt_sz);
+    if(gt_err==cudaSuccess)gt_err=cudaMemcpy(d_gt,h_gt,gt_sz,cudaMemcpyHostToDevice);
+    free(h_gt);
+    if(gt_err!=cudaSuccess){fprintf(stderr,"GLV608 table upload failed: %s\n",cudaGetErrorString(gt_err));return 1;}
+    clock_gettime(CLOCK_MONOTONIC,&tb);
+    printf("  GLV608 table: %u points, %.3f MiB, %.2fs (exact row checks passed)\n",
+           G14_ENTRIES,gt_sz/(1024.0*1024.0),(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9);
+    fflush(stdout);
 
     /* Upload midstate */
     uint32_t *d_mid; cudaMalloc(&d_mid, 32);
@@ -2896,19 +2845,16 @@ int main(int argc, char **argv) {
 
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
 
-    /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
-     * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
-     * per-candidate state through the same cache every 16M batch, which evicts
-     * it. Advisory: if the device or driver refuses, the run is unaffected. */
+    /* Request an advisory persistence window for the 71.888 MiB dual-x table.
+     * This does not guarantee L2 residency alongside streamed pipeline state. */
     {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        /* Chunk 0 holds 2^17 entries for one access per candidate, the other
-         * chunks 2^16 each: pinning the dense chunks first captures more of the
-         * 15 random reads. The window stays inside the table. */
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        /* First four GLV chunks have43692 records, remaining regular chunks61612.
+         * Default skip=0 retains the denser first chunks. Window stays in bounds. */
+        size_t skip = QSB_L2_SKIP ? (size_t)43692u * 96u : 0u;
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
@@ -2959,7 +2905,7 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        size_t skip = QSB_L2_SKIP ? (size_t)43692u * 96u : 0u;
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};

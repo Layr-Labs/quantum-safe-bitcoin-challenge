@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "fixed_word_residual_cases": 100049,
+  "sum_needing_fifth_word": 7336,
+  "negative_controls_discarding_sum_carry": 12,
+  "old_low160_product_expressions": 56,
+  "new_low160_product_expressions": 43,
+  "combined_fast_split_source_products": 73,
+  "old_full_split_source_products": 170,
+  "extra_scratch_words": 0,
+  "scope": "Universal linear identity and fixed-word semantic model; no CUDA execution or measured throughput."
+}

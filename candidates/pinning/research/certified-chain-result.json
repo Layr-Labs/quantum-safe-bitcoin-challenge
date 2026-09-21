@@ -1,0 +1,6 @@
+{
+  "status": "PASS",
+  "fast_nonzero_sequences": 96,
+  "cold_zero_digit_sequences": 5,
+  "scope": "Exact field model, actual common seed/madd operand order, independent EC oracle; no native execution."
+}
