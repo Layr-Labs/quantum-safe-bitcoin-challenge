@@ -30,6 +30,15 @@
  * into kernel_digest and drop the legacy enum/tile host paths (and with them
  * the prefix-cache kernel) from the PTX the driver JITs inside the window; a
  * non-ranked problem shape exits with an error. 0 = promoted code. */
+#ifndef QSB_HV_STATS
+#define QSB_HV_STATS 0   /* 1: print tentatives per batch to stderr (diagnostic) */
+#endif
+#ifndef QSB_HOST_VERIFY
+#define QSB_HOST_VERIFY 1   /* 1: exact host (OpenSSL) publication gate, no GPU verify kernel in the fatbin; 0: e876032 */
+#endif
+#ifndef QSB_TRIM_DIRECT_PRODUCER
+#define QSB_TRIM_DIRECT_PRODUCER 1   /* 1: no direct epoch producer in the fatbin (its only launch is an impossible guard) */
+#endif
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
@@ -1145,6 +1154,7 @@ __device__ __forceinline__ void unrank_combo(uint64_t rank, int n, int t, uint8_
  * the problem's base midstate. For the pinned shape this is 42 + 131*10 =
  * 1352 bytes = 21 full blocks + an 8-byte remainder, which lands in remW.
  * ~21 transforms per thread against 6*256 per consumer block: under 1.5%. */
+#if !QSB_TRIM_DIRECT_PRODUCER
 __global__ void kernel_build_epochs(
     uint64_t epoch_base, uint64_t n_epochs,
     int window_start, int s_early,
@@ -1202,6 +1212,7 @@ __global__ void kernel_build_epochs(
     d->remW[1] = bswap32(curW[1]);
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
 }
+#endif /* !QSB_TRIM_DIRECT_PRODUCER */
 #ifndef QSB_EPOCH_GROUPS
 #define QSB_EPOCH_GROUPS 1
 #endif
@@ -1520,6 +1531,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 #include "tree_inverse.cuh"
 #include "pair_shared.cuh"
 
+#if !QSB_HOST_VERIFY
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
 __global__ void kernel_verify_pair_hits(
@@ -1549,6 +1561,7 @@ __global__ void kernel_verify_pair_hits(
         }
     }
 }
+#endif /* !QSB_HOST_VERIFY */
 
 
 __global__ void __launch_bounds__(256, 2) kernel_digest(
@@ -2354,6 +2367,11 @@ static void unrank_combo_host(uint64_t rank, int n, int t, uint8_t *out) {
     }
 }
 
+#if QSB_HOST_VERIFY
+static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
+#include "qsb_host_verify.h"
+#endif
+
 /* Compress this epoch's constant prefix into a midstate + <64-byte remainder.
  * The bytes are exactly prefix_remainder ++ every push in [0, window_start)
  * that the epoch does not omit -- i.e. the same message the kernel used to
@@ -2819,6 +2837,9 @@ int main(int argc, char **argv) {
             memcpy(h_win3[j],w,3);
         }
         cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
+#if QSB_HOST_VERIFY
+        memcpy(g_hv_win3, h_win3, sizeof(h_win3));
+#endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -3087,6 +3108,11 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if QSB_HOST_VERIFY
+        qsb_hv_t hv;
+        if (!qsb_hv_init(&hv, &dp, g_hv_win3, window_start, s_early)) { fprintf(stderr, "ERROR: host verify init failed\n"); return 1; }
+        static uint8_t hv_pend[4 + 1024 * ZLAB_HIT_REC]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+#endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
@@ -3104,11 +3130,15 @@ int main(int argc, char **argv) {
                 const uint64_t n_groups64 = r5b - r5a + 1;
                 const uint32_t n_groups = (uint32_t)n_groups64;
                 if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
+#if QSB_TRIM_DIRECT_PRODUCER
+                    fprintf(stderr, "ERROR: epoch-group capacity exceeded (%llu groups); the direct producer is compiled out\n", (unsigned long long)n_groups64); return 1;
+#else
                     /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
                     kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
                         epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                         d_mid, d_prem, (int)dp.prefix_remainder_len,
                         d_dsigs, d_epochs, zh_cnt);
+#endif
                 } else {
                 kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
@@ -3160,18 +3190,45 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+#if QSB_HOST_VERIFY
+            /* This batch's digest kernel is queued; verify the previous batch's tentatives on the host meanwhile. */
+            for (uint32_t i = 0; i < hv_pend_n; i++) {
+                uint32_t tag; memcpy(&tag, hv_pend + 4 + (size_t)i * ZLAB_HIT_REC, 4);
+                const uint32_t index = tag & 0x3fffffffu, ep = index / (uint32_t)QSB_SE_PER_EPOCH, lane = index % (uint32_t)QSB_SE_PER_EPOCH;   /* tag layout epoch*QSB_SE_PER_EPOCH + lane (256 on e876032, 128 on 9ac2515) */
+                if (ep >= (uint32_t)hv_pend_epochs) continue;
+                int r = qsb_hv_publish(&hv, hv_pend_base + ep, lane, (int)((tag >> 30) & 1u), zh_fd, &hit_counter);
+                if (r < 0) { fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+            }
+#if QSB_HV_STATS
+            fprintf(stderr, "hv: tentatives=%u published_total=%llu\n", hv_pend_n, (unsigned long long)hit_counter);
+#endif
+            hv_pend_n = 0; g_hit_counter = hit_counter;
+#else
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+#endif
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
             total_searched += (uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH;
             epoch_base += epochs_in_batch;
 #if ZLAB_HITPATH
+#if QSB_HOST_VERIFY
+            err = cudaMemcpy(hv_pend, d_hitbuf, 4, cudaMemcpyDeviceToHost);   /* blocks until this batch's kernels finish */
+            if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
+            g_total_searched = total_searched;
+            memcpy(&hv_pend_n, hv_pend, 4);
+            if (hv_pend_n > 1024u) hv_pend_n = 1024u;
+            if (hv_pend_n) { err = cudaMemcpy(hv_pend + 4, d_hitbuf + 4, (size_t)hv_pend_n * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; } }
+            hv_pend_base = epoch_base - (uint64_t)epochs_in_batch; hv_pend_epochs = epochs_in_batch;
+            h_hit = 0;   /* the e876032 publication block below is compiled but never entered */
+#else
             err = cudaMemcpy(zh_host, d_verified_hitbuf, 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
             if (err != cudaSuccess) { fprintf(stderr, "Hit read failed: %s\n", cudaGetErrorString(err)); return 1; }
             // Publish only completed batches to the termination-time diagnostic.
             g_total_searched = total_searched;
             memcpy(&h_hit, zh_host, 4);
+#endif
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
                 if (nh > ZLAB_HIT_FIRST)
@@ -3273,6 +3330,17 @@ int main(int argc, char **argv) {
                 }
                 t_last_se = t_now;
             }
+#if QSB_HOST_VERIFY
+            if (epoch_base >= n_epochs) {   /* drain: no next batch will publish these */
+                for (uint32_t i = 0; i < hv_pend_n; i++) {
+                    uint32_t tag; memcpy(&tag, hv_pend + 4 + (size_t)i * ZLAB_HIT_REC, 4);
+                    const uint32_t index = tag & 0x3fffffffu, ep = index / (uint32_t)QSB_SE_PER_EPOCH, lane = index % (uint32_t)QSB_SE_PER_EPOCH;   /* tag layout epoch*QSB_SE_PER_EPOCH + lane (256 on e876032, 128 on 9ac2515) */
+                    if (ep >= (uint32_t)hv_pend_epochs) continue;
+                    if (qsb_hv_publish(&hv, hv_pend_base + ep, lane, (int)((tag >> 30) & 1u), zh_fd, &hit_counter) < 0) { fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                }
+                hv_pend_n = 0; g_hit_counter = hit_counter;
+            }
+#endif
             if (epoch_base >= n_epochs) break;
         }
         clock_gettime(CLOCK_MONOTONIC, &t1);
