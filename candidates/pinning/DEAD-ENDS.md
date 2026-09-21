@@ -29,3 +29,5 @@ Official and public negatives that must not be retried without new evidence.
 - Further *per-candidate* 2^-31-class tails from the carry-chain census, only behind the gate, only after this official score.
 - CUDA graphs / further JIT trim as bundle fillers only.
 - Do **not** drop `_ModAddLazyOff` t1 (`mk` is frequently −1).
+
+| `ea2a5970` / `948c67ff` | Z9SUB + unpromoted pinning.cu stack | Setup fail (nvcc) | Do not resubmit that mix; Z9SUB-only on promoted. |
