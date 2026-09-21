@@ -152,7 +152,7 @@ def audit_source():
     assert cu.count("qsb_gate_accept(") >= 3  # definition + two writers
     assert "BN_lebin2bn(pp.neg_r_inv" in cu
     assert "EC_POINT_invert" in cu
-    assert mathh.count("QSB_SECOND_FOLD_TAIL") == 6
+    assert mathh.count("QSB_SECOND_FOLD_TAIL") == 7
     assert "sub.u64 t0,t0,k;" in mathh
     assert "add.u64 t0,t0,k;" in mathh
     assert "sub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;" in mathh
