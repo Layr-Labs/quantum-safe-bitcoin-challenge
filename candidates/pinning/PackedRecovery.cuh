@@ -49,13 +49,6 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
     Load256(out,tmp);
 }
 
-#ifndef QSB_PARITY_WINDOW
-#define QSB_PARITY_WINDOW 1
-#endif
-#if QSB_PARITY_WINDOW
-#include "ParityWindow.cuh"
-#endif
-
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
@@ -90,7 +83,7 @@ __device__ __forceinline__ void qsb_packed_prepare(
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
-    uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
+    const uint64_t *a,const uint64_t *b,const uint64_t *c,uint64_t *x1,uint64_t *x2) {
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
 #if QSB_LAZY_REC
     /* u, v, l, m and sum only feed multiplies and borrow-corrected subtractions, which
@@ -120,22 +113,10 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
-#if QSB_PARITY_WINDOW
-    const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
-#else
     qsb_packed_raw_mul(u,l,s);
-#endif
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
-#if QSB_PARITY_WINDOW
-    const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
-#else
     qsb_packed_raw_mul(v,m,s);
-#endif
-#if QSB_PARITY_WINDOW
-    return parity_u|(parity_v<<1);
-#else
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
-#endif
 }
 #else
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);
