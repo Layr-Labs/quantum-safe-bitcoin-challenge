@@ -56,6 +56,25 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
 #include "ParityWindow.cuh"
 #endif
 
+/* A2: the two finish products only feed "+a" and the parity window.  The window and
+ * its exact fallback both take arbitrary 256-bit representatives, and raw+a < 2p holds
+ * whenever a[3] != 2^64-1 (a < 2^256-2^192 < 2^256-2K), so the single conditional
+ * subtraction inside _ModAdd256 still returns the canonical abscissa; qsb_add_boundary
+ * keeps the normalisation for the excluded top range of the fixed a.  The reduction
+ * carry that qsb_recovery_mul used to clear here is therefore dead work. */
+#ifndef QSB_RAWS_FIN
+#define QSB_RAWS_FIN 1
+#endif
+__device__ __forceinline__ void qsb_finish_product(
+    uint64_t *s,const uint64_t *sum,const uint64_t *t,const uint64_t *a) {
+#if QSB_RAWS_FIN
+    qsb_packed_raw_mul(s,sum,t);
+    qsb_add_boundary(s,a);
+#else
+    (void)a;qsb_recovery_mul(s,sum,t);
+#endif
+}
+
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
@@ -119,13 +138,13 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
-    _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
+    _ModSub256(t,l,c); qsb_finish_product(s,sum,t,a); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
-    _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
+    _ModSub256(t,m,c); qsb_finish_product(s,sum,t,a); _ModAdd256(x2,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
