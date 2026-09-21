@@ -5,7 +5,8 @@
 #ifndef QSB_PAIR_SHARED
 #define QSB_PAIR_SHARED 1
 #endif
-#define QSB_PAIR_MUL (QSB_PAIR_SHARED ? 2 : 1)
+/* epochs consumed per digest block = (epochs per thread) x (epoch pairs per block) */
+#define QSB_PAIR_MUL ((QSB_PAIR_SHARED ? 2 : 1) * QSB_SE_HALVES)
 #if QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_k2s_pre(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
@@ -58,27 +59,13 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #define ZLAB_K2S3M 1
 #endif
 #if ZLAB_K2S3M
-// Research: owizdom 4f367236, carried in DPZZxlz cbcb7bb and fkiene 2cf35a3.
-// Only speculative paired preparation changes; exact replay uses original helpers.
-#ifndef QSB_SPEC_PREPARE_PAIR
-#define QSB_SPEC_PREPARE_PAIR 1
-#endif
-#if QSB_SPEC_PREPARE_PAIR
-#define QSB_PRE_MUL QSB_FMUL
-#define QSB_PRE_SUB QSB_FSUB
-#define QSB_PRE_ADD QSB_FADD
-#else
-#define QSB_PRE_MUL X_FMUL
-#define QSB_PRE_SUB X_FSUB
-#define QSB_PRE_ADD X_FADD
-#endif
 __device__ __forceinline__ void qsb_k2s_pre3(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
     uint64_t yb[4];
-    QSB_PRE_MUL(yb, yR, ZZZ);
-    QSB_PRE_SUB(n, yb, Y);
-    QSB_PRE_ADD(n + 4, yb, Y);
+    X_FMUL(yb, yR, ZZZ);
+    X_FSUB(n, yb, Y);
+    X_FADD(n + 4, yb, Y);
     Load256(n + 8, ZZ);
 }
 /* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
@@ -86,15 +73,12 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    QSB_PRE_MUL(t, xR, ZZ);
-    QSB_PRE_SUB(t, t, X_D);
+    X_FMUL(t, xR, ZZ);
+    X_FSUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
-    QSB_PRE_MUL(W, ZZZ, X_D);       /* W = ZZZ*d */
+    X_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
 }
-#undef QSB_PRE_MUL
-#undef QSB_PRE_SUB
-#undef QSB_PRE_ADD
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
  * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
@@ -306,39 +290,53 @@ __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uin
     o0[0]=I[0]+a0;o0[1]=I[1]+b0;o0[2]=I[2]+c0;o0[3]=I[3]+d0;o0[4]=I[4]+e0;o0[5]=I[5]+f0;o0[6]=I[6]+g0;o0[7]=I[7]+h0;
     o1[0]=I[0]+a1;o1[1]=I[1]+b1;o1[2]=I[2]+c1;o1[3]=I[3]+d1;o1[4]=I[4]+e1;o1[5]=I[5]+f1;o1[6]=I[6]+g1;o1[7]=I[7]+h1;
 }
-// H0-only gate derived independently from Saviour1001 38eb0bc public research.
-// Original full-digest helper remains available for replay and larger targets.
+/* QSB_GATE_H0 (kill switch, default 0): the ranked gate reads only word 0 of the gate digest
+ * (gpu_bench_valid_words at QSB_ZEROS_N<=32 tests hs[0] alone), so the last round's `d += t1`
+ * update -- which becomes digest word 4 -- and the seven dead feed-forward adds o[1..7] are dead
+ * work. This helper runs rounds 0..62 exactly as the shipped pair does, then writes word 0 from
+ * the round-63 a-only identity. EXACT: word 0 is bit-identical, so the hit set cannot change.
+ *
+ * Round 63 of QSB_GP_RND(48) is QSB_GP_R2(b,c,d,e,f,g,h,a,48,15), i.e.
+ *   S2Round(b0,c0,d0,e0,f0,g0,h0,a0,K[63],w0[15])
+ * with S2Round(A,B,C,D,E,F,G,H,k,w): t1=H+S1(E)+Ch(E,F,G)+k+w; t2=S0(A)+Maj(A,B,C); D+=t1; H=t1+t2.
+ * Substituting (A..H)=(b,c,d,e,f,g,h,a):
+ *   t1 = a0 + S1(f0) + Ch(f0,g0,h0) + K[63] + w0[15]      t2 = S0(b0) + Maj(b0,c0,d0)
+ *   e0 += t1   <- DEAD (digest word 4)                    a0  = t1 + t2   <- the new a
+ *   digest word 0 = I[0] + a0_new
+ * Round 62 needs all of a,b,c,e,f,g,h for round 63 and therefore both of its own t1 and t2, so no
+ * earlier round can be trimmed; nor can any of the 64 schedule words, since w0[15] is required.
+ *
+ * Re-derived in our own source from the PUBLIC notes of jacklightChen 6dfdb6f8 and Saviour1001
+ * 38eb0bc. No rival tree was fetched, cloned or built. Credit: Saviour1001 for the idea on this
+ * track; our own pinning `_SHA256Pubkey33H0` (pinning_sha.md piece A item 4) is the same cut. */
 #ifndef QSB_GATE_H0
-#define QSB_GATE_H0 1
+#define QSB_GATE_H0 0
 #endif
-#if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
-__device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
+#if QSB_GATE_H0
+/* rounds 0..14 of a 16-round group; round 15 is written out longhand by the caller */
+#define QSB_GP_RND15(k) { \
+    QSB_GP_R2(a,b,c,d,e,f,g,h,k,0)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,1) \
+    QSB_GP_R2(g,h,a,b,c,d,e,f,k,2)  QSB_GP_R2(f,g,h,a,b,c,d,e,k,3) \
+    QSB_GP_R2(e,f,g,h,a,b,c,d,k,4)  QSB_GP_R2(d,e,f,g,h,a,b,c,k,5) \
+    QSB_GP_R2(c,d,e,f,g,h,a,b,k,6)  QSB_GP_R2(b,c,d,e,f,g,h,a,k,7) \
+    QSB_GP_R2(a,b,c,d,e,f,g,h,k,8)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,9) \
+    QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
+    QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
+    QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) }
+/* Same two interleaved compressions, but only digest word 0 of each is produced. */
+__device__ __forceinline__ void qsb_sha256_init_transform_pair_w0(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
     uint32_t t1, t2;
     uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
     uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
     QSB_GP_RND(0);  QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
     QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
     QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_R2(a,b,c,d,e,f,g,h,48,0)
-    QSB_GP_R2(h,a,b,c,d,e,f,g,48,1)
-    QSB_GP_R2(g,h,a,b,c,d,e,f,48,2)
-    QSB_GP_R2(f,g,h,a,b,c,d,e,48,3)
-    QSB_GP_R2(e,f,g,h,a,b,c,d,48,4)
-    QSB_GP_R2(d,e,f,g,h,a,b,c,48,5)
-    QSB_GP_R2(c,d,e,f,g,h,a,b,48,6)
-    QSB_GP_R2(b,c,d,e,f,g,h,a,48,7)
-    QSB_GP_R2(a,b,c,d,e,f,g,h,48,8)
-    QSB_GP_R2(h,a,b,c,d,e,f,g,48,9)
-    QSB_GP_R2(g,h,a,b,c,d,e,f,48,10)
-    QSB_GP_R2(f,g,h,a,b,c,d,e,48,11)
-    QSB_GP_R2(e,f,g,h,a,b,c,d,48,12)
-    QSB_GP_R2(d,e,f,g,h,a,b,c,48,13)
-    QSB_GP_R2(c,d,e,f,g,h,a,b,48,14)
-    *o0=I[0]+a0+S1(f0)+Ch(f0,g0,h0)+K[63]+w0[15]+S0(b0)+Maj(b0,c0,d0);
-    *o1=I[0]+a1+S1(f1)+Ch(f1,g1,h1)+K[63]+w1[15]+S0(b1)+Maj(b1,c1,d1);
+    QSB_GP_RND15(48);
+    o0[0] = I[0] + (a0 + S1(f0) + Ch(f0,g0,h0) + K[63] + w0[15]) + S0(b0) + Maj(b0,c0,d0);
+    o1[0] = I[0] + (a1 + S1(f1) + Ch(f1,g1,h1) + K[63] + w1[15]) + S0(b1) + Maj(b1,c1,d1);
 }
+#undef QSB_GP_RND15
 #endif
-
 #undef QSB_GP_RND
 #undef QSB_GP_R2
 #undef QSB_GP_WMIX
@@ -374,22 +372,32 @@ __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32
     return 0;
 #endif
 }
-// Full SHA fallback preserves every supported difficulty and original replay.
-__device__ __forceinline__ int qsb_k2s_gate_h0(
-    uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
-#if QSB_GATE_PAIR && QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
-    uint32_t pb0[16],pb1[16],h0,h1;
-    qsb_gate_block(pb0,q1x,y_parities);
-    qsb_gate_block(pb1,q2x,y_parities>>1);
-    qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
-    if((h0>>(32-QSB_ZEROS_N))==0){*recid_out=0;return 1;}
-    if((h1>>(32-QSB_ZEROS_N))==0){*recid_out=1;return 1;}
-    return 0;
+
+/* Word-0-only gate. Used ONLY by the speculative hot path (qsb_pair_tail3_value). The exact replay
+ * qsb_pair_verify_candidate keeps the full 8-word gate, so nothing that authorizes a hit record
+ * changes. Domain guard: the word-0 form is only valid while the predicate reads hs[0] alone, i.e.
+ * 1 <= QSB_ZEROS_N <= 32; anything else falls back to the full gate rather than testing words that
+ * qsb_sha256_init_transform_pair_w0 never wrote. */
+#if QSB_GATE_PAIR && QSB_GATE_H0 && defined(QSB_ZEROS_N) && (QSB_ZEROS_N >= 1) && (QSB_ZEROS_N <= 32)
+__device__ __forceinline__ int qsb_gate_valid_w0(uint32_t w) {
+#if (QSB_ZEROS_N % 32) != 0
+    return (w >> (32 - (QSB_ZEROS_N % 32))) == 0u;
 #else
-    return qsb_k2s_gate(q1x,q2x,y_parities,recid_out);
+    return w == 0u;
 #endif
 }
-
+__device__ __forceinline__ int qsb_k2s_gate_h0(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
+    uint32_t pb0[16], pb1[16], w00[1], w01[1];
+    qsb_gate_block(pb0, q1x, y_parities);
+    qsb_gate_block(pb1, q2x, y_parities>>1);
+    qsb_sha256_init_transform_pair_w0(w00, pb0, w01, pb1);
+    if(qsb_gate_valid_w0(w00[0])){*recid_out=0;return 1;}
+    if(qsb_gate_valid_w0(w01[0])){*recid_out=1;return 1;}
+    return 0;
+}
+#else
+#define qsb_k2s_gate_h0 qsb_k2s_gate
+#endif
 
 struct QsbPairFront {uint64_t words[12];int ok;};
 __device__ __noinline__ QsbPairFront qsb_pair_front_value(
