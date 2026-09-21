@@ -620,64 +620,53 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-// Exact transport integration from public fkiene / DrCleverHans descriptions.
-// One x scratch and alternating ordinates; no next-point prefetch or GLV table.
-__device__ __forceinline__ uint3 qsb_decode_pairs(const uint64_t *k) {
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
-    uint32_t words[8];
+    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
-    for(int i=0;i<4;++i){words[2*i]=(uint32_t)M[i];words[2*i+1]=(uint32_t)(M[i]>>32);}
-    volatile uint64_t *codes=(volatile uint64_t*)qsb_digit_arena();
-    uint3 seed;uint32_t pending=0;
-    #pragma unroll
-    for(int c=0;c<GT_CHUNKS;++c){
-        const unsigned pos=c==0?1u:17u*c+2u,bits=c==0?18u:17u;
-        const unsigned wi=pos>>5,shift=pos&31u;
-        uint32_t hi=wi<7?words[(wi+1)&7]:0u;
-        uint32_t f=__funnelshift_r(words[wi],hi,shift)&((1u<<bits)-1u);
-        uint32_t neg=c==GT_CHUNKS-1?(uint32_t)negative:1u-(f>>(bits-1));
-        uint32_t code=(((f^(0u-neg))&((1u<<(bits-1))-1u))<<6)|(neg<<31);
-        if(c==0)seed.x=code;else if(c==1)seed.y=code;else if(c==2)seed.z=code;
-        else if(c&1)pending=code;
-        else codes[(size_t)((c-4)/2)*QSB_TREE_N+threadIdx.x]=(uint64_t)pending|((uint64_t)code<<32);
+    for(int c=0;c<GT_CHUNKS;c++) {
+        const unsigned pos=c==0?1u:17u*c+2u;
+        const unsigned j=pos/64u,sh=pos%64u;
+        uint64_t value=M[j]>>sh;
+        if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
+        const unsigned bits=c==0?18u:17u;
+        uint32_t f=(uint32_t)value&((1u<<bits)-1u);
+        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+        uint32_t neg=(uint32_t)(tm<0);
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
     }
-    return seed;
 }
-__device__ __forceinline__ void qsb_load_bytecode(const uint8_t *plane,uint32_t code,uint64_t *x,uint64_t *y) {
-    uint64_t mask=0ULL-(uint64_t)(code>>31);
-    // Use the original loader body, with exactly the same addresses and XOR mask.
-    gt_load_signed_flat_m(plane+(code&0x007fffc0u),0,0,mask,x,y);
+__device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
+    unsigned base,uint64_t *x,uint64_t *y) {
+    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
+    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    static_assert(GT_CHUNKS==15,"audited seed and six pairs");
-    (void)unused;uint3 seed=qsb_decode_pairs(k);
-    uint64_t x[4],ya[4],yb[4];
-    {
-        uint64_t x0[4];
-        qsb_load_bytecode(table,seed.x,x0,ya);
-        qsb_load_bytecode(table+(2u<<22),seed.y,x,yb);
-        _PointAddXYZZ_mm(X,Y,U,V,x0,ya,x,yb);
-    }
-    qsb_load_bytecode(table+(3u<<22),seed.z,x,yb);
-    _PointAddXYZZT<true>(X,Y,U,V,x,yb,ya);
-    const uint8_t *plane=table+(4u<<22);
-    volatile uint64_t *codes=(volatile uint64_t*)qsb_digit_arena();
+    (void)unused;qsb_decode_to_shared(k);
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
+    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+    // INIT_ANCHOR
+    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    unsigned base=gt_offset(2);
     #pragma unroll 1
-    for(int pair=0;pair<6;++pair){
-        uint64_t packed=codes[(size_t)pair*QSB_TREE_N+threadIdx.x];
-        qsb_load_bytecode(plane,(uint32_t)packed,x,ya);
-        _PointAddXYZZT<true>(X,Y,U,V,x,ya,yb);
-        qsb_load_bytecode(plane+(1u<<22),(uint32_t)(packed>>32),x,yb);
-        _PointAddXYZZT<true>(X,Y,U,V,x,yb,ya);
-        plane+=2u<<22;
+    for(int c=2;c<GT_CHUNKS;c++) {
+        qsb_load_decoded(table,c,base,x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        base+=1u<<16;
     }
 #if QSB_YOFF
-    qsb_yoff_to_y(yb);
+    qsb_yoff_to_y(y0);
 #endif
-    _ModMult(x,yb,V);_ModSub256(Y,Y,x);
+    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 }
+
 
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
 

@@ -1869,6 +1869,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
   uint64_t PP[4];
   uint64_t PPP[4];
   uint64_t Q[4];
+  uint64_t T[4];
 
 #if QSB_YOFF
   _ModAddLazyOff(S2, Y2, Yoff);        // offset ordinates: y2 + yoff (mod p)
@@ -1887,30 +1888,31 @@ __device__ __forceinline__ void _PointAddXYZZT(
 
 #if QSB_FUSE_SQRADDSUB2
   /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
-  _ModSqrAddSub2(X1, R, PPP, Q);        // X3 = R^2 + PPP - 2V
+  _ModSqrAddSub2(T, R, PPP, Q);        // X3 = R^2 + PPP - 2V
 #else
-  _ModSqr(X1, R);                       // R^2
+  _ModSqr(T, R);                       // R^2
 #if QSB_LAZY
-  _ModX3Fused(X1, X1, PPP, Q);           // X3 = R^2 + PPP - 2V
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
 #else
-  _ModAdd256(X1, X1, PPP);
-  _ModSub256(X1, X1, Q);
-  _ModSub256(X1, X1, Q);                 // X3 = R^2 + PPP - 2V
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
 #endif
 #endif
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, X1);                 // V - X3
+  _ModSub256(Q, Q, T);                 // V - X3
+  _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
-    _ModMult(Y1, Q, R);                    // actual Y3 = Y1 - Y2*ZZZ3
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
-    _ModMult(Q, R);
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
+  Load256(X1, T);                      // X3
 }
 
 // Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3,
@@ -1927,6 +1929,7 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
+  uint64_t T[4];
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -1934,11 +1937,12 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
-  _ModSqr(X3, R);                                   // R^2
-  _ModSub256(X3, X3, ZZZ3);
-  _ModSub256(X3, X3, Q);
-  _ModSub256(X3, X3, Q);                             // X3 = R^2 - PPP - 2Q
+  _ModSqr(T, R);                                   // R^2
+  _ModSub256(T, T, ZZZ3);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, X3);                             // Q - X3
+  _ModSub256(Q, Q, T);                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
+  Load256(X3, T);                                  // X3
 }

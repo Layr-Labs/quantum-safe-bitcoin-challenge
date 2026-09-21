@@ -30,11 +30,7 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
-#if QSB_TREE_TOP2
-        if(half>32)__syncthreads();else __syncwarp();
-#else
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
-#endif
     }
 #if QSB_TREE_TOP2
     /* P12: the top pair n0=products[2N-4], n1=products[2N-3] needs no separate root level
@@ -83,11 +79,7 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
-#if QSB_TREE_TOP2
-            qsb_field_mul_sc(out,parent,sibling);
-#else
             if(count==2){Load256(out,sibling);}else{qsb_field_mul_sc(out,parent,sibling);}
-#endif
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }

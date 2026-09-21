@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "exhaustive_packed_field_cases": 524288,
+  "raw_scalar_cases": 4008,
+  "digit_comparisons": 60120,
+  "basis_vectors_and_negatives": 516,
+  "shared_bytes_removed_per_candidate": 16,
+  "scope": "Independent proof/model of public6fe3a56 description only; no production edits, no donor source fetched, no native compile. Compiler may already fold shifts/signs; register lifetime from two seeds requires remote evidence. Hold small decoder component for meaningful later integration."
+}

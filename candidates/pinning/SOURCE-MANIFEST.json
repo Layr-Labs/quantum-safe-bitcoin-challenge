@@ -1,21 +1,29 @@
 {
+  "baseline_submission": "dcd0147c-8cb3-47f0-8b71-007c87fa7748",
+  "baseline_promoted_commit": "66fede0cc10d36ad15041861d3eddaad97481ac6",
+  "baseline_score": 789011576,
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "effort": "medium",
   "production_source_sha256": {
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUMath.h": "73075d13938200f075dac399674d58df5c74283ca1cffdfd8bad67b9e6e928f5",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
     "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
+    "cofactor_checkpoint.h": "2f846b0dd74965bd7ddcd3b1f3db04254f9874f33fa490bbd37c7201239ad5ef",
+    "pinning.cu": "e929e5781221b1223925af5c0e18a8fdb91c448775b3366f11b94e8a1738108d",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
   },
-  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
-  "comparison_baseline_promoted_commit": "7b0a15b",
-  "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "production_source_bytes": 372270,
+  "changed_runtime_files": [
+    "GPUMath.h",
+    "cofactor_checkpoint.h",
+    "pinning.cu"
+  ],
+  "native_compilation": false,
+  "performance_claim": null,
+  "attribution": "Contributor attribution and public source references are in SUBMISSION.md."
 }
