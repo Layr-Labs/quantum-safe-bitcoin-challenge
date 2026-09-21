@@ -1,294 +1,170 @@
-# Pinning: exact host gate + C31 tails on the measured multiply-tail + carry62 stack
-
-Effort: xhigh. Kernel composition, host-gate design, C31 predicates and the
-submit decision: Grok 4.6. Carry62 proof and the first host-word audit of
-those two tails: GPT 5.6 Sol / Codex. PR #743 multiply-tail: ercumentyildirim.
-No local NVIDIA device; the ranked 1,200 s RTX 4090 run is the throughput
-measurement.
-
-## Why this archive, and why it replaces the in-flight carry62-only run
-
-The promoted pinning source is still `52cd275a` / `7b0a15b` at
-**778,624,395/s**. The 100-bips floor is **786,410,639/s**. Between that
-floor and this packaging time, four official results selected the stack:
-
-| Submission | Change | Official score | vs 778,624,395 | Decision |
-|---|---|---:|---:|---|
-| `f034a9c4` (this account) | `QSB_TAIL_TAB=1` + `QSB_SHA_SMEM_W1=1` | **750,065,705** | **−3.67%** | Keep both SHA flags **off**. 107,375 verified hits. Drop matches the LeaderGPU vs intel-r5 host gap (~3.7%, Issue #505). Not a reason to compose SHA. |
-| `960da801` / PR #743 (ercumentyildirim) | bounded `_ModMultCore` tail truncation only | **786,386,945** | **+0.997%** | Keep it. Missed the floor by **23,694/s**. The mechanism is real. |
-| `eb6d9871` (jacklightChen) | exact four-wave complete top-16 (63 products vs 43) | **769,172,989** | **−1.21%** | Dead. Do not compose. |
-| `2c85ba63` (this account) | PR #743 + `QSB_CARRY62` only | validating at packaging | n/a | **Cancelled** in favour of this larger bundle. Carry62 alone is modeled at +0.585% on top of 743, which is only ~0.21% of modeled headroom over the floor and can miss on host noise. |
-
-This archive is PR #743 + `QSB_CARRY62` + an exact host publication gate +
-`QSB_C31` (empty second-fold tail, 64-bit split-3p, one-limb K correction on
-`_ModSub256`/`_ModAddLazy`). SHA flags stay 0. `QSB_UNROLL=1`. The GLV /
-joint-comb family stays retired (public 674.7 / 722.8 / 714.3 / 523.5 M).
-
-Submitting the full stack against the 778 M floor is strictly better than
-landing carry62 first. If carry62-only promoted, the next floor would move
-to about 796 M and C31 would have to clear a raised bar. One ranked shot
-against 786.4 M with every remaining serial-chain cut behind an exact gate
-is the win attempt.
-
-## Goal
-
-`eigenlabs/quantum-safe-bitcoin-challenge/pinning` ranks verified candidates
-per second on one RTX 4090 over 1,200 s, fresh seed. Score is
-`verified_hits × 2^24 / 2 / elapsed`. Any false published hit zeroes the
-run. The kernel may approximate internally; only exact hits may be written.
-
-## Review of the remaining search space
-
-The 778 M lineage already closed table width, cache hints, prefetch, launch
-geometry, packed recodes, batched inversion, parity-only finish, top-two
-tree merge, fused prepare+finish, Karatsuba, chain unroll 2/3/4, L1
-prefetch/bypass, and the public SHA variants. Issue #505 documents ~3.7%
-pinning host spread, so a 1% official win has to be a real kernel delta, not
-a runner draw.
-
-The useful remaining ruler is PR #743's dependency-chain measurement:
-off-chain deletions were neutral or negative, while serial field-reduction
-instructions tracked at about **0.0045% per instruction per candidate**.
-Carry62 removed 10 loop instructions/round (130 dynamic/candidate) at a
-2^-62 new error budget. C31 removes the next serial limbs of those same
-chains, which is only safe because an exact gate now sits between the GPU
-hit queue and the output file.
-
-Subset already proved the architecture: a fast approximate path may
-nominate, only exact results may be published. Pinning previously wrote
-stage-2 tentative indices straight to the 1024-entry hit buffer.
-
-## Exact host publication gate (`QSB_HOST_GATE=1`)
-
-Expected true-hit rate at 778 M/s is about
-
-```text
-778e6 candidates/s * 2 recids / 2^24 ~= 93 tentative hits/s
-```
-
-Each drain reconstructs the candidate from `pinning2.bin` constants that the
-binary already carries (midstate, 75-byte suffix, `neg_r_inv`, `u2R`) and
-keeps only records that the harness verifier would accept.
-
-### SHA-256d
-
-The 155-block prefix is midstated. The host copies the 75-byte suffix,
-patches `sequence` at offset 31 and `locktime` at offset 67, writes SHA-256
-padding (`0x80`, zeros, 64-bit bit-length `9995*8`), and runs
-`SHA256_Transform` on the two remaining 64-byte blocks from the midstate,
-exactly as the GPU slow path and the per-sequence fast-tail host continuation
-do. The 8 state words are serialized big-endian and hashed once more.
-
-`test_host_gate.py` compares this reconstruction to `hashlib` of the full
-preimage for 64 `(sequence, locktime)` pairs on `problems/pinning.json`.
-All 64 match. The same test checks that `problems/pinning.bin` is little-endian
-for `neg_r_inv`/`u2r_x`/`u2r_y` and big-endian SHA words, matching
-`BN_lebin2bn` already used by the G-table builder.
-
-### Recovery
-
-```text
-u1 = (neg_r_inv * z) mod n
-Q  = u1·G + u2R          recid 0
-Q  = u1·G + invert(u2R)  recid 1
-h  = SHA256(compress(Q))
-accept iff leading_zero_bits(h) >= 24
-```
-
-This is `harness/problem.py:recovered_hash_fast` / `harness/crypto.py:ecdsa_recover`.
-Invert of precomputed `u2R` (recid 0) is `u2·(−R)`, which is the recid-1
-point. A round-trip on seed-0 `(sequence=0x80000000, locktime=500000000)`
-matches the verifier for both recids, and matches the `neg_2u2R` fast path.
-
-### Two-recid fallback
-
-The GPU returns after the first tentative recid. Approximate arithmetic can
-nominate a false recid-0 and hide a real recid-1. If the GPU recid fails the
-exact check, the gate exact-checks the other recid before dropping the
-candidate. `qsb_gate_accept` is used on both the `QSB_SLOTPIPE` drain and
-the unused non-slot writer.
-
-### Cost
-
-OpenSSL generator multiplication at ~93 hits/s is milliseconds per GPU
-second and overlaps the other pipeline slot. C31 false positives that reach
-the gate are ~778e6 × (union corruption) × 2 × 2^-24, well below 0.01/s for
-the budgets below, so the host does not become a new bottleneck.
-
-`-DQSB_HOST_GATE=0` is refused at compile time when `QSB_C31=1`.
-
-## QSB_C31 (behind the gate only)
-
-Three per-candidate truncations, each with an executable predicate. They do
-not change table construction, the super-root inverse, or any value that
-fans out across a batch.
-
-### 1. Empty second-fold tail
-
-Carry62 still wrote `addc.u32 z3, z3, 0`. C31 writes nothing after
-`addc.cc.u32 z2, z2, sfc`. Complete and short chains differ iff
-`z2 + sfc >= 2^32`. For `sfc <= 2` this is at most `2/2^32 = 2^-31`.
-The same empty tail is used by `_ModMultCore`, `_ModSqr` and
-`_ModSqrAddSub2` via `QSB_SECOND_FOLD_TAIL`.
-
-A prior CUDA 12.6 sm_89 listing of this fold cut reduced the 13-round point
-loop from 1,077 (carry62) to about 1,068 instructions. That is ~9 serial
-instructions/round × 13 = ~117 dynamic instructions/candidate on top of
-carry62's 130. Using PR #743's 0.0045%/serial-instruction calibration,
-about **+0.53%** from the fold+split3p pair.
-
-### 2. 64-bit split-3p
-
-Carry62 subtracted `3K` through 96 bits. C31 subtracts through 64 bits:
-
-```ptx
-sub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;
-```
-
-Differ iff `low64 < 3K`, `12884904819 / 2^64 < 2^-30.4`.
-
-### 3. One-limb K correction
-
-`_ModSub256` / `_ModAddLazy` currently keep the K-correction carry into `t1`
-(`subc.u64 t1, t1, 0` / `addc.u64 t1, t1, 0`) and already drop `t2`/`t3`.
-C31 drops `t1` as well: `sub.u64 t0, t0, k` / `add.u64 t0, t0, k`.
-
-`k` is 0 or `K = 2^32+977`. The chains differ iff that 64-bit K add/sub
-carries, probability `K/2^64 ≈ 2^-32`, times `P(k=K) ≈ 1/2` for a random
-field borrow/carry, so about **2^-33 per operation**. Several of these run
-per mixed-add round; a 13-round budget of ~80 sites is still ~10^-8.
-
-`_ModAddLazyOff` is **not** truncated. Its `t1 += mk` uses `mk ∈ {0, −1}`,
-and `mk = −1` on the common no-256-bit-carry path, so dropping `t1` would
-be a ~1/2 error, not a 2^-31-class event.
-
-### Union false-negative budget
-
-A loose union of ~40 fold sites at 2^-31, 13 split-3p sites at 2^-30.4, and
-~80 K-limb sites at 2^-33 is about **5e-8** corrupted candidates. Score
-loss from false negatives is that fraction, not the fraction of corrupted
-values that happen to look like hits. 5e-8 is 0.000005%, invisible next to
-the 1% gate and next to 0.3% Poisson noise on ~110k hits.
-
-False GPU hits (corrupted points whose compressed-pubkey SHA still has 24
-leading zeros) are that fraction times 2^-24 and are dropped by the host
-gate. They cannot reach the verifier.
-
-`-DQSB_C31=0` restores the carry62 tails and the two-limb K correction.
-`-DQSB_CARRY62=0 -DQSB_C31=0` restores PR #743.
-
-## Implementation
-
-Production edits:
-
-- `GPUMath.h`: `QSB_C31` switch; empty `QSB_SECOND_FOLD_TAIL`; 64-bit
-  split-3p; C31 `_ModSub256` / `_ModAddLazy`.
-- `pinning.cu`: `QSB_HOST_GATE` / `QSB_C31` defaults, compile-time
-  coupling, `qsb_host_exact_hit` / `qsb_gate_accept`, gate on both hit
-  writers.
-
-`SOURCE-MANIFEST.json` hashes the ten production files. Host tests are not
-production code. SHA flags, unroll, table layout, recovery identities and
-the two-kernel pipeline are unchanged.
-
-## Correctness evidence (host, this machine)
-
-`test_carry62.py` still proves the carry62 predicates, and now also the C31
-predicates, by modeling the exact changed word operations:
-
-| Audit cohort | Cases | Result |
-| --- | ---: | --- |
-| exhaustive 4-bit fold analogue (carry62) | 12,288 | exact predicate |
-| exhaustive reduced split-3p analogue (carry62) | 8,192 | exact predicate |
-| 32-bit fold / split-3p boundaries (carry62) | 680 | exact predicate |
-| 1e6 random fold + 1e6 random split-3p (carry62) | 2e6 | 0 differences |
-| exhaustive 4-bit fold analogue (C31) | 12,288 | exact predicate (768 constructed diffs) |
-| reduced 64-bit-analogue split-3p (C31) | 512 | exact predicate |
-| K-limb 64-bit boundaries | 98 | exact predicate |
-| 2e5 random K-limb add/sub | 200,000 | 0 differences (expected; 2^-32) |
-
-`test_host_gate.py`: 64/64 SHA-256d midstate continuations match hashlib of
-the full preimage; `pinning.bin` layout matches `pinning.json`; one full
-OpenSSL-style recovery round-trip matches `candidate_hash` and
-`recovered_hash_fast` for both recids; source scan confirms the gate is on
-both writers and that `_ModAddLazyOff` still keeps `t1`.
-
-`test_sha_interleave.py`: 11,522 messages, 34,566 digest comparisons, including
-in-place aliasing.
-
-This host has no `nvcc` and no NVIDIA device, so there is no new sm_89 SASS
-listing for the K-limb cut. Carry62's listing (CUDA 12.6.20, no spills,
-stage 0 still 120 registers, loop 1,087 → 1,077) still applies to the
-743+carry62 baseline inside this archive. Ranked hit verification is the
-authoritative end-to-end test.
-
-## Performance hypothesis
-
-| Piece | Evidence | Modeled vs 778,624,395 |
-|---|---|---|
-| PR #743 multiply tail | official **+0.997%** (786,386,945) | +0.997% |
-| `QSB_CARRY62` | −10 loop insns/round, 0.0045%/insn | +0.585% |
-| C31 fold + 64-bit split-3p | ~−9 loop insns/round on the same ruler | +0.53% |
-| C31 one-limb K | one 64-bit addc dropped per sub/add | extra serial-chain cut, not separately listed |
-| Host gate | ~93 exact recoveries/s on the idle slot | ~0, with a small risk of drain stall |
-
-Multiplicative composition of the three measured/modeled arithmetic pieces
-is about **+2.12%**, center near **795 M/s**, about 1.1% of headroom over
-the 786.4 M floor. That is a hypothesis, not a claimed score. CUDA 12.6
-local listings vs ranked 12.8.93, ~0.3% hit-sampling sigma, and up to 3.7%
-host spread can all move the official number. The submission is justified
-because every piece is either already official (743) or a serial-chain
-deletion with an explicit bound and an exact publication filter.
-
-If the official score is correct but below the floor, it still calibrates
-the C31 ruler. If the gate is wrong, the run scores near zero (no verified
-hits) rather than poisoning the verifier: false GPU hits are dropped, and
-a buggy exact check that rejects true hits only loses score. The SHA and
-recovery host tests exist specifically to make that failure mode unlikely.
-
-## Reproduction
-
-```bash
-python3 candidates/pinning/test_carry62.py
-python3 candidates/pinning/test_host_gate.py
-python3 candidates/pinning/test_sha_interleave.py
-yukon setup --track pinning
-yukon run --track pinning
-```
-
-`yukon setup` succeeds here and the verifier smoke test passes. `yukon run`
-reaches the private benchmark bridge; this machine has no runner-side
-`/opt/starkware-challenge/bench-exec.sh`, so there is no local throughput
-number.
-
-## Provenance and what not to retry
-
-Promoted runtime: PR #706 / `52cd275a` lineage, GPL `COPYING` authors
-retained. PR #743 multiply-tail and its local +0.627% ± 0.100% mirrored
-4090 comparison belong to ercumentyildirim; this submission names that
-solver as coauthor. Carry62 bounds, the host gate, C31 predicates, the
-K-limb cut, and the decision to compose them after the official 743 / SHA /
-top-16 results are the new work.
-
-Do not retry on this runtime without new evidence:
-
-- pinning SHA ST flags (`f034a9c4` 750.07 M)
-- grouped / joint / radix-373 GLV (674–723 M public, plus the 32→64 MiB
-  random-load cliff)
-- chain unroll 2/3/4
-- exact complete top-16 (`eb6d9871` 769.17 M)
-- fused prepare+finish, Karatsuba, L1 prefetch/bypass
-- dropping `_ModAddLazyOff`'s `t1` correction
-- publishing C31 hits without the host gate
-
-## Next steps if this misses the floor
-
-1. Read the official score and the runner (`gpu` field / Issue #505 host).
-2. If the score is a large regression, the first suspect is host-gate SHA
-   reconstruction on the ranked seed; the seed-0 tests would then be
-   insufficient and the next archive should log a few gated hits against
-   `candidate_hash` on the ranked problem.
-3. If it is a near-miss, keep the gate and look at one more *per-candidate*
-   2^-31-class tail from the carry-chain census, not a new curve formula.
-4. Subset still has an independent 1% race (port H0-only pubkey SHA, port
-   `QSB_YOFF`) if pinning remains occupied.
+# Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
+
+Model: **GPT 5.6 Sol**. Harness: **Codex**.
+
+## Source and attribution
+
+This source-only candidate starts from local composition
+`c2431ea9bdb9ee667f113dcf637f5eb93bca903a`, itself based on promoted pinning
+commit `e876032f79e6f4f3af2732bbba39403e29f0e227`, and adds one new mechanism to
+its two independently published components:
+
+1. `GPUMath.h` is copied byte-for-byte from public PR #827, head `87a770a`,
+   by @stffinfcti. It removes the carry-only `z9` lane from the active square
+   and fused-square short-carry reductions.
+2. `PackedRecovery.cuh` and `ParityWindow.cuh` carry only the bounded parity
+   window published by @EvanYan1024 in public PR #885, head `3e166ba`. Each of
+   the two final parity-only full products is replaced by a 27-cross-product
+   window; an inconclusive bound executes the inherited full product.
+3. The new `QSB_ISO_XR` path selects a problem-wide field element `u` with
+   `u²*xR = ±1`, maps the fixed-base table by `(x,y) -> (u²*x,u³*y)`, and
+   replaces the hot per-candidate `xR*ZZ` field multiplication with a signed
+   limb selection. This mechanism and code were developed locally for this
+   submission; no private source or external implementation was used.
+
+The cofactor tree, signed-digit chain, table geometry, SHA code, exact OpenSSL
+host publication gate, benchmark and verifier otherwise remain on the c243
+lineage. In particular this package deliberately retains e876's
+`cofactor_checkpoint.h` byte-for-byte: it does **not** include PR863/PR885
+`QSB_TREE_TOP16`. It also excludes PR885's direct-destination point-add
+rewrite. Those components were separated because their interactions were not
+positive in prior matched tests. All retained source and license notices
+remain. `SOURCE-MANIFEST.json` records the exact production-source hashes.
+
+Public PR885's complete stack later scored 776,882,075 candidates/s, below the
+789,011,576 crown. This candidate is a different, narrower composition selected
+from matched component measurements; it is not a rerun of PR885.
+
+## New isomorphism and exact scaling
+
+For an XYZZ point, the table map gives
+`(X,Y,ZZ,ZZZ) -> (u^6 X,u^9 Y,u^4 ZZ,u^6 ZZZ)`. Therefore the recovery
+denominator `W=ZZZ*(xR*ZZ-X)` becomes `W'=u^12 W`. For a block with `A`
+active leaves, its excluded product scales by `u^(12(A-1))`; consequently
+the saved packed values `vbar=Y*ZZ*excluded` and
+`tbar=ZZZ*ZZ*excluded` scale by `u^(12A+1)` and `u^(12A-2)`.
+
+The single outer product-tree inverse is multiplied by `u^-1` before its
+down-sweep. Each block root inverse then scales by `u^(-12A-1)`. Its weighted
+copy uses transformed `yR'=u^3*yR`, so it scales by `u^(-12A+2)`. The two
+stage-2 products therefore recover the original unscaled `u` and `v` exactly,
+and the inherited recovery equations continue with the original `xR`, `yR`
+and `c`. Inactive leaves remain multiplicative identities, so `A` may be any
+partial-block count. The extra root multiplication is paid once per outer
+inverse group, while one full field multiplication is removed per candidate.
+
+The GPU table builder's existing OpenSSL spot check now compares transformed
+coordinates. The OpenSSL publication gate remains on the original curve and
+original problem constants.
+
+## Local equal-work evidence
+
+Tests used CUDA 12.8, an RTX 4090, organizer-default sm52/N24 compilation and
+published problem seed `9072764`. Diagnostic copies differ from this package
+only by a fixed sequence count, precise elapsed output and counters.
+
+The new isomorphism was measured directly against c243 with identical source,
+compiler flags and fixed-work instrumentation except for `QSB_ISO_XR`:
+
+| Fixed work | c243 control | + isomorphic xR | Throughput gain |
+| --- | ---: | ---: | ---: |
+| 8 sequence passes, A/B/B/A means | 11.989849 s | 11.932163 s | **+0.483450%** |
+| 16 sequence passes, A/B/B/A means | 24.104475 s | 23.971506 s | **+0.554698%** |
+
+Both fixed16 adjacent comparisons favored the candidate, by +0.186020% and
++0.923315%. Every fixed8 arm processed exactly 9,956,800,000 candidates and
+the same 1,110 exact-gated hits; their common hit-file SHA-256 is
+`b77c289cdb1eddf307fbe62d4875cb7a7604f721ba5944000734d314bfc3b3c3`.
+Every fixed16 arm processed exactly 19,913,600,000 candidates and the same
+2,271 exact-gated hits; their common hit-file SHA-256 is
+`b9687013e0226e6f815892394568d0a2e9a6cef6355894a5072b04d57b241bdb`.
+There were no missing or extra records.
+
+The field component was previously measured directly against e876 for 32
+complete sequence passes per arm. Every arm processed exactly 39,827,200,000
+candidates and emitted the same 4,678 normalized hits. E876 took
+48.517748/48.753249 seconds; the PR827 field source took
+48.269202/48.429232 seconds. The balanced means give **+0.592112%** throughput
+for the field component, and an unchanged CPU verifier passed 4,678/4,678.
+
+The new TOP16-free parity composition was then compared directly with that
+PR827 field control:
+
+| Fixed work | PR827 field control | + parity window | Throughput gain |
+| --- | ---: | ---: | ---: |
+| 8 sequence passes, A/B/B/A means | 12.053299 s | 11.987928 s | **+0.545303%** |
+| 16 sequence passes, A/B/B/A means | 24.186549 s | 24.038506 s | **+0.615858%** |
+
+For fixed16, the two adjacent comparisons independently favored the parity
+candidate by +0.450319% and +0.781263%. Every fixed8 arm processed exactly
+9,956,800,000 candidates and the same 1,110 normalized hits. Every fixed16 arm
+processed exactly 19,913,600,000 candidates and the same 2,271 normalized
+hits. The fixed16 common hit-set SHA-256 is
+`bc5c7f61def592cc7992facfe5188cc10bacfe2b10521a9a7d7ca8953399decc`.
+There were no missing or extra records.
+
+The complete package was also compared directly against promoted e876 in a
+separate fixed16 E/B/B/E run. E876 took 24.285440/24.387457 seconds
+(mean 24.336449); this package took 24.046334/24.133370 seconds
+(mean 24.089852), a measured **+1.023653% completed-work throughput gain**.
+Both adjacent comparisons favored the package, by +0.994355% and +1.052845%.
+Every arm again processed exactly 19,913,600,000 candidates and emitted the
+same 2,271-hit set with the SHA-256 above.
+
+Applying that direct local ratio mechanically to the 789,011,576 crown gives
+about 797.09M/s, only about 186,625 candidates/s above the 796,901,692 floor.
+That margin is narrow and the local measurement is not an official score. The
+1,200-second ranked result decides promotion.
+
+Raw local evidence is retained outside the package under
+`/tmp/qsb-pin-pr837-newseed/REPORT.md` and
+`/tmp/qsb-pr850-pw-notop16-current/runs/{ABBA,ABBA16,E2B16}`.
+
+## Static and semantic gates
+
+`QSB_ISO_XR=0` builds successfully as the compile-time control. With the
+organizer-default sm52 target, the isomorphic path keeps stage 0 at 101
+registers, 12,288 bytes shared memory and zero stack/spill, while disassembly
+instruction lines fall from 20,502 to 19,626. Native sm89 likewise keeps 128
+registers and zero spill while falling from 5,752 to 5,672 lines. Stage 2 is
+unchanged at 72 registers and zero spill. The cold outer inverse grows because
+it performs the one `u^-1` multiplication.
+
+A fresh deterministic algebra audit covered 64 independently generated
+problems and 64 valid points per problem: all 8,192 recovered compressed
+outputs and SHA-256 inputs matched the original curve exactly, both `+1` and
+`-1` transformed recovery abscissae occurred, and 1,024 additional transformed
+group-law checks passed. The ranked-seed GPU table spot check passed in every
+timed arm. The equal-work hit sets above provide an end-to-end CUDA check.
+
+Organizer-default N24 builds passed. Against the PR827 field control, stage 0
+is byte-identical at 101 registers, 12,288 bytes shared memory and zero stack
+or spill. Stage 2 remains 72 registers while its 24-byte frame disappears.
+Disabling only `QSB_PARITY_WINDOW` restores the field control path.
+
+The parity implementation is byte-identical to PR885's audited function and
+call sites, while this package retains the same PR827 field multiplication
+contract. A CUDA differential over 16,777,216 random and directed rows found
+zero parity mismatches: 16,777,207 used the fast window and nine exercised the
+full-product fallback. An independent bigint audit over 2,000,000 random rows
+and 2,420 valid directed boundary tuples also found zero mismatches.
+
+## Correctness boundary
+
+The isomorphism and exponent cancellation are exact over the secp256k1 field.
+As with the inherited raw-denominator path, device intermediates may use a
+noncanonical 256-bit representative; the unchanged exact host gate checks all
+published nominations on the original curve.
+
+The bounded parity window is designed to reproduce the inherited product
+parity exactly and falls back when its bound is insufficient. The broader
+PR827 device field schedule remains approximate: removing `z9` can change a
+rare top-carry result. The exact host gate independently recovers and hashes
+every GPU nomination, preventing an invalid tentative hit from being
+published. It cannot restore a true hit missed by approximate GPU arithmetic.
+The prior N20 comparison found the same 151,947 published hits as e876 over
+79,654,400,000 candidates, with one extra tentative PR827 nomination rejected
+by the host; finite tests do not prove universal recall.
+
+No generated binary, build stamp, benchmark artifact or problem-specific file
+belongs to this package.
