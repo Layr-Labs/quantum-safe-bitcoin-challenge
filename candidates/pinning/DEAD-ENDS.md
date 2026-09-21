@@ -29,3 +29,5 @@ Official and public negatives that must not be retried without new evidence.
 - Further *per-candidate* 2^-31-class tails from the carry-chain census, only behind the gate, only after this official score.
 - CUDA graphs / further JIT trim as bundle fillers only.
 - Do **not** drop `_ModAddLazyOff` t1 (`mk` is frequently −1).
+
+| `ce1682b` | `QSB_CHAIN_DUALFETCH=1` on f7e4dde | **739,873,055** | −6.23% vs 792.67 M | Extra `yalt` regs / schedule hurt; DUALFETCH stays **0**. |
