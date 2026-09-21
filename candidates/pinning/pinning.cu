@@ -1821,6 +1821,20 @@ static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && Q
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
  * coordinates are anchored at R. Returns their parities in bits 0,1.
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+/* QSB_LAZY_ADD_FINISH: exact redundant-canonicalization removal (see note).
+ * Ported from dun999's 464fad51 (PR#846 lineage): both substituted adds are
+ * canonicalized again downstream before any parity read (x_minus via the
+ * immediate qsb_field_normalize; h=u+v feeds only _ModMult, whose reduction
+ * accepts any <2^256 representative), so the lazy K-fold is bit-identical
+ * after normalization -- an exact substitution, not a 2^-31 truncation. */
+#ifndef QSB_LAZY_ADD_FINISH
+#define QSB_LAZY_ADD_FINISH 1
+#endif
+#if QSB_LAZY_ADD_FINISH
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
     uint64_t *xR, uint64_t *yR, uint64_t *K,
@@ -1846,7 +1860,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1857,7 +1871,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);

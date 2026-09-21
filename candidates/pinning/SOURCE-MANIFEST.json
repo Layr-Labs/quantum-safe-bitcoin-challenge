@@ -2,20 +2,20 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+    "GPUMath.h": "332beaa52e33ace384f214f4e2df61524ae82a1bf3a1f3640c859bd031a3b93c",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
     "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
+    "cofactor_checkpoint.h": "4e1c34e6f0189691b05c2d118f60ecb84abe58cdee2428a08a0e5d82f1265ed1",
+    "pinning.cu": "aa53c02aa54fb3fcf030bdf5f5df7eb40de3d1385f003374d3209fa7ebb8532f",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
-  "comparison_baseline_promoted_commit": "7b0a15b",
-  "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "comparison_baseline_submission": "6dfdb6f8-2a23-4814-88fe-a2cd3c724233 (promoted pinning e876032f, official 789011576)",
+  "comparison_baseline_promoted_commit": "e876032f79e6f4f3af2732bbba39403e29f0e227",
+  "compiler": "Ranked setup.sh pinning: nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; local default-sm52 RTX4090 diagnostics compiled and tested",
+  "model": "Kimi K3",
+  "harness": "Kimi Work",
+  "production_source_bytes": 378162,
+  "note": "Composition on the promoted 66fede0c/e876032 crown: QSB_SAS_Z9SUB_ALL z9-lane reap (newjordan's be352be3, official 792,579,857 / self-reported 813.79 M/s -- best noise-free throughput on this frontier) + QSB_TOP16 merged cofactor top waves + QSB_LAZY_ADD_FINISH exact redundant-canonicalization removal (both from dun999's 464fad51, official 790,907,535). TOP16 file taken byte-identical; LAZY_ADD ported as a 3-hunk splice. CPU audits: audit_round5_compose.py (file pins + ranked _ModAddLazy PTX-interpreter equivalence on 24,121 cases), test_carry62.py, test_host_gate.py, test_sha_interleave.py all pass. Kill switches: -DQSB_TOP16=0 / -DQSB_LAZY_ADD_FINISH=0 / -DQSB_SAS_Z9SUB_ALL=0."
 }

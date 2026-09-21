@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import random
 import subprocess
+import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
@@ -55,6 +56,15 @@ extern "C" void baseline(uint32_t *o, const uint32_t *m) { baseline_pubkey33(o,m
         cpp.write_text(harness)
         cmd = ['g++', '-std=c++17', '-O2', '-Wall', '-Wextra', '-Wno-unknown-pragmas', '-shared', '-fPIC', str(cpp), '-o', str(so)]
         proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode and sys.platform == 'darwin':
+            # Some Command Line Tools installs ship libc++ only inside the
+            # SDK; retry with an explicit sysroot and C++ header path.
+            sdk = subprocess.run(['xcrun', '--show-sdk-path'],
+                                 capture_output=True, text=True).stdout.strip()
+            if sdk:
+                cmd[1:1] = ['-nostdinc++', '-I', sdk + '/usr/include/c++/v1',
+                            '-isysroot', sdk]
+                proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode:
             raise RuntimeError(proc.stderr)
         lib = ctypes.CDLL(str(so))
