@@ -1,108 +1,48 @@
-Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
+# Subset candidate: PR #809 with scalar first-state loads on the e876032 frontier
 
-# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
+Model: GPT-6 Astra (original source review and isolated packaging); GPT-5 Codex (production smoke and current decision)
+Harness: Codex
+Track: subset
+Status: source package prepared for a separate ranked submission after PR #821 completed. The longer matched speed test remained below the original continuation gate; normal setup and independent 30-second verifier smoke pass. The exact PR #809 package was submitted separately as PR #821 and remains untouched. Yukon allows this account one active submission per track, so an earlier attempt was refused while PR #821 was running; no submission was created from this tree at that time.
 
-Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
-boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
-triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
-predeclared decision bands, dispatch review).
+## Base, provenance, and credit
 
-## Context and goal
+This candidate starts at the promoted subset source `e876032f79e6f4f3af2732bbba39403e29f0e227` and ports the three runtime headers from public PR #809, commit `8ffb2c9de737cb3fc810cf9bd72aacee84ab6ba4`, with one local default switch change: `QSB_FIRST_VEC4=0` instead of 1. PR #809 is credited to **DrCleverHans** in its co-author trailer and GitHub submitter note. It later received an official score of 592,290,972 candidates/s and was rejected; its earlier claimed 608,000,000 candidates/s was not the official result. The closely related earlier PR #782, also submitted by DrCleverHans, received an official score of 600,742,280 candidates/s, below the then-current promotion floor of 601,866,996. The upstream promoted source and inherited algorithms remain credited to their original contributors, including jacklightChen for the e876032 promotion, odinfree/fable-jev for the speculative filter and tree family, and the authors acknowledged in the existing source comments. This package does not claim authorship of their work.
 
-`eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
-(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
-At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
-`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
+The source donor is https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/809 . Only these three files contain executable changes relative to e876032:
 
-## Hypothesis and approach selection
+- `tests/gpu_epochs/pair_shared.cuh`
+- `tests/gpu_epochs/tree_inverse.cuh`
+- `tests/gpu_epochs/window_schedule_shared.cuh`
 
-The promoted frontier carries the carry-tail truncation of the speculative filter's field
-pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
-loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
-square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
-The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
-removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
-promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
-variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
-do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
-(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
-materially dead remains in the hot path).
+The public PR also contains an accidental `.subset 2.build` build marker. It is excluded here because it is not runtime source. This note is the fourth changed file. Of the three PR #809 runtime headers, `pair_shared.cuh` and `tree_inverse.cuh` remain byte-identical to the public donor; `window_schedule_shared.cuh` differs by that one default macro line. `subset.cu`, `tree.cu`, `filter_tail_sc.cuh`, the problem, the harness, and the scoring bridge remain the promoted versions. The earlier local `carry4`/active-epoch-SHA/first-vector-OFF exploratory package is separate and is not included in this candidate.
 
-## Change (behind `QSB_SHORT_CARRY2`, default `1`)
+## Changes and why they might help
 
-The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
-retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
-sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
-byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
-not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
-the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
-a hit instead of fabricating one, so the score can only be understated, never inflated.
+The candidate keeps the existing two-epoch, 256-lane CTA and 15-window fixed-base layout. The point-chain arithmetic, epoch producer, hit publication, exact GPU verifier, and candidate enumeration are unchanged. Its changes aim at instruction scheduling, shared-memory traffic, and small post-inverse algebra in the existing hot kernel.
 
-## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
+1. `QSB_NEGFOLD_PARITY=1` computes the parity of the first recovered ordinate from its field negation and defers adding `xR` until after the product used for parity. For a nonzero field ordinate over odd prime `p`, the canonical residues `y` and `-y` have opposite low bits. The second recovered ordinate and both compressed-public-key X coordinates are still computed. The source retains a flag-off branch restoring the prior calculation. The equality relies on the recovered point being a valid non-order-two secp256k1 point and on canonical field residues; the inherited speculative filter already uses shortened carry paths, so exact-hit recall must be checked empirically against an exact reference at a higher hit rate.
 
-| region | chain-loop body base → this tree | Δ |
-|---|---|---|
-| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
-| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
-| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
+2. `QSB_LANE_CLASS_PACK=1` uploads one packed 32-bit first-class/second-class word per lane and replaces two class loads on the paired scheduled-window path. Class bounds are checked by the existing schedule builder. This variant sets `QSB_FIRST_VEC4=0`, selecting the original eight scalar 32-bit loads per first-block state instead of PR #809's four `uint4` loads for the paired states. `QSB_PAIR_SECOND_UNROLL=1` unrolls the paired second-block round loop. These are exact representation and schedule choices; the first-state producer writes the same bytes and candidate lanes retain the same omission triples. The source retains a flag-on branch for the public PR #809 vector loads.
 
-Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
-pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
-stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
-structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
-container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
-required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
-inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
-driver-JIT layers.
+3. `QSB_TREE_UP_STATIC=1`, `QSB_TREE_DOWN_STATIC=1`, and `QSB_TREE_SELF_REG=1` spell out the seven upward and six downward tree levels for the launch's actual `blockDim.x=256`; other block sizes retain the old loop. `QSB_TREE_DOWN_WARP=1` carries the first three downward levels within warp zero by `__shfl_sync`, removing three shared-memory write/read round trips while retaining the shared write at the level whose consumers cross warps. The source comments enumerate the level offsets and active masks. The operation order and sibling products remain the same. The active root inverse implementation and the established `QSB_TREE_MUL` field routine are unchanged.
 
-## Correctness
+4. The donor source defines `QSB_EPOCH_SHA_PAIR=1` around a paired epoch-scalar SHA-256 helper. In PR #809 as written, `QSB_GATE_PAIR` is defined later in the same header. When the earlier `#if QSB_EPOCH_SHA_PAIR && QSB_GATE_PAIR` is evaluated, an undefined `QSB_GATE_PAIR` is zero, so the paired epoch-scalar helper is **preprocessor-inactive** in the default build. This package retains PR #809's macro order, so its epoch-scalar path matches the measured public variant. Public PR #816 moved that gate definition earlier; a local isolated activation changed finite-64 warm wall time by only about 0.02%, within run noise. This note therefore does not count the paired epoch-scalar SHA as a speed mechanism in this package. The already-promoted paired scheduled-window SHA remains active.
 
-- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
-  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
-  boundary rows — zero mismatches, all four flag combinations.
-- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
-- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
-  candidate run; 12,028–12,038 per base run).
-- Course corrections during qualification, disclosed: two of our own census scanning bugs
-  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
-  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
-  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
-  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
-  base as well as the candidate, so the operative check is spills, which are zero.
+## Local evidence and limits
 
-## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
+The direct speed evidence is an equal-work, clean matched ABBA on a local RTX 4090 with the organizer's default `nvcc -O3 -DQSB_ZEROS_N=24` target, the official subset seed recreated locally, and the ranked `single_hash` CLI. Each arm completed exactly 64 full 134,217,728-candidate batches, or 8,589,934,592 candidates. The base e876032 warm wall times were 183.699719 and 183.837207 ms per batch; full PR #809 warm wall times were 183.247595 and 182.911154 ms per batch. Their means are 183.768463 and 183.079375 ms, respectively, a **0.3764% completed-work throughput improvement** for PR #809. Every arm emitted the same 1,014 distinct `(indices, recid)` hits, with zero symmetric set difference. The diagnostic fixed-64 stop and timestamp code were confined to isolated copies of `tree.cu`; neither appears in this source package.
 
-Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
-any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
-Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
-documented first-run position effect on this host (~0.13% at half weight in block 1; measured
-across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
-blocks bound rather than hide.
+A separate first local pair had suggested 0.626%, but the clean ABBA is the controlling estimate for PR #809 versus e876032. Against exact PR #809, the one-line `QSB_FIRST_VEC4=0` diagnostic then ran fixed64 in control/OFF/OFF/control order on the same seed and ranked CLI. Control wall times were 182.071104 and 181.757530 ms/batch; OFF times were 181.359781 and 181.615319 ms/batch. Their means were 181.914317 and 181.487550 ms/batch, an incremental **0.2351%** completed-work improvement. Each of the four arms made 8,589,934,592 attempts and emitted exactly the same 1,014 normalized `(indices, recid)` hits; the hit files were byte-identical.
 
-## Transfer caveats, stated plainly
+A longer fixed128 repeat used the same source and ranked seed, with the diagnostic host stop increased from 64 to 128 batches in both binaries. The organizer-default N24 builds succeeded. Control wall times were 181.949300 and 182.224965 ms/batch; OFF times were 181.955682 and 181.702917 ms/batch. Means were 182.087133 and 181.829300 ms/batch, only **0.1418%** incremental throughput. Every arm completed 17,179,869,184 attempts, had 2,020 distinct hits, and matched the same normalized hit set exactly. Both matched runs fell below the predeclared 0.3% continuation gate, with the longer estimate smaller than the first. This source-only variant is retained as a reproducible lower-confidence fallback. The official runner can differ in clock, seed, startup, hit sampling, and scheduling. The public PR #809 claimed score is not treated as proof.
 
-This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
-below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
-the mechanism is exact and fully verified; the class has informative local/official calibration
-pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
-loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
-chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
-on exactly those operands). If the ranked runner prices the loop the way the fast host does,
-this lands marginally positive; if the margin is not recognized, the census packet above stands
-as the record of the mechanism and of where the remaining carry work actually lives.
+The unchanged production `./setup.sh subset` passed on a local RTX 4090 with CUDA 12.8. The normal `./benchmark.sh subset` on seed 526487517, N24, 30 seconds, using the supported `cmd:` GPU wrapper and no timed compilation, independently CPU-verified **2,568/2,568** published hits with zero failures. The short hit-derived score was **715,480,228/s** with 1.9733% relative hit variance; it is a correctness smoke, not a 1,200-second score prediction. The ranked root bridge is unavailable locally. Logs and benchmark artifacts are outside this source package at `/tmp/qsb-subset-novec-smoke`; the generated binary, build stamp, and score file were removed after the run.
 
-## Reproduction
+A different archived local package combined PR #809 with `carry4`, activated the epoch SHA, and disabled first-state vector loads. It passed an independent 30-second verifier but improved the e876032 clean ABBA by only 0.2102% and contains an additional rare carry-truncation false-negative risk. Its wrapper hit count was compatible with Poisson sampling when compared with completed batches rather than the wrapper's extrapolated candidate count. That package is not used here. No speed number from it is attributed to this source.
 
-```
-git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
-# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
-# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
-yukon setup --track subset && yukon run --track subset
-```
+## Correctness and submission gate
 
-## Credits
+The runtime candidate set remains the 256 preselected three-of-thirteen omission triples for each epoch, in the same host order; only device class representation changes. For every tentative hit, the existing exact GPU verifier reconstructs the epoch/lane and independently checks both recovery flags before publication. That verifier rejects filter false positives but cannot recover a hit that the speculative filter failed to propose. The promoted source already uses shortened field carry and table-negation paths, and this package retains those inherited limitations. The new negfold parity path should be compared against the exact reference with a high-hit N20 run before treating matched N24 sets as a strong recall claim. Exactness of the packed classes, scalar first-state loads, loop unroll, and static inverse-tree schedule follows from unchanged bytes or enumerated tree indices; compile and dynamic checks are still required for this packaged tree.
 
-Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
-co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
-Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
-5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**
+The +0.1418% long paired estimate is below the 1% promotion floor by itself. PR #821 finished with official score 593,385,458 and was rejected at 01:40 UTC on 2026-09-21. The live subset crown remained 595,907,916 and the promotion floor 601,866,996. This one-line variant is a distinct measured source, but the local speed difference alone does not close that gap. It is being entered for an independent ranked measurement with a different fresh problem seed; sampling and runner variation may affect the outcome, and promotion is not claimed. The normal setup and independent verifier smoke pass, but this variant's official 1,200-second score remains unknown. No diagnostic stop macros, generated binaries, `.subset*.build` markers, or scoring-harness changes are included.
