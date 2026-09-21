@@ -623,7 +623,31 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
+/* Chunks 0 and 1 are consumed by the seeding mmadd immediately after the recode,
+ * so their codes never have to make the shared round trip: the decode hands them
+ * back in registers and stores only the thirteen planes the rolled chain reads
+ * (two STS and two LDS per candidate removed). QSB_CODE_REG=0 restores the
+ * fifteen-plane store, the loaded values being identical either way. */
+#ifndef QSB_CODE_REG
+#define QSB_CODE_REG 1
+#endif
+/* The rolled chain reads one plane per chunk at a fixed lane-invariant stride, so
+ * the shared address is an induction variable: carry it instead of re-forming
+ * c*QSB_TREE_N+threadIdx.x. Same address sequence. */
+#ifndef QSB_CODE_PTR
+#define QSB_CODE_PTR 1
+#endif
+/* Rotated table-point buffers. The addition consumes the freshly loaded point and
+ * only reads the preceding affine ordinate, so alternating the destination pair
+ * between (x1,y1) and (x0,y0) leaves each ordinate in place as the next step's
+ * anchor and deletes the per-step four-word Load256. Both buffers are already
+ * live in the unrotated form (x0/y0 hold the seed point's abscissa and the
+ * anchor), so peak liveness is unchanged: one point plus one anchor ordinate.
+ * The two-phase body needs an odd GT_CHUNKS; asserted below. */
+#ifndef QSB_CHAIN_ROT
+#define QSB_CHAIN_ROT 1
+#endif
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k,uint32_t *c0,uint32_t *c1) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
@@ -637,37 +661,72 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
         int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
         uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
         uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+        uint32_t code=idx|(neg<<31);
+        if(c==0)*c0=code;
+        if(c==1)*c1=code;
+        if(!QSB_CODE_REG||c>=2)codes[(size_t)c*QSB_TREE_N+threadIdx.x]=code;
     }
+}
+__device__ __forceinline__ void qsb_load_code(const uint8_t *table,unsigned base,uint32_t code,
+    uint64_t *x,uint64_t *y) {
+    uint32_t m32=(uint32_t)((int32_t)code>>31);
+    gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y);  /* P6: same mask, one SHF */
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    qsb_load_code(table,base,codes[(size_t)c*QSB_TREE_N+threadIdx.x],x,y);
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
+    (void)unused;
+    uint32_t code0,code1;qsb_decode_to_shared(k,&code0,&code1);
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+    qsb_load_code(table,gt_offset(0),code0,x0,y0);
+    qsb_load_code(table,gt_offset(1),code1,x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
+#if QSB_CODE_PTR
+    volatile const uint32_t *cp=(volatile const uint32_t*)qsb_digit_arena()
+                                +(size_t)2*QSB_TREE_N+threadIdx.x;
+#define QSB_CHAIN_POINT(px,py) do{qsb_load_code(table,base,*cp,px,py);\
+                                  cp+=QSB_TREE_N;base+=1u<<16;}while(0)
+#else
+    unsigned cc=2;
+#define QSB_CHAIN_POINT(px,py) do{qsb_load_decoded(table,cc,base,px,py);\
+                                  cc++;base+=1u<<16;}while(0)
+#endif
+#if QSB_CHAIN_ROT
+    static_assert(GT_CHUNKS%2==1,"rotated chain pairs the additions after the seed");
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS-1;c+=2) {
+        QSB_CHAIN_POINT(x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);   /* anchor: chunk c-1, in y0 */
+        QSB_CHAIN_POINT(x0,y0);
+        _PointAddXYZZT<true>(X,Y,U,V,x0,y0,y1);   /* anchor: chunk c, still in y1 */
+    }
+    QSB_CHAIN_POINT(x1,y1);                       /* the last chunk, GT_CHUNKS-1 */
+    _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#if QSB_YOFF
+    qsb_yoff_to_y(y1);
+#endif
+    _ModMult(x0,y1,V);_ModSub256(Y,Y,x0);
+#else
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
+        QSB_CHAIN_POINT(x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-        Load256(y0,y1);
-        base+=1u<<16;
+        Load256(y0,y1);                 /* current affine y anchors next madd */
     }
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
+#undef QSB_CHAIN_POINT
 }
 
 
