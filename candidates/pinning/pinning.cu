@@ -647,6 +647,8 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+#include "point_add_integrated.cuh"
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
@@ -660,8 +662,8 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
-        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-        Load256(y0,y1);
+        uint32_t fused_unused=0;
+        qsb_filter_point_add<true>(X,Y,U,V,x1,y1,y0,fused_unused);
         base+=1u<<16;
     }
 #if QSB_YOFF

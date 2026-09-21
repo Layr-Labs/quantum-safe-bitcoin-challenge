@@ -1,170 +1,56 @@
-# Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
+# Pinning: deferred point-add fusion with retained even-fold carries
 
-Model: **GPT 5.6 Sol**. Harness: **Codex**.
+Effort: medium. Prepared with GPT 6 Astra in Codex. No local CUDA/C++ compilation and no GPU benchmark were performed. The official remote build and ranked run are the first native evaluation of this exact integration. No speedup or claimed score is asserted.
 
-## Source and attribution
+## Base and decision
 
-This source-only candidate starts from local composition
-`c2431ea9bdb9ee667f113dcf637f5eb93bca903a`, itself based on promoted pinning
-commit `e876032f79e6f4f3af2732bbba39403e29f0e227`, and adds one new mechanism to
-its two independently published components:
+This candidate starts from the latest promoted Pinning source, submission 07009ac3-94a4-428e-b030-1f6ce317ccb7 by terrapinelf, promoted commit 94abdd0d72847b780c7d4f99da4f367e6f9f0fd1, official score 797,446,582 verified candidates/s. It retains the 64 MiB, 15-window signed table, decoder layout and volatile accesses, isomorphic recovery xR=plus/minus1, field header, bounded 27-product parity, cofactor tree, pipeline, SHA and OpenSSL host publication gate.
 
-1. `GPUMath.h` is copied byte-for-byte from public PR #827, head `87a770a`,
-   by @stffinfcti. It removes the carry-only `z9` lane from the active square
-   and fused-square short-carry reductions.
-2. `PackedRecovery.cuh` and `ParityWindow.cuh` carry only the bounded parity
-   window published by @EvanYan1024 in public PR #885, head `3e166ba`. Each of
-   the two final parity-only full products is replaced by a 27-cross-product
-   window; an inconclusive bound executes the inherited full product.
-3. The new `QSB_ISO_XR` path selects a problem-wide field element `u` with
-   `u²*xR = ±1`, maps the fixed-base table by `(x,y) -> (u²*x,u³*y)`, and
-   replaces the hot per-candidate `xR*ZZ` field multiplication with a signed
-   limb selection. This mechanism and code were developed locally for this
-   submission; no private source or external implementation was used.
+Our preceding cache/schedule integration, 40c5c4de, passed verification but scored 751,799,654, with 107,622 verified hits in 1200.8502 seconds. That is approximately 5.724% below the current promoted frontier. The public table-CG donor d2b1ca8 separately scored 762,928,439 and the schedule donor 8aa35d5 scored 777,631,992. These separate runs do not isolate each component under identical conditions, but they provide no basis to carry the losing bundle forward. This archive starts fresh: it does not contain table .cg loads, relaxed digit reads, cofactor predicate deletion, factor masking, our former 32 MiB table, or our former 25-product parity.
 
-The cofactor tree, signed-digit chain, table geometry, SHA code, exact OpenSSL
-host publication gate, benchmark and verifier otherwise remain on the c243
-lineage. In particular this package deliberately retains e876's
-`cofactor_checkpoint.h` byte-for-byte: it does **not** include PR863/PR885
-`QSB_TREE_TOP16`. It also excludes PR885's direct-destination point-add
-rewrite. Those components were separated because their interactions were not
-positive in prior matched tests. All retained source and license notices
-remain. `SOURCE-MANIFEST.json` records the exact production-source hashes.
+The new mechanism is a single PTX register scope for each deferred mixed point addition. It targets all thirteen additions in the serial scalar chain. The total number of mathematical field multiplications is not reduced. The potential gain is reduced intermediate materialization, carry-register capture, register lifetime and instruction scheduling cost over the entire serial chain. The official run will determine whether this pays after the compatibility repairs below.
 
-Public PR885's complete stack later scored 776,882,075 candidates/s, below the
-789,011,576 crown. This candidate is a different, narrower composition selected
-from matched component measurements; it is not a rerun of PR885.
+## Selected public mechanism and attribution
 
-## New isomorphism and exact scaling
+The fused structure is derived from Saviour1001's public Pinning submission 7c159de9-d226-465d-b31a-ff98dd32492a, PR930, immutable source 66912b5a49fe853cc9b991f47e1f9c5408554887:
+https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/930
 
-For an XYZZ point, the table map gives
-`(X,Y,ZZ,ZZZ) -> (u^6 X,u^9 Y,u^4 ZZ,u^6 ZZZ)`. Therefore the recovery
-denominator `W=ZZZ*(xR*ZZ-X)` becomes `W'=u^12 W`. For a block with `A`
-active leaves, its excluded product scales by `u^(12(A-1))`; consequently
-the saved packed values `vbar=Y*ZZ*excluded` and
-`tbar=ZZZ*ZZ*excluded` scale by `u^(12A+1)` and `u^(12A-2)`.
+The public description was screened first; only then was the selected Pinning implementation fetched. No other track's implementation, author task, private artifact, binary or diagnostic archive was inspected. The donor note describes earlier provenance; retained notices and COPYING continue to apply. Attribution is written in this note and the new header. No additional coauthor metadata is requested by the account owner.
 
-The single outer product-tree inverse is multiplied by `u^-1` before its
-down-sweep. Each block root inverse then scales by `u^(-12A-1)`. Its weighted
-copy uses transformed `yR'=u^3*yR`, so it scales by `u^(-12A+2)`. The two
-stage-2 products therefore recover the original unscaled `u` and `v` exactly,
-and the inherited recovery equations continue with the original `xR`, `yR`
-and `c`. Inactive leaves remain multiplicative identities, so `A` may be any
-partial-block count. The extra root multiplication is paid once per outer
-inverse group, while one full field multiplication is removed per candidate.
+The donor reports a one-body native sm89 version using 116 registers without spills, while its duplicated rotated-body variant spills. Those are donor observations, not measurements of this archive. We retain the promoted single-body loop and its original decoder rather than import the donor's complete decoder/seed-register/paired-layout stack. Thus neither the donor register count nor its modeled throughput gain can be transferred to this candidate as a measured result.
 
-The GPU table builder's existing OpenSSL spot check now compares transformed
-coordinates. The OpenSSL publication gate remains on the original curve and
-original problem constants.
+## Implementation and compatibility repairs
 
-## Local equal-work evidence
+Only pinning.cu and a new point_add_integrated.cuh implement runtime changes. GPUMath.h, all recovery headers, the parity window, SHA headers and the cofactor tree remain byte-identical to the promoted frontier.
 
-Tests used CUDA 12.8, an RTX 4090, organizer-default sm52/N24 compilation and
-published problem seed `9072764`. Diagnostic copies differ from this package
-only by a fixed sequence count, precise elapsed output and counters.
+The promoted scalar loop still decodes the same digits, loads the same table coordinates, seeds with _PointAddXYZZ_mm, visits the same thirteen remaining chunks, and resolves the deferred ordinate once at the end. Each _PointAddXYZZT<true> invocation is replaced by qsb_filter_point_add<true>. Its output includes the next affine ordinate anchor, so the caller's four-word anchor copy is folded into the same scope. No point or digit is prefetched, and no extra table point is held across iterations.
 
-The new isomorphism was measured directly against c243 with identical source,
-compiler flags and fixed-work instrumentation except for `QSB_ISO_XR`:
+The selected header is intentionally not copied wholesale. Unused donor filtering helpers and seed routines are excluded. The one-body active configuration is extracted into a dedicated header. On device builds the fused arm requires the promoted YOFF, C31, short-carry and fused-square configuration. Other compile-time configurations and the nondeferred arm use the original promoted point-add helper, with anchor update after consumption when required.
 
-| Fixed work | c243 control | + isomorphic xR | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 11.989849 s | 11.932163 s | **+0.483450%** |
-| 16 sequence passes, A/B/B/A means | 24.104475 s | 23.971506 s | **+0.554698%** |
+First, six lean sites in the donor's active body discarded an even-fold carry that the promoted field primitive still retains. These include five multiplication sites and the first square. They are repaired. Where the odd fold formerly interrupted that carry, the independent odd fold is moved ahead of the even fold; the final even add writes CC and the next addc consumes it directly into z8. This keeps the desired carry scheduling without treating the carry as zero. The two other multiply sites already retained that carry. Both inputs and the raw output representative of all seven multiply bodies are preserved relative to the promoted raw-multiply contract.
 
-Both fixed16 adjacent comparisons favored the candidate, by +0.186020% and
-+0.923315%. Every fixed8 arm processed exactly 9,956,800,000 candidates and
-the same 1,110 exact-gated hits; their common hit-file SHA-256 is
-`b77c289cdb1eddf307fbe62d4875cb7a7604f721ba5944000734d314bfc3b3c3`.
-Every fixed16 arm processed exactly 19,913,600,000 candidates and the same
-2,271 exact-gated hits; their common hit-file SHA-256 is
-`b9687013e0226e6f815892394568d0a2e9a6cef6355894a5072b04d57b241bdb`.
-There were no missing or extra records.
+A simple boundary illustrates why this repair matters. Let B=2^256 and K=2^32+977. For a=B-1 and b=2, the product's low half is B-2 and high half is 1. The even fold overflows B. Retaining its contribution is necessary for the second-fold result; omitting it changes the raw value by K. A probabilistic rarity argument is not used to delete this carry.
 
-The field component was previously measured directly against e876 for 32
-complete sequence passes per arm. Every arm processed exactly 39,827,200,000
-candidates and emitted the same 4,678 normalized hits. E876 took
-48.517748/48.753249 seconds; the PR827 field source took
-48.269202/48.429232 seconds. The balanced means give **+0.592112%** throughput
-for the field component, and an unchanged CPU verifier passed 4,678/4,678.
+Second, the donor's separate second-square and signed X3 correction are replaced with the promoted _ModSqrAddSub2 PTX expression itself, remapping only the input/output bindings to the surrounding point registers. This retains the promoted R^2+PPP-2Q fused reduction, its compile-time macro policy and its existing rare-boundary behavior. It avoids introducing another reduction boundary in the critical X3 formula. No changes are made to the promoted field header to achieve this insertion.
 
-The new TOP16-free parity composition was then compared directly with that
-PR827 field control:
+Third, the fused subtraction sites use the donor's two-limb correction arm. The current promoted C31 helper uses only one corrected limb; this integration retains one additional borrow propagation limb rather than introducing a shorter tail. The broader inherited approximate arithmetic remains present. These strengthened correction cases mean that this entire point helper is not claimed universally byte-identical to the promoted C31 helper on rare boundary inputs. The seven raw multiplications and first square have the narrower exact-representative check described below.
 
-| Fixed work | PR827 field control | + parity window | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 12.053299 s | 11.987928 s | **+0.545303%** |
-| 16 sequence passes, A/B/B/A means | 24.186549 s | 24.038506 s | **+0.615858%** |
+The first square uses carry-ordered doubling of its cross terms instead of fifteen funnel shifts. For T=sum_(i<j) ai*aj*2^(32(i+j)), the low word is zero and 2T plus the diagonal terms equals a^2. Full word-to-word carry is retained. This moves work between instruction classes rather than removing a square. The second square is the promoted fused body, not the previous exploratory all-square rewrite.
 
-For fixed16, the two adjacent comparisons independently favored the parity
-candidate by +0.450319% and +0.781263%. Every fixed8 arm processed exactly
-9,956,800,000 candidates and the same 1,110 normalized hits. Every fixed16 arm
-processed exactly 19,913,600,000 candidates and the same 2,271 normalized
-hits. The fixed16 common hit-set SHA-256 is
-`bc5c7f61def592cc7992facfe5188cc10bacfe2b10521a9a7d7ca8953399decc`.
-There were no missing or extra records.
+## Necessary checks
 
-The complete package was also compared directly against promoted e876 in a
-separate fixed16 E/B/B/E run. E876 took 24.285440/24.387457 seconds
-(mean 24.336449); this package took 24.046334/24.133370 seconds
-(mean 24.089852), a measured **+1.023653% completed-work throughput gain**.
-Both adjacent comparisons favored the package, by +0.994355% and +1.052845%.
-Every arm again processed exactly 19,913,600,000 candidates and emitted the
-same 2,271-hit set with the SHA-256 above.
+A Python semantic model executes the extracted integer PTX from seven active multiply sites and the first square. Each site passes 1,100 directed and random cases, 8,800 site evaluations in total. Directed inputs include zero, one, two, K-1, p-1, p, B-2, B-1 and 128-bit boundaries. The reference is the inherited raw short-carry multiplication schedule, including its documented reduction limitations, not merely equality modulo p. Each repaired carry reaches its consumer without an intervening CC-writing instruction. This is a source/PTX model check, not execution on a CUDA device.
 
-Applying that direct local ratio mechanically to the 789,011,576 crown gives
-about 797.09M/s, only about 186,625 candidates/s above the 796,901,692 floor.
-That margin is narrow and the local measurement is not an official score. The
-1,200-second ranked result decides promotion.
+The preceding independent square identity check covered 10,515 actual-square inputs and 10,000 arbitrary 512-bit words with zero low word. It established equality of the shift and carry-doubling steps; it did not establish a GPU performance advantage. The full promoted fused-square source expression is reused for X3 instead of replacing it with a newly derived modular identity.
 
-Raw local evidence is retained outside the package under
-`/tmp/qsb-pin-pr837-newseed/REPORT.md` and
-`/tmp/qsb-pr850-pw-notop16-current/runs/{ABBA,ABBA16,E2B16}`.
+The unchanged Python host-gate test passes: 64 SHA256d midstate continuations, problem binary layout, both public-key recovery outputs against the verifier, and source checks for the exact publication gate. An initial attempt to run that test from a standalone research folder lacked the harness import path; it was rerun successfully from this complete independent benchmark checkout. No native compilation was substituted for the user's remote-validation workflow.
 
-## Static and semantic gates
+A source inventory records every submitted file. The production diff has no changes to benchmark inputs, protected harness, verifier, difficulty, candidate enumeration, time limit, allocation geometry or host publication behavior. The cache/schedule submission remains frozen separately and is not the source of this archive.
 
-`QSB_ISO_XR=0` builds successfully as the compile-time control. With the
-organizer-default sm52 target, the isomorphic path keeps stage 0 at 101
-registers, 12,288 bytes shared memory and zero stack/spill, while disassembly
-instruction lines fall from 20,502 to 19,626. Native sm89 likewise keeps 128
-registers and zero spill while falling from 5,752 to 5,672 lines. Stage 2 is
-unchanged at 72 registers and zero spill. The cold outer inverse grows because
-it performs the one `u^-1` multiplication.
+## Performance limits and next decision
 
-A fresh deterministic algebra audit covered 64 independently generated
-problems and 64 valid points per problem: all 8,192 recovered compressed
-outputs and SHA-256 inputs matched the original curve exactly, both `+1` and
-`-1` transformed recovery abscissae occurred, and 1,024 additional transformed
-group-law checks passed. The ranked-seed GPU table spot check passed in every
-timed arm. The equal-work hit sets above provide an end-to-end CUDA check.
+Seven multiplies and two squares per deferred addition remain. All candidate lanes execute the same fused arithmetic, so there is no sparse-lane speedup claim. Table traffic stays 960 requested bytes per candidate. Shared digit storage and cofactor traffic stay unchanged. The new register scope may improve allocation and remove transfers, or it may constrain scheduling and cause spills; remote compilation and the ranked measurement decide. Restoring the donor's missing carries and using the promoted fused square also changes the instruction balance relative to the donor census.
 
-Organizer-default N24 builds passed. Against the PR827 field control, stage 0
-is byte-identical at 101 registers, 12,288 bytes shared memory and zero stack
-or spill. Stage 2 remains 72 registers while its 24-byte frame disappears.
-Disabling only `QSB_PARITY_WINDOW` restores the field control path.
+The exact OpenSSL gate checks every nomination before publication. The inherited approximate GPU arithmetic can still miss real nominations; successful host verification does not prove universal recall. This candidate adds no deliberate probability-based carry omission. No unchanged rerun, inert marker or cosmetic source change is presented as an optimization.
 
-The parity implementation is byte-identical to PR885's audited function and
-call sites, while this package retains the same PR827 field multiplication
-contract. A CUDA differential over 16,777,216 random and directed rows found
-zero parity mismatches: 16,777,207 used the fast window and nine exercised the
-full-product fallback. An independent bigint audit over 2,000,000 random rows
-and 2,420 valid directed boundary tuples also found zero mismatches.
-
-## Correctness boundary
-
-The isomorphism and exponent cancellation are exact over the secp256k1 field.
-As with the inherited raw-denominator path, device intermediates may use a
-noncanonical 256-bit representative; the unchanged exact host gate checks all
-published nominations on the original curve.
-
-The bounded parity window is designed to reproduce the inherited product
-parity exactly and falls back when its bound is insufficient. The broader
-PR827 device field schedule remains approximate: removing `z9` can change a
-rare top-carry result. The exact host gate independently recovers and hashes
-every GPU nomination, preventing an invalid tentative hit from being
-published. It cannot restore a true hit missed by approximate GPU arithmetic.
-The prior N20 comparison found the same 151,947 published hits as e876 over
-79,654,400,000 candidates, with one extra tentative PR827 nomination rejected
-by the host; finite tests do not prove universal recall.
-
-No generated binary, build stamp, benchmark artifact or problem-specific file
-belongs to this package.
+If this integration fails to build, that is recorded separately from a scored regression and fixed using the remote compiler evidence. If it verifies but regresses, the combined fusion is set aside instead of being stacked onto the next candidate. Any successor starts from the then-current promoted frontier and uses the official result and current public descriptions to select compatible mechanisms.
