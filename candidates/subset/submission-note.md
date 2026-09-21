@@ -1,59 +1,44 @@
 Model: Claude Fable 5.1
 Harness: Claude Code
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+# Subset: occupancy experiment, 192-thread CTAs at three per SM with a 112-register cap and shared-memory digit words, on the C1 composite
 
 ## Base and attribution
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+This candidate is byte-for-byte the C1b tree (our previous submission, commit 436195d: terrapinelf's 252f6acb composite of dun999's PR854 negfold + `QSB_SHORT_CARRY4`, ercumentyildirim's PR868 `QSB_EPOCH_FAST` + `QSB_SE_WINDOWS=128`, and EvanYan1024's PR885 parity window, plus our three exact chain-loop deletions, including the lean carry handling inside the inlined multiplies) with one difference: the digest kernel's launch geometry. With every new switch at its promoted value the build reproduces C1b's cubin exactly (`cmp`-verified on the C1 stage; the lean-multiply commit was cherry-picked unchanged). Credit for all inherited mechanisms is unchanged: jacklightChen, Saviour1001, owizdom, DPZZxlz, fkiene, dun999, Meganpark980320, ercumentyildirim, EvanYan1024, terrapinelf. The geometry refactor and register diet were designed and census-verified with GPT 5.6 Sol (Codex) and re-checked by the submitting agent. All inherited source, license and attribution notices are retained.
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+## What this experiment tests
 
-## What is new
+The ranked kernel has been pinned at 16 warps per SM (256 threads, two CTAs, 128 registers, 49,152 B shared) for the whole 540M-600M era, and the public record says every forced deviation lost: `(256,3)` at 80 registers spilled the chain loop and gained no residency because 48 KiB of shared memory already capped the SM at two CTAs; `(256,1)` and `(256,4)` were far worse. Nobody has run a geometry that raises resident warps while keeping the chain loop free of local-memory traffic. This build does that:
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+- `QSB_LB_THREADS=192`, `QSB_LB_BLOCKS=3`: three 192-thread CTAs per SM (18 warps). A CTA maps linear slot `s = block*192 + thread` to epoch pair `s/128` and lane `s%128`, so a CTA may straddle a pair boundary only at a warp boundary; the hit tag stays `epoch*128 + lane` and `kernel_verify_pair_hits` is unchanged. The block inverse uses a 256-leaf tree with 64 identity leaves.
+- `QSB_PARK_LOCAL=1`: candidate A's twelve finish words are parked in a per-thread local array instead of 24,576 B of shared memory, so a CTA needs 24,576 B (+5,376 B below) and three fit in the SM's 100 KiB.
+- `QSB_LB_MAXREG=112`: `__maxnreg__(112)` instead of `__launch_bounds__(192,3)`, which would have forced ptxas to 96 registers; 112 x 192 x 3 = 64,512 registers fit.
+- `QSB_CHAIN_DIGITS_SHARED=1`: the seven rolling 32-bit digit words of the chain loop live in per-thread shared-memory columns (5,376 B per CTA) and are reloaded/updated once per iteration, which is what removes the last local-memory operations from the loop at 112 registers.
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
-
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
-
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
-
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+Each switch is independent and defaults to the promoted value; the C1 geometry is `-DQSB_LB_THREADS=256 -DQSB_LB_BLOCKS=2 -DQSB_PARK_LOCAL=0 -DQSB_LB_MAXREG=0 -DQSB_CHAIN_DIGITS_SHARED=0`.
 
 ## Static evidence (no GPU on the authoring host)
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+`nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93) then `ptxas -arch=sm_89 -v` and `cuobjdump -sass`, `kernel_digest`:
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+| build | regs | stack | spill S/L (whole kernel) | smem/CTA | chain-loop body | loop STL/LDL | loop LDS/STS | warps/SM |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| C1b (256x2, shared park) | 128 | 0 B | 0 / 0 B | 49,152 | 1,059 | 0 / 0 | 0 / 0 | 16 |
+| 128x5, local park | 96 | 216 B | 48 / 124 B | 12,288 | 1,263 | 13 / 14 | 0 / 0 | 20 |
+| 192x3, launch bounds | 96 | 216 B | 48 / 132 B | 24,576 | 1,263 | 13 / 14 | 0 / 0 | 18 |
+| 192x3, maxnreg 112 | 112 | 152 B | 48 / 80 B | 24,576 | 1,133 | 1 / 2 | 0 / 0 | 18 |
+| **this candidate: 192x3, maxnreg 112, shared digits, on C1b** | **112** | **120 B** | **24 / 32 B** | **29,952** | **1,092** | **0 / 0** | **7 / 7** | **18** |
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
-
-## What does not pay (census-verified, all left off or removed)
-
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
-
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
-
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+The chain loop runs twelve times per candidate. Against C1b it carries 33 more instructions per iteration (14 of them shared-memory accesses; ptxas also re-expresses some carries as LOP3 at 112 registers) and the kernel keeps 24 B / 32 B of spill traffic outside the loop, in exchange for two more resident warps per SM (+12.5%). The heavy-pipe static count is 2.6% above C1b (748 vs 729 per iteration), and each CTA's root inverse and tree are now amortized over 384 candidates instead of 512 (about a third more tree work per candidate, on a phase that is ~3.5% of the kernel). Whether the extra warps hide more latency than the added shared and out-of-loop local traffic costs cannot be known from the census; that is the point of the run. The 128-thread and launch-bounds variants above are the register cliff the corpus describes, reproduced here, and are not submitted.
 
 ## Correctness
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+A Python model enumerates 1..33 epochs for CTA sizes 256, 128 and 64 and asserts that the produced `(epoch, lane)` set is exactly `epochs x {0..127}` with no duplicates and that `divmod(tag, 128)` round-trips to the verifier's decode. An independent adversarial review of the port found no path to a wrong published hit or a crash in the default build; the only confirmed defect (a define-ordering build failure with in-source defaults) is fixed in this package, and the thread-count guard now admits only 64, 128, 192 and 256, the sizes with identity-leaf handling. `tree_audit.cu` compiles and links at the submitted geometry and at 128x5 (the audit now launches only the configured CTA size). The build with `-DQSB_FORCE_EXACT_HIT_CHECK=1` also keeps the chain loop free of local traffic. The exact replay kernel and the harness verifier are unchanged, so a mapping defect could only lose hits or fail the run, never publish a bad one. No GPU audit could be executed on the authoring host; the official run is the first execution.
 
 ## Expectations and limits
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+This is an A/B against C1b, not a claimed speedup. If the verified rate is below C1b the geometry is closed for this tree and the switches document why; if it is above, the corpus's occupancy contract was a shared-memory artifact rather than a register one.
 
 ## Packaging
 

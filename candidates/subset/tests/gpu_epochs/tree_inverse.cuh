@@ -26,12 +26,27 @@
 #ifndef ZLAB_TREE
 #define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
 #endif
+#if QSB_LB_THREADS <= 64
+#define QSB_LB_TREE_THREADS 64
+#elif QSB_LB_THREADS <= 128
+#define QSB_LB_TREE_THREADS 128
+#else
+#define QSB_LB_TREE_THREADS 256
+#endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-    __shared__ uint64_t tree[4][512];
-    const int tid=threadIdx.x,n=blockDim.x;
+    __shared__ uint64_t tree[4][2*QSB_LB_TREE_THREADS];
+    const int tid=threadIdx.x;
+#if QSB_LB_THREADS == 256
+    const int n=blockDim.x;
+#else
+    const int n=QSB_LB_TREE_THREADS;
+#endif
     #pragma unroll
     for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
+#if QSB_LB_THREADS == 192
+    if(tid<64){tree[0][n+192+tid]=1;tree[1][n+192+tid]=0;tree[2][n+192+tid]=0;tree[3][n+192+tid]=0;}
+#endif
     __syncthreads();
     #pragma unroll 1
     for(int width=n>>1;width>0;width>>=1){
@@ -79,10 +94,18 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 }
 #elif ZLAB_TREE == 1
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-    __shared__ uint64_t tree[4][512];
-    const int tid=threadIdx.x,n=blockDim.x;
+    __shared__ uint64_t tree[4][2*QSB_LB_TREE_THREADS];
+    const int tid=threadIdx.x;
+#if QSB_LB_THREADS == 256
+    const int n=blockDim.x;
+#else
+    const int n=QSB_LB_TREE_THREADS;
+#endif
     #pragma unroll
     for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
+#if QSB_LB_THREADS == 192
+    if(tid<64){tree[0][n+192+tid]=1;tree[1][n+192+tid]=0;tree[2][n+192+tid]=0;tree[3][n+192+tid]=0;}
+#endif
     __syncthreads();
     // Upward levels with at least two writers; the readers of level `width`
     // are its writers' low half, so a warp barrier suffices once width<=32.
@@ -153,11 +176,19 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 }
 #else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-    __shared__ uint64_t products[4][512];
-    __shared__ uint64_t inverses[4][256];
-    const int tid=threadIdx.x,n=blockDim.x;
+    __shared__ uint64_t products[4][2*QSB_LB_TREE_THREADS];
+    __shared__ uint64_t inverses[4][QSB_LB_TREE_THREADS];
+    const int tid=threadIdx.x;
+#if QSB_LB_THREADS == 256
+    const int n=blockDim.x;
+#else
+    const int n=QSB_LB_TREE_THREADS;
+#endif
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
+#if QSB_LB_THREADS == 192
+    if(tid<64){products[0][192+tid]=1;products[1][192+tid]=0;products[2][192+tid]=0;products[3][192+tid]=0;}
+#endif
     __syncthreads();
     // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
     // formed by lanes < count/2 and read by lanes < count/4.

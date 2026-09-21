@@ -40,7 +40,7 @@ __global__ void audit_products(const uint64_t *inputs,uint64_t *results,int n){
 #endif
 }
 
-__global__ void __launch_bounds__(256,2) audit_inverses(const uint64_t *inputs,uint64_t *results,int n){
+__global__ void QSB_LB_ATTRIBUTE audit_inverses(const uint64_t *inputs,uint64_t *results,int n){
     int i=blockIdx.x*blockDim.x+threadIdx.x;
     uint64_t value[5]={1,0,0,0,0};
     if(i<n)for(int k=0;k<4;k++)value[k]=inputs[i*8+k];
@@ -131,7 +131,11 @@ int main(){
         BN_mod_inverse(r,a,p,ctx);BN_bn2lebinpad(r,(unsigned char*)(expected.data()+5*i),32);
     }
     CHECK(cudaMemcpy(di,inputs.data(),inputs.size()*8,cudaMemcpyHostToDevice));
+#if QSB_LB_THREADS == 256
     for(int threads=32;threads<=256;threads*=2)for(int count:{ni,1,129,255,256,257}){
+#else
+    for(int threads:{QSB_LB_THREADS})for(int count:{ni,1,QSB_LB_THREADS-1,QSB_LB_THREADS,QSB_LB_THREADS+1}){
+#endif
         audit_inverses<<<(count+threads-1)/threads,threads>>>(di,dr,count);CHECK(cudaDeviceSynchronize());
         CHECK(cudaMemcpy(results.data(),dr,count*5*8,cudaMemcpyDeviceToHost));
         int bad=0;

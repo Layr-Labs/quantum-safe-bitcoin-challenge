@@ -762,12 +762,36 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+/* Experimental consumer geometry. This candidate defaults to the 192x3 experiment
+ * (C1 geometry is 256/2/0/0). Non-default CTAs traverse the same linear
+ * sequence of (epoch-pair,lane) slots, so hit tags remain epoch*128+lane. */
+#ifndef QSB_LB_THREADS
+#define QSB_LB_THREADS 192
+#endif
+#ifndef QSB_LB_BLOCKS
+#define QSB_LB_BLOCKS 3
+#endif
+#ifndef QSB_PARK_LOCAL
+#define QSB_PARK_LOCAL 1
+#endif
+#ifndef QSB_LB_MAXREG
+#define QSB_LB_MAXREG 112
+#endif
+#ifndef QSB_CHAIN_DIGITS_SHARED
+#define QSB_CHAIN_DIGITS_SHARED 1
+#endif
+#ifndef QSB_CHAIN_ANCHOR_SHARED
+#define QSB_CHAIN_ANCHOR_SHARED 0
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_CHAIN_ANCHOR_SHARED
+    __shared__ uint64_t qsb_chain_anchor[4][QSB_LB_THREADS];
+#endif
 #if ZLAB_T14
 #if ZLAB_DIRDIG
     uint64_t sflag=(uint64_t)(sign<0);
@@ -831,6 +855,10 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
     gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
     qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+#if QSB_CHAIN_ANCHOR_SHARED
+    #pragma unroll
+    for(int k=0;k<4;k++)qsb_chain_anchor[k][threadIdx.x]=y0[k];
+#endif
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
 #if QSB_DIGIT_SHIFT
@@ -840,16 +868,48 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
      * (gt_shift(2)+1 == 36, gt_width(2) == 17; checked on the host at startup). */
     constexpr unsigned P0=36u, W2=17u;
     /* S = M >> 36 as 7 words (220 bits); one 32-bit funnel shift per word per step. */
+#if QSB_CHAIN_DIGITS_SHARED
+    __shared__ uint32_t qsb_chain_digits[7][QSB_LB_THREADS];
+#else
     uint32_t w0,w1,w2,w3,w4,w5,w6;
+#endif
     {
         const uint64_t S0=(M[0]>>P0)|(M[1]<<(64-P0)), S1=(M[1]>>P0)|(M[2]<<(64-P0));
         const uint64_t S2=(M[2]>>P0)|(M[3]<<(64-P0)), S3=M[3]>>P0;
+#if QSB_CHAIN_DIGITS_SHARED
+        qsb_chain_digits[0][threadIdx.x]=(uint32_t)S0;
+        qsb_chain_digits[1][threadIdx.x]=(uint32_t)(S0>>32);
+        qsb_chain_digits[2][threadIdx.x]=(uint32_t)S1;
+        qsb_chain_digits[3][threadIdx.x]=(uint32_t)(S1>>32);
+        qsb_chain_digits[4][threadIdx.x]=(uint32_t)S2;
+        qsb_chain_digits[5][threadIdx.x]=(uint32_t)(S2>>32);
+        qsb_chain_digits[6][threadIdx.x]=(uint32_t)S3;
+#else
         w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
         w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
+#endif
     }
     constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
     #pragma unroll (kChainUnroll)
     for (int c=2;c<GT_CHUNKS-1;c++){
+#if QSB_CHAIN_DIGITS_SHARED
+        {
+            const uint32_t w0=qsb_chain_digits[0][threadIdx.x],w1=qsb_chain_digits[1][threadIdx.x];
+            const uint32_t w2=qsb_chain_digits[2][threadIdx.x],w3=qsb_chain_digits[3][threadIdx.x];
+            const uint32_t w4=qsb_chain_digits[4][threadIdx.x],w5=qsb_chain_digits[5][threadIdx.x];
+            const uint32_t w6=qsb_chain_digits[6][threadIdx.x];
+            const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
+            idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
+            neg=(uint64_t)(t^1u)^sflag;
+            qsb_chain_digits[0][threadIdx.x]=__funnelshift_r(w0,w1,W2);
+            qsb_chain_digits[1][threadIdx.x]=__funnelshift_r(w1,w2,W2);
+            qsb_chain_digits[2][threadIdx.x]=__funnelshift_r(w2,w3,W2);
+            qsb_chain_digits[3][threadIdx.x]=__funnelshift_r(w3,w4,W2);
+            qsb_chain_digits[4][threadIdx.x]=__funnelshift_r(w4,w5,W2);
+            qsb_chain_digits[5][threadIdx.x]=__funnelshift_r(w5,w6,W2);
+            qsb_chain_digits[6][threadIdx.x]=w6>>W2;
+        }
+#else
         {
             const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
             idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
@@ -857,18 +917,43 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         }
         w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
         w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+#endif
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+#if QSB_CHAIN_ANCHOR_SHARED
+        uint64_t yanchor[4];
+        #pragma unroll
+        for(int k=0;k<4;k++)yanchor[k]=qsb_chain_anchor[k][threadIdx.x];
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, yanchor,bad);
+        #pragma unroll
+        for(int k=0;k<4;k++)qsb_chain_anchor[k][threadIdx.x]=yanchor[k];
+#else
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+#endif
 #if !QSB_CHAIN_ANCHOR_UPDATE
+#if QSB_CHAIN_ANCHOR_SHARED
+        #pragma unroll
+        for(int k=0;k<4;k++)qsb_chain_anchor[k][threadIdx.x]=cy[k];
+#else
         Load256(y0, cy);                /* current affine y anchors next madd */
+#endif
 #endif
         table_base += 1u << 16;
     }
     {
+#if QSB_CHAIN_DIGITS_SHARED
+        const uint32_t w0=qsb_chain_digits[0][threadIdx.x];
+#endif
         const uint32_t f=w0&((1u<<W2)-1u);
         idx=f&((1u<<(W2-1u))-1u); neg=sflag;
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+#if QSB_CHAIN_ANCHOR_SHARED
+        uint64_t yanchor[4];
+        #pragma unroll
+        for(int k=0;k<4;k++)yanchor[k]=qsb_chain_anchor[k][threadIdx.x];
+        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, yanchor,bad);
+#else
         qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+#endif
     }
 #else
     unsigned pos=(unsigned)gt_shift(2)+1u;
@@ -1087,6 +1172,18 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_BLOCK   256
 #define QSB_SE_HALVES  (QSB_SE_BLOCK / QSB_SE_WINDOWS)
 #define QSB_SE_PER_EPOCH QSB_SE_WINDOWS
+/* Consumer geometry defaults are defined next to the chain switches above (QSB_LB_*). */
+#if QSB_LB_THREADS != 64 && QSB_LB_THREADS != 128 && QSB_LB_THREADS != 192 && QSB_LB_THREADS != 256
+#error "QSB_LB_THREADS must be 64, 128, 192 or 256 (identity-leaf fill exists only for these)"
+#endif
+#if QSB_LB_BLOCKS < 1
+#error "QSB_LB_BLOCKS must be positive"
+#endif
+#if QSB_LB_MAXREG
+#define QSB_LB_ATTRIBUTE __maxnreg__(QSB_LB_MAXREG)
+#else
+#define QSB_LB_ATTRIBUTE __launch_bounds__(QSB_LB_THREADS, QSB_LB_BLOCKS)
+#endif
 /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
 #define ZLAB_LAUNCH_BLOCKS 262144  /* Match PR309: 134217728 paired candidates per full launch. */
@@ -1551,7 +1648,7 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+__global__ void QSB_LB_ATTRIBUTE kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -1580,6 +1677,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 ) {
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
+#if QSB_LB_THREADS == 256
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
     const int half = tid / QSB_SE_WINDOWS;            /* which epoch pair in this block (warp-uniform) */
     int idx = blockIdx.x * blockDim.x + tid;
@@ -1587,10 +1685,31 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const unsigned eA = (unsigned)QSB_PAIR_MUL*blockIdx.x + 2u*(unsigned)half;
     const bool hasA = eA < (unsigned)epochs_in_batch;
     const bool active = idx<batch_size && hasA;
-#if ZLAB_K2S3M
-    __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
 #else
-    __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
+    /* Linear slot s has pair=s/128 and lane=s%128. Pair boundaries are warp
+     * aligned for every supported CTA size. Partial final CTAs stay present
+     * through the block inverse with identity leaves. */
+    const unsigned slot=(unsigned)blockIdx.x*(unsigned)QSB_LB_THREADS+(unsigned)tid;
+    const int lane=(int)(slot%(unsigned)QSB_SE_WINDOWS);
+    const unsigned pair=slot/(unsigned)QSB_SE_WINDOWS;
+    const unsigned eA=2u*pair;
+    const bool hasA=eA<(unsigned)epochs_in_batch;
+    const bool active=hasA;
+#endif
+#if QSB_PARK_LOCAL
+#if ZLAB_K2S3M
+    volatile uint64_t parkL[12];
+#else
+    volatile uint64_t parkL[8];
+#endif
+#define QSB_PARKA(k) parkL[(k)]
+#else
+#if ZLAB_K2S3M
+    __shared__ uint64_t parkA[12][QSB_LB_THREADS]; /* first candidate finish words */
+#else
+    __shared__ uint64_t parkA[8][QSB_LB_THREADS];  /* m1,m2 of the first candidate */
+#endif
+#define QSB_PARKA(k) parkA[(k)][tid]
 #endif
     const unsigned eA0 = hasA ? eA : 0u;
     const epoch_desc_t *e0 = d_epochs + eA0;
@@ -1608,7 +1727,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
     #pragma unroll
-    for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+    for(int k=0;k<4;k++)QSB_PARKA(8+k)=zpair.b[k];
 #endif
 #else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
@@ -1626,14 +1745,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
 #if ZLAB_DUAL_EPOCH_SHA
         #pragma unroll
-        for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
+        for(int k=0;k<8;k++)QSB_PARKA(k)=fa.words[4+k];
         #pragma unroll
-        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+        for(int k=0;k<4;k++)zB[k]=QSB_PARKA(8+k);
         #pragma unroll
-        for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
+        for(int k=0;k<4;k++)QSB_PARKA(8+k)=fa.words[12+k];
 #else
         #pragma unroll
-        for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+        for(int k=0;k<12;k++)QSB_PARKA(k)=fa.words[4+k];
 #endif
 #else
         uint64_t m1[4],m2[4];
@@ -1642,7 +1761,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         okA=fa.ok && active;
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
         #pragma unroll
-        for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
+        for(int k=0;k<4;k++){QSB_PARKA(k)=m1[k];QSB_PARKA(4+k)=m2[k];}
 #endif
     }
     // Both first-state tables are read-only; the odd tail aliases A safely.
@@ -1669,13 +1788,13 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint64_t inv[5],n[12];
         QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
         #pragma unroll
-        for(int k=0;k<12;k++)n[k]=parkA[k][tid];
+        for(int k=0;k<12;k++)n[k]=QSB_PARKA(k);
         int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
         uint64_t inv[5],m1[4],m2[4];
         QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
         #pragma unroll
-        for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
+        for(int k=0;k<4;k++){m1[k]=QSB_PARKA(k);m2[k]=QSB_PARKA(4+k);}
         int encoded=qsb_pair_tail_value(m1[0],m1[1],m1[2],m1[3],m2[0],m2[1],m2[2],m2[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
 #ifdef QSB_FORCE_EXACT_HIT_CHECK
@@ -1712,6 +1831,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             }
         }
     }
+#undef QSB_PARKA
 #else
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -3092,7 +3212,14 @@ int main(int argc, char **argv) {
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
             const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
             int nblk=(epochs_in_batch+QSB_PAIR_MUL-1)/QSB_PAIR_MUL;
+#if QSB_LB_THREADS == 256
+            int digest_nblk=nblk;
             int batch_pos = nblk * QSB_SE_BLOCK;
+#else
+            const int epoch_pairs=(epochs_in_batch+1)/2;
+            int digest_nblk=(epoch_pairs*QSB_SE_WINDOWS+QSB_LB_THREADS-1)/QSB_LB_THREADS;
+            int batch_pos=digest_nblk*QSB_LB_THREADS;
+#endif
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH && QSB_EPOCH_GROUPS
             {
@@ -3141,7 +3268,7 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+            kernel_digest<<<digest_nblk, QSB_LB_THREADS>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
