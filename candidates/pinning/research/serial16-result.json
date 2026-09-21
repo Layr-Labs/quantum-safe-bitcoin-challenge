@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "scalar_cases": 101288,
+  "all_table_addresses": 524288,
+  "table_bytes": 33554432,
+  "old_table_bytes": 67108864,
+  "lookups": [
+    15,
+    16
+  ],
+  "per_candidate_table_bytes": [
+    960,
+    1024
+  ],
+  "point_chain_M": [
+    95,
+    102
+  ],
+  "point_chain_S": [
+    28,
+    30
+  ],
+  "shared_digit_bytes": [
+    60,
+    64
+  ],
+  "optimistic_break_even_old_lookup_fraction_if_lookup_time_halved": 0.12844036697247704,
+  "scope": "Signed scalar transport/table bounds only. NO complete curve/device integration or performance claim. Earlier16-window affineW5 failure does not isolate this serial pipeline. Full32MiB-residency and cache halving assumptions are not measured."
+}

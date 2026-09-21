@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "stream_generations": 576,
+  "active_candidate_flag_checks": 2305264,
+  "slots": [
+    1,
+    2,
+    3
+  ],
+  "prepare_widths": [
+    64,
+    128,
+    256
+  ],
+  "host_scalar_formula": "65535*2^240*neg_r_inv mod n",
+  "scope": "Static callsite/order audit plus model of CUDA FIFO/slot reuse. Not native compilation or a GPU race detector. Other inherited P=+/-R recovery skips remain unchanged."
+}

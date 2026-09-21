@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "finish_cases": 17732,
+  "finish_parity_paths": {
+    "fast": 34882,
+    "fallback": 582
+  },
+  "extra_endpoint_boundary_cases": 750,
+  "uniform_synthetic_finish_warps": 512,
+  "uniform_synthetic_warps_with_fallback": 0,
+  "scope": "Promoted C31 raw/lazy/sub semantic model and literal qsb_sum_parity; valid nonzero canonical offset. Synthetic saved values, not actual device nomination distribution; no timing or native compilation."
+}

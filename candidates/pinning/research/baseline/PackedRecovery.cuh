@@ -49,20 +49,6 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
     Load256(out,tmp);
 }
 
-// Certified partial product; all ambiguous boundaries use the original operation.
-#if QSB_PARITY_SUM
-#include "Parity25.cuh"
-__device__ __forceinline__ uint32_t qsb_packed_product_parity(
-    const uint64_t *a,const uint64_t *b,const uint64_t *offset,uint32_t neg) {
-#if defined(__CUDA_ARCH__) && QSB_C31 && QSB_SHORT_CARRY && QSB_FIELD_SC
-    uint32_t parity;
-    if(qsb_try_parity25(a,b,offset,neg,parity))return parity;
-#endif
-    uint64_t raw[4];qsb_packed_raw_mul(raw,a,b);
-    return qsb_sum_parity(raw,offset,neg);
-}
-#endif
-
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
@@ -127,10 +113,10 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
-    const uint32_t parity0=qsb_packed_product_parity(l,s,b,1u);
+    qsb_packed_raw_mul(u,l,s);
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
-    const uint32_t parity1=qsb_packed_product_parity(m,s,b,0u);
-    return parity0|(parity1<<1);
+    qsb_packed_raw_mul(v,m,s);
+    return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
 }
 #else
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);

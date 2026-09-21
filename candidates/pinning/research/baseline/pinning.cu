@@ -114,8 +114,8 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                * QSB_TREE_OFFLOAD2, both 0 on this base, so they are dead.
                                * The state planes are 16 B each, written once by prepare and
                                * read once by finish, ~1.07 GB per batch -- they can never be
-                               * L2-resident, so caching them only evicts the 32 MiB table
-                               * that every ordinary candidate reads 16 times. */
+                               * L2-resident, so caching them only evicts the 64 MiB table
+                               * that every candidate reads 15 times. */
 #endif
 #ifndef QSB_TREE_OFFLOAD
 #define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
@@ -157,7 +157,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
-#define QSB_L2_SKIP 0         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
+#define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
@@ -289,28 +289,26 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #include "GPUHash.h"
 
-/* Sixteen regular signed odd digits, each width 16. Chunk c starts at 16*c.
- * Entry d is (2*d+1)*2^(16*c)*(A/2). The signed scalar is 2*(k mod n)-n.
- * Each chunk has 2^15 entries: 2^19 affine points, 32 MiB total.
- * Identity and final-doubling scalars use explicit cold dispatch below. */
-#if QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2
-#error "Serial16 identity bitmap requires the packed in-block cofactor path"
-#endif
-#define GT_CHUNKS 16
-#define GT_TOTAL_ENTRIES (1u << 19)
+/* Mixed regular odd digits: widths [18,17,...,17], 15 chunks.
+ * Chunk c starts at bit 0 when c=0, otherwise 17*c+1. Entry d is
+ * (2*d+1)*2^offset*(A/2). Every digit is odd and nonzero; the reconstruction
+ * is 2*k modulo the group order, as in the original regular recoder.
+ * First chunk has 2^17 entries, others 2^16: 2^20 points, 64 MiB total. */
+#define GT_CHUNKS 15
+#define GT_TOTAL_ENTRIES (1u << 20)
 #define GT_LO 256
-#define GT_HI 256
+#define GT_HI 1024
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    (void)c;return 1u << 15;
+    return c == 0 ? (1u << 17) : (1u << 16);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return (unsigned)c << 15;
+    return c == 0 ? 0u : (unsigned)(c+1) << 16;
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
-    return 16*c;
+    return c == 0 ? 0 : 17*c+1;
 }
-static_assert(GT_TOTAL_ENTRIES*64ULL == 32ULL*1024*1024,
-              "serial16 table must contain exactly 32 MiB");
+static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
+              "mixed table must contain exactly 64 MiB");
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -318,12 +316,12 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
     0xFFFFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFFFFFULL
 };
 
-/* k -> 16 signed odd digits. Branchless (no data-dependent BRA) so warps stay
+/* k -> 15 signed odd digits. Branchless (no data-dependent BRA) so warps stay
  * convergent; correctness mirrored on CPU by the same source. */
 /* Recode state: the odd 2k-representative M (4 limbs) plus a global sign.
  * gt_recode_setup computes it once; gt_mixed_step peels one signed odd digit
  * per chunk and advances M. The window multiply carries this 32-byte state and
- * peels digits on the fly, so the 16-entry digit array never materialises
+ * peels digits on the fly, so the 15-entry digit array never materialises
  * (that array was the largest single spill source). gt_recode_signed keeps the
  * array form for the CPU cross-check; both share the same step logic. */
 __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[4], int *sign) {
@@ -380,9 +378,9 @@ __device__ __forceinline__ int32_t gt_mixed_step(uint64_t M[4], int sign) {
 }
 __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[GT_CHUNKS]) {
     uint64_t M[4]; int sign; gt_recode_setup(k,M,&sign);
-    e[0]=gt_mixed_step<16>(M,sign);
+    e[0]=gt_mixed_step<18>(M,sign);
     #pragma unroll
-    for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<16>(M,sign);
+    for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<17>(M,sign);
     e[GT_CHUNKS-1]=sign*(int32_t)M[0];
 }
 
@@ -472,8 +470,7 @@ struct qsb_digit_window {
     }
 };
 
-/* Historical unused entry point (production uses _FixedBaseSignedXYZZScalar below).
- * Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
+/* Signed-digit fixed-base multiply, accumulating INTERNALLY in XYZZ (x=X/ZZ,
  * y=Y/ZZZ). Seed the first two chunks with a deferred-Y mmadd (3M+2S), adjust
  * each next point's y by the preceding affine anchor, and defer the new anchor
  * term through every intermediate addition. Only the final addition resolves
@@ -585,7 +582,7 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 /* Production scalar-entry form: consume the mixed signed digits as they are
  * generated instead of materializing an address-taken digit array. */
 
-// First used as 16 per-lane digit planes (8 KiB at 128 lanes) plus an optional ordinate
+// First used as 15 per-lane digit planes (7.5 KiB) plus an optional ordinate
 // plane (4 KiB); after the handoff, the same 12 KiB holds the cofactor tree.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
     __shared__ uint64_t storage[12*QSB_TREE_N];return storage;
@@ -623,27 +620,22 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-#include "Serial16Special.cuh"
-#include "IdentityFlags.cuh"
-#include "Serial16Identity.cuh"
-__device__ __forceinline__ unsigned qsb_decode_to_shared(const uint64_t *k) {
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
-    const unsigned special=qsb_serial16_classify(M,(unsigned)negative);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
-        const unsigned pos=16u*c+1u;
+        const unsigned pos=c==0?1u:17u*c+2u;
         const unsigned j=pos/64u,sh=pos%64u;
         uint64_t value=M[j]>>sh;
         if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=16u;
+        const unsigned bits=c==0?18u:17u;
         uint32_t f=(uint32_t)value&((1u<<bits)-1u);
         int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
         uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
         uint32_t neg=(uint32_t)(tm<0);
         codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
     }
-    return special;
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
@@ -654,10 +646,8 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
-    uint64_t (*unused)[2*QSB_TREE_N],uint32_t *identity_flags,unsigned idx,unsigned n) {
-    (void)unused;unsigned special=qsb_decode_to_shared(k);
-    qsb_s16_publish_identity(identity_flags,idx,n,special);
-    if(special){qsb_serial16_special_point(special,X,Y,U,V);return;}
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
@@ -669,7 +659,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         qsb_load_decoded(table,c,base,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
-        base+=1u<<15;
+        base+=1u<<16;
     }
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
@@ -2012,8 +2002,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
-    /* u1*G as raw XYZZ via the signed 32 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch(),(uint32_t*)tree,(unsigned)idx,(unsigned)batch_size);
+    /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2041,8 +2031,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
-    const bool identity=(qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0;
-    if(identity && !qsb_s16_identity_flag((const uint32_t*)tree,(unsigned)idx))return;
+    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
 #if QSB_ROOT_V2
@@ -2066,7 +2055,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t recovery_c[4]={pin_recovery_c[0],pin_recovery_c[1],
                             pin_recovery_c[2],pin_recovery_c[3]};
     uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = identity ? qsb_serial16_identity_finish(u2rx,u2ry,q1x,q2x) : qsb_packed_finish(
+    uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
 
     /* Check both pubkeys × 2 hashes */
@@ -2290,17 +2279,17 @@ static void launch_pinning_pipeline(
  *
  * m is odd so lo is odd (never 0); L[0] is never referenced. H[0] is the
  * identity (m < 256) -> copy L[lo]. H[hi] == +-L[lo] would need m == 0 (mod n),
- * impossible for m below 2^16. Base A/2 uses A=neg_r_inv*G.
+ * impossible for m below 2^18. Base A/2 uses A=neg_r_inv*G.
  * ============================================================ */
 
 /* Mixed geometry (GT_CHUNKS/GT_TOTAL_ENTRIES/GT_LO/GT_HI) is defined once near the top,
  * beside gt_recode_signed / _FixedBaseSignedXYZZScalar. Base of chunk c is
  * base_c = 2^gt_shift(c) * (A/2). Entry (c,d) = (2d+1)*base_c with m odd;
- * split m = hi*256 + lo, lo odd in [1,255], hi below 256:
+ * split m = hi*256 + lo, lo odd in [1,255], hi below 1024:
  *     m*base_c = H[hi] + L[lo],  L[lo] = lo*base_c,  H[hi] = hi*256*base_c.
  * H[0] is the identity (m < 256) -> copy L[lo]; lo is always odd so never 0,
  * so L[0] is never referenced. H[hi] == +-L[lo] would need m == 0 (mod n),
- * impossible for m below 2^16. */
+ * impossible for m below 2^18. */
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
@@ -2308,10 +2297,10 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-    int ch=(int)(t>>15);
+    int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
     int d=(int)(t-gt_offset(ch));
-    int m  = 2*d + 1;                        /* odd multiple below 2^16 */
-    int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 256 */
+    int m  = 2*d + 1;                        /* odd multiple below 2^18 */
+    int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 1024 */
 
     const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
@@ -2410,12 +2399,12 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
-        if (ch > 0) { BN_set_word(shift, 1u<<16); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
+        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
         gt_batch_ladder(grp,base,GT_LO-1,                    /* L[lo] = lo * B */
             hL+(size_t)ch*GT_LO*8,x,y,ctx);
         BN_set_word(shift, 256);                             /* step = 256 * B */
         EC_POINT_mul(grp, step, NULL, base, shift, ctx);
-        gt_batch_ladder(grp,step,GT_HI-1,         /* H[hi] = hi * 256 * B */
+        gt_batch_ladder(grp,step,(ch==0?1024:512)-1,         /* H[hi] = hi * 256 * B */
             hH+(size_t)ch*GT_HI*8,x,y,ctx);
     }
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
@@ -2491,7 +2480,7 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     BN_mod_mul(bscal, inv2, nri, order, ctx);
     EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
-        if (ch > 0) { BN_set_word(shift, 1u<<16); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
+        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
         BN_set_word(shift, 2); EC_POINT_mul(grp, two_base, NULL, base, shift, ctx);  /* 2*base_c */
         EC_POINT_copy(pt, base);                                                     /* (2*0+1)*base_c */
         for (unsigned d = 0; d < gt_entries(ch); d++) {
@@ -2511,8 +2500,6 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     EC_POINT_free(base);EC_POINT_free(pt);EC_POINT_free(two_base);
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
-
-#include "Serial16Host.h"
 
 /* Params loader for pinning2.bin */
 typedef struct {
@@ -2791,12 +2778,6 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
     cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
-    {
-        uint64_t special_xy[12];
-        if(!qsb_make_serial16_special(special_xy,pp.neg_r_inv) || cudaMemcpyToSymbol(qsb_serial16_special_xy,special_xy,sizeof(special_xy))!=cudaSuccess){
-            fprintf(stderr,"Serial16 exception constant upload failed\n");return 1;
-        }
-    }
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
         uint64_t recovery_c[4];
         if(!qsb_make_recovery_constant(recovery_c,pp.u2r_x,pp.u2r_y) ||
@@ -3033,7 +3014,7 @@ int main(int argc, char **argv) {
     uint64_t *d_super_roots[QSB_SLOTS],*d_root_checkpoint[QSB_SLOTS];
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=((size_t)BATCH+31u)/32u*sizeof(uint32_t);
+    size_t pipeline_tree_bytes=0;
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     for (int s = 0; s < QSB_SLOTS; s++) {
@@ -3042,8 +3023,6 @@ int main(int argc, char **argv) {
         cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);
-        if(pipeline_err==cudaSuccess)
-            pipeline_err=cudaMalloc(&d_pipeline_tree[s],pipeline_tree_bytes);
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_super_roots[s],super_root_bytes);
         if(pipeline_err==cudaSuccess)
@@ -3063,14 +3042,12 @@ int main(int argc, char **argv) {
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=((size_t)BATCH+31u)/32u*sizeof(uint32_t);
+    size_t pipeline_tree_bytes=0;
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
-    if(pipeline_err==cudaSuccess)
-        pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
     // Cofactor prepare retains its candidate tree in shared memory.
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_super_roots,super_root_bytes);

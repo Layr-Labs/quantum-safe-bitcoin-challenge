@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "cases": 93964,
+  "paths": {
+    "parity_zero_boundary": 3832,
+    "fast": 88220,
+    "low_carry": 1840,
+    "high_fold_window": 72
+  },
+  "random_warps": 2048,
+  "random_warps_with_fallback": 0,
+  "random_lane_fallbacks": 0,
+  "low_window_wide_products": 8,
+  "low_window_high_products": 7,
+  "high_window_wide_products": 6,
+  "high_window_high_products": 4,
+  "operand_products_total": 25,
+  "low_window_bit_products": 7,
+  "top_tail_strict_bound": 9,
+  "top_tail_fraction": "354618055694158357198829072529746255595819287150224307967302502708591277267386823498565601307644731899719803683733505/39402006196394479212279040100143613805079739270465446667948293404245721771497210611414266254884915640806627990306816",
+  "limits": "Python model only. Constant fold multiplies/guards/accumulation excluded. Uniform samples do not model actual field operands. Ambiguity always uses original full multiplier."
+}

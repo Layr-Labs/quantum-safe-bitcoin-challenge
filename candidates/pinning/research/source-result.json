@@ -1,0 +1,7 @@
+{
+  "status": "PASS",
+  "point_symbolic_configs": 32,
+  "raw_primitive_order_and_inputs_unchanged": true,
+  "source_reversal": true,
+  "field_operation_trace_preserved": true
+}

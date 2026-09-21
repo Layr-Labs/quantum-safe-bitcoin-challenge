@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "all_table_addresses_and_ladder_indices": 524288,
+  "full_curve_cases": 96,
+  "normal_add_checks": 1520,
+  "expected_final_exceptions": 16,
+  "shared_widths": [
+    64,
+    128,
+    256
+  ],
+  "default_bitmap_bytes_per_slot": 1048576,
+  "default_slots": 2,
+  "scope": "Source-bound geometry, allocation/launch references and exact group model. No native compile, GPU perf, or proof of all inherited approximate raw field operations."
+}

@@ -1,0 +1,207 @@
+[
+  [
+    "#define GT_CHUNKS 15",
+    "#if QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2\n#error \"Serial16 identity bitmap requires the packed in-block cofactor path\"\n#endif\n#define GT_CHUNKS 16",
+    1
+  ],
+  [
+    "#define GT_TOTAL_ENTRIES (1u << 20)",
+    "#define GT_TOTAL_ENTRIES (1u << 19)",
+    1
+  ],
+  [
+    "#define GT_HI 1024",
+    "#define GT_HI 256",
+    1
+  ],
+  [
+    "return c == 0 ? (1u << 17) : (1u << 16);",
+    "(void)c;return 1u << 15;",
+    1
+  ],
+  [
+    "return c == 0 ? 0u : (unsigned)(c+1) << 16;",
+    "return (unsigned)c << 15;",
+    1
+  ],
+  [
+    "return c == 0 ? 0 : 17*c+1;",
+    "return 16*c;",
+    1
+  ],
+  [
+    "GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024",
+    "GT_TOTAL_ENTRIES*64ULL == 32ULL*1024*1024",
+    1
+  ],
+  [
+    "mixed table must contain exactly 64 MiB",
+    "serial16 table must contain exactly 32 MiB",
+    1
+  ],
+  [
+    "e[0]=gt_mixed_step<18>(M,sign);",
+    "e[0]=gt_mixed_step<16>(M,sign);",
+    1
+  ],
+  [
+    "e[c]=gt_mixed_step<17>(M,sign);",
+    "e[c]=gt_mixed_step<16>(M,sign);",
+    1
+  ],
+  [
+    "__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {",
+    "#include \"Serial16Special.cuh\"\n#include \"IdentityFlags.cuh\"\n#include \"Serial16Identity.cuh\"\n__device__ __forceinline__ unsigned qsb_decode_to_shared(const uint64_t *k) {",
+    1
+  ],
+  [
+    "uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);",
+    "uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);\n    const unsigned special=qsb_serial16_classify(M,(unsigned)negative);",
+    1
+  ],
+  [
+    "const unsigned pos=c==0?1u:17u*c+2u;",
+    "const unsigned pos=16u*c+1u;",
+    1
+  ],
+  [
+    "const unsigned bits=c==0?18u:17u;",
+    "const unsigned bits=16u;",
+    1
+  ],
+  [
+    "codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);\n    }\n}",
+    "codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);\n    }\n    return special;\n}",
+    1
+  ],
+  [
+    "uint64_t (*unused)[2*QSB_TREE_N]) {\n    (void)unused;qsb_decode_to_shared(k);",
+    "uint64_t (*unused)[2*QSB_TREE_N],uint32_t *identity_flags,unsigned idx,unsigned n) {\n    (void)unused;unsigned special=qsb_decode_to_shared(k);\n    qsb_s16_publish_identity(identity_flags,idx,n,special);\n    if(special){qsb_serial16_special_point(special,X,Y,U,V);return;}",
+    1
+  ],
+  [
+    "base+=1u<<16;",
+    "base+=1u<<15;",
+    1
+  ],
+  [
+    "int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);",
+    "int ch=(int)(t>>15);",
+    1
+  ],
+  [
+    "BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17))",
+    "BN_set_word(shift, 1u<<16)",
+    2
+  ],
+  [
+    "gt_batch_ladder(grp,step,(ch==0?1024:512)-1,",
+    "gt_batch_ladder(grp,step,GT_HI-1,",
+    1
+  ],
+  [
+    "#define QSB_L2_SKIP 1",
+    "#define QSB_L2_SKIP 0",
+    1
+  ],
+  [
+    "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());",
+    "_FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch(),(uint32_t*)tree,(unsigned)idx,(unsigned)batch_size);",
+    1
+  ],
+  [
+    "if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;",
+    "const bool identity=(qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0;\n    if(identity && !qsb_s16_identity_flag((const uint32_t*)tree,(unsigned)idx))return;",
+    1
+  ],
+  [
+    "uint32_t y_parities = qsb_packed_finish(\n        qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);",
+    "uint32_t y_parities = identity ? qsb_serial16_identity_finish(u2rx,u2ry,q1x,q2x) : qsb_packed_finish(\n        qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);",
+    1
+  ],
+  [
+    "/* Params loader for pinning2.bin */",
+    "#include \"Serial16Host.h\"\n\n/* Params loader for pinning2.bin */",
+    1
+  ],
+  [
+    "cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));",
+    "cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));\n    {\n        uint64_t special_xy[12];\n        if(!qsb_make_serial16_special(special_xy,pp.neg_r_inv) || cudaMemcpyToSymbol(qsb_serial16_special_xy,special_xy,sizeof(special_xy))!=cudaSuccess){\n            fprintf(stderr,\"Serial16 exception constant upload failed\\n\");return 1;\n        }\n    }",
+    1
+  ],
+  [
+    "size_t pipeline_tree_bytes=0;",
+    "size_t pipeline_tree_bytes=((size_t)BATCH+31u)/32u*sizeof(uint32_t);",
+    2
+  ],
+  [
+    "pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);",
+    "pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);\n        if(pipeline_err==cudaSuccess)\n            pipeline_err=cudaMalloc(&d_pipeline_tree[s],pipeline_tree_bytes);",
+    1
+  ],
+  [
+    "pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);",
+    "pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);\n    if(pipeline_err==cudaSuccess)\n        pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);",
+    1
+  ],
+  [
+    "/* Mixed regular odd digits: widths [18,17,...,17], 15 chunks.\n * Chunk c starts at bit 0 when c=0, otherwise 17*c+1. Entry d is\n * (2*d+1)*2^offset*(A/2). Every digit is odd and nonzero; the reconstruction\n * is 2*k modulo the group order, as in the original regular recoder.\n * First chunk has 2^17 entries, others 2^16: 2^20 points, 64 MiB total. */",
+    "/* Sixteen regular signed odd digits, each width 16. Chunk c starts at 16*c.\n * Entry d is (2*d+1)*2^(16*c)*(A/2). The signed scalar is 2*(k mod n)-n.\n * Each chunk has 2^15 entries: 2^19 affine points, 32 MiB total.\n * Identity and final-doubling scalars use explicit cold dispatch below. */",
+    1
+  ],
+  [
+    "/* k -> 15 signed odd digits.",
+    "/* k -> 16 signed odd digits.",
+    1
+  ],
+  [
+    "the 15-entry digit array",
+    "the 16-entry digit array",
+    1
+  ],
+  [
+    "First used as 15 per-lane digit planes (7.5 KiB)",
+    "First used as 16 per-lane digit planes (8 KiB at 128 lanes)",
+    1
+  ],
+  [
+    "/* u1*G as raw XYZZ via the signed 64 MiB A-table. */",
+    "/* u1*G as raw XYZZ via the signed 32 MiB A-table. */",
+    1
+  ],
+  [
+    "evicts the 64 MiB table",
+    "evicts the 32 MiB table",
+    1
+  ],
+  [
+    "every candidate reads 15 times",
+    "every ordinary candidate reads 16 times",
+    1
+  ],
+  [
+    "hi below 1024",
+    "hi below 256",
+    1
+  ],
+  [
+    "hi < 1024",
+    "hi < 256",
+    1
+  ],
+  [
+    "m below 2^18",
+    "m below 2^16",
+    2
+  ],
+  [
+    "odd multiple below 2^18",
+    "odd multiple below 2^16",
+    1
+  ],
+  [
+    "/* Signed-digit fixed-base multiply, accumulating INTERNALLY",
+    "/* Historical unused entry point (production uses _FixedBaseSignedXYZZScalar below).\n * Signed-digit fixed-base multiply, accumulating INTERNALLY",
+    1
+  ]
+]
