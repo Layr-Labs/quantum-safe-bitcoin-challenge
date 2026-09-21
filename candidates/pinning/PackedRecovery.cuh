@@ -1,6 +1,9 @@
 // Let B=2^256, p=B-K, K=2^32+977. A raw exact product is in [0,B).
 // If b[3]!=0 then b>=2^192>K, so -p<raw-b<p. Its canonical parity
 // needs just the subtraction borrow. Small b retains normalization.
+#ifndef QSB_PREP_ZERO_HC
+#define QSB_PREP_ZERO_HC 1   /* clear the shared cofactor, not the two saved products */
+#endif
 __device__ __forceinline__ void qsb_parity_boundary(uint64_t *raw,const uint64_t *b) {
     if(b[3]==0)qsb_field_normalize(raw);
 }
@@ -62,9 +65,21 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_PREP_ZERO_HC
+        /* An unusable lane published the identity leaf, so its saved pair must
+         * be zero. Clearing the shared cofactor hc before the two products is
+         * the same result by 0*x==0 exactly (qsb_packed_raw_mul is the exact
+         * full-width product, and Load256 of a zero product is zero): four
+         * masked writes instead of eight, and neither product waits on the
+         * predicate. */
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
