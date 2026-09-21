@@ -148,6 +148,24 @@
 #if QSB_FUSE_SQRADDSUB2 != 0 && QSB_FUSE_SQRADDSUB2 != 1
 #error QSB_FUSE_SQRADDSUB2 must be 0 or 1
 #endif
+#ifndef QSB_X3_INPLACE
+#define QSB_X3_INPLACE 1   /* the XYZZ adds land X3 in the accumulator abscissa, no T copy */
+#endif
+#if QSB_X3_INPLACE != 0 && QSB_X3_INPLACE != 1
+#error QSB_X3_INPLACE must be 0 or 1
+#endif
+#ifndef QSB_Y3_DIRECT
+#define QSB_Y3_DIRECT 1    /* deferred Ycore = R*(V-X3) writes the ordinate, no copy */
+#endif
+#if QSB_Y3_DIRECT != 0 && QSB_Y3_DIRECT != 1
+#error QSB_Y3_DIRECT must be 0 or 1
+#endif
+#ifndef QSB_MM_INPLACE
+#define QSB_MM_INPLACE 1   /* the three-affine seed lands X3 in its own destination */
+#endif
+#if QSB_MM_INPLACE != 0 && QSB_MM_INPLACE != 1
+#error QSB_MM_INPLACE must be 0 or 1
+#endif
 
 #define MM64 0xD838091DD2253531ULL
 
@@ -1864,7 +1882,15 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   uint64_t PP[4];
   uint64_t PPP[4];
   uint64_t Q[4];
+#if QSB_X3_INPLACE
+  /* X1 is read for the last time by P = U2 - X1 below, so the X3 destination
+   * may be the accumulator abscissa itself: identical arithmetic, minus the
+   * four-word copy-out and the four registers T held across the R^2 tail.
+   * X1 never aliases X2/Y2/Yoff at either call site. */
+  uint64_t *const T = X1;
+#else
   uint64_t T[4];
+#endif
 
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
 #if QSB_LAZY
@@ -1896,15 +1922,24 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
   if (defer_y) {
+#if QSB_Y3_DIRECT
+    /* Y1 died at R = S2 - Y1, so Ycore = R*(V-X3) is written straight into the
+     * ordinate instead of through Q. Same product, one copy fewer. */
+    _ModMult(Y1, Q, R);                // actual Y3 = Y1 - Y2*ZZZ3
+#else
+    _ModMult(Q, R);                    // R*(V - X3)
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+#endif
   } else {
+    _ModMult(Q, R);                    // R*(V - X3)
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
+#if !QSB_X3_INPLACE
   Load256(X1, T);                      // X3
+#endif
 }
 
 // Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
@@ -1922,7 +1957,12 @@ __device__ __forceinline__ void _PointAddXYZZT(
   uint64_t PP[4];
   uint64_t PPP[4];
   uint64_t Q[4];
+#if QSB_X3_INPLACE
+  /* Same liveness as the runtime twin: X1 dies at P = U2 - X1. */
+  uint64_t *const T = X1;
+#else
   uint64_t T[4];
+#endif
 
 #if QSB_YOFF
   _ModAddLazyOff(S2, Y2, Yoff);        // offset ordinates: y2 + yoff (mod p)
@@ -1957,15 +1997,22 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
   _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
+#if QSB_Y3_DIRECT
+    _ModMult(Y1, Q, R);                // actual Y3 = Y1 - Y2*ZZZ3
+#else
+    _ModMult(Q, R);                    // R*(V - X3)
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+#endif
   } else {
+    _ModMult(Q, R);                    // R*(V - X3)
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
+#if !QSB_X3_INPLACE
   Load256(X1, T);                      // X3
+#endif
 }
 
 // Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3,
@@ -1982,7 +2029,14 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
+#if QSB_MM_INPLACE
+  /* The input abscissa X1 is read for the last time by Q = X1*PP above, and
+   * both call sites pass an accumulator distinct from the two affine
+   * operands, so the R^2 tail may build X3 in its own destination. */
+  uint64_t *const T = X3;
+#else
   uint64_t T[4];
+#endif
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -1997,5 +2051,7 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
 
   _ModSub256(Q, Q, T);                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
+#if !QSB_MM_INPLACE
   Load256(X3, T);                                  // X3
+#endif
 }
