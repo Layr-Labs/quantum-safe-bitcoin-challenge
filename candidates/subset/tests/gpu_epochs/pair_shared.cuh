@@ -5,8 +5,7 @@
 #ifndef QSB_PAIR_SHARED
 #define QSB_PAIR_SHARED 1
 #endif
-/* epochs consumed per digest block = (epochs per thread) x (epoch pairs per block) */
-#define QSB_PAIR_MUL ((QSB_PAIR_SHARED ? 2 : 1) * QSB_SE_HALVES)
+#define QSB_PAIR_MUL (QSB_PAIR_SHARED ? 2 : 1)
 #if QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_k2s_pre(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
@@ -96,7 +95,6 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 #ifndef QSB_NEGFOLD_PARITY
 #define QSB_NEGFOLD_PARITY 1
 #endif
-#include "parity_window_subset.cuh"
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -110,23 +108,15 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
 #if QSB_NEGFOLD_PARITY
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
-#if QSB_K2S_PARITY_WINDOW
-    uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
-#else
     QSB_FMUL(t, x1, m1);           /* p1*lambda1 */
     QSB_FADD(t, t, yR);            /* -y1 */
     uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
-#endif
     QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
     QSB_FSUB(t, m2, cc);
     QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
-#if QSB_K2S_PARITY_WINDOW
-    parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
-#else
     QSB_FMUL(t, x2, m2);           /* p2*m2 */
     QSB_FADD(t, t, yR);            /* y2 */
     parities |= (uint32_t)((t[0] & 1ULL) << 1);
-#endif
     QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
 #else
     QSB_FSUB(t, m1, cc);
