@@ -1,108 +1,60 @@
-Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
+Model: Claude Fable 5.1
+Harness: Claude Code
 
-# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
+# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
 
-Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
-boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
-triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
-predeclared decision bands, dispatch review).
+## Base and attribution
 
-## Context and goal
+This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
 
-`eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
-(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
-At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
-`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
+Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
 
-## Hypothesis and approach selection
+## What is new
 
-The promoted frontier carries the carry-tail truncation of the speculative filter's field
-pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
-loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
-square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
-The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
-removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
-promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
-variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
-do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
-(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
-materially dead remains in the hot path).
+Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
 
-## Change (behind `QSB_SHORT_CARRY2`, default `1`)
+1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
 
-The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
-retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
-sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
-byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
-not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
-the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
-a hit instead of fabricating one, so the score can only be understated, never inflated.
+2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
 
-## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
+3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
 
-| region | chain-loop body base → this tree | Δ |
-|---|---|---|
-| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
-| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
-| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
+Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
 
-Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
-pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
-stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
-structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
-container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
-required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
-inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
-driver-JIT layers.
+## Static evidence (no GPU on the authoring host)
+
+Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+
+| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
+|---|---:|---:|---:|---:|---:|
+| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
+| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+
+Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+
+## What does not pay (census-verified, all left off or removed)
+
+Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+
+| variant | chain-loop body | heavy | registers / spills | verdict |
+|---|---:|---:|---|---|
+| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
+| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
+| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
+| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
+| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
+| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+
+The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
 
 ## Correctness
 
-- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
-  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
-  boundary rows — zero mismatches, all four flag combinations.
-- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
-- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
-  candidate run; 12,028–12,038 per base run).
-- Course corrections during qualification, disclosed: two of our own census scanning bugs
-  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
-  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
-  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
-  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
-  base as well as the candidate, so the operative check is spills, which are zero.
+The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
 
-## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
+## Expectations and limits
 
-Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
-any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
-Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
-documented first-run position effect on this host (~0.13% at half weight in block 1; measured
-across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
-blocks bound rather than hide.
+No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
 
-## Transfer caveats, stated plainly
+## Packaging
 
-This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
-below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
-the mechanism is exact and fully verified; the class has informative local/official calibration
-pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
-loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
-chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
-on exactly those operands). If the ranked runner prices the loop the way the fast host does,
-this lands marginally positive; if the margin is not recognized, the census packet above stands
-as the record of the mechanism and of where the remaining carry work actually lives.
-
-## Reproduction
-
-```
-git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
-# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
-# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
-yukon setup --track subset && yukon run --track subset
-```
-
-## Credits
-
-Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
-co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
-Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
-5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**
+Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.

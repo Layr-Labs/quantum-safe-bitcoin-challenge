@@ -526,7 +526,7 @@ __device__ __forceinline__ void qsb_complete_last_add(
 #endif
 __device__ __forceinline__ void qsb_filter_last_add(
     uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
-    const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
+    const uint64_t *x,const uint64_t *y,uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
     uint64_t scaled_y[4];
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
@@ -859,7 +859,9 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+#if !QSB_CHAIN_ANCHOR_UPDATE
         Load256(y0, cy);                /* current affine y anchors next madd */
+#endif
         table_base += 1u << 16;
     }
     {
@@ -1071,7 +1073,20 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_EARLY     6
 #define QSB_SE_TWIN      3
 #define QSB_SE_CUT       137
-#define QSB_SE_PER_EPOCH 256
+/* QSB_SE_WINDOWS (kill switch/knob, promoted value 256): window omission sets used per epoch and
+ * the size of WIN3. Fewer windows can be chosen from the SAME C(13,3) pool so that they share far
+ * fewer first-block schedules: 256 windows need 54 distinct first blocks, 128 need only 8, and
+ * kernel_build_first_flat's cost is (classes x epochs). To keep everything else identical the BLOCK
+ * stays 256 threads and carries QSB_SE_HALVES epoch PAIRS instead of one: warps 0..3 run epoch pair
+ * 0 and warps 4..7 run epoch pair 1 (QSB_SE_WINDOWS is a multiple of 32, so a warp never straddles
+ * a pair). The block-wide inverse, the 48 KiB shared budget, 128 registers and the 2-blocks-per-SM
+ * occupancy are therefore untouched; only the epoch<->thread binding changes. */
+#ifndef QSB_SE_WINDOWS
+#define QSB_SE_WINDOWS 128
+#endif
+#define QSB_SE_BLOCK   256
+#define QSB_SE_HALVES  (QSB_SE_BLOCK / QSB_SE_WINDOWS)
+#define QSB_SE_PER_EPOCH QSB_SE_WINDOWS
 /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
 #define ZLAB_LAUNCH_BLOCKS 262144  /* Match PR309: 134217728 paired candidates per full launch. */
@@ -1091,10 +1106,11 @@ typedef struct {
 } epoch_desc_t;
 static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
 
-/* The first 256 lexicographic 3-from-13 window omission sets, stored as actual
- * push indices (QSB_SE_CUT + 0..12). Filled by the host once per run. Keeping
- * 256 of C(13,3)=286 is legitimate sampling: one block per epoch aligns with
- * the block-wide inverse, and the benchmark scores verified throughput. */
+/* QSB_SE_WINDOWS window omission sets out of C(13,3)=286, stored as actual push indices
+ * (QSB_SE_CUT + 0..12). Filled by the host once per run. Sampling a subset is legitimate: the
+ * benchmark scores verified throughput over distinct candidates, and the subset is chosen to
+ * minimise the number of distinct FIRST-BLOCK schedules (54 at 256 windows, 8 at 128), which is
+ * what kernel_build_first_flat has to build once per epoch. */
 __device__ __constant__ uint8_t WIN3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "window_schedule_shared.cuh"
 
@@ -1516,7 +1532,8 @@ __global__ void kernel_verify_pair_hits(
     for(uint32_t i=threadIdx.x;i<limit;i+=blockDim.x){
         const uint8_t*record=tentative+4+(size_t)i*ZLAB_HIT_REC;
         const uint32_t index=*((const uint32_t*)record)&0x3fffffffu;
-        const uint32_t ep=index>>8,lane=index&255u;
+        /* Tag layout is epoch*QSB_SE_WINDOWS + lane, written by kernel_digest. */
+        const uint32_t ep=index/(uint32_t)QSB_SE_WINDOWS,lane=index&(uint32_t)(QSB_SE_WINDOWS-1);
         if(ep>=(uint32_t)epochs_in_batch)continue;
         const int encoded=qsb_pair_verify_candidate(
             epochs+ep,first+(size_t)ep*QSB_FIRST_SLOTS*8,lane,gtable);
@@ -1563,18 +1580,23 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 ) {
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
+    const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
+    const int half = tid / QSB_SE_WINDOWS;            /* which epoch pair in this block (warp-uniform) */
     int idx = blockIdx.x * blockDim.x + tid;
     if(blockIdx.x*blockDim.x>=batch_size)return;
-    const bool active = idx<batch_size;
+    const unsigned eA = (unsigned)QSB_PAIR_MUL*blockIdx.x + 2u*(unsigned)half;
+    const bool hasA = eA < (unsigned)epochs_in_batch;
+    const bool active = idx<batch_size && hasA;
 #if ZLAB_K2S3M
     __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
 #else
     __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
 #endif
-    const epoch_desc_t *e0 = d_epochs + 2*blockIdx.x;
-    const bool hasB = 2*blockIdx.x+1 < epochs_in_batch;
+    const unsigned eA0 = hasA ? eA : 0u;
+    const epoch_desc_t *e0 = d_epochs + eA0;
+    const bool hasB = eA+1u < (unsigned)epochs_in_batch;
     const epoch_desc_t *e1 = hasB ? e0+1 : e0;
-    const uint32_t *f0=d_first+(size_t)(2*blockIdx.x)*QSB_FIRST_SLOTS*8;
+    const uint32_t *f0=d_first+(size_t)eA0*QSB_FIRST_SLOTS*8;
     const uint32_t *f1=hasB?f0+QSB_FIRST_SLOTS*8:f0;
     uint64_t u2rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t u2ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
@@ -1582,7 +1604,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], nB[12];
 #if ZLAB_DUAL_EPOCH_SHA
     uint64_t zB[4];
-    QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,tid);
+    QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
     #pragma unroll
@@ -1597,7 +1619,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if ZLAB_DUAL_EPOCH_SHA
         QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
-        QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
         okA=fa.ok && active;
@@ -1628,7 +1650,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if ZLAB_DUAL_EPOCH_SHA
     QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
-    QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
@@ -1663,9 +1685,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=((2u*blockIdx.x+0u)*blockDim.x+threadIdx.x)|((uint32_t)recid<<30);
+                d_hit_idx[pslot*4]=(eA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
-                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[tid][i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
             }
         }
     }
@@ -1684,9 +1706,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=((2u*blockIdx.x+1u)*blockDim.x+threadIdx.x)|((uint32_t)recid<<30);
+                d_hit_idx[pslot*4]=((eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
-                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[tid][i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
             }
         }
     }
@@ -2529,9 +2551,10 @@ int main(int argc, char **argv) {
              * midstate (1352 prefix bytes = 21 blocks + 8) is built ON GPU by
              * kernel_build_epochs -- an epoch lasts ~1us at target throughput,
              * far below what host-side build_epoch_prefix could feed. Each
-             * epoch maps to exactly one 256-thread consumer block covering the
-             * first 256 lex combinations of C(13,3)=286. This family holds
-             * C(137,6) x 256 = 2.1e12 candidates. EPOCH_MIN/SPACE_MIN do not
+             * 256-thread consumer block covers QSB_SE_HALVES epoch pairs, each
+             * running QSB_SE_WINDOWS of C(13,3)=286. This family holds
+             * C(137,6) x QSB_SE_WINDOWS candidates (2.1e12 at 256, 1.05e12 at
+             * 128 -- still 1.25x what a 1200 s run at 700 M/s consumes). EPOCH_MIN/SPACE_MIN do not
              * apply here: the cut is pinned by the 6-transform message shape,
              * not by the old per-launch-fill heuristic. Single GPU only; any
              * non-default flags fall through to the old machinery. */
@@ -2752,6 +2775,9 @@ int main(int argc, char **argv) {
     epoch_desc_t *d_epochs = NULL;
 #if QSB_EPOCH_GROUPS
     qsb_group_t *d_groups = NULL;
+    #if QSB_EPOCH_GROUPS && QSB_EPOCH_FAST
+    uint32_t *d_epoch_group = NULL;
+    #endif
 #endif
     uint32_t *d_first = NULL;
     if (se_mode) {
@@ -2760,9 +2786,21 @@ int main(int argc, char **argv) {
         for (int a = 0; a < 13; a++)
             for (int b = a + 1; b < 13; b++)
                 for (int c = b + 1; c < 13; c++) {
+#if QSB_SE_WINDOWS == 256
                     /* Drop 30 low-reuse triples so the retained 256 need only
                      * 54 distinct first-block schedules instead of 84. */
                     if(a>=1 && c<=7 && !(a==1 && b==2))continue;
+#elif QSB_SE_WINDOWS == 128
+                    /* The first-block schedule is fixed by the first six KEPT pushes, so all
+                     * triples with the same "which of the low positions are skipped" pattern share
+                     * one schedule. The C(13,3) pool splits into groups of 35 / 15x6 / 5x21 / 1x56.
+                     * Take the 35-group (no skip below position 6), all six 15-groups (exactly one
+                     * skip below 7) and three members of one 5-group: 35 + 90 + 3 = 128 windows
+                     * using 1 + 6 + 1 = 8 first-block schedules. */
+                    if(!((a>=6) || (a<=5 && b>=7) || (a==0 && b==1 && c>=8 && c<=10)))continue;
+#else
+#error "QSB_SE_WINDOWS must be 128 or 256"
+#endif
                     h_win3[cnt][0] = (uint8_t)(QSB_SE_CUT + a);
                     h_win3[cnt][1] = (uint8_t)(QSB_SE_CUT + b);
                     h_win3[cnt][2] = (uint8_t)(QSB_SE_CUT + c);
@@ -2788,6 +2826,10 @@ int main(int argc, char **argv) {
         /* A launch spans at most 2 group ranks per epoch (+ends): one non-empty group can be
          * followed by one empty (o5 = cut-1) group in rank order. */
         cudaMalloc(&d_groups, ((size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) * sizeof(qsb_group_t));
+#if QSB_EPOCH_GROUPS && QSB_EPOCH_FAST
+        cudaMalloc(&d_epoch_group, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(uint32_t));
+        if(!d_epoch_group){fprintf(stderr,"OOM: epoch-group map\n");return 1;}
+#endif
         if (!d_groups) { fprintf(stderr, "OOM: epoch groups\n"); return 1; }
 #endif
         cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
@@ -3050,7 +3092,7 @@ int main(int argc, char **argv) {
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
             const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
             int nblk=(epochs_in_batch+QSB_PAIR_MUL-1)/QSB_PAIR_MUL;
-            int batch_pos = nblk * QSB_SE_PER_EPOCH;
+            int batch_pos = nblk * QSB_SE_BLOCK;
             uint32_t h_hit = 0;
 #if ZLAB_HITPATH && QSB_EPOCH_GROUPS
             {
@@ -3070,10 +3112,18 @@ int main(int argc, char **argv) {
                 } else {
                 kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
-                    d_dsigs, d_groups);
+                    d_dsigs, d_groups
+#if QSB_EPOCH_FAST
+                    , d_epoch_group, epoch_base, epoch_base+(uint64_t)epochs_in_batch
+#endif
+                    );
                 kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256>>>(
                     epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
-                    d_dsigs, d_groups, r5a, d_epochs, zh_cnt);
+                    d_dsigs, d_groups, r5a, d_epochs, zh_cnt
+#if QSB_EPOCH_FAST
+                    , d_epoch_group
+#endif
+                    );
                 }
             }
 #elif ZLAB_HITPATH
@@ -3091,7 +3141,7 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_PER_EPOCH>>>(
+            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
