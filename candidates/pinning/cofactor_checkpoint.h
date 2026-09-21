@@ -6,6 +6,14 @@
 // The caller supplies nonzero effective leaves (identity for unusable lanes).
 // Preserve immutable products and accumulate exclusion products separately.
 // All N lanes participate in every barrier; one block publishes one raw root.
+// Under QSB_TREE_TOP2 the up-sweep exits at count==2 and the down-sweep starts
+// at count==8, so two of the level predicates below can never take their other
+// arm. QSB_TREE_LOOPCUT drops exactly those; every multiply, barrier and store
+// that remains is the one the guarded form executed.
+#ifndef QSB_TREE_LOOPCUT
+#define QSB_TREE_LOOPCUT 1
+#endif
+
 template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     uint64_t *value,uint64_t *roots,uint64_t (*products)[2*N],uint64_t (*excluded)[N]) {
     static_assert(N>=16 && !(N&(N-1)),"power-of-two tree");
@@ -30,7 +38,12 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
+#if QSB_TREE_TOP2 && QSB_TREE_LOOPCUT
+        /* the loop condition already stopped at count==2, so count>2 holds here */
+        if(half>32)__syncthreads();else __syncwarp();
+#else
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
+#endif
     }
 #if QSB_TREE_TOP2
     /* P12: the top pair n0=products[2N-4], n1=products[2N-3] needs no separate root level
@@ -79,7 +92,12 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
+#if QSB_TREE_TOP2 && QSB_TREE_LOOPCUT
+            /* the merged top level supplies count==8's parents, so count==2 never runs */
+            qsb_field_mul_sc(out,parent,sibling);
+#else
             if(count==2){Load256(out,sibling);}else{qsb_field_mul_sc(out,parent,sibling);}
+#endif
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }

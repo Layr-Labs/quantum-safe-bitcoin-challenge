@@ -42,6 +42,15 @@ __device__ __forceinline__ uint32_t qsb_sum_parity(const uint64_t *w,const uint6
 }
 #endif
 
+// Stage-2 finish schedule switches. Each is exact on its own and can be
+// returned to the frontier form without touching the other.
+#ifndef QSB_FIN_SUM2
+#define QSB_FIN_SUM2 1   /* sum = l+m = 2u: the doubling leaves the l/m adds off its chain */
+#endif
+#ifndef QSB_FIN_RAWS
+#define QSB_FIN_RAWS 1   /* the pre-"+a" product s stays raw (qsb_add_boundary covers the top a) */
+#endif
+
 // Exact full-width residue; callers normalize before additions/parity.
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
@@ -92,11 +101,24 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v);
+#if QSB_FIN_SUM2
+    /* l+m == (u-v)+(u+v) == 2u (mod p) for any representatives of u and v, and sum only
+     * feeds multiplies, so doubling u is the same residue class with the same 2^-223
+     * carry-fold exposure as the add it replaces. */
+    _ModAddLazy(sum,u,u);
+#else
+    _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+    _ModSub256(l,u,v); _ModAdd256(m,u,v);
+#if QSB_FIN_SUM2
+    _ModAdd256(sum,u,u);
+#else
+    _ModAdd256(sum,l,m);
+#endif
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
@@ -112,10 +134,25 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_FIN_RAWS
+    /* s is consumed only by the parity multiply (any representative) and by the single
+     * conditional subtraction of "+a", so it stays the raw exact product: raw < 2^256 == p+K
+     * and a < 2^256-2^192 whenever a[3] != 2^64-1, hence raw+a < 2^257-2^192 < 2p and one
+     * conditional subtraction still yields the canonical x_i; qsb_add_boundary normalizes in
+     * the remaining fixed-a case. The parity product is taken before that boundary so it does
+     * not wait on it. */
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t);
+    qsb_packed_raw_mul(u,l,s);
+    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t);
+    qsb_packed_raw_mul(v,m,s);
+    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
     qsb_packed_raw_mul(u,l,s);
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
     qsb_packed_raw_mul(v,m,s);
+#endif
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
 }
 #else
