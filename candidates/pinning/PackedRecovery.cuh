@@ -92,11 +92,22 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
+#if QSB_FIN_SUM2
+    /* P13: l = u-v and m = u+v, so sum = l+m == 2u exactly (mod p). Doubling u with the
+     * same carry-folding lazy add is one instruction of the same class, but it no longer
+     * waits for l and m: the sum is ready with u, one add earlier on the finish chain. */
+    _ModAddLazy(sum,u,u); _ModSub256(l,u,v); _ModAddLazy(m,u,v);
+#else
     _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
+#if QSB_FIN_SUM2
+    _ModAdd256(sum,u,u); _ModSub256(l,u,v); _ModAdd256(m,u,v);
+#else
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+#endif
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
@@ -112,10 +123,23 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_FIN_RAWS
+    /* P14: s = sum*(l or m - c) is x_i - a. It is consumed by one canonicalising add and by
+     * one exact full-width multiply, neither of which needs a canonical operand, so the
+     * product stays raw in [0,2^256) and the two tree-multiply normalisations disappear.
+     * raw + a < 2^257 - 2^192 < 2p whenever a[3] != 2^64-1, so the single conditional
+     * subtraction inside _ModAdd256 still returns the canonical x_i that gets hashed;
+     * qsb_add_boundary keeps the normalisation for the excluded top range of a. */
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t); qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    qsb_packed_raw_mul(u,l,s);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t); qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+    qsb_packed_raw_mul(v,m,s);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
     qsb_packed_raw_mul(u,l,s);
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
     qsb_packed_raw_mul(v,m,s);
+#endif
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
 }
 #else
