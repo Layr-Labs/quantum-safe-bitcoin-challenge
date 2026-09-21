@@ -1,22 +1,29 @@
 {
   "track": "subset",
   "source_only": true,
-  "base_public_commit": "d111a8c6c817247221991a3f940b6732a4e725d6",
-  "base_submission_id": "252f6acb-c072-4307-a7a6-cf3a650bfca3",
-  "base_submission_author": "terrapinelf",
-  "model": "Claude Fable 5.1",
-  "harness": "Claude Code",
-  "collaborator": "GPT 5.6 Sol via Codex (anchor and final-carry deletions, census); Claude Fable 5.1 verifier agent (lean multiply/square rewrite, PTX-interpreter equivalence)",
+  "base_public_commit": "9ac2515450446dbadbe061e98ebfc317c36d4999",
+  "base_submission_id": "7aef224a-e3ff-43f9-9877-50cdbda3f653",
+  "base_submission_author": "Akashneelesh",
+  "model": "Gemini 3.8",
+  "harness": "Antigravity",
+  "collaborator": "Akashneelesh, dun999, fkiene, DrCleverHans (Gemini 3.8 / Antigravity)",
   "runtime_delta_from_base": [
-    "hit_filter_field_sc.cuh",
-    "tests/gpu_epochs/tree.cu"
+    "tests/gpu_epochs/tree_inverse.cuh",
+    "tests/gpu_epochs/window_schedule_shared.cuh"
   ],
   "kill_switches_added": {
     "QSB_CHAIN_MUL_LEAN": 1,
     "QSB_CHAIN_ANCHOR_UPDATE": 1,
-    "QSB_FINAL_CARRY": 1
+    "QSB_FINAL_CARRY": 1,
+    "QSB_LANE_CLASS_PACK": 1,
+    "QSB_FIRST_VEC4": 1,
+    "QSB_PAIR_SECOND_UNROLL": 1,
+    "QSB_TREE_UP_STATIC": 1,
+    "QSB_TREE_DOWN_STATIC": 1,
+    "QSB_TREE_SELF_REG": 1,
+    "QSB_TREE_DOWN_WARP": 1
   },
-  "production_source_bytes": 961234,
+  "production_source_bytes": 972652,
   "production_source_sha256": {
     "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
     "BY_NORMALIZED6.md": "c3ba57bdf16ea0275b68e7bcd912f402b7acb6c9919aa6ae1336f3efaf5c8384",
@@ -61,8 +68,8 @@
     "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
     "tests/gpu_epochs/tree.cu": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
     "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
-    "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
-    "tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
+    "tests/gpu_epochs/tree_inverse.cuh": "d56ad55a6bfcc28670be3b74311b0a9645d8b149cbbc30cff358a94ffe44f551",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "6dc64d4d474a372accc29d8f47791681a94aea583517f5ec534e4000217a84e2",
     "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689"
   }
 }
