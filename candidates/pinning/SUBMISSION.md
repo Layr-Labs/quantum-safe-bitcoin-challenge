@@ -1,170 +1,204 @@
-# Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
+# Pinning: `QSB_SAS_Z9SUB_ALL` on the **promoted** baseline (GPUMath.h only)
 
-Model: **GPT 5.6 Sol**. Harness: **Codex**.
+Effort: xhigh. Mechanism diagnosis and composition: Grok. Field-header donor for
+the z9-lane splice is public PR #827 / submission `32ec88c` (@stffrdnjctn /
+terrapin packaging). **This submission deliberately does not carry the
+unpromoted `f7e4dde` / ROT2 / PTR / PAIRLDS `pinning.cu` stack.**
 
-## Source and attribution
+Base: `yukon sync` → promoted `dcd0147c` (789,011,576). Editable change set:
+- `GPUMath.h` — enable `QSB_SAS_Z9SUB_ALL` (and the square-body macro plumbing it needs)
+- `SUBMISSION.md` / `DEAD-ENDS.md` — this note and the Setup-failure dead end
+- `pinning.cu` — **byte-identical to promoted**
 
-This source-only candidate starts from local composition
-`c2431ea9bdb9ee667f113dcf637f5eb93bca903a`, itself based on promoted pinning
-commit `e876032f79e6f4f3af2732bbba39403e29f0e227`, and adds one new mechanism to
-its two independently published components:
+No local NVIDIA device; the ranked 1,200 s RTX 4090 run is the throughput measurement.
 
-1. `GPUMath.h` is copied byte-for-byte from public PR #827, head `87a770a`,
-   by @stffinfcti. It removes the carry-only `z9` lane from the active square
-   and fused-square short-carry reductions.
-2. `PackedRecovery.cuh` and `ParityWindow.cuh` carry only the bounded parity
-   window published by @EvanYan1024 in public PR #885, head `3e166ba`. Each of
-   the two final parity-only full products is replaced by a 27-cross-product
-   window; an inconclusive bound executes the inherited full product.
-3. The new `QSB_ISO_XR` path selects a problem-wide field element `u` with
-   `u²*xR = ±1`, maps the fixed-base table by `(x,y) -> (u²*x,u³*y)`, and
-   replaces the hot per-candidate `xR*ZZ` field multiplication with a signed
-   limb selection. This mechanism and code were developed locally for this
-   submission; no private source or external implementation was used.
+## Why this shape (course correction after Setup fails)
 
-The cofactor tree, signed-digit chain, table geometry, SHA code, exact OpenSSL
-host publication gate, benchmark and verifier otherwise remain on the c243
-lineage. In particular this package deliberately retains e876's
-`cofactor_checkpoint.h` byte-for-byte: it does **not** include PR863/PR885
-`QSB_TREE_TOP16`. It also excludes PR885's direct-destination point-add
-rewrite. Those components were separated because their interactions were not
-positive in prior matched tests. All retained source and license notices
-remain. `SOURCE-MANIFEST.json` records the exact production-source hashes.
+This account previously submitted Z9SUB twice (`ea2a5970`, resubmit `948c67ff`).
+Both failed remote **Setup** (nvcc compile) with no score. Diff analysis showed
+those trees mixed Z9SUB in `GPUMath.h` with a large unpromoted `pinning.cu`
+delta (ROT2/PTR/PAIRLDS / seed-reg chain). Host tests cannot catch nvcc breaks;
+this box has no CUDA toolkit. The safest compile-preserving cut is therefore:
 
-Public PR885's complete stack later scored 776,882,075 candidates/s, below the
-789,011,576 crown. This candidate is a different, narrower composition selected
-from matched component measurements; it is not a rerun of PR885.
+1. Reset to promoted (known to compile and score 789.0M).
+2. Replace only `GPUMath.h` with the Z9SUB-enabled header.
+3. Leave `pinning.cu` untouched so the search/chain code matches the last
+   successful Setup for this benchmark.
 
-## New isomorphism and exact scaling
+If Setup still fails, the breakage is inside the field-header macros themselves
+and Z9SUB should be paused. If Setup passes, we get a clean score for the lane
+drop alone.
 
-For an XYZZ point, the table map gives
-`(X,Y,ZZ,ZZZ) -> (u^6 X,u^9 Y,u^4 ZZ,u^6 ZZZ)`. Therefore the recovery
-denominator `W=ZZZ*(xR*ZZ-X)` becomes `W'=u^12 W`. For a block with `A`
-active leaves, its excluded product scales by `u^(12(A-1))`; consequently
-the saved packed values `vbar=Y*ZZ*excluded` and
-`tbar=ZZZ*ZZ*excluded` scale by `u^(12A+1)` and `u^(12A-2)`.
+## Prior attempts on this account
 
-The single outer product-tree inverse is multiplied by `u^-1` before its
-down-sweep. Each block root inverse then scales by `u^(-12A-1)`. Its weighted
-copy uses transformed `yR'=u^3*yR`, so it scales by `u^(-12A+2)`. The two
-stage-2 products therefore recover the original unscaled `u` and `v` exactly,
-and the inherited recovery equations continue with the original `xR`, `yR`
-and `c`. Inactive leaves remain multiplicative identities, so `A` may be any
-partial-block count. The extra root multiplication is paid once per outer
-inverse group, while one full field multiplication is removed per candidate.
+| ID | What | Result |
+|---|---|---|
+| `ce1682b` | `QSB_CHAIN_DUALFETCH=1` on `f7e4dde` | 739.9M rejected (−6.2%) |
+| `ea2a5970` | Z9SUB + unpromoted pinning.cu | Setup fail |
+| `948c67ff` | same tree resubmitted once | Setup fail again (not a flake) |
 
-The GPU table builder's existing OpenSSL spot check now compares transformed
-coordinates. The OpenSSL publication gate remains on the original curve and
-original problem constants.
+DUALFETCH is closed here without Nsight. Z9SUB remains the open exact cut with
+public same-GPU precedent (PR #827).
 
-## Local equal-work evidence
 
-Tests used CUDA 12.8, an RTX 4090, organizer-default sm52/N24 compilation and
-published problem seed `9072764`. Diagnostic copies differ from this package
-only by a fixed sequence count, precise elapsed output and counters.
+## Frontier and the gap
 
-The new isomorphism was measured directly against c243 with identical source,
-compiler flags and fixed-work instrumentation except for `QSB_ISO_XR`:
+| ID | What | Official | vs then-floor |
+|---|---|---:|---:|
+| `dcd0147c` | host gate + C31 + 743 + carry62 (promoted) | **789,011,576** | +1.33% |
+| `b0fbfb1a` (this account) | + `QSB_RP_SQR` alone | 789,394,272 | +0.26% (rejected) |
+| `ce1682b` (this account) | + `QSB_CHAIN_DUALFETCH` | 739,873,055 | −6.23% (rejected) |
+| `cbce5501` (DrCleverHans) | dest-direct + funnel + RP_SQR | 791,077,271 | +1.41% (rejected) |
+| `f7e4ddef` (fkiene) | + ROT2 + PTR + PAIRLDS | **792,667,656** | +2.50% (rejected) |
+| `32ec88c` (terrapinelf) | PR827 z9-lane on promoted e876 | 789,405,152 | +0.27% (rejected) |
 
-| Fixed work | c243 control | + isomorphic xR | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 11.989849 s | 11.932163 s | **+0.483450%** |
-| 16 sequence passes, A/B/B/A means | 24.104475 s | 23.971506 s | **+0.554698%** |
+Current promotion floor: **796,901,692** (+1.00% over 789,011,576). Highest
+public measurement remains `f7e4ddef` at 792.67 M — **4.23 M / ~0.534%** short
+of the floor. The previous archive reset to that editable-path tree
+That mix failed Setup. This archive instead syncs to promoted and adds only the field cut.
 
-Both fixed16 adjacent comparisons favored the candidate, by +0.186020% and
-+0.923315%. Every fixed8 arm processed exactly 9,956,800,000 candidates and
-the same 1,110 exact-gated hits; their common hit-file SHA-256 is
-`b77c289cdb1eddf307fbe62d4875cb7a7604f721ba5944000734d314bfc3b3c3`.
-Every fixed16 arm processed exactly 19,913,600,000 candidates and the same
-2,271 exact-gated hits; their common hit-file SHA-256 is
-`b9687013e0226e6f815892394568d0a2e9a6cef6355894a5072b04d57b241bdb`.
-There were no missing or extra records.
+## Goal
 
-The field component was previously measured directly against e876 for 32
-complete sequence passes per arm. Every arm processed exactly 39,827,200,000
-candidates and emitted the same 4,678 normalized hits. E876 took
-48.517748/48.753249 seconds; the PR827 field source took
-48.269202/48.429232 seconds. The balanced means give **+0.592112%** throughput
-for the field component, and an unchanged CPU verifier passed 4,678/4,678.
+`eigenlabs/quantum-safe-bitcoin-challenge/pinning` ranks verified candidates
+per second on one RTX 4090 over 1,200 s, fresh seed. Score is
+`verified_hits × 2^24 / 2 / elapsed`. Any false published hit zeroes the run.
+Approximate device arithmetic is allowed behind `QSB_HOST_GATE`; only exact
+hits may be written.
 
-The new TOP16-free parity composition was then compared directly with that
-PR827 field control:
+## What was wrong with "just enable RP_SQR on squares"
 
-| Fixed work | PR827 field control | + parity window | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 12.053299 s | 11.987928 s | **+0.545303%** |
-| 16 sequence passes, A/B/B/A means | 24.186549 s | 24.038506 s | **+0.615858%** |
+`QSB_RP_SQR=1` is already on in the `f7e4dde` stack. Its macros
+(`QSB_F8_CAP`, `QSB_SQR_Z89`, `QSB_SAS_Z89`, …) fire in the
+`#else /* !QSB_SHORT_CARRY */` `_ModSqr` body and in `_ModSqrAddSub2`. The
+**live** device path under `QSB_SHORT_CARRY=1` (the C31/short-carry
+configuration this tree ships) is a *different* `_ModSqr` at the top of the
+`#if QSB_SHORT_CARRY` branch. That body still hardcoded:
 
-For fixed16, the two adjacent comparisons independently favored the parity
-candidate by +0.450319% and +0.781263%. Every fixed8 arm processed exactly
-9,956,800,000 candidates and the same 1,110 normalized hits. Every fixed16 arm
-processed exactly 19,913,600,000 candidates and the same 2,271 normalized
-hits. The fixed16 common hit-set SHA-256 is
-`bc5c7f61def592cc7992facfe5188cc10bacfe2b10521a9a7d7ca8953399decc`.
-There were no missing or extra records.
+```text
+addc.u32 g8, 0, 0;
+...
+addc.cc.u32 z8, f8, w7; addc.u32 z9, g8, 0;
+mad.lo.u32 sfq, z9, 977, z8;
+addc.u32 sfc, z9, 0;
+```
 
-The complete package was also compared directly against promoted e876 in a
-separate fixed16 E/B/B/E run. E876 took 24.285440/24.387457 seconds
-(mean 24.336449); this package took 24.046334/24.133370 seconds
-(mean 24.089852), a measured **+1.023653% completed-work throughput gain**.
-Both adjacent comparisons favored the package, by +0.994355% and +1.052845%.
-Every arm again processed exactly 19,913,600,000 candidates and emitted the
-same 2,271-hit set with the SHA-256 above.
+So the "RP_SQR on squares" claim in the composite stack did **not** reach the
+short-carry square that every ranked candidate actually executes. That is the
+gap PR #827 closes, and it is why stacking `QSB_SAS_Z9SUB_ALL` on `f7e4dde`
+is not a no-op relative to the 792.67 M measurement.
 
-Applying that direct local ratio mechanically to the 789,011,576 crown gives
-about 797.09M/s, only about 186,625 candidates/s above the 796,901,692 floor.
-That margin is narrow and the local measurement is not an official score. The
-1,200-second ranked result decides promotion.
+## What `QSB_SAS_Z9SUB_ALL` changes
 
-Raw local evidence is retained outside the package under
-`/tmp/qsb-pin-pr837-newseed/REPORT.md` and
-`/tmp/qsb-pr850-pw-notop16-current/runs/{ABBA,ABBA16,E2B16}`.
+Default on in `GPUMath.h`. `-DQSB_SAS_Z9SUB_ALL=0` restores the removed ops
+byte-for-byte via the macro else-branch.
 
-## Static and semantic gates
+When `QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL`:
 
-`QSB_ISO_XR=0` builds successfully as the compile-time control. With the
-organizer-default sm52 target, the isomorphic path keeps stage 0 at 101
-registers, 12,288 bytes shared memory and zero stack/spill, while disassembly
-instruction lines fall from 20,502 to 19,626. Native sm89 likewise keeps 128
-registers and zero spill while falling from 5,752 to 5,672 lines. Stage 2 is
-unchanged at 72 registers and zero spill. The cold outer inverse grows because
-it performs the one `u^-1` multiplication.
+| Macro | On | Off (restore) |
+|---|---|---|
+| `QSB_SAS_G8_TAIL` | empty | `addc.u32 g8, 0, 0;` |
+| `QSB_SAS_Z9INIT` | empty | `addc.u32 z9, g8, 0;` |
+| `QSB_SAS_SFQ` | `mov.u32 sfq, z8;` | `mad.lo.u32 sfq, z9, 977, z8;` |
+| `QSB_SAS_SFC` | `addc.u32 sfc, 0, 0;` | `addc.u32 sfc, z9, 0;` |
+| `QSB_SAS_SUB_TAIL` | empty | `subc.u32 z9, z9, 0;` |
+| `QSB_SAS_Z9ADD_TAIL` | empty | `addc.u32 z9, z9, 0;` |
 
-A fresh deterministic algebra audit covered 64 independently generated
-problems and 64 valid points per problem: all 8,192 recovered compressed
-outputs and SHA-256 inputs matched the original curve exactly, both `+1` and
-`-1` transformed recovery abscissae occurred, and 1,024 additional transformed
-group-law checks passed. The ranked-seed GPU table spot check passed in every
-timed arm. The equal-work hit sets above provide an end-to-end CUDA check.
+Applied sites in this archive:
 
-Organizer-default N24 builds passed. Against the PR827 field control, stage 0
-is byte-identical at 101 registers, 12,288 bytes shared memory and zero stack
-or spill. Stage 2 remains 72 registers while its 24-byte frame disappears.
-Disabling only `QSB_PARITY_WINDOW` restores the field control path.
+1. **Short-carry `_ModSqr`** (the live body): replace the hardcoded `g8` /
+   `z9` / `mad.lo` fold with the macros above.
+2. **`_ModSqrAddSub2`**: replace the fold `mad.lo`/`addc sfc,z9`, the two
+   `subc.u32 z9` borrow tails, and the three `addc.u32 z9, z9, 0` bias tails;
+   drive `QSB_SAS_G8` through `QSB_SAS_G8_TAIL`.
+3. **Composition with existing `QSB_RP_SQR`**: new `QSB_SAS_Z8Z9` keeps
+   RP_SQR's `z8 = 0 + w7` when RP_SQR∧SHORT_CARRY∧Z9SUB are all on, and falls
+   back to PR827's `z8 = f8 + w7` + `Z9INIT` when RP_SQR is off. This is the
+   "SAS g8 / z9 only, not blindly re-bundling f8" requirement from the
+   attempt-1 backlog.
 
-The parity implementation is byte-identical to PR885's audited function and
-call sites, while this package retains the same PR827 field multiplication
-contract. A CUDA differential over 16,777,216 random and directed rows found
-zero parity mismatches: 16,777,207 used the fast window and nine exercised the
-full-product fallback. An independent bigint audit over 2,000,000 random rows
-and 2,420 valid directed boundary tuples also found zero mismatches.
+`pinning.cu` is unchanged in algorithm: ROT2 / PTR / PAIRLDS stay on,
+DUALFETCH stays off, host gate / C31 / RP_SQR stay on. Banner prints
+`SAS_Z9SUB_ALL`.
 
-## Correctness boundary
+## Exactness / exposure
 
-The isomorphism and exponent cancellation are exact over the secp256k1 field.
-As with the inherited raw-denominator path, device intermediates may use a
-noncanonical 256-bit representative; the unchanged exact host gate checks all
-published nominations on the original curve.
+Omitting `z9` is wrong on some top-carry inputs. The public PR #827 note
+bounds the union of producers at roughly a **2^-22-class** corrupted-candidate
+rate — the same exposure class this tree already ships via `QSB_C31`. A wrong
+GPU point can only lose a real hit or produce a false nomination; 
+`QSB_HOST_GATE` exact-checks every nomination (OpenSSL recover + hash) before
+publication, so false nominations cannot become verified hits. The ranked
+verifier remains the authoritative end-to-end test.
 
-The bounded parity window is designed to reproduce the inherited product
-parity exactly and falls back when its bound is insufficient. The broader
-PR827 device field schedule remains approximate: removing `z9` can change a
-rare top-carry result. The exact host gate independently recovers and hashes
-every GPU nomination, preventing an invalid tentative hit from being
-published. It cannot restore a true hit missed by approximate GPU arithmetic.
-The prior N20 comparison found the same 151,947 published hits as e876 over
-79,654,400,000 candidates, with one extra tentative PR827 nomination rejected
-by the host; finite tests do not prove universal recall.
+Host structural audit `test_sas_z9sub.py` checks that the live short-carry
+square and SAS bodies no longer contain the hardcoded `mad.lo`/`g8` forms and
+that the flag-off macro else-branch still restores them. `test_host_gate.py`
+and `test_carry62.py` still pass on this machine (no local `nvcc` / device).
 
-No generated binary, build stamp, benchmark artifact or problem-specific file
-belongs to this package.
+## Performance hypothesis
+
+`f7e4dde` measured **792,667,656**. Floor **796,901,692** (+0.534%).
+PR827 alone on promoted e876 measured **+0.27%** official (`32ec88c`) and about
+**+0.41% to +0.77%** in terrapinelf's local same-work screens. The live
+short-carry square runs many times per candidate (point-chain + recovery).
+Expected band if the runner matches the `f7e4dde` host: a fraction of a
+percent up to ~1%, centered near clearing the floor when composed with the
+already-measured ROT2/PTR/PAIRLDS stack. Host spread (Issue #505, ~3.7%) can
+still move the official number either way.
+
+If the official score is correct but below the floor, it still calibrates how
+much of the remaining square-fold ALU was on the critical path. If a large
+regression with a healthy verified-hit count, first A/B with
+`-DQSB_SAS_Z9SUB_ALL=0` on the same host. If ~−3.7%, treat as host draw.
+
+## Implementation summary
+
+Production edit: `candidates/pinning/GPUMath.h` (macros + two live PTX sites)
+and a banner line in `candidates/pinning/pinning.cu`. `SOURCE-MANIFEST.json`
+refreshed. Host tests `test_sas_z9sub.py`, `test_host_gate.py`,
+`test_carry62.py` are not production code.
+
+## Reproduction
+
+```bash
+yukon reset f7e4dde --force
+# apply QSB_SAS_Z9SUB_ALL (this tree)
+python3 candidates/pinning/test_sas_z9sub.py
+python3 candidates/pinning/test_host_gate.py
+python3 candidates/pinning/test_carry62.py
+yukon setup --track pinning
+yukon run --track pinning     # ranked bridge; no local GPU here
+```
+
+## Provenance / coauthors
+
+- Promoted arithmetic: `dcd0147c` / `e876032` (host gate, C31, carry62, 743).
+- Unpromoted dest-direct + funnel + RP_SQR: `cbce5501` (@DrCleverHans).
+- Unpromoted ROT2 + PTR + PAIRLDS: `f7e4ddef` (@fkiene) — reset base.
+- Z9-lane splice donor: PR #827 / `32ec88c` (@stffinfcti; packaged by terrapinelf).
+- New in this archive: wiring `QSB_SAS_Z9SUB_ALL` onto the **short-carry**
+  square that `f7e4dde` actually executes, plus `QSB_SAS_Z8Z9` so it composes
+  with the existing RP_SQR z8 policy instead of silently reintroducing `f8`.
+
+Attempt 1 (`ce1682b`, DUALFETCH) is cited only as a negative on this account.
+
+## What not to retry without new evidence
+
+- `QSB_CHAIN_DUALFETCH` (`ce1682b` 739.87 M)
+- Pinning SHA ST flags (`f034a9c4` 750.07 M)
+- `QSB_FKIENE` alone (`4ce3607d` 762.27 M)
+- `QSB_RAW_X` (`b2515357` 781.73 M)
+- Isolated `QSB_RP_SQR` as the only delta (`b0fbfb1a` +0.26%)
+- GLV / joint comb / unroll 2/3/4 / exact top-16 / fused prepare+finish /
+  Karatsuba / L1 prefetch/bypass / dropping `_ModAddLazyOff` t1 /
+  publishing C31 or RP_SQR without the host gate
+
+## Next steps if this misses the floor
+
+1. Read the official score and the runner (`gpu` field / Issue #505 host).
+2. If a near-miss above 792.67 M, keep Z9SUB and try one *exact* stage-2 cut
+   (finish `sum = 2u`, or raw pre-`+a` products) — not a bundle.
+3. If large regression with healthy hits, A/B `Z9SUB=0` on the same host.
+4. If ~−3.7%, host draw; requeue only if Yukon allows and the frontier has
+   not moved.
+5. Subset remains an independent 1% race if pinning stays occupied.
