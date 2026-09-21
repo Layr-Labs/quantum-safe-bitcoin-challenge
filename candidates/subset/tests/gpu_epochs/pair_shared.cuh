@@ -97,6 +97,9 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 #undef QSB_PRE_ADD
 /* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
  * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
+#ifndef QSB_NEGFOLD_PARITY
+#define QSB_NEGFOLD_PARITY 1
+#endif
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -107,6 +110,21 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(m1, n, n + 8);
     QSB_FMUL(m2, n + 4, n + 8);
     QSB_FADD(sum, m1, m2);
+#if QSB_NEGFOLD_PARITY
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
+    QSB_FMUL(t, x1, m1);           /* p1*lambda1 */
+    QSB_FADD(t, t, yR);            /* -y1 */
+    uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
+    QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
+    QSB_FMUL(t, x2, m2);           /* p2*m2 */
+    QSB_FADD(t, t, yR);            /* y2 */
+    parities |= (uint32_t)((t[0] & 1ULL) << 1);
+    QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
+    return parities;
+#else
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);
     QSB_FADD(x1, x1, xR);
@@ -122,6 +140,7 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FSUB(t, t, yR);
     parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
+#endif
 }
 #endif
 __device__ __forceinline__ int qsb_k2s_front(
@@ -188,6 +207,27 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#ifndef QSB_EPOCH_SHA_PAIR
+#define QSB_EPOCH_SHA_PAIR 1
+#endif
+#if QSB_EPOCH_SHA_PAIR && QSB_GATE_PAIR
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(
+    uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1);
+__device__ __forceinline__ void qsb_pair_pad_block(uint32_t *b2, const uint32_t *state){
+    #pragma unroll
+    for(int i=0;i<8;i++)b2[i]=state[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for(int i=9;i<15;i++)b2[i]=0;
+    b2[15]=0x00000100;
+}
+__device__ __forceinline__ void qsb_pair_z_from_state(uint64_t *z, const uint32_t *s2){
+    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+}
+#endif
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
     uint32_t b2[16];
     #pragma unroll
@@ -209,8 +249,17 @@ __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if QSB_EPOCH_SHA_PAIR && QSB_GATE_PAIR
+    uint32_t bA[16],bB[16],sA[8],sB[8];
+    qsb_pair_pad_block(bA,stateA);
+    qsb_pair_pad_block(bB,stateB);
+    qsb_sha256_init_transform_pair(sA,bA,sB,bB);
+    qsb_pair_z_from_state(out.a,sA);
+    qsb_pair_z_from_state(out.b,sB);
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
