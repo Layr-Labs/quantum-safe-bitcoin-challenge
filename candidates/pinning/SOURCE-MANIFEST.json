@@ -2,20 +2,22 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "776189f572cb2a0ddce2832a378ab80024641691fbe3371e600b939aa4c4e120",
+    "GPUMath.h": "ec106ecafa54e0460e580edf0b1f010f5133d4ac2c290a9aa661c699638ccb23",
     "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
-    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "PackedRecovery.cuh": "72287a8d428693bcfd5ecd7f7f2a994d043655eb4af61b22dcfe3922efece1fe",
+    "ParityWindow.cuh": "56d0b345f86691134598340c208982544b1a658a8d99889b9fcbeaf31b84b8ed",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+    "cofactor_checkpoint.h": "ee68cf50bba4371fc664483b3319fa8a2b9fb1e11c3fe641b463c183a5a773cb",
     "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
     "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "960da801-db48-42d9-9422-bd73b2a74c3f (PR #743 official 786,386,945, unpromoted; promoted ancestor 52cd275a at 778,624,395)",
-  "comparison_baseline_promoted_commit": "7b0a15b",
-  "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
-  "model": "Grok 4.6",
-  "harness": "Grok",
-  "production_source_bytes": 371508,
-  "note": "PR #743 multiply-tail + QSB_CARRY62 + QSB_HOST_GATE exact OpenSSL publication filter + QSB_C31 (empty second-fold tail, 64-bit split-3p, one-limb K on _ModSub256/_ModAddLazy). SHA flags off. C31 requires HOST_GATE at compile time. Host tests: test_carry62.py, test_host_gate.py, test_sha_interleave.py."
+  "comparison_baseline_submission": "Promoted e876/66fede0 official 789011576, floor 796901692; public PR885 4dd921b2 validating when packaged",
+  "comparison_baseline_promoted_commit": "e876032f79e6f4f3af2732bbba39403e29f0e227 (runtime lineage 66fede0/dcd0147)",
+  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
+  "model": "GPT 5.6 Sol",
+  "harness": "Codex",
+  "production_source_bytes": 383067,
+  "note": "Byte-exact public PR885 head 3e166ba: z9 field tail, DrCleverHans zero-spill point-add destinations, EvanYan1024 TOP16 and bounded parity window with full-product fallback. Local official-seed fixed8 was about +0.95% versus PR863 with identical 1110 hits; isolated parity window +0.50432%, and 16777216-row parity differential had zero mismatch with 9 fallback rows. PR863-chain composition was -1.333% and excluded. Prior own queued PR883 was cancelled before Action because this materially stronger validated source became available.",
+  "public_source": "PR885 3e166ba462b03affb785852589606398b10f32b2 (@EvanYan1024); zero-spill donor cbce5501 (@DrCleverHans); z9 lineage PR827 (@stffinfcti); promoted parent @Saviour1001"
 }
