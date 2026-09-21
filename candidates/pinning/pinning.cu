@@ -27,8 +27,14 @@
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
+#ifndef QSB_RP_SQR
+#define QSB_RP_SQR 1     /* 743 odd-fold tail on squares + even-fold f8; needs HOST_GATE */
+#endif
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+#if QSB_RP_SQR && !QSB_HOST_GATE
+#error "QSB_RP_SQR requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
@@ -393,7 +399,7 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
                                                       uint64_t m,
                                                       uint64_t *__restrict__ gx,
                                                       uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
+    uint32_t off = (base + idx) << 6;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
@@ -411,7 +417,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
                                                      uint64_t neg,
                                                      uint64_t *__restrict__ gx,
                                                      uint64_t *__restrict__ gy) {
-    size_t off = ((size_t)base + idx) * 64;
+    uint32_t off = (base + idx) << 6;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
@@ -620,39 +626,93 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
-__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
+/* Field extraction, digit sign and the seed hand-off are the three schedules
+ * between the recode setup and the chain. Each is switched on its own so any
+ * one of them can return to the frontier form without touching the others. */
+#ifndef QSB_DIGIT_WINDOW32
+#define QSB_DIGIT_WINDOW32 1  /* 1: one 32-bit funnel shift per signed digit field */
+#endif
+#ifndef QSB_DIGIT_SIGN_FOLD
+#define QSB_DIGIT_SIGN_FOLD 1 /* 1: take the digit sign from the field's own top bit */
+#endif
+#ifndef QSB_DIGIT_SEED_REG
+#define QSB_DIGIT_SEED_REG 1  /* 1: the two seed digits stay in registers */
+#endif
+__device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k
+#if QSB_DIGIT_SEED_REG
+    ,uint32_t *seed0,uint32_t *seed1
+#endif
+) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t *codes=(uint32_t*)qsb_digit_arena();
+#if QSB_DIGIT_WINDOW32
+    uint32_t Mw[8];
+    #pragma unroll
+    for(int j=0;j<4;j++){Mw[2*j]=(uint32_t)M[j];Mw[2*j+1]=(uint32_t)(M[j]>>32);}
+#endif
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
         const unsigned pos=c==0?1u:17u*c+2u;
+        const unsigned bits=c==0?18u:17u;
+#if QSB_DIGIT_WINDOW32
+        const unsigned wi=pos>>5,ws=pos&31u;
+        uint32_t f=(wi<7u?__funnelshift_r(Mw[wi],Mw[(wi+1u)&7u],ws):(Mw[7]>>ws))
+                   &((1u<<bits)-1u);
+#else
         const unsigned j=pos/64u,sh=pos%64u;
         uint64_t value=M[j]>>sh;
         if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
         uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+#endif
+#if QSB_DIGIT_SIGN_FOLD
+        const uint32_t ftop=f<<(32u-bits);
+        const int32_t tm=c==GT_CHUNKS-1?-negative:((int32_t)(~ftop)>>31);
+        const uint32_t sign_bit=c==GT_CHUNKS-1?((uint32_t)(tm<0)<<31)
+                                              :((~ftop)&0x80000000u);
+#else
+        const int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+        const uint32_t sign_bit=(uint32_t)(tm<0)<<31;
+#endif
+        const uint32_t code=((f^(uint32_t)tm)&((1u<<(bits-1u))-1u))|sign_bit;
+#if QSB_DIGIT_SEED_REG
+        if(c==0)*seed0=code;
+        else if(c==1)*seed1=code;
+        else codes[(c<<7)+threadIdx.x]=code;
+#else
+        codes[(c<<7)+threadIdx.x]=code;
+#endif
     }
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
-    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    uint32_t *codes=(uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[(c<<7)+threadIdx.x];
+    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused;qsb_decode_to_shared(k);
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
-    // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    (void)unused;
+    uint64_t y0[4];
+    {
+        uint64_t x0[4], x1[4], y1[4];
+#if QSB_DIGIT_SEED_REG
+        uint32_t seed0, seed1;
+        qsb_decode_to_shared(k, &seed0, &seed1);
+        { uint32_t m32=(uint32_t)((int32_t)seed0>>31);
+          gt_load_signed_flat_m(table,gt_offset(0),seed0&0x1ffffu,((uint64_t)m32<<32)|m32,x0,y0); }
+        { uint32_t m32=(uint32_t)((int32_t)seed1>>31);
+          gt_load_signed_flat_m(table,gt_offset(1),seed1&0x1ffffu,((uint64_t)m32<<32)|m32,x1,y1); }
+#else
+        qsb_decode_to_shared(k);
+        qsb_load_decoded(table,0,gt_offset(0),x0,y0);
+        qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+#endif
+        // INIT_ANCHOR
+        _PointAddXYZZ_mm(X,Y,U,V, x0,y0, x1,y1);
+    }
+    uint64_t x1[4], y1[4];
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -1821,6 +1881,15 @@ static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && Q
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
  * coordinates are anchored at R. Returns their parities in bits 0,1.
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+/* QSB_LAZY_ADD_FINISH: exact redundant-canonicalization removal (see note). */
+#ifndef QSB_LAZY_ADD_FINISH
+#define QSB_LAZY_ADD_FINISH 1
+#endif
+#if QSB_LAZY_ADD_FINISH
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
     uint64_t *xR, uint64_t *yR, uint64_t *K,
@@ -1846,7 +1915,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1857,7 +1926,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);
