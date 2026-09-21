@@ -9,6 +9,9 @@ Official and public negatives that must not be retried without new evidence.
 | `f034a9c4` | `QSB_TAIL_TAB=1` + `QSB_SHA_SMEM_W1=1` on 7b0a15b | 750,065,705 | −3.67% | 107,375 verified hits, 89.41 hits/s. Relative drop matches LeaderGPU vs intel-r5 (~3.7%). Does **not** isolate the ST path as slower, and does **not** justify composing SHA into the next arithmetic submit. Keep both flags **0**. Stop pinning SHA work. |
 | `0227bc3` | older weaker lineage (2026-09-17) | 679,373,443 | n/a then | Built off the wrong base. Always start from the live promoted source. |
 | `2c85ba63` | PR #743 + `QSB_CARRY62` only | cancelled | n/a | Cancelled while validating so the host-gate + C31 bundle could take the slot against the 778 M floor. Do not requeue carry62-only unless this larger bundle is a large regression. |
+| `b0fbfb1a` | `QSB_RP_SQR` on 789 M | 789,394,272 | +0.26% | Keep RP_SQR only as part of a larger stack (it is already in `f7e4dde`). Do not resubmit as the sole delta. |
+| `4ce3607d` | `QSB_FKIENE` | 762,268,179 | −3.39% | Register codes[] lost to volatile shared. Stay off. |
+| `b2515357` | `QSB_RAW_X` | 781,725,021 | −0.93% | Finish-only normalize skip. Stay off. |
 
 ## Official, public, used as evidence
 
