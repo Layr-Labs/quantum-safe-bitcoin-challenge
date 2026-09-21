@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// CUDA/RTX 4090 differential-validated against the full packed product; see SUBMISSION.md.
+// Research prototype for the 66fede0 C31 frontier; not CUDA/GPU validated.
 // Include after qsb_packed_raw_mul and qsb_sum_parity in PackedRecovery.cuh.
 #pragma once
 #if !QSB_C31 || !QSB_SHORT_CARRY || !QSB_FIELD_SC || !QSB_PARITY_SUM
