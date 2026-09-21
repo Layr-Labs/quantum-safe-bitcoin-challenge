@@ -526,7 +526,7 @@ __device__ __forceinline__ void qsb_complete_last_add(
 #endif
 __device__ __forceinline__ void qsb_filter_last_add(
     uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
-    const uint64_t *x,const uint64_t *y,uint64_t *yoff,uint32_t &bad) {
+    const uint64_t *x,const uint64_t *y,const uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
     uint64_t scaled_y[4];
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
@@ -859,9 +859,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-#if !QSB_CHAIN_ANCHOR_UPDATE
         Load256(y0, cy);                /* current affine y anchors next madd */
-#endif
         table_base += 1u << 16;
     }
     {
