@@ -1,0 +1,235 @@
+{
+  "track": "subset",
+  "source_only": true,
+  "base_package_commit": "ce248ca0d493f9db5c177fde690f3a38ebbe1695",
+  "model": "GPT 5.6 Sol",
+  "harness": "Codex",
+  "runtime_delta_from_base": [
+    "hit_filter_field_sc.cuh",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh",
+    "tests/gpu_epochs/pair_shared.cuh",
+    "tests/gpu_epochs/tree.cu",
+    "tests/gpu_epochs/tree_inverse.cuh",
+    "tests/gpu_epochs/zinv32.cuh"
+  ],
+  "production_source_bytes": 426352,
+  "production_source_sha256": {
+    "submission-note.md": "4d8ced618be5da39a54e563465fc1678a5bc7f1061e76f5927fe8eac9f87fbf3",
+    "subset.cu": "103101573be38d528994aa8c35c35a06ae1a23b0d2d856dcfd5bc606392976a9",
+    "hit_filter_field_sc.cuh": "b56176d8844275e4901ef434e4ff7b0c200ade2eddb7a02f9b34ad13dd120aea",
+    "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "tests/gpu_epochs/epoch_groups.cuh": "ae0b03eae7d0c8036020a3af0d7965530372789ed4ee4bdbde7cc44be22a5c10",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
+    "tests/gpu_epochs/pair_shared.cuh": "2c86f5ee0ede0e5bc3f847cf7f2493512612e82329c6a46592347ea4877a0e00",
+    "tests/gpu_epochs/parity_window_subset.cuh": "e0d48dbdb45b639ad0220aa108e336bd2287daf166990f8e0dcde32a47d03737",
+    "tests/gpu_epochs/tree.cu": "0a18c4ec688bfcd5080579c05ef448025d4a6c67a34173757d4d629a2c757ef2",
+    "tests/gpu_epochs/tree_inverse.cuh": "9e178ed45bde47e7d460ed74695e77b394b08fd34926834bd7f10daedc55b2ab",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
+    "tests/gpu_epochs/zinv32.cuh": "7e9c1ef26df306b7158c6db9edb4a1444e7f2e3bbb43a9c0cf58c96f4775c163"
+  },
+  "compile": {
+    "command": "nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm (CUDA 12.8)",
+    "default_sm52": {
+      "xiso_control": "128 registers/thread, 49152B shared/CTA, 40B frame, 0 spill, 50202 digest SASS instructions",
+      "fused_candidate": "128 registers/thread, 49152B shared/CTA, 0B frame, 0 spill, 50130 digest SASS instructions",
+      "control_digest_sass_sha256": "de74e3c44772a13614df7c3252642dec4e2c385fe978e2f7149dc025d561df90",
+      "candidate_digest_sass_sha256": "19a1c2bdb61ff5ca6d549861b889c85144024b81acbb9c9502866a6e9143195f",
+      "short_carry6_candidate": "128 registers/thread, 49152B shared/CTA, 0B frame, 0 spill, 50112 digest SASS instructions",
+      "short_carry6_full_cuobjdump_sha256": "9a9beb0f0a329831ec1266a20f15b2099cc329231710cca29e0ad539b800b6d7",
+      "firstfold_f8_cut": "128 registers/thread, 49152B shared/CTA, 0B frame, 0 spill, 50118 digest SASS instructions"
+    },
+    "native_sm89": {
+      "xiso_control": "128 registers/thread, 49152B shared/CTA, 56B frame, 16B spill stores, 12B spill loads, 21656 instructions",
+      "fused_candidate": "128 registers/thread, 49152B shared/CTA, 16B frame, 16B spill stores, 12B spill loads, 21600 instructions",
+      "control_digest_sass_sha256": "5213beb0bee9e4e1a473b8281229763daf69e69efa25533e623cf47a1374808c",
+      "candidate_digest_sass_sha256": "72d63ec240c7d83de8f22221a256aec86de1ec965b4feae03821aff067f56f6e",
+      "short_carry6_candidate": "128 registers/thread, 49152B shared/CTA, 0B frame, 0B spill stores, 0B spill loads, 21504 digest SASS instructions",
+      "short_carry6_full_cuobjdump_sha256": "2baaf21c8bc3fab4bdbc2f7add511f875941e5f8dfa266629a3d7a3ce8dbd609",
+      "firstfold_f8_cut": "128 registers/thread, 49152B shared/CTA, 0B frame, 0 spill, 21464 digest SASS instructions"
+    },
+    "setup_status": "PASS: QSB_PROBLEM_SEED=777 ./setup.sh subset; CUDA 12.8 organizer-default N24 build and CPU verifier smoke passed; generated files removed and tracked problems restored."
+  },
+  "parity_vector": {
+    "rows": 16777216,
+    "mismatches": 0,
+    "fast": 16777207,
+    "fallback": 9
+  },
+  "fixed64_abba": {
+    "problem_seed": 526487517,
+    "zeros": 24,
+    "attempts_per_arm": 8589934592,
+    "hits_per_arm": 1096,
+    "normalized_hit_sha256": "1b5c727cb1380c6ae0438e74011582cb652620bc0d26b7d14ccea59075572c06",
+    "symmetric_difference": 0,
+    "pr891_to_xiso": {
+      "control_wall_ms": [
+        179.373835,
+        179.592025
+      ],
+      "candidate_wall_ms": [
+        179.032589,
+        179.049545
+      ],
+      "completed_work_gain_pct": 0.246794,
+      "adjacent_gain_pct": [
+        0.190606,
+        0.302978
+      ]
+    },
+    "xiso_to_fused_root": {
+      "control_wall_ms": [
+        179.841274,
+        180.260001
+      ],
+      "candidate_wall_ms": [
+        179.695083,
+        179.881182
+      ],
+      "completed_work_gain_pct": 0.1460079686,
+      "adjacent_gain_pct": [
+        0.0813550363,
+        0.2105940131
+      ]
+    },
+    "mechanical_composed_gain_over_pr891_pct": 0.3931623075,
+    "projected_center_from_pr891_local_center": 608364685,
+    "projection_note": "Mechanical composition of two same-problem balanced ratios; not a direct official score.",
+    "fused_root_to_short_carry6": {
+      "control_wall_ms": [
+        178.880086,
+        179.89244
+      ],
+      "candidate_wall_ms": [
+        178.198875,
+        179.010642
+      ],
+      "control_digest_ms": [
+        177.051881,
+        178.057347
+      ],
+      "candidate_digest_ms": [
+        176.369965,
+        177.176485
+      ],
+      "completed_work_gain_pct": 0.43756085,
+      "digest_gain_pct": 0.44202905,
+      "adjacent_gain_pct": [
+        0.3822757,
+        0.49259529
+      ]
+    },
+    "mechanical_composed_gain_over_pr891_pct_with_short_carry6": 0.832443482,
+    "projected_center_from_pr891_local_center_with_short_carry6": 611026650,
+    "firstfold_f8_cut": {
+      "ranked_mode": "single_hash; N24; fixed64; first 3 batches excluded; A/B/B/A",
+      "problem_sha256": [
+        "02dbb614d29a0ef63c04de506359d4678e9cf6052624603caa0c4bdb47de1dfe",
+        "bb68c4d250e68d359877bf193ee3405d7d814fdcf13654c6420a309d0c5b7a73"
+      ],
+      "attempts_per_arm": 8589934592,
+      "problem1": {
+        "control_wall_ms": [
+          178.499307,
+          179.325223
+        ],
+        "candidate_wall_ms": [
+          178.33436,
+          178.449169
+        ],
+        "hits_per_arm": 1096,
+        "sorted_hit_sha256": "f57aeac25e8437ad7b1ea0473dd7e9a4339ee70725c11726bdf882edbe4f7023",
+        "wall_gain_pct": 0.2917738391,
+        "adjacent_gain_pct": [
+          0.0924931124,
+          0.4909263545
+        ]
+      },
+      "problem2": {
+        "control_wall_ms": [
+          179.345548,
+          179.628982
+        ],
+        "candidate_wall_ms": [
+          178.541767,
+          178.75652
+        ],
+        "hits_per_arm": 998,
+        "sorted_hit_sha256": "7cfb3ca7ce9cc95756fd0941c1722cb347250fd77ca56ae92f649aa3a7fe5610",
+        "wall_gain_pct": 0.4691438669,
+        "adjacent_gain_pct": [
+          0.4501921391,
+          0.4880728267
+        ]
+      },
+      "pooled_equal_work_gain_pct": 0.3805227831,
+      "mechanical_projection_from_pr891_official_draw_with_prior_composition": 615456279
+    }
+  },
+  "attribution": "PR891 attribution retained in submission-note.md. The x-isomorphic recovery and zinv32 root-scale fusion were independently implemented and measured with Codex.",
+  "base_public_pr": 891,
+  "mechanisms": [
+    "per-problem secp256k1 x/y coordinate isomorphism making recovery x equal +/-1",
+    "zinv32 coefficient initialization fusing the once-per-CTA inverse-root scale",
+    "speculative mixed-add limb-0-only K corrections at four folds (QSB_SHORT_CARRY6)",
+    "speculative first-fold f8 top-carry omission in filter-only multiply and square; exact replay unchanged"
+  ],
+  "isomorphic_recovery_vector": {
+    "fresh_problems": 64,
+    "points_per_problem": 64,
+    "candidate_points": 4096,
+    "recovery_outputs": 8192,
+    "mismatches": 0,
+    "group_closure_cases": 1024,
+    "group_closure_mismatches": 0,
+    "output_digest_xor": "b3b4a55c415d54e21c372d11426d7ae8e5a4c8b4fce9fbe0c8ed930390562f69"
+  },
+  "root_scale_vector": {
+    "scale_constants": 8,
+    "normal_direct_roots": 32768,
+    "normal_direct_mismatches": 0,
+    "normal_tree_exact": 32764,
+    "normal_tree_congruent_plus_p": 4,
+    "normal_tree_wrong": 0,
+    "forced_fallback_direct_roots": 4096,
+    "forced_fallback_mismatches": 0,
+    "forced_fallback_tree_exact": 4092,
+    "forced_fallback_tree_congruent_plus_p": 4,
+    "forced_fallback_tree_wrong": 0
+  },
+  "inherited_lineage": {
+    "pr871_package_commit": "347394e9f6567d33b405621fccc12dc8a070c62f",
+    "pr885_parity_window_commit": "3e166ba462b03affb785852589606398b10f32b2",
+    "details": "See submission-note.md; this package starts from the complete PR891 candidate commit above."
+  },
+  "short_carry6_audit": {
+    "random_four_limb_states": 2000000,
+    "random_mismatches": 0,
+    "directed_add_boundary_cases": 6,
+    "directed_sub_boundary_cases": 8,
+    "conditional_trigger_interval": "K/2^64 = 2.328306966171e-10",
+    "conservative_52_fold_uniform_union": "1.210719622409e-8",
+    "publication_path": "unchanged exact replay and pair-hit verifier"
+  },
+  "official_pr891_base_measurement": {
+    "github_artifact_id": 10633867510,
+    "zip_sha256": "739980080a08c98274b62b0a17032ff6e9968dc39917f84f304cb3cd957b08b7",
+    "score": 608061438,
+    "problem_seed": 216208103,
+    "verified_hits": 87061,
+    "elapsed_s": 1201.0638,
+    "yukon_ingestion": "failed ENOSPC before officialScore/promotion was recorded",
+    "mechanical_projection_with_composed_gain": 613123206,
+    "mechanical_projection_with_composed_gain_and_f8_cut": 615456279
+  },
+  "firstfold_f8_audit": {
+    "exception_condition": "r3 + 977*x14 + c3 >= 2^64",
+    "conditional_uniform_top_word_upper_bound_per_fold": 2.2747553879692156e-07,
+    "bound_assumption": "r3 uniform conditional on x14,c3; no universal recall guarantee",
+    "publication_path": "unchanged exact replay and pair-hit verifier",
+    "directed_cuda_vectors": "canonical multiply and constructed canonical square each differ by K=2^32+977 when omitted f8=1; bad flag remains zero; exact replay unchanged",
+    "isolated_screens": "ranked single_hash first problem: square-only wall -0.5951%; multiply-only initial pair +0.2070%; full composition +0.2918% ABBA, +0.4691% on second problem"
+  },
+  "public_note_file": "submission-note.md",
+  "full_technical_note_file": "submission-note.md"
+}
