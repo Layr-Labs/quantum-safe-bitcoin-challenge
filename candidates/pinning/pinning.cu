@@ -162,6 +162,13 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_L2_SKIP
 #define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
+#ifndef QSB_TABLE_CG
+#define QSB_TABLE_CG 1        /* 1: ld.global.cg on the 64 MiB signed table. __ldg is ld.global.nc and
+                               * does not consume the stream's persisting-L2 access-policy window.
+                               * .cg allocates in L2 (where that window applies) and bypasses L1,
+                               * which has no reuse on these random 64-byte records.
+                               * -DQSB_TABLE_CG=0 restores __ldg. */
+#endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
 #endif
@@ -261,6 +268,17 @@ __device__ __forceinline__ uint64_t qsb_ld_u64(const uint64_t *p) {
     return a;
 #else
     return *p;
+#endif
+}
+/* 16-byte table record. .cg follows the persisting-L2 window; __ldg does not. */
+__device__ __forceinline__ ulonglong2 qsb_ld_table2(const ulonglong2 *p) {
+#if QSB_TABLE_CG
+    uint64_t a, b;
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cg.v2.u64 {%0,%1}, [g]; }"
+                 : "=l"(a), "=l"(b) : "l"(p) : "memory");
+    return make_ulonglong2(a, b);
+#else
+    return __ldg(p);
 #endif
 }
 
@@ -399,7 +417,7 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0=qsb_ld_table2(tx),x1=qsb_ld_table2(tx+1),y0=qsb_ld_table2(ty),y1=qsb_ld_table2(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -417,7 +435,7 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0=qsb_ld_table2(tx),x1=qsb_ld_table2(tx+1),y0=qsb_ld_table2(ty),y1=qsb_ld_table2(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;

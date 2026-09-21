@@ -407,3 +407,17 @@ A union budget around 5e-8 corrupted candidates is the remaining
 false-negative score loss. False GPU hits are dropped by the gate and
 cannot reach the verifier. `QSB_C31` without `QSB_HOST_GATE` is a compile
 error. SHA flags and `QSB_UNROLL` are unchanged.
+
+## 2026-09-21: L2-resident table loads
+
+The promoted tree sets a persisting-L2 access-policy window on each slot
+stream over the signed table (after chunk 0 when `QSB_L2_SKIP=1`). The
+production loads of that table were `__ldg`, which is `ld.global.nc`. That
+operator uses the non-coherent cache and does not take the stream window's
+eviction priority. `QSB_TABLE_CG=1` loads each 16-byte half of the 64-byte
+record with `ld.global.cg.v2.u64`: allocate in L2, bypass L1. There is no
+intra-SM reuse of a random table record, so an L1 line is not useful, and
+L2 is the cache the window was installed to protect. `-DQSB_TABLE_CG=0`
+restores `__ldg`. No field arithmetic, tree geometry, slot count, or SHA
+schedule changes. This workstation has no GPU; the ranked run is the
+measurement.
