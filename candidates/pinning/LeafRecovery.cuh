@@ -10,6 +10,20 @@
 #endif
 static_assert(QSB_RECOVERY_N==128 || QSB_RECOVERY_N==256,"supported tree width");
 
+/* QSB_DEN_W4: the per-lane denominator record is written as four limbs, not
+ * five. Exhaustive over its readers -- there are exactly three in the whole
+ * tree and each one is a four-limb read: the usability test on limbs 0..3 in
+ * the stage-0 arm of the pipeline kernel, the cofactor tree's leaf
+ * publication (a four-iteration copy), and the right operand of
+ * qsb_field_mul_sc, whose inline product loads b[0..3] and writes its own
+ * carry slot in the destination. No reader observes the fifth word, so the
+ * stored record is value-identical for every reader; the identity record an
+ * unusable lane installs keeps the same four limbs. -DQSB_DEN_W4=0 restores
+ * the five-word store byte for byte. */
+#ifndef QSB_DEN_W4
+#define QSB_DEN_W4 1
+#endif
+
 // The tree multiplier retains the final reduction carry. Normalize at these
 // recovery boundaries, where additions, zero tests and parity require [0,p).
 __device__ __forceinline__ void qsb_recovery_mul(
@@ -40,7 +54,16 @@ __device__ __forceinline__ void qsb_recovery_denominator(
 #else
     qsb_recovery_mul(W,V,d);       // W = V*(a*U-X), with U=ZZ and V=ZZZ.
 #endif
+#if !QSB_DEN_W4
     W[4]=0;
+#else
+    /* W is the per-lane denominator record. Its readers are the usability
+     * test on limbs 0..3, the cofactor tree's leaf publication (four limbs)
+     * and the right operand of qsb_field_mul_sc, whose inline product reads
+     * b[0..3] only; the scaled multiply writes its own carry slot wherever it
+     * produces one. The fifth word therefore has no reader on this path, and
+     * the four limbs the record does carry are the ones the store wrote. */
+#endif
 }
 
 // Preserve Y,V before this call. Instead of saving W, save H_i=U_i*W_sibling.
