@@ -227,7 +227,9 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
     z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
 }
-__device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
+/* Keep the paired SHA temporaries in their own call frame. This preserves
+ * both scalars exactly and shortens their register live ranges in kernel_digest. */
+__device__ __noinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     const uint32_t*firstA,const uint32_t*firstB,int lane){
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
@@ -449,12 +451,13 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 
 struct QsbPairFront3 {uint64_t words[16];int ok;};
 #if ZLAB_DUAL_EPOCH_SHA
+/* These ranked-path helpers consume the runtime problem's QSB_U2R directly.
+ * Avoid carrying and passing eight identical u64 coordinates at every call.
+ * The constant symbol is populated by main before any search launch. */
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
-    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt){
     uint64_t z[4]={z0,z1,z2,z3};
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]},ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     uint64_t prod[5],n[12];QsbPairFront3 out;
     out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
     Load256(out.words,prod);
@@ -480,12 +483,10 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
     uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3){
     uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
     uint64_t inv[4]={v0,v1,v2,v3};
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]},ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     uint64_t q1x[4],q2x[4];int recid=0;
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
