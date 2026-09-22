@@ -1551,6 +1551,39 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
+
+/* Exact paired SHA materialization. The producer uses the existing helper,
+ * window schedule and epoch identities. Scalar planes are coalesced; the
+ * consumer runs the unchanged speculative EC filter and exact replay.
+ * QSB_SPLIT_SHA=0 restores the inherited monolithic device computation.
+ * Derived from the inherited paired SHA implementation; GPLv3 applies. */
+#ifndef QSB_SPLIT_SHA
+#define QSB_SPLIT_SHA 1
+#endif
+#if QSB_SPLIT_SHA && QSB_PAIR_SHARED && ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+__global__ void kernel_build_pair_scalars(
+    const uint32_t * __restrict__ first, uint64_t * __restrict__ scalars,
+    unsigned epochs_in_batch) {
+    const unsigned tid = threadIdx.x;
+    const unsigned idx = blockIdx.x * blockDim.x + tid;
+    const size_t stride = (size_t)gridDim.x * blockDim.x;
+    const unsigned lane = tid & (QSB_SE_WINDOWS - 1);
+    const unsigned half = tid / QSB_SE_WINDOWS;
+    const unsigned eA = (unsigned)QSB_PAIR_MUL * blockIdx.x + 2u * half;
+    // The consumer redirects inactive A to epoch zero and aliases absent B
+    // to A. Match both choices, including the final partial physical block.
+    const unsigned eA0 = eA < epochs_in_batch ? eA : 0u;
+    const uint32_t *f0 = first + (size_t)eA0 * QSB_FIRST_SLOTS * 8;
+    const uint32_t *f1 = eA + 1u < epochs_in_batch ? f0 + QSB_FIRST_SLOTS * 8 : f0;
+    const QsbPairEpochZ z = qsb_pair_epoch_z_value(f0, f1, lane);
+    #pragma unroll
+    for (int j = 0; j < 4; ++j) {
+        scalars[(size_t)j * stride + idx] = z.a[j];
+        scalars[(size_t)(j + 4) * stride + idx] = z.b[j];
+    }
+}
+#endif
+
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -1576,7 +1609,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
     int fast_inc, const uint32_t * __restrict__ d_const_words,
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
-, const uint32_t *d_first, int epochs_in_batch
+, const uint32_t *d_first, int epochs_in_batch, const uint64_t * __restrict__ d_pair_scalars
 ) {
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
@@ -1604,7 +1637,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], nB[12];
 #if ZLAB_DUAL_EPOCH_SHA
     uint64_t zB[4];
+#if QSB_SPLIT_SHA
+    QsbPairEpochZ zpair;
+    const size_t scalar_stride = (size_t)gridDim.x * blockDim.x;
+    #pragma unroll
+    for (int j = 0; j < 4; ++j) {
+        zpair.a[j] = d_pair_scalars[(size_t)j * scalar_stride + idx];
+        zpair.b[j] = d_pair_scalars[(size_t)(j + 4) * scalar_stride + idx];
+    }
+#else
     QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
+#endif
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
     #pragma unroll
@@ -2780,6 +2823,7 @@ int main(int argc, char **argv) {
     #endif
 #endif
     uint32_t *d_first = NULL;
+    uint64_t *d_pair_scalars = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2834,6 +2878,15 @@ int main(int argc, char **argv) {
 #endif
         cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
         if(first_error!=cudaSuccess){fprintf(stderr,"OOM: first states: %s\n",cudaGetErrorString(first_error));return 1;}
+#if QSB_SPLIT_SHA && QSB_PAIR_SHARED && ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+        // Eight u64 planes for two 256-bit scalars per physical lane.
+        const size_t scalar_bytes = (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_SE_BLOCK * 8u * sizeof(uint64_t);
+        cudaError_t scalar_error = cudaMalloc(&d_pair_scalars, scalar_bytes);
+        if (scalar_error != cudaSuccess) {
+            fprintf(stderr,"OOM: pair SHA scalars: %s\n",cudaGetErrorString(scalar_error));
+            return 1;
+        }
+#endif
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -3141,6 +3194,9 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+#if QSB_SPLIT_SHA && QSB_PAIR_SHARED && ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
+            kernel_build_pair_scalars<<<nblk, QSB_SE_BLOCK>>>(d_first,d_pair_scalars,(unsigned)epochs_in_batch);
+#endif
             kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -3159,7 +3215,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch, d_pair_scalars);
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
@@ -3343,7 +3399,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
-                t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, 0);
+                t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, 0, NULL);
             // Blocking hit-count copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -3545,7 +3601,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
-                t_sel, 0, d_early, 0, d_const_words, NULL, NULL, 0);
+                t_sel, 0, d_early, 0, d_const_words, NULL, NULL, 0, NULL);
             // Blocking hit-count copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
