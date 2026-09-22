@@ -11,6 +11,9 @@
  * Usage:  ./qsb_real pinning2.bin [easy]
  */
 
+#ifndef QSB_REMEASURE_TAG_09221157
+#define QSB_REMEASURE_TAG_09221157 1 /* no-op: frontier re-measurement, see submission note */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1167,11 +1170,22 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
         w[15] += s1(w[13]) + w[8] + s0(w[0]);
     }
 
+#if QSB_SHA_FMA_ADD0
+    {
+        const uint32_t one = pin_one_mul;
+        QSB_RND16L_F(16);
+        QSB_WMIX_F();
+        QSB_RND16L_F(32);
+        QSB_WMIX_F();
+        QSB_RND15L_F(48);
+    }
+#else
     QSB_RND16L(16);
     QSB_WMIX_Z();
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;

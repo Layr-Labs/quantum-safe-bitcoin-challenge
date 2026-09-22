@@ -46,6 +46,25 @@ __host__ __device__ __forceinline__ constexpr uint32_t qsb_klit(int i)
 #ifndef QSB_SHA_FMA_ADD
 #define QSB_SHA_FMA_ADD 1     /* pubkey-hash adds on the FMA-heavy pipe (stage 2 is ALU-bound) */
 #endif
+/* QSB_SHA_FMA_ADD0: the same trick for the two stage-0 compressions (tail block and the
+ * SHA256d second block). Stage 0 is not one mixed instruction pool: the SHA prologue and the
+ * 13-iteration chain loop are disjoint straight-line phases with no divergence, so during the
+ * SHA phase the whole SM is ALU-bound (2826 ALU vs 548 FMA issue slots measured on sm_89).
+ * Moving the two-input schedule and round adds to IMAD relieves the pipe that is actually
+ * scarce in that phase. Exact: a*1 + b = a + b mod 2^32. */
+#ifndef QSB_SHA_FMA_ADD0
+#define QSB_SHA_FMA_ADD0 1    /* stage-0 tail/digest adds on the FMA pipe */
+#endif
+#if QSB_SHA_FMA_ADD0 && !QSB_SHA_FMA_ADD
+#error "QSB_SHA_FMA_ADD0 needs QSB_SHA_FMA_ADD (it reuses qsb_fadd and the _F round macros)"
+#endif
+/* QSB_SHA_FMA_ROT0: the stage-0 schedule sigmas only (never S0/S1, which sit on the round
+ * critical path). bit 8 moves the logical shift of s0/s1 to IMAD.HI (one FMA-pipe instruction
+ * for one ALU-pipe SHF, no growth); bit 4 moves the two rotations (two FMA-pipe instructions
+ * for one ALU-pipe SHF). The schedule words have slack, so the extra latency is hidden. */
+#ifndef QSB_SHA_FMA_ROT0
+#define QSB_SHA_FMA_ROT0 0
+#endif
 __device__ __constant__ uint32_t pin_one_mul = 1;   /* 1; also re-uploaded by the host */
 __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t b) {
     uint32_t r; asm("mad.lo.u32 %0, %1, %2, %3;" : "=r"(r) : "r"(a), "r"(one), "r"(b)); return r;
@@ -201,69 +220,19 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;\
     out0 = t1 + S0(b) + Maj(b,c,d); \
     out4 = e + t1 + (F4mF0);
 
-/* SHA256d second compression of a 32-byte message m[0..7] (pad W8=0x80000000,
- * W9..14=0, W15=256) from the IV. Bit-identical to _SHA256TransformDigest32. */
-__device__ __forceinline__ void _SHA256TransformDigest32Q(
-    uint32_t out[8], const uint32_t m[8])
-{
-    uint32_t t1;
-    uint32_t t2;
-    uint32_t a = QSB_IV0, b = QSB_IV1, c = QSB_IV2, d = QSB_IV3;
-    uint32_t e = QSB_IV4, f = QSB_IV5, g = QSB_IV6, h = QSB_IV7;
-
-    uint32_t w[16];
-#pragma unroll
-    for (int i = 0; i < 8; i++) w[i] = m[i];
-
-    QSB_IV_ROUNDS01(w[0], w[1]);
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
-
-    {
-        w[0] += s0(w[1]);
-        w[1] += s1(256u) + s0(w[2]);
-        w[2] += s1(w[0]) + s0(w[3]);
-        w[3] += s1(w[1]) + s0(w[4]);
-        w[4] += s1(w[2]) + s0(w[5]);
-        w[5] += s1(w[3]) + s0(w[6]);
-        w[6] += s1(w[4]) + 256u + s0(w[7]);
-        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
-        w[8]  = 0x80000000u + s1(w[6]) + w[1] + QSB_Z;
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(256u);
-        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
-    }
-
-    QSB_RND16L(16);
-    WMIX();
-    QSB_RND16L(32);
-    WMIX();
-    QSB_RND15L(48);
-    QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
-    out[1] = QSB_IV1 + b;
-    out[2] = QSB_IV2 + c;
-    out[3] = QSB_IV3 + d;
-    out[5] = QSB_IV5 + f;
-    out[6] = QSB_IV6 + g;
-    out[7] = QSB_IV7 + h;
-}
-
+#if (QSB_SHA_FMA_ROT0 & 4) && (QSB_SHA_FMA_ROT0 & 8)
+#define QSB_s0M0(x) (qsb_rorf(x,7,one) ^ qsb_rorf(x,18,one) ^ qsb_shrf(x,3))
+#define QSB_s1M0(x) (qsb_rorf(x,17,one) ^ qsb_rorf(x,19,one) ^ qsb_shrf(x,10))
+#elif (QSB_SHA_FMA_ROT0 & 4)
+#define QSB_s0M0(x) (qsb_rorf(x,7,one) ^ qsb_rorf(x,18,one) ^ ((x) >> 3))
+#define QSB_s1M0(x) (qsb_rorf(x,17,one) ^ qsb_rorf(x,19,one) ^ ((x) >> 10))
+#elif (QSB_SHA_FMA_ROT0 & 8)
+#define QSB_s0M0(x) (ROR(x,7) ^ ROR(x,18) ^ qsb_shrf(x,3))
+#define QSB_s1M0(x) (ROR(x,17) ^ ROR(x,19) ^ qsb_shrf(x,10))
+#else
+#define QSB_s0M0(x) s0(x)
+#define QSB_s1M0(x) s1(x)
+#endif
 #if QSB_SHA_FMA_ADD
 #if QSB_SHA_FMA_ROT & 1
 #define QSB_S1M(x) S1F(x)
@@ -330,7 +299,102 @@ QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
     QSB_INTERLEAVED15L_F(base); \
     QSB_STEPL_F(15,b,c,d,e,f,g,h,a,base); \
 } while (0)
+/* Batch schedule mix with every add on the FMA pipe (QSB_SHA_FMA_ADD0). Same values and same
+ * statement order as QSB_WMIX_Z. */
+#define QSB_WMIX_F() {\
+w[0] = qsb_fadd(w[0], one, QSB_s1M0(w[14])); w[0] = qsb_fadd(w[0], one, w[9]); w[0] = qsb_fadd(w[0], one, QSB_s0M0(w[1]));\
+w[1] = qsb_fadd(w[1], one, QSB_s1M0(w[15])); w[1] = qsb_fadd(w[1], one, w[10]); w[1] = qsb_fadd(w[1], one, QSB_s0M0(w[2]));\
+w[2] = qsb_fadd(w[2], one, QSB_s1M0(w[0])); w[2] = qsb_fadd(w[2], one, w[11]); w[2] = qsb_fadd(w[2], one, QSB_s0M0(w[3]));\
+w[3] = qsb_fadd(w[3], one, QSB_s1M0(w[1])); w[3] = qsb_fadd(w[3], one, w[12]); w[3] = qsb_fadd(w[3], one, QSB_s0M0(w[4]));\
+w[4] = qsb_fadd(w[4], one, QSB_s1M0(w[2])); w[4] = qsb_fadd(w[4], one, w[13]); w[4] = qsb_fadd(w[4], one, QSB_s0M0(w[5]));\
+w[5] = qsb_fadd(w[5], one, QSB_s1M0(w[3])); w[5] = qsb_fadd(w[5], one, w[14]); w[5] = qsb_fadd(w[5], one, QSB_s0M0(w[6]));\
+w[6] = qsb_fadd(w[6], one, QSB_s1M0(w[4])); w[6] = qsb_fadd(w[6], one, w[15]); w[6] = qsb_fadd(w[6], one, QSB_s0M0(w[7]));\
+w[7] = qsb_fadd(w[7], one, QSB_s1M0(w[5])); w[7] = qsb_fadd(w[7], one, w[0]); w[7] = qsb_fadd(w[7], one, QSB_s0M0(w[8]));\
+w[8] = qsb_fadd(w[8], one, QSB_s1M0(w[6])); w[8] = qsb_fadd(w[8], one, w[1]); w[8] = qsb_fadd(w[8], one, QSB_s0M0(w[9]));\
+w[9] = qsb_fadd(w[9], one, QSB_s1M0(w[7])); w[9] = qsb_fadd(w[9], one, w[2]); w[9] = qsb_fadd(w[9], one, QSB_s0M0(w[10]));\
+w[10] = qsb_fadd(w[10], one, QSB_s1M0(w[8])); w[10] = qsb_fadd(w[10], one, w[3]); w[10] = qsb_fadd(w[10], one, QSB_s0M0(w[11]));\
+w[11] = qsb_fadd(w[11], one, QSB_s1M0(w[9])); w[11] = qsb_fadd(w[11], one, w[4]); w[11] = qsb_fadd(w[11], one, QSB_s0M0(w[12]));\
+w[12] = qsb_fadd(w[12], one, QSB_s1M0(w[10])); w[12] = qsb_fadd(w[12], one, w[5]); w[12] = qsb_fadd(w[12], one, QSB_s0M0(w[13]));\
+w[13] = qsb_fadd(w[13], one, QSB_s1M0(w[11])); w[13] = qsb_fadd(w[13], one, w[6]); w[13] = qsb_fadd(w[13], one, QSB_s0M0(w[14]));\
+w[14] = qsb_fadd(w[14], one, QSB_s1M0(w[12])); w[14] = qsb_fadd(w[14], one, w[7]); w[14] = qsb_fadd(w[14], one, QSB_s0M0(w[15]));\
+w[15] = qsb_fadd(w[15], one, QSB_s1M0(w[13])); w[15] = qsb_fadd(w[15], one, w[8]); w[15] = qsb_fadd(w[15], one, QSB_s0M0(w[0]));\
+}
 #endif
+
+/* SHA256d second compression of a 32-byte message m[0..7] (pad W8=0x80000000,
+ * W9..14=0, W15=256) from the IV. Bit-identical to _SHA256TransformDigest32. */
+__device__ __forceinline__ void _SHA256TransformDigest32Q(
+    uint32_t out[8], const uint32_t m[8])
+{
+    uint32_t t1;
+    uint32_t t2;
+    uint32_t a = QSB_IV0, b = QSB_IV1, c = QSB_IV2, d = QSB_IV3;
+    uint32_t e = QSB_IV4, f = QSB_IV5, g = QSB_IV6, h = QSB_IV7;
+
+    uint32_t w[16];
+#pragma unroll
+    for (int i = 0; i < 8; i++) w[i] = m[i];
+
+    QSB_IV_ROUNDS01(w[0], w[1]);
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
+
+    {
+        w[0] += s0(w[1]);
+        w[1] += s1(256u) + s0(w[2]);
+        w[2] += s1(w[0]) + s0(w[3]);
+        w[3] += s1(w[1]) + s0(w[4]);
+        w[4] += s1(w[2]) + s0(w[5]);
+        w[5] += s1(w[3]) + s0(w[6]);
+        w[6] += s1(w[4]) + 256u + s0(w[7]);
+        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
+        w[8]  = 0x80000000u + s1(w[6]) + w[1] + QSB_Z;
+        w[9]  = s1(w[7]) + w[2];
+        w[10] = s1(w[8]) + w[3];
+        w[11] = s1(w[9]) + w[4];
+        w[12] = s1(w[10]) + w[5];
+        w[13] = s1(w[11]) + w[6];
+        w[14] = s1(w[12]) + w[7] + s0(256u);
+        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
+    }
+
+#if QSB_SHA_FMA_ADD0
+    {
+        const uint32_t one = pin_one_mul;
+        QSB_RND16L_F(16);
+        QSB_WMIX_F();
+        QSB_RND16L_F(32);
+        QSB_WMIX_F();
+        QSB_RND15L_F(48);
+    }
+#else
+    QSB_RND16L(16);
+    WMIX();
+    QSB_RND16L(32);
+    WMIX();
+    QSB_RND15L(48);
+#endif
+    QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
+    out[1] = QSB_IV1 + b;
+    out[2] = QSB_IV2 + c;
+    out[3] = QSB_IV3 + d;
+    out[5] = QSB_IV5 + f;
+    out[6] = QSB_IV6 + g;
+    out[7] = QSB_IV7 + h;
+}
+
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
  * W15=0x108, from the IV. Equal to out[0] of _SHA256TransformPubkey33. */
