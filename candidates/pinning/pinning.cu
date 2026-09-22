@@ -18,8 +18,23 @@
 #include <math.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <atomic>
+#include <thread>
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
+
+/* Init-dead-time cuts. The harness scores verified hits over the whole wall
+ * window, so every pre-t0 second is lost throughput. These three switches are
+ * host-side only: no kernel signature, arithmetic, or launch order changes. */
+#ifndef QSB_JIT_WARM
+#define QSB_JIT_WARM 1   /* warm the module's PTX->SASS JIT on a side thread */
+#endif
+#ifndef QSB_LAD_THREADS
+#define QSB_LAD_THREADS 1 /* per-chunk gtable ladders on independent threads */
+#endif
+#ifndef QSB_SPOT_DEV
+#define QSB_SPOT_DEV 1    /* spot-check reads 64B records; no 64 MiB D2H copy */
+#endif
 
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
@@ -640,21 +655,149 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
         codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
     }
 }
+/* QSB_DEC_REP: the sign mask for a decoded digit is the sign bit replicated to
+ * both 32-bit halves. mov.b64 {m,m} does that in one instruction instead of a
+ * shift and an OR. (Public mechanism, fkiene's pending bundle note.) */
+#ifndef QSB_DEC_REP
+#define QSB_DEC_REP 1
+#endif
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    { uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_DEC_REP
+      uint64_t m64; asm("mov.b64 %0,{%1,%1};" : "=l"(m64) : "r"(m32));
+      gt_load_signed_flat_m(table,base,code&0x1ffffu,m64,x,y);
+#else
+      gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y);
+#endif
+    }  /* P6: same mask, one SHF */
 }
 
+/* QSB_CHAIN_PIPE: depth-1 gather software pipeline inside the signed-digit
+ * chain. The next chunk's table point is gathered the moment both of its
+ * target registers die: X2 after U2 = X2*ZZ1 and Yoff after
+ * S2 = (Y2+Yoff)*ZZZ1. The remaining ~5M+2S of this addition cover the next
+ * gather's L2 latency, so the loop never waits on a load at its head. The
+ * load lands in X2 and Yoff, which the caller rotates: after the call
+ * (x,y,o) holds (next x, dead anchor slot, current y) so the next iteration
+ * consumes (x,o,y) -- y and o trade roles each step. Zero net register
+ * growth: the prefetch reuses registers that are already dead, unlike the
+ * dedicated nx/ny buffers of the retired QSB_EARLY_LOAD experiment.
+ * Measured on the pre-isomorphism pipeline (our v6, d83b6aa0): +0.8-1.4%
+ * self-reported throughput vs the same-kernel tip family. Ported here onto
+ * the QSB_YOFF chain (offset ordinates make the signed gather a pure XOR). */
+#ifndef QSB_CHAIN_PIPE
+#define QSB_CHAIN_PIPE 1
+#endif
+#if QSB_CHAIN_PIPE
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZT_pipe(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    uint64_t *X2, uint64_t *Y2, uint64_t *Yoff,
+    const uint8_t *table, unsigned nc)
+{
+  uint64_t U2[4];
+  uint64_t S2[4];
+  uint64_t P[4];
+  uint64_t R[4];
+  uint64_t PP[4];
+  uint64_t PPP[4];
+  uint64_t Q[4];
+  uint64_t T[4];
+  volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+  uint32_t ncode=codes[(size_t)nc*QSB_TREE_N+threadIdx.x];
+
+#if QSB_YOFF
+  _ModAddLazyOff(S2, Y2, Yoff);        // offset ordinates: y2 + yoff (mod p)
+#elif QSB_LAZY
+  _ModAddLazy(S2, Y2, Yoff);
+#else
+  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1 ; Yoff dead
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1           ; X2 dead
+  { uint32_t m32=(uint32_t)((int32_t)ncode>>31);
+#if QSB_DEC_REP
+    uint64_t m64; asm("mov.b64 %0,{%1,%1};" : "=l"(m64) : "r"(m32));
+    gt_load_signed_flat_m(table, gt_offset(nc), ncode&0x1ffffu, m64, X2, Yoff);
+#else
+    gt_load_signed_flat_m(table, gt_offset(nc), ncode&0x1ffffu,
+                          ((uint64_t)m32<<32)|m32, X2, Yoff);
+#endif
+  }                                    // next point -> dead regs
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  _ModSqr(PP, P);                      // PP = P^2
+  _ModMult(PPP, PP, P);                // PPP = P*PP
+  _ModMult(Q, U2, PP);                 // V  = U2*PP
+
+#if QSB_FUSE_SQRADDSUB2
+  /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
+  _ModSqrAddSub2(T, R, PPP, Q);        // X3 = R^2 + PPP - 2V
+#else
+  _ModSqr(T, R);                       // R^2
+#if QSB_LAZY
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
+#else
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
+#endif
+
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
+                                       // on the paired-carry schedule without predicate spills)
+  _ModSub256(Q, Q, T);                 // V - X3
+  _ModMult(Q, R);                      // R*(V - X3)
+  if (DEFER_Y) {
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+  } else {
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+    _ModSub256(Y1, Q, S2);             // exact Y3
+  }
+
+  Load256(X1, T);                      // X3
+}
+#endif
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
-    qsb_decode_to_shared(k);
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_CHAIN_PIPE
+    /* Rotating point buffers: iteration consumes (x,y,o) and prefetches the
+     * next chunk into (x,o); the following iteration therefore consumes
+     * (x,o,y) -- y and o trade roles each step. The role swap also absorbs
+     * the old Load256(y0,y1) anchor copy for free. The final iteration uses
+     * the classic body (nothing left to prefetch), and the anchor copy it
+     * would have produced is exactly the last point's y, already in y. */
+    uint64_t x[4],y[4],o[4];
+    /* The two-calls-per-iteration rotation prefetches c+1 and c+2, so the
+     * last prefetch index is GT_CHUNKS-1 only when GT_CHUNKS is odd. */
+    static_assert(GT_CHUNKS&1,"QSB_CHAIN_PIPE requires odd GT_CHUNKS");
+    Load256(o,y0);                     /* deferred-Y anchor = first point's y (the
+                                        * affine anchor of the mm seed), matching the
+                                        * classic loop's y0 carried into iteration 2. */
+    qsb_load_decoded(table,2,gt_offset(2),x,y);
+    #pragma unroll 1
+    for(int c=2;c+1<GT_CHUNKS;c+=2) {
+        _PointAddXYZZT_pipe<true>(X,Y,U,V,x,y,o,table,(unsigned)c+1u);
+        _PointAddXYZZT_pipe<true>(X,Y,U,V,x,o,y,table,(unsigned)c+2u);
+    }
+    _PointAddXYZZT<true>(X,Y,U,V,x,y,o);
+#if QSB_YOFF
+    qsb_yoff_to_y(y);
+#endif
+    _ModMult(x1,y,V);_ModSub256(Y,Y,x1);
+#else
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -667,6 +810,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
@@ -1532,6 +1676,14 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
+
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -2022,7 +2174,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2400,6 +2552,35 @@ static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
     }
 }
 
+#if QSB_LAD_THREADS
+/* One chunk's two ladders in a private OpenSSL context (objects must not be
+ * shared across threads). The chunk base arrives already affine. */
+static void gt_ladder_chunk(int ch, const uint8_t base_x_le[32], const uint8_t base_y_le[32],
+                            const uint64_t alpha_le[4], const uint64_t beta_le[4],
+                            uint64_t *hL, uint64_t *hH) {
+    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *x=BN_new(), *y=BN_new(), *shift=BN_new(), *bx=BN_new(), *by=BN_new(),
+           *field_p=BN_new(), *alpha=BN_new(), *beta=BN_new();
+    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp);
+    EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+    BN_lebin2bn(base_x_le,32,bx); BN_lebin2bn(base_y_le,32,by);
+    EC_POINT_set_affine_coordinates_GFp(grp,base,bx,by,ctx);
+    BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
+    BN_lebin2bn((const uint8_t*)beta_le,32,beta);
+    gt_batch_ladder(grp,base,GT_LO-1,
+        hL+(size_t)ch*GT_LO*8,x,y,alpha,beta,field_p,ctx);
+    BN_set_word(shift, 256);
+    EC_POINT_mul(grp, step, NULL, base, shift, ctx);
+    gt_batch_ladder(grp,step,(ch==0?1024:512)-1,
+        hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
+    BN_free(x);BN_free(y);BN_free(shift);BN_free(bx);BN_free(by);
+    BN_free(field_p);BN_free(alpha);BN_free(beta);
+    EC_POINT_free(base);EC_POINT_free(step);
+    EC_GROUP_free(grp);BN_CTX_free(ctx);
+}
+#endif
+
 /* The two ladders the GPU builder needs: L[ch][lo] = lo * base_ch and
  * H[ch][hi] = hi * 256 * base_ch. Index 0 of each is the identity and is
  * left zeroed; the kernel treats it as such. 12,002 real points, against the
@@ -2428,6 +2609,31 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
     memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
+#if QSB_LAD_THREADS
+    /* Serial base chain, exported affine; the per-chunk ladders then run on
+     * independent threads (each with its own OpenSSL objects). */
+    uint8_t chain_x[GT_CHUNKS][32], chain_y[GT_CHUNKS][32];
+    for (int ch = 0; ch < GT_CHUNKS; ch++) {
+        if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
+        EC_POINT_get_affine_coordinates_GFp(grp, base, x, y, ctx);
+        BN_bn2lebinpad(x, chain_x[ch], 32);
+        BN_bn2lebinpad(y, chain_y[ch], 32);
+    }
+    int nth = (int)std::thread::hardware_concurrency();
+    if (nth < 1) nth = 1;
+    if (nth > 4) nth = 4;
+    if (nth > GT_CHUNKS) nth = GT_CHUNKS;
+    {
+        std::thread pool[GT_CHUNKS];
+        for (int t = 0; t < nth; t++)
+            pool[t] = std::thread([&, t]{
+                for (int ch = t; ch < GT_CHUNKS; ch += nth)
+                    gt_ladder_chunk(ch, chain_x[ch], chain_y[ch],
+                                    alpha_le, beta_le, hL, hH);
+            });
+        for (int t = 0; t < nth; t++) pool[t].join();
+    }
+#else
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
         gt_batch_ladder(grp,base,GT_LO-1,                    /* L[lo] = lo * B */
@@ -2437,6 +2643,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
         gt_batch_ladder(grp,step,(ch==0?1024:512)-1,         /* H[hi] = hi * 256 * B */
             hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
     }
+#endif
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
     BN_free(nri); BN_free(bscal); BN_free(field_p); BN_free(alpha); BN_free(beta);
     EC_POINT_free(base); EC_POINT_free(step);
@@ -2497,6 +2704,63 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
     return ok;
 }
+
+#if QSB_SPOT_DEV
+/* Identical sample sequence and acceptance criteria to gt_spot_check, but each
+ * sampled 64-byte record is read straight off the device instead of copying
+ * the whole 64 MiB table back. Same coverage, ~250 small copies vs 64 MiB. */
+static int gt_spot_check_dev(const uint8_t *d_gTable, int samples,
+                             const uint8_t neg_r_inv[32],
+                             const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *inv2 = BN_new(), *order = BN_new(),
+           *nri = BN_new(), *half_nri = BN_new(), *field_p=BN_new(),
+           *alpha=BN_new(), *beta=BN_new();
+    EC_POINT *pt = EC_POINT_new(grp);
+    uint64_t want[8];
+    uint8_t rec[64];
+    int ok = 1;
+    unsigned seed = 0x9e3779b9u;
+    EC_GROUP_get_order(grp, order, ctx);
+    EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+    BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
+    BN_lebin2bn((const uint8_t*)beta_le,32,beta);
+    BN_set_word(k, 2); BN_mod_inverse(inv2, k, order, ctx);   /* inv2 = 2^-1 mod n */
+    BN_lebin2bn(neg_r_inv, 32, nri);
+    BN_mod_mul(half_nri, inv2, nri, order, ctx);              /* (2^-1 * neg_r_inv) mod n = A/2 scalar */
+    for (int t = 0; t < samples && ok; t++) {
+        int ch, i;
+        if (t < GT_CHUNKS * 4) {
+            ch = t / 4;
+            const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
+            i = corner[t % 4];
+        } else {
+            seed = seed * 1664525u + 1013904223u;
+            ch = (int)(seed >> 28) % GT_CHUNKS;
+            i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
+        }
+        /* want = (2i+1) * 2^gt_shift(ch) * (A/2). */
+        BN_one(k);
+        BN_lshift(k, k, gt_shift(ch));
+        BN_mul_word(k, (BN_ULONG)(2*i + 1));
+        BN_mod_mul(k, k, half_nri, order, ctx);
+        EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
+        gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,want);
+        size_t off = ((size_t)gt_offset(ch) + i) * 64;
+        if (cudaMemcpy(rec, d_gTable + off, 64, cudaMemcpyDeviceToHost) != cudaSuccess ||
+            memcmp(rec,      want,     32) != 0 ||
+            memcmp(rec + 32, want + 4, 32) != 0) {
+            fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
+            ok = 0;
+        }
+    }
+    BN_free(x); BN_free(y); BN_free(k); BN_free(inv2); BN_free(order); BN_free(nri); BN_free(half_nri);
+    BN_free(field_p); BN_free(alpha); BN_free(beta);
+    EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
+    return ok;
+}
+#endif
 
 /* OpenSSL fallback builder (only if the GPU builder's spot check fails). Emits
  * the signed table: entry (ch,d) = (2d+1) * 2^gt_shift(ch) * (A/2). Walks odd
@@ -2747,6 +3011,13 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 
 
 int main(int argc, char **argv) {
+#if QSB_JIT_WARM
+    /* Force whole-module JIT instead of per-function lazy loading so a single
+     * side-thread launch below warms every kernel at once. Read by the driver
+     * at module-load time; must be set before any CUDA call. Ignored harmlessly
+     * on runtimes that do not honor it. */
+    setenv("CUDA_MODULE_LOADING", "EAGER", 0);
+#endif
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
     uint32_t tail_w0 = 0;   /* W0 of the static tail block with a zero low byte (QSB_TAIL_TAB) */
     if (argc < 2) {
@@ -2774,6 +3045,25 @@ int main(int argc, char **argv) {
 
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+
+#if QSB_JIT_WARM
+    /* The ranked build embeds PTX (the fixed build line carries no -arch), so
+     * the driver's JIT compiles the whole module at the first kernel launch --
+     * inside the timed window. Trigger that load on a detached side thread so
+     * it overlaps the host-side init below; waited on before the first launch.
+     * Detached so early returns cannot leave a joinable thread behind. */
+    std::atomic<int> *jit_done = new std::atomic<int>(0);  /* leaked: a detached thread may outlive main */
+    std::thread([gpu_index, jit_done]{
+        cudaSetDevice(gpu_index);
+        uint8_t *sc = NULL;
+        if (cudaMalloc(&sc, 64) == cudaSuccess) {
+            kernel_build_gtable<<<1,1>>>((const uint64_t*)sc, (const uint64_t*)sc, sc);  /* touches only sc[0..63]: safe scratch */
+            cudaDeviceSynchronize();
+            cudaFree(sc);
+        }
+        jit_done->store(1);
+    }).detach();
+#endif
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
@@ -2812,10 +3102,34 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
+#if QSB_JIT_WARM
+        while (!jit_done->load()) std::this_thread::yield();  /* module JIT overlapped host init */
+#endif
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
+#if QSB_SPOT_DEV
+        int gt_ok = (gerr==cudaSuccess);
+        if (gt_ok)
+            gt_ok = gt_spot_check_dev(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
+                                      iso.alpha,iso.beta);
+        clock_gettime(CLOCK_MONOTONIC, &tb);
+        double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
+        if(gt_ok){
+            printf("  GTable built on GPU in %.2fs (%d points, %.0f MiB total, spot check passed)\n",
+                   gt_secs, gt_total, (double)gt_sz/(1024*1024));
+        } else {
+            printf("  GTable GPU build rejected (%s); using the host builder\n",
+                   gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+            uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+            compute_gtable(chk_table,pp.neg_r_inv,iso.alpha,iso.beta);
+            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            free(chk_table);
+        }
+        fflush(stdout);
+#else
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
@@ -2837,6 +3151,7 @@ int main(int argc, char **argv) {
         }
         fflush(stdout);
         free(chk_table);
+#endif
 #if QSB_YOFF
         qsb_table_offset_y<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt);
         cudaError_t yerr = cudaDeviceSynchronize();

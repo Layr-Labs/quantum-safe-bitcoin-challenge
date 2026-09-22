@@ -28,4 +28,18 @@ Official and public negatives that must not be retried without new evidence.
 - Exact host publication gate + C31 (fold / 64-bit split-3p / one-limb K) on top of 743+carry62 — this submit.
 - Further *per-candidate* 2^-31-class tails from the carry-chain census, only behind the gate, only after this official score.
 - CUDA graphs / further JIT trim as bundle fillers only.
+
+## RAW_DIFF — mathematically dead (falsified 2026-09-22, v11 session)
+
+Replacing `_ModSub256` with raw subtraction mod 2^256 (fkiene pending-bundle
+idea, submission `b7b11e5`/`614c5398` → **FAILED**): with `B=2^256`,
+`p=B-K`, a borrow wraps by `B` and `B == K (mod p)` — the result is off by
+exactly `K` per borrow, NOT congruent. Multiplies/squares/parity windows
+cannot repair a wrong representative. CPU oracle anchored to OpenSSL fails
+every case under the raw sub and passes under canonical `_ModSub256`. The
+pending bundle also deleted `_ModMult(Q,R)` (the `R*(V-X3)` term) in
+`_PointAddXYZZT` — independently fatal; its validation indeed failed. A
+corrected borrow fold (`borrow -> -K`, ~3 instrs) was evaluated and rejected
+as not worth it vs the masked `+p`. **Do not revive.** Recorded in
+`GPUMath.h` comment so the idea is not re-attempted.
 - Do **not** drop `_ModAddLazyOff` t1 (`mk` is frequently −1).
