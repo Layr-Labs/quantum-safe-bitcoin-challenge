@@ -45,6 +45,12 @@ floor.
    kernel kill. Same archive can be requeued only if Yukon allows and the
    frontier has not moved.
 
+## Applied in this prep (pre-Yukon)
+
+- C31 `_ModX3Fused` one-limb `h·K` fold (drop `addc` into t1..t3). Predicate:
+  `t0 + t4*K` overflows `2^64` (≤~2^-31/call). Host-gated. Host audit in
+  `test_carry62.py`. See `/workspace/qsb/prep/note.md`.
+
 ## Still closed
 
 - GLV / joint comb / radix-373

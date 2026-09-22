@@ -92,6 +92,81 @@ def klimb_add_c31(t0, t1, k):
     return (t0 + k) & MASK64, t1
 
 
+
+def x3_fold_complete(t0, t1, t2, t3, t4):
+    """Complete h*K fold into t0..t3 (baseline _ModX3Fused tail)."""
+    k = (t4 * K64) & MASK64
+    total = t0 + k
+    n0 = total & MASK64
+    carry = total >> 64
+    total = t1 + carry
+    n1 = total & MASK64
+    carry = total >> 64
+    total = t2 + carry
+    n2 = total & MASK64
+    carry = total >> 64
+    n3 = (t3 + carry) & MASK64
+    return n0, n1, n2, n3
+
+
+def x3_fold_c31(t0, t1, t2, t3, t4):
+    """C31: add k into t0 only; leave t1..t3 untouched."""
+    k = (t4 * K64) & MASK64
+    return (t0 + k) & MASK64, t1, t2, t3
+
+
+def audit_x3_fold():
+    # Differ iff t0 + t4*K overflows 2^64.
+    diffs = 0
+    cases = 0
+    # Boundary windows around the overflow threshold for t4 in 0..3.
+    for t4 in range(0, 4):
+        k = t4 * K64
+        edge = [0, 1, 2, MASK64 - 1, MASK64]
+        if k > 0:
+            thr = (1 << 64) - k  # first t0 that overflows
+            for delta in range(-64, 65):
+                t0 = thr + delta
+                if 0 <= t0 <= MASK64:
+                    edge.append(t0)
+            edge.extend([thr - 1, thr, MASK64 - k, (MASK64 - k + 1) & MASK64])
+        seen = set()
+        t0s = []
+        for t0 in edge:
+            t0 &= MASK64
+            if t0 not in seen:
+                seen.add(t0)
+                t0s.append(t0)
+        for t0 in t0s:
+            for t1 in (0, 1, MASK64):
+                full = x3_fold_complete(t0, t1, 0, 0, t4)
+                short = x3_fold_c31(t0, t1, 0, 0, t4)
+                expected = (t0 + k) >= (1 << 64)
+                assert (full != short) == expected, (t4, t0, t1, full, short, expected)
+                cases += 1
+                diffs += full != short
+    rng = random.Random(20260921)
+    rand_diff = 0
+    for _ in range(200_000):
+        t4 = rng.randrange(0, 4)
+        t0 = rng.randrange(0, 1 << 64)
+        t1 = rng.randrange(0, 1 << 64)
+        t2 = rng.randrange(0, 1 << 64)
+        t3 = rng.randrange(0, 1 << 64)
+        full = x3_fold_complete(t0, t1, t2, t3, t4)
+        short = x3_fold_c31(t0, t1, t2, t3, t4)
+        expected = (t0 + t4 * K64) >= (1 << 64)
+        assert (full != short) == expected
+        rand_diff += full != short
+    return {
+        "c31_x3_fold_boundary_cases": cases,
+        "c31_x3_fold_boundary_differences": diffs,
+        "c31_x3_fold_random_samples": 200_000,
+        "c31_x3_fold_random_differences": rand_diff,
+        "c31_x3_fold_difference_predicate": "t0 + t4*K overflows 2^64 (~t4*2^-32)",
+    }
+
+
 def audit_reduced_exhaustive():
     # Exhaust every state in a four-bit analogue.  sfc<=2 covers the largest
     # second-fold addend used by the three changed call sites.
@@ -264,6 +339,8 @@ def audit_source():
     assert "#define QSB_SECOND_FOLD_TAIL \"\"" in source
     assert "sub.u64 t0,t0,k;" in source
     assert "add.u64 t0,t0,k;" in source
+    assert "mul.lo.u64 k,t4,0x1000003D1;\\nadd.u64 t0,t0,k;" in source
+    assert "_ModX3Fused drops the h*K fold" in source
     cu = (HERE / "pinning.cu").read_text()
     assert "#define QSB_HOST_GATE 1" in cu
     assert "#define QSB_C31 1" in cu
@@ -275,6 +352,7 @@ def main():
     boundaries = audit_32bit_boundaries()
     random_differences = audit_random()
     c31 = audit_c31_predicates()
+    c31_x3 = audit_x3_fold()
     source_sha256 = audit_source()
     result = {
         "test": "exact changed carry and borrow word operations",
@@ -301,6 +379,7 @@ def main():
         "speedup": None,
     }
     result.update(c31)
+    result.update(c31_x3)
     print(json.dumps(result, indent=2))
 
 
