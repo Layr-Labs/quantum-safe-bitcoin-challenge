@@ -1617,7 +1617,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     {
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
+#if QSB_CALLEE_COORDS
+        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt);
+#else
         QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
 #else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -1648,7 +1652,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
+#if QSB_CALLEE_COORDS
+    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt);
+#else
     QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
 #else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -1670,7 +1678,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
         #pragma unroll
         for(int k=0;k<12;k++)n[k]=parkA[k][tid];
+#if QSB_CALLEE_COORDS
+        int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3]);
+#else
         int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
 #else
         uint64_t inv[5],m1[4],m2[4];
         QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
@@ -1695,7 +1707,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint64_t inv[5];
         QSB_TREE_MUL(inv,leaf,prodA);    /* 1/WB */
 #if ZLAB_K2S3M
+#if QSB_CALLEE_COORDS
+        int encoded=qsb_pair_tail3_value(nB[0],nB[1],nB[2],nB[3],nB[4],nB[5],nB[6],nB[7],nB[8],nB[9],nB[10],nB[11],inv[0],inv[1],inv[2],inv[3]);
+#else
         int encoded=qsb_pair_tail3_value(nB[0],nB[1],nB[2],nB[3],nB[4],nB[5],nB[6],nB[7],nB[8],nB[9],nB[10],nB[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
 #else
         int encoded=qsb_pair_tail_value(m1B[0],m1B[1],m1B[2],m1B[3],m2B[0],m2B[1],m2B[2],m2B[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
