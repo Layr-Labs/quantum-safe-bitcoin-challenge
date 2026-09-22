@@ -2794,6 +2794,14 @@ int main(int argc, char **argv) {
 
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+    // One consistent shared-cache preference for the whole pipeline.
+    // This is a host scheduling/cache experiment; device arithmetic is unchanged.
+    cudaError_t cache_status = cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+    if (cache_status != cudaSuccess) {
+        fprintf(stderr, "Shared-cache preference unavailable: %s\n", cudaGetErrorString(cache_status));
+        cudaGetLastError();
+    }
+
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
