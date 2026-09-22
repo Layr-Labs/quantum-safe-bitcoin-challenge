@@ -1,234 +1,13 @@
-#ifndef QSB_SHORT_CARRY2
-#define QSB_SHORT_CARRY2 1
-#endif
-// Speculative filter only: these raw point results are never trusted for output.
-// Every proposed hit is recomputed with the unchanged guarded/exact recovery
-// before atomic publication. Lost tentative hits reduce the actual scored yield.
-// Retain all inherited source notices and licenses.
-// Canonical parent arithmetic with delayed cold-path dispatch.
-// Preserve all inherited VanitySearch/GPL and point-chain attribution.
+// SPDX-License-Identifier: GPL-3.0-only
+// Exact promoted arithmetic for target-device comparison, from shared main
+// 7c3609b87b9d8e094a16be148fe846dfd5ac7807. Preserve VanitySearch/GPL and
+// the promoted point-chain contributions of the upstream authors. Common
+// arithmetic helpers still come from the unchanged promoted implementations.
+// Only the four function names have a _control suffix; device bodies are intact.
 #pragma once
-
-/* Negative deferred ordinate: N=-Ycore, so actual Y=-N-Yoff*ZZZ.
- * Fuse (Y2+Yoff)*ZZZ+N before reduction. Exact publication remains separate.
- * Research default; native compile and PTX/curve audits are required. */
-#ifndef QSB_SUBSET_NEG_Y_MAC
-#define QSB_SUBSET_NEG_Y_MAC 1
-#endif
-
-/* Exact loop-carried-anchor deletion.  The deferred point-add already has the
- * current affine Y in AY0..AY3; publish those registers as the next iteration's
- * Yoff outputs instead of making the caller copy Y2 after the asm block. */
-#ifndef QSB_CHAIN_ANCHOR_UPDATE
-#define QSB_CHAIN_ANCHOR_UPDATE 1
-#endif
-
-/* Exact final-limb carry deletion.  Keep the last odd-stream carry in CC
- * across the non-CC unpack moves and consume it directly into x15. */
-#ifndef QSB_FINAL_CARRY
-#define QSB_FINAL_CARRY 1
-#endif
-
-/* Lean carry handling in the chain's inlined multiplies/squares: o15/f8/m2 are
- * consumed by the next add instead of being captured with addc.u32 x,0,0 (SEL), and
- * the square doubles with an add chain instead of 15 funnel shifts.  Bit-identical
- * output (see scratchpad/ptx/c4_report.md).  0 = the C1 text byte for byte; 1 = the seven
- * multiplies and the first square (f5): default, zero spills in the census; 2 = also the
- * second square (f9), which makes ptxas spill 4 B of stores.  At >=1 the f0 copy always
- * uses the lean form, so QSB_FINAL_CARRY only matters at 0. */
-#ifndef QSB_CHAIN_MUL_LEAN
-#define QSB_CHAIN_MUL_LEAN 1
-#endif
-
-__device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t *b, uint32_t &bad){
-#ifdef __CUDA_ARCH__
-
-    uint64_t r0,r1,r2,r3;uint32_t carry;
-    // S=a+b<2^257. Fold its high bit with C=2^32+977, retaining
-    // the fold's carry. The resulting total is below 2^256+C.
-    asm("{\n\t.reg .u64 h,t;\n\t"
-        "add.cc.u64 %0,%5,%9;\n\t"
-        "addc.cc.u64 %1,%6,%10;\n\t"
-        "addc.cc.u64 %2,%7,%11;\n\t"
-        "addc.cc.u64 %3,%8,%12;\n\t"
-        "addc.u64 h,0,0;\n\t"
-        "mul.lo.u64 t,h,0x1000003d1;\n\t"
-        "add.cc.u64 %0,%0,t;\n\t"
-        "addc.cc.u64 %1,%1,0;\n\t"
-        "addc.cc.u64 %2,%2,0;\n\t"
-        "addc.cc.u64 %3,%3,0;\n\t"
-        "addc.u32 %4,0,0;\n\t}"
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3),"=r"(carry)
-        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),
-          "l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
-
-    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
-
-#else
-    _ModAdd256(r,a,b);
-
-#endif
-}
-
-__device__ __forceinline__ void qsb_filter_mul(uint64_t *r, const uint64_t *a, const uint64_t *b, uint32_t &bad)
-{
-#ifdef __CUDA_ARCH__
-
-    uint64_t r0,r1,r2,r3; uint32_t carry;
-    asm( "{\n\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n\t.reg .u64 e0,e1,e2,e3,e4,e5,e6,e7,o0,o1,o2,o3,o4,o5,o6,t,lc;\n\t.reg .u32 cy,o15,ec10,ec12,ec14;\n\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t.reg .u32 y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\tmov.b64 {a0,a1}, %5;\n\tmov.b64 {a2,a3}, %6;\n\tmov.b64 {a4,a5}, %7;\n\tmov.b64 {a6,a7}, %8;\n\tmov.b64 {b0,b1}, %9;\n\tmov.b64 {b2,b3}, %10;\n\tmov.b64 {b4,b5}, %11;\n\tmov.b64 {b6,b7}, %12;\n\tmul.wide.u32 e0, a0, b0; mul.wide.u32 e1, a0, b2; mul.wide.u32 e2, a0, b4; mul.wide.u32 e3, a0, b6;\n\tmul.wide.u32 t, a1, b1; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a1, b3; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a1, b5; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a1, b7; addc.u64 e4, t, 0;\n\tmul.wide.u32 t, a2, b0; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a2, b2; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a2, b4; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a2, b6; addc.cc.u64 e4, e4, t;\n\taddc.u32 ec10, 0, 0;\n\tmul.wide.u32 t, a3, b1; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a3, b3; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a3, b5; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a3, b7; addc.u64 e5, t, 0;\n\tmul.wide.u32 t, a4, b0; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a4, b2; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a4, b4; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a4, b6; addc.cc.u64 e5, e5, t;\n\taddc.u32 ec12, 0, 0;\n\tmul.wide.u32 t, a5, b1; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a5, b3; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a5, b5; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a5, b7; addc.u64 e6, t, 0;\n\tmul.wide.u32 t, a6, b0; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a6, b2; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a6, b4; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a6, b6; addc.cc.u64 e6, e6, t;\n\taddc.u32 ec14, 0, 0;\n\tmul.wide.u32 t, a7, b1; add.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a7, b3; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a7, b5; addc.cc.u64 e6, e6, t;\n\tmul.wide.u32 t, a7, b7; addc.u64 e7, t, 0;\n\tmul.wide.u32 o0, a0, b1; mul.wide.u32 o1, a0, b3; mul.wide.u32 o2, a0, b5; mul.wide.u32 o3, a0, b7;\n\tmul.wide.u32 t, a1, b0; add.cc.u64 o0, o0, t;\n\tmul.wide.u32 t, a1, b2; addc.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a1, b4; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a1, b6; addc.cc.u64 o3, o3, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec10};\n\tmul.wide.u32 t, a2, b1; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a2, b3; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a2, b5; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a2, b7; addc.u64 o4, t, lc;\n\tmul.wide.u32 t, a3, b0; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a3, b2; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a3, b4; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a3, b6; addc.cc.u64 o4, o4, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec12};\n\tmul.wide.u32 t, a4, b1; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a4, b3; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a4, b5; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a4, b7; addc.u64 o5, t, lc;\n\tmul.wide.u32 t, a5, b0; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a5, b2; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a5, b4; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a5, b6; addc.cc.u64 o5, o5, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec14};\n\tmul.wide.u32 t, a6, b1; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a6, b3; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a6, b5; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a6, b7; addc.u64 o6, t, lc;\n\tmul.wide.u32 t, a7, b0; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a7, b2; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a7, b4; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a7, b6; addc.cc.u64 o6, o6, t;\n\taddc.u32 o15, 0, 0;\n\tmov.b64 {x0,x1}, e0;\n\tmov.b64 {x2,x3}, e1;\n\tmov.b64 {x4,x5}, e2;\n\tmov.b64 {x6,x7}, e3;\n\tmov.b64 {x8,x9}, e4;\n\tmov.b64 {x10,x11}, e5;\n\tmov.b64 {x12,x13}, e6;\n\tmov.b64 {x14,x15}, e7;\n\tmov.b64 {y1,y2}, o0;\n\tmov.b64 {y3,y4}, o1;\n\tmov.b64 {y5,y6}, o2;\n\tmov.b64 {y7,y8}, o3;\n\tmov.b64 {y9,y10}, o4;\n\tmov.b64 {y11,y12}, o5;\n\tmov.b64 {y13,y14}, o6;\n\tadd.cc.u32 x1, x1, y1;\n\taddc.cc.u32 x2, x2, y2;\n\taddc.cc.u32 x3, x3, y3;\n\taddc.cc.u32 x4, x4, y4;\n\taddc.cc.u32 x5, x5, y5;\n\taddc.cc.u32 x6, x6, y6;\n\taddc.cc.u32 x7, x7, y7;\n\taddc.cc.u32 x8, x8, y8;\n\taddc.cc.u32 x9, x9, y9;\n\taddc.cc.u32 x10, x10, y10;\n\taddc.cc.u32 x11, x11, y11;\n\taddc.cc.u32 x12, x12, y12;\n\taddc.cc.u32 x13, x13, y13;\n\taddc.cc.u32 x14, x14, y14;\n\taddc.u32 x15, x15, o15;\n\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n\taddc.u32 f8, 0, 0;\n\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.u64 g3, h3, t;\n\tmov.b64 {z0,z1}, f0;\n\tmov.b64 {z2,z3}, f1;\n\tmov.b64 {z4,z5}, f2;\n\tmov.b64 {z6,z7}, f3;\n\tmov.b64 {w0,w1}, g0;\n\tmov.b64 {w2,w3}, g1;\n\tmov.b64 {w4,w5}, g2;\n\tmov.b64 {w6,w7}, g3;\n\tadd.cc.u32  z1, z1, w0;\n\taddc.cc.u32 z2, z2, w1;\n\taddc.cc.u32 z3, z3, w2;\n\taddc.cc.u32 z4, z4, w3;\n\taddc.cc.u32 z5, z5, w4;\n\taddc.cc.u32 z6, z6, w5;\n\taddc.cc.u32 z7, z7, w6;\n\taddc.u32 z8, f8, w7;\n\t{ .reg .u64 sfz,sft; .reg .u32 sfl;\n\tmov.b64 sfz, {z0, z8};\n\tmul.wide.u32 sft, z8, 977; add.cc.u64 sft, sft, sfz;\n\taddc.u32 m2, 0, 0;\n\tmov.b64 {z0, sfl}, sft;\n\tadd.cc.u32 z1, z1, sfl; }\n\t "
-#if QSB_SHORT_CARRY2
-        "addc.u32 z2, z2, m2;"
-#if QSB_SHORT_CARRY2_SENTINEL
-        "xor.b32 z0,z0,0xC0DE0001;\n\t"
-#endif
-#else
-        "addc.cc.u32 z2, z2, m2;\n\taddc.cc.u32 z3, z3, 0;\n\taddc.u32 z4, z4, 0;"
-#endif
-        "\n\tmov.u32 %4, 0;\n\tmov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n\t}"
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3),"=r"(carry)
-        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]) );
-
-    r[0]=r0; r[1]=r1; r[2]=r2; r[3]=r3;
-
-#else
-    _ModMultCore(r,a,b);
-
-#endif
-}
-
-__device__ __forceinline__ void qsb_filter_sqr(uint64_t r[4], const uint64_t a[4], uint32_t &bad) {
-#ifdef __CUDA_ARCH__
-
-    uint64_t r0,r1,r2,r3; uint32_t carry;
-    asm("{\n\t"
-        ".reg .u32 a0,a1,a2,a3,a4,a5,a6,a7;\n\t"
-        ".reg .u64 e2,e4,e6,e8,e10,e12,o1,o3,o5,o7,o9,o11,o13,t;\n\t"
-        ".reg .u32 ecy,ocy,e14,o15;\n\t"
-        ".reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t"
-        ".reg .u32 y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\t"
-        ".reg .u64 d0,d1,d2,d3,d4,d5,d6,d7;\n\t"
-        "mov.b64 {a0,a1}, %5;\n\t"
-        "mov.b64 {a2,a3}, %6;\n\t"
-        "mov.b64 {a4,a5}, %7;\n\t"
-        "mov.b64 {a6,a7}, %8;\n\t"
-
-        /* E rows, shortest first. Carries run into the next 64-bit column. */
-        "mul.wide.u32 e6, a2, a4;\n\t"
-        "mul.wide.u32 e8, a3, a5;\n\t"
-        "mul.wide.u32 e4, a1, a3;\n\t"
-        "mul.wide.u32 t, a1, a5; add.cc.u64 e6, e6, t;\n\t"
-        "mul.wide.u32 t, a2, a6; addc.cc.u64 e8, e8, t;\n\t"
-        "mul.wide.u32 t, a4, a6; addc.u64 e10, t, 0;\n\t"
-        "mul.wide.u32 e2, a0, a2;\n\t"
-        "mul.wide.u32 t, a0, a4; add.cc.u64 e4, e4, t;\n\t"
-        "mul.wide.u32 t, a0, a6; addc.cc.u64 e6, e6, t;\n\t"
-        "mul.wide.u32 t, a1, a7; addc.cc.u64 e8, e8, t;\n\t"
-        "mul.wide.u32 t, a3, a7; addc.cc.u64 e10, e10, t;\n\t"
-        "mul.wide.u32 t, a5, a7; addc.u64 e12, t, 0;\n\t"
-
-        /* O rows, shortest first; O7's four products occupy four rows. */
-        "mul.wide.u32 o7, a3, a4;\n\t"
-        "mul.wide.u32 o5, a2, a3;\n\t"
-        "mul.wide.u32 t, a2, a5; add.cc.u64 o7, o7, t;\n\t"
-        "mul.wide.u32 t, a4, a5; addc.u64 o9, t, 0;\n\t"
-        "mul.wide.u32 o3, a1, a2;\n\t"
-        "mul.wide.u32 t, a1, a4; add.cc.u64 o5, o5, t;\n\t"
-        "mul.wide.u32 t, a1, a6; addc.cc.u64 o7, o7, t;\n\t"
-        "mul.wide.u32 t, a3, a6; addc.cc.u64 o9, o9, t;\n\t"
-        "mul.wide.u32 t, a5, a6; addc.u64 o11, t, 0;\n\t"
-        "mul.wide.u32 o1, a0, a1;\n\t"
-        "mul.wide.u32 t, a0, a3; add.cc.u64 o3, o3, t;\n\t"
-        "mul.wide.u32 t, a0, a5; addc.cc.u64 o5, o5, t;\n\t"
-        "mul.wide.u32 t, a0, a7; addc.cc.u64 o7, o7, t;\n\t"
-        "mul.wide.u32 t, a2, a7; addc.cc.u64 o9, o9, t;\n\t"
-        "mul.wide.u32 t, a4, a7; addc.cc.u64 o11, o11, t;\n\t"
-        "mul.wide.u32 t, a6, a7; addc.u64 o13, t, 0;\n\t"
-
-        /* Merge the staggered 64-bit E/O words into X[0..15]. */
-        "mov.u32 x0, 0;\n\t"
-        "mov.b64 {x2,x3}, e2; mov.b64 {x4,x5}, e4; mov.b64 {x6,x7}, e6;\n\t"
-        "mov.b64 {x8,x9}, e8; mov.b64 {x10,x11}, e10; mov.b64 {x12,x13}, e12;\n\t"
-        "mov.u32 x14, 0; mov.u32 x15, 0;\n\t"
-        "mov.b64 {x1,y2}, o1; mov.b64 {y3,y4}, o3; mov.b64 {y5,y6}, o5;\n\t"
-        "mov.b64 {y7,y8}, o7; mov.b64 {y9,y10}, o9; mov.b64 {y11,y12}, o11; mov.b64 {y13,y14}, o13;\n\t"
-        "add.cc.u32 x2, x2, y2; addc.cc.u32 x3, x3, y3;\n\t"
-        "addc.cc.u32 x4, x4, y4; addc.cc.u32 x5, x5, y5; addc.cc.u32 x6, x6, y6;\n\t"
-        "addc.cc.u32 x7, x7, y7; addc.cc.u32 x8, x8, y8; addc.cc.u32 x9, x9, y9;\n\t"
-        "addc.cc.u32 x10, x10, y10; addc.cc.u32 x11, x11, y11; addc.cc.u32 x12, x12, y12;\n\t"
-        "addc.cc.u32 x13, x13, y13; addc.cc.u32 x14, x14, y14; addc.u32 x15, x15, 0;\n\t"
-
-        /* X = 2*cross. Descending funnel shifts retain the old lower limb. */
-        "shf.l.wrap.b32 x15, x14, x15, 1; shf.l.wrap.b32 x14, x13, x14, 1;\n\t"
-        "shf.l.wrap.b32 x13, x12, x13, 1; shf.l.wrap.b32 x12, x11, x12, 1;\n\t"
-        "shf.l.wrap.b32 x11, x10, x11, 1; shf.l.wrap.b32 x10, x9, x10, 1;\n\t"
-        "shf.l.wrap.b32 x9, x8, x9, 1; shf.l.wrap.b32 x8, x7, x8, 1;\n\t"
-        "shf.l.wrap.b32 x7, x6, x7, 1; shf.l.wrap.b32 x6, x5, x6, 1;\n\t"
-        "shf.l.wrap.b32 x5, x4, x5, 1; shf.l.wrap.b32 x4, x3, x4, 1;\n\t"
-        "shf.l.wrap.b32 x3, x2, x3, 1; shf.l.wrap.b32 x2, x1, x2, 1;\n\t"
-        "shf.l.wrap.b32 x1, x0, x1, 1;\n\t"
-        /* Add A[i]^2 at each 64-bit word 2*i. */
-        "mov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n\t"
-        "mov.b64 d4, {x8,x9}; mov.b64 d5, {x10,x11}; mov.b64 d6, {x12,x13}; mov.b64 d7, {x14,x15};\n\t"
-        "mul.wide.u32 t, a0, a0; add.cc.u64 d0, d0, t;\n\t"
-        "mul.wide.u32 t, a1, a1; addc.cc.u64 d1, d1, t;\n\t"
-        "mul.wide.u32 t, a2, a2; addc.cc.u64 d2, d2, t;\n\t"
-        "mul.wide.u32 t, a3, a3; addc.cc.u64 d3, d3, t;\n\t"
-        "mul.wide.u32 t, a4, a4; addc.cc.u64 d4, d4, t;\n\t"
-        "mul.wide.u32 t, a5, a5; addc.cc.u64 d5, d5, t;\n\t"
-        "mul.wide.u32 t, a6, a6; addc.cc.u64 d6, d6, t;\n\t"
-        "mul.wide.u32 t, a7, a7; addc.u64 d7, d7, t;\n\t"
-        "mov.b64 {x0,x1}, d0; mov.b64 {x2,x3}, d1; mov.b64 {x4,x5}, d2; mov.b64 {x6,x7}, d3;\n\t"
-        "mov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n\t"
-
-        /* The multiply core's unchanged secp256k1 double fold. */
-        ".reg .u64 fr0,fr1,fr2,fr3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t"
-        ".reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\t"
-        "mov.b64 fr0, {x0,x1}; mov.b64 fr1, {x2,x3}; mov.b64 fr2, {x4,x5}; mov.b64 fr3, {x6,x7};\n\t"
-        "mov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\t"
-        "mul.wide.u32 t, x8, 977;  add.cc.u64  f0, fr0, t;\n\t"
-        "mul.wide.u32 t, x10, 977; addc.cc.u64 f1, fr1, t;\n\t"
-        "mul.wide.u32 t, x12, 977; addc.cc.u64 f2, fr2, t;\n\t"
-        "mul.wide.u32 t, x14, 977; addc.cc.u64 f3, fr3, t;\n\t"
-        "addc.u32 f8, 0, 0;\n\t"
-        "mul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\t"
-        "mul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\t"
-        "mul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\t"
-        "mul.wide.u32 t, x15, 977; addc.u64 g3, h3, t;\n\t"
-        "mov.b64 {z0,z1}, f0; mov.b64 {z2,z3}, f1; mov.b64 {z4,z5}, f2; mov.b64 {z6,z7}, f3;\n\t"
-        "mov.b64 {w0,w1}, g0; mov.b64 {w2,w3}, g1; mov.b64 {w4,w5}, g2; mov.b64 {w6,w7}, g3;\n\t"
-        "add.cc.u32 z1, z1, w0; addc.cc.u32 z2, z2, w1; addc.cc.u32 z3, z3, w2;\n\t"
-        "addc.cc.u32 z4, z4, w3; addc.cc.u32 z5, z5, w4; addc.cc.u32 z6, z6, w5;\n\t"
-        "addc.cc.u32 z7, z7, w6; addc.u32 z8, f8, w7;\n\t"
-        "{ .reg .u64 sfz,sft; .reg .u32 sfl;\n\tmov.b64 sfz, {z0, z8};\n\tmul.wide.u32 sft, z8, 977; add.cc.u64 sft, sft, sfz;\n\taddc.u32 m2, 0, 0;\n\tmov.b64 {z0, sfl}, sft;\n\tadd.cc.u32 z1, z1, sfl; }\n\t "
-#if QSB_SHORT_CARRY2
-        "addc.u32 z2, z2, m2;"
-#if QSB_SHORT_CARRY2_SENTINEL
-        "xor.b32 z0,z0,0xC0DE0002;\n\t"
-#endif
-#else
-        "addc.cc.u32 z2, z2, m2;\n\t"
-        "addc.cc.u32 z3, z3, 0; addc.u32 z4, z4, 0;"
-#endif
-        "\n\tmov.u32 %4, 0;\n\t"
-        "mov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n\t"
-        "}\n\t"
-        : "=l"(r0), "=l"(r1), "=l"(r2), "=l"(r3),"=r"(carry)
-        : "l"(a[0]), "l"(a[1]), "l"(a[2]), "l"(a[3]));
-
-    r[0] = r0; r[1] = r1; r[2] = r2; r[3] = r3;
-
-#else
-    _ModSqr(r,a);
-
-#endif
-}
-
-__device__ __forceinline__ void qsb_filter_mul(uint64_t*r,const uint64_t*a,uint32_t &bad){
-    qsb_filter_mul(r,r,a,bad);
-}
-
+#if QSB_SUBSET_SHA_AUTOTUNE
 template<bool DEFER_Y>
-__device__ __forceinline__ void qsb_filter_point_add(
+__device__ __forceinline__ void qsb_filter_point_add_control(
     uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
     uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
     const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
@@ -625,22 +404,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 {f2_b4,f2_b5}, ZZZ2;\n"
         "\tmov.b64 {f2_b6,f2_b7}, ZZZ3;\n"
         "\tmul.wide.u32 f2_e0, f2_a0, f2_b0; mul.wide.u32 f2_e1, f2_a0, f2_b2; mul.wide.u32 f2_e2, f2_a0, f2_b4; mul.wide.u32 f2_e3, f2_a0, f2_b6;\n"
-#if QSB_SUBSET_NEG_Y_MAC
-        "\t.reg .u64 f2_bias;\n"
-        "\tadd.cc.u64 f2_e0, f2_e0, YY0;\n"
-        "\taddc.cc.u64 f2_e1, f2_e1, YY1;\n"
-        "\taddc.cc.u64 f2_e2, f2_e2, YY2;\n"
-        "\taddc.cc.u64 f2_e3, f2_e3, YY3;\n"
-        "\taddc.u64 f2_bias, 0, 0;\n"
-#endif
         "\tmul.wide.u32 f2_t, f2_a1, f2_b1; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b3; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b5; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
-#if QSB_SUBSET_NEG_Y_MAC
-        "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, f2_bias;\n"
-#else
         "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, 0;\n"
-#endif
         "\tmul.wide.u32 f2_t, f2_a2, f2_b0; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b2; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b4; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
@@ -787,22 +554,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 {f2_b4,f2_b5}, ZZZ2;\n"
         "\tmov.b64 {f2_b6,f2_b7}, ZZZ3;\n"
         "\tmul.wide.u32 f2_e0, f2_a0, f2_b0; mul.wide.u32 f2_e1, f2_a0, f2_b2; mul.wide.u32 f2_e2, f2_a0, f2_b4; mul.wide.u32 f2_e3, f2_a0, f2_b6;\n"
-#if QSB_SUBSET_NEG_Y_MAC
-        "\t.reg .u64 f2_bias;\n"
-        "\tadd.cc.u64 f2_e0, f2_e0, YY0;\n"
-        "\taddc.cc.u64 f2_e1, f2_e1, YY1;\n"
-        "\taddc.cc.u64 f2_e2, f2_e2, YY2;\n"
-        "\taddc.cc.u64 f2_e3, f2_e3, YY3;\n"
-        "\taddc.u64 f2_bias, 0, 0;\n"
-#endif
         "\tmul.wide.u32 f2_t, f2_a1, f2_b1; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b3; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b5; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
-#if QSB_SUBSET_NEG_Y_MAC
-        "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, f2_bias;\n"
-#else
         "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, 0;\n"
-#endif
         "\tmul.wide.u32 f2_t, f2_a2, f2_b0; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b2; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b4; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
@@ -940,9 +695,6 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "and.b64 sub3_lo,sub3_borrow,0x1000003D1;\n"
         "sub.cc.u64 D0,D0,sub3_lo;\n"
         "subc.u64 D1,D1,0;\n"
-#if QSB_SUBSET_NEG_Y_MAC
-        "mov.u64 R0,S0; mov.u64 R1,S1; mov.u64 R2,S2; mov.u64 R3,S3;\n"
-#else
         ".reg .u64 sub4_borrow,sub4_lo;\n"
         "sub.cc.u64 R0,S0,YY0;\n"
         "subc.cc.u64 R1,S1,YY1;\n"
@@ -952,7 +704,6 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "and.b64 sub4_lo,sub4_borrow,0x1000003D1;\n"
         "sub.cc.u64 R0,R0,sub4_lo;\n"
         "subc.u64 R1,R1,0;\n"
-#endif
         ".reg .u32 f5_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
@@ -2605,17 +2356,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #endif
         "\t\n"
         ".reg .u64 sub14_borrow,sub14_lo;\n"
-#if QSB_SUBSET_NEG_Y_MAC
-        "sub.cc.u64 Q0,T0,Q0;\n"
-        "subc.cc.u64 Q1,T1,Q1;\n"
-        "subc.cc.u64 Q2,T2,Q2;\n"
-        "subc.cc.u64 Q3,T3,Q3;\n"
-#else
         "sub.cc.u64 Q0,Q0,T0;\n"
         "subc.cc.u64 Q1,Q1,T1;\n"
         "subc.cc.u64 Q2,Q2,T2;\n"
         "subc.cc.u64 Q3,Q3,T3;\n"
-#endif
         "subc.u64 sub14_borrow,0,0;\n"
         "and.b64 sub14_lo,sub14_borrow,0x1000003D1;\n"
         "sub.cc.u64 Q0,Q0,sub14_lo;\n"
@@ -2967,11 +2711,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
   qsb_filter_add(S2, (uint64_t *)Y2, (uint64_t *)Yoff,bad);
   qsb_filter_mul(S2, ZZZ1,bad);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
-#if QSB_SUBSET_NEG_Y_MAC
-  _ModAdd256(R, S2, Y1);               // R = S2 + N
-#else
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
-#endif
   qsb_filter_sqr(PP, P,bad);                      // PP = P^2
   qsb_filter_mul(PPP, PP, P,bad);                // PPP = P*PP
   qsb_filter_mul(Q, U2, PP,bad);                 // V  = U2*PP
@@ -2983,87 +2723,19 @@ __device__ __forceinline__ void qsb_filter_point_add(
   _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
 
   qsb_filter_mul(ZZZ1, PPP,bad);                 // ZZZ3
-#if QSB_SUBSET_NEG_Y_MAC
-  _ModSub256(Q, T, Q);                 // X3 - V
-#else
   _ModSub256(Q, Q, T);                 // V - X3
-#endif
   qsb_filter_mul(Q, R,bad);                      // R*(V - X3)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     qsb_filter_mul(S2, (uint64_t *)Y2, ZZZ1,bad);// affine Y2*ZZZ3
-#if QSB_SUBSET_NEG_Y_MAC
-    uint64_t zero[4]={0};
-    _ModSub256(Y1, zero, Q);
-    _ModSub256(Y1, Y1, S2);
-#else
     _ModSub256(Y1, Q, S2);             // exact Y3
-#endif
   }
 
-#if QSB_CHAIN_ANCHOR_UPDATE
-  Load256(Yoff, Y2);
-#endif
   Load256(X1, T);                      // X3
 }
 
-// The seed-X3 opportunity is independently identified in fkiene PR338,
-// e532114a2b3bc9a86ef618238ee77631cbe15924. This implementation uses our
-// signed-quotient fold from ad4b6d1, with a retained boundary guard and the
-// unchanged exact whole-chain replay. Preserve all prior notices and licenses.
-__device__ __forceinline__ void qsb_filter_seed_x3(
-    uint64_t *r,const uint64_t *a,const uint64_t *b,const uint64_t *c,uint32_t &bad){
-#ifdef __CUDA_ARCH__
-    uint64_t r0,r1,r2,r3,high;
-    // a-b-2c = low+h*2^256, h in {-3,-2,-1,0}, for all 256-bit inputs.
-    // low+h*K lies in (-3K,2^256). A boundary flag triggers exact chain replay.
-    asm("{\n\t.reg .u64 h,t,ext;\n\t"
-        "sub.cc.u64 %0,%5,%9;\n\t"
-        "subc.cc.u64 %1,%6,%10;\n\t"
-        "subc.cc.u64 %2,%7,%11;\n\t"
-        "subc.cc.u64 %3,%8,%12;\n\t"
-        "subc.u64 h,0,0;\n\t"
-        "sub.cc.u64 %0,%0,%13;\n\t"
-        "subc.cc.u64 %1,%1,%14;\n\t"
-        "subc.cc.u64 %2,%2,%15;\n\t"
-        "subc.cc.u64 %3,%3,%16;\n\t"
-        "subc.u64 h,h,0;\n\t"
-        "sub.cc.u64 %0,%0,%13;\n\t"
-        "subc.cc.u64 %1,%1,%14;\n\t"
-        "subc.cc.u64 %2,%2,%15;\n\t"
-        "subc.cc.u64 %3,%3,%16;\n\t"
-        "subc.u64 h,h,0;\n\t"
-        "shr.s64 ext,h,63;\n\t"
-        "mul.lo.u64 t,h,0x1000003d1;\n\t"
-        "add.cc.u64 %0,%0,t;\n\t"
-        ""
-#if QSB_SHORT_CARRY2
-        "addc.u64 %1,%1,ext; mov.u64 %4,0;"
-#if QSB_SHORT_CARRY2_SENTINEL
-        "xor.b64 %0,%0,0xC0DE000D;\n\t"
-#endif
-#else
-        "addc.cc.u64 %1,%1,ext;\n\t"
-        "addc.cc.u64 %2,%2,ext;\n\t"
-        "addc.cc.u64 %3,%3,ext;\n\t"
-        "addc.u64 %4,ext,0;"
-#endif
-        "\n\t}"
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3),"=l"(high)
-        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),
-          "l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]),
-          "l"(c[0]),"l"(c[1]),"l"(c[2]),"l"(c[3]));
-
-    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
-#else
-    _ModSub256(r,(uint64_t*)a,(uint64_t*)b);
-    _ModSub256(r,r,(uint64_t*)c);_ModSub256(r,r,(uint64_t*)c);
-
-#endif
-}
-
-__device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
+__device__ void qsb_filter_point_seed_control(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                      const uint64_t *X1, const uint64_t *Y1,
                                      const uint64_t *X2, const uint64_t *Y2, uint32_t &bad)
 {
@@ -3081,11 +2753,171 @@ __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3,
   qsb_filter_sqr(T, R,bad);                                   // R^2
   qsb_filter_seed_x3(T,T,ZZZ3,Q,bad); // guarded R^2 - PPP - 2Q
 
-#if QSB_SUBSET_NEG_Y_MAC
-  _ModSub256(Q, T, Q);                             // X3 - Q
-#else
   _ModSub256(Q, Q, T);                             // Q - X3
-#endif
   qsb_filter_mul(Y3, Q, R,bad);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }
+
+__device__ __forceinline__ void qsb_filter_last_add_control(
+    uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
+    const uint64_t *x,const uint64_t *y,uint64_t *yoff,uint32_t &bad) {
+    qsb_filter_point_add_control<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
+    uint64_t scaled_y[4];
+    qsb_filter_mul(scaled_y,y,ZZZ,bad);
+#if QSB_SPEC_LAST_RESOLVE
+    QSB_FSUB(Y,Y,scaled_y);
+#else
+    _ModSub256(Y,Y,scaled_y);
+#endif
+}
+
+__device__ void qsb_filter_chain_trial_control(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+                                           const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+    uint64_t M[4]; int sign;
+    gt_recode_setup(k, M, &sign);
+    uint32_t idx; uint64_t neg;
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+#if ZLAB_T14
+#if ZLAB_DIRDIG
+    uint64_t sflag=(uint64_t)(sign<0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+    gt_load_signed(gTable,0,idx,neg,x0,y0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+    gt_load_signed(gTable,1,idx,neg,x1,y1);
+#else
+    int32_t ec=gt_mixed_step<19>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<19>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+#endif
+    qsb_filter_point_seed_control(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+#if ZLAB_DIRDIG
+    unsigned pos=(unsigned)gt_shift(2)+1u;
+#endif
+    #pragma unroll 1
+    for (int c=2;c<GT_BIG;c++){
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg); pos+=gt_width(2);
+#else
+        ec=gt_mixed_step<19>(M,sign);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add_control<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 18;
+    }
+    #pragma unroll 1
+    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
+#else
+        ec=gt_mixed_step<18>(M,sign);
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add_control<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);
+        table_base += 1u << 17;
+    }
+    {
+#if ZLAB_DIRDIG
+        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
+#else
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg);
+#endif
+        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_last_add_control(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+    }
+#else
+#if ZLAB_DIRDIG
+    uint64_t sflag=(uint64_t)(sign<0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
+    gt_load_signed_flat_f(gTable,gt_offset(0),idx,neg,x0,y0);
+    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
+    gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
+    qsb_filter_point_seed_control(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+#if QSB_DIGIT_SHIFT
+    /* Same digits as gt_direct_digit at pos = gt_shift(c)+1: keep S = M >> pos in registers and
+     * shift it by one chunk width per step, instead of selecting limb pos>>6 each iteration. */
+    /* 15-chunk mixed geometry: chunk c>=1 starts at bit 17c+1, digit field at 17c+2, width 17
+     * (gt_shift(2)+1 == 36, gt_width(2) == 17; checked on the host at startup). */
+    constexpr unsigned P0=36u, W2=17u;
+    /* S = M >> 36 as 7 words (220 bits); one 32-bit funnel shift per word per step. */
+    uint32_t w0,w1,w2,w3,w4,w5,w6;
+    {
+        const uint64_t S0=(M[0]>>P0)|(M[1]<<(64-P0)), S1=(M[1]>>P0)|(M[2]<<(64-P0));
+        const uint64_t S2=(M[2]>>P0)|(M[3]<<(64-P0)), S3=M[3]>>P0;
+        w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
+        w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
+    }
+    constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
+    #pragma unroll (kChainUnroll)
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        {
+            const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
+            idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
+            neg=(uint64_t)(t^1u)^sflag;
+        }
+        w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
+        w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add_control<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+        Load256(y0, cy);                /* current affine y anchors next madd */
+#endif
+        table_base += 1u << 16;
+    }
+    {
+        const uint32_t f=w0&((1u<<W2)-1u);
+        idx=f&((1u<<(W2-1u))-1u); neg=sflag;
+        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_last_add_control(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+    }
+#else
+    unsigned pos=(unsigned)gt_shift(2)+1u;
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
+        pos+=gt_width(2);
+        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add_control<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
+        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_last_add_control(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+    }
+#endif
+#else
+    int32_t ec=gt_mixed_step<18>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
+    ec=gt_mixed_step<17>(M,sign);
+    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
+    qsb_filter_point_seed_control(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
+    uint64_t cx[4],cy[4];
+    uint32_t table_base=gt_offset(2);
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        ec=gt_mixed_step<17>(M,sign);
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_point_add_control<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+        Load256(y0, cy);                /* current affine y anchors next madd */
+        table_base += 1u << 16;
+    }
+    {
+        ec=sign*(int32_t)M[0];
+        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
+        qsb_filter_last_add_control(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+    }
+#endif
+#endif
+}
+#endif
