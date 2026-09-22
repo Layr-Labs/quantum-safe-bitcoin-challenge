@@ -762,8 +762,19 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#ifndef QSB_AFFINE_CHAIN
+#define QSB_AFFINE_CHAIN 1
+#endif
+// Collective: the ranked pair front invokes this with every block lane alive.
+// Definition follows the shared inverse implementation below.
+__device__ __forceinline__ void qsb_affine_chain(
+    uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+    const uint64_t k[4], const uint8_t *gTable);
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+#if QSB_AFFINE_CHAIN
+    qsb_affine_chain(X,Y,ZZ,ZZZ,k,gTable);
+#else
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
@@ -910,6 +921,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     }
 #endif
 #endif
+#endif // QSB_AFFINE_CHAIN
 }
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
@@ -1518,6 +1530,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+#include "affine_chain.cuh"
 #include "pair_shared.cuh"
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
