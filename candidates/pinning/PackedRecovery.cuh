@@ -69,9 +69,22 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_PREP_MASK
+        /* An exactly zero factor stays zero through this multiply: every 32x32
+         * partial product of a zero operand is zero, both pseudo-Mersenne folds
+         * then add 977*0 and 0<<32, and the short-carry lanes that the device
+         * body drops are carries out of zero words. Masking the single shared
+         * factor therefore reproduces the zeroed vbar/tbar of an unusable lane
+         * with four selects instead of eight, and it retires them before the
+         * two dependent multiplies instead of after. */
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -87,6 +100,12 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+/* Public PR993 QSB_FIN_RAWS, isolated on the PR976 source. Both slope products
+ * may remain raw in [0,2^256): the parity window accepts congruent raw input,
+ * while qsb_add_boundary preserves canonical x-coordinate addition. */
+#ifndef QSB_FIN_RAWS
+#define QSB_FIN_RAWS 1
+#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -99,11 +118,26 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
+#if QSB_SUM_2U
+    /* l+m = (u-v)+(u+v) = 2u exactly over the integers before reduction, so the
+     * sum the two x-coordinate multiplies share is one fold of u with itself.
+     * It is congruent for any representative u in [0,2^256) (the lazy fold adds
+     * K=2^32+977 for the one carry 2u can produce, and 2^256 = K mod p), it is
+     * the same single _ModAddLazy application as the sum it replaces - so the
+     * short-carry divergence budget of the finish is unchanged - and it no
+     * longer waits on l and m. */
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,u,u);
+#else
     _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
+#if QSB_SUM_2U
+    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,u,u);
+#else
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+#endif
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
@@ -119,6 +153,22 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_FIN_RAWS
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t);
+#if QSB_PARITY_WINDOW
+    const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
+#else
+    qsb_packed_raw_mul(u,l,s);
+#endif
+    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t);
+#if QSB_PARITY_WINDOW
+    const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
+#else
+    qsb_packed_raw_mul(v,m,s);
+#endif
+    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
@@ -130,6 +180,7 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
+#endif
 #endif
 #if QSB_PARITY_WINDOW
     return parity_u|(parity_v<<1);
