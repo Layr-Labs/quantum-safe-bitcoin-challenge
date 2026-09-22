@@ -447,6 +447,27 @@ __device__ void _ModNeg256(uint64_t *r)
 
 }
 
+/* QSB_ADD_MASKEDC: Q214 masked-C correction for the canonical-input field
+ * adds in qsb_packed_finish (PackedRecovery.cuh).  K = 2^256 - p =
+ * 0x1000003D1, so subtracting p mod 2^256 is adding K.  Correction needed iff
+ * the raw five-u64 sum overflowed OR raw >= p; for canonical inputs a,b in
+ * [0,p) the two predicates are disjoint (a+b < 2p: overflow implies raw < p),
+ * so at most one correction of k*K (k in {0,1}) is applied.  The raw>=p test
+ * reuses the qsb_field_normalize high-word all-ones predicate
+ * ((s1&s2&s3)==UINT64_MAX && s0 >= p0); s3 > p3 is impossible for s < 2^256.
+ * Exact for canonical inputs only.  _ModAdd256 itself stays UNCHANGED: its
+ * gtable-build caller (_PointAddSecp256k1 <- kernel_build_gtable) feeds
+ * _ModMult representatives in [0,2^256) that are not provably canonical, so
+ * the Q214 proposal is REFORMULATED to scope the correction to the
+ * provably-canonical finish sites (qsb_recovery_mul outputs + host-gated
+ * affine constant).  -DQSB_ADD_MASKEDC=0 restores the shipped bytes. */
+#ifndef QSB_ADD_MASKEDC
+#define QSB_ADD_MASKEDC 0
+#endif
+#if QSB_ADD_MASKEDC != 0 && QSB_ADD_MASKEDC != 1
+#error QSB_ADD_MASKEDC must be 0 or 1
+#endif
+
 __device__ __forceinline__ void _ModAdd256(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n.reg .u64 t0,t1,t2,t3,t4,s0,s1,s2,s3,d0,d1,d2,d3,d4,k;\n.reg .pred choose;\nadd.cc.u64 s0,%4,%8;\naddc.cc.u64 s1,%5,%9; addc.cc.u64 s2,%6,%10; addc.cc.u64 s3,%7,%11;\naddc.u64 t4,0,0;\nsub.cc.u64 t0,s0,0xFFFFFFFEFFFFFC2F;\nsubc.cc.u64 t1,s1,0xFFFFFFFFFFFFFFFF;\nsubc.cc.u64 t2,s2,0xFFFFFFFFFFFFFFFF;\nsubc.cc.u64 t3,s3,0xFFFFFFFFFFFFFFFF;\nsubc.u64 t4,t4,0;\nsetp.ge.s64 choose,t4,0;\nselp.u64 %0,t0,s0,choose; selp.u64 %1,t1,s1,choose;\nselp.u64 %2,t2,s2,choose; selp.u64 %3,t3,s3,choose;\n}"
@@ -454,6 +475,41 @@ __device__ __forceinline__ void _ModAdd256(uint64_t *r, const uint64_t *a, const
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
 }
+#if QSB_ADD_MASKEDC
+/* Q214 masked-C canonical-input field add.  Exact replacement of _ModAdd256
+ * for inputs in [0,p): K = 2^256 - p = 0x1000003D1, so subtracting p mod
+ * 2^256 is adding K.  Correction k in {0,1} fires iff the five-limb raw sum
+ * overflowed OR raw >= p; disjoint for canonical a,b (a+b < 2p), proven in
+ * the Q214 caller census.  The raw>=p test reuses the qsb_field_normalize
+ * high-word all-ones predicate ((s1&s2&s3)==UINT64_MAX && s0 >= p0); s3 > p3
+ * is impossible for s < 2^256.  _ModAdd256 itself is UNCHANGED: the gtable
+ * build path (_PointAddSecp256k1 <- kernel_build_gtable) feeds _ModMult
+ * representatives that are not provably canonical, so the premise is
+ * reformulated per the Q214 gate to scope the correction to the
+ * canonical-input finish sites only.  -DQSB_ADD_MASKEDC=0 restores the
+ * shipped bytes exactly. */
+__device__ __forceinline__ void qsb_field_add_c(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t r0,r1,r2,r3;
+    asm("{\n.reg .u64 s0,s1,s2,s3,t,k,p1,p2;\n.reg .pred hp,ge;\n"
+        "add.cc.u64 s0,%4,%8;\n"
+        "addc.cc.u64 s1,%5,%9; addc.cc.u64 s2,%6,%10; addc.cc.u64 s3,%7,%11;\n"
+        "addc.u64 k,0,0;\n"                                        /* overflow bit */
+        "and.b64 t,s1,s2; and.b64 t,t,s3;\n"                       /* qsb_field_normalize predicate */
+        "setp.eq.u64 hp,t,0xFFFFFFFFFFFFFFFF;\n"
+        "setp.ge.u64 ge,s0,0xFFFFFFFEFFFFFC2F;\n"
+        "selp.u64 p1,1,0,hp; selp.u64 p2,1,0,ge;\n"
+        "and.b64 t,p1,p2; add.u64 k,k,t;\n"                        /* k = overflow | raw>=p */
+        "mul.lo.u64 t,k,0x1000003D1;\n"                            /* masked 33-bit C */
+        "add.cc.u64 s0,s0,t;\n"
+        "addc.cc.u64 s1,s1,0; addc.cc.u64 s2,s2,0; addc.u64 s3,s3,0;\n"
+        "mov.u64 %0,s0; mov.u64 %1,s1; mov.u64 %2,s2; mov.u64 %3,s3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#else
+#define qsb_field_add_c _ModAdd256
+#endif
 
 #ifndef QSB_LAZY
 #define QSB_LAZY 1

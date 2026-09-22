@@ -119,13 +119,13 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
-    _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
+    _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); qsb_field_add_c(x1,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
-    _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
+    _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); qsb_field_add_c(x2,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
