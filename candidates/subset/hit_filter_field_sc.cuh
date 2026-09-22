@@ -1,5 +1,32 @@
+#ifndef QSB_SQ_DBL_TOP
+#define QSB_SQ_DBL_TOP 0
+#endif
+#ifndef QSB_SQ9_ADD_DBL
+#define QSB_SQ9_ADD_DBL 0
+#endif
+#ifndef QSB_FUSED_HIGH_MASK
+#define QSB_FUSED_HIGH_MASK 0
+#endif
+#ifndef QSB_FUSED_LOW_MASK
+#define QSB_FUSED_LOW_MASK 0
+#endif
+#ifndef QSB_FOLD67
+#define QSB_FOLD67 0
+#endif
+#ifndef QSB_DROP_Z2
+#define QSB_DROP_Z2 0
+#endif
+#ifndef QSB_DROP_Z2_EARLY
+#define QSB_DROP_Z2_EARLY 1
+#endif
+#ifndef QSB_PACKED_CORRECTION
+#define QSB_PACKED_CORRECTION 0
+#endif
 #ifndef QSB_SHORT_CARRY2
 #define QSB_SHORT_CARRY2 1
+#endif
+#ifndef QSB_SHORT_CARRY6
+#define QSB_SHORT_CARRY6 1
 #endif
 // Speculative filter only: these raw point results are never trusted for output.
 // Every proposed hit is recomputed with the unchanged guarded/exact recovery
@@ -68,7 +95,7 @@ __device__ __forceinline__ void qsb_filter_mul(uint64_t *r, const uint64_t *a, c
 #ifdef __CUDA_ARCH__
 
     uint64_t r0,r1,r2,r3; uint32_t carry;
-    asm( "{\n\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n\t.reg .u64 e0,e1,e2,e3,e4,e5,e6,e7,o0,o1,o2,o3,o4,o5,o6,t,lc;\n\t.reg .u32 cy,o15,ec10,ec12,ec14;\n\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t.reg .u32 y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\tmov.b64 {a0,a1}, %5;\n\tmov.b64 {a2,a3}, %6;\n\tmov.b64 {a4,a5}, %7;\n\tmov.b64 {a6,a7}, %8;\n\tmov.b64 {b0,b1}, %9;\n\tmov.b64 {b2,b3}, %10;\n\tmov.b64 {b4,b5}, %11;\n\tmov.b64 {b6,b7}, %12;\n\tmul.wide.u32 e0, a0, b0; mul.wide.u32 e1, a0, b2; mul.wide.u32 e2, a0, b4; mul.wide.u32 e3, a0, b6;\n\tmul.wide.u32 t, a1, b1; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a1, b3; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a1, b5; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a1, b7; addc.u64 e4, t, 0;\n\tmul.wide.u32 t, a2, b0; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a2, b2; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a2, b4; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a2, b6; addc.cc.u64 e4, e4, t;\n\taddc.u32 ec10, 0, 0;\n\tmul.wide.u32 t, a3, b1; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a3, b3; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a3, b5; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a3, b7; addc.u64 e5, t, 0;\n\tmul.wide.u32 t, a4, b0; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a4, b2; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a4, b4; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a4, b6; addc.cc.u64 e5, e5, t;\n\taddc.u32 ec12, 0, 0;\n\tmul.wide.u32 t, a5, b1; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a5, b3; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a5, b5; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a5, b7; addc.u64 e6, t, 0;\n\tmul.wide.u32 t, a6, b0; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a6, b2; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a6, b4; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a6, b6; addc.cc.u64 e6, e6, t;\n\taddc.u32 ec14, 0, 0;\n\tmul.wide.u32 t, a7, b1; add.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a7, b3; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a7, b5; addc.cc.u64 e6, e6, t;\n\tmul.wide.u32 t, a7, b7; addc.u64 e7, t, 0;\n\tmul.wide.u32 o0, a0, b1; mul.wide.u32 o1, a0, b3; mul.wide.u32 o2, a0, b5; mul.wide.u32 o3, a0, b7;\n\tmul.wide.u32 t, a1, b0; add.cc.u64 o0, o0, t;\n\tmul.wide.u32 t, a1, b2; addc.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a1, b4; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a1, b6; addc.cc.u64 o3, o3, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec10};\n\tmul.wide.u32 t, a2, b1; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a2, b3; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a2, b5; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a2, b7; addc.u64 o4, t, lc;\n\tmul.wide.u32 t, a3, b0; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a3, b2; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a3, b4; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a3, b6; addc.cc.u64 o4, o4, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec12};\n\tmul.wide.u32 t, a4, b1; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a4, b3; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a4, b5; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a4, b7; addc.u64 o5, t, lc;\n\tmul.wide.u32 t, a5, b0; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a5, b2; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a5, b4; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a5, b6; addc.cc.u64 o5, o5, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec14};\n\tmul.wide.u32 t, a6, b1; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a6, b3; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a6, b5; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a6, b7; addc.u64 o6, t, lc;\n\tmul.wide.u32 t, a7, b0; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a7, b2; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a7, b4; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a7, b6; addc.cc.u64 o6, o6, t;\n\taddc.u32 o15, 0, 0;\n\tmov.b64 {x0,x1}, e0;\n\tmov.b64 {x2,x3}, e1;\n\tmov.b64 {x4,x5}, e2;\n\tmov.b64 {x6,x7}, e3;\n\tmov.b64 {x8,x9}, e4;\n\tmov.b64 {x10,x11}, e5;\n\tmov.b64 {x12,x13}, e6;\n\tmov.b64 {x14,x15}, e7;\n\tmov.b64 {y1,y2}, o0;\n\tmov.b64 {y3,y4}, o1;\n\tmov.b64 {y5,y6}, o2;\n\tmov.b64 {y7,y8}, o3;\n\tmov.b64 {y9,y10}, o4;\n\tmov.b64 {y11,y12}, o5;\n\tmov.b64 {y13,y14}, o6;\n\tadd.cc.u32 x1, x1, y1;\n\taddc.cc.u32 x2, x2, y2;\n\taddc.cc.u32 x3, x3, y3;\n\taddc.cc.u32 x4, x4, y4;\n\taddc.cc.u32 x5, x5, y5;\n\taddc.cc.u32 x6, x6, y6;\n\taddc.cc.u32 x7, x7, y7;\n\taddc.cc.u32 x8, x8, y8;\n\taddc.cc.u32 x9, x9, y9;\n\taddc.cc.u32 x10, x10, y10;\n\taddc.cc.u32 x11, x11, y11;\n\taddc.cc.u32 x12, x12, y12;\n\taddc.cc.u32 x13, x13, y13;\n\taddc.cc.u32 x14, x14, y14;\n\taddc.u32 x15, x15, o15;\n\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n\taddc.u32 f8, 0, 0;\n\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.u64 g3, h3, t;\n\tmov.b64 {z0,z1}, f0;\n\tmov.b64 {z2,z3}, f1;\n\tmov.b64 {z4,z5}, f2;\n\tmov.b64 {z6,z7}, f3;\n\tmov.b64 {w0,w1}, g0;\n\tmov.b64 {w2,w3}, g1;\n\tmov.b64 {w4,w5}, g2;\n\tmov.b64 {w6,w7}, g3;\n\tadd.cc.u32  z1, z1, w0;\n\taddc.cc.u32 z2, z2, w1;\n\taddc.cc.u32 z3, z3, w2;\n\taddc.cc.u32 z4, z4, w3;\n\taddc.cc.u32 z5, z5, w4;\n\taddc.cc.u32 z6, z6, w5;\n\taddc.cc.u32 z7, z7, w6;\n\taddc.u32 z8, f8, w7;\n\t{ .reg .u64 sfz,sft; .reg .u32 sfl;\n\tmov.b64 sfz, {z0, z8};\n\tmul.wide.u32 sft, z8, 977; add.cc.u64 sft, sft, sfz;\n\taddc.u32 m2, 0, 0;\n\tmov.b64 {z0, sfl}, sft;\n\tadd.cc.u32 z1, z1, sfl; }\n\t "
+    asm( "{\n\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n\t.reg .u64 e0,e1,e2,e3,e4,e5,e6,e7,o0,o1,o2,o3,o4,o5,o6,t,lc;\n\t.reg .u32 cy,o15,ec10,ec12,ec14;\n\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;\n\t.reg .u32 y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n\tmov.b64 {a0,a1}, %5;\n\tmov.b64 {a2,a3}, %6;\n\tmov.b64 {a4,a5}, %7;\n\tmov.b64 {a6,a7}, %8;\n\tmov.b64 {b0,b1}, %9;\n\tmov.b64 {b2,b3}, %10;\n\tmov.b64 {b4,b5}, %11;\n\tmov.b64 {b6,b7}, %12;\n\tmul.wide.u32 e0, a0, b0; mul.wide.u32 e1, a0, b2; mul.wide.u32 e2, a0, b4; mul.wide.u32 e3, a0, b6;\n\tmul.wide.u32 t, a1, b1; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a1, b3; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a1, b5; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a1, b7; addc.u64 e4, t, 0;\n\tmul.wide.u32 t, a2, b0; add.cc.u64 e1, e1, t;\n\tmul.wide.u32 t, a2, b2; addc.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a2, b4; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a2, b6; addc.cc.u64 e4, e4, t;\n\taddc.u32 ec10, 0, 0;\n\tmul.wide.u32 t, a3, b1; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a3, b3; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a3, b5; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a3, b7; addc.u64 e5, t, 0;\n\tmul.wide.u32 t, a4, b0; add.cc.u64 e2, e2, t;\n\tmul.wide.u32 t, a4, b2; addc.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a4, b4; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a4, b6; addc.cc.u64 e5, e5, t;\n\taddc.u32 ec12, 0, 0;\n\tmul.wide.u32 t, a5, b1; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a5, b3; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a5, b5; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a5, b7; addc.u64 e6, t, 0;\n\tmul.wide.u32 t, a6, b0; add.cc.u64 e3, e3, t;\n\tmul.wide.u32 t, a6, b2; addc.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a6, b4; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a6, b6; addc.cc.u64 e6, e6, t;\n\taddc.u32 ec14, 0, 0;\n\tmul.wide.u32 t, a7, b1; add.cc.u64 e4, e4, t;\n\tmul.wide.u32 t, a7, b3; addc.cc.u64 e5, e5, t;\n\tmul.wide.u32 t, a7, b5; addc.cc.u64 e6, e6, t;\n\tmul.wide.u32 t, a7, b7; addc.u64 e7, t, 0;\n\tmul.wide.u32 o0, a0, b1; mul.wide.u32 o1, a0, b3; mul.wide.u32 o2, a0, b5; mul.wide.u32 o3, a0, b7;\n\tmul.wide.u32 t, a1, b0; add.cc.u64 o0, o0, t;\n\tmul.wide.u32 t, a1, b2; addc.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a1, b4; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a1, b6; addc.cc.u64 o3, o3, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec10};\n\tmul.wide.u32 t, a2, b1; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a2, b3; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a2, b5; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a2, b7; addc.u64 o4, t, lc;\n\tmul.wide.u32 t, a3, b0; add.cc.u64 o1, o1, t;\n\tmul.wide.u32 t, a3, b2; addc.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a3, b4; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a3, b6; addc.cc.u64 o4, o4, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec12};\n\tmul.wide.u32 t, a4, b1; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a4, b3; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a4, b5; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a4, b7; addc.u64 o5, t, lc;\n\tmul.wide.u32 t, a5, b0; add.cc.u64 o2, o2, t;\n\tmul.wide.u32 t, a5, b2; addc.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a5, b4; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a5, b6; addc.cc.u64 o5, o5, t;\n\taddc.u32 cy, 0, 0;\n\tmov.b64 lc, {cy, ec14};\n\tmul.wide.u32 t, a6, b1; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a6, b3; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a6, b5; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a6, b7; addc.u64 o6, t, lc;\n\tmul.wide.u32 t, a7, b0; add.cc.u64 o3, o3, t;\n\tmul.wide.u32 t, a7, b2; addc.cc.u64 o4, o4, t;\n\tmul.wide.u32 t, a7, b4; addc.cc.u64 o5, o5, t;\n\tmul.wide.u32 t, a7, b6; addc.cc.u64 o6, o6, t;\n\taddc.u32 o15, 0, 0;\n\tmov.b64 {x0,x1}, e0;\n\tmov.b64 {x2,x3}, e1;\n\tmov.b64 {x4,x5}, e2;\n\tmov.b64 {x6,x7}, e3;\n\tmov.b64 {x8,x9}, e4;\n\tmov.b64 {x10,x11}, e5;\n\tmov.b64 {x12,x13}, e6;\n\tmov.b64 {x14,x15}, e7;\n\tmov.b64 {y1,y2}, o0;\n\tmov.b64 {y3,y4}, o1;\n\tmov.b64 {y5,y6}, o2;\n\tmov.b64 {y7,y8}, o3;\n\tmov.b64 {y9,y10}, o4;\n\tmov.b64 {y11,y12}, o5;\n\tmov.b64 {y13,y14}, o6;\n\tadd.cc.u32 x1, x1, y1;\n\taddc.cc.u32 x2, x2, y2;\n\taddc.cc.u32 x3, x3, y3;\n\taddc.cc.u32 x4, x4, y4;\n\taddc.cc.u32 x5, x5, y5;\n\taddc.cc.u32 x6, x6, y6;\n\taddc.cc.u32 x7, x7, y7;\n\taddc.cc.u32 x8, x8, y8;\n\taddc.cc.u32 x9, x9, y9;\n\taddc.cc.u32 x10, x10, y10;\n\taddc.cc.u32 x11, x11, y11;\n\taddc.cc.u32 x12, x12, y12;\n\taddc.cc.u32 x13, x13, y13;\n\taddc.cc.u32 x14, x14, y14;\n\taddc.u32 x15, x15, o15;\n\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n\t\n\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.u64 g3, h3, t;\n\tmov.b64 {z0,z1}, f0;\n\tmov.b64 {z2,z3}, f1;\n\tmov.b64 {z4,z5}, f2;\n\tmov.b64 {z6,z7}, f3;\n\tmov.b64 {w0,w1}, g0;\n\tmov.b64 {w2,w3}, g1;\n\tmov.b64 {w4,w5}, g2;\n\tmov.b64 {w6,w7}, g3;\n\tadd.cc.u32  z1, z1, w0;\n\taddc.cc.u32 z2, z2, w1;\n\taddc.cc.u32 z3, z3, w2;\n\taddc.cc.u32 z4, z4, w3;\n\taddc.cc.u32 z5, z5, w4;\n\taddc.cc.u32 z6, z6, w5;\n\taddc.cc.u32 z7, z7, w6;\n\taddc.u32 z8, 0, w7;\n\t{ .reg .u64 sfz,sft; .reg .u32 sfl;\n\tmov.b64 sfz, {z0, z8};\n\tmul.wide.u32 sft, z8, 977; add.cc.u64 sft, sft, sfz;\n\taddc.u32 m2, 0, 0;\n\tmov.b64 {z0, sfl}, sft;\n\tadd.cc.u32 z1, z1, sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 z2, z2, m2;"
 #if QSB_SHORT_CARRY2_SENTINEL
@@ -182,7 +209,7 @@ __device__ __forceinline__ void qsb_filter_sqr(uint64_t r[4], const uint64_t a[4
         "mul.wide.u32 t, x10, 977; addc.cc.u64 f1, fr1, t;\n\t"
         "mul.wide.u32 t, x12, 977; addc.cc.u64 f2, fr2, t;\n\t"
         "mul.wide.u32 t, x14, 977; addc.cc.u64 f3, fr3, t;\n\t"
-        "addc.u32 f8, 0, 0;\n\t"
+        "\n\t"
         "mul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\t"
         "mul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\t"
         "mul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\t"
@@ -191,7 +218,7 @@ __device__ __forceinline__ void qsb_filter_sqr(uint64_t r[4], const uint64_t a[4
         "mov.b64 {w0,w1}, g0; mov.b64 {w2,w3}, g1; mov.b64 {w4,w5}, g2; mov.b64 {w6,w7}, g3;\n\t"
         "add.cc.u32 z1, z1, w0; addc.cc.u32 z2, z2, w1; addc.cc.u32 z3, z3, w2;\n\t"
         "addc.cc.u32 z4, z4, w3; addc.cc.u32 z5, z5, w4; addc.cc.u32 z6, z6, w5;\n\t"
-        "addc.cc.u32 z7, z7, w6; addc.u32 z8, f8, w7;\n\t"
+        "addc.cc.u32 z7, z7, w6; addc.u32 z8, 0, w7;\n\t"
         "{ .reg .u64 sfz,sft; .reg .u32 sfl;\n\tmov.b64 sfz, {z0, z8};\n\tmul.wide.u32 sft, z8, 977; add.cc.u64 sft, sft, sfz;\n\taddc.u32 m2, 0, 0;\n\tmov.b64 {z0, sfl}, sft;\n\tadd.cc.u32 z1, z1, sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 z2, z2, m2;"
@@ -398,16 +425,30 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f0_z0,f0_z1,f0_z2,f0_z3,f0_z4,f0_z5,f0_z6,f0_z7,f0_z8,f0_w0,f0_w1,f0_w2,f0_w3,f0_w4,f0_w5,f0_w6,f0_w7,f0_m2;\n"
         "\tmov.b64 f0_r0, {f0_x0,f0_x1}; mov.b64 f0_r1, {f0_x2,f0_x3}; mov.b64 f0_r2, {f0_x4,f0_x5}; mov.b64 f0_r3, {f0_x6,f0_x7};\n"
         "\tmov.b64 f0_h0, {f0_x8,f0_x9}; mov.b64 f0_h1, {f0_x10,f0_x11}; mov.b64 f0_h2, {f0_x12,f0_x13}; mov.b64 f0_h3, {f0_x14,f0_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 0)
+        "\tmad.wide.u32 f0_g0, f0_x9, 977, f0_h0;\n"
+        "\tmad.wide.u32 f0_g1, f0_x11, 977, f0_h1;\n"
+        "\tmad.wide.u32 f0_g2, f0_x13, 977, f0_h2;\n"
+        "\tmad.wide.u32 f0_g3, f0_x15, 977, f0_h3;\n"
+#else
         "\tmul.wide.u32 f0_t, f0_x9, 977;  add.cc.u64  f0_g0, f0_h0, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x11, 977; addc.cc.u64 f0_g1, f0_h1, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x13, 977; addc.cc.u64 f0_g2, f0_h2, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x15, 977; addc.u64 f0_g3, f0_h3, f0_t;\n"
+#endif
         "\tmov.b64 {f0_w0,f0_w1}, f0_g0; mov.b64 {f0_w2,f0_w3}, f0_g1; mov.b64 {f0_w4,f0_w5}, f0_g2; mov.b64 {f0_w6,f0_w7}, f0_g3;\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 0))
+        "\tmad.wide.u32 f0_f0, f0_x8, 977, f0_r0;\n"
+        "\tmad.wide.u32 f0_f1, f0_x10, 977, f0_r1;\n"
+        "\tmad.wide.u32 f0_f2, f0_x12, 977, f0_r2;\n"
+        "\tmad.wide.u32 f0_f3, f0_x14, 977, f0_r3;\n"
+#else
         "\tmul.wide.u32 f0_t, f0_x8, 977;  add.cc.u64  f0_f0, f0_r0, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x10, 977; addc.cc.u64 f0_f1, f0_r1, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x12, 977; addc.cc.u64 f0_f2, f0_r2, f0_t;\n"
-        "\tmul.wide.u32 f0_t, f0_x14, 977; addc.cc.u64 f0_f3, f0_r3, f0_t;\n"
-        "\taddc.u32 f0_z8, f0_w7, 0;\n"
+        "\tmul.wide.u32 f0_t, f0_x14, 977; addc.u64 f0_f3, f0_r3, f0_t;\n"
+#endif
+        "\tmov.u32 f0_z8, f0_w7;\n"
         "\tmov.b64 {f0_z0,f0_z1}, f0_f0; mov.b64 {f0_z2,f0_z3}, f0_f1; mov.b64 {f0_z4,f0_z5}, f0_f2; mov.b64 {f0_z6,f0_z7}, f0_f3;\n"
         "\tadd.cc.u32 f0_z1, f0_z1, f0_w0; addc.cc.u32 f0_z2, f0_z2, f0_w1; addc.cc.u32 f0_z3, f0_z3, f0_w2;\n"
         "\taddc.cc.u32 f0_z4, f0_z4, f0_w3; addc.cc.u32 f0_z5, f0_z5, f0_w4; addc.cc.u32 f0_z6, f0_z6, f0_w5;\n"
@@ -416,10 +457,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f0_sfz, {f0_z0, f0_z8};\n"
         "\tmul.wide.u32 f0_sft, f0_z8, 977; add.cc.u64 f0_sft, f0_sft, f0_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f0_z2, f0_z2, 0;\n"
+#endif
         "\tmov.b64 {f0_z0, f0_sfl}, f0_sft;\n"
         "\tadd.cc.u32 f0_z1, f0_z1, f0_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f0_z2, f0_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f0_z0,f0_z0,0xC0DE0003;\n"
 #endif
@@ -552,11 +599,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f0_t, f0_x10, 977; addc.cc.u64 f0_f1, f0_r1, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x12, 977; addc.cc.u64 f0_f2, f0_r2, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x14, 977; addc.cc.u64 f0_f3, f0_r3, f0_t;\n"
-        "\taddc.u32 f0_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 0)
+        "\tmad.wide.u32 f0_g0, f0_x9, 977, f0_h0;\n"
+        "\tmad.wide.u32 f0_g1, f0_x11, 977, f0_h1;\n"
+        "\tmad.wide.u32 f0_g2, f0_x13, 977, f0_h2;\n"
+        "\tmad.wide.u32 f0_g3, f0_x15, 977, f0_h3;\n"
+#else
         "\tmul.wide.u32 f0_t, f0_x9, 977;  add.cc.u64  f0_g0, f0_h0, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x11, 977; addc.cc.u64 f0_g1, f0_h1, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x13, 977; addc.cc.u64 f0_g2, f0_h2, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x15, 977; addc.u64 f0_g3, f0_h3, f0_t;\n"
+#endif
         "\tmov.b64 {f0_z0,f0_z1}, f0_f0;\n"
         "\tmov.b64 {f0_z2,f0_z3}, f0_f1;\n"
         "\tmov.b64 {f0_z4,f0_z5}, f0_f2;\n"
@@ -572,7 +626,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f0_z5, f0_z5, f0_w4;\n"
         "\taddc.cc.u32 f0_z6, f0_z6, f0_w5;\n"
         "\taddc.cc.u32 f0_z7, f0_z7, f0_w6;\n"
-        "\taddc.u32 f0_z8, f0_f8, f0_w7;\n"
+        "\taddc.u32 f0_z8, 0, f0_w7;\n"
         "\t{ .reg .u64 f0_sfz,f0_sft; .reg .u32 f0_sfl;\n\tmov.b64 f0_sfz, {f0_z0, f0_z8};\n\tmul.wide.u32 f0_sft, f0_z8, 977; add.cc.u64 f0_sft, f0_sft, f0_sfz;\n\taddc.u32 f0_m2, 0, 0;\n\tmov.b64 {f0_z0, f0_sfl}, f0_sft;\n\tadd.cc.u32 f0_z1, f0_z1, f0_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f0_z2, f0_z2, f0_m2;"
@@ -595,11 +649,22 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u64 S1,AY1,OFF1;\n"
         "\taddc.cc.u64 S2,AY2,OFF2;\n"
         "\taddc.cc.u64 S3,AY3,OFF3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_f1_c,packed_f1_lo;\n"
+        "addc.u32 packed_f1_c,0,0;\n"
+        "mul.lo.u32 packed_f1_lo,packed_f1_c,977;\n"
+        "mov.b64 f1_t,{packed_f1_lo,packed_f1_c};\n"
+#else
         "\taddc.u64 f1_h,0,0;\n"
         "\tneg.s64 f1_h,f1_h;\n"
         "\tand.b64 f1_t,f1_h,0x1000003d1;\n"
+#endif
+#if QSB_SHORT_CARRY6
+        "\tadd.u64 S0,S0,f1_t;\n"
+#else
         "\tadd.cc.u64 S0,S0,f1_t;\n"
         "\taddc.u64 S1,S1,0;\n"
+#endif
         "\t\n"
         ".reg .u32 f2_outcarry;\n"
         "\n"
@@ -719,16 +784,30 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f2_z0,f2_z1,f2_z2,f2_z3,f2_z4,f2_z5,f2_z6,f2_z7,f2_z8,f2_w0,f2_w1,f2_w2,f2_w3,f2_w4,f2_w5,f2_w6,f2_w7,f2_m2;\n"
         "\tmov.b64 f2_r0, {f2_x0,f2_x1}; mov.b64 f2_r1, {f2_x2,f2_x3}; mov.b64 f2_r2, {f2_x4,f2_x5}; mov.b64 f2_r3, {f2_x6,f2_x7};\n"
         "\tmov.b64 f2_h0, {f2_x8,f2_x9}; mov.b64 f2_h1, {f2_x10,f2_x11}; mov.b64 f2_h2, {f2_x12,f2_x13}; mov.b64 f2_h3, {f2_x14,f2_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 2)
+        "\tmad.wide.u32 f2_g0, f2_x9, 977, f2_h0;\n"
+        "\tmad.wide.u32 f2_g1, f2_x11, 977, f2_h1;\n"
+        "\tmad.wide.u32 f2_g2, f2_x13, 977, f2_h2;\n"
+        "\tmad.wide.u32 f2_g3, f2_x15, 977, f2_h3;\n"
+#else
         "\tmul.wide.u32 f2_t, f2_x9, 977;  add.cc.u64  f2_g0, f2_h0, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x11, 977; addc.cc.u64 f2_g1, f2_h1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x13, 977; addc.cc.u64 f2_g2, f2_h2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x15, 977; addc.u64 f2_g3, f2_h3, f2_t;\n"
+#endif
         "\tmov.b64 {f2_w0,f2_w1}, f2_g0; mov.b64 {f2_w2,f2_w3}, f2_g1; mov.b64 {f2_w4,f2_w5}, f2_g2; mov.b64 {f2_w6,f2_w7}, f2_g3;\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 2))
+        "\tmad.wide.u32 f2_f0, f2_x8, 977, f2_r0;\n"
+        "\tmad.wide.u32 f2_f1, f2_x10, 977, f2_r1;\n"
+        "\tmad.wide.u32 f2_f2, f2_x12, 977, f2_r2;\n"
+        "\tmad.wide.u32 f2_f3, f2_x14, 977, f2_r3;\n"
+#else
         "\tmul.wide.u32 f2_t, f2_x8, 977;  add.cc.u64  f2_f0, f2_r0, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x10, 977; addc.cc.u64 f2_f1, f2_r1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x12, 977; addc.cc.u64 f2_f2, f2_r2, f2_t;\n"
-        "\tmul.wide.u32 f2_t, f2_x14, 977; addc.cc.u64 f2_f3, f2_r3, f2_t;\n"
-        "\taddc.u32 f2_z8, f2_w7, 0;\n"
+        "\tmul.wide.u32 f2_t, f2_x14, 977; addc.u64 f2_f3, f2_r3, f2_t;\n"
+#endif
+        "\tmov.u32 f2_z8, f2_w7;\n"
         "\tmov.b64 {f2_z0,f2_z1}, f2_f0; mov.b64 {f2_z2,f2_z3}, f2_f1; mov.b64 {f2_z4,f2_z5}, f2_f2; mov.b64 {f2_z6,f2_z7}, f2_f3;\n"
         "\tadd.cc.u32 f2_z1, f2_z1, f2_w0; addc.cc.u32 f2_z2, f2_z2, f2_w1; addc.cc.u32 f2_z3, f2_z3, f2_w2;\n"
         "\taddc.cc.u32 f2_z4, f2_z4, f2_w3; addc.cc.u32 f2_z5, f2_z5, f2_w4; addc.cc.u32 f2_z6, f2_z6, f2_w5;\n"
@@ -737,10 +816,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f2_sfz, {f2_z0, f2_z8};\n"
         "\tmul.wide.u32 f2_sft, f2_z8, 977; add.cc.u64 f2_sft, f2_sft, f2_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f2_z2, f2_z2, 0;\n"
+#endif
         "\tmov.b64 {f2_z0, f2_sfl}, f2_sft;\n"
         "\tadd.cc.u32 f2_z1, f2_z1, f2_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f2_z2, f2_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f2_z0,f2_z0,0xC0DE0004;\n"
 #endif
@@ -864,11 +949,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f2_t, f2_x10, 977; addc.cc.u64 f2_f1, f2_r1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x12, 977; addc.cc.u64 f2_f2, f2_r2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x14, 977; addc.cc.u64 f2_f3, f2_r3, f2_t;\n"
-        "\taddc.u32 f2_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 2)
+        "\tmad.wide.u32 f2_g0, f2_x9, 977, f2_h0;\n"
+        "\tmad.wide.u32 f2_g1, f2_x11, 977, f2_h1;\n"
+        "\tmad.wide.u32 f2_g2, f2_x13, 977, f2_h2;\n"
+        "\tmad.wide.u32 f2_g3, f2_x15, 977, f2_h3;\n"
+#else
         "\tmul.wide.u32 f2_t, f2_x9, 977;  add.cc.u64  f2_g0, f2_h0, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x11, 977; addc.cc.u64 f2_g1, f2_h1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x13, 977; addc.cc.u64 f2_g2, f2_h2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x15, 977; addc.u64 f2_g3, f2_h3, f2_t;\n"
+#endif
         "\tmov.b64 {f2_z0,f2_z1}, f2_f0;\n"
         "\tmov.b64 {f2_z2,f2_z3}, f2_f1;\n"
         "\tmov.b64 {f2_z4,f2_z5}, f2_f2;\n"
@@ -884,7 +976,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f2_z5, f2_z5, f2_w4;\n"
         "\taddc.cc.u32 f2_z6, f2_z6, f2_w5;\n"
         "\taddc.cc.u32 f2_z7, f2_z7, f2_w6;\n"
-        "\taddc.u32 f2_z8, f2_f8, f2_w7;\n"
+        "\taddc.u32 f2_z8, 0, f2_w7;\n"
         "\t{ .reg .u64 f2_sfz,f2_sft; .reg .u32 f2_sfl;\n\tmov.b64 f2_sfz, {f2_z0, f2_z8};\n\tmul.wide.u32 f2_sft, f2_z8, 977; add.cc.u64 f2_sft, f2_sft, f2_sfz;\n\taddc.u32 f2_m2, 0, 0;\n\tmov.b64 {f2_z0, f2_sfl}, f2_sft;\n\tadd.cc.u32 f2_z1, f2_z1, f2_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f2_z2, f2_z2, f2_m2;"
@@ -905,19 +997,43 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "subc.cc.u64 D1,U1,XX1;\n"
         "subc.cc.u64 D2,U2,XX2;\n"
         "subc.cc.u64 D3,U3,XX3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_sub3_b,packed_sub3_lo,packed_sub3_hi;\n"
+        "subc.u32 packed_sub3_b,0,0;\n"
+        "and.b32 packed_sub3_lo,packed_sub3_b,977;\n"
+        "and.b32 packed_sub3_hi,packed_sub3_b,1;\n"
+        "mov.b64 sub3_lo,{packed_sub3_lo,packed_sub3_hi};\n"
+#else
         "subc.u64 sub3_borrow,0,0;\n"
         "and.b64 sub3_lo,sub3_borrow,0x1000003D1;\n"
+#endif
+#if QSB_SHORT_CARRY6
+        "sub.u64 D0,D0,sub3_lo;\n"
+#else
         "sub.cc.u64 D0,D0,sub3_lo;\n"
         "subc.u64 D1,D1,0;\n"
+#endif
         ".reg .u64 sub4_borrow,sub4_lo;\n"
         "sub.cc.u64 R0,S0,YY0;\n"
         "subc.cc.u64 R1,S1,YY1;\n"
         "subc.cc.u64 R2,S2,YY2;\n"
         "subc.cc.u64 R3,S3,YY3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_sub4_b,packed_sub4_lo,packed_sub4_hi;\n"
+        "subc.u32 packed_sub4_b,0,0;\n"
+        "and.b32 packed_sub4_lo,packed_sub4_b,977;\n"
+        "and.b32 packed_sub4_hi,packed_sub4_b,1;\n"
+        "mov.b64 sub4_lo,{packed_sub4_lo,packed_sub4_hi};\n"
+#else
         "subc.u64 sub4_borrow,0,0;\n"
         "and.b64 sub4_lo,sub4_borrow,0x1000003D1;\n"
+#endif
+#if QSB_SHORT_CARRY6
+        "sub.u64 R0,R0,sub4_lo;\n"
+#else
         "sub.cc.u64 R0,R0,sub4_lo;\n"
         "subc.u64 R1,R1,0;\n"
+#endif
         ".reg .u32 f5_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
@@ -961,7 +1077,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.u32 f5_x0, 0;\n"
         "\tmov.b64 {f5_x2,f5_x3}, f5_e2; mov.b64 {f5_x4,f5_x5}, f5_e4; mov.b64 {f5_x6,f5_x7}, f5_e6;\n"
         "\tmov.b64 {f5_x8,f5_x9}, f5_e8; mov.b64 {f5_x10,f5_x11}, f5_e10; mov.b64 {f5_x12,f5_x13}, f5_e12;\n"
+#if !QSB_SQ_DBL_TOP
         "\tmov.u32 f5_x15, 0;\n"
+#endif
         "\tmov.b64 {f5_x1,f5_y2}, f5_o1; mov.b64 {f5_y3,f5_y4}, f5_o3; mov.b64 {f5_y5,f5_y6}, f5_o5;\n"
         "\tmov.b64 {f5_y7,f5_y8}, f5_o7; mov.b64 {f5_y9,f5_y10}, f5_o9; mov.b64 {f5_y11,f5_y12}, f5_o11; mov.b64 {f5_y13,f5_y14}, f5_o13;\n"
         "\tadd.cc.u32 f5_x2, f5_x2, f5_y2; addc.cc.u32 f5_x3, f5_x3, f5_y3;\n"
@@ -975,9 +1093,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f5_x7, f5_x7, f5_x7; addc.cc.u32 f5_x8, f5_x8, f5_x8; addc.cc.u32 f5_x9, f5_x9, f5_x9;\n"
         "\taddc.cc.u32 f5_x10, f5_x10, f5_x10; addc.cc.u32 f5_x11, f5_x11, f5_x11; addc.cc.u32 f5_x12, f5_x12, f5_x12;\n"
         "\taddc.cc.u32 f5_x13, f5_x13, f5_x13;\n"
+#if QSB_SQ_DBL_TOP
+        "\taddc.cc.u32 f5_x14, f5_x14, f5_x14;\n"
+        "\taddc.u32 f5_x15, 0, 0;\n"
+        "\tmov.b64 f5_d0, {f5_x0,f5_x1}; mov.b64 f5_d1, {f5_x2,f5_x3}; mov.b64 f5_d2, {f5_x4,f5_x5}; mov.b64 f5_d3, {f5_x6,f5_x7};\n"
+        "\tmov.b64 f5_d4, {f5_x8,f5_x9}; mov.b64 f5_d5, {f5_x10,f5_x11}; mov.b64 f5_d6, {f5_x12,f5_x13}; mov.b64 f5_d7, {f5_x14,f5_x15};\n"
+#else
         "\tmul.wide.u32 f5_t, f5_x14, 2; addc.u64 f5_d7, f5_t, 0;\n"
         "\tmov.b64 f5_d0, {f5_x0,f5_x1}; mov.b64 f5_d1, {f5_x2,f5_x3}; mov.b64 f5_d2, {f5_x4,f5_x5}; mov.b64 f5_d3, {f5_x6,f5_x7};\n"
         "\tmov.b64 f5_d4, {f5_x8,f5_x9}; mov.b64 f5_d5, {f5_x10,f5_x11}; mov.b64 f5_d6, {f5_x12,f5_x13};\n"
+#endif
         "\tmul.wide.u32 f5_t, f5_a0, f5_a0; add.cc.u64 f5_d0, f5_d0, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_a1, f5_a1; addc.cc.u64 f5_d1, f5_d1, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_a2, f5_a2; addc.cc.u64 f5_d2, f5_d2, f5_t;\n"
@@ -992,16 +1117,30 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f5_z0,f5_z1,f5_z2,f5_z3,f5_z4,f5_z5,f5_z6,f5_z7,f5_z8,f5_w0,f5_w1,f5_w2,f5_w3,f5_w4,f5_w5,f5_w6,f5_w7,f5_m2;\n"
         "\tmov.b64 f5_fr0, {f5_x0,f5_x1}; mov.b64 f5_fr1, {f5_x2,f5_x3}; mov.b64 f5_fr2, {f5_x4,f5_x5}; mov.b64 f5_fr3, {f5_x6,f5_x7};\n"
         "\tmov.b64 f5_h0, {f5_x8,f5_x9}; mov.b64 f5_h1, {f5_x10,f5_x11}; mov.b64 f5_h2, {f5_x12,f5_x13}; mov.b64 f5_h3, {f5_x14,f5_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 5)
+        "\tmad.wide.u32 f5_g0, f5_x9, 977, f5_h0;\n"
+        "\tmad.wide.u32 f5_g1, f5_x11, 977, f5_h1;\n"
+        "\tmad.wide.u32 f5_g2, f5_x13, 977, f5_h2;\n"
+        "\tmad.wide.u32 f5_g3, f5_x15, 977, f5_h3;\n"
+#else
         "\tmul.wide.u32 f5_t, f5_x9, 977;  add.cc.u64  f5_g0, f5_h0, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x11, 977; addc.cc.u64 f5_g1, f5_h1, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x13, 977; addc.cc.u64 f5_g2, f5_h2, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x15, 977; addc.u64 f5_g3, f5_h3, f5_t;\n"
+#endif
         "\tmov.b64 {f5_w0,f5_w1}, f5_g0; mov.b64 {f5_w2,f5_w3}, f5_g1; mov.b64 {f5_w4,f5_w5}, f5_g2; mov.b64 {f5_w6,f5_w7}, f5_g3;\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 5))
+        "\tmad.wide.u32 f5_f0, f5_x8, 977, f5_fr0;\n"
+        "\tmad.wide.u32 f5_f1, f5_x10, 977, f5_fr1;\n"
+        "\tmad.wide.u32 f5_f2, f5_x12, 977, f5_fr2;\n"
+        "\tmad.wide.u32 f5_f3, f5_x14, 977, f5_fr3;\n"
+#else
         "\tmul.wide.u32 f5_t, f5_x8, 977;  add.cc.u64  f5_f0, f5_fr0, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x10, 977; addc.cc.u64 f5_f1, f5_fr1, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x12, 977; addc.cc.u64 f5_f2, f5_fr2, f5_t;\n"
-        "\tmul.wide.u32 f5_t, f5_x14, 977; addc.cc.u64 f5_f3, f5_fr3, f5_t;\n"
-        "\taddc.u32 f5_z8, f5_w7, 0;\n"
+        "\tmul.wide.u32 f5_t, f5_x14, 977; addc.u64 f5_f3, f5_fr3, f5_t;\n"
+#endif
+        "\tmov.u32 f5_z8, f5_w7;\n"
         "\tmov.b64 {f5_z0,f5_z1}, f5_f0; mov.b64 {f5_z2,f5_z3}, f5_f1; mov.b64 {f5_z4,f5_z5}, f5_f2; mov.b64 {f5_z6,f5_z7}, f5_f3;\n"
         "\tadd.cc.u32 f5_z1, f5_z1, f5_w0; addc.cc.u32 f5_z2, f5_z2, f5_w1; addc.cc.u32 f5_z3, f5_z3, f5_w2;\n"
         "\taddc.cc.u32 f5_z4, f5_z4, f5_w3; addc.cc.u32 f5_z5, f5_z5, f5_w4; addc.cc.u32 f5_z6, f5_z6, f5_w5;\n"
@@ -1010,10 +1149,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f5_sfz, {f5_z0, f5_z8};\n"
         "\tmul.wide.u32 f5_sft, f5_z8, 977; add.cc.u64 f5_sft, f5_sft, f5_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f5_z2, f5_z2, 0;\n"
+#endif
         "\tmov.b64 {f5_z0, f5_sfl}, f5_sft;\n"
         "\tadd.cc.u32 f5_z1, f5_z1, f5_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f5_z2, f5_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f5_z0,f5_z0,0xC0DE0005;\n"
 #endif
@@ -1105,15 +1250,22 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f5_t, f5_x12, 977; addc.cc.u64 f5_f2, f5_fr2, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x14, 977; addc.cc.u64 f5_f3, f5_fr3, f5_t;\n"
         "\taddc.u32 f5_f8, 0, 0;\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 5)
+        "\tmad.wide.u32 f5_g0, f5_x9, 977, f5_h0;\n"
+        "\tmad.wide.u32 f5_g1, f5_x11, 977, f5_h1;\n"
+        "\tmad.wide.u32 f5_g2, f5_x13, 977, f5_h2;\n"
+        "\tmad.wide.u32 f5_g3, f5_x15, 977, f5_h3;\n"
+#else
         "\tmul.wide.u32 f5_t, f5_x9, 977;  add.cc.u64  f5_g0, f5_h0, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x11, 977; addc.cc.u64 f5_g1, f5_h1, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x13, 977; addc.cc.u64 f5_g2, f5_h2, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x15, 977; addc.u64 f5_g3, f5_h3, f5_t;\n"
+#endif
         "\tmov.b64 {f5_z0,f5_z1}, f5_f0; mov.b64 {f5_z2,f5_z3}, f5_f1; mov.b64 {f5_z4,f5_z5}, f5_f2; mov.b64 {f5_z6,f5_z7}, f5_f3;\n"
         "\tmov.b64 {f5_w0,f5_w1}, f5_g0; mov.b64 {f5_w2,f5_w3}, f5_g1; mov.b64 {f5_w4,f5_w5}, f5_g2; mov.b64 {f5_w6,f5_w7}, f5_g3;\n"
         "\tadd.cc.u32 f5_z1, f5_z1, f5_w0; addc.cc.u32 f5_z2, f5_z2, f5_w1; addc.cc.u32 f5_z3, f5_z3, f5_w2;\n"
         "\taddc.cc.u32 f5_z4, f5_z4, f5_w3; addc.cc.u32 f5_z5, f5_z5, f5_w4; addc.cc.u32 f5_z6, f5_z6, f5_w5;\n"
-        "\taddc.cc.u32 f5_z7, f5_z7, f5_w6; addc.u32 f5_z8, f5_f8, f5_w7;\n"
+        "\taddc.cc.u32 f5_z7, f5_z7, f5_w6; addc.u32 f5_z8, 0, f5_w7;\n"
         "\t{ .reg .u64 f5_sfz,f5_sft; .reg .u32 f5_sfl;\n\tmov.b64 f5_sfz, {f5_z0, f5_z8};\n\tmul.wide.u32 f5_sft, f5_z8, 977; add.cc.u64 f5_sft, f5_sft, f5_sfz;\n\taddc.u32 f5_m2, 0, 0;\n\tmov.b64 {f5_z0, f5_sfl}, f5_sft;\n\tadd.cc.u32 f5_z1, f5_z1, f5_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f5_z2, f5_z2, f5_m2;"
@@ -1246,16 +1398,37 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f6_z0,f6_z1,f6_z2,f6_z3,f6_z4,f6_z5,f6_z6,f6_z7,f6_z8,f6_w0,f6_w1,f6_w2,f6_w3,f6_w4,f6_w5,f6_w6,f6_w7,f6_m2;\n"
         "\tmov.b64 f6_r0, {f6_x0,f6_x1}; mov.b64 f6_r1, {f6_x2,f6_x3}; mov.b64 f6_r2, {f6_x4,f6_x5}; mov.b64 f6_r3, {f6_x6,f6_x7};\n"
         "\tmov.b64 f6_h0, {f6_x8,f6_x9}; mov.b64 f6_h1, {f6_x10,f6_x11}; mov.b64 f6_h2, {f6_x12,f6_x13}; mov.b64 f6_h3, {f6_x14,f6_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 6)
+        "\tmad.wide.u32 f6_g0, f6_x9, 977, f6_h0;\n"
+        "\tmad.wide.u32 f6_g1, f6_x11, 977, f6_h1;\n"
+        "\tmad.wide.u32 f6_g2, f6_x13, 977, f6_h2;\n"
+        "\tmad.wide.u32 f6_g3, f6_x15, 977, f6_h3;\n"
+#else
         "\tmul.wide.u32 f6_t, f6_x9, 977;  add.cc.u64  f6_g0, f6_h0, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x11, 977; addc.cc.u64 f6_g1, f6_h1, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x13, 977; addc.cc.u64 f6_g2, f6_h2, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x15, 977; addc.u64 f6_g3, f6_h3, f6_t;\n"
+#endif
         "\tmov.b64 {f6_w0,f6_w1}, f6_g0; mov.b64 {f6_w2,f6_w3}, f6_g1; mov.b64 {f6_w4,f6_w5}, f6_g2; mov.b64 {f6_w6,f6_w7}, f6_g3;\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 6))
+        "\tmad.wide.u32 f6_f0, f6_x8, 977, f6_r0;\n"
+        "\tmad.wide.u32 f6_f1, f6_x10, 977, f6_r1;\n"
+        "\tmad.wide.u32 f6_f2, f6_x12, 977, f6_r2;\n"
+        "\tmad.wide.u32 f6_f3, f6_x14, 977, f6_r3;\n"
+        "\tmov.u32 f6_z8, f6_w7;\n"
+#elif QSB_FOLD67
+        "\tmul.wide.u32 f6_t, f6_x8, 977;  add.cc.u64  f6_f0, f6_r0, f6_t;\n"
+        "\tmul.wide.u32 f6_t, f6_x10, 977; addc.cc.u64 f6_f1, f6_r1, f6_t;\n"
+        "\tmul.wide.u32 f6_t, f6_x12, 977; addc.cc.u64 f6_f2, f6_r2, f6_t;\n"
+        "\tmul.wide.u32 f6_t, f6_x14, 977; addc.u64 f6_f3, f6_r3, f6_t;\n"
+        "\tmov.u32 f6_z8, f6_w7;\n"
+#else
         "\tmul.wide.u32 f6_t, f6_x8, 977;  add.cc.u64  f6_f0, f6_r0, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x10, 977; addc.cc.u64 f6_f1, f6_r1, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x12, 977; addc.cc.u64 f6_f2, f6_r2, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x14, 977; addc.cc.u64 f6_f3, f6_r3, f6_t;\n"
         "\taddc.u32 f6_z8, f6_w7, 0;\n"
+#endif
         "\tmov.b64 {f6_z0,f6_z1}, f6_f0; mov.b64 {f6_z2,f6_z3}, f6_f1; mov.b64 {f6_z4,f6_z5}, f6_f2; mov.b64 {f6_z6,f6_z7}, f6_f3;\n"
         "\tadd.cc.u32 f6_z1, f6_z1, f6_w0; addc.cc.u32 f6_z2, f6_z2, f6_w1; addc.cc.u32 f6_z3, f6_z3, f6_w2;\n"
         "\taddc.cc.u32 f6_z4, f6_z4, f6_w3; addc.cc.u32 f6_z5, f6_z5, f6_w4; addc.cc.u32 f6_z6, f6_z6, f6_w5;\n"
@@ -1264,10 +1437,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f6_sfz, {f6_z0, f6_z8};\n"
         "\tmul.wide.u32 f6_sft, f6_z8, 977; add.cc.u64 f6_sft, f6_sft, f6_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f6_z2, f6_z2, 0;\n"
+#endif
         "\tmov.b64 {f6_z0, f6_sfl}, f6_sft;\n"
         "\tadd.cc.u32 f6_z1, f6_z1, f6_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f6_z2, f6_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f6_z0,f6_z0,0xC0DE0006;\n"
 #endif
@@ -1391,11 +1570,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f6_t, f6_x10, 977; addc.cc.u64 f6_f1, f6_r1, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x12, 977; addc.cc.u64 f6_f2, f6_r2, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x14, 977; addc.cc.u64 f6_f3, f6_r3, f6_t;\n"
-        "\taddc.u32 f6_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 6)
+        "\tmad.wide.u32 f6_g0, f6_x9, 977, f6_h0;\n"
+        "\tmad.wide.u32 f6_g1, f6_x11, 977, f6_h1;\n"
+        "\tmad.wide.u32 f6_g2, f6_x13, 977, f6_h2;\n"
+        "\tmad.wide.u32 f6_g3, f6_x15, 977, f6_h3;\n"
+#else
         "\tmul.wide.u32 f6_t, f6_x9, 977;  add.cc.u64  f6_g0, f6_h0, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x11, 977; addc.cc.u64 f6_g1, f6_h1, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x13, 977; addc.cc.u64 f6_g2, f6_h2, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x15, 977; addc.u64 f6_g3, f6_h3, f6_t;\n"
+#endif
         "\tmov.b64 {f6_z0,f6_z1}, f6_f0;\n"
         "\tmov.b64 {f6_z2,f6_z3}, f6_f1;\n"
         "\tmov.b64 {f6_z4,f6_z5}, f6_f2;\n"
@@ -1411,7 +1597,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f6_z5, f6_z5, f6_w4;\n"
         "\taddc.cc.u32 f6_z6, f6_z6, f6_w5;\n"
         "\taddc.cc.u32 f6_z7, f6_z7, f6_w6;\n"
-        "\taddc.u32 f6_z8, f6_f8, f6_w7;\n"
+        "\taddc.u32 f6_z8, 0, f6_w7;\n"
         "\t{ .reg .u64 f6_sfz,f6_sft; .reg .u32 f6_sfl;\n\tmov.b64 f6_sfz, {f6_z0, f6_z8};\n\tmul.wide.u32 f6_sft, f6_z8, 977; add.cc.u64 f6_sft, f6_sft, f6_sfz;\n\taddc.u32 f6_m2, 0, 0;\n\tmov.b64 {f6_z0, f6_sfl}, f6_sft;\n\tadd.cc.u32 f6_z1, f6_z1, f6_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f6_z2, f6_z2, f6_m2;"
@@ -1545,16 +1731,37 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f7_z0,f7_z1,f7_z2,f7_z3,f7_z4,f7_z5,f7_z6,f7_z7,f7_z8,f7_w0,f7_w1,f7_w2,f7_w3,f7_w4,f7_w5,f7_w6,f7_w7,f7_m2;\n"
         "\tmov.b64 f7_r0, {f7_x0,f7_x1}; mov.b64 f7_r1, {f7_x2,f7_x3}; mov.b64 f7_r2, {f7_x4,f7_x5}; mov.b64 f7_r3, {f7_x6,f7_x7};\n"
         "\tmov.b64 f7_h0, {f7_x8,f7_x9}; mov.b64 f7_h1, {f7_x10,f7_x11}; mov.b64 f7_h2, {f7_x12,f7_x13}; mov.b64 f7_h3, {f7_x14,f7_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 7)
+        "\tmad.wide.u32 f7_g0, f7_x9, 977, f7_h0;\n"
+        "\tmad.wide.u32 f7_g1, f7_x11, 977, f7_h1;\n"
+        "\tmad.wide.u32 f7_g2, f7_x13, 977, f7_h2;\n"
+        "\tmad.wide.u32 f7_g3, f7_x15, 977, f7_h3;\n"
+#else
         "\tmul.wide.u32 f7_t, f7_x9, 977;  add.cc.u64  f7_g0, f7_h0, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x11, 977; addc.cc.u64 f7_g1, f7_h1, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x13, 977; addc.cc.u64 f7_g2, f7_h2, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x15, 977; addc.u64 f7_g3, f7_h3, f7_t;\n"
+#endif
         "\tmov.b64 {f7_w0,f7_w1}, f7_g0; mov.b64 {f7_w2,f7_w3}, f7_g1; mov.b64 {f7_w4,f7_w5}, f7_g2; mov.b64 {f7_w6,f7_w7}, f7_g3;\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 7))
+        "\tmad.wide.u32 f7_f0, f7_x8, 977, f7_r0;\n"
+        "\tmad.wide.u32 f7_f1, f7_x10, 977, f7_r1;\n"
+        "\tmad.wide.u32 f7_f2, f7_x12, 977, f7_r2;\n"
+        "\tmad.wide.u32 f7_f3, f7_x14, 977, f7_r3;\n"
+        "\tmov.u32 f7_z8, f7_w7;\n"
+#elif QSB_FOLD67
+        "\tmul.wide.u32 f7_t, f7_x8, 977;  add.cc.u64  f7_f0, f7_r0, f7_t;\n"
+        "\tmul.wide.u32 f7_t, f7_x10, 977; addc.cc.u64 f7_f1, f7_r1, f7_t;\n"
+        "\tmul.wide.u32 f7_t, f7_x12, 977; addc.cc.u64 f7_f2, f7_r2, f7_t;\n"
+        "\tmul.wide.u32 f7_t, f7_x14, 977; addc.u64 f7_f3, f7_r3, f7_t;\n"
+        "\tmov.u32 f7_z8, f7_w7;\n"
+#else
         "\tmul.wide.u32 f7_t, f7_x8, 977;  add.cc.u64  f7_f0, f7_r0, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x10, 977; addc.cc.u64 f7_f1, f7_r1, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x12, 977; addc.cc.u64 f7_f2, f7_r2, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x14, 977; addc.cc.u64 f7_f3, f7_r3, f7_t;\n"
         "\taddc.u32 f7_z8, f7_w7, 0;\n"
+#endif
         "\tmov.b64 {f7_z0,f7_z1}, f7_f0; mov.b64 {f7_z2,f7_z3}, f7_f1; mov.b64 {f7_z4,f7_z5}, f7_f2; mov.b64 {f7_z6,f7_z7}, f7_f3;\n"
         "\tadd.cc.u32 f7_z1, f7_z1, f7_w0; addc.cc.u32 f7_z2, f7_z2, f7_w1; addc.cc.u32 f7_z3, f7_z3, f7_w2;\n"
         "\taddc.cc.u32 f7_z4, f7_z4, f7_w3; addc.cc.u32 f7_z5, f7_z5, f7_w4; addc.cc.u32 f7_z6, f7_z6, f7_w5;\n"
@@ -1563,10 +1770,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f7_sfz, {f7_z0, f7_z8};\n"
         "\tmul.wide.u32 f7_sft, f7_z8, 977; add.cc.u64 f7_sft, f7_sft, f7_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f7_z2, f7_z2, 0;\n"
+#endif
         "\tmov.b64 {f7_z0, f7_sfl}, f7_sft;\n"
         "\tadd.cc.u32 f7_z1, f7_z1, f7_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f7_z2, f7_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f7_z0,f7_z0,0xC0DE0007;\n"
 #endif
@@ -1690,11 +1903,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f7_t, f7_x10, 977; addc.cc.u64 f7_f1, f7_r1, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x12, 977; addc.cc.u64 f7_f2, f7_r2, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x14, 977; addc.cc.u64 f7_f3, f7_r3, f7_t;\n"
-        "\taddc.u32 f7_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 7)
+        "\tmad.wide.u32 f7_g0, f7_x9, 977, f7_h0;\n"
+        "\tmad.wide.u32 f7_g1, f7_x11, 977, f7_h1;\n"
+        "\tmad.wide.u32 f7_g2, f7_x13, 977, f7_h2;\n"
+        "\tmad.wide.u32 f7_g3, f7_x15, 977, f7_h3;\n"
+#else
         "\tmul.wide.u32 f7_t, f7_x9, 977;  add.cc.u64  f7_g0, f7_h0, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x11, 977; addc.cc.u64 f7_g1, f7_h1, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x13, 977; addc.cc.u64 f7_g2, f7_h2, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x15, 977; addc.u64 f7_g3, f7_h3, f7_t;\n"
+#endif
         "\tmov.b64 {f7_z0,f7_z1}, f7_f0;\n"
         "\tmov.b64 {f7_z2,f7_z3}, f7_f1;\n"
         "\tmov.b64 {f7_z4,f7_z5}, f7_f2;\n"
@@ -1710,7 +1930,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f7_z5, f7_z5, f7_w4;\n"
         "\taddc.cc.u32 f7_z6, f7_z6, f7_w5;\n"
         "\taddc.cc.u32 f7_z7, f7_z7, f7_w6;\n"
-        "\taddc.u32 f7_z8, f7_f8, f7_w7;\n"
+        "\taddc.u32 f7_z8, 0, f7_w7;\n"
         "\t{ .reg .u64 f7_sfz,f7_sft; .reg .u32 f7_sfl;\n\tmov.b64 f7_sfz, {f7_z0, f7_z8};\n\tmul.wide.u32 f7_sft, f7_z8, 977; add.cc.u64 f7_sft, f7_sft, f7_sfz;\n\taddc.u32 f7_m2, 0, 0;\n\tmov.b64 {f7_z0, f7_sfl}, f7_sft;\n\tadd.cc.u32 f7_z1, f7_z1, f7_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f7_z2, f7_z2, f7_m2;"
@@ -1844,16 +2064,30 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f8_z0,f8_z1,f8_z2,f8_z3,f8_z4,f8_z5,f8_z6,f8_z7,f8_z8,f8_w0,f8_w1,f8_w2,f8_w3,f8_w4,f8_w5,f8_w6,f8_w7,f8_m2;\n"
         "\tmov.b64 f8_r0, {f8_x0,f8_x1}; mov.b64 f8_r1, {f8_x2,f8_x3}; mov.b64 f8_r2, {f8_x4,f8_x5}; mov.b64 f8_r3, {f8_x6,f8_x7};\n"
         "\tmov.b64 f8_h0, {f8_x8,f8_x9}; mov.b64 f8_h1, {f8_x10,f8_x11}; mov.b64 f8_h2, {f8_x12,f8_x13}; mov.b64 f8_h3, {f8_x14,f8_x15};\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 8))
+        "\tmad.wide.u32 f8_f0, f8_x8, 977, f8_r0;\n"
+        "\tmad.wide.u32 f8_f1, f8_x10, 977, f8_r1;\n"
+        "\tmad.wide.u32 f8_f2, f8_x12, 977, f8_r2;\n"
+        "\tmad.wide.u32 f8_f3, f8_x14, 977, f8_r3;\n"
+#else
+        "\tmul.wide.u32 f8_t, f8_x8, 977;  add.cc.u64  f8_f0, f8_r0, f8_t;\n"
+        "\tmul.wide.u32 f8_t, f8_x10, 977; addc.cc.u64 f8_f1, f8_r1, f8_t;\n"
+        "\tmul.wide.u32 f8_t, f8_x12, 977; addc.cc.u64 f8_f2, f8_r2, f8_t;\n"
+        "\tmul.wide.u32 f8_t, f8_x14, 977; addc.u64 f8_f3, f8_r3, f8_t;\n"
+#endif
+#if QSB_FUSED_HIGH_MASK & (1 << 8)
+        "\tmad.wide.u32 f8_g0, f8_x9, 977, f8_h0;\n"
+        "\tmad.wide.u32 f8_g1, f8_x11, 977, f8_h1;\n"
+        "\tmad.wide.u32 f8_g2, f8_x13, 977, f8_h2;\n"
+        "\tmad.wide.u32 f8_g3, f8_x15, 977, f8_h3;\n"
+#else
         "\tmul.wide.u32 f8_t, f8_x9, 977;  add.cc.u64  f8_g0, f8_h0, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x11, 977; addc.cc.u64 f8_g1, f8_h1, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x13, 977; addc.cc.u64 f8_g2, f8_h2, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x15, 977; addc.u64 f8_g3, f8_h3, f8_t;\n"
+#endif
         "\tmov.b64 {f8_w0,f8_w1}, f8_g0; mov.b64 {f8_w2,f8_w3}, f8_g1; mov.b64 {f8_w4,f8_w5}, f8_g2; mov.b64 {f8_w6,f8_w7}, f8_g3;\n"
-        "\tmul.wide.u32 f8_t, f8_x8, 977;  add.cc.u64  f8_f0, f8_r0, f8_t;\n"
-        "\tmul.wide.u32 f8_t, f8_x10, 977; addc.cc.u64 f8_f1, f8_r1, f8_t;\n"
-        "\tmul.wide.u32 f8_t, f8_x12, 977; addc.cc.u64 f8_f2, f8_r2, f8_t;\n"
-        "\tmul.wide.u32 f8_t, f8_x14, 977; addc.cc.u64 f8_f3, f8_r3, f8_t;\n"
-        "\taddc.u32 f8_z8, f8_w7, 0;\n"
+        "\tmov.u32 f8_z8, f8_w7;\n"
         "\tmov.b64 {f8_z0,f8_z1}, f8_f0; mov.b64 {f8_z2,f8_z3}, f8_f1; mov.b64 {f8_z4,f8_z5}, f8_f2; mov.b64 {f8_z6,f8_z7}, f8_f3;\n"
         "\tadd.cc.u32 f8_z1, f8_z1, f8_w0; addc.cc.u32 f8_z2, f8_z2, f8_w1; addc.cc.u32 f8_z3, f8_z3, f8_w2;\n"
         "\taddc.cc.u32 f8_z4, f8_z4, f8_w3; addc.cc.u32 f8_z5, f8_z5, f8_w4; addc.cc.u32 f8_z6, f8_z6, f8_w5;\n"
@@ -1862,10 +2096,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f8_sfz, {f8_z0, f8_z8};\n"
         "\tmul.wide.u32 f8_sft, f8_z8, 977; add.cc.u64 f8_sft, f8_sft, f8_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f8_z2, f8_z2, 0;\n"
+#endif
         "\tmov.b64 {f8_z0, f8_sfl}, f8_sft;\n"
         "\tadd.cc.u32 f8_z1, f8_z1, f8_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f8_z2, f8_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f8_z0,f8_z0,0xC0DE0008;\n"
 #endif
@@ -1989,11 +2229,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f8_t, f8_x10, 977; addc.cc.u64 f8_f1, f8_r1, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x12, 977; addc.cc.u64 f8_f2, f8_r2, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x14, 977; addc.cc.u64 f8_f3, f8_r3, f8_t;\n"
-        "\taddc.u32 f8_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 8)
+        "\tmad.wide.u32 f8_g0, f8_x9, 977, f8_h0;\n"
+        "\tmad.wide.u32 f8_g1, f8_x11, 977, f8_h1;\n"
+        "\tmad.wide.u32 f8_g2, f8_x13, 977, f8_h2;\n"
+        "\tmad.wide.u32 f8_g3, f8_x15, 977, f8_h3;\n"
+#else
         "\tmul.wide.u32 f8_t, f8_x9, 977;  add.cc.u64  f8_g0, f8_h0, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x11, 977; addc.cc.u64 f8_g1, f8_h1, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x13, 977; addc.cc.u64 f8_g2, f8_h2, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x15, 977; addc.u64 f8_g3, f8_h3, f8_t;\n"
+#endif
         "\tmov.b64 {f8_z0,f8_z1}, f8_f0;\n"
         "\tmov.b64 {f8_z2,f8_z3}, f8_f1;\n"
         "\tmov.b64 {f8_z4,f8_z5}, f8_f2;\n"
@@ -2009,7 +2256,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f8_z5, f8_z5, f8_w4;\n"
         "\taddc.cc.u32 f8_z6, f8_z6, f8_w5;\n"
         "\taddc.cc.u32 f8_z7, f8_z7, f8_w6;\n"
-        "\taddc.u32 f8_z8, f8_f8, f8_w7;\n"
+        "\taddc.u32 f8_z8, 0, f8_w7;\n"
         "\t{ .reg .u64 f8_sfz,f8_sft; .reg .u32 f8_sfl;\n\tmov.b64 f8_sfz, {f8_z0, f8_z8};\n\tmul.wide.u32 f8_sft, f8_z8, 977; add.cc.u64 f8_sft, f8_sft, f8_sfz;\n\taddc.u32 f8_m2, 0, 0;\n\tmov.b64 {f8_z0, f8_sfl}, f8_sft;\n\tadd.cc.u32 f8_z1, f8_z1, f8_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f8_z2, f8_z2, f8_m2;"
@@ -2099,10 +2346,17 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f9_z0,f9_z1,f9_z2,f9_z3,f9_z4,f9_z5,f9_z6,f9_z7,f9_z8,f9_w0,f9_w1,f9_w2,f9_w3,f9_w4,f9_w5,f9_w6,f9_w7,f9_m2;\n"
         "\tmov.b64 f9_fr0, {f9_x0,f9_x1}; mov.b64 f9_fr1, {f9_x2,f9_x3}; mov.b64 f9_fr2, {f9_x4,f9_x5}; mov.b64 f9_fr3, {f9_x6,f9_x7};\n"
         "\tmov.b64 f9_h0, {f9_x8,f9_x9}; mov.b64 f9_h1, {f9_x10,f9_x11}; mov.b64 f9_h2, {f9_x12,f9_x13}; mov.b64 f9_h3, {f9_x14,f9_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 9)
+        "\tmad.wide.u32 f9_g0, f9_x9, 977, f9_h0;\n"
+        "\tmad.wide.u32 f9_g1, f9_x11, 977, f9_h1;\n"
+        "\tmad.wide.u32 f9_g2, f9_x13, 977, f9_h2;\n"
+        "\tmad.wide.u32 f9_g3, f9_x15, 977, f9_h3;\n"
+#else
         "\tmul.wide.u32 f9_t, f9_x9, 977;  add.cc.u64  f9_g0, f9_h0, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x11, 977; addc.cc.u64 f9_g1, f9_h1, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x13, 977; addc.cc.u64 f9_g2, f9_h2, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x15, 977; addc.u64 f9_g3, f9_h3, f9_t;\n"
+#endif
         "\tmov.b64 {f9_w0,f9_w1}, f9_g0; mov.b64 {f9_w2,f9_w3}, f9_g1; mov.b64 {f9_w4,f9_w5}, f9_g2; mov.b64 {f9_w6,f9_w7}, f9_g3;\n"
         "\tmul.wide.u32 f9_t, f9_x8, 977;  add.cc.u64  f9_f0, f9_fr0, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x10, 977; addc.cc.u64 f9_f1, f9_fr1, f9_t;\n"
@@ -2117,10 +2371,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f9_sfz, {f9_z0, f9_z8};\n"
         "\tmul.wide.u32 f9_sft, f9_z8, 977; add.cc.u64 f9_sft, f9_sft, f9_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f9_z2, f9_z2, 0;\n"
+#endif
         "\tmov.b64 {f9_z0, f9_sfl}, f9_sft;\n"
         "\tadd.cc.u32 f9_z1, f9_z1, f9_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f9_z2, f9_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f9_z0,f9_z0,0xC0DE0009;\n"
 #endif
@@ -2175,13 +2435,24 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.u32 f9_x0, 0;\n"
         "\tmov.b64 {f9_x2,f9_x3}, f9_e2; mov.b64 {f9_x4,f9_x5}, f9_e4; mov.b64 {f9_x6,f9_x7}, f9_e6;\n"
         "\tmov.b64 {f9_x8,f9_x9}, f9_e8; mov.b64 {f9_x10,f9_x11}, f9_e10; mov.b64 {f9_x12,f9_x13}, f9_e12;\n"
+#if !QSB_SQ9_ADD_DBL
         "\tmov.u32 f9_x14, 0; mov.u32 f9_x15, 0;\n"
+#endif
         "\tmov.b64 {f9_x1,f9_y2}, f9_o1; mov.b64 {f9_y3,f9_y4}, f9_o3; mov.b64 {f9_y5,f9_y6}, f9_o5;\n"
         "\tmov.b64 {f9_y7,f9_y8}, f9_o7; mov.b64 {f9_y9,f9_y10}, f9_o9; mov.b64 {f9_y11,f9_y12}, f9_o11; mov.b64 {f9_y13,f9_y14}, f9_o13;\n"
         "\tadd.cc.u32 f9_x2, f9_x2, f9_y2; addc.cc.u32 f9_x3, f9_x3, f9_y3;\n"
         "\taddc.cc.u32 f9_x4, f9_x4, f9_y4; addc.cc.u32 f9_x5, f9_x5, f9_y5; addc.cc.u32 f9_x6, f9_x6, f9_y6;\n"
         "\taddc.cc.u32 f9_x7, f9_x7, f9_y7; addc.cc.u32 f9_x8, f9_x8, f9_y8; addc.cc.u32 f9_x9, f9_x9, f9_y9;\n"
         "\taddc.cc.u32 f9_x10, f9_x10, f9_y10; addc.cc.u32 f9_x11, f9_x11, f9_y11; addc.cc.u32 f9_x12, f9_x12, f9_y12;\n"
+#if QSB_SQ9_ADD_DBL
+        "\taddc.cc.u32 f9_x13, f9_x13, f9_y13; addc.u32 f9_x14, f9_y14, 0;\n"
+        "\tadd.cc.u32 f9_x1, f9_x1, f9_x1; addc.cc.u32 f9_x2, f9_x2, f9_x2; addc.cc.u32 f9_x3, f9_x3, f9_x3;\n"
+        "\taddc.cc.u32 f9_x4, f9_x4, f9_x4; addc.cc.u32 f9_x5, f9_x5, f9_x5; addc.cc.u32 f9_x6, f9_x6, f9_x6;\n"
+        "\taddc.cc.u32 f9_x7, f9_x7, f9_x7; addc.cc.u32 f9_x8, f9_x8, f9_x8; addc.cc.u32 f9_x9, f9_x9, f9_x9;\n"
+        "\taddc.cc.u32 f9_x10, f9_x10, f9_x10; addc.cc.u32 f9_x11, f9_x11, f9_x11; addc.cc.u32 f9_x12, f9_x12, f9_x12;\n"
+        "\taddc.cc.u32 f9_x13, f9_x13, f9_x13; addc.cc.u32 f9_x14, f9_x14, f9_x14;\n"
+        "\taddc.u32 f9_x15, 0, 0;\n"
+#else
         "\taddc.cc.u32 f9_x13, f9_x13, f9_y13; addc.cc.u32 f9_x14, f9_x14, f9_y14; addc.u32 f9_x15, f9_x15, 0;\n"
         "\tshf.l.wrap.b32 f9_x15, f9_x14, f9_x15, 1; shf.l.wrap.b32 f9_x14, f9_x13, f9_x14, 1;\n"
         "\tshf.l.wrap.b32 f9_x13, f9_x12, f9_x13, 1; shf.l.wrap.b32 f9_x12, f9_x11, f9_x12, 1;\n"
@@ -2191,6 +2462,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tshf.l.wrap.b32 f9_x5, f9_x4, f9_x5, 1; shf.l.wrap.b32 f9_x4, f9_x3, f9_x4, 1;\n"
         "\tshf.l.wrap.b32 f9_x3, f9_x2, f9_x3, 1; shf.l.wrap.b32 f9_x2, f9_x1, f9_x2, 1;\n"
         "\tshf.l.wrap.b32 f9_x1, f9_x0, f9_x1, 1;\n"
+#endif
         "\tmov.b64 f9_d0, {f9_x0,f9_x1}; mov.b64 f9_d1, {f9_x2,f9_x3}; mov.b64 f9_d2, {f9_x4,f9_x5}; mov.b64 f9_d3, {f9_x6,f9_x7};\n"
         "\tmov.b64 f9_d4, {f9_x8,f9_x9}; mov.b64 f9_d5, {f9_x10,f9_x11}; mov.b64 f9_d6, {f9_x12,f9_x13}; mov.b64 f9_d7, {f9_x14,f9_x15};\n"
         "\tmul.wide.u32 f9_t, f9_a0, f9_a0; add.cc.u64 f9_d0, f9_d0, f9_t;\n"
@@ -2211,16 +2483,23 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f9_t, f9_x10, 977; addc.cc.u64 f9_f1, f9_fr1, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x12, 977; addc.cc.u64 f9_f2, f9_fr2, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x14, 977; addc.cc.u64 f9_f3, f9_fr3, f9_t;\n"
-        "\taddc.u32 f9_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 9)
+        "\tmad.wide.u32 f9_g0, f9_x9, 977, f9_h0;\n"
+        "\tmad.wide.u32 f9_g1, f9_x11, 977, f9_h1;\n"
+        "\tmad.wide.u32 f9_g2, f9_x13, 977, f9_h2;\n"
+        "\tmad.wide.u32 f9_g3, f9_x15, 977, f9_h3;\n"
+#else
         "\tmul.wide.u32 f9_t, f9_x9, 977;  add.cc.u64  f9_g0, f9_h0, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x11, 977; addc.cc.u64 f9_g1, f9_h1, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x13, 977; addc.cc.u64 f9_g2, f9_h2, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x15, 977; addc.u64 f9_g3, f9_h3, f9_t;\n"
+#endif
         "\tmov.b64 {f9_z0,f9_z1}, f9_f0; mov.b64 {f9_z2,f9_z3}, f9_f1; mov.b64 {f9_z4,f9_z5}, f9_f2; mov.b64 {f9_z6,f9_z7}, f9_f3;\n"
         "\tmov.b64 {f9_w0,f9_w1}, f9_g0; mov.b64 {f9_w2,f9_w3}, f9_g1; mov.b64 {f9_w4,f9_w5}, f9_g2; mov.b64 {f9_w6,f9_w7}, f9_g3;\n"
         "\tadd.cc.u32 f9_z1, f9_z1, f9_w0; addc.cc.u32 f9_z2, f9_z2, f9_w1; addc.cc.u32 f9_z3, f9_z3, f9_w2;\n"
         "\taddc.cc.u32 f9_z4, f9_z4, f9_w3; addc.cc.u32 f9_z5, f9_z5, f9_w4; addc.cc.u32 f9_z6, f9_z6, f9_w5;\n"
-        "\taddc.cc.u32 f9_z7, f9_z7, f9_w6; addc.u32 f9_z8, f9_f8, f9_w7;\n"
+        "\taddc.cc.u32 f9_z7, f9_z7, f9_w6; addc.u32 f9_z8, 0, f9_w7;\n"
         "\t{ .reg .u64 f9_sfz,f9_sft; .reg .u32 f9_sfl;\n\tmov.b64 f9_sfz, {f9_z0, f9_z8};\n\tmul.wide.u32 f9_sft, f9_z8, 977; add.cc.u64 f9_sft, f9_sft, f9_sfz;\n\taddc.u32 f9_m2, 0, 0;\n\tmov.b64 {f9_z0, f9_sfl}, f9_sft;\n\tadd.cc.u32 f9_z1, f9_z1, f9_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f9_z2, f9_z2, f9_m2;"
@@ -2237,6 +2516,26 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t\n"
         ".reg .u64 x3_high;\n"
         "\n"
+#if QSB_PACKED_CORRECTION
+        "\t.reg .u64 x3_t,x3_ext; .reg .s32 packed_x3_h,packed_x3_sign; .reg .u32 packed_x3_lo,packed_x3_hi;\n"
+        "\tadd.cc.u64 T0,T0,PPP0;\n"
+        "\taddc.cc.u64 T1,T1,PPP1;\n"
+        "\taddc.cc.u64 T2,T2,PPP2;\n"
+        "\taddc.cc.u64 T3,T3,PPP3;\n"
+        "\taddc.u32 packed_x3_h,0,0;\n"
+        "\tsub.cc.u64 T0,T0,Q0;\n"
+        "\tsubc.cc.u64 T1,T1,Q1;\n"
+        "\tsubc.cc.u64 T2,T2,Q2;\n"
+        "\tsubc.cc.u64 T3,T3,Q3;\n"
+        "\tsubc.u32 packed_x3_h,packed_x3_h,0;\n"
+        "\tsub.cc.u64 T0,T0,Q0;\n"
+        "\tsubc.cc.u64 T1,T1,Q1;\n"
+        "\tsubc.cc.u64 T2,T2,Q2;\n"
+        "\tsubc.cc.u64 T3,T3,Q3;\n"
+        "\tsubc.u32 packed_x3_h,packed_x3_h,0;\n"
+        "\tshr.s32 packed_x3_sign,packed_x3_h,31; mov.b64 x3_ext,{packed_x3_sign,packed_x3_sign};\n"
+        "\tmul.wide.s32 x3_t,packed_x3_h,977; mov.b64 {packed_x3_lo,packed_x3_hi},x3_t; add.u32 packed_x3_hi,packed_x3_hi,packed_x3_h; mov.b64 x3_t,{packed_x3_lo,packed_x3_hi};\n"
+#else
         "\t.reg .u64 x3_h,x3_t,x3_ext;\n"
         "\tadd.cc.u64 T0,T0,PPP0;\n"
         "\taddc.cc.u64 T1,T1,PPP1;\n"
@@ -2255,6 +2554,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tsubc.u64 x3_h,x3_h,0;\n"
         "\tshr.s64 x3_ext,x3_h,63;\n"
         "\tmul.lo.u64 x3_t,x3_h,0x1000003d1;\n"
+#endif
         "\tadd.cc.u64 T0,T0,x3_t;\n"
         "\t"
 #if QSB_SHORT_CARRY2
@@ -2388,16 +2688,30 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f13_z0,f13_z1,f13_z2,f13_z3,f13_z4,f13_z5,f13_z6,f13_z7,f13_z8,f13_w0,f13_w1,f13_w2,f13_w3,f13_w4,f13_w5,f13_w6,f13_w7,f13_m2;\n"
         "\tmov.b64 f13_r0, {f13_x0,f13_x1}; mov.b64 f13_r1, {f13_x2,f13_x3}; mov.b64 f13_r2, {f13_x4,f13_x5}; mov.b64 f13_r3, {f13_x6,f13_x7};\n"
         "\tmov.b64 f13_h0, {f13_x8,f13_x9}; mov.b64 f13_h1, {f13_x10,f13_x11}; mov.b64 f13_h2, {f13_x12,f13_x13}; mov.b64 f13_h3, {f13_x14,f13_x15};\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 13)
+        "\tmad.wide.u32 f13_g0, f13_x9, 977, f13_h0;\n"
+        "\tmad.wide.u32 f13_g1, f13_x11, 977, f13_h1;\n"
+        "\tmad.wide.u32 f13_g2, f13_x13, 977, f13_h2;\n"
+        "\tmad.wide.u32 f13_g3, f13_x15, 977, f13_h3;\n"
+#else
         "\tmul.wide.u32 f13_t, f13_x9, 977;  add.cc.u64  f13_g0, f13_h0, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x11, 977; addc.cc.u64 f13_g1, f13_h1, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x13, 977; addc.cc.u64 f13_g2, f13_h2, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x15, 977; addc.u64 f13_g3, f13_h3, f13_t;\n"
+#endif
         "\tmov.b64 {f13_w0,f13_w1}, f13_g0; mov.b64 {f13_w2,f13_w3}, f13_g1; mov.b64 {f13_w4,f13_w5}, f13_g2; mov.b64 {f13_w6,f13_w7}, f13_g3;\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 13))
+        "\tmad.wide.u32 f13_f0, f13_x8, 977, f13_r0;\n"
+        "\tmad.wide.u32 f13_f1, f13_x10, 977, f13_r1;\n"
+        "\tmad.wide.u32 f13_f2, f13_x12, 977, f13_r2;\n"
+        "\tmad.wide.u32 f13_f3, f13_x14, 977, f13_r3;\n"
+#else
         "\tmul.wide.u32 f13_t, f13_x8, 977;  add.cc.u64  f13_f0, f13_r0, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x10, 977; addc.cc.u64 f13_f1, f13_r1, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x12, 977; addc.cc.u64 f13_f2, f13_r2, f13_t;\n"
-        "\tmul.wide.u32 f13_t, f13_x14, 977; addc.cc.u64 f13_f3, f13_r3, f13_t;\n"
-        "\taddc.u32 f13_z8, f13_w7, 0;\n"
+        "\tmul.wide.u32 f13_t, f13_x14, 977; addc.u64 f13_f3, f13_r3, f13_t;\n"
+#endif
+        "\tmov.u32 f13_z8, f13_w7;\n"
         "\tmov.b64 {f13_z0,f13_z1}, f13_f0; mov.b64 {f13_z2,f13_z3}, f13_f1; mov.b64 {f13_z4,f13_z5}, f13_f2; mov.b64 {f13_z6,f13_z7}, f13_f3;\n"
         "\tadd.cc.u32 f13_z1, f13_z1, f13_w0; addc.cc.u32 f13_z2, f13_z2, f13_w1; addc.cc.u32 f13_z3, f13_z3, f13_w2;\n"
         "\taddc.cc.u32 f13_z4, f13_z4, f13_w3; addc.cc.u32 f13_z5, f13_z5, f13_w4; addc.cc.u32 f13_z6, f13_z6, f13_w5;\n"
@@ -2406,10 +2720,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f13_sfz, {f13_z0, f13_z8};\n"
         "\tmul.wide.u32 f13_sft, f13_z8, 977; add.cc.u64 f13_sft, f13_sft, f13_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f13_z2, f13_z2, 0;\n"
+#endif
         "\tmov.b64 {f13_z0, f13_sfl}, f13_sft;\n"
         "\tadd.cc.u32 f13_z1, f13_z1, f13_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f13_z2, f13_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f13_z0,f13_z0,0xC0DE000A;\n"
 #endif
@@ -2533,11 +2853,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f13_t, f13_x10, 977; addc.cc.u64 f13_f1, f13_r1, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x12, 977; addc.cc.u64 f13_f2, f13_r2, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x14, 977; addc.cc.u64 f13_f3, f13_r3, f13_t;\n"
-        "\taddc.u32 f13_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 13)
+        "\tmad.wide.u32 f13_g0, f13_x9, 977, f13_h0;\n"
+        "\tmad.wide.u32 f13_g1, f13_x11, 977, f13_h1;\n"
+        "\tmad.wide.u32 f13_g2, f13_x13, 977, f13_h2;\n"
+        "\tmad.wide.u32 f13_g3, f13_x15, 977, f13_h3;\n"
+#else
         "\tmul.wide.u32 f13_t, f13_x9, 977;  add.cc.u64  f13_g0, f13_h0, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x11, 977; addc.cc.u64 f13_g1, f13_h1, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x13, 977; addc.cc.u64 f13_g2, f13_h2, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x15, 977; addc.u64 f13_g3, f13_h3, f13_t;\n"
+#endif
         "\tmov.b64 {f13_z0,f13_z1}, f13_f0;\n"
         "\tmov.b64 {f13_z2,f13_z3}, f13_f1;\n"
         "\tmov.b64 {f13_z4,f13_z5}, f13_f2;\n"
@@ -2553,7 +2880,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f13_z5, f13_z5, f13_w4;\n"
         "\taddc.cc.u32 f13_z6, f13_z6, f13_w5;\n"
         "\taddc.cc.u32 f13_z7, f13_z7, f13_w6;\n"
-        "\taddc.u32 f13_z8, f13_f8, f13_w7;\n"
+        "\taddc.u32 f13_z8, 0, f13_w7;\n"
         "\t{ .reg .u64 f13_sfz,f13_sft; .reg .u32 f13_sfl;\n\tmov.b64 f13_sfz, {f13_z0, f13_z8};\n\tmul.wide.u32 f13_sft, f13_z8, 977; add.cc.u64 f13_sft, f13_sft, f13_sfz;\n\taddc.u32 f13_m2, 0, 0;\n\tmov.b64 {f13_z0, f13_sfl}, f13_sft;\n\tadd.cc.u32 f13_z1, f13_z1, f13_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f13_z2, f13_z2, f13_m2;"
@@ -2574,10 +2901,22 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "subc.cc.u64 Q1,Q1,T1;\n"
         "subc.cc.u64 Q2,Q2,T2;\n"
         "subc.cc.u64 Q3,Q3,T3;\n"
+#if QSB_PACKED_CORRECTION
+        ".reg .u32 packed_sub14_b,packed_sub14_lo,packed_sub14_hi;\n"
+        "subc.u32 packed_sub14_b,0,0;\n"
+        "and.b32 packed_sub14_lo,packed_sub14_b,977;\n"
+        "and.b32 packed_sub14_hi,packed_sub14_b,1;\n"
+        "mov.b64 sub14_lo,{packed_sub14_lo,packed_sub14_hi};\n"
+#else
         "subc.u64 sub14_borrow,0,0;\n"
         "and.b64 sub14_lo,sub14_borrow,0x1000003D1;\n"
+#endif
+#if QSB_SHORT_CARRY6
+        "sub.u64 Q0,Q0,sub14_lo;\n"
+#else
         "sub.cc.u64 Q0,Q0,sub14_lo;\n"
         "subc.u64 Q1,Q1,0;\n"
+#endif
         ".reg .u32 f15_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
@@ -2696,16 +3035,30 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f15_z0,f15_z1,f15_z2,f15_z3,f15_z4,f15_z5,f15_z6,f15_z7,f15_z8,f15_w0,f15_w1,f15_w2,f15_w3,f15_w4,f15_w5,f15_w6,f15_w7,f15_m2;\n"
         "\tmov.b64 f15_r0, {f15_x0,f15_x1}; mov.b64 f15_r1, {f15_x2,f15_x3}; mov.b64 f15_r2, {f15_x4,f15_x5}; mov.b64 f15_r3, {f15_x6,f15_x7};\n"
         "\tmov.b64 f15_h0, {f15_x8,f15_x9}; mov.b64 f15_h1, {f15_x10,f15_x11}; mov.b64 f15_h2, {f15_x12,f15_x13}; mov.b64 f15_h3, {f15_x14,f15_x15};\n"
+#if (QSB_FUSED_LOW_MASK & (1 << 15))
+        "\tmad.wide.u32 f15_f0, f15_x8, 977, f15_r0;\n"
+        "\tmad.wide.u32 f15_f1, f15_x10, 977, f15_r1;\n"
+        "\tmad.wide.u32 f15_f2, f15_x12, 977, f15_r2;\n"
+        "\tmad.wide.u32 f15_f3, f15_x14, 977, f15_r3;\n"
+#else
+        "\tmul.wide.u32 f15_t, f15_x8, 977;  add.cc.u64  f15_f0, f15_r0, f15_t;\n"
+        "\tmul.wide.u32 f15_t, f15_x10, 977; addc.cc.u64 f15_f1, f15_r1, f15_t;\n"
+        "\tmul.wide.u32 f15_t, f15_x12, 977; addc.cc.u64 f15_f2, f15_r2, f15_t;\n"
+        "\tmul.wide.u32 f15_t, f15_x14, 977; addc.u64 f15_f3, f15_r3, f15_t;\n"
+#endif
+#if QSB_FUSED_HIGH_MASK & (1 << 15)
+        "\tmad.wide.u32 f15_g0, f15_x9, 977, f15_h0;\n"
+        "\tmad.wide.u32 f15_g1, f15_x11, 977, f15_h1;\n"
+        "\tmad.wide.u32 f15_g2, f15_x13, 977, f15_h2;\n"
+        "\tmad.wide.u32 f15_g3, f15_x15, 977, f15_h3;\n"
+#else
         "\tmul.wide.u32 f15_t, f15_x9, 977;  add.cc.u64  f15_g0, f15_h0, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x11, 977; addc.cc.u64 f15_g1, f15_h1, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x13, 977; addc.cc.u64 f15_g2, f15_h2, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x15, 977; addc.u64 f15_g3, f15_h3, f15_t;\n"
+#endif
         "\tmov.b64 {f15_w0,f15_w1}, f15_g0; mov.b64 {f15_w2,f15_w3}, f15_g1; mov.b64 {f15_w4,f15_w5}, f15_g2; mov.b64 {f15_w6,f15_w7}, f15_g3;\n"
-        "\tmul.wide.u32 f15_t, f15_x8, 977;  add.cc.u64  f15_f0, f15_r0, f15_t;\n"
-        "\tmul.wide.u32 f15_t, f15_x10, 977; addc.cc.u64 f15_f1, f15_r1, f15_t;\n"
-        "\tmul.wide.u32 f15_t, f15_x12, 977; addc.cc.u64 f15_f2, f15_r2, f15_t;\n"
-        "\tmul.wide.u32 f15_t, f15_x14, 977; addc.cc.u64 f15_f3, f15_r3, f15_t;\n"
-        "\taddc.u32 f15_z8, f15_w7, 0;\n"
+        "\tmov.u32 f15_z8, f15_w7;\n"
         "\tmov.b64 {f15_z0,f15_z1}, f15_f0; mov.b64 {f15_z2,f15_z3}, f15_f1; mov.b64 {f15_z4,f15_z5}, f15_f2; mov.b64 {f15_z6,f15_z7}, f15_f3;\n"
         "\tadd.cc.u32 f15_z1, f15_z1, f15_w0; addc.cc.u32 f15_z2, f15_z2, f15_w1; addc.cc.u32 f15_z3, f15_z3, f15_w2;\n"
         "\taddc.cc.u32 f15_z4, f15_z4, f15_w3; addc.cc.u32 f15_z5, f15_z5, f15_w4; addc.cc.u32 f15_z6, f15_z6, f15_w5;\n"
@@ -2714,10 +3067,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 f15_sfz, {f15_z0, f15_z8};\n"
         "\tmul.wide.u32 f15_sft, f15_z8, 977; add.cc.u64 f15_sft, f15_sft, f15_sfz;\n"
 #if QSB_SHORT_CARRY2
+#if QSB_DROP_Z2_EARLY
+#else
         "\taddc.u32 f15_z2, f15_z2, 0;\n"
+#endif
         "\tmov.b64 {f15_z0, f15_sfl}, f15_sft;\n"
         "\tadd.cc.u32 f15_z1, f15_z1, f15_sfl; }\n"
+#if QSB_DROP_Z2
+#else
         "\taddc.u32 f15_z2, f15_z2, 0;\n"
+#endif
 #if QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f15_z0,f15_z0,0xC0DE000B;\n"
 #endif
@@ -2841,11 +3200,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f15_t, f15_x10, 977; addc.cc.u64 f15_f1, f15_r1, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x12, 977; addc.cc.u64 f15_f2, f15_r2, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x14, 977; addc.cc.u64 f15_f3, f15_r3, f15_t;\n"
-        "\taddc.u32 f15_f8, 0, 0;\n"
+        "\t\n"
+#if QSB_FUSED_HIGH_MASK & (1 << 15)
+        "\tmad.wide.u32 f15_g0, f15_x9, 977, f15_h0;\n"
+        "\tmad.wide.u32 f15_g1, f15_x11, 977, f15_h1;\n"
+        "\tmad.wide.u32 f15_g2, f15_x13, 977, f15_h2;\n"
+        "\tmad.wide.u32 f15_g3, f15_x15, 977, f15_h3;\n"
+#else
         "\tmul.wide.u32 f15_t, f15_x9, 977;  add.cc.u64  f15_g0, f15_h0, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x11, 977; addc.cc.u64 f15_g1, f15_h1, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x13, 977; addc.cc.u64 f15_g2, f15_h2, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x15, 977; addc.u64 f15_g3, f15_h3, f15_t;\n"
+#endif
         "\tmov.b64 {f15_z0,f15_z1}, f15_f0;\n"
         "\tmov.b64 {f15_z2,f15_z3}, f15_f1;\n"
         "\tmov.b64 {f15_z4,f15_z5}, f15_f2;\n"
@@ -2861,7 +3227,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f15_z5, f15_z5, f15_w4;\n"
         "\taddc.cc.u32 f15_z6, f15_z6, f15_w5;\n"
         "\taddc.cc.u32 f15_z7, f15_z7, f15_w6;\n"
-        "\taddc.u32 f15_z8, f15_f8, f15_w7;\n"
+        "\taddc.u32 f15_z8, 0, f15_w7;\n"
         "\t{ .reg .u64 f15_sfz,f15_sft; .reg .u32 f15_sfl;\n\tmov.b64 f15_sfz, {f15_z0, f15_z8};\n\tmul.wide.u32 f15_sft, f15_z8, 977; add.cc.u64 f15_sft, f15_sft, f15_sfz;\n\taddc.u32 f15_m2, 0, 0;\n\tmov.b64 {f15_z0, f15_sfl}, f15_sft;\n\tadd.cc.u32 f15_z1, f15_z1, f15_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f15_z2, f15_z2, f15_m2;"

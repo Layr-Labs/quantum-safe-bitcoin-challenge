@@ -1,3 +1,6 @@
+#ifndef QSB_CALLEE_COORDS
+#define QSB_CALLEE_COORDS 0
+#endif
 // First-state producer from dun999 PR212; paired finish from PR258.
 // Shared pre-inverse finish derived from dun999 PR258, ac9a6164.
 // Window SHA cache is inherited from odinfree; retain all parent notices.
@@ -85,7 +88,17 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    QSB_PRE_FMUL(t, xR, ZZ);
+#if QSB_ISO_FAST_X
+    (void)xR;
+    /* Branchless selection of ZZ or p-ZZ.  This is the same complement/add-p
+     * construction used by signed G-table loads, with a problem-uniform mask. */
+    uint64_t m=0ULL-(uint64_t)QSB_ISO_XNEG;
+    t[0]=ZZ[0]^m;t[1]=ZZ[1]^m;t[2]=ZZ[2]^m;t[3]=ZZ[3]^m;
+    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
+    UADDO1(t[0],c0);UADDC1(t[1],m);UADDC1(t[2],m);UADD1(t[3],m);
+#else
+    QSB_PRE_FMUL(t,xR,ZZ);
+#endif
     QSB_PRE_FSUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
     QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
@@ -209,8 +222,19 @@ __device__ __forceinline__ int qsb_k2s_front3(
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
+#ifndef QSB_SPECIAL_SECOND_SHA
+#define QSB_SPECIAL_SECOND_SHA 0
+#endif
+#if QSB_SPECIAL_SECOND_SHA
+#include "../../sha_gate_fma.cuh"
+#endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#ifndef QSB_INLINE_SECOND_SHA_PAIR
+#define QSB_INLINE_SECOND_SHA_PAIR 0
+#endif
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t*,uint32_t*,uint32_t*,uint32_t*);
+
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
     uint32_t b2[16];
     #pragma unroll
@@ -221,19 +245,47 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     b2[15]=0x00000100;
     uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+#if QSB_SPECIAL_SECOND_SHA
+    _SHA256TransformDigest32Q(s2,state);
+#else
     _SHA256Transform(s2,b2);
+#endif
     z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
     z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
     z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
 }
-__device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
+#ifndef QSB_SHA_OUTLINE
+#define QSB_SHA_OUTLINE 0
+#endif
+#if QSB_SHA_OUTLINE
+__device__ __noinline__
+#else
+__device__ __forceinline__
+#endif
+QsbPairEpochZ qsb_pair_epoch_z_value(
     const uint32_t*firstA,const uint32_t*firstB,int lane){
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if QSB_INLINE_SECOND_SHA_PAIR
+    // Independent digest messages, with their own rolling schedules.
+    uint32_t wa[16],wb[16];
+    #pragma unroll
+    for(int i=0;i<16;i++) {
+        wa[i]=i<8?stateA[i]:(i==8?0x80000000u:(i==15?256u:0u));
+        wb[i]=i<8?stateB[i]:(i==8?0x80000000u:(i==15?256u:0u));
+    }
+    qsb_sha256_init_transform_pair(stateA,wa,stateB,wb);
+    #pragma unroll
+    for(int i=0;i<4;i++) {
+        out.a[i]=((uint64_t)stateA[6-2*i]<<32)|stateA[7-2*i];
+        out.b[i]=((uint64_t)stateB[6-2*i]<<32)|stateB[7-2*i];
+    }
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
@@ -359,12 +411,24 @@ __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *
     *o1=I[0]+a1+S1(f1)+Ch(f1,g1,h1)+K[63]+w1[15]+S0(b1)+Maj(b1,c1,d1);
 }
 
+#ifndef QSB_GATE_H0_FMA
+#define QSB_GATE_H0_FMA 0
+#endif
+#if QSB_GATE_H0_FMA
+#include "../../sha_gate_fma.cuh"
+#endif
+
 __device__ __forceinline__ int qsb_k2s_gate_h0(
     uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
     uint32_t pb0[16],pb1[16],h0,h1;
     qsb_gate_block(pb0,q1x,y_parities);
     qsb_gate_block(pb1,q2x,y_parities>>1);
+#if QSB_GATE_H0_FMA
+    h0=_SHA256Pubkey33H0(pb0);
+    h1=_SHA256Pubkey33H0(pb1);
+#else
     qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
+#endif
     if((h0>>(32-QSB_ZEROS_N))==0){*recid_out=0;return 1;}
     if((h1>>(32-QSB_ZEROS_N))==0){*recid_out=1;return 1;}
     return 0;
@@ -436,11 +500,15 @@ __device__ __noinline__ int qsb_pair_tail_value(
 // cannot bypass it, and neither the external verifier nor its inputs changes.
 __device__ __noinline__ int qsb_pair_verify_candidate(
     const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt){
-    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
+    uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
     uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
     if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
     _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
+    uint64_t invu[4]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3]};
+    _ModMult(inv,invu);             // transformed inverse -> original slope scale
+    rx[0]=QSB_U2R[0];rx[1]=QSB_U2R[1];rx[2]=QSB_U2R[2];rx[3]=QSB_U2R[3];
+    ry[0]=QSB_U2R[4];ry[1]=QSB_U2R[5];ry[2]=QSB_U2R[6];ry[3]=QSB_U2R[7];
     uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
     int recid=0;
     return qsb_k2s_gate(x1,x2,par,&recid)?recid+1:0;
@@ -450,11 +518,19 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 struct QsbPairFront3 {uint64_t words[16];int ok;};
 #if ZLAB_DUAL_EPOCH_SHA
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
-    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt
+#if !QSB_CALLEE_COORDS
+    ,
     uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+){
     uint64_t z[4]={z0,z1,z2,z3};
+#if QSB_CALLEE_COORDS
+    uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]},ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
+#else
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+#endif
     uint64_t prod[5],n[12];QsbPairFront3 out;
     out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
     Load256(out.words,prod);
@@ -480,12 +556,20 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
     uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,
+    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
+#if !QSB_CALLEE_COORDS
+    ,
     uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+){
     uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
     uint64_t inv[4]={v0,v1,v2,v3};
+#if QSB_CALLEE_COORDS
+    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]},ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+#else
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+#endif
     uint64_t q1x[4],q2x[4];int recid=0;
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
