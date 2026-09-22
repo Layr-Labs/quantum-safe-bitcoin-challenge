@@ -147,6 +147,74 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     return parities;
 }
 #endif
+/* Second SHA-256 over the 32-byte first digest.  Its message block is fixed
+ * except for the eight digest words: [d0..d7, 0x80000000, 0,0,0,0,0,0, 0x100].
+ * ASSEMBLY_SIGMA makes s0/s1 opaque asm, so nvcc cannot fold s0(0)=s1(0)=0 out
+ * of the first expansion even though it propagates the zero words themselves.
+ * The rows below are the WMIX identity with exactly those seven zero-argument
+ * sigmas and the zero addends removed, and with the chaining value written as
+ * literals instead of a loaded array; rounds, constants and order are
+ * unchanged.  0 restores the generic transform. */
+#ifndef QSB_Z2_ZERO_SIGMA
+#define QSB_Z2_ZERO_SIGMA 1
+#endif
+__device__ __forceinline__ void qsb_second_sha_z_words(const uint32_t *dg, uint64_t *z) {
+#if QSB_Z2_ZERO_SIGMA
+    uint32_t w[16];
+    #pragma unroll
+    for (int i=0;i<8;i++) w[i]=dg[i];
+    w[8]=0x80000000u;
+    #pragma unroll
+    for (int i=9;i<15;i++) w[i]=0u;
+    w[15]=0x00000100u;
+    uint32_t a=0x6a09e667u,b=0xbb67ae85u,c=0x3c6ef372u,d=0xa54ff53au;
+    uint32_t e=0x510e527fu,f=0x9b05688cu,g=0x1f83d9abu,h=0x5be0cd19u,t1,t2;
+    SHA256_RND(0);
+    /* w9..w14 are still zero here, w8 and w15 still their padding values. */
+    w[0]  += s0(w[1]);
+    w[1]  += s1(w[15]) + s0(w[2]);
+    w[2]  += s1(w[0])  + s0(w[3]);
+    w[3]  += s1(w[1])  + s0(w[4]);
+    w[4]  += s1(w[2])  + s0(w[5]);
+    w[5]  += s1(w[3])  + s0(w[6]);
+    w[6]  += s1(w[4]) + w[15] + s0(w[7]);
+    w[7]  += s1(w[5]) + w[0]  + s0(w[8]);
+    w[8]  += s1(w[6]) + w[1];
+    w[9]   = s1(w[7]) + w[2];
+    w[10]  = s1(w[8]) + w[3];
+    w[11]  = s1(w[9]) + w[4];
+    w[12]  = s1(w[10]) + w[5];
+    w[13]  = s1(w[11]) + w[6];
+    w[14]  = s1(w[12]) + w[7] + s0(w[15]);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]);
+    SHA256_RND(16);
+    WMIX();
+    SHA256_RND(32);
+    WMIX();
+    SHA256_RND(48);
+    const uint32_t o0=0x6a09e667u+a,o1=0xbb67ae85u+b,o2=0x3c6ef372u+c,o3=0xa54ff53au+d;
+    const uint32_t o4=0x510e527fu+e,o5=0x9b05688cu+f,o6=0x1f83d9abu+g,o7=0x5be0cd19u+h;
+    z[0]=((uint64_t)o6<<32)|(uint64_t)o7;
+    z[1]=((uint64_t)o4<<32)|(uint64_t)o5;
+    z[2]=((uint64_t)o2<<32)|(uint64_t)o3;
+    z[3]=((uint64_t)o0<<32)|(uint64_t)o1;
+#else
+    uint32_t b2[16];
+    #pragma unroll
+    for (int i=0;i<8;i++) b2[i]=dg[i];
+    b2[8]=0x80000000;
+    #pragma unroll
+    for (int i=9;i<15;i++) b2[i]=0;
+    b2[15]=0x00000100;
+    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    _SHA256Transform(s2, b2);
+    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+#endif
+}
 __device__ __forceinline__ int qsb_k2s_front(
     const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
     uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
@@ -155,21 +223,8 @@ __device__ __forceinline__ int qsb_k2s_front(
     #pragma unroll
     for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
     qsb_scheduled_window_hash(state, ep, lane, first);
-    uint32_t b2[16];
-    #pragma unroll
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
     uint64_t z[4];
-    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
-    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
-    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
-    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    qsb_second_sha_z_words(state, z);
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
@@ -186,21 +241,8 @@ __device__ __forceinline__ int qsb_k2s_front3(
     #pragma unroll
     for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
     qsb_scheduled_window_hash(state, ep, lane, first);
-    uint32_t b2[16];
-    #pragma unroll
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
     uint64_t z[4];
-    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
-    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
-    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
-    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    qsb_second_sha_z_words(state, z);
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
@@ -212,20 +254,7 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
-    uint32_t b2[16];
-    #pragma unroll
-    for(int i=0;i<8;i++)b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for(int i=9;i<15;i++)b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2,b2);
-    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
-    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
-    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
-    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+    qsb_second_sha_z_words(state, z);
 }
 __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     const uint32_t*firstA,const uint32_t*firstB,int lane){
