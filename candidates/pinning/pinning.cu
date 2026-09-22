@@ -647,6 +647,18 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+/* QSB_CHAIN_PP: the rolled chain is `#pragma unroll 1`, so the anchor update
+ * `Load256(y0,y1)` at the bottom of the body is a real four-word register move
+ * on every chunk. Writing the body twice with the two chunk-ordinate register
+ * sets exchanged makes the anchor of one half the freshly loaded ordinate of
+ * the other, so the copy disappears while the sequence of additions and their
+ * operands are identical. GT_CHUNKS is odd, so chunks 2..GT_CHUNKS-2 pair
+ * exactly and the last chunk is a single peeled body whose ordinate feeds the
+ * resolving deferred multiply directly (a further copy removed).
+ * -DQSB_CHAIN_PP=0 restores the single rolled body. */
+#ifndef QSB_CHAIN_PP
+#define QSB_CHAIN_PP 1
+#endif
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
     qsb_decode_to_shared(k);
@@ -656,6 +668,23 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
+#if QSB_CHAIN_PP
+    static_assert((GT_CHUNKS&1)==1,"QSB_CHAIN_PP pairs chunks 2..GT_CHUNKS-2");
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS-1;c+=2) {
+        qsb_load_decoded(table,c,base,x1,y1);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);      /* anchor: chunk c-1 */
+        qsb_load_decoded(table,c+1,base+(1u<<16),x0,y0);
+        _PointAddXYZZT<true>(X,Y,U,V,x0,y0,y1);      /* anchor: chunk c   */
+        base+=2u<<16;
+    }
+    qsb_load_decoded(table,GT_CHUNKS-1,base,x1,y1);
+    _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#if QSB_YOFF
+    qsb_yoff_to_y(y1);
+#endif
+    _ModMult(x0,y1,V);_ModSub256(Y,Y,x0);
+#else
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
@@ -667,6 +696,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 

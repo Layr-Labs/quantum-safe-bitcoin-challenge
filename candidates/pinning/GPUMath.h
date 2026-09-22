@@ -1910,6 +1910,24 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
 // production chain calls <true> twelve times in its rolled loop and <false>
 // once for the resolving final addition, so no defer_y branch is in the loop.
+/* QSB_XYZZ_DEST: the rolled chain calls _PointAddXYZZT with a fixed register
+ * assignment, so the trailing `Load256(X1, T)` is a real four-word register
+ * move per addition. X1 is read exactly once in the body (`P = U2 - X1`) and
+ * is dead from that point, so the X3 combiner may name the accumulator
+ * abscissa as its own destination: the operand list, the reduction and the
+ * result are unchanged, only the copy disappears.
+ * -DQSB_XYZZ_DEST=0 restores the T temporary and the copy. */
+#ifndef QSB_XYZZ_DEST
+#define QSB_XYZZ_DEST 1
+#endif
+/* QSB_XYZZ_YFUSE: in the deferring branch Y3 is exactly R*(V - X3), computed
+ * in place in Q and then copied to Y1. Y1 is read exactly once in the body
+ * (`R = S2 - Y1`) and is dead afterwards, so the final multiply writes Y1
+ * directly. Same two operands, same reduction, one copy less.
+ * -DQSB_XYZZ_YFUSE=0 restores the in-place multiply plus copy. */
+#ifndef QSB_XYZZ_YFUSE
+#define QSB_XYZZ_YFUSE 1
+#endif
 template<bool DEFER_Y>
 __device__ __forceinline__ void _PointAddXYZZT(
     uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
@@ -1922,7 +1940,12 @@ __device__ __forceinline__ void _PointAddXYZZT(
   uint64_t PP[4];
   uint64_t PPP[4];
   uint64_t Q[4];
+#if !QSB_XYZZ_DEST
   uint64_t T[4];
+#define QSB_X3T T
+#else
+#define QSB_X3T X1
+#endif
 
 #if QSB_YOFF
   _ModAddLazyOff(S2, Y2, Yoff);        // offset ordinates: y2 + yoff (mod p)
@@ -1941,31 +1964,39 @@ __device__ __forceinline__ void _PointAddXYZZT(
 
 #if QSB_FUSE_SQRADDSUB2
   /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
-  _ModSqrAddSub2(T, R, PPP, Q);        // X3 = R^2 + PPP - 2V
+  _ModSqrAddSub2(QSB_X3T, R, PPP, Q);  // X3 = R^2 + PPP - 2V
 #else
-  _ModSqr(T, R);                       // R^2
+  _ModSqr(QSB_X3T, R);                 // R^2
 #if QSB_LAZY
-  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
+  _ModX3Fused(QSB_X3T, QSB_X3T, PPP, Q);// X3 = R^2 + PPP - 2V
 #else
-  _ModAdd256(T, T, PPP);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+  _ModAdd256(QSB_X3T, QSB_X3T, PPP);
+  _ModSub256(QSB_X3T, QSB_X3T, Q);
+  _ModSub256(QSB_X3T, QSB_X3T, Q);     // X3 = R^2 + PPP - 2V
 #endif
 #endif
 
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
+  _ModSub256(Q, Q, QSB_X3T);           // V - X3
   if (DEFER_Y) {
-    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+#if QSB_XYZZ_YFUSE
+    _ModMult(Y1, Q, R);                // actual Y3 = Y1 - Y2*ZZZ3, written in place
+#else
+    _ModMult(Q, R);                    // R*(V - X3)
+    Load256(Y1, Q);
+#endif
   } else {
+    _ModMult(Q, R);                    // R*(V - X3)
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
+#if !QSB_XYZZ_DEST
   Load256(X1, T);                      // X3
+#endif
+#undef QSB_X3T
 }
 
 // Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3,
@@ -1975,6 +2006,14 @@ __device__ __forceinline__ void _PointAddXYZZT(
 // is then (Ythird+Y1)*ZZZ3-R*(Q-X3) = Ythird*ZZZ3-Y(P1+P2), while its final
 // affine anchor remains Ythird. The combined seed is therefore exact and costs
 // 11M+4S rather than 12M+4S.
+/* QSB_MM_DEST: the seed addition's X3 output is write-only for the caller and
+ * distinct from every input array at its single call site, so the combiner may
+ * build R^2 - PPP - 2Q in the destination instead of a temporary. X1 is still
+ * read at `Q = X1*PP`, which happens before the first write of X3, so the
+ * sequence is unchanged. -DQSB_MM_DEST=0 restores the temporary and the copy. */
+#ifndef QSB_MM_DEST
+#define QSB_MM_DEST 1
+#endif
 __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                  const uint64_t *X1, const uint64_t *Y1,
                                  const uint64_t *X2, const uint64_t *Y2)
@@ -1982,7 +2021,12 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
+#if QSB_MM_DEST
+#define QSB_MMT X3
+#else
   uint64_t T[4];
+#define QSB_MMT T
+#endif
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -1990,12 +2034,15 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
-  _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+  _ModSqr(QSB_MMT, R);                             // R^2
+  _ModSub256(QSB_MMT, QSB_MMT, ZZZ3);
+  _ModSub256(QSB_MMT, QSB_MMT, Q);
+  _ModSub256(QSB_MMT, QSB_MMT, Q);                 // X3 = R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, T);                             // Q - X3
+  _ModSub256(Q, Q, QSB_MMT);                       // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
+#if !QSB_MM_DEST
   Load256(X3, T);                                  // X3
+#endif
+#undef QSB_MMT
 }
