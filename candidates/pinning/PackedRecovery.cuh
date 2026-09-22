@@ -56,6 +56,12 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
 #include "ParityWindow.cuh"
 #endif
 
+// Shared-factor zero mask follows fkiene's public f52ebd11 description.
+// Raw multiplication by zero is identically zero, including every carry.
+#ifndef QSB_PREP_MASK
+#define QSB_PREP_MASK 1
+#endif
+
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
@@ -69,9 +75,14 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_PREP_MASK
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+#endif
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
+#if !QSB_PREP_MASK
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -99,11 +110,21 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
+#if QSB_NEGATIVE_MAC
+    // The checkpoint carries -Y; restore the same l/m slopes and key order.
+    _ModAddLazy(l,u,v); _ModSub256(m,u,v); _ModAddLazy(sum,l,m);
+#else
     _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
+#if QSB_NEGATIVE_MAC
+    // The checkpoint carries -Y; restore the same l/m slopes and key order.
+    _ModAdd256(l,u,v); _ModSub256(m,u,v); _ModAdd256(sum,l,m);
+#else
     _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+#endif
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional

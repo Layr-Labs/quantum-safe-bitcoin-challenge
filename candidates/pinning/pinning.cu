@@ -647,6 +647,13 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+#ifndef QSB_NEGATIVE_MAC
+#define QSB_NEGATIVE_MAC 1
+#endif
+#if QSB_NEGATIVE_MAC
+#include "NegativePoint.cuh"
+#endif
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
     qsb_decode_to_shared(k);
@@ -654,19 +661,34 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
+
+#if QSB_NEGATIVE_MAC
+    qsb_negative_seed(X,Y,U,V,x0,y0,x1,y1);
+#else
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#endif
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
+
+#if QSB_NEGATIVE_MAC
+        qsb_negative_add(X,Y,U,V,x1,y1,y0);
+#else
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#endif
         Load256(y0,y1);
         base+=1u<<16;
     }
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
+
+#if QSB_NEGATIVE_MAC
+    qsb_mac256(Y,y0,V,Y);
+#else
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
