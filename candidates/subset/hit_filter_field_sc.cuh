@@ -33,6 +33,40 @@
 #define QSB_CHAIN_MUL_LEAN 1
 #endif
 
+/* Exact top-limb deletion in the first inline square's doubling.  The merged
+ * cross sum occupies limbs 0..14 (its highest column is a6*a7 at limbs 13,14,
+ * and the remaining 27 columns contribute below 2^453, so the total stays
+ * under 2^480): limb 15 is identically zero before the doubling.  Continue the
+ * 32-bit doubling chain through x14 and take limb 15 from its carry instead of
+ * widening x14 by a multiply.  Same 64-bit d7. */
+#ifndef QSB_SQ_DBL_TOP
+#define QSB_SQ_DBL_TOP 1
+#endif
+
+/* The same add-chain doubling for the second inline square, without adopting
+ * the rest of the lean square body (that spills).  x0 is zero, so the chain may
+ * open on x1 with add.cc; the merge's x15 term is provably zero and is replaced
+ * by the doubling carry. */
+#ifndef QSB_SQ9_ADD_DBL
+#define QSB_SQ9_ADD_DBL 1
+#endif
+
+/* Lean carry handling in the second inline square's 977 double fold: emit the
+ * odd-word chain first, then let the even-word chain's carry be consumed by the
+ * z8 seed instead of materialising it with addc.u32 f8,0,0.  The residual merge
+ * carry is folded into z8 at the end of the 32-bit merge, exactly as the first
+ * inline square already does. */
+#ifndef QSB_SQ9_FOLD_LEAN
+#define QSB_SQ9_FOLD_LEAN 1
+#endif
+
+/* One-bit fold constant in the filter's modular add.  The retained high bit h
+ * is 0 or 1, so h*(2^32+977) is the 32-bit pair {977*h, h} and needs a single
+ * 32-bit multiply instead of a 64-bit multiply by a 33-bit constant. */
+#ifndef QSB_ADD_FOLD_PAIR
+#define QSB_ADD_FOLD_PAIR 1
+#endif
+
 __device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t *b, uint32_t &bad){
 #ifdef __CUDA_ARCH__
 
@@ -44,8 +78,15 @@ __device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t 
         "addc.cc.u64 %1,%6,%10;\n\t"
         "addc.cc.u64 %2,%7,%11;\n\t"
         "addc.cc.u64 %3,%8,%12;\n\t"
+#if QSB_ADD_FOLD_PAIR
+        ".reg .u32 hl,tl;\n\t"
+        "addc.u32 hl,0,0;\n\t"
+        "mul.lo.u32 tl,hl,977;\n\t"
+        "mov.b64 t,{tl,hl};\n\t"
+#else
         "addc.u64 h,0,0;\n\t"
         "mul.lo.u64 t,h,0x1000003d1;\n\t"
+#endif
         "add.cc.u64 %0,%0,t;\n\t"
         "addc.cc.u64 %1,%1,0;\n\t"
         "addc.cc.u64 %2,%2,0;\n\t"
@@ -961,7 +1002,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.u32 f5_x0, 0;\n"
         "\tmov.b64 {f5_x2,f5_x3}, f5_e2; mov.b64 {f5_x4,f5_x5}, f5_e4; mov.b64 {f5_x6,f5_x7}, f5_e6;\n"
         "\tmov.b64 {f5_x8,f5_x9}, f5_e8; mov.b64 {f5_x10,f5_x11}, f5_e10; mov.b64 {f5_x12,f5_x13}, f5_e12;\n"
+#if !QSB_SQ_DBL_TOP
         "\tmov.u32 f5_x15, 0;\n"
+#endif
         "\tmov.b64 {f5_x1,f5_y2}, f5_o1; mov.b64 {f5_y3,f5_y4}, f5_o3; mov.b64 {f5_y5,f5_y6}, f5_o5;\n"
         "\tmov.b64 {f5_y7,f5_y8}, f5_o7; mov.b64 {f5_y9,f5_y10}, f5_o9; mov.b64 {f5_y11,f5_y12}, f5_o11; mov.b64 {f5_y13,f5_y14}, f5_o13;\n"
         "\tadd.cc.u32 f5_x2, f5_x2, f5_y2; addc.cc.u32 f5_x3, f5_x3, f5_y3;\n"
@@ -975,9 +1018,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f5_x7, f5_x7, f5_x7; addc.cc.u32 f5_x8, f5_x8, f5_x8; addc.cc.u32 f5_x9, f5_x9, f5_x9;\n"
         "\taddc.cc.u32 f5_x10, f5_x10, f5_x10; addc.cc.u32 f5_x11, f5_x11, f5_x11; addc.cc.u32 f5_x12, f5_x12, f5_x12;\n"
         "\taddc.cc.u32 f5_x13, f5_x13, f5_x13;\n"
+#if QSB_SQ_DBL_TOP
+        "\taddc.cc.u32 f5_x14, f5_x14, f5_x14;\n"
+        "\taddc.u32 f5_x15, 0, 0;\n"
+        "\tmov.b64 f5_d0, {f5_x0,f5_x1}; mov.b64 f5_d1, {f5_x2,f5_x3}; mov.b64 f5_d2, {f5_x4,f5_x5}; mov.b64 f5_d3, {f5_x6,f5_x7};\n"
+        "\tmov.b64 f5_d4, {f5_x8,f5_x9}; mov.b64 f5_d5, {f5_x10,f5_x11}; mov.b64 f5_d6, {f5_x12,f5_x13}; mov.b64 f5_d7, {f5_x14,f5_x15};\n"
+#else
         "\tmul.wide.u32 f5_t, f5_x14, 2; addc.u64 f5_d7, f5_t, 0;\n"
         "\tmov.b64 f5_d0, {f5_x0,f5_x1}; mov.b64 f5_d1, {f5_x2,f5_x3}; mov.b64 f5_d2, {f5_x4,f5_x5}; mov.b64 f5_d3, {f5_x6,f5_x7};\n"
         "\tmov.b64 f5_d4, {f5_x8,f5_x9}; mov.b64 f5_d5, {f5_x10,f5_x11}; mov.b64 f5_d6, {f5_x12,f5_x13};\n"
+#endif
         "\tmul.wide.u32 f5_t, f5_a0, f5_a0; add.cc.u64 f5_d0, f5_d0, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_a1, f5_a1; addc.cc.u64 f5_d1, f5_d1, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_a2, f5_a2; addc.cc.u64 f5_d2, f5_d2, f5_t;\n"
@@ -2175,13 +2225,24 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.u32 f9_x0, 0;\n"
         "\tmov.b64 {f9_x2,f9_x3}, f9_e2; mov.b64 {f9_x4,f9_x5}, f9_e4; mov.b64 {f9_x6,f9_x7}, f9_e6;\n"
         "\tmov.b64 {f9_x8,f9_x9}, f9_e8; mov.b64 {f9_x10,f9_x11}, f9_e10; mov.b64 {f9_x12,f9_x13}, f9_e12;\n"
+#if !QSB_SQ9_ADD_DBL
         "\tmov.u32 f9_x14, 0; mov.u32 f9_x15, 0;\n"
+#endif
         "\tmov.b64 {f9_x1,f9_y2}, f9_o1; mov.b64 {f9_y3,f9_y4}, f9_o3; mov.b64 {f9_y5,f9_y6}, f9_o5;\n"
         "\tmov.b64 {f9_y7,f9_y8}, f9_o7; mov.b64 {f9_y9,f9_y10}, f9_o9; mov.b64 {f9_y11,f9_y12}, f9_o11; mov.b64 {f9_y13,f9_y14}, f9_o13;\n"
         "\tadd.cc.u32 f9_x2, f9_x2, f9_y2; addc.cc.u32 f9_x3, f9_x3, f9_y3;\n"
         "\taddc.cc.u32 f9_x4, f9_x4, f9_y4; addc.cc.u32 f9_x5, f9_x5, f9_y5; addc.cc.u32 f9_x6, f9_x6, f9_y6;\n"
         "\taddc.cc.u32 f9_x7, f9_x7, f9_y7; addc.cc.u32 f9_x8, f9_x8, f9_y8; addc.cc.u32 f9_x9, f9_x9, f9_y9;\n"
         "\taddc.cc.u32 f9_x10, f9_x10, f9_y10; addc.cc.u32 f9_x11, f9_x11, f9_y11; addc.cc.u32 f9_x12, f9_x12, f9_y12;\n"
+#if QSB_SQ9_ADD_DBL
+        "\taddc.cc.u32 f9_x13, f9_x13, f9_y13; addc.u32 f9_x14, f9_y14, 0;\n"
+        "\tadd.cc.u32 f9_x1, f9_x1, f9_x1; addc.cc.u32 f9_x2, f9_x2, f9_x2; addc.cc.u32 f9_x3, f9_x3, f9_x3;\n"
+        "\taddc.cc.u32 f9_x4, f9_x4, f9_x4; addc.cc.u32 f9_x5, f9_x5, f9_x5; addc.cc.u32 f9_x6, f9_x6, f9_x6;\n"
+        "\taddc.cc.u32 f9_x7, f9_x7, f9_x7; addc.cc.u32 f9_x8, f9_x8, f9_x8; addc.cc.u32 f9_x9, f9_x9, f9_x9;\n"
+        "\taddc.cc.u32 f9_x10, f9_x10, f9_x10; addc.cc.u32 f9_x11, f9_x11, f9_x11; addc.cc.u32 f9_x12, f9_x12, f9_x12;\n"
+        "\taddc.cc.u32 f9_x13, f9_x13, f9_x13; addc.cc.u32 f9_x14, f9_x14, f9_x14;\n"
+        "\taddc.u32 f9_x15, 0, 0;\n"
+#else
         "\taddc.cc.u32 f9_x13, f9_x13, f9_y13; addc.cc.u32 f9_x14, f9_x14, f9_y14; addc.u32 f9_x15, f9_x15, 0;\n"
         "\tshf.l.wrap.b32 f9_x15, f9_x14, f9_x15, 1; shf.l.wrap.b32 f9_x14, f9_x13, f9_x14, 1;\n"
         "\tshf.l.wrap.b32 f9_x13, f9_x12, f9_x13, 1; shf.l.wrap.b32 f9_x12, f9_x11, f9_x12, 1;\n"
@@ -2191,6 +2252,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tshf.l.wrap.b32 f9_x5, f9_x4, f9_x5, 1; shf.l.wrap.b32 f9_x4, f9_x3, f9_x4, 1;\n"
         "\tshf.l.wrap.b32 f9_x3, f9_x2, f9_x3, 1; shf.l.wrap.b32 f9_x2, f9_x1, f9_x2, 1;\n"
         "\tshf.l.wrap.b32 f9_x1, f9_x0, f9_x1, 1;\n"
+#endif
         "\tmov.b64 f9_d0, {f9_x0,f9_x1}; mov.b64 f9_d1, {f9_x2,f9_x3}; mov.b64 f9_d2, {f9_x4,f9_x5}; mov.b64 f9_d3, {f9_x6,f9_x7};\n"
         "\tmov.b64 f9_d4, {f9_x8,f9_x9}; mov.b64 f9_d5, {f9_x10,f9_x11}; mov.b64 f9_d6, {f9_x12,f9_x13}; mov.b64 f9_d7, {f9_x14,f9_x15};\n"
         "\tmul.wide.u32 f9_t, f9_a0, f9_a0; add.cc.u64 f9_d0, f9_d0, f9_t;\n"
@@ -2207,6 +2269,22 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f9_f8,f9_g8,f9_z0,f9_z1,f9_z2,f9_z3,f9_z4,f9_z5,f9_z6,f9_z7,f9_z8,f9_z9,f9_w0,f9_w1,f9_w2,f9_w3,f9_w4,f9_w5,f9_w6,f9_w7,f9_m0,f9_m1,f9_m2;\n"
         "\tmov.b64 f9_fr0, {f9_x0,f9_x1}; mov.b64 f9_fr1, {f9_x2,f9_x3}; mov.b64 f9_fr2, {f9_x4,f9_x5}; mov.b64 f9_fr3, {f9_x6,f9_x7};\n"
         "\tmov.b64 f9_h0, {f9_x8,f9_x9}; mov.b64 f9_h1, {f9_x10,f9_x11}; mov.b64 f9_h2, {f9_x12,f9_x13}; mov.b64 f9_h3, {f9_x14,f9_x15};\n"
+#if QSB_SQ9_FOLD_LEAN
+        "\tmul.wide.u32 f9_t, f9_x9, 977;  add.cc.u64  f9_g0, f9_h0, f9_t;\n"
+        "\tmul.wide.u32 f9_t, f9_x11, 977; addc.cc.u64 f9_g1, f9_h1, f9_t;\n"
+        "\tmul.wide.u32 f9_t, f9_x13, 977; addc.cc.u64 f9_g2, f9_h2, f9_t;\n"
+        "\tmul.wide.u32 f9_t, f9_x15, 977; addc.u64 f9_g3, f9_h3, f9_t;\n"
+        "\tmov.b64 {f9_w0,f9_w1}, f9_g0; mov.b64 {f9_w2,f9_w3}, f9_g1; mov.b64 {f9_w4,f9_w5}, f9_g2; mov.b64 {f9_w6,f9_w7}, f9_g3;\n"
+        "\tmul.wide.u32 f9_t, f9_x8, 977;  add.cc.u64  f9_f0, f9_fr0, f9_t;\n"
+        "\tmul.wide.u32 f9_t, f9_x10, 977; addc.cc.u64 f9_f1, f9_fr1, f9_t;\n"
+        "\tmul.wide.u32 f9_t, f9_x12, 977; addc.cc.u64 f9_f2, f9_fr2, f9_t;\n"
+        "\tmul.wide.u32 f9_t, f9_x14, 977; addc.cc.u64 f9_f3, f9_fr3, f9_t;\n"
+        "\taddc.u32 f9_z8, f9_w7, 0;\n"
+        "\tmov.b64 {f9_z0,f9_z1}, f9_f0; mov.b64 {f9_z2,f9_z3}, f9_f1; mov.b64 {f9_z4,f9_z5}, f9_f2; mov.b64 {f9_z6,f9_z7}, f9_f3;\n"
+        "\tadd.cc.u32 f9_z1, f9_z1, f9_w0; addc.cc.u32 f9_z2, f9_z2, f9_w1; addc.cc.u32 f9_z3, f9_z3, f9_w2;\n"
+        "\taddc.cc.u32 f9_z4, f9_z4, f9_w3; addc.cc.u32 f9_z5, f9_z5, f9_w4; addc.cc.u32 f9_z6, f9_z6, f9_w5;\n"
+        "\taddc.cc.u32 f9_z7, f9_z7, f9_w6; addc.u32 f9_z8, f9_z8, 0;\n"
+#else
         "\tmul.wide.u32 f9_t, f9_x8, 977;  add.cc.u64  f9_f0, f9_fr0, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x10, 977; addc.cc.u64 f9_f1, f9_fr1, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_x12, 977; addc.cc.u64 f9_f2, f9_fr2, f9_t;\n"
@@ -2221,6 +2299,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tadd.cc.u32 f9_z1, f9_z1, f9_w0; addc.cc.u32 f9_z2, f9_z2, f9_w1; addc.cc.u32 f9_z3, f9_z3, f9_w2;\n"
         "\taddc.cc.u32 f9_z4, f9_z4, f9_w3; addc.cc.u32 f9_z5, f9_z5, f9_w4; addc.cc.u32 f9_z6, f9_z6, f9_w5;\n"
         "\taddc.cc.u32 f9_z7, f9_z7, f9_w6; addc.u32 f9_z8, f9_f8, f9_w7;\n"
+#endif
         "\t{ .reg .u64 f9_sfz,f9_sft; .reg .u32 f9_sfl;\n\tmov.b64 f9_sfz, {f9_z0, f9_z8};\n\tmul.wide.u32 f9_sft, f9_z8, 977; add.cc.u64 f9_sft, f9_sft, f9_sfz;\n\taddc.u32 f9_m2, 0, 0;\n\tmov.b64 {f9_z0, f9_sfl}, f9_sft;\n\tadd.cc.u32 f9_z1, f9_z1, f9_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f9_z2, f9_z2, f9_m2;"
