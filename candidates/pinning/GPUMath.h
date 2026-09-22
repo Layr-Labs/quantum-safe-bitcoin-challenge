@@ -603,6 +603,30 @@ __device__ void _ModSub256(uint64_t *r, uint64_t *b)
 }
 #endif
 
+/* QSB_RAW_DIFF: a difference whose every consumer is congruence-tolerant (a
+ * field multiply or square, the parity window, or another raw difference)
+ * does not need the borrow's +p correction at all: a-b mod 2^256 is already
+ * congruent mod p and lies in [0,2^256), which is exactly the input contract
+ * of _ModMultCore/_ModSqr/qsb_parity_product_window. Dropping the
+ * three-instruction K-fold (subc/and/sub) per site is exact mod p; only the
+ * representative changes. Sites: _PointAddXYZZT (P, R, V-X3),
+ * _PointAddXYZZ_mm (P, R, the three X3 subtractions, Q-X3),
+ * qsb_recovery_denominator (d = +-U - X) and the packed finish (l = u-v,
+ * t = l-c, t = m-c). -DQSB_RAW_DIFF=0 restores _ModSub256 everywhere. */
+#ifndef QSB_RAW_DIFF
+#define QSB_RAW_DIFF 1
+#endif
+__device__ __forceinline__ void qsb_sub_diff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+#if QSB_RAW_DIFF
+    uint64_t r0,r1,r2,r3;
+    asm("sub.cc.u64 %0,%4,%8;\n\tsubc.cc.u64 %1,%5,%9;\n\tsubc.cc.u64 %2,%6,%10;\n\tsubc.u64 %3,%7,%11;"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+#else
+    _ModSub256(r,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
+}
+
 // ---------------------------------------------------------------------------------------
 
 __device__ __forceinline__ uint32_t _CTZ(uint64_t x)
@@ -1932,9 +1956,9 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
-  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  qsb_sub_diff(R, S2, Y1);               // R  = S2 - Y1 (raw: feeds a multiply)
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
-  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  qsb_sub_diff(P, U2, X1);               // P  = U2 - X1 (raw: feeds a square)
   _ModSqr(PP, P);                      // PP = P^2
   _ModMult(PPP, PP, P);                // PPP = P*PP
   _ModMult(Q, U2, PP);                 // V  = U2*PP
@@ -1956,8 +1980,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, T);                 // V - X3
-  _ModMult(Q, R);                      // R*(V - X3)
+  qsb_sub_diff(Q, Q, T);                 // V - X3 (raw: feeds a multiply)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
@@ -1984,18 +2007,17 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t Q[4];
   uint64_t T[4];
 
-  _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
-  _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
+  qsb_sub_diff(P, X2, X1);                             // P = X2 - X1 (raw: feeds a square)
+  qsb_sub_diff(R, Y2, Y1);                             // R = Y2 - Y1 (raw: feeds a square)
   _ModSqr(ZZ3, P);                                 // ZZ3  = PP  = P^2
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
   _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
-
-  _ModSub256(Q, Q, T);                             // Q - X3
+  qsb_sub_diff(T, T, ZZZ3);
+  qsb_sub_diff(T, T, Q);
+  qsb_sub_diff(T, T, Q);                               // X3 = R^2 - PPP - 2Q (raw chain)
+  qsb_sub_diff(Q, Q, T);                               // Q - X3 (raw: feeds a multiply)
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }
