@@ -1,60 +1,210 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: host pipeline and exact SHA folds on the promoted clean arithmetic
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+## Source and scope
 
-## Base and attribution
+This candidate starts from shared main `7c3609b87b9d8e094a16be148fe846dfd5ac7807`.
+Its subset implementation is the promoted `7aef224a-e3ff-43f9-9877-50cdbda3f653`
+source, landed at `9ac2515`, with a recorded score of **623,518,629 verified
+candidates/second**. The source milestone for this port is `da34628`.
+The implementation and tests in this submission were prepared with GPT 6 Astra,
+xhigh effort, using Codex. All edits and added artifacts belong to
+`candidates/subset`. The harness, scoring, benchmark manifest, problem generator,
+problem instances, sibling track, and workflows are unchanged.
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+The new runtime mechanisms come from the public difference between
+`8b397a5c56b32c8d799eada6f913d990b6503cd1` (submission `35c4db43`) and
+`ae0ade77bfdd71e5a2dc1a3e2bab780af8c7bb46` (submission `e63e42ec`, public
+[PR 977](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/977)).
+Akashneelesh is credited as a coauthor for this substantial unpromoted code.
+The promoted base's authorship and source notices remain in place, including
+jacklightChen, Saviour1001, owizdom, DPZZxlz, fkiene, dun999, Meganpark980320,
+ercumentyildirim, EvanYan1024, terrapinelf, and Akashneelesh. The pipeline donor
+also credits the promoted pinning host-loop lineage. The SHA header comes from
+the pinning source in the same shared-main snapshot; a byte-identical copy is
+included inside this track, avoiding a dependency on later sibling changes.
+VanitySearch notices and the existing GPLv3 COPYING file are preserved.
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+This port intentionally extracts only the host pipeline, startup trims, and
+exact SHA folding. It retains the promoted subset arithmetic and table layout.
+The donor's isomorphic recovery, extra short-carry tails, and speculative
+first-fold cuts are not introduced. Our contribution is the clean-base
+composition, cross-track dependency removal, checked CUDA error paths, resource
+cleanup, source-executing host tests, and independent build/resource census.
 
-## What is new
+## Mechanisms and invariants
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+`QSB_HOST_PIPE=1` gives each of two slots its own nonblocking CUDA stream,
+completion event, epoch descriptors, first states, group records, epoch-to-group
+map, tentative hits, and verified hits. Each stream orders its own producer
+kernels, digest, exact replay, asynchronous readback, and completion event.
+Immutable parameters, window tables, and the fixed-base table are shared.
+A checked device synchronization finishes startup uploads before either
+nonblocking stream consumes them.
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+Batch k uses slot k modulo 2. Before reusing that slot for batch k+2, the host
+waits for k's event, writes its completed verified records, and updates its
+completed-candidate and hit counters exactly once. This makes the next batch's
+GPU work eligible to overlap the previous batch's host formatting and writeout,
+and permits producer/replay work on the other stream where GPU resources allow.
+Actual overlap and its performance effect require the ranked device.
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+Exhaustion drains the oldest pending slot and then the last pending slot before
+exit. Zero-hit batches still increment completed-candidate accounting. The
+existing host publication limit of 64 records per batch is retained, bounded
+by the 1,028-byte pinned readback region; the device tentative and verified
+buffers each hold 1,024 records. The exact replay kernel remains the only source
+of published records. Its per-slot epoch and first-state buffers remain live
+until completion. Event synchronization, readback enqueue, event recording, and
+initial synchronization errors are checked. A zero-length write is rejected
+instead of causing an infinite write loop. Normal exhaustion releases streams,
+events, pinned mirrors, secondary producer buffers, and both hit-buffer pairs.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+The inherited termination handler still exits on SIGTERM/SIGINT. At forced
+termination, up to two undrained batches can be lost, as disclosed in the donor;
+the diagnostic counter reports only completed drains. This implementation does
+not claim a new graceful-signal drain. It does not extend or control the judge's
+clock. At the ranked difficulty, the inherited 64-hit host cap is ordinarily
+well above the expected batch count; low-difficulty diagnostic hit saturation
+must not be mistaken for an unbiased throughput measurement.
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+`QSB_STARTUP_TRIM=1` changes three startup costs. OpenSSL ladder points are made
+affine in batches, which produces the same coordinates as individual affine
+conversion. The GPU table is checked at the same four corners of every chunk
+plus the same 192 deterministic LCG samples. Only those 252 records of 64 bytes
+are copied to the host, with a pageable-copy fallback if pinned allocation
+fails. A construction, transfer, or sample failure follows the original full
+host-table builder; the fallback upload's return code is checked. Finally, the
+unconditional 32 KiB per-thread stack reservation is omitted. Every compiled
+kernel has zero spills; the largest reported cumulative stack is 120 bytes,
+below the default reservation. Switch zero retains the old reservation and
+full-table copy.
 
-## Static evidence (no GPU on the authoring host)
+`QSB_SHA_FOLD=1` uses exact SHA-256 identities already present in the promoted
+pinning header: literal round constants, IV-specific initial rounds, sparse
+first expansion for the 32-byte digest block, and the final H0 feed-forward
+fold for a compressed 33-byte key. The second SHA emits all eight scalar words;
+the pubkey gate emits only H0 because ranked N=24 reads only its first 24 bits.
+The header's independent FMA/rotation/ALU scheduling experiments are explicitly
+disabled. All other SHA blocks, candidate identities, EC operations, replay
+semantics, and leading-zero conditions remain the promoted ones.
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+Each new mechanism has its own default-on switch. Setting an individual switch
+to zero disables that mechanism; setting all three to zero restores the
+promoted digest machine-instruction stream in our native build. Host error
+checks and ordinary-exit cleanup remain present.
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+## Local validation and compiler evidence
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+The authoring machine is an Apple Silicon Mac without an NVIDIA GPU. Tests
+execute actual extracted production host and SHA code on its CPU; they do not
+emulate CUDA scheduling or establish GPU throughput. Compilation uses the
+existing `qsb-build:latest` container, CUDA 12.6.20, native Linux arm64, targeting
+sm_89. This differs from the donor author's CUDA 12.8 compiler, so this note
+reports our own counts rather than copying the donor's.
 
-## What does not pay (census-verified, all left off or removed)
+`python3 candidates/subset/test_hostsha_compose.py` passed:
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+* 20,261 SHA message vectors, including fixed patterns, all one-bit positions,
+  and deterministic random inputs. There were 81,044 comparisons to hashlib:
+  full digest32, in-place digest32, and H0 for both compressed-key prefixes.
+* 3,603 executions of the extracted production drain lambda and pipeline loop
+  using deterministic completion-event and producer stubs. The test checks
+  exact file output, slot reuse, batch order, total searched, zero-hit batches,
+  all small exhaustion sizes, partial tails, and counts around and beyond the
+  inherited 64-record host cap. Guard bytes surround both readback regions.
+* Three injected completion-event errors, verifying that failed batches are
+  not included in the completed-work counter.
+* Three independent full-width ladder scalars: every byte of the batched and
+  original OpenSSL ladders agrees. Both full-table and gathered sample checks
+  pass on 252 independently reconstructed records per scalar, and deliberate
+  corruption is rejected in six negative checks.
+* Source checks for default flags, stream arguments, slot-specific replay
+  inputs, return-code checks, cleanup, local SHA include, and the stack switch.
 
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+`python3 -m py_compile candidates/subset/test_hostsha_compose.py` and
+`git diff --check` also passed. The source test prints historical projection
+arithmetic as a model, explicitly labelled as unmeasured.
 
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+Native build command:
 
-## Correctness
+```sh
+nvcc -O3 -arch=sm_89 -DQSB_ZEROS_N=24 -Xptxas=-v \
+  -o subset candidates/subset/subset.cu -lcrypto -lm
+```
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+Five variants compile: default, HOST_PIPE=0, STARTUP_TRIM=0, SHA_FOLD=0, and
+all three zero. `cuobjdump -sass` reports the following for `kernel_digest`:
 
-## Expectations and limits
+| Variant | Registers | Static instructions | Stack | Spill stores / loads | Shared |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| All three off | 128 | 21,376 | 0 | 0 / 0 | 49,152 |
+| Default | 127 | 21,336 | 0 | 0 / 0 | 49,152 |
+| Host pipeline off | 127 | 21,336 | 0 | 0 / 0 | 49,152 |
+| Startup trim off | 127 | 21,336 | 0 | 0 / 0 | 49,152 |
+| SHA fold off | 128 | 21,376 | 0 | 0 / 0 | 49,152 |
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+The default, no-pipeline, and no-startup digest instruction streams have the
+same SHA256 `ea9ba9b9c7922176dd9fdec653ba93bc6a815b9b06ab1d3aef4cec1964479e9f`.
+The all-off and no-SHA streams share SHA256
+`f35ed4d343f5126f77fb21240c241180a95313deb85d589a0e0da78416e8f5af`.
+These hashes cover the normalized cuobjdump instruction text, not the whole
+ELF or cubin. The resource count preserves the existing two-block occupancy
+class; moving from 128 to 127 registers does not claim another resident CTA.
 
-## Packaging
+The organizer-default build, without an architecture flag, also passes:
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+```sh
+nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v \
+  -o subset candidates/subset/subset.cu -lcrypto -lm
+nvcc -O3 -DQSB_ZEROS_N=24 -ptx candidates/subset/subset.cu -o ranked.ptx
+ptxas -arch=sm_89 -v ranked.ptx -o ranked-jit.cubin
+```
+
+That default sm_52 build reports 128 digest registers, zero stack and spills.
+Reassembling its PTX for sm_89 reports 127 registers, zero stack and spills.
+The actual ranked driver/JIT, runtime scheduling, thermals, and candidate
+hit set have not been reproduced locally.
+
+## Expected benefit and decision limits
+
+Immediately before packaging, the live leader remained 623,518,629/s. The
+100-bips floor is calculated with integer arithmetic as
+`ceil(623518629 * 101 / 100) = 629753816`.
+Public donor scores were 613,936,599/s before the three additions and
+622,587,731/s afterward. Their ratio is 1.014091246578, or +1.4091%.
+Mechanically applying that ratio to the clean promoted source yields
+**632,304,784/s**, approximately 1.41% over the leader and 0.41% over the
+promotion floor. This is a composition hypothesis, not a measured result or
+confidence interval. The public runs used different problem draws and runtime
+conditions; the score difference cannot by itself prove causation.
+
+The specific evidence favoring this candidate is the removal of host-side
+serialization, exact startup work deletion, a smaller SHA instruction stream,
+unchanged EC arithmetic, zero spills, and a completed ranked donor with the
+same three mechanisms. The earlier donor note estimates 0.8-1.3% serialized
+pipeline overhead and about 0.1% from the SHA change. Startup savings are small
+when amortized across 1,200 seconds. None of these observations guarantees
+promotion. Thermal changes, kernel overlap limits, and score sampling can erase
+a narrow margin. No claimed score is supplied; Yukon records that field only.
+
+This is the strongest ready composition from this session. More speculative
+cache-policy changes and arithmetic cuts have been kept out. The public
+pinning C6 research was screened separately and is not part of this archive.
+A rejection should prompt comparison of the actual ranked work and elapsed
+time, not an unchanged resubmission seeking a favorable draw.
+
+## Reproduction, archive, and rollback
+
+`SOURCE-MANIFEST.json` records source SHA256 values, the base commit, donor,
+actual attribution, compiler evidence, and validation summary. The generated
+binaries, cubins, disassemblies, and host-test artifacts are stored outside
+the editable tree and are not submitted. Yukon archives ignored files too;
+the complete on-disk editable tree was checked against the 8 MiB limit. There is no build stamp or generated
+problem in this source package. Setup and execution remain the challenge's
+normal track commands. Public Discussions are disabled for this benchmark.
+
+For isolation, compile the three switch-off variants listed above. For a full
+rollback, restore `candidates/subset` from shared main `7c3609b`. The inherited
+speculative filter and exact replay retain their original contract: replay
+prevents false nominations from being published; it cannot recover candidates
+lost by the inherited filter. This port adds no new speculative arithmetic.
