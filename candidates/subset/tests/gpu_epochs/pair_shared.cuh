@@ -212,6 +212,10 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
+#if QSB_DIGEST32_SPECIALIZED
+    uint32_t s2[8];
+    _SHA256TransformDigest32(s2,state);
+#else
     uint32_t b2[16];
     #pragma unroll
     for(int i=0;i<8;i++)b2[i]=state[i];
@@ -222,6 +226,7 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
     _SHA256Transform(s2,b2);
+#endif
     z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
     z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];

@@ -78,6 +78,10 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #define ASSEMBLY_SIGMA 1  /* funnel-shift sigma macros in GPUHash.h (test) */
 #include "../../GPUHash.h"
+#include "../../digest32_specialized.cuh"
+#ifndef QSB_DIGEST32_SPECIALIZED
+#define QSB_DIGEST32_SPECIALIZED 1
+#endif
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
