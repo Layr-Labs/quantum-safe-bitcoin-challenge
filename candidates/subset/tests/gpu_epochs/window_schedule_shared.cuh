@@ -96,15 +96,25 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     if (e >= n_epochs) return;
     const epoch_desc_t *ep = d_epochs + e;
     uint32_t st[8], W[16];
+#if QSB_L2_HINTS
+    /* mid[0..7] at 0..28, remW at 32/36: written by the epoch producer, read here once. */
+    st[0]=qsb_ldcs_u32<0>(ep); st[1]=qsb_ldcs_u32<4>(ep); st[2]=qsb_ldcs_u32<8>(ep); st[3]=qsb_ldcs_u32<12>(ep); st[4]=qsb_ldcs_u32<16>(ep); st[5]=qsb_ldcs_u32<20>(ep); st[6]=qsb_ldcs_u32<24>(ep); st[7]=qsb_ldcs_u32<28>(ep);
+    W[0]=qsb_ldcs_u32<32>(ep); W[1]=qsb_ldcs_u32<36>(ep);
+#else
     #pragma unroll
     for(int j=0;j<8;j++)st[j]=ep->mid[j];
     W[0]=ep->remW[0];W[1]=ep->remW[1];
+#endif
     #pragma unroll
-    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+    for(int j=2;j<16;j++)W[j]=QSB_LDG_RO(&QSB_FIRST_UNIQUE[j-2][c]);
     _SHA256Transform(st,W);
     const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+#if QSB_L2_HINTS
+    { uint32_t *fo=d_first+base; qsb_stcs_u32<0>(fo,st[0]); qsb_stcs_u32<4>(fo,st[1]); qsb_stcs_u32<8>(fo,st[2]); qsb_stcs_u32<12>(fo,st[3]); qsb_stcs_u32<16>(fo,st[4]); qsb_stcs_u32<20>(fo,st[5]); qsb_stcs_u32<24>(fo,st[6]); qsb_stcs_u32<28>(fo,st[7]); }
+#else
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
+#endif
 }
 #if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
@@ -173,11 +183,19 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     const uint32_t *firstA, const uint32_t *firstB) {
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
+#if QSB_L2_HINTS
+    /* The digest's only read of each first-block state (32 B per lane class per
+     * epoch, 512 MiB per launch): evict-first, [base+imm] like the plain loads. */
+    { const uint32_t *fa=firstA+first_slot*8, *fb=firstB+first_slot*8;
+      stateA[0]=qsb_ldcs_u32<0>(fa); stateA[1]=qsb_ldcs_u32<4>(fa); stateA[2]=qsb_ldcs_u32<8>(fa); stateA[3]=qsb_ldcs_u32<12>(fa); stateA[4]=qsb_ldcs_u32<16>(fa); stateA[5]=qsb_ldcs_u32<20>(fa); stateA[6]=qsb_ldcs_u32<24>(fa); stateA[7]=qsb_ldcs_u32<28>(fa);
+      stateB[0]=qsb_ldcs_u32<0>(fb); stateB[1]=qsb_ldcs_u32<4>(fb); stateB[2]=qsb_ldcs_u32<8>(fb); stateB[3]=qsb_ldcs_u32<12>(fb); stateB[4]=qsb_ldcs_u32<16>(fb); stateB[5]=qsb_ldcs_u32<20>(fb); stateB[6]=qsb_ldcs_u32<24>(fb); stateB[7]=qsb_ldcs_u32<28>(fb); }
+#else
     #pragma unroll
     for(int j=0;j<8;j++){
         stateA[j]=firstA[first_slot*8+j];
         stateB[j]=firstB[first_slot*8+j];
     }
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
