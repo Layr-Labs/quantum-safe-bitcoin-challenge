@@ -87,6 +87,7 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+template<bool EXACT_PARITY=true>
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -99,11 +100,22 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+#if QSB_NEG_Y_MAC
+    // The chain and checkpoint carry -Y. These produce the original l,m.
+    _ModAddLazy(l,u,v); _ModSub256(m,u,v);
+#else
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v);
+#endif
+    _ModAddLazy(sum,l,m);
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+#if QSB_NEG_Y_MAC
+    _ModAdd256(l,u,v); _ModSub256(m,u,v);
+#else
+    _ModSub256(l,u,v); _ModAdd256(m,u,v);
+#endif
+    _ModAdd256(sum,l,m);
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
@@ -121,13 +133,13 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
-    const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
+    const uint32_t parity_u=qsb_parity_product_window<EXACT_PARITY>(l,s,b,1u);
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
 #if QSB_PARITY_WINDOW
-    const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
+    const uint32_t parity_v=qsb_parity_product_window<EXACT_PARITY>(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
 #endif

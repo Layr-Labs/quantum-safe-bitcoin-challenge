@@ -1,26 +1,52 @@
 {
   "production_source_sha256": {
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "332beaa52e33ace384f214f4e2df61524ae82a1bf3a1f3640c859bd031a3b93c",
-    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
-    "PackedRecovery.cuh": "72287a8d428693bcfd5ecd7f7f2a994d043655eb4af61b22dcfe3922efece1fe",
-    "ParityWindow.cuh": "e1459e314c86fd84d1ebdd90dd0897fff448062123b7629cb40bf4a585db67c0",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "1ffefb87484a452eecb6f908495357a2403bcec33a8dd872b7fef2b00b012728",
-    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "SUBMISSION.md": "cf2763f1a4d20f74dade6b7d69a5ae496c6e52585f0e89f10a9b811621cc0625"
+    "COPYING": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+    "GPUHash.h": "f8107cfd6909733aefc497eb0437048aa8025404c04101a46d25c3c8238b7f49",
+    "GPUMath.h": "d96f9680b6d023d5227139f6287308415c6251b73c49c6ea783b1b7eceb5c7c5",
+    "LeafRecovery.cuh": "b4a0b5ba514cae84f3a5d5b6e375394cd2e0e783d457aa83be4cadb94dd61a01",
+    "PackedRecovery.cuh": "3329a24a477930aaa834831615def4368150f7376474e947f4c364a55f89dc98",
+    "ParityWindow.cuh": "c9220bd70eb6bf831fdfc62098734eef7536a9bd319b78cda07f0ff85a41e868",
+    "RecoveryConstant.h": "3af62499aa292f6ba30066327ca3e0c1f984301def265d21f27a7a0134e77cf9",
+    "cofactor_checkpoint.h": "234641bf90cdf5ae3d95e278d52bdb030dc7878c6cb17fe4eb87552e8ceb5b1d",
+    "negative_y_mac.cuh": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6",
+    "pinning.cu": "a9501c9b19f777cb566fb02fe334d8ce332a07a207b33ebb8e5afbd404094846",
+    "sha_path_tuning.h": "75b3ea5bcfe992adddf089714c1131b931be83ed7340eb55df0c383ccdc57636",
+    "sha_pinsha.cuh": "5df63c5fbf8c4127180ed35961dd7ed87a6fe87fc9bef02f5527c42ee0ed90e8",
+    "sha_schedule_interleaved.cuh": "45182529cf459d47953adbe2ea3a447dc00310d85363b1083ed47484b778fa40",
+    "SUBMISSION.md": "3d33cc3d17d6cac4272a95bbdfd398a1f39db9627ab0fe3a829dab0aa15d3c9b"
   },
-  "comparison_baseline_submission": "local c2431ea composition; promoted e876/6dfdb6f8 official 789011576, floor 796901692",
-  "comparison_baseline_promoted_commit": "e876032f79e6f4f3af2732bbba39403e29f0e227",
-  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
-  "model": "GPT 5.6 Sol",
+  "production_source_bytes": 421853,
+  "comparison_baseline_submission": "22944657-779f-4b1c-b22e-5b89c8d429c9",
+  "comparison_baseline_promoted_commit": "7c3609b87b9d8e094a16be148fe846dfd5ac7807",
+  "comparison_baseline_score": 805428058,
+  "promotion_floor_at_preflight": 813482339,
+  "source_milestone": "9e3b4105bf7a41aa81c41a9874052ccf5b81058e",
+  "model": "GPT 6 Astra",
+  "effort": "xhigh",
   "harness": "Codex",
-  "production_source_bytes": 395438,
-  "note": "c243 plus a problem-wide exact curve isomorphism that maps xR to +/-1 and removes one hot field multiplication per candidate. Direct fixed16 c243/isomorphism ABBA measured +0.554698%, both adjacent pairs positive, exact equal work and identical 2271-hit sets. QSB_ISO_XR=0 build and fresh algebra/table checks pass. Inherited composition measured +1.023653% over e876 before this increment. This is local evidence, not an official score.",
-  "public_sources": "PR827 87a770a (@stffinfcti); PR885 3e166ba (@EvanYan1024); promoted parent e876032f",
+  "coauthors": [
+    "Portablelle"
+  ],
+  "unpromoted_sources": [
+    {
+      "commit": "1e8f3b02cba580490960655b1a5e1711c9d5b4f6",
+      "author": "Portablelle",
+      "mechanism": "guarded narrow parity window"
+    }
+  ],
+  "compiler": "CUDA 12.6.20; native sm_89 and compute_52 PTX reassembled for sm_89",
+  "build_command": "nvcc -O3 -arch=sm_89 -DQSB_ZEROS_N=24 -Xptxas=-v -o /tmp/qsb-pinning candidates/pinning/pinning.cu -lcrypto -lm",
+  "defaults": {
+    "QSB_NEG_Y_MAC": 1,
+    "QSB_PARITY_REPLAY": 1,
+    "QSB_PARITY_WINDOW_NARROW": 1,
+    "QSB_SHA_PRODUCER": 1,
+    "QSB_SHA_AUTOTUNE": 1,
+    "QSB_SHA_PRODUCER_BLOCKS": 12
+  },
+  "local_gpu_execution": false,
+  "local_candidate_rate": null,
+  "projected_candidate_rate": null,
   "public_note_file": "SUBMISSION.md",
-  "full_technical_note_file": "SUBMISSION.md"
+  "note": "Fresh candidate with negative deferred-Y MAC, exact parity exception replay and adaptive scalar SHA split. Runtime path selection times real distinct search batches and preserves hits. It is not pre-submit performance evidence or a promise of promotion."
 }
