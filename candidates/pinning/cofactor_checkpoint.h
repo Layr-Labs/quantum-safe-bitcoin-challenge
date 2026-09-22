@@ -3,6 +3,13 @@
 // Public cofactor collective: tekkac, submission31e98e47, commit554fa24c.
 #pragma once
 
+#ifndef QSB_TOP32_RESIDENT
+#define QSB_TOP32_RESIDENT 1
+#endif
+#if QSB_TOP32_RESIDENT && QSB_TREE_TOP2
+#include "ResidentCofactor.cuh"
+#endif
+
 // The caller supplies nonzero effective leaves (identity for unusable lanes).
 // Preserve immutable products and accumulate exclusion products separately.
 // All N lanes participate in every barrier; one block publishes one raw root.
@@ -15,7 +22,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     __syncthreads();
     int offset=0;
     #pragma unroll 1
-#if QSB_TREE_TOP2
+#if QSB_TOP32_RESIDENT && QSB_TREE_TOP2
+    for(int count=N;count>32;count>>=1) {
+#elif QSB_TREE_TOP2
     for(int count=N;count>2;count>>=1) {   /* stop below the root: the top pair is merged into the down-sweep */
 #else
     for(int count=N;count>1;count>>=1) {
@@ -32,7 +41,15 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         offset+=count;
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
     }
-#if QSB_TREE_TOP2
+#if QSB_TOP32_RESIDENT && QSB_TREE_TOP2
+    static_assert(N>=64,"resident top needs at least 64 tree leaves");
+    if(tid<32)qsb_resident_top32<N>(roots,products,excluded);
+    // The next level can involve other warps, including final leaves for N=64.
+    __syncthreads();
+    offset=2*N-128;
+    #pragma unroll 1
+    for(int count=64;count<N;count<<=1) {
+#elif QSB_TREE_TOP2
     /* P12: the top pair n0=products[2N-4], n1=products[2N-3] needs no separate root level
      * and no copy level: one warp-multiply gives the root n0*n1 (lane 4) together with the
      * four excluded products of the level below, E(c)=E(parent)*sibling with E(n0)=n1 and
