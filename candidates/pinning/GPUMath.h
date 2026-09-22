@@ -1785,6 +1785,26 @@ __device__ int _BinarySearch(uint64_t *buffer, int hi, uint64_t target)
 	}
 }
 
+#ifndef QSB_NEG_Y_MAC
+#define QSB_NEG_Y_MAC 1
+#endif
+#if QSB_NEG_Y_MAC
+#if !QSB_C31 || !QSB_SHORT_CARRY || !QSB_CARRY62 || !QSB_HOST_GATE
+#error "Negative-Y MAC requires the promoted C31/CARRY62 arithmetic and exact host gate"
+#endif
+#include "negative_y_mac.cuh"
+// Multipliers return a representative in [0,2^256). _ModNeg256 requires
+// a representative <=p; normalize the exceptional [p,2^256) interval first.
+__device__ __forceinline__ void qsb_negate_residue(uint64_t *r) {
+    if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
+        r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
+        r[0] -= 0xFFFFFFFEFFFFFC2FULL;
+        r[1] = r[2] = r[3] = 0;
+    }
+    _ModNeg256(r); // zero may map to p, an allowed congruent representative
+}
+#endif
+
 //Secp256k1 Point Addition implementation
 __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, uint64_t *p2x, uint64_t *p2y)
 {
@@ -1857,6 +1877,10 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
                               const uint64_t *X2, const uint64_t *Y2,
                               const uint64_t *Yoff, bool defer_y)
 {
+#if QSB_NEG_Y_MAC
+  if (defer_y) _PointAddXYZZT<true>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
+  else _PointAddXYZZT<false>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
+#else
   uint64_t U2[4];
   uint64_t S2[4];
   uint64_t P[4];
@@ -1905,6 +1929,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   }
 
   Load256(X1, T);                      // X3
+#endif
 }
 
 // Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
@@ -1931,8 +1956,12 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
+#if QSB_NEG_Y_MAC
+  qsb_muladd_seed(R,S2,ZZZ1,Y1);
+#else
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+#endif
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSqr(PP, P);                      // PP = P^2
@@ -1956,12 +1985,26 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, T);                 // V - X3
+#if QSB_NEG_Y_MAC
+  _ModSub256(Q, T, Q); // negative deferred ordinate
+#else
+  _ModSub256(Q, Q, T);
+#endif                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
+#if QSB_NEG_Y_MAC && QSB_YOFF
+    // Runtime/diagnostic callers may resolve here instead of after the loop.
+    uint64_t anchor[4], off[4]={0x800001E8ULL,0,0,0};
+    _ModSub256(anchor,Y2,off);
+    _ModMult(S2,anchor,ZZZ1);
+#else
     _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+#endif
+#if QSB_NEG_Y_MAC
+    qsb_negate_residue(Q);
+#endif
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
@@ -1995,7 +2038,11 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, T);                             // Q - X3
+#if QSB_NEG_Y_MAC
+  _ModSub256(Q, T, Q); // seed negative deferred ordinate
+#else
+  _ModSub256(Q, Q, T);
+#endif                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }

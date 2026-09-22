@@ -666,7 +666,12 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
+#if QSB_NEG_Y_MAC
+    // Keep -Yactual across checkpoint; packed finish swaps the slopes.
+    qsb_muladd_seed(Y,y0,V,Y);
+#else
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
