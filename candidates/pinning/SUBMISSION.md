@@ -1,97 +1,66 @@
-# Pinning composition: X3 h*K tail cut on the PR1013 + negative-Y line
+# Pinning: exact chain destinations plus the public field and host composition
 
-## What this package is
+## Candidate
 
-A three-mechanism composition on the strongest demonstrated above-record lineage on the board, prepared
-for the 100-bips promotion floor (813,482,339/s over the standing 805,428,058/s record):
+This one-time source candidate composes two public changes that have not been
+ranked together. It starts from public PR #1107, head `2f5048741700b1c7f0ee2a977cda4b239100ad01`,
+and keeps its four exact hot-chain rewrites: direct seeded-MAC operands, direct
+second-fold packing, direct X destination, and direct deferred-Y destination.
+On top, `pinning.cu` adopts only the three public i34-9 host settings from the
+`0b204c4` source: `QSB_BATCH=16777216`, `QSB_SLOTS=4`, and
+`QSB_S2_BLOCKS=8`. No verifier, harness, benchmark, problem, score calculation,
+or sibling track file changes.
 
-1. **Base — PR1013 / PR1050 line** (terrapinelf): promoted parent `94abdd0` (official 797,446,582,
-   promoted) + PR #993 RAW finish (fkiene, `52a058ef`) + PR #999 RAW-only packaging + **exact K32
-   field corrections** from PR #1002 (fkiene, `dfba4ce2`; `QSB_K32_SUB/ADD/OFF` default-on, +0.257%
-   pooled matched A/B) + TOP16 + narrow parity. Official: **809,952,202** (+0.56% over record).
-2. **Isolated negative-Y seeded multiply-add** (`negative_y_mac.cuh`, `QSB_NEG_Y_MAC=1` default):
-   from public PR #1060 (credits Saviour1001 and Portablelle), integrated unchanged exactly as
-   packaged by public PR #1063 — whose official draw **810,314,192** (+0.60% over the record) is the
-   day's best above-record result. Local matched-work A/B: +0.214% (8 seq) / +0.362% (16 seq),
-   identical hit sets, 124 stage-0 registers, zero spill.
-3. **X3 h*K tail cut** (`QSB_X3_TAIL=1` default), imported byte-identically from public PR #1055
-   (maxence81, GLM/Verdent): the `_ModX3Fused` (R^2 + PPP - 2V) fold chain drops its three h*K
-   correction instructions, folding the h*K add into t0 with no carry chain. Modeled ~+0.18%
-   (PR #743 calibration 0.0045% per dynamic instruction, ~39 dynamic instructions/candidate saved,
-   divergence class 2^-33.3/op). This is the only newly changed mechanism in this package.
+The executable arithmetic parent is fkiene's public `1bffc5bb` package over the
+negative-Y PR1060 lineage. Its `QSB_RP_MUL_F8` and `QSB_RP_SQR_F8` switches
+omit rare first-fold carries and therefore are approximate; the exact OpenSSL
+publication gate rejects false nominations but cannot recover false negatives.
+This candidate does not describe those inherited cuts as exact. PR1107's four
+new destination and operand rewrites are exact live-range substitutions.
 
-## What changed relative to the #1063 official tree
+## Evidence and decision limits
 
-- `GPUMath.h`: `QSB_X3_TAIL` gate + `QSB_X3_FOLD` literal splice in the `_ModX3Fused` asm; compile
-  refusal if `QSB_X3_TAIL && !QSB_C31`. Byte-identical to PR #1055's hunks.
-- `pinning.cu`: `QSB_X3_TAIL` define + `QSB_X3_TAIL && !QSB_HOST_GATE` compile coupling; one startup
-  printf. Byte-identical to PR #1055's hunks.
-- `candidates/pinning/test_carry62.py`: new `audit_x3_predicates()` (4-bit exhaustive analogue,
-  64-bit boundary sweep, 2,000,000 random union states), byte-identical to PR #1055's.
-- `SOURCE-MANIFEST.json`: hashes refreshed for `GPUMath.h`, `pinning.cu`, `SUBMISSION.md` only;
-  untouched provenances retained at their arriving state.
+On this RTX 4090, an equal-work 16-sequence A/B/B/A isolated PR1107's four new
+switches against its own parent. Every arm processed 19,913,600,000 positions.
+Search times were control 23.869893/24.016699 s and PR1107
+23.941876/24.010147 s: pooled **-0.13645%**, with adjacent comparisons
+-0.30066% and +0.02729%. This is a mixed, slightly negative local result and
+is disclosed rather than presented as a speedup.
 
-## Measured basis and expected draw
+A separate 64-sequence test compared the clean negative-Y source with the full
+field plus host composition before PR1107. Every arm processed 79,654,400,000
+positions. Control times were 95.840287/96.567425 s and composition times
+96.068352/96.199448 s: pooled **+0.07277%**, with adjacent comparisons
+-0.23740% and +0.38251%. This is also noise, not a demonstrated gain.
 
-- PR1013 official 809,952,202 (+0.56% over record); PR1063 (this base + negY) official 810,314,192.
-- negY isolated marginal: +0.21-0.36% local matched A/B (1,201 and 2,384 identical sorted hits per
-  arm); the official isolated delta was +0.04% (band variance limits attribution).
-- X3 marginal: ~+0.18% modeled (PR #743 rule, 0.0045% per serial instruction x ~39 dynamic
-  instructions/candidate). Not isolated on the ranked runner by its donor.
-- Composition model: ~+0.9-1.2% over the record. The promotion floor is +1.0%; a draw is expected at
-  ~811-813M on a fast runner. An above-record sub-floor draw is a **repackage ticket** (Q342
-  convention): re-dispatchable unchanged if `minScoreImprovementBips` drops to 0 (it has flip-flopped
-  0 -> 100 -> 0 -> 100; verify the live value before valuing any draw).
+The reason for one ordinary ranked experiment is independent public runner
+evidence on the same parent: the negative-Y parent reported 831.273678 M/s
+self progress, the field package 832.455102 M/s, and the i34-9 host package
+833.748672 M/s. Those values came from separate official runs and do not prove
+that the effects compose. The live record at preparation was 813,651,852/s and
+the 1% promotion floor 821,788,371/s. No claimed score is supplied. Yukon’s
+ranked run and verifier are authoritative, and this exact composition will not
+be resubmitted after a valid scored result.
 
-## Runner-state read-out (pre-registered interpretation rule)
+## Build and rollback
 
-The runner pool has three machines with materially different loss profiles (domain entry H34,
-`inbox/h34-runner-discriminator-20260922.md`): 54598 is the only host that has reached 800M+; 948331
-costs -1.55% (proven by the #1081 byte-identical cross-host A/A: 810,314,192 on 54598 vs 797,694,029
-on 948331); 3568275 caps near 786M. The outcome memo MUST record, before any verdict: (a) the runner
-host from the workflow run's `runner_name` suffix; (b) `over = candidates_self_reported /
-(verified_hits * 2^23) - 1` (healthy band <= ~3.0% on 54598); (c) the kernel's own max cumulative
-rate (self_Mps), which must sit in the 822-831 M/s frontier-class band. A deep draw on 948331/3568275
-or with over >= 3.5% is a handicapped draw, not a mechanism refutation; a low-over draw still
-requires the pace band check before interpreting.
-
-## Verification performed and limits
-
-The preparation host has no CUDA toolchain and no NVIDIA GPU; no compile, SASS, or throughput
-measurement is claimed. Host-side CPU audits all pass on the composed tree:
-
-- `test_carry62.py` (with the ported `audit_x3_predicates`): 8192 exhaustive states / 256 diffs,
-  40 boundary cases / 6 diffs, **2,000,000 random union states / 0 differences, carry predicate 0
-  fires** (expected ~2^-33.3 per operation).
-- `test_host_gate.py`: 64/64 midstates, recovery == verifier, layout and gate/C31 checks pass.
-- `test_sha_interleave.py`: clean (inherited from the base lineage).
-
-Owed at dispatch (needs nvcc): the SASS census — confirm zero spill with `nvcc -O3 -DQSB_ZEROS_N=24
--Xptxas -v`; PR1063 measured 124 stage-0 registers on the negY base and PR1055 measured ~126 with
-zero spill on its own line; the composition's interaction is expected benign but unverified here.
-No candidate-side change can alter the runner's non-grind init bucket (H31).
-
-## Switch inventory
-
-`QSB_X3_TAIL=1` (new, default on; `QSB_X3_TAIL=0` restores the full fold), `QSB_NEG_Y_MAC=1`,
-`QSB_K32_SUB=1`, `QSB_K32_ADD=1`, `QSB_K32_OFF=1`, `QSB_C31=1`, `QSB_HOST_GATE=1` (defaults all
-inherited from the base lineage; K32 branches were already default-on in PR1013).
-
-## Reproduction
-
-From the linked checkout: `./setup.sh pinning` then the ranked bridge, or the exact harness build
-line `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm` at N=24 on
-CUDA 12.8, and the audits above. No harness, verifier, setup, benchmark, problem, or watcher code is
-changed. License: the lineage and the imported sources retain their GPL-3.0-only notices
-(VanitySearch descent); no Apache-2.0 code was introduced.
+The organizer command remains `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning
+candidates/pinning/pinning.cu -lcrypto -lm`. The PR1107 switches
+`QSB_MAC_BIAS_DIRECT`, `QSB_MAC_SFQ`, `QSB_ADD_XDST`, and `QSB_ADD_YDST` each
+restore their parent path at zero. Restoring batch 8,388,608, two slots, and
+seven stage-2 blocks removes this candidate's host composition. The normal
+CPU carry, host-gate, and SHA tests and an organizer-default build are run on
+the packaged source before submission.
 
 ## Attribution
 
-- PR1013/PR999/PR1050 packaging and the K32/RAW/TOP16/narrow-parity integration: terrapinelf (GPT-5/Codex).
-- Negative-Y MAC: Saviour1001 and Portablelle (PR1060), integrated by terrapinelf (PR1063).
-- K32 and `QSB_SAS_FRMOV`: fkiene (PR1002). RAW finish: fkiene (PR993, `52a058ef`).
-- X3 h*K tail cut and its audit: maxence81 (PR1055).
-- Composition packaging: GLM (glm-5.3-flash) via the omp harness; model and switch inventory as above.
+The four exact chain rewrites and their source are by fkiene using Claude Opus
+5 / Claude Code in PR #1107. The host settings are from i34-9's public
+`0b204c4` package. The inherited negative-Y seeded MAC credits Saviour1001 and
+Portablelle; the lineage also retains the credits in its source and manifest,
+including stffinfcti, EvanYan1024, ercumentyildirim, and fkiene. GPT-5 / Codex
+performed this composition, local equal-work measurements, packaging, and
+submission decision.
 
 ---
 

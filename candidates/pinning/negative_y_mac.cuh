@@ -2,6 +2,21 @@
 // Research only: seed the promoted integer product with c.
 // The changed point representation stores the negative deferred ordinate.
 #pragma once
+/* QSB_MAC_BIAS_DIRECT: the seeded multiply-add stages each limb of c through a
+ * scratch .u64 ("mov.u64 bias, %1x") before the reduction-free bias chain adds
+ * it. The four staging moves are pure operand forwarding -- the inputs are
+ * already .u64 registers under the "l" constraint -- so consuming them straight
+ * in the add.cc/addc.cc chain is instruction-for-instruction identical
+ * arithmetic with one fewer live 64-bit scratch across the whole even chain. */
+#ifndef QSB_MAC_BIAS_DIRECT
+#define QSB_MAC_BIAS_DIRECT 1
+#endif
+/* QSB_MAC_SFQ: the second fold aliases z8 into sfq and then packs {z0,sfq}.
+ * sfq has exactly one definition (the alias) and two uses, both of which can
+ * read z8; the K-fold multiply on the next line already reads z8 directly. */
+#ifndef QSB_MAC_SFQ
+#define QSB_MAC_SFQ 1
+#endif
 __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,const uint64_t *b,const uint64_t *c){
 #ifdef __CUDA_ARCH__
  uint64_t r0,r1,r2,r3;
@@ -20,6 +35,21 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\tmov.b64 {b2,b3}, %9;\n"
   "\tmov.b64 {b4,b5}, %10;\n"
   "\tmov.b64 {b6,b7}, %11;\n"
+#if QSB_MAC_BIAS_DIRECT
+  "\t.reg .u64 bias_carry; .reg .u64 odd_t,odd_lc; .reg .u32 odd_cy;\n"
+  "mul.wide.u32 e0, a0, b0;\n"
+  "add.cc.u64 e0, e0, %12;\n"
+  "mul.wide.u32 o0, a0, b1;\n"
+  "mul.wide.u32 e1, a0, b2;\n"
+  "addc.cc.u64 e1, e1, %13;\n"
+  "mul.wide.u32 o1, a0, b3;\n"
+  "mul.wide.u32 e2, a0, b4;\n"
+  "addc.cc.u64 e2, e2, %14;\n"
+  "mul.wide.u32 o2, a0, b5;\n"
+  "mul.wide.u32 e3, a0, b6;\n"
+  "addc.cc.u64 e3, e3, %15;\n"
+  "addc.u64 bias_carry, 0, 0;\n"
+#else
   "\t.reg .u64 bias,bias_carry; .reg .u64 odd_t,odd_lc; .reg .u32 odd_cy;\n"
   "mul.wide.u32 e0, a0, b0;\n"
   "mov.u64 bias, %12;\n"
@@ -37,6 +67,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "mov.u64 bias, %15;\n"
   "addc.cc.u64 e3, e3, bias;\n"
   "addc.u64 bias_carry, 0, 0;\n"
+#endif
   "mul.wide.u32 o3, a0, b7;\n"
   "mul.wide.u32 t, a1, b1;\n"
   "mul.wide.u32 odd_t, a1, b0;\n"
@@ -220,6 +251,15 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\taddc.cc.u32 z6, z6, w5;\n"
   "\taddc.cc.u32 z7, z7, w6;\n"
   "\taddc.u32 z8, f8, w7;\n"
+#if QSB_MAC_SFQ
+  "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfl, sfh;\n"
+  "mov.b64 sfz, {z0, z8};\n"
+  "mul.wide.u32 sft, z8, 977;\n"
+  "add.cc.u64 sft, sft, sfz;\n"
+  "addc.u32 sfc, 0, 0;\n"
+  "mov.b64 {sfl, sfh}, sft;\n"
+  "mov.u32 z0, sfl;\n"
+#else
   "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n"
   "mov.u32 sfq, z8;\n"
   "mov.b64 sfz, {z0, sfq};\n"
@@ -228,6 +268,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "addc.u32 sfc, 0, 0;\n"
   "mov.b64 {sfl, sfh}, sft;\n"
   "mov.u32 z0, sfl;\n"
+#endif
   "add.cc.u32 z1, z1, sfh;\n"
   "addc.cc.u32 z2, z2, sfc; }\n"
   "\n"
