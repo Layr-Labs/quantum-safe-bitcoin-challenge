@@ -1,3 +1,6 @@
+#ifndef QSB_REMEASURE_0922_20463
+#define QSB_REMEASURE_0922_20463 1 /* no-op remeasure re-roll */
+#endif
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
