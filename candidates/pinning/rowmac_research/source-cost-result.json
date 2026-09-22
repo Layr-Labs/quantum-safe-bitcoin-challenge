@@ -1,0 +1,78 @@
+{
+  "selected": {
+    "groups": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "opcodes": {
+      "mov.b64": 136,
+      "mul.wide.u32": 8,
+      "mad.wide.u32": 56,
+      "mov.u32": 8,
+      "add.cc.u32": 7,
+      "addc.cc.u32": 49,
+      "addc.u32": 7
+    },
+    "wide_multiplies": 8,
+    "wide_MACs": 56,
+    "zero_extended_MAD_seeds": 56,
+    "precombined_33bit_MAD_seeds": 0,
+    "other_MAD_seeds": 0,
+    "costs": {
+      "balanced": 191,
+      "slow_mad": 191,
+      "fast_wide": 127
+    },
+    "balanced_plus_one_move_per_zero_seed": 247,
+    "balanced_plus_two_moves_per_zero_seed": 303,
+    "ssa_peak_live_words32": 32,
+    "ssa_peak_live_predicates": 0,
+    "weighted_dependency_depth": {
+      "balanced": 31,
+      "slow_mad": 31,
+      "fast_wide": 23
+    },
+    "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency.",
+    "fresh_seed_unpack_warning": "Pairs produced by separate adds still require native allocation; no claim that packing is free.",
+    "pareto_one_move": true
+  },
+  "promoted": {
+    "opcodes": {
+      "mov.b64": 34,
+      "mul.wide.u32": 64,
+      "add.cc.u64": 14,
+      "addc.cc.u64": 35,
+      "addc.u64": 7,
+      "addc.u32": 8,
+      "add.cc.u32": 1,
+      "addc.cc.u32": 13
+    },
+    "wide_multiplies": 64,
+    "wide_MACs": 0,
+    "zero_extended_MAD_seeds": 0,
+    "precombined_33bit_MAD_seeds": 0,
+    "other_MAD_seeds": 0,
+    "costs": {
+      "balanced": 262,
+      "slow_mad": 262,
+      "fast_wide": 198
+    },
+    "balanced_plus_one_move_per_zero_seed": 262,
+    "balanced_plus_two_moves_per_zero_seed": 262,
+    "ssa_peak_live_words32": 40,
+    "ssa_peak_live_predicates": 0,
+    "weighted_dependency_depth": {
+      "balanced": 32,
+      "slow_mad": 32,
+      "fast_wide": 31
+    },
+    "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency."
+  },
+  "warning": "PTX source sensitivity and SSA estimates; no native build or GPU measurements."
+}
