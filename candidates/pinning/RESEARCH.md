@@ -407,3 +407,56 @@ A union budget around 5e-8 corrupted candidates is the remaining
 false-negative score loss. False GPU hits are dropped by the gate and
 cannot reach the verifier. `QSB_C31` without `QSB_HOST_GATE` is a compile
 error. SHA flags and `QSB_UNROLL` are unchanged.
+
+### QSB-FIRE8 pricing pass + draw-4 staged on crown cekuu35 805,428,058 (2026-09-22 ~01:50Z)
+
+Crown re-check 01:10Z: 2294465 cekuu35 805,428,058 @ 7c3609b (intel-r5 22:48:22Z, promoted
+23:16Z Sep-21) = 07009ac3 + dead scratch-arg removal in pinning.cu ONLY (whitespace-
+normalized diff 3+/12-; every other file CRLF noise). Old staged f2958a8 (S2_BLOCKS=8 on
+0b2c7b0, band ~740-744M) dead at -8% vs bar. New-base knobs: S2_BLOCKS ladder now 3->7
+via undef/redefine (bare -D still dead), QSB_BATCH=8M already in lineage.
+
+Re-diff vs old base (real content): 0b2c7b0 -> 208bbcb6 (789.0M) -> 52cd275a terrapinelf
+(778.6M: PR743 tail trunc +CARRY62 +host gate +C31 per NEXT-OPTIMIZATIONS.md) ->
+07009ac3 terrapinelf (797.4M: PR827 z9 lane removal @stffinfcti + PR885 bounded parity
+@EvanYan1024 + QSB_ISO_XR isomorphic recovery) -> 7c3609b cekuu35 (805.4M). e23edea
+jacklightChen 800,562,062 (near-miss): ParityWindow.cuh high-half variant on 07009ac3 —
+reads -0.5% vs contemporaries on r5; not the pick.
+
+BEST UNTAKEN SINGLE: QSB_TOP16 (PR #927 caf7f8c0, @ercumentyildirim Claude Opus 5/Claude
+Code; idea/schedule @EvanYan1024 58005ee5). Official reads on parent base: 804,598,773
++ 804,457,861 (PR957 re-upload, same executable) BOTH on intel-r5, spread 0.017%; local
+mirrored +0.330%+/-0.070% rate (ranked predictor +0.077% via -0.215% clock term — the
+honest spread). Crown does NOT carry it (qsb_cofactor_top16: 0 vs 2 in preprocessed
+source, clang -E vs real CUDA 12.9 headers). Untaken across resolved (8740a30, 02327c9
+on old base) + validating (5589bf3 inert re-measure, 01df704 its re-upload, e13c1f8
+TOP16+narrow composite OLD base prior read 786.2M on 3568275, 50b31a4 fkiene copy-free
+accumulator GPUMath.h+pinning.cu — different mechanisms all).
+
+Box bands recomputed on new base (runner_name via direct api.github.com — egress BACK UP
+since QsbFire7's outage): intel-r5 family reads 800.56-805.43M (6 samples), 3568275
+same-TOP16-executable 779.5M = **-3.11% vs r5** (02327c9) — only r5 can beat 805.4M;
+r3 no new-base sample yet (e13c1f8 there now; 741M-era band was -1.1..-1.5%). r5 cycle
+~48-49 min; 3568275 ~27 min.
+
+Draw-4 = crown 7c3609b + cofactor_checkpoint.h byte-exact from caf7f8c0 + QSB-DRAW-4
+comment marker in pinning.cu (strip proves byte-equality vs crown by cmp). Per-draw
+digest 11d758e4efb7ac32a4149213fb987e04ac39f94c9a14d3d147b9407396171d08 (pinning.cu
+remainder + cofactor_checkpoint.h); tree digest (tag normalized DRAW-4->DRAW-1)
+60740d0dcc37485dba53d53825ec9e312ad3afddfa080a30d174017b99e23a24. Gates: device+sysroot
+0, host 0/0, negatives TREE_N=100 (3 @ exact #error+static_asserts) and S2_THREADS=100
+(2 @ exact #error), control -DQSB_TOP16=0 compiles 0 (graft clean both states). CPU:
+test_host_gate.py all-true, test_carry62.py 200k/0-diff, harness smoke 2/2 verified
+(K>=94 REJECT = expected power bar). SOURCE-MANIFEST.json regenerated over actual bytes
+(cekuu35's entries were stale vs CRLF flip). Note 11.9 KiB.
+
+PRICING vs bar 805,428,058: TOP16 exec r5 mean 804.53M (n=2) + scratch-removal delta
+(0 to +0.5% +/- 0.5% — cekuu35's own note says zero-to-small) -> central composite
+805.5-808.5M = -0.11% at worst vs bar. 3% rule: nowhere near HOLD. P(win on r5)
+~0.35-0.65 central ~0.5. VERDICT: PROCEED.
+
+Window history this session: Supervisor5 confirmed 2-tick lull 00:25-01:04Z; while
+rebuilding, lull BROKE 01:20Z (DPZZxlz a0cca088 -> 3568275, DrCleverHans 46f5847 queued,
+Jay44333 554f612 + anamdong 8b490cb latent) — all three slots claimed through ~02:05Z+;
+no r5-targeted geometry. Holding per doctrine; fire on next all-busy/r5-next-free/
+empty-queue window with crown recheck at FIRE-PRE.
