@@ -528,6 +528,11 @@ __device__ __forceinline__ void qsb_filter_last_add(
     uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
     const uint64_t *x,const uint64_t *y,uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
+#if QSB_SUBSET_NEG_Y_MAC
+    // Restore the positive deferred ordinate once at the chain boundary.
+    uint64_t zero[4]={0};
+    _ModSub256(Y,zero,Y);
+#endif
     uint64_t scaled_y[4];
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
 #if QSB_SPEC_LAST_RESOLVE
@@ -1519,6 +1524,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 #include "pair_shared.cuh"
+#include "sha_stage.cuh"
+#include "sha_tile_pipe.cuh"
+#include "schedule_tuning.cuh"
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
@@ -1551,6 +1559,9 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
+#if QSB_SCHEDULE_TUNE
+template<bool PRODUCED_SHA=true>
+#endif
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -1577,7 +1588,14 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int fast_inc, const uint32_t * __restrict__ d_const_words,
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 , const uint32_t *d_first, int epochs_in_batch
+#if QSB_SHA_STAGE
+, const uint64_t * __restrict__ staged_z
+#endif
+QSB_TILE_ARG(unsigned tile_epoch_offset)
 ) {
+#if !QSB_SCHEDULE_TUNE
+    const bool PRODUCED_SHA=QSB_SHA_STAGE;
+#endif
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
@@ -1604,11 +1622,22 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], nB[12];
 #if ZLAB_DUAL_EPOCH_SHA
     uint64_t zB[4];
-    QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
-    // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
-    // until A's final four pre-inverse words are written below.
-    #pragma unroll
-    for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+    QsbPairEpochZ zpair;
+#if QSB_SHA_STAGE
+    if(PRODUCED_SHA) {
+    #if QSB_STAGE_RELOAD_ID
+        qsb_load_staged_consumer_z<false>(zpair.a,staged_z,(unsigned)epochs_in_batch);
+    #else
+        qsb_load_staged_z(zpair.a,staged_z,eA0,(unsigned)lane);
+    #endif
+    } else
+#endif
+    {
+        zpair=qsb_pair_epoch_z_value(f0,f1,lane);
+        // Preserve B's scalar until A's field chain returns its parked words.
+        #pragma unroll
+        for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+    }
 #endif
 #else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
@@ -1622,24 +1651,35 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
+        #if QSB_SHA_STAGE && QSB_STAGE_RELOAD_ID
+        okA=fa.ok && qsb_stage_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch);
+#else
         okA=fa.ok && active;
+#endif
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
 #if ZLAB_DUAL_EPOCH_SHA
-        #pragma unroll
-        for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
-        #pragma unroll
-        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
-        #pragma unroll
-        for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
-#else
-        #pragma unroll
-        for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+        if(!PRODUCED_SHA) {
+            #pragma unroll
+            for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
+            #pragma unroll
+            for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+            #pragma unroll
+            for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
+        } else
 #endif
+        {
+            #pragma unroll
+            for(int k=0;k<12;k++)parkA[k][tid]=fa.words[4+k];
+        }
 #else
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
         Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
+        #if QSB_SHA_STAGE && QSB_STAGE_RELOAD_ID
+        okA=fa.ok && qsb_stage_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch);
+#else
         okA=fa.ok && active;
+#endif
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
         #pragma unroll
         for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
@@ -1648,6 +1688,15 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
+#if QSB_SHA_STAGE
+    if(PRODUCED_SHA) {
+    #if QSB_STAGE_RELOAD_ID
+        qsb_load_staged_consumer_z<true>(zB,staged_z,(unsigned)epochs_in_batch);
+    #else
+        qsb_load_staged_z(zB,staged_z,hasB?eA0+1u:eA0,(unsigned)lane);
+    #endif
+    }
+#endif
     QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
@@ -1659,7 +1708,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
 #endif
+    #if QSB_SHA_STAGE && QSB_STAGE_RELOAD_ID
+    okB=fb.ok && qsb_stage_active<true>((unsigned)batch_size,(unsigned)epochs_in_batch);
+#else
     okB=fb.ok && active && hasB;
+#endif
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);
@@ -1685,9 +1738,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=(eA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
+                #if QSB_SHA_STAGE && QSB_STAGE_RELOAD_ID
+                const unsigned hit_epoch=qsb_stage_epoch<false>();
+                const unsigned hit_lane=qsb_stage_tid()&(QSB_SE_WINDOWS-1u);
+                d_hit_idx[pslot*4]=(QSB_TILE_EPOCH(hit_epoch)*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
+#else
+                d_hit_idx[pslot*4]=(QSB_TILE_EPOCH(eA0)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+#endif
             }
         }
     }
@@ -1706,9 +1767,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=((eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
+                #if QSB_SHA_STAGE && QSB_STAGE_RELOAD_ID
+                const unsigned hit_epoch=qsb_stage_epoch<true>();
+                const unsigned hit_lane=qsb_stage_tid()&(QSB_SE_WINDOWS-1u);
+                d_hit_idx[pslot*4]=(QSB_TILE_EPOCH(hit_epoch)*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
+#else
+                d_hit_idx[pslot*4]=(QSB_TILE_EPOCH(eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+#endif
             }
         }
     }
@@ -2780,6 +2849,12 @@ int main(int argc, char **argv) {
     #endif
 #endif
     uint32_t *d_first = NULL;
+#if QSB_SHA_STAGE && QSB_SHA_TILE_PIPE
+    QsbShaTilePipe sha_pipe;
+#endif
+#if QSB_SHA_STAGE && (!QSB_SHA_TILE_PIPE || QSB_SCHEDULE_TUNE)
+    uint64_t *d_staged_z=NULL;
+#endif
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2834,6 +2909,14 @@ int main(int argc, char **argv) {
 #endif
         cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
         if(first_error!=cudaSuccess){fprintf(stderr,"OOM: first states: %s\n",cudaGetErrorString(first_error));return 1;}
+#if QSB_SHA_STAGE && QSB_SHA_TILE_PIPE
+        if(!sha_pipe.init())return 1;
+#endif
+#if QSB_SHA_STAGE && (!QSB_SHA_TILE_PIPE || QSB_SCHEDULE_TUNE)
+        const size_t z_bytes=(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_SE_WINDOWS*4*sizeof(uint64_t);
+        cudaError_t zerr=cudaMalloc(&d_staged_z,z_bytes);
+        if(zerr!=cudaSuccess){fprintf(stderr,"OOM: staged scalars: %s\n",cudaGetErrorString(zerr));return 1;}
+#endif
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -3087,7 +3170,15 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if QSB_SCHEDULE_TUNE
+        QsbScheduleTuning schedule_tuning;
+        unsigned schedule_route=schedule_tuning.route();
+#endif
         while (1) {
+#if QSB_SCHEDULE_TUNE
+            struct timespec schedule_start;
+            if(!schedule_tuning.done())clock_gettime(CLOCK_MONOTONIC,&schedule_start);
+#endif
             uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
             const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
@@ -3141,7 +3232,73 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+#if QSB_SHA_STAGE && QSB_SHA_TILE_PIPE
+#if QSB_SCHEDULE_TUNE
+            if(schedule_route>=2) {
+            const cudaStream_t sha_stream=schedule_route==3?sha_pipe.producer:0;
+#else
+            const cudaStream_t sha_stream=sha_pipe.producer;
+#endif
+            // Only the producer is nonblocking: the default stream preserves
+            // consumer ordering, shared hit-buffer ownership and exact replay.
+            if(!qsb_tile_check(cudaEventRecord(sha_pipe.first_ready,0)) ||
+               !qsb_tile_check(cudaStreamWaitEvent(sha_stream,sha_pipe.first_ready,0)))return 1;
+            for(int tile_begin=0,tile_id=0;tile_begin<epochs_in_batch;
+                tile_begin+=QSB_SHA_TILE_EPOCHS,tile_id++) {
+                const int remain=epochs_in_batch-tile_begin;
+                const int tile_epochs=remain<QSB_SHA_TILE_EPOCHS?remain:QSB_SHA_TILE_EPOCHS;
+                const int tile_blocks=(tile_epochs+QSB_PAIR_MUL-1)/QSB_PAIR_MUL;
+                const int slot=tile_id&1;
+                uint64_t *tile_z=sha_pipe.scalars[slot];
+                const uint32_t *tile_first=d_first+(size_t)tile_begin*QSB_FIRST_SLOTS*8;
+                // Wait captures this event's previous record, not its future
+                // re-record below. No writer may overtake a prior slot reader.
+                if(tile_id>=2 && !qsb_tile_check(cudaStreamWaitEvent(sha_stream,sha_pipe.consumed[slot],0)))return 1;
+#if QSB_SHA_STAGE_SINGLE
+                const unsigned z_threads=(unsigned)tile_epochs*QSB_SE_WINDOWS;
+                kernel_stage_sighash_single<<<(z_threads+127u)/128u,128,0,sha_stream>>>(tile_first,tile_z,(unsigned)tile_epochs);
+#else
+                const unsigned z_threads=((unsigned)tile_epochs+1u)/2u*QSB_SE_WINDOWS;
+                kernel_stage_sighash<<<(z_threads+255u)/256u,256,0,sha_stream>>>(tile_first,tile_z,(unsigned)tile_epochs);
+#endif // QSB_TILE_STAGE_COMPLETE
+                if(!qsb_tile_check(cudaGetLastError()) ||
+                   !qsb_tile_check(cudaEventRecord(sha_pipe.scalar_ready[slot],sha_stream)) ||
+                   !qsb_tile_check(cudaStreamWaitEvent(0,sha_pipe.scalar_ready[slot],0)))return 1;
+            QSB_DIGEST_STAGED<<<tile_blocks, QSB_SE_BLOCK>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                tile_blocks*QSB_SE_BLOCK, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs+tile_begin, tile_first, tile_epochs QSB_STAGE_ARG(tile_z) QSB_TILE_ARG((unsigned)tile_begin));
+                if(!qsb_tile_check(cudaGetLastError()) ||
+                   !qsb_tile_check(cudaEventRecord(sha_pipe.consumed[slot],0)))return 1;
+            }
+#if QSB_SCHEDULE_TUNE
+            } else if(schedule_route==1) {
+#if QSB_SHA_STAGE
+            // Same default stream: all staged scalars complete before consumption.
+            #if QSB_SHA_STAGE_SINGLE
+            const unsigned z_threads=(unsigned)epochs_in_batch*QSB_SE_WINDOWS;
+            kernel_stage_sighash_single<<<(z_threads+127u)/128u,128>>>(d_first,d_staged_z,(unsigned)epochs_in_batch);
+#else
+            const unsigned z_threads=((unsigned)epochs_in_batch+1u)/2u*QSB_SE_WINDOWS;
+            kernel_stage_sighash<<<(z_threads+255u)/256u,256>>>(d_first,d_staged_z,(unsigned)epochs_in_batch);
+#endif // QSB_STAGE_LAUNCH_COMPLETE
+#endif
+            QSB_DIGEST_STAGED<<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -3159,7 +3316,60 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch QSB_STAGE_ARG(d_staged_z) QSB_TILE_ARG(0));
+            } else {
+            QSB_DIGEST_FUSED<<<nblk, QSB_SE_BLOCK>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch QSB_STAGE_ARG(NULL) QSB_TILE_ARG(0));
+            }
+#endif
+#else
+#if QSB_SHA_STAGE
+            // Same default stream: all staged scalars complete before consumption.
+            #if QSB_SHA_STAGE_SINGLE
+            const unsigned z_threads=(unsigned)epochs_in_batch*QSB_SE_WINDOWS;
+            kernel_stage_sighash_single<<<(z_threads+127u)/128u,128>>>(d_first,d_staged_z,(unsigned)epochs_in_batch);
+#else
+            const unsigned z_threads=((unsigned)epochs_in_batch+1u)/2u*QSB_SE_WINDOWS;
+            kernel_stage_sighash<<<(z_threads+255u)/256u,256>>>(d_first,d_staged_z,(unsigned)epochs_in_batch);
+#endif // QSB_STAGE_LAUNCH_COMPLETE
+#endif
+            QSB_DIGEST_STAGED<<<nblk, QSB_SE_BLOCK>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch QSB_STAGE_ARG(d_staged_z) QSB_TILE_ARG(0));
+#endif // QSB_TILE_PIPE_COMPLETE
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
@@ -3249,6 +3459,28 @@ int main(int argc, char **argv) {
                     fclose(ff);
                 }
             }
+#if QSB_SCHEDULE_TUNE
+            if(!schedule_tuning.done()) {
+                struct timespec schedule_end;
+                clock_gettime(CLOCK_MONOTONIC,&schedule_end);
+                const double seconds=(schedule_end.tv_sec-schedule_start.tv_sec)
+                    +(schedule_end.tv_nsec-schedule_start.tv_nsec)*1e-9;
+                if(schedule_tuning.observe(seconds,(uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH)) {
+                    schedule_route=schedule_tuning.route();
+                    printf("Subset schedule selected %u; relative times %.6f %.6f %.6f %.6f\n",
+                        schedule_route,schedule_tuning.relative_time[0],schedule_tuning.relative_time[1],
+                        schedule_tuning.relative_time[2],schedule_tuning.relative_time[3]);
+                    if(schedule_route!=1) {
+                        if(!qsb_tile_check(cudaFree(d_staged_z)))return 1;
+                        d_staged_z=NULL;
+                    }
+                    if(schedule_route<2)for(int slot=0;slot<2;slot++) {
+                        if(!qsb_tile_check(cudaFree(sha_pipe.scalars[slot])))return 1;
+                        sha_pipe.scalars[slot]=NULL;
+                    }
+                } else schedule_route=schedule_tuning.route();
+            }
+#endif
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
@@ -3288,6 +3520,9 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+#if QSB_SHA_STAGE && (!QSB_SHA_TILE_PIPE || QSB_SCHEDULE_TUNE)
+        cudaFree(d_staged_z);
+#endif
         free(h_combos);
         return 0;
     }
@@ -3330,7 +3565,7 @@ int main(int argc, char **argv) {
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
 #endif
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_DIGEST_STAGED<<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -3343,7 +3578,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, enum_base,
-                t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, 0);
+                t_win, s_early, d_early, fast_inc, d_const_words, NULL, NULL, 0 QSB_STAGE_ARG(NULL) QSB_TILE_ARG(0));
             // Blocking hit-count copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -3532,7 +3767,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_DIGEST_STAGED<<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
@@ -3545,7 +3780,7 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, 0, (uint64_t)0,
-                t_sel, 0, d_early, 0, d_const_words, NULL, NULL, 0);
+                t_sel, 0, d_early, 0, d_const_words, NULL, NULL, 0 QSB_STAGE_ARG(NULL) QSB_TILE_ARG(0));
             // Blocking hit-count copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }

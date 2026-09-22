@@ -9,6 +9,14 @@
 // Preserve all inherited VanitySearch/GPL and point-chain attribution.
 #pragma once
 
+/* Adapted from Saviour1001 PR1072 (50fda34b).
+ * Negative deferred ordinate: N=-Ycore, so actual Y=-N-Yoff*ZZZ.
+ * Fuse (Y2+Yoff)*ZZZ+N before reduction. Exact publication remains separate.
+ * Research default; native compile and PTX/curve audits are required. */
+#ifndef QSB_SUBSET_NEG_Y_MAC
+#define QSB_SUBSET_NEG_Y_MAC 1
+#endif
+
 /* Exact loop-carried-anchor deletion.  The deferred point-add already has the
  * current affine Y in AY0..AY3; publish those registers as the next iteration's
  * Yoff outputs instead of making the caller copy Y2 after the asm block. */
@@ -618,10 +626,22 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 {f2_b4,f2_b5}, ZZZ2;\n"
         "\tmov.b64 {f2_b6,f2_b7}, ZZZ3;\n"
         "\tmul.wide.u32 f2_e0, f2_a0, f2_b0; mul.wide.u32 f2_e1, f2_a0, f2_b2; mul.wide.u32 f2_e2, f2_a0, f2_b4; mul.wide.u32 f2_e3, f2_a0, f2_b6;\n"
+#if QSB_SUBSET_NEG_Y_MAC
+        "\t.reg .u64 f2_bias;\n"
+        "\tadd.cc.u64 f2_e0, f2_e0, YY0;\n"
+        "\taddc.cc.u64 f2_e1, f2_e1, YY1;\n"
+        "\taddc.cc.u64 f2_e2, f2_e2, YY2;\n"
+        "\taddc.cc.u64 f2_e3, f2_e3, YY3;\n"
+        "\taddc.u64 f2_bias, 0, 0;\n"
+#endif
         "\tmul.wide.u32 f2_t, f2_a1, f2_b1; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b3; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b5; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
+#if QSB_SUBSET_NEG_Y_MAC
+        "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, f2_bias;\n"
+#else
         "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, 0;\n"
+#endif
         "\tmul.wide.u32 f2_t, f2_a2, f2_b0; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b2; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b4; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
@@ -768,10 +788,22 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 {f2_b4,f2_b5}, ZZZ2;\n"
         "\tmov.b64 {f2_b6,f2_b7}, ZZZ3;\n"
         "\tmul.wide.u32 f2_e0, f2_a0, f2_b0; mul.wide.u32 f2_e1, f2_a0, f2_b2; mul.wide.u32 f2_e2, f2_a0, f2_b4; mul.wide.u32 f2_e3, f2_a0, f2_b6;\n"
+#if QSB_SUBSET_NEG_Y_MAC
+        "\t.reg .u64 f2_bias;\n"
+        "\tadd.cc.u64 f2_e0, f2_e0, YY0;\n"
+        "\taddc.cc.u64 f2_e1, f2_e1, YY1;\n"
+        "\taddc.cc.u64 f2_e2, f2_e2, YY2;\n"
+        "\taddc.cc.u64 f2_e3, f2_e3, YY3;\n"
+        "\taddc.u64 f2_bias, 0, 0;\n"
+#endif
         "\tmul.wide.u32 f2_t, f2_a1, f2_b1; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b3; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a1, f2_b5; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
+#if QSB_SUBSET_NEG_Y_MAC
+        "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, f2_bias;\n"
+#else
         "\tmul.wide.u32 f2_t, f2_a1, f2_b7; addc.u64 f2_e4, f2_t, 0;\n"
+#endif
         "\tmul.wide.u32 f2_t, f2_a2, f2_b0; add.cc.u64 f2_e1, f2_e1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b2; addc.cc.u64 f2_e2, f2_e2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a2, f2_b4; addc.cc.u64 f2_e3, f2_e3, f2_t;\n"
@@ -909,6 +941,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "and.b64 sub3_lo,sub3_borrow,0x1000003D1;\n"
         "sub.cc.u64 D0,D0,sub3_lo;\n"
         "subc.u64 D1,D1,0;\n"
+#if QSB_SUBSET_NEG_Y_MAC
+        "mov.u64 R0,S0; mov.u64 R1,S1; mov.u64 R2,S2; mov.u64 R3,S3;\n"
+#else
         ".reg .u64 sub4_borrow,sub4_lo;\n"
         "sub.cc.u64 R0,S0,YY0;\n"
         "subc.cc.u64 R1,S1,YY1;\n"
@@ -918,6 +953,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "and.b64 sub4_lo,sub4_borrow,0x1000003D1;\n"
         "sub.cc.u64 R0,R0,sub4_lo;\n"
         "subc.u64 R1,R1,0;\n"
+#endif
         ".reg .u32 f5_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
@@ -2570,10 +2606,17 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #endif
         "\t\n"
         ".reg .u64 sub14_borrow,sub14_lo;\n"
+#if QSB_SUBSET_NEG_Y_MAC
+        "sub.cc.u64 Q0,T0,Q0;\n"
+        "subc.cc.u64 Q1,T1,Q1;\n"
+        "subc.cc.u64 Q2,T2,Q2;\n"
+        "subc.cc.u64 Q3,T3,Q3;\n"
+#else
         "sub.cc.u64 Q0,Q0,T0;\n"
         "subc.cc.u64 Q1,Q1,T1;\n"
         "subc.cc.u64 Q2,Q2,T2;\n"
         "subc.cc.u64 Q3,Q3,T3;\n"
+#endif
         "subc.u64 sub14_borrow,0,0;\n"
         "and.b64 sub14_lo,sub14_borrow,0x1000003D1;\n"
         "sub.cc.u64 Q0,Q0,sub14_lo;\n"
@@ -2925,7 +2968,11 @@ __device__ __forceinline__ void qsb_filter_point_add(
   qsb_filter_add(S2, (uint64_t *)Y2, (uint64_t *)Yoff,bad);
   qsb_filter_mul(S2, ZZZ1,bad);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
+#if QSB_SUBSET_NEG_Y_MAC
+  _ModAdd256(R, S2, Y1);               // R = S2 + N
+#else
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+#endif
   qsb_filter_sqr(PP, P,bad);                      // PP = P^2
   qsb_filter_mul(PPP, PP, P,bad);                // PPP = P*PP
   qsb_filter_mul(Q, U2, PP,bad);                 // V  = U2*PP
@@ -2937,15 +2984,28 @@ __device__ __forceinline__ void qsb_filter_point_add(
   _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
 
   qsb_filter_mul(ZZZ1, PPP,bad);                 // ZZZ3
+#if QSB_SUBSET_NEG_Y_MAC
+  _ModSub256(Q, T, Q);                 // X3 - V
+#else
   _ModSub256(Q, Q, T);                 // V - X3
+#endif
   qsb_filter_mul(Q, R,bad);                      // R*(V - X3)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
     qsb_filter_mul(S2, (uint64_t *)Y2, ZZZ1,bad);// affine Y2*ZZZ3
+#if QSB_SUBSET_NEG_Y_MAC
+    uint64_t zero[4]={0};
+    _ModSub256(Y1, zero, Q);
+    _ModSub256(Y1, Y1, S2);
+#else
     _ModSub256(Y1, Q, S2);             // exact Y3
+#endif
   }
 
+#if QSB_CHAIN_ANCHOR_UPDATE
+  Load256(Yoff, Y2);
+#endif
   Load256(X1, T);                      // X3
 }
 
@@ -3022,7 +3082,11 @@ __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3,
   qsb_filter_sqr(T, R,bad);                                   // R^2
   qsb_filter_seed_x3(T,T,ZZZ3,Q,bad); // guarded R^2 - PPP - 2Q
 
+#if QSB_SUBSET_NEG_Y_MAC
+  _ModSub256(Q, T, Q);                             // X3 - Q
+#else
   _ModSub256(Q, Q, T);                             // Q - X3
+#endif
   qsb_filter_mul(Y3, Q, R,bad);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }
