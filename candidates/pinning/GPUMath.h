@@ -1,3 +1,4 @@
+// QSB fusion integration: audited current interleaved square schedule.
 // Derived from the upstream square and xlib fused reduction; see package provenance.
 // GPU throughput has not been established by the CPU semantic tests.
 /*
@@ -599,24 +600,13 @@ __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, c
 }
 #endif
 #endif
-#ifndef QSB_X3_TAIL
-#define QSB_X3_TAIL 1   /* drop the 3 h*K correction no-ops in _ModX3Fused; audited 2^-33/op class */
-#endif
-#if QSB_X3_TAIL && !QSB_C31
-#error "QSB_X3_TAIL requires the audited C31 path"
-#endif
-#if QSB_X3_TAIL
-#define QSB_X3_FOLD "add.u64 t0,t0,k;"
-#else
-#define QSB_X3_FOLD "add.cc.u64 t0,t0,k; addc.cc.u64 t1,t1,0; addc.cc.u64 t2,t2,0;\naddc.u64 t3,t3,0;"
-#endif
 // Fused X3 = a + b - 2c (mod p) for the XYZZ addition (R^2 + PPP - 2V), in
 // one carry chain: t = a + b + 2p - 2c lies in [0, 2^258) (the 2^-224 case
 // c > p + (a+b)/2 is ignored), and its top two bits h fold as h*K. A second
 // carry needs t mod 2^256 >= 2^256 - 2^34, a 2^-222 event, ignored.
 __device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, const uint64_t *b, const uint64_t *c) {
     uint64_t r0,r1,r2,r3;
-    asm("{\n.reg .u64 t0,t1,t2,t3,t4,s0,s1,s2,s3,d0,d1,d2,d3,d4,k;\n.reg .pred choose;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u64 t4,0,0;\nadd.cc.u64 t0,t0,0xFFFFFFFDFFFFF85E;\naddc.cc.u64 t1,t1,0xFFFFFFFFFFFFFFFF;\naddc.cc.u64 t2,t2,0xFFFFFFFFFFFFFFFF;\naddc.cc.u64 t3,t3,0xFFFFFFFFFFFFFFFF; addc.u64 t4,t4,1;\nshl.b64 d0,%12,1;\nshl.b64 d1,%13,1; shr.u64 k,%12,63; or.b64 d1,d1,k;\nshl.b64 d2,%14,1; shr.u64 k,%13,63; or.b64 d2,d2,k;\nshl.b64 d3,%15,1; shr.u64 k,%14,63; or.b64 d3,d3,k;\nshr.u64 d4,%15,63;\nsub.cc.u64 t0,t0,d0; subc.cc.u64 t1,t1,d1;\nsubc.cc.u64 t2,t2,d2; subc.cc.u64 t3,t3,d3; subc.u64 t4,t4,d4;\nmul.lo.u64 k,t4,0x1000003D1;\n" QSB_X3_FOLD "\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+    asm("{\n.reg .u64 t0,t1,t2,t3,t4,s0,s1,s2,s3,d0,d1,d2,d3,d4,k;\n.reg .pred choose;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u64 t4,0,0;\nadd.cc.u64 t0,t0,0xFFFFFFFDFFFFF85E;\naddc.cc.u64 t1,t1,0xFFFFFFFFFFFFFFFF;\naddc.cc.u64 t2,t2,0xFFFFFFFFFFFFFFFF;\naddc.cc.u64 t3,t3,0xFFFFFFFFFFFFFFFF; addc.u64 t4,t4,1;\nshl.b64 d0,%12,1;\nshl.b64 d1,%13,1; shr.u64 k,%12,63; or.b64 d1,d1,k;\nshl.b64 d2,%14,1; shr.u64 k,%13,63; or.b64 d2,d2,k;\nshl.b64 d3,%15,1; shr.u64 k,%14,63; or.b64 d3,d3,k;\nshr.u64 d4,%15,63;\nsub.cc.u64 t0,t0,d0; subc.cc.u64 t1,t1,d1;\nsubc.cc.u64 t2,t2,d2; subc.cc.u64 t3,t3,d3; subc.u64 t4,t4,d4;\nmul.lo.u64 k,t4,0x1000003D1;\nadd.cc.u64 t0,t0,k; addc.cc.u64 t1,t1,0; addc.cc.u64 t2,t2,0;\naddc.u64 t3,t3,0;\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]),"l"(c[0]),"l"(c[1]),"l"(c[2]),"l"(c[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
@@ -668,6 +658,18 @@ __device__ void _ModSub256(uint64_t *r, uint64_t *b)
 
 }
 #endif
+
+/* QSB_RAW_DIFF: REJECTED — mathematically invalid for secp256k1. The public
+ * note claims "a-b mod 2^256 is already congruent mod p"; it is not. When the
+ * subtract borrows, the mod-2^256 wrap adds 2^256, and 2^256 == K (mod p),
+ * not 0: the result is off by exactly K per borrow. Congruence-tolerant
+ * consumers (multiplies, squares, parity window) cannot repair that — the
+ * value itself is wrong. Verified empirically: the CPU oracle's OpenSSL
+ * anchor fails on every case with the raw subtraction and passes with the
+ * canonical one. The pending public bundle shipping this is doubly broken
+ * (it also deleted the R*(V-X3) multiply in _PointAddXYZZT). Do not revive
+ * without a corrected borrow fold (a borrow->subtract-K tail is ~3 instrs
+ * vs _ModSub256's masked +p; not worth it). */
 
 // ---------------------------------------------------------------------------------------
 
@@ -1966,7 +1968,6 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   if (defer_y) _PointAddXYZZT<true>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
   else _PointAddXYZZT<false>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
 #else
-
   uint64_t U2[4];
   uint64_t S2[4];
   uint64_t P[4];
@@ -2075,7 +2076,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModSub256(Q, T, Q); // negative deferred ordinate
 #else
   _ModSub256(Q, Q, T);
-#endif                 // V - X3
+#endif                                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
@@ -2086,7 +2087,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
     _ModSub256(anchor,Y2,off);
     _ModMult(S2,anchor,ZZZ1);
 #else
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
 #endif
 #if QSB_NEG_Y_MAC
     qsb_negate_residue(Q);
@@ -2128,7 +2129,7 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModSub256(Q, T, Q); // seed negative deferred ordinate
 #else
   _ModSub256(Q, Q, T);
-#endif                             // Q - X3
+#endif                                               // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }
