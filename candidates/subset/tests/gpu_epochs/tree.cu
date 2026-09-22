@@ -247,43 +247,17 @@ __device__ uint64_t BINOM_C[151][10];
  * 2^17 for the rest (2,359,296 64-byte records = 144 MiB). One fewer table load
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
-#ifndef ZLAB_T14
+#define HM37_COMB 1
 #define ZLAB_T14 0
-#endif
-#if ZLAB_T14
-#define GT_CHUNKS 14
-#define GT_BIG 4
-#define GT_TOTAL_ENTRIES (GT_BIG * (1u << 18) + (GT_CHUNKS - GT_BIG) * (1u << 17))
+#define QSB_DIGIT_SHIFT 0
+#define GT_CHUNKS 8
+#define GT_TOTAL_ENTRIES (1u << 18)
 #define GT_LO 256
-#define GT_HI 2048
-__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    return c < GT_BIG ? (1u << 18) : (1u << 17);
-}
-__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return c <= GT_BIG ? (unsigned)c << 18 : ((unsigned)GT_BIG << 18) + ((unsigned)(c - GT_BIG) << 17);
-}
-__host__ __device__ __forceinline__ int gt_shift(int c) {
-    return c <= GT_BIG ? 19*c : 19*GT_BIG + 18*(c - GT_BIG);
-}
-static_assert(GT_TOTAL_ENTRIES*64ULL == 144ULL*1024*1024,
-              "14-term table must contain exactly 144 MiB");
-#else
-#define GT_CHUNKS 15
-#define GT_TOTAL_ENTRIES (1u << 20)
-#define GT_LO 256
-#define GT_HI 1024
-__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    return c == 0 ? (1u << 17) : (1u << 16);
-}
-__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return c == 0 ? 0u : (unsigned)(c+1) << 16;
-}
-__host__ __device__ __forceinline__ int gt_shift(int c) {
-    return c == 0 ? 0 : 17*c+1;
-}
-static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
-              "mixed table must contain exactly 64 MiB");
-#endif
+#define GT_HI 128
+__host__ __device__ __forceinline__ unsigned gt_entries(int c){return 32768;}
+__host__ __device__ __forceinline__ unsigned gt_offset(int c){return (unsigned)c<<15;}
+__host__ __device__ __forceinline__ int gt_shift(int c){return 32*c;}
+static_assert(GT_TOTAL_ENTRIES*64ULL==16ULL*1024*1024,"M83 table16MiB");
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -762,8 +736,11 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#include "hm83_comb.cuh"
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+    hm83_chain_filter(X,Y,ZZ,ZZZ,k,gTable);return;
+
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
@@ -913,6 +890,8 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 }
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
+    hm83_chain_exact(X,Y,ZZ,ZZZ,k,gTable);return;
+
     // The original scalar survives even if an output aliases the input k.
     uint64_t saved_k[4];Load256(saved_k,k);
     uint32_t bad=0;
@@ -2045,20 +2024,22 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-#if ZLAB_T14
+#if HM37_COMB
+    int ch=(int)(t>>15);
+#elif ZLAB_T14
     int ch=t<((uint64_t)GT_BIG<<18)?(int)(t>>18):GT_BIG+(int)((t-((uint64_t)GT_BIG<<18))>>17);
 #else
     int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
 #endif
     int d=(int)(t-gt_offset(ch));
-    int m  = 2*d + 1;                        /* odd multiple below 2^18 */
+    int m  = HM37_COMB ? d : 2*d + 1;
     int hi = m >> 8, lo = m & 255;           /* lo odd; hi < 1024 */
 
     const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
 
     uint64_t rx[4], ry[4];
-    if (hi == 0) {
+    if (!HM37_COMB && hi == 0) {
         for (int k = 0; k < 4; k++) { rx[k] = Lp[k]; ry[k] = Lp[4 + k]; }
     } else {
         uint64_t px[4], py[4], pz[5] = {1, 0, 0, 0, 0}, qx[4], qy[4];
@@ -2112,128 +2093,7 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
  * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
  * comes from the runtime problem (little-endian 32 bytes), so the ladders are
  * rebuilt per instance and NOT cached across problems (anti-replay). */
-static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32]) {
-    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
-    BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
-           *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp), *acc = EC_POINT_new(grp);
-    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
-    EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
-    BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
-    BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
-    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
-    memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
-    memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
-    for (int ch = 0; ch < GT_CHUNKS; ch++) {
-        if (ch > 0) { BN_set_word(shift, 1ul << (gt_shift(ch) - gt_shift(ch-1))); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        EC_POINT_copy(acc, base);
-        for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
-            gt_point_to_limbs(grp, acc, x, y, ctx, hL + ((size_t)ch * GT_LO + lo) * 8);
-            EC_POINT_add(grp, acc, acc, base, ctx);
-        }
-        BN_set_word(shift, 256);                             /* step = 256 * B */
-        EC_POINT_mul(grp, step, NULL, base, shift, ctx);
-        EC_POINT_copy(acc, step);
-        for (int hi = 1; hi < (int)(gt_entries(ch) >> 7); hi++) {   /* m=2d+1 < 2*entries */                 /* H[hi] = hi * 256 * B */
-            gt_point_to_limbs(grp, acc, x, y, ctx, hH + ((size_t)ch * GT_HI + hi) * 8);
-            EC_POINT_add(grp, acc, acc, step, ctx);
-        }
-    }
-    BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
-    BN_free(nri); BN_free(bscal);
-    EC_POINT_free(base); EC_POINT_free(step); EC_POINT_free(acc);
-    EC_GROUP_free(grp); BN_CTX_free(ctx);
-}
-
-/* Spot-check the built table against OpenSSL. The builder runs on hardware this
- * code has never executed on, so a silent wrong table -- which would simply
- * produce zero verifiable hits and burn the whole run -- must be caught here
- * and fall back, not discovered from the scorecard. */
-static int gt_spot_check(const uint8_t *gTable, int samples,
-                         const uint8_t neg_r_inv[32]) {
-    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
-    BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *inv2 = BN_new(), *order = BN_new(),
-           *nri = BN_new(), *half_nri = BN_new();
-    EC_POINT *pt = EC_POINT_new(grp);
-    uint64_t want[8];
-    int ok = 1;
-    unsigned seed = 0x9e3779b9u;
-    EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(k, 2); BN_mod_inverse(inv2, k, order, ctx);   /* inv2 = 2^-1 mod n */
-    BN_lebin2bn(neg_r_inv, 32, nri);
-    BN_mod_mul(half_nri, inv2, nri, order, ctx);              /* (2^-1 * neg_r_inv) mod n = A/2 scalar */
-    for (int t = 0; t < samples && ok; t++) {
-        /* always include the corners of each chunk, then pseudo-random entries */
-        int ch, i;
-        if (t < GT_CHUNKS * 4) {
-            ch = t / 4;
-            const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
-            i = corner[t % 4];
-        } else {
-            seed = seed * 1664525u + 1013904223u;
-            ch = (int)(seed >> 28) % GT_CHUNKS;
-            i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
-        }
-        /* want = (2i+1) * 2^gt_shift(ch) * (A/2). */
-        BN_one(k);
-        BN_lshift(k, k, gt_shift(ch));
-        BN_mul_word(k, (BN_ULONG)(2*i + 1));
-        BN_mod_mul(k, k, half_nri, order, ctx);
-        EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
-        gt_point_to_limbs(grp, pt, x, y, ctx, want);
-        size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        if (memcmp(gTable + off,      want,     32) != 0 ||
-            memcmp(gTable + off + 32, want + 4, 32) != 0) {
-            fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
-            ok = 0;
-        }
-    }
-    BN_free(x); BN_free(y); BN_free(k); BN_free(inv2); BN_free(order); BN_free(nri); BN_free(half_nri);
-    EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
-    return ok;
-}
-
-/* OpenSSL fallback builder (only if the GPU builder's spot check fails). Emits
- * the signed table: entry (ch,d) = (2d+1) * 2^(16ch) * (G/2). Walks odd
- * multiples by stepping 2*base_c per entry (acc = base_c, 3base_c, ...). */
-static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
-    /* No cache: base A/2 is problem-dependent (neg_r_inv fresh per instance). */
-    printf("  Computing GTable (OpenSSL fallback)...\n");
-    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
-    BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(), *order = BN_new(),
-           *nri = BN_new(), *bscal = BN_new();
-    EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp), *two_base = EC_POINT_new(grp);
-    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
-    EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
-    BN_lebin2bn(neg_r_inv, 32, nri);
-    BN_mod_mul(bscal, inv2, nri, order, ctx);
-    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);
-    for (int ch = 0; ch < GT_CHUNKS; ch++) {
-        if (ch > 0) { BN_set_word(shift, 1ul << (gt_shift(ch) - gt_shift(ch-1))); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
-        BN_set_word(shift, 2); EC_POINT_mul(grp, two_base, NULL, base, shift, ctx);  /* 2*base_c */
-        EC_POINT_copy(pt, base);                                                     /* (2*0+1)*base_c */
-        for (unsigned d = 0; d < gt_entries(ch); d++) {
-            EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
-            uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
-            BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
-            BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
-            for(int j=0;j<16;j++){uint8_t t=xb[j];xb[j]=xb[31-j];xb[31-j]=t;}
-            for(int j=0;j<16;j++){uint8_t t=yb[j];yb[j]=yb[31-j];yb[31-j]=t;}
-            size_t off = ((size_t)gt_offset(ch) + d) * 64;
-            memcpy(gTable + off,      xb, 32);
-            memcpy(gTable + off + 32, yb, 32);
-            if (d < gt_entries(ch) - 1) EC_POINT_add(grp, pt, pt, two_base, ctx);
-        }
-    }
-    BN_free(x);BN_free(y);BN_free(shift);BN_free(inv2);BN_free(order);BN_free(nri);BN_free(bscal);
-    EC_POINT_free(base);EC_POINT_free(pt);EC_POINT_free(two_base);
-    EC_GROUP_free(grp);BN_CTX_free(ctx);
-}
+#include "hm83_table.cuh"
 
 /* Digest params loader */
 typedef struct {
