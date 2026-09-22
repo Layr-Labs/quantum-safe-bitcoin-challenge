@@ -1,0 +1,158 @@
+{
+  "passed": true,
+  "full_512bit_pairs": 6816,
+  "sign_cases": {
+    "(0, 0)": 2102,
+    "(0, 1)": 1669,
+    "(1, 0)": 1610,
+    "(1, 1)": 1435
+  },
+  "predicate_CC_microcases": 4,
+  "baseline_is_latest_promoted": true,
+  "variants": {
+    "baseline": {
+      "wide_products": 64,
+      "width_normalized_other_arithmetic": 134,
+      "predicate_operations": 0,
+      "opcodes": {
+        "mov.b64": 34,
+        "mul.wide.u32": 64,
+        "add.cc.u64": 14,
+        "addc.cc.u64": 35,
+        "addc.u64": 7,
+        "addc.u32": 8,
+        "add.cc.u32": 1,
+        "addc.cc.u32": 13
+      },
+      "ssa_peak_live_words32": 40,
+      "ssa_peak_live_predicates": 0,
+      "weighted_dependency_depth": {
+        "1": 31,
+        "2": 32,
+        "4": 34
+      },
+      "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency."
+    },
+    "mask_middle": {
+      "wide_products": 48,
+      "width_normalized_other_arithmetic": 166,
+      "predicate_operations": 0,
+      "opcodes": {
+        "mov.b64": 68,
+        "sub.cc.u64": 5,
+        "subc.cc.u64": 7,
+        "subc.u64": 2,
+        "mul.wide.u32": 48,
+        "add.cc.u64": 20,
+        "addc.u64": 10,
+        "addc.cc.u64": 16,
+        "addc.u32": 13,
+        "add.cc.u32": 3,
+        "addc.cc.u32": 15,
+        "mov.u32": 1,
+        "and.b64": 5,
+        "subc.u32": 3,
+        "and.b32": 1,
+        "add.u32": 1
+      },
+      "ssa_peak_live_words32": 44,
+      "ssa_peak_live_predicates": 0,
+      "weighted_dependency_depth": {
+        "1": 31,
+        "2": 32,
+        "4": 34
+      },
+      "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency."
+    },
+    "predicated_middle": {
+      "wide_products": 48,
+      "width_normalized_other_arithmetic": 153,
+      "predicate_operations": 3,
+      "opcodes": {
+        "mov.b64": 67,
+        "sub.cc.u64": 5,
+        "subc.cc.u64": 7,
+        "subc.u32": 5,
+        "setp.ne.u32": 2,
+        "mul.wide.u32": 48,
+        "add.cc.u64": 20,
+        "addc.u64": 10,
+        "addc.cc.u64": 16,
+        "addc.u32": 13,
+        "add.cc.u32": 3,
+        "addc.cc.u32": 15,
+        "mov.u32": 1,
+        "and.pred": 1,
+        "add.u32": 1
+      },
+      "ssa_peak_live_words32": 40,
+      "ssa_peak_live_predicates": 2,
+      "weighted_dependency_depth": {
+        "1": 34,
+        "2": 35,
+        "4": 37
+      },
+      "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency."
+    },
+    "predicated_early_sign": {
+      "wide_products": 48,
+      "width_normalized_other_arithmetic": 153,
+      "predicate_operations": 2,
+      "opcodes": {
+        "mov.b64": 67,
+        "sub.cc.u64": 5,
+        "subc.cc.u64": 7,
+        "subc.u32": 5,
+        "setp.ne.u32": 2,
+        "mov.u32": 1,
+        "sub.u32": 1,
+        "mul.wide.u32": 48,
+        "add.cc.u64": 20,
+        "addc.u64": 10,
+        "addc.cc.u64": 16,
+        "addc.u32": 13,
+        "add.cc.u32": 3,
+        "addc.cc.u32": 15
+      },
+      "ssa_peak_live_words32": 41,
+      "ssa_peak_live_predicates": 2,
+      "weighted_dependency_depth": {
+        "1": 34,
+        "2": 35,
+        "4": 37
+      },
+      "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency."
+    },
+    "predicated_fused_sign": {
+      "wide_products": 48,
+      "width_normalized_other_arithmetic": 152,
+      "predicate_operations": 2,
+      "opcodes": {
+        "mov.b64": 67,
+        "sub.cc.u64": 5,
+        "subc.cc.u64": 7,
+        "subc.u32": 5,
+        "setp.ne.u32": 2,
+        "mul.wide.u32": 48,
+        "add.cc.u64": 20,
+        "addc.u64": 10,
+        "addc.cc.u64": 16,
+        "addc.u32": 13,
+        "add.cc.u32": 3,
+        "addc.cc.u32": 15,
+        "mov.u32": 1
+      },
+      "ssa_peak_live_words32": 41,
+      "ssa_peak_live_predicates": 2,
+      "weighted_dependency_depth": {
+        "1": 34,
+        "2": 35,
+        "4": 37
+      },
+      "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency.",
+      "wide_product_unit_cost_break_even": 1.25
+    }
+  },
+  "native_compilation": false,
+  "GPU_execution": false
+}
