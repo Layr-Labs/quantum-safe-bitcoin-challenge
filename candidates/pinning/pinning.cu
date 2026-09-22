@@ -648,8 +648,9 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
-    qsb_decode_to_shared(k);
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
@@ -1093,6 +1094,15 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
 
 #include "sha_pinsha.cuh"
 
+/* QSB_SHA_FMA_W0: the sparse locktime-tail schedule prologue (W0..W15 of the first
+ * 16 rounds' successor block) on the FMA-heavy pipe, same pipe-balance argument as
+ * QSB_SHA_FMA_ADD0 one phase earlier: every two-input add becomes mad.lo.u32 a*1+b,
+ * exact mod 2^32, and the two sigma logical shifts follow QSB_SHA_FMA_ROT0. The
+ * compile-time terms s0(L) and the L addend stay folded. */
+#ifndef QSB_SHA_FMA_W0
+#define QSB_SHA_FMA_W0 1
+#endif
+
 /* QSB_SHA_OPT tail transform: _SHA256TransformFastTail11P with literal K, round 1
  * rewritten with the host constants v2y/c2y/mx (Maj and Ch of constant midstate words
  * as disjoint AND terms) and the feed-forward of words 0 and 4 folded into round 63
@@ -1148,6 +1158,28 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
+#if QSB_SHA_FMA_W0
+    {
+        const uint32_t one = pin_one_mul;
+        w[0]  = qsb_fadd(w[0], one, QSB_s0M0(w[1]));
+        w[1]  = qsb_fadd(w[1], one, tp.v[5]);
+        w[2]  = qsb_fadd(w[2], one, QSB_s1M0(w[0]));
+        w[3]  = QSB_s1M0(w[1]);
+        w[4]  = QSB_s1M0(w[2]);
+        w[5]  = QSB_s1M0(w[3]);
+        w[6]  = qsb_fadd(QSB_s1M0(w[4]), one, L);
+        w[7]  = qsb_fadd(QSB_s1M0(w[5]), one, w[0]);
+        w[8]  = qsb_fadd(QSB_s1M0(w[6]), one, w[1]);
+        w[9]  = qsb_fadd(QSB_s1M0(w[7]), one, w[2]);
+        w[10] = qsb_fadd(QSB_s1M0(w[8]), one, w[3]);
+        w[11] = qsb_fadd(QSB_s1M0(w[9]), one, w[4]);
+        w[12] = qsb_fadd(QSB_s1M0(w[10]), one, w[5]);
+        w[13] = qsb_fadd(QSB_s1M0(w[11]), one, w[6]);
+        w[14] = qsb_fadd(qsb_fadd(QSB_s1M0(w[12]), one, w[7]), one, s0(L));
+        w[15] = qsb_fadd(qsb_fadd(qsb_fadd(w[15], one, QSB_s1M0(w[13])), one, w[8]),
+                         one, QSB_s0M0(w[0]));
+    }
+#else
     {
         w[0] += s0(w[1]);
         w[1] += tp.v[5];
@@ -1166,12 +1198,24 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
         w[14] = s1(w[12]) + w[7] + s0(L);
         w[15] += s1(w[13]) + w[8] + s0(w[0]);
     }
+#endif
 
+#if QSB_SHA_FMA_ADD0
+    {
+        const uint32_t one = pin_one_mul;
+        QSB_RND16L_F(16);
+        QSB_WMIX_F();
+        QSB_RND16L_F(32);
+        QSB_WMIX_F();
+        QSB_RND15L_F(48);
+    }
+#else
     QSB_RND16L(16);
     QSB_WMIX_Z();
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
@@ -1532,6 +1576,14 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
+
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -2022,7 +2074,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
