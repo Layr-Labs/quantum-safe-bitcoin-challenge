@@ -42,19 +42,23 @@ __device__ __forceinline__ uint32_t qsb_sum_parity(const uint64_t *w,const uint6
 }
 #endif
 
+/* Independent stage-2 schedule rewrites. */
+#ifndef QSB_FIN_SUM2
+#define QSB_FIN_SUM2 1
+#endif
+#ifndef QSB_FIN_RAWS
+#define QSB_FIN_RAWS 1
+#endif
+#ifndef QSB_MASK_HC
+#define QSB_MASK_HC 1
+#endif
+
 // Exact full-width residue; callers normalize before additions/parity.
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
     uint64_t tmp[5];qsb_field_mul_sc(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
     Load256(out,tmp);
 }
-
-#ifndef QSB_PARITY_WINDOW
-#define QSB_PARITY_WINDOW 1
-#endif
-#if QSB_PARITY_WINDOW
-#include "ParityWindow.cuh"
-#endif
 
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
@@ -69,9 +73,15 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_MASK_HC
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -90,7 +100,8 @@ __device__ __forceinline__ void qsb_packed_prepare(
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
-    uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
+    const uint64_t *a,const uint64_t *b,const uint64_t *c,
+    uint64_t *x1,uint64_t *x2) {
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
 #if QSB_LAZY_REC
     /* u, v, l, m and sum only feed multiplies and borrow-corrected subtractions, which
@@ -99,11 +110,21 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v);
+#if QSB_FIN_SUM2
+    _ModAddLazy(sum,u,u);
+#else
+    _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+    _ModSub256(l,u,v); _ModAdd256(m,u,v);
+#if QSB_FIN_SUM2
+    _ModAdd256(sum,u,u);
+#else
+    _ModAdd256(sum,l,m);
+#endif
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
@@ -119,23 +140,18 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_FIN_RAWS
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t); qsb_packed_raw_mul(u,l,s);
+    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t); qsb_packed_raw_mul(v,m,s);
+    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
-#if QSB_PARITY_WINDOW
-    const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
-#else
     qsb_packed_raw_mul(u,l,s);
-#endif
     _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
-#if QSB_PARITY_WINDOW
-    const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
-#else
     qsb_packed_raw_mul(v,m,s);
 #endif
-#if QSB_PARITY_WINDOW
-    return parity_u|(parity_v<<1);
-#else
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);
-#endif
 }
 #else
     _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t); qsb_parity_boundary(s,b);

@@ -2,25 +2,20 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "332beaa52e33ace384f214f4e2df61524ae82a1bf3a1f3640c859bd031a3b93c",
-    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
-    "PackedRecovery.cuh": "72287a8d428693bcfd5ecd7f7f2a994d043655eb4af61b22dcfe3922efece1fe",
-    "ParityWindow.cuh": "e1459e314c86fd84d1ebdd90dd0897fff448062123b7629cb40bf4a585db67c0",
+    "GPUMath.h": "5d5b0e51b17dfe85dc130f4743314530b53899d29efd97e19f9c43495d52eb6d",
+    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+    "PackedRecovery.cuh": "eae84e22b9d364c5b8a38e5638162a8241888c034ef365d17e3e3cb06298d719",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "1ffefb87484a452eecb6f908495357a2403bcec33a8dd872b7fef2b00b012728",
+    "cofactor_checkpoint.h": "03f1c9469c72bd17749046d04bc7c22bcf8bc7057adc21733865af0ca5fb41e3",
+    "pinning.cu": "4ff93060fdedc0f73dac13c15d2ae379f58c84d9c352fa30889c431a72f4f63e",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "SUBMISSION.md": "cf2763f1a4d20f74dade6b7d69a5ae496c6e52585f0e89f10a9b811621cc0625"
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "local c2431ea composition; promoted e876/6dfdb6f8 official 789011576, floor 796901692",
-  "comparison_baseline_promoted_commit": "e876032f79e6f4f3af2732bbba39403e29f0e227",
-  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
+  "comparison_baseline_submission": "f7e4ddef-a698-4127-b1fa-b6ee257637da (commit 344cd8f official 792,667,656, unpromoted)",
+  "comparison_baseline_promoted_commit": "66fede0",
+  "compiler": "Ranked: CUDA 12.8.93, nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; no local nvcc",
   "model": "GPT 5.6 Sol",
-  "harness": "Codex",
-  "production_source_bytes": 395438,
-  "note": "c243 plus a problem-wide exact curve isomorphism that maps xR to +/-1 and removes one hot field multiplication per candidate. Direct fixed16 c243/isomorphism ABBA measured +0.554698%, both adjacent pairs positive, exact equal work and identical 2271-hit sets. QSB_ISO_XR=0 build and fresh algebra/table checks pass. Inherited composition measured +1.023653% over e876 before this increment. This is local evidence, not an official score.",
-  "public_sources": "PR827 87a770a (@stffinfcti); PR885 3e166ba (@EvanYan1024); promoted parent e876032f",
-  "public_note_file": "SUBMISSION.md",
-  "full_technical_note_file": "SUBMISSION.md"
+  "harness": "Hoplite",
+  "production_source_bytes": 379838,
+  "note": "Commit 344cd8f donor with the complete fused z9 lane restored, plus QSB_FIN_SUM2, QSB_FIN_RAWS, QSB_MASK_HC, QSB_CONST_RECOVERY_ARGS and QSB_TREE_LOOPCUT. TOP16, lazy dead-code finish and non-volatile load experiments are excluded. Existing C31/RP_SQR approximations remain behind QSB_HOST_GATE. CPU audits: test_carry62.py, test_host_gate.py, test_sha_interleave.py, test_exact_finish_stack.py. No local nvcc or GPU score; ranked RTX 4090 validation is authoritative."
 }

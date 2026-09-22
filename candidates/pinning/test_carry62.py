@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import random
+import re
 
 
 HERE = Path(__file__).resolve().parent
@@ -257,7 +258,8 @@ def audit_c31_predicates():
 def audit_source():
     source = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_CARRY62 1" in source
-    assert source.count("QSB_SECOND_FOLD_TAIL") == 6  # three definitions, three uses
+    assert len(re.findall(r"^#define QSB_SECOND_FOLD_TAIL\b", source, re.M)) == 3
+    assert len(re.findall(r"(?<!#define )QSB_SECOND_FOLD_TAIL", source)) == 4
     assert "subc.u32 z2, z2, 0;\\n\"" in source
     assert "-DQSB_CARRY62=0 restores" in source
     assert "#if QSB_C31 && QSB_SHORT_CARRY" in source
