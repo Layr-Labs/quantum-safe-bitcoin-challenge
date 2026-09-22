@@ -1896,9 +1896,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     int total_preimage_len,
     uint32_t seq_value,         /* current sequence value */
     uint32_t start_lt,          /* starting locktime for this batch */
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
+    /* dead recovery-scratch pointers removed: superseded by __constant__
+       pin_u2rx_words/pin_u2ry_words/pin_recovery_c; neg_r_inv folded into
+       the fixed-base A-table at build time. Bit-exact, L2-neutral. */
     uint8_t *d_gt,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
@@ -2219,11 +2219,12 @@ static void launch_pinning_pipeline(
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
     uint64_t *super_roots, uint64_t *root_checkpoint, const qsb_tail_pre &tp QSB_STREAM_PARM
 ) {
+    (void)d_neg_r_inv;(void)d_u2rx;(void)d_u2ry;(void)d_neg2u2rx;(void)d_neg2u2ry;
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        seq_value,start_lt,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree,tp);
     cudaError_t err=cudaGetLastError();
@@ -2271,7 +2272,7 @@ static void launch_pinning_pipeline(
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        seq_value,start_lt,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree,tp);
     err=cudaGetLastError();
