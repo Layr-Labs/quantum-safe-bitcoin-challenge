@@ -51,6 +51,20 @@
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
+#ifndef QSB_SHA_PRODUCER
+#define QSB_SHA_PRODUCER 1 /* compile an optional dense hash path; same saved-state allocation */
+#endif
+#ifndef QSB_SHA_PRODUCER_BLOCKS
+#define QSB_SHA_PRODUCER_BLOCKS 12
+#endif
+#ifndef QSB_SHA_AUTOTUNE
+#define QSB_SHA_AUTOTUNE 1 /* compare complete pipelines on real search work before selecting */
+#endif
+#include "sha_path_tuning.h"
+static bool qsb_sha_use_producer = QSB_SHA_PRODUCER && !QSB_SHA_AUTOTUNE;
+#ifndef QSB_PARITY_REPLAY
+#define QSB_PARITY_REPLAY 1
+#endif
 #include "GPUMath.h"
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
@@ -145,7 +159,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
+#define QSB_S2_BLOCKS (QSB_PARITY_REPLAY ? 8 : 7) /* separate rare parity fallback */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
@@ -201,6 +215,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
+#if QSB_SHA_PRODUCER && QSB_SHA_AUTOTUNE && !QSB_SLOTPIPE
+#error "SHA path autotuning requires the slot pipeline; disable QSB_SHA_AUTOTUNE for single-slot builds"
+#endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
 #endif
@@ -212,6 +229,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #else
 #define QSB_STREAM_PARM
 #define QSB_STREAM_ARG
+#endif
+#if QSB_PARITY_REPLAY && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_PARITY_REPLAY uses the otherwise-unused tree buffer; disable tree offload"
 #endif
 #if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
 #undef QSB_S0_THREADS
@@ -509,6 +529,9 @@ __device__ void _FixedBaseSignedXYZZ(uint64_t *X, uint64_t *Y,
     }
 }
 
+#if QSB_EARLY_LOAD && QSB_NEG_Y_MAC
+#error "Negative-Y MAC does not support the retired early-load path"
+#endif
 #if QSB_EARLY_LOAD
 /* Mixed addition with the next record's loads issued as soon as the current
  * record is consumed: X2 dies after U2, Y2 after S2. The next digit is peeled
@@ -666,7 +689,13 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
+#if QSB_NEG_Y_MAC
+    // Keep -Yactual across the checkpoint: -(Ycore-yoff*V)=N+yoff*V.
+    // The finish swaps its add/sub slopes, so no final negation is needed.
+    qsb_muladd_seed(Y,y0,V,Y);
+#else
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
@@ -1419,6 +1448,8 @@ __device__ __forceinline__ void qsb_field_normalize(uint64_t *r) {
     }
 }
 
+#include "affine_block.cuh"
+
 /* qsb_warp_inverse: removed -- it has no caller. */
 
 #if QSB_ISO_XR
@@ -1885,32 +1916,151 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
-template<bool FAST_TAIL, int STAGE>
-__global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
-                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
-    const uint32_t *d_midstate,
-    const uint8_t *d_suffix,    /* suffix template */
-    int suffix_len,             /* total suffix including lt+sighash */
-    int seq_offset,             /* offset of sequence in suffix */
-    int lt_offset,              /* offset of locktime in suffix */
-    int total_preimage_len,
-    uint32_t seq_value,         /* current sequence value */
-    uint32_t start_lt,          /* starting locktime for this batch */
-    const uint64_t *d_neg_r_inv,
-    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
-    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
-    uint8_t *d_gt,
-    uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
-    int batch_size, int easy_mode, int single_hash,
-    ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (blockIdx.x * blockDim.x >= batch_size) return;
-    int active = idx < batch_size;
-    uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
+template<bool FAST_TAIL,bool EXACT_PARITY>
+__device__ __forceinline__ void qsb_finish_candidate(
+    int idx,int batch_size,int easy_mode,int single_hash,
+    const ulonglong2 *saved,const uint64_t *roots,
+    uint32_t *d_hit_cnt,uint32_t *d_hit_idx,uint32_t *replay){
+    uint64_t qy[4],qzzz[4],prod[5];
+    size_t i=(size_t)idx,s=(size_t)batch_size;
+#if QSB_STREAM2
+    ulonglong2 y01=qsb_ld_v2(&saved[0*s+i]),y23=qsb_ld_v2(&saved[1*s+i]);
+    ulonglong2 v01=qsb_ld_v2(&saved[2*s+i]),v23=qsb_ld_v2(&saved[3*s+i]);
+#else
+    ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
+    ulonglong2 v01=saved[2*s+i],v23=saved[3*s+i];
+#endif
+    qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
+    qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
+    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
+    uint64_t weighted_inv[4];
+    size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+#if QSB_ROOT_V2
+    {   /* roots is cudaMalloc'd (256-byte aligned) and indexed in 4-limb (32-byte) records */
+        const ulonglong2 *r2=(const ulonglong2 *)roots;
+        ulonglong2 a01=r2[2ull*(unsigned(idx)/QSB_TREE_N)],a23=r2[2ull*(unsigned(idx)/QSB_TREE_N)+1];
+        ulonglong2 b01=r2[2ull*(root_count+(unsigned(idx)/QSB_TREE_N))],b23=r2[2ull*(root_count+(unsigned(idx)/QSB_TREE_N))+1];
+        prod[0]=a01.x;prod[1]=a01.y;prod[2]=a23.x;prod[3]=a23.y;
+        weighted_inv[0]=b01.x;weighted_inv[1]=b01.y;weighted_inv[2]=b23.x;weighted_inv[3]=b23.y;
+    }
+#else
+    for(int k=0;k<4;k++)prod[k]=roots[4ull*(unsigned(idx)/QSB_TREE_N)+k];
+    for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+(unsigned(idx)/QSB_TREE_N))+k];
+#endif
+    prod[4]=0;
+    uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
+                      pin_u2rx_words[2],pin_u2rx_words[3]};
+    uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
+                      pin_u2ry_words[2],pin_u2ry_words[3]};
+    uint64_t recovery_c[4]={pin_recovery_c[0],pin_recovery_c[1],
+                            pin_recovery_c[2],pin_recovery_c[3]};
+    uint64_t q1x[4],q2x[4];
+    uint32_t y_parities = qsb_packed_finish<EXACT_PARITY>(
+        qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
 
-    uint64_t qx[4], qy[4], qzz[4], qzzz[4], prod[5];
-    if (STAGE==0) {
+    if(!EXACT_PARITY && (y_parities&0xffff0000u)){
+        uint32_t pos=atomicAdd(replay,1u);
+        replay[1u+pos]=(uint32_t)idx; // capacity is the full batch; one append per candidate
+        return;
+    }
+    /* Check both pubkeys × 2 hashes */
+#if QSB_PK_UNROLL
+    #pragma unroll
+#else
+    #pragma unroll 1
+#endif
+    for(int ri=0;ri<2;ri++){
+        uint64_t sx0=ri ? q2x[0] : q1x[0];
+        uint64_t sx1=ri ? q2x[1] : q1x[1];
+        uint64_t sx2=ri ? q2x[2] : q1x[2];
+        uint64_t sx3=ri ? q2x[3] : q1x[3];
+        uint32_t x0=(uint32_t)sx0, x1=(uint32_t)(sx0>>32);
+        uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
+        uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
+        uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
+        uint32_t pb[16];
+        pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
+        pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
+        pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
+        pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
+        pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
+#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+        if (FAST_TAIL) {
+            /* ranked gate: only digest word 0 is read */
+            if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
+                uint32_t pos=atomicAdd(d_hit_cnt,1);
+                if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
+                return;
+            }
+            continue;
+        }
+#endif
+        uint32_t hs[8];
+#if QSB_SPARSE_D
+        _SHA256TransformPubkey33(hs,pb);   /* pb[9..14]=0, pb[15]=0x108 folded in */
+#else
+        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+        _SHA256Initialize(hs);_SHA256Transform(hs,pb);
+#endif
+        int vv;
+        if (!FAST_TAIL && easy_mode) {
+            uint8_t h[32];
+            for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+                h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+            vv=gpu_is_der_easy(h,32);
+        } else {
+            vv=gpu_bench_valid_words(hs);
+        }
+        if(vv){
+            uint32_t pos=atomicAdd(d_hit_cnt,1);
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
+            return;
+        }
+        if (FAST_TAIL || single_hash) continue;  /* Config A: only one hash iteration */
+        uint8_t h[32];
+        for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
+        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
+        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
+            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
+        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
+        if (!FAST_TAIL && easy_mode) {
+            uint8_t h2[32];
+            for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
+                h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
+            vv=gpu_is_der_easy(h2,32);
+        } else {
+            vv=gpu_bench_valid_words(h2s);
+        }
+        if(vv){
+            uint32_t pos=atomicAdd(d_hit_cnt,1);
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30)|(1u<<31);
+            return;
+        }
+    }
+}
+#if QSB_PARITY_REPLAY
+template<bool FAST_TAIL>
+__global__ __launch_bounds__(128,4) void qsb_replay_parity(
+    int batch_size,int easy_mode,int single_hash,
+    const ulonglong2 *saved,const uint64_t *roots,
+    uint32_t *d_hit_cnt,uint32_t *d_hit_idx,const uint32_t *replay){
+    const uint32_t count=replay[0];
+    for(uint32_t pos=blockIdx.x*blockDim.x+threadIdx.x;pos<count;pos+=blockDim.x*gridDim.x){
+        uint32_t idx=replay[1u+pos];
+        qsb_finish_candidate<FAST_TAIL,true>(idx,batch_size,easy_mode,single_hash,
+            saved,roots,d_hit_cnt,d_hit_idx,nullptr);
+    }
+}
+#endif
+
+// Identical scalar hash for fused and producer paths. No EC or publication here.
+template<bool FAST_TAIL>
+__device__ __forceinline__ void qsb_hash_scalar(
+    uint64_t z[4], const uint32_t *d_midstate, const uint8_t *d_suffix,
+    int suffix_len, int seq_offset, int lt_offset, int total_preimage_len,
+    uint32_t seq_value, uint32_t start_lt, uint32_t lt,
+    int easy_mode, int single_hash, const qsb_tail_pre &tp) {
     uint32_t state[8];
     if (FAST_TAIL) {
         // This specialization is selected only for single_hash, normal mode.
@@ -2013,15 +2163,77 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
-    uint64_t z[4];
     z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
     z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
     z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
     z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+}
+
+#ifndef QSB_PIN_EC_BLOCKS
+#define QSB_PIN_EC_BLOCKS QSB_S0_BLOCKS
+#endif
+
+template<bool FAST_TAIL, int STAGE>
+__global__ void __launch_bounds__(STAGE == 1 ? 128 : ((STAGE == 0 || STAGE == 3) ? QSB_S0_THREADS : QSB_S2_THREADS),
+                                  STAGE == 1 ? QSB_SHA_PRODUCER_BLOCKS : ((STAGE == 0) ? QSB_S0_BLOCKS : (STAGE == 3 ? QSB_PIN_EC_BLOCKS : QSB_S2_BLOCKS))) kernel_pinning_pipeline(
+    const uint32_t *d_midstate,
+    const uint8_t *d_suffix,    /* suffix template */
+    int suffix_len,             /* total suffix including lt+sighash */
+    int seq_offset,             /* offset of sequence in suffix */
+    int lt_offset,              /* offset of locktime in suffix */
+    int total_preimage_len,
+    uint32_t seq_value,         /* current sequence value */
+    uint32_t start_lt,          /* starting locktime for this batch */
+    const uint64_t *d_neg_r_inv,
+    const uint64_t *d_u2rx, const uint64_t *d_u2ry,
+    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry,
+    uint8_t *d_gt,
+    uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
+    int batch_size, int easy_mode, int single_hash,
+    ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (blockIdx.x * blockDim.x >= batch_size) return;
+    int active = idx < batch_size;
+    uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
+
+#if QSB_SHA_PRODUCER
+    if(STAGE==1) {
+        uint64_t z[4];
+        qsb_hash_scalar<FAST_TAIL>(z,d_midstate,d_suffix,
+        suffix_len,seq_offset,lt_offset,total_preimage_len,
+        seq_value,start_lt,lt,easy_mode,single_hash,tp);
+        if(active) {
+            const size_t i=(size_t)idx, n=(size_t)batch_size;
+            qsb_st_v2(&saved[i],z[0],z[1]);
+            qsb_st_v2(&saved[n+i],z[2],z[3]);
+        }
+        return;
+    }
+#endif
+    uint64_t qx[4], qy[4], qzz[4], qzzz[4], prod[5];
+    if (STAGE==0 || STAGE==3) {
+    uint64_t z[4];
+#if QSB_SHA_PRODUCER
+    if (STAGE==3) {
+        if(active) {
+            const size_t i=(size_t)idx, n=(size_t)batch_size;
+            const ulonglong2 a=qsb_ld_v2(&saved[i]), b=qsb_ld_v2(&saved[n+i]);
+            z[0]=a.x;z[1]=a.y;z[2]=b.x;z[3]=b.y;
+        } else { z[0]=z[1]=z[2]=z[3]=0; }
+    } else
+#endif
+    { qsb_hash_scalar<FAST_TAIL>(z,d_midstate,d_suffix,
+        suffix_len,seq_offset,lt_offset,total_preimage_len,
+        seq_value,start_lt,lt,easy_mode,single_hash,tp); }
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
+#if QSB_PIN_AFFINE
+    if(STAGE==3)qsb_fixed_affine_block(qx,qy,qzz,qzzz,z,d_gt);
+    else
+#endif
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
@@ -2034,124 +2246,13 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
-    qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
+    qsb_packed_prepare<QSB_PIN_AFFINE && STAGE==3>(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
     (void)tree;
     return;
     } else {
 
-    if(!active)return;
-    size_t i=(size_t)idx,s=(size_t)batch_size;
-#if QSB_STREAM2
-    ulonglong2 y01=qsb_ld_v2(&saved[0*s+i]),y23=qsb_ld_v2(&saved[1*s+i]);
-    ulonglong2 v01=qsb_ld_v2(&saved[2*s+i]),v23=qsb_ld_v2(&saved[3*s+i]);
-#else
-    ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
-    ulonglong2 v01=saved[2*s+i],v23=saved[3*s+i];
-#endif
-    qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
-    qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
-    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0)return;
-    uint64_t weighted_inv[4];
-    size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
-#if QSB_ROOT_V2
-    {   /* roots is cudaMalloc'd (256-byte aligned) and indexed in 4-limb (32-byte) records */
-        const ulonglong2 *r2=(const ulonglong2 *)roots;
-        ulonglong2 a01=r2[2ull*blockIdx.x],a23=r2[2ull*blockIdx.x+1];
-        ulonglong2 b01=r2[2ull*(root_count+blockIdx.x)],b23=r2[2ull*(root_count+blockIdx.x)+1];
-        prod[0]=a01.x;prod[1]=a01.y;prod[2]=a23.x;prod[3]=a23.y;
-        weighted_inv[0]=b01.x;weighted_inv[1]=b01.y;weighted_inv[2]=b23.x;weighted_inv[3]=b23.y;
-    }
-#else
-    for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
-    for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
-#endif
-    prod[4]=0;
-    (void)tree;
-    uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
-                      pin_u2rx_words[2],pin_u2rx_words[3]};
-    uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
-                      pin_u2ry_words[2],pin_u2ry_words[3]};
-    uint64_t recovery_c[4]={pin_recovery_c[0],pin_recovery_c[1],
-                            pin_recovery_c[2],pin_recovery_c[3]};
-    uint64_t q1x[4],q2x[4];
-    uint32_t y_parities = qsb_packed_finish(
-        qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
-
-    /* Check both pubkeys × 2 hashes */
-#if QSB_PK_UNROLL
-    #pragma unroll
-#else
-    #pragma unroll 1
-#endif
-    for(int ri=0;ri<2;ri++){
-        uint64_t sx0=ri ? q2x[0] : q1x[0];
-        uint64_t sx1=ri ? q2x[1] : q1x[1];
-        uint64_t sx2=ri ? q2x[2] : q1x[2];
-        uint64_t sx3=ri ? q2x[3] : q1x[3];
-        uint32_t x0=(uint32_t)sx0, x1=(uint32_t)(sx0>>32);
-        uint32_t x2=(uint32_t)sx1, x3=(uint32_t)(sx1>>32);
-        uint32_t x4=(uint32_t)sx2, x5=(uint32_t)(sx2>>32);
-        uint32_t x6=(uint32_t)sx3, x7=(uint32_t)(sx3>>32);
-        uint32_t pb[16];
-        pb[0]=__byte_perm(x7,0x2+(uint8_t)((y_parities>>ri)&1u),0x4321);
-        pb[1]=__byte_perm(x7,x6,0x0765);pb[2]=__byte_perm(x6,x5,0x0765);
-        pb[3]=__byte_perm(x5,x4,0x0765);pb[4]=__byte_perm(x4,x3,0x0765);
-        pb[5]=__byte_perm(x3,x2,0x0765);pb[6]=__byte_perm(x2,x1,0x0765);
-        pb[7]=__byte_perm(x1,x0,0x0765);pb[8]=__byte_perm(x0,0x80,0x0456);
-#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
-        if (FAST_TAIL) {
-            /* ranked gate: only digest word 0 is read */
-            if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
-                uint32_t pos=atomicAdd(d_hit_cnt,1);
-                if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
-                return;
-            }
-            continue;
-        }
-#endif
-        uint32_t hs[8];
-#if QSB_SPARSE_D
-        _SHA256TransformPubkey33(hs,pb);   /* pb[9..14]=0, pb[15]=0x108 folded in */
-#else
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        _SHA256Initialize(hs);_SHA256Transform(hs,pb);
-#endif
-        int vv;
-        if (!FAST_TAIL && easy_mode) {
-            uint8_t h[32];
-            for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
-                h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-            vv=gpu_is_der_easy(h,32);
-        } else {
-            vv=gpu_bench_valid_words(hs);
-        }
-        if(vv){
-            uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
-            return;
-        }
-        if (FAST_TAIL || single_hash) continue;  /* Config A: only one hash iteration */
-        uint8_t h[32];
-        for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
-            h[i*4+2]=(hs[i]>>8)&0xFF;h[i*4+3]=hs[i]&0xFF;}
-        uint8_t pp[64];memset(pp,0,64);memcpy(pp,h,32);pp[32]=0x80;pp[62]=1;pp[63]=0;
-        uint32_t bb2[16];for(int i=0;i<16;i++)bb2[i]=((uint32_t)pp[i*4]<<24)|((uint32_t)pp[i*4+1]<<16)|
-            ((uint32_t)pp[i*4+2]<<8)|(uint32_t)pp[i*4+3];
-        uint32_t h2s[8];_SHA256Initialize(h2s);_SHA256Transform(h2s,bb2);
-        if (!FAST_TAIL && easy_mode) {
-            uint8_t h2[32];
-            for(int i=0;i<8;i++){h2[i*4]=(h2s[i]>>24)&0xFF;h2[i*4+1]=(h2s[i]>>16)&0xFF;
-                h2[i*4+2]=(h2s[i]>>8)&0xFF;h2[i*4+3]=h2s[i]&0xFF;}
-            vv=gpu_is_der_easy(h2,32);
-        } else {
-            vv=gpu_bench_valid_words(h2s);
-        }
-        if(vv){
-            uint32_t pos=atomicAdd(d_hit_cnt,1);
-            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30)|(1u<<31);
-            return;
-        }
-    }
+    if(active)qsb_finish_candidate<FAST_TAIL,!QSB_PARITY_REPLAY>(
+        idx,batch_size,easy_mode,single_hash,saved,roots,d_hit_cnt,d_hit_idx,(uint32_t*)tree);
     }
 }
 
@@ -2221,11 +2322,34 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
-        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-        saved,roots,tree,tp);
+#if QSB_SHA_PRODUCER
+    static_assert(QSB_S0_THREADS==128 && QSB_TREE_N==128,
+        "SHA producer preserves the 128-lane uniform tail mapping");
+    if(FAST_TAIL && qsb_sha_use_producer) {
+        kernel_pinning_pipeline<FAST_TAIL,1><<<(batch_size+127)/128,128 QSB_STREAM_ARG>>>(
+            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+            saved,roots,tree,tp);
+        cudaError_t hash_err=cudaGetLastError();
+        if(hash_err!=cudaSuccess) {
+            fprintf(stderr,"SHA producer launch failed: %s\n",cudaGetErrorString(hash_err));
+            exit(2);
+        }
+        kernel_pinning_pipeline<FAST_TAIL,3><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+            saved,roots,tree,tp);
+    } else
+#endif
+    {
+        kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+            saved,roots,tree,tp);
+    }
     cudaError_t err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
@@ -2268,6 +2392,14 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #endif
+#if QSB_PARITY_REPLAY
+#if QSB_SLOTPIPE
+    err=cudaMemsetAsync(tree,0,sizeof(uint32_t),st);
+#else
+    err=cudaMemsetAsync(tree,0,sizeof(uint32_t));
+#endif
+    if(err!=cudaSuccess){fprintf(stderr,"Parity replay reset failed: %s\n",cudaGetErrorString(err));exit(2);}
+#endif
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
@@ -2279,6 +2411,13 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Pipeline finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#if QSB_PARITY_REPLAY
+    qsb_replay_parity<FAST_TAIL><<<8,128 QSB_STREAM_ARG>>>(batch_size,easy_mode,single_hash,
+        saved,roots,d_hit_cnt,d_hit_idx,(uint32_t*)tree);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){fprintf(stderr,"Parity replay launch failed: %s\n",cudaGetErrorString(err));exit(2);}
+#endif
+
 }
 
 /* ============================================================
@@ -3123,13 +3262,16 @@ int main(int argc, char **argv) {
     uint64_t *d_super_roots[QSB_SLOTS],*d_root_checkpoint[QSB_SLOTS];
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=0;
+    size_t pipeline_tree_bytes=QSB_PARITY_REPLAY?((size_t)BATCH+1u)*sizeof(uint32_t):0;
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     for (int s = 0; s < QSB_SLOTS; s++) {
         d_pipeline_state[s]=NULL; d_pipeline_roots[s]=NULL; d_pipeline_tree[s]=NULL;
         d_super_roots[s]=NULL; d_root_checkpoint[s]=NULL;
         cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
+#if QSB_PARITY_REPLAY
+        if(pipeline_err==cudaSuccess)pipeline_err=cudaMalloc(&d_pipeline_tree[s],pipeline_tree_bytes);
+#endif
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);
         if(pipeline_err==cudaSuccess)
@@ -3151,10 +3293,13 @@ int main(int argc, char **argv) {
     uint64_t *d_super_roots=NULL,*d_root_checkpoint=NULL;
     size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
     size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=0;
+    size_t pipeline_tree_bytes=QSB_PARITY_REPLAY?((size_t)BATCH+1u)*sizeof(uint32_t):0;
     size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
     size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
     cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state,pipeline_state_bytes);
+#if QSB_PARITY_REPLAY
+    if(pipeline_err==cudaSuccess)pipeline_err=cudaMalloc(&d_pipeline_tree,pipeline_tree_bytes);
+#endif
     if(pipeline_err==cudaSuccess)
         pipeline_err=cudaMalloc(&d_pipeline_roots,pipeline_root_bytes);
     // Cofactor prepare retains its candidate tree in shared memory.
@@ -3264,11 +3409,15 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_SHA_PRODUCER && QSB_SHA_AUTOTUNE
+    qsb_sha_path_tuning sha_tuning;
+    timespec sha_phase_start{};
+#endif
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaEventSynchronize(slot_done[s]);
+        cudaError_t err=cudaEventSynchronize(slot_done[s]);
         slot_busy[s] = 0;
-        cudaError_t err = cudaGetLastError();
+        if(err==cudaSuccess)err=cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         uint32_t h_hit = h_hit_cnt[s];
         if (h_hit > 0) {
@@ -3337,6 +3486,12 @@ int main(int argc, char **argv) {
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
+#if QSB_SHA_PRODUCER && QSB_SHA_AUTOTUNE
+            if(!sha_tuning.done() && sha_tuning.batches==0) {
+                qsb_sha_use_producer=sha_tuning.split();
+                clock_gettime(CLOCK_MONOTONIC,&sha_phase_start);
+            }
+#endif
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
             if (drain_slot(s)) return 1;
@@ -3366,6 +3521,24 @@ int main(int argc, char **argv) {
             slot_busy[s] = 1;
 
             total_searched += batch_sz;
+
+#if QSB_SHA_PRODUCER && QSB_SHA_AUTOTUNE
+            if(sha_tuning.add_batch((uint64_t)batch_sz)) {
+                // A cohort ends only after all streams and their hit writers drain.
+                for(int drain=0;drain<QSB_SLOTS;drain++)if(drain_slot(drain))return 1;
+                timespec stop;clock_gettime(CLOCK_MONOTONIC,&stop);
+                const double seconds=double(stop.tv_sec-sha_phase_start.tv_sec)+
+                    1e-9*double(stop.tv_nsec-sha_phase_start.tv_nsec);
+                sha_tuning.finish_phase(seconds);
+                if(sha_tuning.done()) {
+                    qsb_sha_use_producer=sha_tuning.split();
+                    printf("SHA path tuning: ratios %.6f %.6f %.6f %.6f; aggregate %.6f; selected %s\n",
+                        sha_tuning.ratios[0],sha_tuning.ratios[1],sha_tuning.ratios[2],sha_tuning.ratios[3],
+                        sha_tuning.gain,qsb_sha_use_producer?"producer":"fused");
+                    fflush(stdout);
+                }
+            }
+#endif
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
