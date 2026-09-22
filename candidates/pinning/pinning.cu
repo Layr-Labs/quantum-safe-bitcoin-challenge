@@ -52,6 +52,13 @@
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
 #include "GPUMath.h"
+#include "NegativePoint.cuh"
+#include "ProductiveTune.h"
+// -1: finite productive comparisons; 0..3: force one route for reproduction.
+#ifndef QSB_SCALAR_ROUTE
+#define QSB_SCALAR_ROUTE -1
+#endif
+static_assert(QSB_SCALAR_ROUTE >= -1 && QSB_SCALAR_ROUTE <= 3, "scalar route");
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -647,6 +654,7 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+template<bool NEGATIVE_Y=false>
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
     qsb_decode_to_shared(k);
@@ -654,19 +662,26 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
-    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    if(NEGATIVE_Y)qsb_negative_point_seed(X,Y,U,V,x0,y0,x1,y1);
+    else _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
         qsb_load_decoded(table,c,base,x1,y1);
-        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        if(NEGATIVE_Y)qsb_negative_point_add(X,Y,U,V,x1,y1,y0);
+        else _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
         base+=1u<<16;
     }
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
-    _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    if(NEGATIVE_Y) {
+        qsb_muladd_seed(x1,y0,V,Y);
+        _ModNeg256(Y,x1); // restore positive actual Y for unchanged recovery
+    } else {
+        _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+    }
 }
 
 
@@ -1419,6 +1434,8 @@ __device__ __forceinline__ void qsb_field_normalize(uint64_t *r) {
     }
 }
 
+#include "PairSeed.cuh"
+
 /* qsb_warp_inverse: removed -- it has no caller. */
 
 #if QSB_ISO_XR
@@ -1885,9 +1902,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
-template<bool FAST_TAIL, int STAGE>
+template<bool FAST_TAIL, int STAGE, int SCALAR_ROUTE=0>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
-                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
+                                  STAGE == 0 ? (SCALAR_ROUTE == 3 ? 3 : QSB_S0_BLOCKS) : QSB_S2_BLOCKS) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -2022,7 +2039,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    if (SCALAR_ROUTE == 3) qsb_pairseed_scalar<false>(qx,qy,qzz,qzzz,z,d_gt);
+    else if (SCALAR_ROUTE == 2) qsb_pairseed_scalar<true>(qx,qy,qzz,qzzz,z,d_gt);
+    else _FixedBaseSignedXYZZScalar<SCALAR_ROUTE == 1>(qx,qy,qzz,qzzz,z,d_gt);
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2206,7 +2225,7 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
-template<bool FAST_TAIL>
+template<bool FAST_TAIL, int SCALAR_ROUTE=0>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
     int suffix_len, int seq_offset, int lt_offset, int total_preimage_len,
@@ -2221,7 +2240,7 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+    kernel_pinning_pipeline<FAST_TAIL,0,SCALAR_ROUTE><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -3266,9 +3285,10 @@ int main(int argc, char **argv) {
     uint64_t batch_no = 0;
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         slot_busy[s] = 0;
-        cudaError_t err = cudaGetLastError();
+        err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         uint32_t h_hit = h_hit_cnt[s];
         if (h_hit > 0) {
@@ -3306,6 +3326,19 @@ int main(int argc, char **argv) {
         }
         return 0;
     };
+    // Timing uses completed, disjoint search batches. All slots are drained at
+    // each boundary, so no cohort borrows work from the previous implementation.
+    qsb::ProductiveTune tuner;
+    unsigned incumbent = QSB_SCALAR_ROUTE < 0 ? 0 : QSB_SCALAR_ROUTE, challenger = 1;
+    bool tuning = QSB_SCALAR_ROUTE < 0;
+    unsigned cohort_batches = 0;
+    uint64_t cohort_work = 0;
+    auto monotonic_seconds = []() -> double {
+        struct timespec now;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return std::nan("");
+        return now.tv_sec + now.tv_nsec / 1e9;
+    };
+    double cohort_start = monotonic_seconds();
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -3347,7 +3380,12 @@ int main(int argc, char **argv) {
             cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
 
-            launch_pinning_pipeline<true>(
+            const unsigned route = tuning && tuner.route() ? challenger : incumbent;
+            auto launch = route == 3 ? launch_pinning_pipeline<true,3> :
+                          route == 2 ? launch_pinning_pipeline<true,2> :
+                          route == 1 ? launch_pinning_pipeline<true,1> :
+                                       launch_pinning_pipeline<true,0>;
+            launch(
                 d_mid_slot[s], d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
                 pp.total_preimage_len,
@@ -3366,6 +3404,31 @@ int main(int argc, char **argv) {
             slot_busy[s] = 1;
 
             total_searched += batch_sz;
+            if (tuning) {
+                cohort_work += (uint64_t)batch_sz;
+                if (++cohort_batches == tuner.target_batches()) {
+                    for (int d = 0; d < QSB_SLOTS; ++d)
+                        if (drain_slot(d)) return 1;
+                    const double seconds = monotonic_seconds() - cohort_start;
+                    if (tuner.finish_cohort(seconds, cohort_work)) {
+                        incumbent = tuner.selected() ? challenger : incumbent;
+                        fprintf(stderr, "productive comparison: challenger=%u route=%u valid=%d "
+                                "gain=%.6f pairs=%.6f,%.6f,%.6f,%.6f\n",
+                                challenger, incumbent, (int)tuner.valid(), tuner.geometric_gain(),
+                                tuner.ratio(0), tuner.ratio(1), tuner.ratio(2), tuner.ratio(3));
+                        if (challenger < 3) {
+                            ++challenger;
+                            tuner = qsb::ProductiveTune();
+                        } else {
+                            tuning = false;
+                        }
+                    }
+                    cohort_batches = 0;
+                    cohort_work = 0;
+                    cohort_start = monotonic_seconds();
+                }
+            }
+
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
