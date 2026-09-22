@@ -1,7 +1,6 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
-
 # Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+
+Effort: high
 
 ## Base and attribution
 
