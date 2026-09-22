@@ -39,9 +39,6 @@
 #ifndef QSB_RAW_DEN
 #define QSB_RAW_DEN 1
 #endif
-#ifndef QSB_ISO_XR
-#define QSB_ISO_XR 1   /* problem isomorphism makes recovery xR exactly +/-1 */
-#endif
 #ifndef QSB_PARITY_SUM
 #define QSB_PARITY_SUM 1   /* P9: y-parities from the pre-"+a" products (no a-x subtractions) */
 #endif
@@ -648,8 +645,9 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
-    qsb_decode_to_shared(k);
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
@@ -1421,12 +1419,6 @@ __device__ __forceinline__ void qsb_field_normalize(uint64_t *r) {
 
 /* qsb_warp_inverse: removed -- it has no caller. */
 
-#if QSB_ISO_XR
-__device__ __constant__ uint64_t pin_iso_invu_words[4];
-__device__ __constant__ uint64_t pin_iso_u2ry_words[4];
-__device__ __constant__ uint32_t pin_iso_xneg;
-#endif
-
 // Share one inverse across all 256 lanes with a work-efficient binary product
 // tree. Each level is packed after the preceding level, and every level stores
 // its left half before its right half. Thus both operands of a multiply are
@@ -1474,18 +1466,6 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
         root[4]=0;
         qsb_field_normalize(root);
         _ModInv(root);
-#if QSB_ISO_XR
-        /* Scale the single outer-tree inverse by u^-1.  The down-sweep is
-         * linear in that inverse, so every returned group-root inverse keeps
-         * the factor; the packed cofactor exponents cancel it in finish. */
-        uint64_t invu[5]={pin_iso_invu_words[0],pin_iso_invu_words[1],
-                          pin_iso_invu_words[2],pin_iso_invu_words[3],0};
-        uint64_t scaled[5];
-        qsb_field_mul(scaled,root,invu);
-        #pragma unroll
-        for(int k=0;k<4;k++)root[k]=scaled[k];
-        root[4]=0;
-#endif
         #pragma unroll
         for(int k=0;k<4;k++)inverses[k][254]=root[k];
     }
@@ -1532,6 +1512,14 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
+
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -1693,14 +1681,7 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
         for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
         // One fixed-ordinate multiplication per128-leaf tree, instead of
         // one per leaf in finish. Keep both inverse representatives.
-        uint64_t b[5]={
-#if QSB_ISO_XR
-            pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],
-            pin_iso_u2ry_words[2],pin_iso_u2ry_words[3],0
-#else
-            pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3],0
-#endif
-        };
+        uint64_t b[5]={pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3],0};
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
         #pragma unroll
         for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
@@ -2022,7 +2003,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2359,13 +2340,10 @@ extern "C" {
 
 /* Affine (x,y) of a point, as the 4+4 little-endian limbs the table uses. */
 static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
-                              const BIGNUM *alpha, const BIGNUM *beta,
-                              const BIGNUM *field_p, BN_CTX *ctx, uint64_t out[8]) {
+                              BN_CTX *ctx, uint64_t out[8]) {
     uint8_t xb[32], yb[32];
     memset(xb, 0, 32); memset(yb, 0, 32);
     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
-    BN_mod_mul(x,x,alpha,field_p,ctx);
-    BN_mod_mul(y,y,beta,field_p,ctx);
     BN_bn2bin(x, xb + (32 - BN_num_bytes(x)));
     BN_bn2bin(y, yb + (32 - BN_num_bytes(y)));
     for (int j = 0; j < 16; j++) { uint8_t t = xb[j]; xb[j] = xb[31-j]; xb[31-j] = t; }
@@ -2378,9 +2356,7 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
  * the point sequence is unchanged; EC_POINTs_make_affine replaces one
  * inversion per point by one batched inversion per ladder. */
 static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
-                            uint64_t *out, BIGNUM *x, BIGNUM *y,
-                            const BIGNUM *alpha, const BIGNUM *beta,
-                            const BIGNUM *field_p, BN_CTX *ctx) {
+                            uint64_t *out, BIGNUM *x, BIGNUM *y, BN_CTX *ctx) {
     EC_POINT *points[GT_HI];
     if(count<1 || count>=GT_HI) { fprintf(stderr,"Invalid ladder size\n");exit(2); }
     for(int i=0;i<count;i++) {
@@ -2394,8 +2370,7 @@ static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
         fprintf(stderr,"Ladder batch normalization failed\n");exit(2);
     }
     for(int i=0;i<count;i++) {
-        gt_point_to_limbs(grp,points[i],x,y,alpha,beta,field_p,ctx,
-                          out+(size_t)(i+1)*8);
+        gt_point_to_limbs(grp,points[i],x,y,ctx,out+(size_t)(i+1)*8);
         EC_POINT_free(points[i]);
     }
 }
@@ -2409,19 +2384,14 @@ static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
  * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
  * comes from the runtime problem (little-endian 32 bytes), so the ladders are
  * rebuilt per instance and NOT cached across problems (anti-replay). */
-static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32],
-                             const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
-           *order = BN_new(), *nri = BN_new(), *bscal = BN_new(),
-           *field_p=BN_new(), *alpha=BN_new(), *beta=BN_new();
+           *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
     EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp);
     /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
     EC_GROUP_get_order(grp, order, ctx);
-    EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
-    BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
-    BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
     BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
     BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
@@ -2431,14 +2401,14 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, ch==1 ? (1u<<18) : (1u<<17)); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
         gt_batch_ladder(grp,base,GT_LO-1,                    /* L[lo] = lo * B */
-            hL+(size_t)ch*GT_LO*8,x,y,alpha,beta,field_p,ctx);
+            hL+(size_t)ch*GT_LO*8,x,y,ctx);
         BN_set_word(shift, 256);                             /* step = 256 * B */
         EC_POINT_mul(grp, step, NULL, base, shift, ctx);
         gt_batch_ladder(grp,step,(ch==0?1024:512)-1,         /* H[hi] = hi * 256 * B */
-            hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
+            hH+(size_t)ch*GT_HI*8,x,y,ctx);
     }
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
-    BN_free(nri); BN_free(bscal); BN_free(field_p); BN_free(alpha); BN_free(beta);
+    BN_free(nri); BN_free(bscal);
     EC_POINT_free(base); EC_POINT_free(step);
     EC_GROUP_free(grp); BN_CTX_free(ctx);
 }
@@ -2448,21 +2418,16 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
 static int gt_spot_check(const uint8_t *gTable, int samples,
-                         const uint8_t neg_r_inv[32],
-                         const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+                         const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *inv2 = BN_new(), *order = BN_new(),
-           *nri = BN_new(), *half_nri = BN_new(), *field_p=BN_new(),
-           *alpha=BN_new(), *beta=BN_new();
+           *nri = BN_new(), *half_nri = BN_new();
     EC_POINT *pt = EC_POINT_new(grp);
     uint64_t want[8];
     int ok = 1;
     unsigned seed = 0x9e3779b9u;
     EC_GROUP_get_order(grp, order, ctx);
-    EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
-    BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
-    BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_set_word(k, 2); BN_mod_inverse(inv2, k, order, ctx);   /* inv2 = 2^-1 mod n */
     BN_lebin2bn(neg_r_inv, 32, nri);
     BN_mod_mul(half_nri, inv2, nri, order, ctx);              /* (2^-1 * neg_r_inv) mod n = A/2 scalar */
@@ -2484,7 +2449,7 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         BN_mul_word(k, (BN_ULONG)(2*i + 1));
         BN_mod_mul(k, k, half_nri, order, ctx);
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
-        gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,want);
+        gt_point_to_limbs(grp, pt, x, y, ctx, want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
         if (memcmp(gTable + off,      want,     32) != 0 ||
             memcmp(gTable + off + 32, want + 4, 32) != 0) {
@@ -2493,7 +2458,6 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         }
     }
     BN_free(x); BN_free(y); BN_free(k); BN_free(inv2); BN_free(order); BN_free(nri); BN_free(half_nri);
-    BN_free(field_p); BN_free(alpha); BN_free(beta);
     EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
     return ok;
 }
@@ -2501,21 +2465,16 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
 /* OpenSSL fallback builder (only if the GPU builder's spot check fails). Emits
  * the signed table: entry (ch,d) = (2d+1) * 2^gt_shift(ch) * (A/2). Walks odd
  * multiples by stepping 2*base_c per entry (acc = base_c, 3base_c, ...). */
-static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
-                           const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     /* No cache: base A/2 is problem-dependent (neg_r_inv fresh per instance). */
     printf("  Computing GTable (OpenSSL fallback)...\n");
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(), *order = BN_new(),
-           *nri = BN_new(), *bscal = BN_new(), *field_p=BN_new(),
-           *alpha=BN_new(), *beta=BN_new();
+           *nri = BN_new(), *bscal = BN_new();
     EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp), *two_base = EC_POINT_new(grp);
     /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
     EC_GROUP_get_order(grp, order, ctx);
-    EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
-    BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
-    BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
     BN_lebin2bn(neg_r_inv, 32, nri);
     BN_mod_mul(bscal, inv2, nri, order, ctx);
@@ -2526,8 +2485,6 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
         EC_POINT_copy(pt, base);                                                     /* (2*0+1)*base_c */
         for (unsigned d = 0; d < gt_entries(ch); d++) {
             EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
-            BN_mod_mul(x,x,alpha,field_p,ctx);
-            BN_mod_mul(y,y,beta,field_p,ctx);
             uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
             BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
             BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
@@ -2540,7 +2497,6 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
         }
     }
     BN_free(x);BN_free(y);BN_free(shift);BN_free(inv2);BN_free(order);BN_free(nri);BN_free(bscal);
-    BN_free(field_p);BN_free(alpha);BN_free(beta);
     EC_POINT_free(base);EC_POINT_free(pt);EC_POINT_free(two_base);
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
@@ -2591,53 +2547,6 @@ err:
     fprintf(stderr, "Error reading %s\n", fn);
     fclose(f); return -1;
 }
-
-typedef struct {
-    uint64_t alpha[4];              /* u^2: affine x scale */
-    uint64_t beta[4];               /* u^3: affine y scale */
-    uint64_t invu[4];               /* root scale restoring original slopes */
-    uint64_t u2r_iso[8];            /* transformed recovery point */
-    uint32_t xneg;                  /* transformed xR is -1 iff set */
-} qsb_iso_params_t;
-
-#if QSB_ISO_XR
-/* Since p == 3 (mod 4), exactly one of +/-1/xR is a square.  Select it as
- * alpha=u^2, so the transformed recovery abscissa alpha*xR is +/-1. */
-static int qsb_make_iso_params(const pinning2_params_t *pp,qsb_iso_params_t *out){
-    static const uint8_t p_be[32]={
-        0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-        0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFE,0xFF,0xFF,0xFC,0x2F};
-    BN_CTX *ctx=BN_CTX_new();
-    BIGNUM *p=BN_new(),*x=BN_new(),*y=BN_new(),*alpha=BN_new(),*u=BN_new(),
-           *exp=BN_new(),*check=BN_new(),*beta=BN_new(),*invu=BN_new(),
-           *xt=BN_new(),*yt=BN_new();
-    int ok=ctx&&p&&x&&y&&alpha&&u&&exp&&check&&beta&&invu&&xt&&yt;
-    if(ok)ok=BN_bin2bn(p_be,32,p)!=NULL && BN_lebin2bn(pp->u2r_x,32,x)!=NULL
-             && BN_lebin2bn(pp->u2r_y,32,y)!=NULL;
-    if(ok)ok=BN_mod_inverse(alpha,x,p,ctx)!=NULL;
-    if(ok){
-        BN_copy(exp,p);BN_add_word(exp,1);BN_rshift(exp,exp,2);
-        BN_mod_exp(u,alpha,exp,p,ctx);BN_mod_sqr(check,u,p,ctx);
-        out->xneg=(BN_cmp(check,alpha)!=0);
-        if(out->xneg){BN_mod_sub(alpha,p,alpha,p,ctx);BN_mod_exp(u,alpha,exp,p,ctx);}
-        BN_mod_sqr(check,u,p,ctx);ok=BN_cmp(check,alpha)==0;
-    }
-    if(ok){BN_mod_mul(beta,alpha,u,p,ctx);ok=BN_mod_inverse(invu,u,p,ctx)!=NULL;}
-    if(ok){
-        BN_one(xt);if(out->xneg)BN_sub(xt,p,xt);
-        BN_mod_mul(yt,beta,y,p,ctx);
-        ok=BN_bn2lebinpad(alpha,(uint8_t*)out->alpha,32)==32
-          && BN_bn2lebinpad(beta,(uint8_t*)out->beta,32)==32
-          && BN_bn2lebinpad(invu,(uint8_t*)out->invu,32)==32
-          && BN_bn2lebinpad(xt,(uint8_t*)out->u2r_iso,32)==32
-          && BN_bn2lebinpad(yt,(uint8_t*)(out->u2r_iso+4),32)==32;
-    }
-    BN_free(p);BN_free(x);BN_free(y);BN_free(alpha);BN_free(u);BN_free(exp);
-    BN_free(check);BN_free(beta);BN_free(invu);BN_free(xt);BN_free(yt);BN_CTX_free(ctx);
-    if(!ok)fprintf(stderr,"ERROR: isomorphic coordinate setup failed\n");
-    return ok?0:-1;
-}
-#endif
 
 #if QSB_HOST_GATE
 static int qsb_host_zeros(const uint8_t *h) {
@@ -2781,15 +2690,6 @@ int main(int argc, char **argv) {
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
-    qsb_iso_params_t iso={};
-#if QSB_ISO_XR
-    if(qsb_make_iso_params(&pp,&iso)<0)return 1;
-    printf("  Isomorphic recovery coordinates: xR'=%s1\n",iso.xneg?"-":"+");
-#else
-    /* Keep the original table builder available as an exact compile-time
-     * control: multiplying both affine coordinates by one is a no-op. */
-    iso.alpha[0]=iso.beta[0]=1;
-#endif
 
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
@@ -2806,7 +2706,7 @@ int main(int argc, char **argv) {
         size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
-        gt_build_ladders(hL,hH,pp.neg_r_inv,iso.alpha,iso.beta);
+        gt_build_ladders(hL,hH,pp.neg_r_inv);
         uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
         cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
@@ -2821,8 +2721,7 @@ int main(int argc, char **argv) {
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
-                                  iso.alpha,iso.beta);
+            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -2832,7 +2731,7 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
-            compute_gtable(chk_table,pp.neg_r_inv,iso.alpha,iso.beta);
+            compute_gtable(chk_table,pp.neg_r_inv);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
         fflush(stdout);
@@ -2879,14 +2778,6 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
     cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
-#if QSB_ISO_XR
-    if(cudaMemcpyToSymbol(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
-       cudaMemcpyToSymbol(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
-       cudaMemcpyToSymbol(pin_iso_xneg,&iso.xneg,sizeof(iso.xneg))!=cudaSuccess){
-        fprintf(stderr,"Failed to upload isomorphic recovery constants\n");
-        return 1;
-    }
-#endif
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
         uint64_t recovery_c[4];
         if(!qsb_make_recovery_constant(recovery_c,pp.u2r_x,pp.u2r_y) ||

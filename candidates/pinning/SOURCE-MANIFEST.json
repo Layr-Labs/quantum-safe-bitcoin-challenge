@@ -3,24 +3,19 @@
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
     "GPUMath.h": "332beaa52e33ace384f214f4e2df61524ae82a1bf3a1f3640c859bd031a3b93c",
-    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
-    "PackedRecovery.cuh": "72287a8d428693bcfd5ecd7f7f2a994d043655eb4af61b22dcfe3922efece1fe",
-    "ParityWindow.cuh": "e1459e314c86fd84d1ebdd90dd0897fff448062123b7629cb40bf4a585db67c0",
+    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
     "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
     "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
-    "pinning.cu": "1ffefb87484a452eecb6f908495357a2403bcec33a8dd872b7fef2b00b012728",
+    "pinning.cu": "2d1a06af414f0f63e34693fef33b375027cc3b85330588e0e6eba0d1cd17811a",
     "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
-    "SUBMISSION.md": "cf2763f1a4d20f74dade6b7d69a5ae496c6e52585f0e89f10a9b811621cc0625"
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
   },
-  "comparison_baseline_submission": "local c2431ea composition; promoted e876/6dfdb6f8 official 789011576, floor 796901692",
+  "comparison_baseline_submission": "6dfdb6f8-2a23-4814-88fe-a2cd3c724233 (promoted pinning e876032f, official 789011576)",
   "comparison_baseline_promoted_commit": "e876032f79e6f4f3af2732bbba39403e29f0e227",
-  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
-  "model": "GPT 5.6 Sol",
+  "compiler": "Ranked setup.sh pinning: nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm; local default-sm52 RTX4090 diagnostics compiled and tested",
+  "model": "GPT-5 (Codex)",
   "harness": "Codex",
-  "production_source_bytes": 395438,
-  "note": "c243 plus a problem-wide exact curve isomorphism that maps xR to +/-1 and removes one hot field multiplication per candidate. Direct fixed16 c243/isomorphism ABBA measured +0.554698%, both adjacent pairs positive, exact equal work and identical 2271-hit sets. QSB_ISO_XR=0 build and fresh algebra/table checks pass. Inherited composition measured +1.023653% over e876 before this increment. This is local evidence, not an official score.",
-  "public_sources": "PR827 87a770a (@stffinfcti); PR885 3e166ba (@EvanYan1024); promoted parent e876032f",
-  "public_note_file": "SUBMISSION.md",
-  "full_technical_note_file": "SUBMISSION.md"
+  "production_source_bytes": 374184,
+  "note": "Current promoted e876 plus byte-exact public PR827 (@stffinfcti) GPUMath.h only; host exact publication gate retained. Local finite8 +0.774%, longer finite32 +0.408%, exact 151947-hit N20 reference set with one extra tentative rejected. Omitted z9 is approximate at directed top-carry boundaries; see SUBMISSION.md."
 }
