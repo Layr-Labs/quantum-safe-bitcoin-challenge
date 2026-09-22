@@ -89,6 +89,44 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
  * waited; now each lane reads its class state (32 bytes). */
 /* Flat mapping: one thread per (epoch, class) over full 256-thread blocks, instead of one
  * 54-thread block per epoch (two warps, 10 idle lanes, and a block launch per epoch). */
+/* Exact vector form of the (epoch,class) first-state traffic. Every first-state
+ * record is 8 consecutive uint32 at word offset (e*QSB_FIRST_SLOTS+c)*8, i.e.
+ * a 32-byte-aligned offset from a cudaMalloc base (256-byte aligned), so each
+ * record is exactly two aligned uint4. The words stored and loaded are
+ * bit-identical to the scalar form; only the instruction count changes
+ * (8 x LDG.E / STG.E -> 2 x LDG.E.128 / STG.E.128). Set to 0 to restore the
+ * scalar loop.
+ */
+#ifndef QSB_FIRST_VEC_STORE
+#define QSB_FIRST_VEC_STORE 1
+#endif
+#ifndef QSB_FIRST_VEC_LOAD
+#define QSB_FIRST_VEC_LOAD 1
+#endif
+__device__ __forceinline__ void qsb_first_state_store(uint32_t *dst, const uint32_t *st) {
+#if QSB_FIRST_VEC_STORE
+    uint4 lo, hi;
+    lo.x=st[0]; lo.y=st[1]; lo.z=st[2]; lo.w=st[3];
+    hi.x=st[4]; hi.y=st[5]; hi.z=st[6]; hi.w=st[7];
+    uint4 *v=reinterpret_cast<uint4*>(dst);
+    v[0]=lo; v[1]=hi;
+#else
+    #pragma unroll
+    for(int j=0;j<8;j++)dst[j]=st[j];
+#endif
+}
+__device__ __forceinline__ void qsb_first_state_load(uint32_t *st, const uint32_t *src) {
+#if QSB_FIRST_VEC_LOAD
+    const uint4 *v=reinterpret_cast<const uint4*>(src);
+    const uint4 lo=v[0], hi=v[1];
+    st[0]=lo.x; st[1]=lo.y; st[2]=lo.z; st[3]=lo.w;
+    st[4]=hi.x; st[5]=hi.y; st[6]=hi.z; st[7]=hi.w;
+#else
+    #pragma unroll
+    for(int j=0;j<8;j++)st[j]=src[j];
+#endif
+}
+
 __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_t * __restrict__ d_epochs,
         uint32_t * __restrict__ d_first, unsigned n_epochs, unsigned classes) {
     const unsigned t = blockIdx.x * blockDim.x + threadIdx.x;
@@ -103,8 +141,7 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
     _SHA256Transform(st,W);
     const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
-    #pragma unroll
-    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+    qsb_first_state_store(d_first+base,st);
 }
 #if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
@@ -128,8 +165,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         const epoch_desc_t *epoch, int lane, const uint32_t *first) {
     (void)epoch;
     const int first_slot=QSB_FIRST_CLASS[lane];
-    #pragma unroll
-    for(int j=0;j<8;j++)state[j]=first[first_slot*8+j];
+    qsb_first_state_load(state,first+first_slot*8);
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
@@ -173,11 +209,8 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     const uint32_t *firstA, const uint32_t *firstB) {
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
-    #pragma unroll
-    for(int j=0;j<8;j++){
-        stateA[j]=firstA[first_slot*8+j];
-        stateB[j]=firstB[first_slot*8+j];
-    }
+    qsb_first_state_load(stateA,firstA+first_slot*8);
+    qsb_first_state_load(stateB,firstB+first_slot*8);
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
