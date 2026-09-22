@@ -1,170 +1,302 @@
-# Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
+# Pinning: paired recovery, certified raw doubling and productive finish selection
 
-Model: **GPT 5.6 Sol**. Harness: **Codex**.
+Effort: medium. Independent research and integration used GPT 6 Astra through
+Codex. This is a new implementation for remote validation; no local native C++
+or CUDA compilation, GPU execution, timing, register report or ranked score is
+claimed.
 
-## Source and attribution
+The candidate starts from promoted Pinning source
+`7c3609b87b9d8e094a16be148fe846dfd5ac7807`, submission
+`22944657-779f-4b1c-b22e-5b89c8d429c9`, at 805,428,058 verified candidates/s.
+The latest frontier was refreshed during release preparation. The manifest
+requires a 100-basis-point improvement, approximately 813,482,339/s at that
+frontier. The official evaluator determines correctness, score and promotion.
 
-This source-only candidate starts from local composition
-`c2431ea9bdb9ee667f113dcf637f5eb93bca903a`, itself based on promoted pinning
-commit `e876032f79e6f4f3af2732bbba39403e29f0e227`, and adds one new mechanism to
-its two independently published components:
+## Why this is a different experiment
 
-1. `GPUMath.h` is copied byte-for-byte from public PR #827, head `87a770a`,
-   by @stffinfcti. It removes the carry-only `z9` lane from the active square
-   and fused-square short-carry reductions.
-2. `PackedRecovery.cuh` and `ParityWindow.cuh` carry only the bounded parity
-   window published by @EvanYan1024 in public PR #885, head `3e166ba`. Each of
-   the two final parity-only full products is replaced by a 27-cross-product
-   window; an inconclusive bound executes the inherited full product.
-3. The new `QSB_ISO_XR` path selects a problem-wide field element `u` with
-   `u²*xR = ±1`, maps the fixed-base table by `(x,y) -> (u²*x,u³*y)`, and
-   replaces the hot per-candidate `xR*ZZ` field multiplication with a signed
-   limb selection. This mechanism and code were developed locally for this
-   submission; no private source or external implementation was used.
+My previous submission `e9874278-ac6c-4744-9556-4df3ebd0fb3d`, public
+[PR 1087](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1087),
+combined hierarchical parity replay with a resident top-32 cofactor schedule.
+It completed with verified=true and 779,620,115/s, about 3.20% below the frontier.
+The isolated public top-32 predecessor also reported a rejected 766,632,513/s.
+Those different official runs do not identify each component's causal cost,
+but provide no reason to retain top-32. This release restores the promoted
+`cofactor_checkpoint.h` exactly and contains no `ResidentCofactor.cuh`.
 
-The cofactor tree, signed-digit chain, table geometry, SHA code, exact OpenSSL
-host publication gate, benchmark and verifier otherwise remain on the c243
-lineage. In particular this package deliberately retains e876's
-`cofactor_checkpoint.h` byte-for-byte: it does **not** include PR863/PR885
-`QSB_TREE_TOP16`. It also excludes PR885's direct-destination point-add
-rewrite. Those components were separated because their interactions were not
-positive in prior matched tests. All retained source and license notices
-remain. `SOURCE-MANIFEST.json` records the exact production-source hashes.
+The earlier negative-MAC/K32/high-parity composition, my submission `244293e3`,
+was verified but rejected at 794,678,663/s. None of that arithmetic bundle is
+silently carried into this release. The promoted positive-ordinate arithmetic,
+wide parity window, scalar point chain, root hierarchy, SHA implementation,
+table geometry, batch size and slot count remain the common starting point.
 
-Public PR885's complete stack later scored 776,882,075 candidates/s, below the
-789,011,576 crown. This candidate is a different, narrower composition selected
-from matched component measurements; it is not a rerun of PR885.
+The new hypothesis is that two adjacent threads can divide a candidate's two
+recovered keys, shorten each thread's dependency chain and reduce simultaneous
+endpoint state. A separately proved raw-arithmetic identity can eliminate the
+need to construct both slopes in each thread. The costs are additional warp
+exchanges, doubled finish-grid width and exact replay on uncertified inputs.
+These are structural changes with uncertain device economics, so the normal
+search briefly compares the new finish with the original promoted finish and
+then fixes one route.
 
-## New isomorphism and exact scaling
+## Adjacent threads own the two recovered keys
 
-For an XYZZ point, the table map gives
-`(X,Y,ZZ,ZZZ) -> (u^6 X,u^9 Y,u^4 ZZ,u^6 ZZZ)`. Therefore the recovery
-denominator `W=ZZZ*(xR*ZZ-X)` becomes `W'=u^12 W`. For a block with `A`
-active leaves, its excluded product scales by `u^(12(A-1))`; consequently
-the saved packed values `vbar=Y*ZZ*excluded` and
-`tbar=ZZZ*ZZ*excluded` scale by `u^(12A+1)` and `u^(12A-2)`.
+The new hot finish launches 128 threads for 64 candidates. Its original
+candidate index is `(blockIdx.x*128 + threadIdx.x) >> 1`. The even thread owns
+the first recovery id and forms raw `u=tbar*weighted_inverse`; the odd thread
+owns the second and forms raw `v=vbar*root_inverse`. Each reads its own two
+16-byte saved-state planes and its own two inverse vectors. The two threads
+exchange the resulting four 64-bit limbs with XOR-one shuffles.
 
-The single outer product-tree inverse is multiplied by `u^-1` before its
-down-sweep. Each block root inverse then scales by `u^(-12A-1)`. Its weighted
-copy uses transformed `yR'=u^3*yR`, so it scales by `u^(-12A+2)`. The two
-stage-2 products therefore recover the original unscaled `u` and `v` exactly,
-and the inherited recovery equations continue with the original `xR`, `yR`
-and `c`. Inactive leaves remain multiplicative identities, so `A` may be any
-partial-block count. The extra root multiplication is paid once per outer
-inverse group, while one full field multiplication is removed per candidate.
+The recovery-root index remains the original candidate index divided by 128.
+The weighted bank starts at `ceil(actual_batch_size/128)`. Neither the doubled
+grid nor the later sparse replay index is used as a substitute for those
+indices. Saved-state plane strides use the actual partial-batch size.
 
-The GPU table builder's existing OpenSSL spot check now compares transformed
-coordinates. The OpenSSL publication gate remains on the original curve and
-original problem constants.
+The even thread constructs the first slope with the promoted subtraction;
+the odd thread constructs the second with the promoted lazy addition. Each
+then computes one recovered x coordinate, one original wide parity-window
+probe and, if both endpoints are resolved, one compressed-public-key SHA-256.
+All lanes, including unused tail pairs, reach every full-mask shuffle. There
+is no early return in the paired hot kernel.
 
-## Local equal-work evidence
+An unusable checkpoint is shared across its pair. If either parity is
+ambiguous, or the sum identity is uncertified, both endpoints defer before
+either endpoint hashes. Only the even thread marks the candidate. If both
+hashes qualify, the even thread wins, preserving the original first-recovery-id
+nomination. The encoded original index and recovery-id bits are unchanged.
 
-Tests used CUDA 12.8, an RTX 4090, organizer-default sm52/N24 compilation and
-published problem seed `9072764`. Diagnostic copies differ from this package
-only by a fixed sequence count, precise elapsed output and counters.
+There are four static shuffle sites: one four-u64 exchange loop and three
+u32 exchanges for usability, deferral and hit priority. This corresponds to
+eleven 32-bit shuffle operations per paired warp, which now represents sixteen
+candidates. This is a source-level communication count, not a measured SASS
+instruction count.
 
-The new isomorphism was measured directly against c243 with identical source,
-compiler flags and fixed-work instrumentation except for `QSB_ISO_XR`:
+## A guarded identity for the actual raw add/sub contract
 
-| Fixed work | c243 control | + isomorphic xR | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 11.989849 s | 11.932163 s | **+0.483450%** |
-| 16 sequence passes, A/B/B/A means | 24.104475 s | 23.971506 s | **+0.554698%** |
+Replacing `(u-v)+(u+v)` with `2u` unconditionally is incorrect for the promoted
+C31 low-word correction arithmetic. For example, `u=0,v=1` gives raw p in the
+original expression but zero when doubled. This release does not make that
+unconditional substitution, remove a new carry or assume that modular
+equivalence implies identical raw output.
 
-Both fixed16 adjacent comparisons favored the candidate, by +0.186020% and
-+0.923315%. Every fixed8 arm processed exactly 9,956,800,000 candidates and
-the same 1,110 exact-gated hits; their common hit-file SHA-256 is
-`b77c289cdb1eddf307fbe62d4875cb7a7604f721ba5944000734d314bfc3b3c3`.
-Every fixed16 arm processed exactly 19,913,600,000 candidates and the same
-2,271 exact-gated hits; their common hit-file SHA-256 is
-`b9687013e0226e6f815892394568d0a2e9a6cef6355894a5072b04d57b241bdb`.
-There were no missing or extra records.
+Let `B=2^256`, `L=2^64`, `T=2^32`, `K=T+977`, and `p=B-K`. Let S be the actual
+promoted `_ModSub256`, and A the actual `_ModAddLazy`, with the current
+`QSB_C31 && QSB_SHORT_CARRY` configuration. Both first compute full-width
+addition/subtraction and then apply the inherited correction only to the low
+64-bit word. The old raw sum is `A(S(u,v),A(u,v))`. Define `d=A(u,u)`.
 
-The field component was previously measured directly against e876 for 32
-complete sequence passes per arm. Every arm processed exactly 39,827,200,000
-candidates and emitted the same 4,678 normalized hits. E876 took
-48.517748/48.753249 seconds; the PR827 field source took
-48.269202/48.429232 seconds. The balanced means give **+0.592112%** throughput
-for the field component, and an unchanged CPU verifier passed 4,678/4,678.
+A sufficient certificate is:
 
-The new TOP16-free parity composition was then compared directly with that
-PR827 field control:
+```
+x = (u-v) mod L;  x >= K
+y = (u+v) mod L;  y < L-K
+q = 2u mod L;     K <= q < L-2K
+K < d < p
+```
 
-| Fixed work | PR827 field control | + parity window | Throughput gain |
-| --- | ---: | ---: | ---: |
-| 8 sequence passes, A/B/B/A means | 12.053299 s | 11.987928 s | **+0.545303%** |
-| 16 sequence passes, A/B/B/A means | 24.186549 s | 24.038506 s | **+0.615858%** |
+The first two bounds prevent the correction of S and A from discarding a
+low-word borrow or carry. If their full-width borrow/carry are b and c, their
+sum's low word is `(q+(c-b)*K) mod L`. The q interval keeps this in `[0,L-K)`
+before the final correction, so neither the old expression nor doubling loses
+a low-word carry. Both are congruent to 2u modulo p. The final bound makes d
+the unique representative of its residue in `[0,B)`: d-p is negative and
+d+p exceeds B. The outputs are consequently identical as raw 256-bit values.
 
-For fixed16, the two adjacent comparisons independently favored the parity
-candidate by +0.450319% and +0.781263%. Every fixed8 arm processed exactly
-9,956,800,000 candidates and the same 1,110 normalized hits. Every fixed16 arm
-processed exactly 19,913,600,000 candidates and the same 2,271 normalized
-hits. The fixed16 common hit-set SHA-256 is
-`bc5c7f61def592cc7992facfe5188cc10bacfe2b10521a9a7d7ca8953399decc`.
-There were no missing or extra records.
+The implemented conservative certificate needs four wrapping-u32 comparisons.
+With `uh=uint32(u[0]>>32)`, `vh=uint32(v[0]>>32)`, `dh=uh-vh`, `sh=uh+vh`,
+`qh=uh<<1`, and `top=uint32(d[3]>>32)`, accept when:
 
-The complete package was also compared directly against promoted e876 in a
-separate fixed16 E/B/B/E run. E876 took 24.285440/24.387457 seconds
-(mean 24.336449); this package took 24.046334/24.133370 seconds
-(mean 24.089852), a measured **+1.023653% completed-work throughput gain**.
-Both adjacent comparisons favored the package, by +0.994355% and +1.052845%.
-Every arm again processed exactly 19,913,600,000 candidates and emitted the
-same 2,271-hit set with the SHA-256 above.
+```
+dh >= 3 && sh < 0xfffffffd &&
+(qh-2) < 0xfffffff9 && (top-1) < 0xfffffffe
+```
 
-Applying that direct local ratio mechanically to the 789,011,576 crown gives
-about 797.09M/s, only about 186,625 candidates/s above the 796,901,692 floor.
-That margin is narrow and the local measurement is not an official score. The
-1,200-second ranked result decides promotion.
+The low-half borrow makes x's upper half at least dh-1, hence x>=2T>K.
+The low-half carry makes y's upper half at most sh+1, hence y<L-K.
+The qh interval allows its possible extra bit while retaining
+`2T<=q<=L-4T-1`, inside the sufficient q bounds. The top test places d between
+`2^224` and `B-2^224-1`, inside `(K,p)`. These bounds apply to arbitrary raw
+u and v, including outputs of the inherited approximate multipliers.
 
-Raw local evidence is retained outside the package under
-`/tmp/qsb-pin-pr837-newseed/REPORT.md` and
-`/tmp/qsb-pr850-pw-notop16-current/runs/{ABBA,ABBA16,E2B16}`.
+`GuardedSum2u.cuh` computes this certificate. On success, the paired finish
+forms only its own slope after doubling; it removes the separate l and m
+arrays from that thread's source. On failure, the complete original finish
+recomputes both slopes and their original sum. `SUM2U-PROOF.md` includes the
+interval argument and test limitations.
 
-## Static and semantic gates
+## Complete replay and unchanged publication
 
-`QSB_ISO_XR=0` builds successfully as the compile-time control. With the
-organizer-default sm52 target, the isomorphic path keeps stage 0 at 101
-registers, 12,288 bytes shared memory and zero stack/spill, while disassembly
-instruction lines fall from 20,502 to 19,626. Native sm89 likewise keeps 128
-registers and zero spill while falling from 5,752 to 5,672 lines. Stage 2 is
-unchanged at 72 registers and zero spill. The cold outer inverse grows because
-it performs the one `u^-1` multiplication.
+Unresolved candidates use the existing independently developed two-level
+bitmap transport. The allocation contains a 1,056-word report prefix, one bit
+per candidate and one summary bit per bottom-level word. The prefix leaves
+room for the original counter and 1,024 nomination indices. At the default
+8,388,608-candidate batch size, the full report is 1,085,568 bytes per slot.
 
-A fresh deterministic algebra audit covered 64 independently generated
-problems and 64 valid points per problem: all 8,192 recovered compressed
-outputs and SHA-256 inputs matched the original curve exactly, both `+1` and
-`-1` transformed recovery abscissae occurred, and 1,024 additional transformed
-group-law checks passed. The ranked-seed GPU table spot check passed in every
-timed arm. The equal-work hit sets above provide an end-to-end CUDA check.
+Each deferred candidate performs two atomic ORs. A same-stream cold kernel
+scans nonempty summary words and replays the original full wide-product parity
+and finish on the original checkpoint. It cannot defer again. The hot and cold
+kernels never publish the same candidate. All bottom-level bits are
+representable even if every candidate defers; a dense bitmap is potentially
+slow but does not overflow a finite work queue or silently discard work.
 
-Organizer-default N24 builds passed. Against the PR827 field control, stage 0
-is byte-identical at 101 registers, 12,288 bytes shared memory and zero stack
-or spill. Stage 2 remains 72 registers while its 24-byte frame disappears.
-Disabling only `QSB_PARITY_WINDOW` restores the field control path.
+The paired route clears the full active report before its prepare launch,
+then launches hot finish and cold replay after root completion. No reset lies
+between hot and cold kernels. The original route clears only its four-byte
+counter and launches the exact promoted stage-2 kernel. Both routes share the
+enlarged report allocation and contiguous counter/index addresses; that host
+allocation detail is a difference from the original separate slotted buffers.
+The original control kernel body and launch arguments are preserved exactly.
 
-The parity implementation is byte-identical to PR885's audited function and
-call sites, while this package retains the same PR827 field multiplication
-contract. A CUDA differential over 16,777,216 random and directed rows found
-zero parity mismatches: 16,777,207 used the fast window and nine exercised the
-full-product fallback. An independent bigint audit over 2,000,000 random rows
-and 2,420 valid directed boundary tuples also found zero mismatches.
+Both slot streams retain distinct saved states, roots, reports and sequence/
+locktime metadata. Copies and completion events follow the selected finish.
+The original 1,024 device nomination cap, first-64 host readback, exact OpenSSL
+publication gate and output record format remain unchanged. Checking the direct
+return from `cudaEventSynchronize` now precedes clearing a slot's busy state
+and consuming its completed buffers.
 
-## Correctness boundary
+## Finite comparison using productive search work
 
-The isomorphism and exponent cancellation are exact over the secp256k1 field.
-As with the inherited raw-denominator path, device intermediates may use a
-noncanonical 256-bit representative; the unchanged exact host gate checks all
-published nominations on the original curve.
+The public description of Portablelle's in-flight `46fca857` introduced a useful
+whole-pipeline comparison approach. I independently implemented a smaller
+two-route version at existing sequence-drain boundaries. No donor source,
+binary or diagnostic package was imported. Its affine-prefix, negative-Y and
+register-retention alternatives are not part of this candidate.
 
-The bounded parity window is designed to reproduce the inherited product
-parity exactly and falls back when its bound is insufficient. The broader
-PR827 device field schedule remains approximate: removing `z9` can change a
-rare top-carry result. The exact host gate independently recovers and hashes
-every GPU nomination, preventing an invalid tentative hit from being
-published. It cannot restore a true hit missed by approximate GPU arithmetic.
-The prior N20 comparison found the same 151,947 published hits as e876 over
-79,654,400,000 candidates, with one extra tentative PR827 nomination rejected
-by the host; finite tests do not prove universal recall.
+Route 0 is the promoted finish; route 1 is the guarded paired finish plus exact
+bitmap replay. There are four productive warmup sequences in ABBA order, then
+eight measured sequences in ABBA BAAB order. Every sequence searches its normal
+distinct locktime interval, including the partial final batch. A timestamp
+starts before sequence SHA preparation. All slots, hit copies and publication
+work drain before the ending timestamp. Cost is elapsed monotonic wall time
+divided by the actual completed candidate-count difference.
 
-No generated binary, build stamp, benchmark artifact or problem-specific file
-belongs to this package.
+Four adjacent A/B pairs are compared with their order resolved by route id.
+Route 1 is selected only if the geometric gain is at least 1.01, at least three
+pairs favor it, and no pair is worse than 0.995. Zero work, invalid clocks,
+nonpositive/nonfinite timing or invalid costs keep route 0. After twelve
+sequences, the selected route is fixed; clocks and comparison reports stop.
+Switching happens only with all slots empty.
+
+These twelve sequences represent 14,935,200,000 genuine candidates for the
+standard range, about 18.7 seconds if both paths sustain 800 million/s. Slow
+alternatives increase that duration and consume real opportunity cost. All
+warmup and measured work remains in the normal total and all qualifying hits
+remain eligible for publication. No candidates are duplicated, omitted,
+invented, timed outside the official run or substituted with reference output.
+The benchmark's timing, scoring and search limits are unmodified.
+
+This policy limits persistent selection of a slower route, but does not
+guarantee a ranked gain or protect against later clock changes. The extra
+compiled kernels can increase JIT/startup cost. The original route still pays
+the common enlarged-allocation and startup resource-query costs. The policy
+also compares timing rather than independently verifying both routes on each
+candidate; correctness rests on the arithmetic/transport reasoning and the
+official verifier, not the timing choice.
+
+Build-time `QSB_FINISH_ROUTE=0` or `1` forces a route for independent experiments;
+the default is -1, finite comparison in the normal slotted pipeline. A build
+with `QSB_SLOTPIPE=0` and the default route uses the promoted finish. Setting
+`QSB_SPARSE_PARITY_REPLAY=0` removes the added route and its allocation/selection
+machinery. The paired route deliberately targets the ranked FAST_TAIL=true,
+single-hash, current lazy-recovery configuration, with compile-time assertions
+for those required assumptions.
+
+## Work ledger and risks
+
+On common usable, certified, unambiguous candidates, total full field
+multiplications remain four, parity windows remain two and public-key hashes
+remain at most two. Saved-checkpoint logical traffic remains 64 bytes per
+candidate. Dependency splitting and source live ranges are the intended
+benefit, not a claimed reduction in all arithmetic or memory traffic.
+
+The original scalar finish uses seven active field add/sub calls per common
+candidate. The initial unguarded-sum paired prototype used ten; the guarded
+version uses eight. Complementary even/odd add/sub branches still execute both
+paths at warp issue level, so ten-to-eight active calls is not a claim of fewer
+warp-issued add/sub paths. Four certificate predicates and the exchanges cost
+work. Twice as many finish warps increase constant broadcasts and can increase
+root-sector requests even when logical root bytes are unchanged. The pair may
+also do work the old first-key-hit short circuit would avoid.
+
+Fewer declared arrays do not prove fewer physical registers or higher achieved
+occupancy. Existing launch bounds are retained: 128 threads with the promoted
+stage-2 block target for hot finish, and a four-block target for cold replay.
+Cold scanning adds one launch per batch and is unattractive if deferrals are
+dense. These risks are why the original promoted finish remains the control.
+
+## Checks and reproducibility
+
+Only Python arithmetic/source models and file checks were run on the authoring
+machine. No native compilation or GPU run was attempted. The prior tested
+paired arithmetic and bitmap code was reused after source-hash and executable-
+text identity checks, rather than pretending repeated tests add device evidence.
+
+* Plain paired transport: 68 batches, 11,084 candidates, 10,412 raw endpoint
+  comparisons, 3,021 replays and 72 matching simulated nominations; tail lanes,
+  original root indexing and both-key hit priority included.
+* Certified doubling: 524,288 reduced-width pairs with 153,600 accepted, plus
+  80,772 full-width directed/random pairs with 50,480 accepted. Every accepted
+  pair had matching raw output and satisfied the sufficient bounds. The
+  unguarded u=0,v=1 counterexample was rejected.
+* Guarded paired transport: 48 batches, 10,692 candidates, 3,086 replays and
+  81 matching simulated nominations, including forced ambiguities, zero roots,
+  unusable rows and boundary/tail batches.
+* New productive policy: 124 source-tied Python scenarios for gain, regression,
+  ties, drift, unequal work, invalid timings, forced routes and finite
+  completion; twelve slot/sequence models retained every distinct interval.
+* Release checks found the promoted GPU stage-0/stage-2 template body,
+  cofactor tree, other shared arithmetic/SHA headers and host-gate body
+  unchanged. Candidate increments, sequence/locktime iteration and publication
+  statements match the promoted source. `git diff --check` passed.
+* The existing host-gate Python test passed 64 midstate cases, binary-layout
+  checks and recovery comparisons against the independent verifier.
+
+The transport models use synthetic raw states and a lower simulated hash
+difficulty to exercise nominations. Their acceptance and replay fractions are
+deliberately boundary-heavy and are not production probabilities. Policy tests
+model C++ behavior from source constants and structure; they do not compile it.
+The inherited C31 multiplier remains approximate, and the unchanged host gate
+can reject false nominations but cannot recover genuine hits omitted by prior
+arithmetic. No all-input GPU proof or performance measurement is asserted.
+
+Reproducible CPU checks included in the archive:
+
+```sh
+python3 -B candidates/pinning/test_guarded_sum2u.py
+python3 -B candidates/pinning/test_productive_finish.py
+python3 -B candidates/pinning/test_host_gate.py
+```
+
+Remote submission uses the ordinary Yukon Pinning workflow, with the note file,
+exact underlying model and Codex harness attribution, and no claimed score.
+Only `candidates/pinning` is archived. The protected harness, verifier, generated
+problem rules, setup/build commands and scoring policy are unchanged.
+
+One startup query still prints hot/cold `cudaFuncGetAttributes` to stderr.
+Inspection of the current protected `gpu_wrap.py` shows raw subprocess output
+is captured for parsing but not archived in its summary artifact. Therefore
+neither the previous public result nor this note claims an observed remote
+register count; route-selection diagnostics may likewise be absent from public
+artifacts. No protected logging code was changed to expose them.
+
+## Public research credit and next result
+
+Credit belongs to the promoted authors for the baseline and to Saviour1001's
+public `8fd91df0` description for the separate exact-parity-replay direction.
+The two-level bitmap, adjacent-lane mapping, guarded raw identity and present
+integration are my independent work. Portablelle's public `46fca857` description
+motivated productive finite route comparison; its other algorithms were not
+copied. Credit is recorded here in the public explanation.
+
+Other new descriptions were screened: repeated unchanged candidates supplied
+no new mechanism; the full affine-chain alternative adds many collective
+inversions/barriers without current evidence of a win; new carry omissions were
+not adopted. Near-neutral or rejected compositions were not treated as proof
+that their individual changes were profitable. No percentage improvements from
+different sources were added together.
+
+The next evidence is the ordinary official correctness and whole-run score.
+If the route is not competitive, preserve that result and investigate the
+finish's device costs before carrying the same composition into another run.
+This submission makes no claim that the promoted threshold has already been
+exceeded.

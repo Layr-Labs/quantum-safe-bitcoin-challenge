@@ -51,6 +51,9 @@
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
+#ifndef QSB_SPARSE_PARITY_REPLAY
+#define QSB_SPARSE_PARITY_REPLAY 1
+#endif
 #include "GPUMath.h"
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
@@ -2206,6 +2209,11 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_SPARSE_PARITY_REPLAY
+#include "SparseBitmapReplay.cuh"
+#include "ProductiveFinish.cuh"
+#endif
+
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -2268,6 +2276,18 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #endif
+#if QSB_SPARSE_PARITY_REPLAY
+    if(qsb_finish_route==1) {
+    err=qsb_bitmap_launch_finish<FAST_TAIL>(batch_size,easy_mode,single_hash,
+        saved,roots,d_hit_cnt,d_hit_idx,
+#if QSB_SLOTPIPE
+        st
+#else
+        0
+#endif
+    );
+    } else {
+#endif
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
@@ -2275,6 +2295,9 @@ static void launch_pinning_pipeline(
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree,tp);
     err=cudaGetLastError();
+#if QSB_SPARSE_PARITY_REPLAY
+    }
+#endif
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
@@ -2774,6 +2797,17 @@ int main(int argc, char **argv) {
 
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+#if QSB_SPARSE_PARITY_REPLAY
+    {
+        cudaError_t resource_err=qsb_bitmap_report_resources();
+        if(resource_err!=cudaSuccess){
+            fprintf(stderr,"Parity replay resource query failed: %s\n",
+                    cudaGetErrorString(resource_err));
+            return 1;
+        }
+    }
+#endif
+
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
@@ -3055,8 +3089,13 @@ int main(int argc, char **argv) {
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
+#if QSB_SPARSE_PARITY_REPLAY
+            if(se==cudaSuccess)se=cudaMalloc(&d_hit_cnt_s[s],qsb_bitmap_report_bytes(QSB_BATCH));
+            if(se==cudaSuccess)d_hit_idx_s[s]=d_hit_cnt_s[s]+1;
+#else
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
+#endif
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 32);
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
         }
@@ -3086,6 +3125,16 @@ int main(int argc, char **argv) {
     }
 #else
     uint32_t *d_hit_cnt, *d_hit_idx;
+#if QSB_SPARSE_PARITY_REPLAY
+    {
+        cudaError_t hit_err=cudaMalloc(&d_hit_cnt,qsb_bitmap_report_bytes(QSB_BATCH));
+        if(hit_err!=cudaSuccess){
+            fprintf(stderr,"Bitmap report allocation failed: %s\n",cudaGetErrorString(hit_err));
+            return 1;
+        }
+        d_hit_idx=d_hit_cnt+1;
+    }
+#else
 #if QSB_HOST_READBACK
     /* Delta A (jungjipdo a91746ca): counter and indices contiguous, so one
      * blocking copy per batch replaces synchronize + two copies. */
@@ -3104,6 +3153,7 @@ int main(int argc, char **argv) {
     }
 #else
     cudaMalloc(&d_hit_cnt, 4); cudaMalloc(&d_hit_idx, 1024*4);
+#endif
 #endif
 #endif
 
@@ -3264,11 +3314,15 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_SPARSE_PARITY_REPLAY
+    qsb_finish_tournament finish_tune;
+#endif
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA completion error: %s\n", cudaGetErrorString(err)); return 1; }
         slot_busy[s] = 0;
-        cudaError_t err = cudaGetLastError();
+        err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         uint32_t h_hit = h_hit_cnt[s];
         if (h_hit > 0) {
@@ -3307,6 +3361,14 @@ int main(int argc, char **argv) {
         return 0;
     };
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+#if QSB_SPARSE_PARITY_REPLAY
+        // The preceding sequence drained every slot before route selection.
+        qsb_finish_route=finish_tune.route();
+        const bool tuning=finish_tune.active();
+        const uint64_t tune_begin_count=total_searched;
+        struct timespec tune_begin={},tune_end={};
+        const bool tune_clock_ok=!tuning || clock_gettime(CLOCK_MONOTONIC,&tune_begin)==0;
+#endif
         if (fast_tail) {
             uint8_t block[64];
             memcpy(block, pp.suffix, sizeof(block));
@@ -3345,7 +3407,16 @@ int main(int argc, char **argv) {
 
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);
             cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
+#if QSB_SPARSE_PARITY_REPLAY
+            cudaError_t clear_err=cudaMemsetAsync(d_hit_cnt_s[s],0,
+                                                  (qsb_finish_route==1?qsb_bitmap_report_bytes(batch_sz):sizeof(uint32_t)),st);
+            if(clear_err!=cudaSuccess){
+                fprintf(stderr,"Bitmap report clear failed: %s\n",cudaGetErrorString(clear_err));
+                exit(2);
+            }
+#else
             cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
+#endif
 
             launch_pinning_pipeline<true>(
                 d_mid_slot[s], d_suffix, gpu_suffix_len,
@@ -3383,6 +3454,20 @@ int main(int argc, char **argv) {
          * hit can never be attributed to the wrong sequence and at most
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#if QSB_SPARSE_PARITY_REPLAY
+        if(tuning) {
+            const bool end_ok=clock_gettime(CLOCK_MONOTONIC,&tune_end)==0;
+            const double seconds=(double)(tune_end.tv_sec-tune_begin.tv_sec)+
+                                 (double)(tune_end.tv_nsec-tune_begin.tv_nsec)*1.0e-9;
+            const uint64_t completed=total_searched-tune_begin_count;
+            finish_tune.observe(seconds,completed,tune_clock_ok && end_ok);
+            fprintf(stderr,"QSB finish comparison step=%u route=%d completed=%llu elapsed=%.9f\n",
+                    finish_tune.step,qsb_finish_route,(unsigned long long)completed,seconds);
+            if(!finish_tune.active())
+                fprintf(stderr,"QSB finish comparison fixed route=%d valid=%d\n",
+                        finish_tune.route(),(int)finish_tune.valid);
+        }
+#endif
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
@@ -3430,7 +3515,15 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
+#if QSB_SPARSE_PARITY_REPLAY
+            cudaError_t clear_err=cudaMemset(d_hit_cnt,0,(qsb_finish_route==1?qsb_bitmap_report_bytes(batch_sz):sizeof(uint32_t)));
+            if(clear_err!=cudaSuccess){
+                fprintf(stderr,"Bitmap report clear failed: %s\n",cudaGetErrorString(clear_err));
+                exit(2);
+            }
+#else
             cudaMemset(d_hit_cnt, 0, 4);
+#endif
 
             launch_pinning_pipeline<true>(
                 d_mid, d_suffix, gpu_suffix_len,
