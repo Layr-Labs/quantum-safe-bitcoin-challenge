@@ -2,7 +2,17 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
+// Independent compact word-plane layout; 128 windows use exactly eight classes.
+#ifndef QSB_COMPACT_FIRST
+#define QSB_COMPACT_FIRST 1
+#endif
+#if QSB_COMPACT_FIRST && QSB_SE_WINDOWS == 128
+#define QSB_FIRST_SLOTS 8
+#define QSB_FIRST_WORD(c,j) ((j)*QSB_FIRST_SLOTS+(c))
+#else
 #define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+#define QSB_FIRST_WORD(c,j) ((c)*8+(j))
+#endif
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
@@ -102,9 +112,9 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     #pragma unroll
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
     _SHA256Transform(st,W);
-    const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+    const size_t base=(size_t)e*QSB_FIRST_SLOTS*8;
     #pragma unroll
-    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+    for(int j=0;j<8;j++)d_first[base+QSB_FIRST_WORD(c,j)]=st[j];
 }
 #if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
@@ -118,9 +128,9 @@ __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
     #pragma unroll
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
     _SHA256Transform(st,W);
-    const size_t base=((size_t)blockIdx.x*QSB_FIRST_SLOTS+(size_t)c)*8;
+    const size_t base=(size_t)blockIdx.x*QSB_FIRST_SLOTS*8;
     #pragma unroll
-    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+    for(int j=0;j<8;j++)d_first[base+QSB_FIRST_WORD(c,j)]=st[j];
 }
 #endif
 
@@ -129,7 +139,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     (void)epoch;
     const int first_slot=QSB_FIRST_CLASS[lane];
     #pragma unroll
-    for(int j=0;j<8;j++)state[j]=first[first_slot*8+j];
+    for(int j=0;j<8;j++)state[j]=first[QSB_FIRST_WORD(first_slot,j)];
     int slot=QSB_WINDOW_CLASS[lane];
     uint32_t a=state[0],b=state[1],c=state[2],d=state[3];
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
@@ -175,8 +185,8 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     const int slot=QSB_WINDOW_CLASS[lane];
     #pragma unroll
     for(int j=0;j<8;j++){
-        stateA[j]=firstA[first_slot*8+j];
-        stateB[j]=firstB[first_slot*8+j];
+        stateA[j]=firstA[QSB_FIRST_WORD(first_slot,j)];
+        stateB[j]=firstB[QSB_FIRST_WORD(first_slot,j)];
     }
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;

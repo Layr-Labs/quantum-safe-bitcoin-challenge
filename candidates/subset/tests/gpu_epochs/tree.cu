@@ -285,6 +285,12 @@ static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
               "mixed table must contain exactly 64 MiB");
 #endif
 
+/* Direct-base recoding, independently implemented from Akashneelesh's
+ * public cedc7a5 description. Both table builders and the check use this switch. */
+#ifndef QSB_RECODE_BASE_A
+#define QSB_RECODE_BASE_A 1
+#endif
+
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
     0xBFD25E8CD0364141ULL, 0xBAAEDCE6AF48A03BULL,
@@ -293,7 +299,8 @@ __device__ __constant__ uint64_t GT_ORDER_N[4] = {
 
 /* k -> 16 signed odd digits. Branchless (no data-dependent BRA) so warps stay
  * convergent; correctness mirrored on CPU by the same source. */
-/* Recode state: the odd 2k-representative M (4 limbs) plus a global sign.
+/* Recode state: the odd representative M (k by default, 2k with the switch off)
+ * in four limbs, plus a global sign.
  * gt_recode_setup computes it once; gt_recode_step peels one signed odd digit
  * per chunk and advances M. The window multiply carries this 32-byte state and
  * peels digits on the fly, so the 16-entry digit array never materialises
@@ -314,6 +321,11 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
         s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
         s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
     }
+#if QSB_RECODE_BASE_A
+    // For reduced k, exactly one of k and n-k is odd. The same digit
+    // recurrence now expands +/-k against A instead of +/-2k against A/2.
+    uint64_t m0=k0,m1=k1,m2=k2,m3=k3,br;
+#else
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -326,6 +338,7 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
     uint64_t ge = tc | (1u - (uint64_t)br);
     uint64_t gm = 0 - ge;
     uint64_t m0=(t0&~gm)|(d0&gm), m1=(t1&~gm)|(d1&gm), m2=(t2&~gm)|(d2&gm), m3=(t3&~gm)|(d3&gm);
+#endif
     uint64_t odd = m0 & 1ULL;
     s=(__uint128_t)n0-m0;    uint64_t p0=(uint64_t)s; br=(s>>64)&1;
     s=(__uint128_t)n1-m1-br; uint64_t p1=(uint64_t)s; br=(s>>64)&1;
@@ -2103,11 +2116,24 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
+/* Instance-dependent scalar for the affine table; no cached problem data. */
+static void gt_select_base_scalar(BIGNUM *out, const BIGNUM *nri,
+                                  const BIGNUM *order, BIGNUM *tmp,
+                                  BIGNUM *inv2, BN_CTX *ctx) {
+#if QSB_RECODE_BASE_A
+    BN_copy(out,nri);
+#else
+    BN_set_word(tmp,2); BN_mod_inverse(inv2,tmp,order,ctx);
+    BN_mod_mul(out,inv2,nri,order,ctx);
+#endif
+}
+
 /* The two ladders the GPU builder needs: L[ch][lo] = lo * 2^(16ch) * G and
  * H[ch][hi] = hi * 256 * 2^(16ch) * G. Index 0 of each is the identity and is
  * left zeroed; the kernel treats it as such. 8176 real points, against the
  * 1,048,576 the host would otherwise have to make affine one at a time. */
-/* Build the ladders for base A/2 where A = neg_r_inv * G (problem-dependent).
+/* Build ladders on A (or A/2 with QSB_RECODE_BASE_A=0), where
+ * A = neg_r_inv * G (problem-dependent).
  * With the table on base A, recoding z directly gives z*A = z*neg_r_inv*G =
  * (neg_r_inv*z mod n)*G = u1*G, so the kernel skips gpu_scalar_mulmod. neg_r_inv
  * comes from the runtime problem (little-endian 32 bytes), so the ladders are
@@ -2118,12 +2144,11 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(),
            *order = BN_new(), *nri = BN_new(), *bscal = BN_new();
     EC_POINT *base = EC_POINT_new(grp), *step = EC_POINT_new(grp), *acc = EC_POINT_new(grp);
-    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
+    /* Select A by default, or A/2 for the inherited recoding. */
     EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
     BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
-    BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
-    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
+    gt_select_base_scalar(bscal,nri,order,shift,inv2,ctx);
+    EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G */
     memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
@@ -2162,9 +2187,8 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     int ok = 1;
     unsigned seed = 0x9e3779b9u;
     EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(k, 2); BN_mod_inverse(inv2, k, order, ctx);   /* inv2 = 2^-1 mod n */
     BN_lebin2bn(neg_r_inv, 32, nri);
-    BN_mod_mul(half_nri, inv2, nri, order, ctx);              /* (2^-1 * neg_r_inv) mod n = A/2 scalar */
+    gt_select_base_scalar(half_nri,nri,order,k,inv2,ctx);      /* selected table base */
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
@@ -2177,7 +2201,7 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
             ch = (int)(seed >> 28) % GT_CHUNKS;
             i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
         }
-        /* want = (2i+1) * 2^gt_shift(ch) * (A/2). */
+        /* want = (2i+1) * 2^gt_shift(ch) * selected table base. */
         BN_one(k);
         BN_lshift(k, k, gt_shift(ch));
         BN_mul_word(k, (BN_ULONG)(2*i + 1));
@@ -2200,18 +2224,17 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
  * the signed table: entry (ch,d) = (2d+1) * 2^(16ch) * (G/2). Walks odd
  * multiples by stepping 2*base_c per entry (acc = base_c, 3base_c, ...). */
 static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
-    /* No cache: base A/2 is problem-dependent (neg_r_inv fresh per instance). */
+    /* No cache: selected base is problem-dependent (fresh neg_r_inv). */
     printf("  Computing GTable (OpenSSL fallback)...\n");
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *shift = BN_new(), *inv2 = BN_new(), *order = BN_new(),
            *nri = BN_new(), *bscal = BN_new();
     EC_POINT *base = EC_POINT_new(grp), *pt = EC_POINT_new(grp), *two_base = EC_POINT_new(grp);
-    /* base = A/2 = (2^-1 * neg_r_inv mod n) * G */
+    /* Select A by default, or A/2 for the inherited recoding. */
     EC_GROUP_get_order(grp, order, ctx);
-    BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
     BN_lebin2bn(neg_r_inv, 32, nri);
-    BN_mod_mul(bscal, inv2, nri, order, ctx);
+    gt_select_base_scalar(bscal,nri,order,shift,inv2,ctx);
     EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, 1ul << (gt_shift(ch) - gt_shift(ch-1))); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
