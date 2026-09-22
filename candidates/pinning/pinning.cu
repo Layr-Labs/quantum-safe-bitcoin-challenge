@@ -30,6 +30,12 @@
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
+#ifndef QSB_X3_TAIL
+#define QSB_X3_TAIL 1   /* h*K fold one-limb cut in _ModX3Fused; defined in GPUMath.h */
+#endif
+#if QSB_X3_TAIL && !QSB_HOST_GATE
+#error "QSB_X3_TAIL requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
 #endif
@@ -2975,6 +2981,7 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
+    printf("  X3 h*h correction cut: %s\n", QSB_X3_TAIL ? "on" : "off");
     printf("  Host publication gate: %s; C31 approx: %s\n",
            QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
 
