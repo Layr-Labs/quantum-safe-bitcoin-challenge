@@ -1,4 +1,6 @@
 // Actual device scalar setup/direct digits versus independent bigint fixtures.
+// recode_base_a_model.py emits the QSB_RECODE_BASE_A=1 fixture used by Round 12B;
+// compile this audit with the same switch as the fixture convention.
 #define main qsb_grinder_main
 #include "tree.cu"
 #undef main

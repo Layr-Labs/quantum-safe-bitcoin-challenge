@@ -43,19 +43,21 @@ int main(int argc,char**argv){
     unsigned infinity=0,table_checks=0;
     for(unsigned run=0;run<2;run++){
         uint8_t seed[32],nri[32];
+        const uint64_t identity_scale[4]={1,0,0,0};
         for(int i=0;i<32;i++)seed[i]=(uint8_t)(i*43+run*79+11);
         SHA256(seed,32,nri);BN_bin2bn(nri,32,base);BN_mod(base,base,n,ctx);
         // The production table builder accepts little-endian neg_r_inv.
         BN_bn2lebinpad(base,nri,32);
         std::vector<uint64_t>L(GT_CHUNKS*GT_LO*8),H(GT_CHUNKS*GT_HI*8);
-        gt_build_ladders(L.data(),H.data(),nri);
+        gt_build_ladders(L.data(),H.data(),nri,identity_scale,identity_scale);
         uint64_t *dL,*dH;uint8_t*table;size_t bytes=(size_t)GT_TOTAL_ENTRIES*64;
         if(!gpu_ok(cudaMalloc(&dL,L.size()*8))||!gpu_ok(cudaMalloc(&dH,H.size()*8))||!gpu_ok(cudaMalloc(&table,bytes)))return 2;
         cudaMemcpy(dL,L.data(),L.size()*8,cudaMemcpyHostToDevice);cudaMemcpy(dH,H.data(),H.size()*8,cudaMemcpyHostToDevice);
         kernel_build_gtable<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(dL,dH,table);
         std::vector<uint8_t>table_host(bytes);
         if(!gpu_ok(cudaMemcpy(table_host.data(),table,bytes,cudaMemcpyDeviceToHost)))return 2;
-        if(!gt_spot_check(table_host.data(),GT_CHUNKS*4+192,nri))return 1;
+        if(!gt_spot_check(table_host.data(),GT_CHUNKS*4+192,nri,
+                          identity_scale,identity_scale,NULL))return 1;
         table_checks+=GT_CHUNKS*4+192;
         audit_complete_points<<<(select.size()+127)/128,128>>>(dc,ds,select.size(),table,dout);
         if(!gpu_ok(cudaMemcpy(points.data(),dout,points.size()*8,cudaMemcpyDeviceToHost)))return 2;
