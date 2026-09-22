@@ -24,17 +24,18 @@
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
 #endif
-#ifndef QSB_C31
-#define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
-#endif
-#if QSB_C31 && !QSB_HOST_GATE
-#error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
-#endif
 #ifndef QSB_X3_TAIL
 #define QSB_X3_TAIL 1   /* h*K fold one-limb cut in _ModX3Fused; defined in GPUMath.h */
 #endif
 #if QSB_X3_TAIL && !QSB_HOST_GATE
 #error "QSB_X3_TAIL requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
+#endif
+
+#ifndef QSB_C31
+#define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
+#endif
+#if QSB_C31 && !QSB_HOST_GATE
+#error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
@@ -1860,6 +1861,26 @@ static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && Q
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
  * coordinates are anchored at R. Returns their parities in bits 0,1.
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+#ifndef QSB_LAZY_ADD_FINISH
+#define QSB_LAZY_ADD_FINISH 1
+#endif
+#if QSB_LAZY_ADD_FINISH != 0 && QSB_LAZY_ADD_FINISH != 1
+#error QSB_LAZY_ADD_FINISH must be 0 or 1
+#endif
+/* QSB_LAZY_ADD_FINISH: the two stage-2 finish additions whose consumer either
+ * normalizes or multiplies take the lazy form.  _ModAddLazy folds the 2^256
+ * carry once with the single-limb constant K instead of running the full
+ * conditional p-subtraction, so its result is congruent mod p and below 2^256
+ * rather than canonical.  x_minus is canonicalized by qsb_field_normalize on
+ * the next line and V (from h = u+v) by qsb_field_normalize before its parity
+ * bit is read, and _ModMult reduces any operand below 2^256, so both parity
+ * bits and both published x-coordinates are bit-identical to the _ModAdd256
+ * form.  -DQSB_LAZY_ADD_FINISH=0 restores _ModAdd256 at both sites. */
+#if QSB_LAZY_ADD_FINISH
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
     uint64_t *xR, uint64_t *yR, uint64_t *K,
@@ -1885,7 +1906,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1896,7 +1917,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);
@@ -2995,9 +3016,9 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
-    printf("  X3 h*h correction cut: %s\n", QSB_X3_TAIL ? "on" : "off");
     printf("  Host publication gate: %s; C31 approx: %s\n",
            QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
+    printf("  X3 h*h correction cut: %s\n", QSB_X3_TAIL ? "on" : "off");
 
     /* The ranked problem geometry is fixed by harness/gen_problem.py
      * (PIN_SUFFIX_LEN=75, PIN_SEQ_OFFSET=31, 155 midstate blocks -> 9995 B),
