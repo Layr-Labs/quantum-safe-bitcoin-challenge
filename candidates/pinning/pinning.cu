@@ -647,6 +647,13 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+#ifndef QSB_LATE_GATHER
+#define QSB_LATE_GATHER 1
+#endif
+#if QSB_LATE_GATHER
+#include "LateGather.cuh"
+#endif
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
     qsb_decode_to_shared(k);
@@ -655,6 +662,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_LATE_GATHER
+    unsigned base=gt_offset(2);
+    qsb_load_decoded(table,2,base,x1,y1);
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        const unsigned next_base=base+(1u<<16);
+        qsb_point_add_late_gather(X,Y,U,V,x1,y1,y0,
+                                 c+1<GT_CHUNKS,table,c+1,next_base);
+        base=next_base;
+    }
+#else
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -663,6 +681,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
