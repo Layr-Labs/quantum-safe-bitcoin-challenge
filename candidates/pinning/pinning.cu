@@ -648,8 +648,9 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
-    qsb_decode_to_shared(k);
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
@@ -666,7 +667,12 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
+#if QSB_NEG_Y_MAC
+    // Keep -Yactual across checkpoint; packed finish swaps the slopes.
+    qsb_muladd_seed(Y,y0,V,Y);
+#else
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
@@ -1532,6 +1538,14 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
+
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -1840,6 +1854,26 @@ static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && Q
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
  * coordinates are anchored at R. Returns their parities in bits 0,1.
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+#ifndef QSB_LAZY_ADD_FINISH
+#define QSB_LAZY_ADD_FINISH 1
+#endif
+#if QSB_LAZY_ADD_FINISH != 0 && QSB_LAZY_ADD_FINISH != 1
+#error QSB_LAZY_ADD_FINISH must be 0 or 1
+#endif
+/* QSB_LAZY_ADD_FINISH: the two stage-2 finish additions whose consumer either
+ * normalizes or multiplies take the lazy form.  _ModAddLazy folds the 2^256
+ * carry once with the single-limb constant K instead of running the full
+ * conditional p-subtraction, so its result is congruent mod p and below 2^256
+ * rather than canonical.  x_minus is canonicalized by qsb_field_normalize on
+ * the next line and V (from h = u+v) by qsb_field_normalize before its parity
+ * bit is read, and _ModMult reduces any operand below 2^256, so both parity
+ * bits and both published x-coordinates are bit-identical to the _ModAdd256
+ * form.  -DQSB_LAZY_ADD_FINISH=0 restores _ModAdd256 at both sites. */
+#if QSB_LAZY_ADD_FINISH
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
     uint64_t *xR, uint64_t *yR, uint64_t *K,
@@ -1865,7 +1899,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1876,7 +1910,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);
@@ -2022,7 +2056,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
