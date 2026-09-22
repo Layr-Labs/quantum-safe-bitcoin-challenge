@@ -149,6 +149,32 @@
 #error QSB_FUSE_SQRADDSUB2 must be 0 or 1
 #endif
 
+/* QSB_K32_*: the pseudo-Mersenne K corrections of the C31 add/sub forms are
+ * applied to the two 32-bit halves of the low limb instead of to the whole
+ * 64-bit limb.  K = 2^32 + 977 splits exactly as {kh,kl} = {1,0x3D1} and every
+ * sm_8x 64-bit add/sub already lowers to a 32-bit IADD3 pair, so the mask
+ * build and the correction itself lose one 32-bit op each; the selected value,
+ * the carry/borrow that leaves the low limb and the limb the correction stops
+ * at are unchanged, so each result is bit-identical to the C31 form it
+ * replaces.  -DQSB_K32_SUB=0 / -DQSB_K32_ADD=0 / -DQSB_K32_OFF=0 restore the
+ * 64-bit correction of _ModSub256 / _ModAddLazy / _ModAddLazyOff byte for byte.
+ * QSB_SAS_FRMOV drops the dead 32-bit round trip in front of the fused square's
+ * first fold: the fold re-assembled fr0..fr3 / h0..h3 out of the halves of
+ * d0..d7 it had just taken apart, and fr_i == d_i, h_i == d_{4+i} identically,
+ * so only the four words the 977 multiplies read (x8..x15) are unpacked. */
+#ifndef QSB_K32_SUB
+#define QSB_K32_SUB 1
+#endif
+#ifndef QSB_K32_ADD
+#define QSB_K32_ADD 1
+#endif
+#ifndef QSB_K32_OFF
+#define QSB_K32_OFF 1
+#endif
+#ifndef QSB_SAS_FRMOV
+#define QSB_SAS_FRMOV 1
+#endif
+
 #define MM64 0xD838091DD2253531ULL
 
 
@@ -464,6 +490,15 @@ __device__ __forceinline__ void _ModAdd256(uint64_t *r, const uint64_t *a, const
 // has to select one limb-sized constant instead of four limbs of p. The
 // result is bit-identical to the original formulation.
 #if QSB_C31 && QSB_SHORT_CARRY
+#if QSB_K32_SUB
+__device__ __forceinline__ void _ModSub256(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t r0,r1,r2,r3;
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 m,kl,kh,l0,h0;\nsub.cc.u64 t0,%4,%8;\nsubc.cc.u64 t1,%5,%9; subc.cc.u64 t2,%6,%10; subc.cc.u64 t3,%7,%11;\nsubc.u32 m,0,0; and.b32 kl,m,0x3D1; and.b32 kh,m,1;\nmov.b64 {l0,h0},t0;\nsub.cc.u32 l0,l0,kl; subc.u32 h0,h0,kh;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#else
 __device__ __forceinline__ void _ModSub256(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n.reg .u64 t0,t1,t2,t3,t4,s0,s1,s2,s3,d0,d1,d2,d3,d4,k;\n.reg .pred choose;\nsub.cc.u64 t0,%4,%8;\nsubc.cc.u64 t1,%5,%9; subc.cc.u64 t2,%6,%10; subc.cc.u64 t3,%7,%11;\nsubc.u64 k,0,0; and.b64 k,k,0x1000003D1;\nsub.u64 t0,t0,k;\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
@@ -471,6 +506,7 @@ __device__ __forceinline__ void _ModSub256(uint64_t *r, const uint64_t *a, const
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
 }
+#endif
 
 #elif QSB_SHORT_CARRY
 __device__ __forceinline__ void _ModSub256(uint64_t *r, const uint64_t *a, const uint64_t *b) {
@@ -500,6 +536,15 @@ __device__ __forceinline__ void _ModSub256(uint64_t *r,uint64_t *b) { _ModSub256
 // event for field-random inputs, ignored like the existing 2^-224 exposure
 // of _ModSub256 to inputs above p.
 #if QSB_C31 && QSB_SHORT_CARRY
+#if QSB_K32_ADD
+__device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t r0,r1,r2,r3;
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 m,kl,l0,h0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 m,0,0; mul.lo.u32 kl,m,977;\nmov.b64 {l0,h0},t0;\nadd.cc.u32 l0,l0,kl; addc.u32 h0,h0,m;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#else
 __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n.reg .u64 t0,t1,t2,t3,t4,s0,s1,s2,s3,d0,d1,d2,d3,d4,k;\n.reg .pred choose;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u64 k,0,0; neg.s64 k,k; and.b64 k,k,0x1000003D1;\nadd.u64 t0,t0,k;\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
@@ -507,6 +552,7 @@ __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, cons
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
 }
+#endif
 
 #elif QSB_SHORT_CARRY
 __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, const uint64_t *b) {
@@ -536,6 +582,15 @@ __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, cons
 // 2^256 and k the carry, r = t - (K-1) if k = 0 (a+b >= 2c, so no wrap) and r = t + 1 if k = 1
 // (2^256 == K). The correction keeps its borrow/carry through limb 1 (short carry): dropped only
 // if limb0 < K-1 (2^-31) and limb1 == 0 (2^-64), <= 2^-95 per operation.
+#if QSB_K32_OFF
+__device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t r0,r1,r2,r3;
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 kk,0,0; sub.u32 mk,kk,1; and.b32 clo,mk,0xFFFFFC2F; add.u32 clo,clo,1; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\nadd.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#else
 __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n.reg .u64 t0,t1,t2,t3,k,mk,c0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u64 k,0,0; sub.u64 mk,k,1; and.b64 c0,mk,0xFFFFFFFEFFFFFC2F; add.u64 c0,c0,1;\nadd.cc.u64 t0,t0,c0; addc.u64 t1,t1,mk;\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
@@ -543,6 +598,7 @@ __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, c
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
 }
+#endif
 #endif
 // Fused X3 = a + b - 2c (mod p) for the XYZZ addition (R^2 + PPP - 2V), in
 // one carry chain: t = a + b + 2p - 2c lies in [0, 2^258) (the 2^-224 case
@@ -1521,6 +1577,24 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmul.wide.u32 t, a5, a5; addc.cc.u64 d5, d5, t;\n"
         "\tmul.wide.u32 t, a6, a6; addc.cc.u64 d6, d6, t;\n"
         "\tmul.wide.u32 t, a7, a7; addc.u64 d7, d7, t;\n"
+#if QSB_SAS_FRMOV
+        /* fr_i == d_i and h_i == d_{4+i} identically: only the eight 32-bit
+         * words the 977 multiplies read are unpacked, and the two folds read
+         * the 64-bit product limbs directly. */
+        "\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n"
+        "\t.reg .u32 u0,u1,u2,u3,u4,u5,u6,u7,v0,v1,v2,v3,v4,v5,v6,v7,cf,k0;\n"
+        ".reg .u64 f0,f1,f2,f3,g0,g1,g2,g3;\n"
+        "\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n"
+        "\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, d0, t;\n"
+        "\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, d1, t;\n"
+        "\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, d2, t;\n"
+        "\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, d3, t;\n"
+        "\taddc.u32 f8, 0, 0;\n"
+        "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, d4, t;\n"
+        "\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, d5, t;\n"
+        "\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, d6, t;\n"
+        "\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, d7, t;\n"
+#else
         "\tmov.b64 {x0,x1}, d0; mov.b64 {x2,x3}, d1; mov.b64 {x4,x5}, d2; mov.b64 {x6,x7}, d3;\n"
         "\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n"
         "\t.reg .u32 u0,u1,u2,u3,u4,u5,u6,u7,v0,v1,v2,v3,v4,v5,v6,v7,cf,k0;\n"
@@ -1537,6 +1611,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n"
         "\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n"
         "\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n"
+#endif
         QSB_SAS_G8_TAIL
         "\tmov.b64 {z0,z1}, f0; mov.b64 {z2,z3}, f1; mov.b64 {z4,z5}, f2; mov.b64 {z6,z7}, f3;\n"
         "\tmov.b64 {w0,w1}, g0; mov.b64 {w2,w3}, g1; mov.b64 {w4,w5}, g2; mov.b64 {w6,w7}, g3;\n"
@@ -1785,6 +1860,26 @@ __device__ int _BinarySearch(uint64_t *buffer, int hi, uint64_t target)
 	}
 }
 
+#ifndef QSB_NEG_Y_MAC
+#define QSB_NEG_Y_MAC 1
+#endif
+#if QSB_NEG_Y_MAC
+#if !QSB_C31 || !QSB_SHORT_CARRY || !QSB_CARRY62 || !QSB_HOST_GATE
+#error "Negative-Y MAC requires the promoted C31/CARRY62 arithmetic and exact host gate"
+#endif
+#include "negative_y_mac.cuh"
+// Multipliers return a representative in [0,2^256). _ModNeg256 requires
+// a representative <=p; normalize the exceptional [p,2^256) interval first.
+__device__ __forceinline__ void qsb_negate_residue(uint64_t *r) {
+    if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
+        r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
+        r[0] -= 0xFFFFFFFEFFFFFC2FULL;
+        r[1] = r[2] = r[3] = 0;
+    }
+    _ModNeg256(r); // zero may map to p, an allowed congruent representative
+}
+#endif
+
 //Secp256k1 Point Addition implementation
 __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, uint64_t *p2x, uint64_t *p2y)
 {
@@ -1857,6 +1952,11 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
                               const uint64_t *X2, const uint64_t *Y2,
                               const uint64_t *Yoff, bool defer_y)
 {
+#if QSB_NEG_Y_MAC
+  if (defer_y) _PointAddXYZZT<true>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
+  else _PointAddXYZZT<false>(X1,Y1,ZZ1,ZZZ1,X2,Y2,Yoff);
+#else
+
   uint64_t U2[4];
   uint64_t S2[4];
   uint64_t P[4];
@@ -1905,6 +2005,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   }
 
   Load256(X1, T);                      // X3
+#endif
 }
 
 // Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
@@ -1931,8 +2032,12 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #else
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
+#if QSB_NEG_Y_MAC
+  qsb_muladd_seed(R,S2,ZZZ1,Y1);
+#else
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+#endif
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
   _ModSqr(PP, P);                      // PP = P^2
@@ -1956,12 +2061,26 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)
-  _ModSub256(Q, Q, T);                 // V - X3
+#if QSB_NEG_Y_MAC
+  _ModSub256(Q, T, Q); // negative deferred ordinate
+#else
+  _ModSub256(Q, Q, T);
+#endif                 // V - X3
   _ModMult(Q, R);                      // R*(V - X3)
   if (DEFER_Y) {
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
-    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+#if QSB_NEG_Y_MAC && QSB_YOFF
+    // Runtime/diagnostic callers may resolve here instead of after the loop.
+    uint64_t anchor[4], off[4]={0x800001E8ULL,0,0,0};
+    _ModSub256(anchor,Y2,off);
+    _ModMult(S2,anchor,ZZZ1);
+#else
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);
+#endif
+#if QSB_NEG_Y_MAC
+    qsb_negate_residue(Q);
+#endif
     _ModSub256(Y1, Q, S2);             // exact Y3
   }
 
@@ -1995,7 +2114,11 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
 
-  _ModSub256(Q, Q, T);                             // Q - X3
+#if QSB_NEG_Y_MAC
+  _ModSub256(Q, T, Q); // seed negative deferred ordinate
+#else
+  _ModSub256(Q, Q, T);
+#endif                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
   Load256(X3, T);                                  // X3
 }
