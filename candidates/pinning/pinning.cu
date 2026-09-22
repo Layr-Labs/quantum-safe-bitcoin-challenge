@@ -11,6 +11,15 @@
  * Usage:  ./qsb_real pinning2.bin [easy]
  */
 
+/* QSB-DRAW-4 (QsbFire8 2026-09-22): box-timed intel-r5 draw vs crown cekuu35
+ * 2294465 (7c3609b, 805,428,058). Single graft vs that crown: cofactor_checkpoint.h
+ * from ercu's PR #927 validation commit caf7f8c0 (QSB_TOP16 merged four-wave top-16
+ * traversal; idea + schedule @EvanYan1024 58005ee5). The only other edit is this
+ * comment block. Strip this block, concatenate pinning.cu's remainder with
+ * cofactor_checkpoint.h and sha256: 11d758e4efb7ac32a4149213fb987e04ac39f94c9a14d3d147b9407396171d08.
+ * Every draw of this tree carries the same tree digest - only the draw id in this
+ * marker and in the cofactor define tag differ. */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
