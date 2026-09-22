@@ -623,9 +623,42 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
+/* QSB_DIGIT_SHF: every signed-digit field is at most 18 bits at a compile-time
+ * bit offset, so it lies inside exactly two 32-bit words of the recode value M.
+ * One funnel shift plus one AND then replaces the 64-bit shift, the cross-limb
+ * OR and its 64-bit limb select for all fifteen chunks. -DQSB_DIGIT_SHF=0
+ * restores the 64-bit extraction byte for byte. */
+#ifndef QSB_DIGIT_SHF
+#define QSB_DIGIT_SHF 1
+#endif
 __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+#if QSB_DIGIT_SHF
+    /* Word 8 does not exist: chunk 14 starts at bit 240 and is read with a zero
+     * high word, which is exactly the 16 significant bits the 64-bit form
+     * produced there (M[3]>>48 zero-extends, and the top chunk takes its sign
+     * from the recode flag, not from the field's top bit). */
+    const uint32_t m0=(uint32_t)M[0],m1=(uint32_t)(M[0]>>32);
+    const uint32_t m2=(uint32_t)M[1],m3=(uint32_t)(M[1]>>32);
+    const uint32_t m4=(uint32_t)M[2],m5=(uint32_t)(M[2]>>32);
+    const uint32_t m6=(uint32_t)M[3],m7=(uint32_t)(M[3]>>32);
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++) {
+        const unsigned pos=c==0?1u:17u*c+2u;
+        const unsigned wi=pos>>5,sh=pos&31u;
+        const uint32_t lo=wi==0?m0:wi==1?m1:wi==2?m2:wi==3?m3:
+                          wi==4?m4:wi==5?m5:wi==6?m6:m7;
+        const uint32_t hi=wi==0?m1:wi==1?m2:wi==2?m3:wi==3?m4:
+                          wi==4?m5:wi==5?m6:wi==6?m7:0u;
+        const unsigned bits=c==0?18u:17u;
+        uint32_t f=__funnelshift_r(lo,hi,sh)&((1u<<bits)-1u);
+        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+        uint32_t neg=(uint32_t)(tm<0);
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
+    }
+#else
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
         const unsigned pos=c==0?1u:17u*c+2u;
@@ -639,6 +672,7 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
         uint32_t neg=(uint32_t)(tm<0);
         codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
     }
+#endif
 }
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
