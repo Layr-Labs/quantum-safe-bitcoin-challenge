@@ -1,0 +1,48 @@
+{
+  "compiler": "CUDA 12.8.93, GCC 13",
+  "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
+  "gpu_executed": false,
+  "active_completion_mode": 1,
+  "device_sass": {
+    "sm52": {
+      "identical": true,
+      "functions": 7,
+      "instructions": 51804,
+      "function_counts": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": 9852,
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": 21936,
+        "_Z19kernel_build_gtablePKmS0_Ph": 10434,
+        "_Z21qsb_root_group_finishPmiPKmS1_": 2466,
+        "_Z22qsb_invert_super_rootsPmi": 6198,
+        "_Z22qsb_root_group_preparePKmiPmS1_": 876,
+        "_Z18qsb_table_offset_yPh": 42
+      }
+    },
+    "sm89": {
+      "identical": true,
+      "functions": 7,
+      "instructions": 15864,
+      "function_counts": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": 4048,
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": 6056,
+        "_Z19kernel_build_gtablePKmS0_Ph": 3080,
+        "_Z21qsb_root_group_finishPmiPKmS1_": 512,
+        "_Z22qsb_invert_super_rootsPmi": 1904,
+        "_Z22qsb_root_group_preparePKmiPmS1_": 224,
+        "_Z18qsb_table_offset_yPh": 40
+      }
+    }
+  },
+  "dependency_tests": {
+    "passed": 5,
+    "scenarios": 79,
+    "injected_failures": 18,
+    "negative_controls": 2
+  },
+  "host_gate_test": {
+    "passed": true,
+    "sha256d_midstate_samples": 64
+  },
+  "candidate_sha256": "126d153fe0786f7ff10ea463c8b91d77b6ac0fc11a9bac50ea09e890c76472e3",
+  "helper_sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
+}
