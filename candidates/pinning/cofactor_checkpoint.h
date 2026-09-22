@@ -2,6 +2,15 @@
 // applied here to the distinct public cofactor exclusion traversal.
 // Public cofactor collective: tekkac, submission31e98e47, commit554fa24c.
 #pragma once
+#ifndef QSB_ROW_PAIR_TREE
+#define QSB_ROW_PAIR_TREE 1
+#endif
+#if QSB_ROW_PAIR_TREE
+#if !QSB_C31 || !QSB_SHORT_CARRY || !QSB_FIELD_SC || !QSB_TREE_TOP2
+#error "Two-lane row tree requires the promoted C31/TOP2 path"
+#endif
+#include "RowPairTree.cuh"
+#endif
 
 // The caller supplies nonzero effective leaves (identity for unusable lanes).
 // Preserve immutable products and accumulate exclusion products separately.
@@ -21,6 +30,10 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     for(int count=N;count>1;count>>=1) {
 #endif
         int half=count>>1;
+#if QSB_ROW_PAIR_TREE
+        if(half<=8) { qsb_tree_pair_up<N>(products,offset,count); }
+        else
+#endif
         if(tid<half) {
             uint64_t a[5],b[5],out[5];
             #pragma unroll
@@ -38,6 +51,19 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
      * four excluded products of the level below, E(c)=E(parent)*sibling with E(n0)=n1 and
      * E(n1)=n0 (lanes 0..3). Same operands in the same order as the two levels it replaces,
      * so the root and every excluded product are bit-identical. */
+#if QSB_ROW_PAIR_TREE
+    if(tid<32) {
+        unsigned mask=__ballot_sync(0xffffffffu,tid<10);
+        if(tid<10) {
+            int job=tid/2;
+            const int ia=job<4?2*N-4+((job&1)^1):2*N-4;
+            const int ib=job<4?2*N-8+(job^2):2*N-3;
+            uint64_t *dest=job<4?&excluded[0][N-8+job]:roots+(size_t)blockIdx.x*4;
+            qsb_tree_pair_product(&products[0][ia],2*N,&products[0][ib],2*N,
+                                  dest,job<4?N:1,mask);
+        }
+    }
+#else
     if(tid<5) {
         uint64_t a[5],b[5],out[5];
         const int ia=tid<4 ? 2*N-4+((tid&1)^1) : 2*N-4;
@@ -53,6 +79,7 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=out[k];
         }
     }
+#endif
     __syncwarp();
     offset=2*N-16;
     #pragma unroll 1
@@ -71,6 +98,10 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     for(int count=2;count<N;count<<=1) {
 #endif
         int half=count>>1;
+#if QSB_ROW_PAIR_TREE
+        if(count<=16) { qsb_tree_pair_down<N>(products,excluded,offset,count); }
+        else
+#endif
         if(tid<count) {
             uint64_t parent[5],sibling[5],out[5];
             #pragma unroll
