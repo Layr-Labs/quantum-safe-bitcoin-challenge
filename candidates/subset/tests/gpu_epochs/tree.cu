@@ -2741,6 +2741,61 @@ int main(int argc, char **argv) {
         free(chk_table);
     }
 
+    /* Independent cache-policy experiment inspired by karar189's public
+     * db474b0 note. Keep the existing single-stream publication schedule. */
+#ifndef QSB_TABLE_L2
+#define QSB_TABLE_L2 1
+#endif
+#if QSB_TABLE_L2 && CUDART_VERSION >= 11000
+    if (se_mode && !ZLAB_T14 && prop.major >= 8 &&
+        prop.persistingL2CacheMaxSize > 0 && prop.accessPolicyMaxWindowSize > 0) {
+        const size_t offset = (size_t)gt_offset(1) * 64;
+        size_t window = gt_sz - offset;
+        if (window > (size_t)prop.accessPolicyMaxWindowSize)
+            window = (size_t)prop.accessPolicyMaxWindowSize;
+        size_t target = (size_t)prop.persistingL2CacheMaxSize;
+        if (target > window) target = window;
+        size_t previous = 0, actual = 0;
+        cudaError_t policy_error = cudaDeviceGetLimit(&previous, cudaLimitPersistingL2CacheSize);
+        bool changed = false;
+        if (policy_error == cudaSuccess) {
+            policy_error = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, target);
+            changed = (policy_error == cudaSuccess);
+        }
+        if (policy_error == cudaSuccess)
+            policy_error = cudaDeviceGetLimit(&actual, cudaLimitPersistingL2CacheSize);
+        if (policy_error == cudaSuccess && actual > 0 && window > 0) {
+            cudaStreamAttrValue attr = {};
+            attr.accessPolicyWindow.base_ptr = d_gt + offset;
+            attr.accessPolicyWindow.num_bytes = window;
+            attr.accessPolicyWindow.hitRatio = actual >= window ? 1.0f :
+                (float)((double)actual / (double)window);
+            attr.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+            attr.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+            policy_error = cudaStreamSetAttribute((cudaStream_t)0,
+                cudaStreamAttributeAccessPolicyWindow, &attr);
+            if (policy_error == cudaSuccess) {
+                fprintf(stderr, "Table L2: window=%zu reserved=%zu ratio=%.6f\n",
+                    window, actual, (double)attr.accessPolicyWindow.hitRatio);
+            }
+        } else if (policy_error == cudaSuccess) {
+            policy_error = cudaErrorNotSupported;
+        }
+        if (policy_error != cudaSuccess) {
+            fprintf(stderr, "Table L2 unavailable: %s; using normal policy\n",
+                cudaGetErrorString(policy_error));
+            cudaGetLastError();
+            if (changed) {
+                cudaError_t restore_error = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, previous);
+                if (restore_error != cudaSuccess) {
+                    fprintf(stderr, "Table L2 restore failed: %s\n", cudaGetErrorString(restore_error));
+                    return 1;
+                }
+            }
+        }
+    }
+#endif
+
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
     cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
