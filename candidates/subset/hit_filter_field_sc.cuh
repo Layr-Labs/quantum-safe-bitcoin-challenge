@@ -590,6 +590,19 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t\n"
         ".reg .u32 f1_outcarry;\n"
         "\n"
+#if QSB_YOFF_FILTER
+        "\t.reg .u64 f1_k,f1_mk,f1_c0;\n"
+        "\tadd.cc.u64 S0,AY0,OFF0;\n"
+        "\taddc.cc.u64 S1,AY1,OFF1;\n"
+        "\taddc.cc.u64 S2,AY2,OFF2;\n"
+        "\taddc.cc.u64 S3,AY3,OFF3;\n"
+        "\taddc.u64 f1_k,0,0;\n"
+        "\tsub.u64 f1_mk,f1_k,1;\n"
+        "\tand.b64 f1_c0,f1_mk,0xFFFFFFFEFFFFFC2F;\n"
+        "\tadd.u64 f1_c0,f1_c0,1;\n"
+        "\tadd.cc.u64 S0,S0,f1_c0;\n"
+        "\taddc.u64 S1,S1,f1_mk;\n"
+#else
         "\t.reg .u64 f1_h,f1_t;\n"
         "\tadd.cc.u64 S0,AY0,OFF0;\n"
         "\taddc.cc.u64 S1,AY1,OFF1;\n"
@@ -600,6 +613,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tand.b64 f1_t,f1_h,0x1000003d1;\n"
         "\tadd.cc.u64 S0,S0,f1_t;\n"
         "\taddc.u64 S1,S1,0;\n"
+#endif
         "\t\n"
         ".reg .u32 f2_outcarry;\n"
         "\n"

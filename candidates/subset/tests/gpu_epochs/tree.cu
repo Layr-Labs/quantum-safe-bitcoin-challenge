@@ -389,7 +389,15 @@ __device__ __forceinline__ void gt_load_signed(const uint8_t *gTable,
 #ifndef QSB_NEG_SHORT
 #define QSB_NEG_SHORT 1
 #endif
-/* Filter-only table load: p - y = ~y - (K-1) mod 2^256 with the borrow out of limb 0 dropped.
+/* QSB_YOFF_FILTER (kill switch): keep an offset-ordinate copy of the fixed-base
+ * table for the speculative filter.  With p=2^256-K and c=(K-1)/2, storing
+ * y'=y+c turns the signed ordinate p-y+c into ~y'.  The independent exact
+ * verifier continues to consume the original, unshifted table. */
+#ifndef QSB_YOFF_FILTER
+#define QSB_YOFF_FILTER 1
+#endif
+/* Filter-only table load.  The offset form is a pure XOR.  The fallback raw
+ * form uses p - y = ~y - (K-1) mod 2^256 with the borrow out of limb 0 dropped.
  * The borrow needs ~y0 < K-1, i.e. y0 > 2^64-2^32-978: a property of the fixed table entry
  * (expected 2^20 * 2^-32 = 2.4e-4 affected entries per table), so for almost every table this is
  * exact; otherwise only candidates using that entry negated can lose a hit. The exact replay
@@ -398,7 +406,15 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
                                                        uint32_t base, uint32_t idx, uint64_t neg,
                                                        uint64_t *__restrict__ gx,
                                                        uint64_t *__restrict__ gy) {
-#if QSB_NEG_SHORT
+#if QSB_YOFF_FILTER
+    size_t off = ((size_t)base + idx) * 64;
+    const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
+    const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    uint64_t m=0ULL-neg;
+    gy[0]=y0.x^m; gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
+#elif QSB_NEG_SHORT
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
@@ -410,6 +426,19 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
     gt_load_signed_flat(gTable, base, idx, neg, gx, gy);
 #endif
 }
+
+#if QSB_YOFF_FILTER
+/* Convert the final affine anchor y'=y+c back to y.  As in the promoted
+ * pinning donor, the borrow is retained through limb 1; a dropped borrow
+ * therefore needs a <=2^-97 event.  The exact verifier below remains raw. */
+__device__ __forceinline__ void qsb_yoff_filter_to_y(
+    uint64_t *__restrict__ out, const uint64_t *__restrict__ in) {
+    uint64_t r0, r1;
+    asm("sub.cc.u64 %0, %2, 0x800001E8;\n\tsubc.u64 %1, %3, 0;"
+        : "=l"(r0), "=l"(r1) : "l"(in[0]), "l"(in[1]));
+    out[0]=r0; out[1]=r1; out[2]=in[2]; out[3]=in[3];
+}
+#endif
 
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
  * 16 signed digits -> 1 seed load + 15 mixed adds; the next chunk's load is
@@ -529,7 +558,12 @@ __device__ __forceinline__ void qsb_filter_last_add(
     const uint64_t *x,const uint64_t *y,uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
     uint64_t scaled_y[4];
+#if QSB_YOFF_FILTER
+    qsb_yoff_filter_to_y(scaled_y,y);
+    qsb_filter_mul(scaled_y,scaled_y,ZZZ,bad);
+#else
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
+#endif
 #if QSB_SPEC_LAST_RESOLVE
     QSB_FSUB(Y,Y,scaled_y);
 #else
@@ -1520,6 +1554,10 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 #include "tree_inverse.cuh"
 #include "pair_shared.cuh"
 
+#if QSB_YOFF_FILTER && (!QSB_PAIR_SHARED || !ZLAB_TRIM)
+#error "QSB_YOFF_FILTER requires the ranked speculative-pair path"
+#endif
+
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
 __global__ void kernel_verify_pair_hits(
@@ -2077,6 +2115,23 @@ __global__ void kernel_build_gtable(
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
 }
+
+#if QSB_YOFF_FILTER
+/* Build the speculative table from the validated raw table: y += c exactly.
+ * Since y<p and c<K, the four-limb addition cannot overflow 2^256. */
+__global__ void qsb_table_offset_y_filter(uint8_t *gTable) {
+    uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= GT_TOTAL_ENTRIES) return;
+    uint64_t *y = (uint64_t *)(gTable + t * 64 + 32);
+    uint64_t a0=y[0],a1=y[1],a2=y[2],a3=y[3];
+    asm("add.cc.u64 %0, %0, 0x800001E8;\n\t"
+        "addc.cc.u64 %1, %1, 0;\n\t"
+        "addc.cc.u64 %2, %2, 0;\n\t"
+        "addc.u64 %3, %3, 0;"
+        : "+l"(a0), "+l"(a1), "+l"(a2), "+l"(a3));
+    y[0]=a0;y[1]=a1;y[2]=a2;y[3]=a3;
+}
+#endif
 
 /* ============================================================
  * Host code
@@ -2740,6 +2795,25 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
     }
+#if QSB_YOFF_FILTER
+    /* The hot speculative kernel reads only this offset copy.  The raw table
+     * remains resident solely for the rare independent exact replay. */
+    uint8_t *d_gt_filter;
+    cudaError_t yoff_err=cudaMalloc(&d_gt_filter,gt_sz);
+    if(yoff_err==cudaSuccess)
+        yoff_err=cudaMemcpy(d_gt_filter,d_gt,gt_sz,cudaMemcpyDeviceToDevice);
+    if(yoff_err==cudaSuccess){
+        qsb_table_offset_y_filter<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt_filter);
+        yoff_err=cudaDeviceSynchronize();
+        if(yoff_err==cudaSuccess)yoff_err=cudaGetLastError();
+    }
+    if(yoff_err!=cudaSuccess){
+        fprintf(stderr,"Filter table offset failed: %s\n",cudaGetErrorString(yoff_err));
+        return 1;
+    }
+#else
+    uint8_t *d_gt_filter=d_gt;
+#endif
 
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
@@ -3148,7 +3222,7 @@ int main(int argc, char **argv) {
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
+                d_gt_filter,
 #if ZLAB_HITPATH
                 zh_cnt, zh_idx,
                 zh_combos, d_hit_sighash,
@@ -3337,7 +3411,7 @@ int main(int argc, char **argv) {
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
+                d_gt_filter,
                 d_hit_cnt, d_hit_idx,
                 d_hit_combos, d_hit_sighash,
                 d_hit_keynonce, d_hit_pubhash,
@@ -3539,7 +3613,7 @@ int main(int argc, char **argv) {
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
+                d_gt_filter,
                 d_hit_cnt, d_hit_idx,
                 d_hit_combos, d_hit_sighash,
                 d_hit_keynonce, d_hit_pubhash,
