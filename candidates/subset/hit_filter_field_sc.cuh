@@ -33,6 +33,91 @@
 #define QSB_CHAIN_MUL_LEAN 1
 #endif
 
+/* 64-bit column merge for the speculative filter's inlined multiplies.
+ * The even-column accumulator P_e0..P_e7 and the odd-column accumulator
+ * P_o0..P_o6 differ by exactly one 32-bit position, so the word-wise
+ * 15-instruction 32-bit merge is the same bit pattern as eight 64-bit
+ * add.cc/addc steps on the odd sum shifted left by one word.  The merged
+ * result is produced straight into the reduction's r/h word pair, so the
+ * repack of x0..x15 into r0..r3/h0..h3 disappears; only h is split back
+ * into 32-bit words because the 977 folds need them.  Exactness: same
+ * summands, same positions, full carry propagation through word 15; the
+ * carry out of word 15 is dropped exactly as the 32-bit chain dropped it.
+ * Set QSB_COL64 to 0 to restore the 32-bit merge. */
+#ifndef QSB_COL64
+#define QSB_COL64 1
+#endif
+
+/* 64-bit high-fold add and Solinas tail.  g<<32 is added to f as four
+ * 64-bit words built from the already split g halves (w0 comes straight
+ * out of g0 with shl.b64), replacing the eight 32-bit adds and the f/z
+ * split, and the result is written directly to the stage's output pair.
+ * The 2^256 word z8 is folded with z8*977 + (z8<<32); the overflow of
+ * that 64-bit sum is captured in P_sh2 and re-added one word up, so the
+ * fold keeps the carry that the packed 32-bit tail kept, while the final
+ * 64-bit addc carries through bit 127 instead of stopping at bit 95.
+ * Set QSB_FOLD64 to 0 to restore the packed 32-bit tail. */
+#ifndef QSB_FOLD64
+#define QSB_FOLD64 1
+#endif
+
+#define QSB_COL64_MERGE(P) \
+    "\t.reg .u64 " #P "_s0," #P "_s1," #P "_s2," #P "_s3," #P "_s4," #P "_s5," #P "_s6," #P "_s7;\n" \
+    "\t.reg .u64 " #P "_r0," #P "_r1," #P "_r2," #P "_r3," #P "_h0," #P "_h1," #P "_h2," #P "_h3," #P "_f0," #P "_f1," #P "_f2," #P "_f3," #P "_g0," #P "_g1," #P "_g2," #P "_g3;\n" \
+    "\t.reg .u32 " #P "_z0," #P "_z1," #P "_z2," #P "_z3," #P "_z4," #P "_z5," #P "_z6," #P "_z7," #P "_z8," #P "_w0," #P "_w1," #P "_w2," #P "_w3," #P "_w4," #P "_w5," #P "_w6," #P "_w7," #P "_m2;\n" \
+    "\taddc.u32 " #P "_cy, 0, 0;\n" \
+    "\tmov.b64 {" #P "_y1," #P "_y2}, " #P "_o0;\n" \
+    "\tmov.b64 {" #P "_y3," #P "_y4}, " #P "_o1;\n" \
+    "\tmov.b64 {" #P "_y5," #P "_y6}, " #P "_o2;\n" \
+    "\tmov.b64 {" #P "_y7," #P "_y8}, " #P "_o3;\n" \
+    "\tmov.b64 {" #P "_y9," #P "_y10}, " #P "_o4;\n" \
+    "\tmov.b64 {" #P "_y11," #P "_y12}, " #P "_o5;\n" \
+    "\tmov.b64 {" #P "_y13," #P "_y14}, " #P "_o6;\n" \
+    "\tshl.b64 " #P "_s0, " #P "_o0, 32;\n" \
+    "\tmov.b64 " #P "_s1, {" #P "_y2," #P "_y3};\n" \
+    "\tmov.b64 " #P "_s2, {" #P "_y4," #P "_y5};\n" \
+    "\tmov.b64 " #P "_s3, {" #P "_y6," #P "_y7};\n" \
+    "\tmov.b64 " #P "_s4, {" #P "_y8," #P "_y9};\n" \
+    "\tmov.b64 " #P "_s5, {" #P "_y10," #P "_y11};\n" \
+    "\tmov.b64 " #P "_s6, {" #P "_y12," #P "_y13};\n" \
+    "\tmov.b64 " #P "_s7, {" #P "_y14," #P "_cy};\n" \
+    "\tadd.cc.u64 " #P "_r0, " #P "_e0, " #P "_s0;\n" \
+    "\taddc.cc.u64 " #P "_r1, " #P "_e1, " #P "_s1;\n" \
+    "\taddc.cc.u64 " #P "_r2, " #P "_e2, " #P "_s2;\n" \
+    "\taddc.cc.u64 " #P "_r3, " #P "_e3, " #P "_s3;\n" \
+    "\taddc.cc.u64 " #P "_h0, " #P "_e4, " #P "_s4;\n" \
+    "\taddc.cc.u64 " #P "_h1, " #P "_e5, " #P "_s5;\n" \
+    "\taddc.cc.u64 " #P "_h2, " #P "_e6, " #P "_s6;\n" \
+    "\taddc.u64 " #P "_h3, " #P "_e7, " #P "_s7;\n" \
+    "\tmov.b64 {" #P "_x8," #P "_x9}, " #P "_h0;\n" \
+    "\tmov.b64 {" #P "_x10," #P "_x11}, " #P "_h1;\n" \
+    "\tmov.b64 {" #P "_x12," #P "_x13}, " #P "_h2;\n" \
+    "\tmov.b64 {" #P "_x14," #P "_x15}, " #P "_h3;\n"
+
+#define QSB_FOLD64_ADD(P) \
+    "\t.reg .u64 " #P "_sh0," #P "_sh1," #P "_sh2," #P "_sh3;\n" \
+    "\t.reg .u32 " #P "_zw;\n" \
+    "\tshl.b64 " #P "_sh0, " #P "_g0, 32;\n" \
+    "\tmov.b64 " #P "_sh1, {" #P "_w1," #P "_w2};\n" \
+    "\tmov.b64 " #P "_sh2, {" #P "_w3," #P "_w4};\n" \
+    "\tmov.b64 " #P "_sh3, {" #P "_w5," #P "_w6};\n" \
+    "\tadd.cc.u64 " #P "_f0, " #P "_f0, " #P "_sh0;\n" \
+    "\taddc.cc.u64 " #P "_f1, " #P "_f1, " #P "_sh1;\n" \
+    "\taddc.cc.u64 " #P "_f2, " #P "_f2, " #P "_sh2;\n" \
+    "\taddc.cc.u64 " #P "_f3, " #P "_f3, " #P "_sh3;\n" \
+    "\taddc.u32 " #P "_z8, " #P "_z8, 0;\n"
+
+#define QSB_FOLD64_TAIL(P,O) \
+    "\tmov.u32 " #P "_zw, 0;\n" \
+    "\tmov.b64 " #P "_sh0, {" #P "_zw," #P "_z8};\n" \
+    "\tmul.wide.u32 " #P "_sh1, " #P "_z8, 977;\n" \
+    "\tadd.cc.u64 " #P "_sh0, " #P "_sh0, " #P "_sh1;\n" \
+    "\taddc.u64 " #P "_sh2, 0, 0;\n" \
+    "\tadd.cc.u64 " #O "0, " #P "_f0, " #P "_sh0;\n" \
+    "\taddc.cc.u64 " #O "1, " #P "_f1, " #P "_sh2;\n" \
+    "\tmov.u64 " #O "2, " #P "_f2;\n" \
+    "\tmov.u64 " #O "3, " #P "_f3;\n"
+
 __device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t *b, uint32_t &bad){
 #ifdef __CUDA_ARCH__
 
@@ -363,6 +448,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f0_t, f0_a7, f0_b2; addc.cc.u64 f0_o4, f0_o4, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_a7, f0_b4; addc.cc.u64 f0_o5, f0_o5, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_a7, f0_b6; addc.cc.u64 f0_o6, f0_o6, f0_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f0_x14,f0_x15}, f0_e7;\n"
         "\taddc.u32 f0_x15, f0_x15, 0;\n"
         "\tmov.b64 {f0_x0,f0_x1}, f0_e0;\n"
@@ -398,6 +484,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f0_z0,f0_z1,f0_z2,f0_z3,f0_z4,f0_z5,f0_z6,f0_z7,f0_z8,f0_w0,f0_w1,f0_w2,f0_w3,f0_w4,f0_w5,f0_w6,f0_w7,f0_m2;\n"
         "\tmov.b64 f0_r0, {f0_x0,f0_x1}; mov.b64 f0_r1, {f0_x2,f0_x3}; mov.b64 f0_r2, {f0_x4,f0_x5}; mov.b64 f0_r3, {f0_x6,f0_x7};\n"
         "\tmov.b64 f0_h0, {f0_x8,f0_x9}; mov.b64 f0_h1, {f0_x10,f0_x11}; mov.b64 f0_h2, {f0_x12,f0_x13}; mov.b64 f0_h3, {f0_x14,f0_x15};\n"
+#else
+        QSB_COL64_MERGE(f0)
+#endif
         "\tmul.wide.u32 f0_t, f0_x9, 977;  add.cc.u64  f0_g0, f0_h0, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x11, 977; addc.cc.u64 f0_g1, f0_h1, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x13, 977; addc.cc.u64 f0_g2, f0_h2, f0_t;\n"
@@ -408,6 +497,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f0_t, f0_x12, 977; addc.cc.u64 f0_f2, f0_r2, f0_t;\n"
         "\tmul.wide.u32 f0_t, f0_x14, 977; addc.cc.u64 f0_f3, f0_r3, f0_t;\n"
         "\taddc.u32 f0_z8, f0_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f0_z0,f0_z1}, f0_f0; mov.b64 {f0_z2,f0_z3}, f0_f1; mov.b64 {f0_z4,f0_z5}, f0_f2; mov.b64 {f0_z6,f0_z7}, f0_f3;\n"
         "\tadd.cc.u32 f0_z1, f0_z1, f0_w0; addc.cc.u32 f0_z2, f0_z2, f0_w1; addc.cc.u32 f0_z3, f0_z3, f0_w2;\n"
         "\taddc.cc.u32 f0_z4, f0_z4, f0_w3; addc.cc.u32 f0_z5, f0_z5, f0_w4; addc.cc.u32 f0_z6, f0_z6, f0_w5;\n"
@@ -432,6 +522,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f0_z4, f0_z4, 0;\n"
 #endif
         "\tmov.b64 U0, {f0_z0,f0_z1}; mov.b64 U1, {f0_z2,f0_z3}; mov.b64 U2, {f0_z4,f0_z5}; mov.b64 U3, {f0_z6,f0_z7};\n"
+#else
+        QSB_FOLD64_ADD(f0)
+        QSB_FOLD64_TAIL(f0,U)
+#endif
 #else
         "\t.reg .u32 f0_a0,f0_a1,f0_a2,f0_a3,f0_a4,f0_a5,f0_a6,f0_a7,f0_b0,f0_b1,f0_b2,f0_b3,f0_b4,f0_b5,f0_b6,f0_b7;\n"
         "\t.reg .u64 f0_e0,f0_e1,f0_e2,f0_e3,f0_e4,f0_e5,f0_e6,f0_e7,f0_o0,f0_o1,f0_o2,f0_o3,f0_o4,f0_o5,f0_o6,f0_t,f0_lc;\n"
@@ -684,6 +778,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f2_t, f2_a7, f2_b2; addc.cc.u64 f2_o4, f2_o4, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a7, f2_b4; addc.cc.u64 f2_o5, f2_o5, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_a7, f2_b6; addc.cc.u64 f2_o6, f2_o6, f2_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f2_x14,f2_x15}, f2_e7;\n"
         "\taddc.u32 f2_x15, f2_x15, 0;\n"
         "\tmov.b64 {f2_x0,f2_x1}, f2_e0;\n"
@@ -719,6 +814,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f2_z0,f2_z1,f2_z2,f2_z3,f2_z4,f2_z5,f2_z6,f2_z7,f2_z8,f2_w0,f2_w1,f2_w2,f2_w3,f2_w4,f2_w5,f2_w6,f2_w7,f2_m2;\n"
         "\tmov.b64 f2_r0, {f2_x0,f2_x1}; mov.b64 f2_r1, {f2_x2,f2_x3}; mov.b64 f2_r2, {f2_x4,f2_x5}; mov.b64 f2_r3, {f2_x6,f2_x7};\n"
         "\tmov.b64 f2_h0, {f2_x8,f2_x9}; mov.b64 f2_h1, {f2_x10,f2_x11}; mov.b64 f2_h2, {f2_x12,f2_x13}; mov.b64 f2_h3, {f2_x14,f2_x15};\n"
+#else
+        QSB_COL64_MERGE(f2)
+#endif
         "\tmul.wide.u32 f2_t, f2_x9, 977;  add.cc.u64  f2_g0, f2_h0, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x11, 977; addc.cc.u64 f2_g1, f2_h1, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x13, 977; addc.cc.u64 f2_g2, f2_h2, f2_t;\n"
@@ -729,6 +827,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f2_t, f2_x12, 977; addc.cc.u64 f2_f2, f2_r2, f2_t;\n"
         "\tmul.wide.u32 f2_t, f2_x14, 977; addc.cc.u64 f2_f3, f2_r3, f2_t;\n"
         "\taddc.u32 f2_z8, f2_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f2_z0,f2_z1}, f2_f0; mov.b64 {f2_z2,f2_z3}, f2_f1; mov.b64 {f2_z4,f2_z5}, f2_f2; mov.b64 {f2_z6,f2_z7}, f2_f3;\n"
         "\tadd.cc.u32 f2_z1, f2_z1, f2_w0; addc.cc.u32 f2_z2, f2_z2, f2_w1; addc.cc.u32 f2_z3, f2_z3, f2_w2;\n"
         "\taddc.cc.u32 f2_z4, f2_z4, f2_w3; addc.cc.u32 f2_z5, f2_z5, f2_w4; addc.cc.u32 f2_z6, f2_z6, f2_w5;\n"
@@ -753,6 +852,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f2_z4, f2_z4, 0;\n"
 #endif
         "\tmov.b64 S0, {f2_z0,f2_z1}; mov.b64 S1, {f2_z2,f2_z3}; mov.b64 S2, {f2_z4,f2_z5}; mov.b64 S3, {f2_z6,f2_z7};\n"
+#else
+        QSB_FOLD64_ADD(f2)
+        QSB_FOLD64_TAIL(f2,S)
+#endif
 #else
         "\t.reg .u32 f2_a0,f2_a1,f2_a2,f2_a3,f2_a4,f2_a5,f2_a6,f2_a7,f2_b0,f2_b1,f2_b2,f2_b3,f2_b4,f2_b5,f2_b6,f2_b7;\n"
         "\t.reg .u64 f2_e0,f2_e1,f2_e2,f2_e3,f2_e4,f2_e5,f2_e6,f2_e7,f2_o0,f2_o1,f2_o2,f2_o3,f2_o4,f2_o5,f2_o6,f2_t,f2_lc;\n"
@@ -1002,6 +1105,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f5_t, f5_x12, 977; addc.cc.u64 f5_f2, f5_fr2, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_x14, 977; addc.cc.u64 f5_f3, f5_fr3, f5_t;\n"
         "\taddc.u32 f5_z8, f5_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f5_z0,f5_z1}, f5_f0; mov.b64 {f5_z2,f5_z3}, f5_f1; mov.b64 {f5_z4,f5_z5}, f5_f2; mov.b64 {f5_z6,f5_z7}, f5_f3;\n"
         "\tadd.cc.u32 f5_z1, f5_z1, f5_w0; addc.cc.u32 f5_z2, f5_z2, f5_w1; addc.cc.u32 f5_z3, f5_z3, f5_w2;\n"
         "\taddc.cc.u32 f5_z4, f5_z4, f5_w3; addc.cc.u32 f5_z5, f5_z5, f5_w4; addc.cc.u32 f5_z6, f5_z6, f5_w5;\n"
@@ -1026,6 +1130,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f5_z4, f5_z4, 0;\n"
 #endif
         "\tmov.b64 PP0, {f5_z0,f5_z1}; mov.b64 PP1, {f5_z2,f5_z3}; mov.b64 PP2, {f5_z4,f5_z5}; mov.b64 PP3, {f5_z6,f5_z7};\n"
+#else
+        QSB_FOLD64_ADD(f5)
+        QSB_FOLD64_TAIL(f5,PP)
+#endif
 #else
         "\t.reg .u32 f5_a0,f5_a1,f5_a2,f5_a3,f5_a4,f5_a5,f5_a6,f5_a7;\n"
         "\t.reg .u64 f5_e2,f5_e4,f5_e6,f5_e8,f5_e10,f5_e12,f5_o1,f5_o3,f5_o5,f5_o7,f5_o9,f5_o11,f5_o13,f5_t;\n"
@@ -1211,6 +1319,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f6_t, f6_a7, f6_b2; addc.cc.u64 f6_o4, f6_o4, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_a7, f6_b4; addc.cc.u64 f6_o5, f6_o5, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_a7, f6_b6; addc.cc.u64 f6_o6, f6_o6, f6_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f6_x14,f6_x15}, f6_e7;\n"
         "\taddc.u32 f6_x15, f6_x15, 0;\n"
         "\tmov.b64 {f6_x0,f6_x1}, f6_e0;\n"
@@ -1246,6 +1355,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f6_z0,f6_z1,f6_z2,f6_z3,f6_z4,f6_z5,f6_z6,f6_z7,f6_z8,f6_w0,f6_w1,f6_w2,f6_w3,f6_w4,f6_w5,f6_w6,f6_w7,f6_m2;\n"
         "\tmov.b64 f6_r0, {f6_x0,f6_x1}; mov.b64 f6_r1, {f6_x2,f6_x3}; mov.b64 f6_r2, {f6_x4,f6_x5}; mov.b64 f6_r3, {f6_x6,f6_x7};\n"
         "\tmov.b64 f6_h0, {f6_x8,f6_x9}; mov.b64 f6_h1, {f6_x10,f6_x11}; mov.b64 f6_h2, {f6_x12,f6_x13}; mov.b64 f6_h3, {f6_x14,f6_x15};\n"
+#else
+        QSB_COL64_MERGE(f6)
+#endif
         "\tmul.wide.u32 f6_t, f6_x9, 977;  add.cc.u64  f6_g0, f6_h0, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x11, 977; addc.cc.u64 f6_g1, f6_h1, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x13, 977; addc.cc.u64 f6_g2, f6_h2, f6_t;\n"
@@ -1256,6 +1368,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f6_t, f6_x12, 977; addc.cc.u64 f6_f2, f6_r2, f6_t;\n"
         "\tmul.wide.u32 f6_t, f6_x14, 977; addc.cc.u64 f6_f3, f6_r3, f6_t;\n"
         "\taddc.u32 f6_z8, f6_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f6_z0,f6_z1}, f6_f0; mov.b64 {f6_z2,f6_z3}, f6_f1; mov.b64 {f6_z4,f6_z5}, f6_f2; mov.b64 {f6_z6,f6_z7}, f6_f3;\n"
         "\tadd.cc.u32 f6_z1, f6_z1, f6_w0; addc.cc.u32 f6_z2, f6_z2, f6_w1; addc.cc.u32 f6_z3, f6_z3, f6_w2;\n"
         "\taddc.cc.u32 f6_z4, f6_z4, f6_w3; addc.cc.u32 f6_z5, f6_z5, f6_w4; addc.cc.u32 f6_z6, f6_z6, f6_w5;\n"
@@ -1280,6 +1393,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f6_z4, f6_z4, 0;\n"
 #endif
         "\tmov.b64 PPP0, {f6_z0,f6_z1}; mov.b64 PPP1, {f6_z2,f6_z3}; mov.b64 PPP2, {f6_z4,f6_z5}; mov.b64 PPP3, {f6_z6,f6_z7};\n"
+#else
+        QSB_FOLD64_ADD(f6)
+        QSB_FOLD64_TAIL(f6,PPP)
+#endif
 #else
         "\t.reg .u32 f6_a0,f6_a1,f6_a2,f6_a3,f6_a4,f6_a5,f6_a6,f6_a7,f6_b0,f6_b1,f6_b2,f6_b3,f6_b4,f6_b5,f6_b6,f6_b7;\n"
         "\t.reg .u64 f6_e0,f6_e1,f6_e2,f6_e3,f6_e4,f6_e5,f6_e6,f6_e7,f6_o0,f6_o1,f6_o2,f6_o3,f6_o4,f6_o5,f6_o6,f6_t,f6_lc;\n"
@@ -1510,6 +1627,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f7_t, f7_a7, f7_b2; addc.cc.u64 f7_o4, f7_o4, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_a7, f7_b4; addc.cc.u64 f7_o5, f7_o5, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_a7, f7_b6; addc.cc.u64 f7_o6, f7_o6, f7_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f7_x14,f7_x15}, f7_e7;\n"
         "\taddc.u32 f7_x15, f7_x15, 0;\n"
         "\tmov.b64 {f7_x0,f7_x1}, f7_e0;\n"
@@ -1545,6 +1663,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f7_z0,f7_z1,f7_z2,f7_z3,f7_z4,f7_z5,f7_z6,f7_z7,f7_z8,f7_w0,f7_w1,f7_w2,f7_w3,f7_w4,f7_w5,f7_w6,f7_w7,f7_m2;\n"
         "\tmov.b64 f7_r0, {f7_x0,f7_x1}; mov.b64 f7_r1, {f7_x2,f7_x3}; mov.b64 f7_r2, {f7_x4,f7_x5}; mov.b64 f7_r3, {f7_x6,f7_x7};\n"
         "\tmov.b64 f7_h0, {f7_x8,f7_x9}; mov.b64 f7_h1, {f7_x10,f7_x11}; mov.b64 f7_h2, {f7_x12,f7_x13}; mov.b64 f7_h3, {f7_x14,f7_x15};\n"
+#else
+        QSB_COL64_MERGE(f7)
+#endif
         "\tmul.wide.u32 f7_t, f7_x9, 977;  add.cc.u64  f7_g0, f7_h0, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x11, 977; addc.cc.u64 f7_g1, f7_h1, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x13, 977; addc.cc.u64 f7_g2, f7_h2, f7_t;\n"
@@ -1555,6 +1676,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f7_t, f7_x12, 977; addc.cc.u64 f7_f2, f7_r2, f7_t;\n"
         "\tmul.wide.u32 f7_t, f7_x14, 977; addc.cc.u64 f7_f3, f7_r3, f7_t;\n"
         "\taddc.u32 f7_z8, f7_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f7_z0,f7_z1}, f7_f0; mov.b64 {f7_z2,f7_z3}, f7_f1; mov.b64 {f7_z4,f7_z5}, f7_f2; mov.b64 {f7_z6,f7_z7}, f7_f3;\n"
         "\tadd.cc.u32 f7_z1, f7_z1, f7_w0; addc.cc.u32 f7_z2, f7_z2, f7_w1; addc.cc.u32 f7_z3, f7_z3, f7_w2;\n"
         "\taddc.cc.u32 f7_z4, f7_z4, f7_w3; addc.cc.u32 f7_z5, f7_z5, f7_w4; addc.cc.u32 f7_z6, f7_z6, f7_w5;\n"
@@ -1579,6 +1701,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f7_z4, f7_z4, 0;\n"
 #endif
         "\tmov.b64 Q0, {f7_z0,f7_z1}; mov.b64 Q1, {f7_z2,f7_z3}; mov.b64 Q2, {f7_z4,f7_z5}; mov.b64 Q3, {f7_z6,f7_z7};\n"
+#else
+        QSB_FOLD64_ADD(f7)
+        QSB_FOLD64_TAIL(f7,Q)
+#endif
 #else
         "\t.reg .u32 f7_a0,f7_a1,f7_a2,f7_a3,f7_a4,f7_a5,f7_a6,f7_a7,f7_b0,f7_b1,f7_b2,f7_b3,f7_b4,f7_b5,f7_b6,f7_b7;\n"
         "\t.reg .u64 f7_e0,f7_e1,f7_e2,f7_e3,f7_e4,f7_e5,f7_e6,f7_e7,f7_o0,f7_o1,f7_o2,f7_o3,f7_o4,f7_o5,f7_o6,f7_t,f7_lc;\n"
@@ -1809,6 +1935,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f8_t, f8_a7, f8_b2; addc.cc.u64 f8_o4, f8_o4, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_a7, f8_b4; addc.cc.u64 f8_o5, f8_o5, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_a7, f8_b6; addc.cc.u64 f8_o6, f8_o6, f8_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f8_x14,f8_x15}, f8_e7;\n"
         "\taddc.u32 f8_x15, f8_x15, 0;\n"
         "\tmov.b64 {f8_x0,f8_x1}, f8_e0;\n"
@@ -1844,6 +1971,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f8_z0,f8_z1,f8_z2,f8_z3,f8_z4,f8_z5,f8_z6,f8_z7,f8_z8,f8_w0,f8_w1,f8_w2,f8_w3,f8_w4,f8_w5,f8_w6,f8_w7,f8_m2;\n"
         "\tmov.b64 f8_r0, {f8_x0,f8_x1}; mov.b64 f8_r1, {f8_x2,f8_x3}; mov.b64 f8_r2, {f8_x4,f8_x5}; mov.b64 f8_r3, {f8_x6,f8_x7};\n"
         "\tmov.b64 f8_h0, {f8_x8,f8_x9}; mov.b64 f8_h1, {f8_x10,f8_x11}; mov.b64 f8_h2, {f8_x12,f8_x13}; mov.b64 f8_h3, {f8_x14,f8_x15};\n"
+#else
+        QSB_COL64_MERGE(f8)
+#endif
         "\tmul.wide.u32 f8_t, f8_x9, 977;  add.cc.u64  f8_g0, f8_h0, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x11, 977; addc.cc.u64 f8_g1, f8_h1, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x13, 977; addc.cc.u64 f8_g2, f8_h2, f8_t;\n"
@@ -1854,6 +1984,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f8_t, f8_x12, 977; addc.cc.u64 f8_f2, f8_r2, f8_t;\n"
         "\tmul.wide.u32 f8_t, f8_x14, 977; addc.cc.u64 f8_f3, f8_r3, f8_t;\n"
         "\taddc.u32 f8_z8, f8_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f8_z0,f8_z1}, f8_f0; mov.b64 {f8_z2,f8_z3}, f8_f1; mov.b64 {f8_z4,f8_z5}, f8_f2; mov.b64 {f8_z6,f8_z7}, f8_f3;\n"
         "\tadd.cc.u32 f8_z1, f8_z1, f8_w0; addc.cc.u32 f8_z2, f8_z2, f8_w1; addc.cc.u32 f8_z3, f8_z3, f8_w2;\n"
         "\taddc.cc.u32 f8_z4, f8_z4, f8_w3; addc.cc.u32 f8_z5, f8_z5, f8_w4; addc.cc.u32 f8_z6, f8_z6, f8_w5;\n"
@@ -1878,6 +2009,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f8_z4, f8_z4, 0;\n"
 #endif
         "\tmov.b64 ZZ0, {f8_z0,f8_z1}; mov.b64 ZZ1, {f8_z2,f8_z3}; mov.b64 ZZ2, {f8_z4,f8_z5}; mov.b64 ZZ3, {f8_z6,f8_z7};\n"
+#else
+        QSB_FOLD64_ADD(f8)
+        QSB_FOLD64_TAIL(f8,ZZ)
+#endif
 #else
         "\t.reg .u32 f8_a0,f8_a1,f8_a2,f8_a3,f8_a4,f8_a5,f8_a6,f8_a7,f8_b0,f8_b1,f8_b2,f8_b3,f8_b4,f8_b5,f8_b6,f8_b7;\n"
         "\t.reg .u64 f8_e0,f8_e1,f8_e2,f8_e3,f8_e4,f8_e5,f8_e6,f8_e7,f8_o0,f8_o1,f8_o2,f8_o3,f8_o4,f8_o5,f8_o6,f8_t,f8_lc;\n"
@@ -2353,6 +2488,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f13_t, f13_a7, f13_b2; addc.cc.u64 f13_o4, f13_o4, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_a7, f13_b4; addc.cc.u64 f13_o5, f13_o5, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_a7, f13_b6; addc.cc.u64 f13_o6, f13_o6, f13_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f13_x14,f13_x15}, f13_e7;\n"
         "\taddc.u32 f13_x15, f13_x15, 0;\n"
         "\tmov.b64 {f13_x0,f13_x1}, f13_e0;\n"
@@ -2388,6 +2524,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f13_z0,f13_z1,f13_z2,f13_z3,f13_z4,f13_z5,f13_z6,f13_z7,f13_z8,f13_w0,f13_w1,f13_w2,f13_w3,f13_w4,f13_w5,f13_w6,f13_w7,f13_m2;\n"
         "\tmov.b64 f13_r0, {f13_x0,f13_x1}; mov.b64 f13_r1, {f13_x2,f13_x3}; mov.b64 f13_r2, {f13_x4,f13_x5}; mov.b64 f13_r3, {f13_x6,f13_x7};\n"
         "\tmov.b64 f13_h0, {f13_x8,f13_x9}; mov.b64 f13_h1, {f13_x10,f13_x11}; mov.b64 f13_h2, {f13_x12,f13_x13}; mov.b64 f13_h3, {f13_x14,f13_x15};\n"
+#else
+        QSB_COL64_MERGE(f13)
+#endif
         "\tmul.wide.u32 f13_t, f13_x9, 977;  add.cc.u64  f13_g0, f13_h0, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x11, 977; addc.cc.u64 f13_g1, f13_h1, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x13, 977; addc.cc.u64 f13_g2, f13_h2, f13_t;\n"
@@ -2398,6 +2537,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f13_t, f13_x12, 977; addc.cc.u64 f13_f2, f13_r2, f13_t;\n"
         "\tmul.wide.u32 f13_t, f13_x14, 977; addc.cc.u64 f13_f3, f13_r3, f13_t;\n"
         "\taddc.u32 f13_z8, f13_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f13_z0,f13_z1}, f13_f0; mov.b64 {f13_z2,f13_z3}, f13_f1; mov.b64 {f13_z4,f13_z5}, f13_f2; mov.b64 {f13_z6,f13_z7}, f13_f3;\n"
         "\tadd.cc.u32 f13_z1, f13_z1, f13_w0; addc.cc.u32 f13_z2, f13_z2, f13_w1; addc.cc.u32 f13_z3, f13_z3, f13_w2;\n"
         "\taddc.cc.u32 f13_z4, f13_z4, f13_w3; addc.cc.u32 f13_z5, f13_z5, f13_w4; addc.cc.u32 f13_z6, f13_z6, f13_w5;\n"
@@ -2422,6 +2562,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f13_z4, f13_z4, 0;\n"
 #endif
         "\tmov.b64 ZZZ0, {f13_z0,f13_z1}; mov.b64 ZZZ1, {f13_z2,f13_z3}; mov.b64 ZZZ2, {f13_z4,f13_z5}; mov.b64 ZZZ3, {f13_z6,f13_z7};\n"
+#else
+        QSB_FOLD64_ADD(f13)
+        QSB_FOLD64_TAIL(f13,ZZZ)
+#endif
 #else
         "\t.reg .u32 f13_a0,f13_a1,f13_a2,f13_a3,f13_a4,f13_a5,f13_a6,f13_a7,f13_b0,f13_b1,f13_b2,f13_b3,f13_b4,f13_b5,f13_b6,f13_b7;\n"
         "\t.reg .u64 f13_e0,f13_e1,f13_e2,f13_e3,f13_e4,f13_e5,f13_e6,f13_e7,f13_o0,f13_o1,f13_o2,f13_o3,f13_o4,f13_o5,f13_o6,f13_t,f13_lc;\n"
@@ -2661,6 +2805,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f15_t, f15_a7, f15_b2; addc.cc.u64 f15_o4, f15_o4, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_a7, f15_b4; addc.cc.u64 f15_o5, f15_o5, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_a7, f15_b6; addc.cc.u64 f15_o6, f15_o6, f15_t;\n"
+#if !QSB_COL64
         "\tmov.b64 {f15_x14,f15_x15}, f15_e7;\n"
         "\taddc.u32 f15_x15, f15_x15, 0;\n"
         "\tmov.b64 {f15_x0,f15_x1}, f15_e0;\n"
@@ -2696,6 +2841,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\t.reg .u32 f15_z0,f15_z1,f15_z2,f15_z3,f15_z4,f15_z5,f15_z6,f15_z7,f15_z8,f15_w0,f15_w1,f15_w2,f15_w3,f15_w4,f15_w5,f15_w6,f15_w7,f15_m2;\n"
         "\tmov.b64 f15_r0, {f15_x0,f15_x1}; mov.b64 f15_r1, {f15_x2,f15_x3}; mov.b64 f15_r2, {f15_x4,f15_x5}; mov.b64 f15_r3, {f15_x6,f15_x7};\n"
         "\tmov.b64 f15_h0, {f15_x8,f15_x9}; mov.b64 f15_h1, {f15_x10,f15_x11}; mov.b64 f15_h2, {f15_x12,f15_x13}; mov.b64 f15_h3, {f15_x14,f15_x15};\n"
+#else
+        QSB_COL64_MERGE(f15)
+#endif
         "\tmul.wide.u32 f15_t, f15_x9, 977;  add.cc.u64  f15_g0, f15_h0, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x11, 977; addc.cc.u64 f15_g1, f15_h1, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x13, 977; addc.cc.u64 f15_g2, f15_h2, f15_t;\n"
@@ -2706,6 +2854,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmul.wide.u32 f15_t, f15_x12, 977; addc.cc.u64 f15_f2, f15_r2, f15_t;\n"
         "\tmul.wide.u32 f15_t, f15_x14, 977; addc.cc.u64 f15_f3, f15_r3, f15_t;\n"
         "\taddc.u32 f15_z8, f15_w7, 0;\n"
+#if !QSB_FOLD64
         "\tmov.b64 {f15_z0,f15_z1}, f15_f0; mov.b64 {f15_z2,f15_z3}, f15_f1; mov.b64 {f15_z4,f15_z5}, f15_f2; mov.b64 {f15_z6,f15_z7}, f15_f3;\n"
         "\tadd.cc.u32 f15_z1, f15_z1, f15_w0; addc.cc.u32 f15_z2, f15_z2, f15_w1; addc.cc.u32 f15_z3, f15_z3, f15_w2;\n"
         "\taddc.cc.u32 f15_z4, f15_z4, f15_w3; addc.cc.u32 f15_z5, f15_z5, f15_w4; addc.cc.u32 f15_z6, f15_z6, f15_w5;\n"
@@ -2730,6 +2879,10 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 f15_z4, f15_z4, 0;\n"
 #endif
         "\tmov.b64 Q0, {f15_z0,f15_z1}; mov.b64 Q1, {f15_z2,f15_z3}; mov.b64 Q2, {f15_z4,f15_z5}; mov.b64 Q3, {f15_z6,f15_z7};\n"
+#else
+        QSB_FOLD64_ADD(f15)
+        QSB_FOLD64_TAIL(f15,Q)
+#endif
 #else
         "\t.reg .u32 f15_a0,f15_a1,f15_a2,f15_a3,f15_a4,f15_a5,f15_a6,f15_a7,f15_b0,f15_b1,f15_b2,f15_b3,f15_b4,f15_b5,f15_b6,f15_b7;\n"
         "\t.reg .u64 f15_e0,f15_e1,f15_e2,f15_e3,f15_e4,f15_e5,f15_e6,f15_e7,f15_o0,f15_o1,f15_o2,f15_o3,f15_o4,f15_o5,f15_o6,f15_t,f15_lc;\n"
