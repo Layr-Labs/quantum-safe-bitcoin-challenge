@@ -1,0 +1,256 @@
+{
+  "cuda": "12.6.20",
+  "source_milestone": "b8f921b609fdc6b8947da5bfe7509c0b97745a81",
+  "local_gpu_available": false,
+  "kernels": {
+    "native": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 0,
+        "streaming_store_instructions": 0
+      },
+      {
+        "symbol": "_Z13kernel_digestILb1EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 8,
+        "streaming_store_instructions": 0
+      },
+      {
+        "symbol": "_Z28kernel_subset_scalars_singlePKjPmj",
+        "registers": 39,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 0,
+        "streaming_store_instructions": 4
+      },
+      {
+        "symbol": "_Z21kernel_subset_scalarsPKjPmj",
+        "registers": 64,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 0,
+        "streaming_store_instructions": 8
+      }
+    ],
+    "jit89": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 0,
+        "streaming_store_instructions": 0
+      },
+      {
+        "symbol": "_Z13kernel_digestILb1EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 8,
+        "streaming_store_instructions": 0
+      },
+      {
+        "symbol": "_Z28kernel_subset_scalars_singlePKjPmj",
+        "registers": 39,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 0,
+        "streaming_store_instructions": 4
+      },
+      {
+        "symbol": "_Z21kernel_subset_scalarsPKjPmj",
+        "registers": 64,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "local_memory_sass_instructions": 0,
+        "streaming_load_instructions": 0,
+        "streaming_store_instructions": 8
+      }
+    ],
+    "stream-off": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z13kernel_digestILb1EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z28kernel_subset_scalars_singlePKjPmj",
+        "registers": 38,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z21kernel_subset_scalarsPKjPmj",
+        "registers": 64,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      }
+    ],
+    "producer-off": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      }
+    ],
+    "single-off": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z13kernel_digestILb1EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z28kernel_subset_scalars_singlePKjPmj",
+        "registers": 39,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z21kernel_subset_scalarsPKjPmj",
+        "registers": 64,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      }
+    ],
+    "forced-producer": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z13kernel_digestILb1EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z28kernel_subset_scalars_singlePKjPmj",
+        "registers": 39,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z21kernel_subset_scalarsPKjPmj",
+        "registers": 64,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      }
+    ],
+    "negative-y-off": [
+      {
+        "symbol": "_Z13kernel_digestILb0EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z13kernel_digestILb1EEvPKhiiPKjS1_iS1_S1_iS1_iiPKmS5_S5_S5_S5_PhPjS7_S6_S6_S6_S6_S6_S6_iiiiimiiS1_iS3_PK12epoch_desc_tS3_iS5_",
+        "registers": 128,
+        "shared_bytes": 49152,
+        "stack_bytes": 8,
+        "spill_store_bytes": 12,
+        "spill_load_bytes": 8
+      },
+      {
+        "symbol": "_Z28kernel_subset_scalars_singlePKjPmj",
+        "registers": 39,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      },
+      {
+        "symbol": "_Z21kernel_subset_scalarsPKjPmj",
+        "registers": 64,
+        "shared_bytes": 0,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0
+      }
+    ]
+  },
+  "external_artifact_sha256": {
+    "subset-margin-final-native.log": "d39f9a35450d4eeab5e259fc602aadf89bffa08db8df8d5f3c830f4ba0f1aa35",
+    "subset-margin-final-jit89.log": "59c77d61f0dd2cea9421cbfe916f625fa52aa99e87f62a08aa5545c894369127",
+    "subset-margin-final-stream-off.log": "f7bf89b5e26af3ccd8c737abdc66dc537c14632c02780ab9071a0a2790cc412f",
+    "subset-margin-final-producer-off.log": "4fc3f2d1ddc7e91784d5599cef62945445e0ca45fe66f43ee9f4f03e02af3e1d",
+    "subset-margin-final-single-off.log": "d39f9a35450d4eeab5e259fc602aadf89bffa08db8df8d5f3c830f4ba0f1aa35",
+    "subset-margin-final-forced-producer.log": "1a2bcbf4569376f093a46d877d541c55563673dc3200ec8ca6029febbf75d58c",
+    "subset-margin-final-negative-y-off.log": "48eb444eec8ceb369307165ec7ebf6f4240b496878aa385ba6bedb792882c3d2",
+    "subset-margin-final-native.sass": "bba996bae0be37f8e5a9a64f0d10f73ce9b6d25d483bb652b572b0b852d88fa1",
+    "subset-margin-final-jit89.sass": "4abeb0e967ddf35137bb3c2da591307eb35be2cb6c701d06a83ee853e9d50317"
+  }
+}

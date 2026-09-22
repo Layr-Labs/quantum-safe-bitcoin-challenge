@@ -48,6 +48,7 @@
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
 
+#include "../../subset_sha_flags.h"
 #include "../../GPUMath.h"
 
 #define MAX_LEN_WORD_PRIME 20
@@ -528,6 +529,11 @@ __device__ __forceinline__ void qsb_filter_last_add(
     uint64_t *X,uint64_t *Y,uint64_t *ZZ,uint64_t *ZZZ,
     const uint64_t *x,const uint64_t *y,uint64_t *yoff,uint32_t &bad) {
     qsb_filter_point_add<true>(X,Y,ZZ,ZZZ,x,y,yoff,bad);
+#if QSB_SUBSET_NEG_Y_MAC
+    // Restore the public positive ordinate convention once per whole chain.
+    uint64_t zero[4]={0};
+    _ModSub256(Y,zero,Y);
+#endif
     uint64_t scaled_y[4];
     qsb_filter_mul(scaled_y,y,ZZZ,bad);
 #if QSB_SPEC_LAST_RESOLVE
@@ -1518,7 +1524,10 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+#include "../../baseline_filter_control.cuh"
 #include "pair_shared.cuh"
+#include "scalar_producer.cuh"
+#include "../../subset_sha_tuning.h"
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
@@ -1551,6 +1560,7 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
+template<bool PRODUCED_SHA=false>
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -1576,7 +1586,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     int t_win, int s_early, const uint8_t * __restrict__ d_early,
     int fast_inc, const uint32_t * __restrict__ d_const_words,
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
-, const uint32_t *d_first, int epochs_in_batch
+, const uint32_t *d_first, int epochs_in_batch, const uint64_t *d_scalars=nullptr
 ) {
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
@@ -1604,11 +1614,19 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], nB[12];
 #if ZLAB_DUAL_EPOCH_SHA
     uint64_t zB[4];
+#if QSB_SUBSET_SHA_PRODUCER
+    QsbPairEpochZ zpair;
+    if(PRODUCED_SHA)qsb_load_scalar<false>(d_scalars,zpair.a);
+    else zpair=qsb_pair_epoch_z_value(f0,f1,lane);
+#else
     QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
+#endif
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
-    #pragma unroll
-    for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+    if(!PRODUCED_SHA){
+        #pragma unroll
+        for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
+    }
 #endif
 #else
     uint64_t prodA[5], prodB[5], m1B[4], m2B[4];
@@ -1617,18 +1635,24 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     {
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront3 fa=qsb_pair_front3_z_value<QSB_SUBSET_SHA_AUTOTUNE && !PRODUCED_SHA>(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
-        okA=fa.ok && active;
+        okA=fa.ok && (PRODUCED_SHA?qsb_scalar_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch):active);
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
 #if ZLAB_DUAL_EPOCH_SHA
         #pragma unroll
         for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
-        #pragma unroll
-        for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+#if QSB_SUBSET_SHA_PRODUCER
+        if(PRODUCED_SHA)qsb_load_scalar<true>(d_scalars,zB);
+        else
+#endif
+        {
+            #pragma unroll
+            for(int k=0;k<4;k++)zB[k]=parkA[8+k][tid];
+        }
         #pragma unroll
         for(int k=0;k<4;k++)parkA[8+k][tid]=fa.words[12+k];
 #else
@@ -1639,7 +1663,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
         Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
-        okA=fa.ok && active;
+        okA=fa.ok && (PRODUCED_SHA?qsb_scalar_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch):active);
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
         #pragma unroll
         for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
@@ -1648,7 +1672,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront3 fb=qsb_pair_front3_z_value<QSB_SUBSET_SHA_AUTOTUNE && !PRODUCED_SHA>(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -1659,7 +1683,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
 #endif
-    okB=fb.ok && active && hasB;
+    okB=fb.ok && (PRODUCED_SHA?qsb_scalar_active<true>((unsigned)batch_size,(unsigned)epochs_in_batch):(active && hasB));
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);
@@ -1685,9 +1709,18 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
+                if(PRODUCED_SHA){
+                    const unsigned hit_tid=qsb_reload_tid();
+                    const unsigned hit_lane=hit_tid&(QSB_SE_WINDOWS-1);
+                    const unsigned hit_epoch=QSB_PAIR_MUL*qsb_reload_bid()+2u*(hit_tid/QSB_SE_WINDOWS)+0u;
+                    d_hit_idx[pslot*4]=(hit_epoch*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                    for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                    for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
+                }else{
                 d_hit_idx[pslot*4]=(eA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+                }
             }
         }
     }
@@ -1706,9 +1739,18 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
+                if(PRODUCED_SHA){
+                    const unsigned hit_tid=qsb_reload_tid();
+                    const unsigned hit_lane=hit_tid&(QSB_SE_WINDOWS-1);
+                    const unsigned hit_epoch=QSB_PAIR_MUL*qsb_reload_bid()+2u*(hit_tid/QSB_SE_WINDOWS)+1u;
+                    d_hit_idx[pslot*4]=(hit_epoch*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                    for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                    for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
+                }else{
                 d_hit_idx[pslot*4]=((eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+                }
             }
         }
     }
@@ -2780,6 +2822,7 @@ int main(int argc, char **argv) {
     #endif
 #endif
     uint32_t *d_first = NULL;
+    uint64_t *d_scalars = NULL;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2834,6 +2877,15 @@ int main(int argc, char **argv) {
 #endif
         cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
         if(first_error!=cudaSuccess){fprintf(stderr,"OOM: first states: %s\n",cudaGetErrorString(first_error));return 1;}
+#if QSB_SUBSET_SHA_PRODUCER
+        const size_t scalar_bytes=(size_t)QSB_SE_LAUNCH_BLOCKS*8u*QSB_SE_BLOCK*sizeof(uint64_t);
+        cudaError_t scalar_error=cudaMalloc(&d_scalars,scalar_bytes);
+        if(scalar_error!=cudaSuccess){
+            d_scalars=nullptr;
+            fprintf(stderr,"Scalar producer unavailable; using fused SHA: %s\n",cudaGetErrorString(scalar_error));
+            cudaGetLastError(); // clear the optional allocation failure
+        }
+#endif
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -3087,6 +3139,11 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+        qsb_subset_sha_tuning sha_tuning;
+        unsigned sha_route=(QSB_SUBSET_SHA_PRODUCER && !QSB_SUBSET_SHA_AUTOTUNE && d_scalars)
+            ?(QSB_SUBSET_SHA_SINGLE?2u:1u):0u;
+        struct timespec sha_phase_start;
+        clock_gettime(CLOCK_MONOTONIC,&sha_phase_start);
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
@@ -3141,7 +3198,15 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+#if QSB_SUBSET_SHA_PRODUCER
+            if(sha_route){
+#if QSB_SUBSET_SHA_SINGLE
+                if(sha_route==2)
+                    kernel_subset_scalars_single<<<4u*(unsigned)nblk,128>>>(d_first,d_scalars,(unsigned)epochs_in_batch);
+                else
+#endif
+                    kernel_subset_scalars<<<nblk,QSB_SE_BLOCK>>>(d_first,d_scalars,(unsigned)epochs_in_batch);
+                kernel_digest<true><<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -3159,7 +3224,30 @@ int main(int argc, char **argv) {
                 d_hit_keynonce, d_hit_pubhash,
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
-                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch, d_scalars);
+            }else
+#endif
+            {
+                kernel_digest<false><<<nblk, QSB_SE_BLOCK>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch, d_scalars);
+            }
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
@@ -3174,10 +3262,12 @@ int main(int argc, char **argv) {
             memcpy(&h_hit, zh_host, 4);
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
-                if (nh > ZLAB_HIT_FIRST)
-                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                if (nh > ZLAB_HIT_FIRST){
+                    err=cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
                                d_verified_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
                                (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                    if(err!=cudaSuccess){fprintf(stderr,"Hit tail read failed: %s\n",cudaGetErrorString(err));return 1;}
+                }
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
                 int wl = 0;
@@ -3249,6 +3339,30 @@ int main(int argc, char **argv) {
                     fclose(ff);
                 }
             }
+#if QSB_SUBSET_SHA_AUTOTUNE
+            // The blocking verified-hit copy and all host writes above have
+            // finished. Timing includes producers, consumer, verification and output.
+            if(d_scalars && sha_tuning.add_batch((uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH)){
+                struct timespec sha_phase_end;
+                clock_gettime(CLOCK_MONOTONIC,&sha_phase_end);
+                const double seconds=(sha_phase_end.tv_sec-sha_phase_start.tv_sec)
+                    +(sha_phase_end.tv_nsec-sha_phase_start.tv_nsec)*1e-9;
+                const unsigned trial_before=sha_tuning.current;
+                sha_tuning.finish_phase(seconds);
+                sha_route=sha_tuning.route();
+                if(sha_tuning.current!=trial_before){
+                    const auto &t=sha_tuning.trial[trial_before];
+                    printf("Subset SHA trial %s: ratios %.6f %.6f %.6f %.6f aggregate %.6f eligible %u\n",
+                        trial_before?"single":"paired",t.ratios[0],t.ratios[1],t.ratios[2],t.ratios[3],
+                        t.gain,(unsigned)t.selected);
+                    if(sha_tuning.done())
+                        printf("Subset SHA selected %s aggregate %.6f\n",
+                            sha_route==2?"single":(sha_route==1?"paired":"fused"),sha_tuning.best_gain);
+                    fflush(stdout);
+                }
+                clock_gettime(CLOCK_MONOTONIC,&sha_phase_start);
+            }
+#endif
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
@@ -3288,6 +3402,7 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+        if(d_scalars)cudaFree(d_scalars);
         free(h_combos);
         return 0;
     }
