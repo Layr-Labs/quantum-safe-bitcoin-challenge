@@ -40,7 +40,7 @@ __device__ __forceinline__ uint64_t qsb_rank_lex(const uint8_t *c, int k, int n)
     uint64_t r = 0; int prev = -1;
     for (int i = 0; i < k; i++) {
         // sum_{j=prev+1}^{c_i-1} C(n-j-1, k-i-1) = C(n-prev-1, k-i) - C(n-c_i, k-i)
-        r += BINOM_C[n - prev - 1][k - i] - BINOM_C[n - c[i]][k - i];
+        r += QSB_LDG_RO(&BINOM_C[n - prev - 1][k - i]) - QSB_LDG_RO(&BINOM_C[n - c[i]][k - i]);
         prev = c[i];
     }
     return r;
@@ -108,8 +108,17 @@ __global__ void kernel_epoch_groups(
         full[k5] = (uint8_t)(last + 1);
         const uint64_t base = qsb_rank_lex(full, s_early, window_start);
         qsb_group_t *Gw = d_groups + g;
+#if QSB_L2_HINTS
+        /* base_lo/base_hi/last at 112/116/108: written once, read once by the epoch kernel.
+         * The 8 o[] bytes and the d_epoch_group scatter below stay plain stores: their
+         * runtime-indexed loops would change shape around an asm store, and they are
+         * 8 B per 128-B record and 4 MiB per launch respectively. */
+        qsb_stcs_u32<112>(Gw,(uint32_t)base); qsb_stcs_u32<116>(Gw,(uint32_t)(base >> 32));
+        qsb_stcs_u32<108>(Gw,(uint32_t)last);
+#else
         Gw->base_lo = (uint32_t)base; Gw->base_hi = (uint32_t)(base >> 32);
         Gw->last = (uint32_t)last;
+#endif
         for (int i = 0; i < 8; i++) Gw->o[i] = (i < k5) ? o[i] : 0;
         /* Scatter this group's epochs -> group index. The run is [base, base + (window_start-1-last)). */
         const uint64_t lo = base > epoch_base ? base : epoch_base;
@@ -131,9 +140,16 @@ __global__ void kernel_epoch_groups(
         }
     }
     qsb_group_t *G = d_groups + g;
+#if QSB_L2_HINTS
+    /* st[] at 0..28, w[] at 32..92; the promoted build stores pos/acc as one v2 at 96 and nb at 104. */
+    qsb_stcs_u32<0>(G,state[0]); qsb_stcs_u32<4>(G,state[1]); qsb_stcs_u32<8>(G,state[2]); qsb_stcs_u32<12>(G,state[3]); qsb_stcs_u32<16>(G,state[4]); qsb_stcs_u32<20>(G,state[5]); qsb_stcs_u32<24>(G,state[6]); qsb_stcs_u32<28>(G,state[7]);
+    qsb_stcs_u32<32>(G,W[0]); qsb_stcs_u32<36>(G,W[1]); qsb_stcs_u32<40>(G,W[2]); qsb_stcs_u32<44>(G,W[3]); qsb_stcs_u32<48>(G,W[4]); qsb_stcs_u32<52>(G,W[5]); qsb_stcs_u32<56>(G,W[6]); qsb_stcs_u32<60>(G,W[7]); qsb_stcs_u32<64>(G,W[8]); qsb_stcs_u32<68>(G,W[9]); qsb_stcs_u32<72>(G,W[10]); qsb_stcs_u32<76>(G,W[11]); qsb_stcs_u32<80>(G,W[12]); qsb_stcs_u32<84>(G,W[13]); qsb_stcs_u32<88>(G,W[14]); qsb_stcs_u32<92>(G,W[15]);
+    qsb_stcs_v2<96>(G,(uint32_t)wi,acc); qsb_stcs_u32<104>(G,(uint32_t)nb);
+#else
     for (int i = 0; i < 8; i++) G->st[i] = state[i];
     for (int i = 0; i < 16; i++) G->w[i] = W[i];
     G->pos = (uint32_t)wi; G->acc = acc; G->nb = (uint32_t)nb;
+#endif
 #else
     uint32_t curW[16];
     uint8_t *cur = (uint8_t *)curW;
@@ -183,6 +199,21 @@ __global__ void kernel_build_epochs_inc(
     if (e >= n_epochs) return;
     uint8_t early[MAX_T];
 #if QSB_EPOCH_FAST
+#if QSB_L2_HINTS
+    const qsb_group_t *G = d_groups + qsb_ldcs_u32<0>(d_epoch_group + t);
+    const int last = (int)qsb_ldcs_u32<108>(G);
+    /* (int)(e - base) depends only on the low 32 bits, so only base_lo is read
+     * (the promoted build already drops the base_hi load): same value, same code. */
+    const int o6 = last + 1 + (int)((uint32_t)e - qsb_ldcs_u32<112>(G));
+    for (int i = 0; i < s_early - 1; i++) early[i] = G->o[i];   /* byte loop: plain, see kernel_epoch_groups */
+    early[s_early - 1] = (uint8_t)o6;
+    uint32_t state[8], W[18];
+    state[0]=qsb_ldcs_u32<0>(G); state[1]=qsb_ldcs_u32<4>(G); state[2]=qsb_ldcs_u32<8>(G); state[3]=qsb_ldcs_u32<12>(G); state[4]=qsb_ldcs_u32<16>(G); state[5]=qsb_ldcs_u32<20>(G); state[6]=qsb_ldcs_u32<24>(G); state[7]=qsb_ldcs_u32<28>(G);
+    W[0]=qsb_ldcs_u32<32>(G); W[1]=qsb_ldcs_u32<36>(G); W[2]=qsb_ldcs_u32<40>(G); W[3]=qsb_ldcs_u32<44>(G); W[4]=qsb_ldcs_u32<48>(G); W[5]=qsb_ldcs_u32<52>(G); W[6]=qsb_ldcs_u32<56>(G); W[7]=qsb_ldcs_u32<60>(G); W[8]=qsb_ldcs_u32<64>(G); W[9]=qsb_ldcs_u32<68>(G); W[10]=qsb_ldcs_u32<72>(G); W[11]=qsb_ldcs_u32<76>(G); W[12]=qsb_ldcs_u32<80>(G); W[13]=qsb_ldcs_u32<84>(G); W[14]=qsb_ldcs_u32<88>(G); W[15]=qsb_ldcs_u32<92>(G);
+    /* The promoted build loads pos/acc/nb (and the adjacent last) as one v4 at 96. */
+    int wi, nb; uint32_t acc;
+    { const uint4 pan = qsb_ldcs_v4<96>(G); wi = (int)pan.x; acc = pan.y; nb = (int)pan.z; }
+#else
     const qsb_group_t *G = d_groups + d_epoch_group[t];
     const int last = (int)G->last;
     const uint64_t base = ((uint64_t)G->base_hi << 32) | (uint64_t)G->base_lo;
@@ -193,6 +224,7 @@ __global__ void kernel_build_epochs_inc(
     for (int i = 0; i < 8; i++) state[i] = G->st[i];
     for (int i = 0; i < 16; i++) W[i] = G->w[i];
     int wi = (int)G->pos, nb = (int)G->nb; uint32_t acc = G->acc;
+#endif
     {
         for (int i = last + 1; i < window_start; i++) {
             if (i == o6) continue;
@@ -201,10 +233,15 @@ __global__ void kernel_build_epochs_inc(
         }
     }
     epoch_desc_t *d = d_epochs + t;
+#if QSB_L2_HINTS
+    qsb_stcs_u32<0>(d,state[0]); qsb_stcs_u32<4>(d,state[1]); qsb_stcs_u32<8>(d,state[2]); qsb_stcs_u32<12>(d,state[3]); qsb_stcs_u32<16>(d,state[4]); qsb_stcs_u32<20>(d,state[5]); qsb_stcs_u32<24>(d,state[6]); qsb_stcs_u32<28>(d,state[7]);
+    qsb_stcs_u32<32>(d,W[0]); qsb_stcs_u32<36>(d,W[1]);
+#else
     for (int i = 0; i < 8; i++) d->mid[i] = state[i];
     d->remW[0] = W[0];
     d->remW[1] = W[1];
-    for (int i = 0; i < s_early; i++) d->early[i] = early[i];
+#endif
+    for (int i = 0; i < s_early; i++) d->early[i] = early[i];   /* byte loop: plain (6 B of the 64-B record) */
 #else
     unrank_combo(e, window_start, s_early, early);
     const qsb_group_t *G = d_groups + (qsb_rank_lex(early, s_early - 1, window_start) - rank_first);
