@@ -56,6 +56,12 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
 #include "ParityWindow.cuh"
 #endif
 
+/* The dead-lane mask applies to the single shared factor instead of both
+ * eight-limb results of the prepare stage. */
+#ifndef QSB_PREP_MASK
+#define QSB_PREP_MASK 1
+#endif
+
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
@@ -69,9 +75,18 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_PREP_MASK
+        /* vbar and tbar are exact full-width products with hc, and the reduced
+         * representative of 0 is 0, so clearing the four limbs of the shared
+         * factor is identical to clearing both eight-limb results. */
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -87,6 +102,12 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+/* Public PR993 QSB_FIN_RAWS, isolated on the PR976 source. Both slope products
+ * may remain raw in [0,2^256): the parity window accepts congruent raw input,
+ * while qsb_add_boundary preserves canonical x-coordinate addition. */
+#ifndef QSB_FIN_RAWS
+#define QSB_FIN_RAWS 1
+#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -119,6 +140,22 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
+#if QSB_FIN_RAWS
+    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t);
+#if QSB_PARITY_WINDOW
+    const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
+#else
+    qsb_packed_raw_mul(u,l,s);
+#endif
+    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t);
+#if QSB_PARITY_WINDOW
+    const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
+#else
+    qsb_packed_raw_mul(v,m,s);
+#endif
+    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
@@ -130,6 +167,7 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
+#endif
 #endif
 #if QSB_PARITY_WINDOW
     return parity_u|(parity_v<<1);
