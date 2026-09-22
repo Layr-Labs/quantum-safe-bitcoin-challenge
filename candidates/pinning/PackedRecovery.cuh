@@ -87,10 +87,62 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
+#if QSB_FINISH_BGAUGE
+/* Q274 residual scope, sites re-derived at 7c3609b8: with QSB_PARITY_SUM=1 and the new
+ * QSB_PARITY_WINDOW=1 both shipped, the active qsb_packed_finish computes both y-parities
+ * through the two qsb_parity_product_window call sites (PackedRecovery.cuh) — the windowed
+ * descendants of the loop12-era qsb_sum_parity sites; their exceptional-window fallback
+ * re-enters qsb_sum_parity (ParityWindow.cuh), whose (s1&s2&s3)==UINT64_MAX
+ * exceptional-limb correction is the surviving 2^-192-class divergence point the gauge
+ * removes. Under the setup-proven b=u2r_y gauge (u2r_y[3]!=0, one compare at setup after
+ * load_pinning2; holds w.p. 1-2^192/p = 1-2^-64*(1+K/p)) both parity predicates collapse
+ * to the pre-P9 borrow-parity site identities with normalization DELETED: for ANY raw
+ * product s in [0,2^256) and canonical b >= 2^192 (b[3]!=0, so b > K and b >= 2^192),
+ * qsb_difference_parity(s,b) equals the true parity of (s-b) mod p (s-b < p whenever
+ * s >= b since K < 2^192; the borrow flip covers s < b) and qsb_difference_parity(b,s)
+ * is exact unconditionally for canonical b. NO small-b normalization fallback remains in
+ * this variant. The generic windowed finish below is the COLD fallback, selected at setup
+ * through the block-uniform qsb_b_gauge_ok constant — never per-candidate at runtime.
+ * x1/x2 are computed exactly as in the generic variant, so both variants publish
+ * identical points. */
+__device__ __constant__ uint32_t qsb_b_gauge_ok;
+
+__device__ __forceinline__ uint32_t qsb_packed_finish_gauge(
+    const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
+    const uint64_t *weighted_inv,
+    uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
+    uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
+#if QSB_LAZY_REC
+    qsb_packed_raw_mul(u,tbar,weighted_inv);
+    qsb_packed_raw_mul(v,vbar,root_inv);
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
+#else
+    qsb_recovery_mul(u,tbar,weighted_inv);
+    qsb_recovery_mul(v,vbar,root_inv);
+    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
+#endif
+    /* x1/x2 exactly as in the generic QSB_PARITY_SUM section. */
+    _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
+    _ModSub256(t,m,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x2,s,a);
+    /* Both qsb_parity_product_window call sites deleted: parity straight off the raw
+     * products s = l*(a-x1) and s = m*(a-x2), as in the pre-P9 site identities. */
+    _ModSub256(t,a,x1); qsb_packed_raw_mul(s,l,t);
+    uint32_t parity=qsb_difference_parity(s,b);
+    _ModSub256(t,a,x2); qsb_packed_raw_mul(s,m,t);
+    return parity|(qsb_difference_parity(b,s)<<1);
+}
+#endif
+
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
     uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
+#if QSB_FINISH_BGAUGE
+    /* Q274: setup-time b=u2r_y gauge selection (block-uniform constant; the generic
+     * windowed finish below is the cold fallback). Zero per-candidate selection
+     * logic beyond this uniform branch. */
+    if (qsb_b_gauge_ok) return qsb_packed_finish_gauge(vbar,tbar,root_inv,weighted_inv,a,b,c,x1,x2);
+#endif
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
 #if QSB_LAZY_REC
     /* u, v, l, m and sum only feed multiplies and borrow-corrected subtractions, which

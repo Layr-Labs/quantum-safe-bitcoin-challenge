@@ -45,6 +45,21 @@
 #ifndef QSB_PARITY_SUM
 #define QSB_PARITY_SUM 1   /* P9: y-parities from the pre-"+a" products (no a-x subtractions) */
 #endif
+#ifndef QSB_FINISH_BGAUGE
+#define QSB_FINISH_BGAUGE 0  /* Q274 residual scope: setup-proven b=u2r_y gauge — one compare
+                                * u2r_y[3]!=0 at setup, after load_pinning2 (failure prob
+                                * 2^192/p = 2^-64*(1+K/p)). Under the gauge the active
+                                * packed-finish parity predicates collapse to the pre-P9
+                                * borrow-parity site identities with normalization DELETED —
+                                * exact for ANY raw product in [0,2^256) when b >= 2^192, with
+                                * NO small-b normalization fallback. The shipped windowed
+                                * sum-parity finish stays compiled in as the cold fallback
+                                * selected at setup (never per-candidate at runtime) via the
+                                * block-uniform qsb_b_gauge_ok constant. */
+#endif
+#if QSB_FINISH_BGAUGE && !QSB_PARITY_SUM
+#error "QSB_FINISH_BGAUGE specializes the P9 (QSB_PARITY_SUM) finish parity sites"
+#endif
 #ifndef QSB_TREE_TOP2
 #define QSB_TREE_TOP2 1    /* P12: root and first excluded level in one warp-multiply */
 #endif
@@ -60,6 +75,28 @@
 #endif
 #ifndef QSB_FIELD_SC
 #define QSB_FIELD_SC 1
+#endif
+/* ---- loop13-20260922 Q342 vehicle member, Q277 layer (a) (port of loop11
+ *      commit c90e8bb onto the 7c3609b8 frontier; default OFF). Routes the
+ *      candidate-tree INTERNAL muls (qsb_block_inverse up-pass/down-pass,
+ *      qsb_block_{product,inverse}_checkpoint intermediates) to the sc body
+ *      _ModMultCore via qsb_field_mul_tree. Roots and the final leaf muls
+ *      feeding _ModInv/published coords stay on the carry-complete
+ *      qsb_field_mul + qsb_field_normalize boundary (RESEARCH.md blessing:
+ *      tree-internal representatives may remain raw; canonicalization stays
+ *      at the inversion and zero-test boundaries). Class: the sc body's own
+ *      rp/short-carry exposure (z9/g8 2^-44/product class + C31 tail shape)
+ *      on ~8.9 internal muls/candidate; blast radius <= 1 root group
+ *      (256 candidates), false-negative only. Default OFF: -DQSB_FIELD_SC_TREE=0
+ *      restores shipped bytes. ---- */
+#ifndef QSB_FIELD_SC_TREE
+#define QSB_FIELD_SC_TREE 1
+#endif
+#if QSB_FIELD_SC_TREE && !(QSB_SHORT_CARRY && QSB_HOST_GATE)
+#error "QSB_FIELD_SC_TREE extends the QSB_SHORT_CARRY sc class and needs QSB_HOST_GATE"
+#endif
+#if QSB_TREE_F8DROP && !QSB_FIELD_SC_TREE
+#error "QSB_TREE_F8DROP has no effect without QSB_FIELD_SC_TREE (layer b rides on the sc routing)"
 #endif
 #ifndef QSB_TAIL_TAB
 #define QSB_TAIL_TAB 0   /* per-sequence 256-entry table (indexed by the low locktime byte) that
@@ -1407,6 +1444,25 @@ __device__ __forceinline__ void qsb_field_mul_sc(uint64_t *out,uint64_t *a,uint6
 #endif
 }
 
+/* Q277 layer (a) + Q323 layer (b): field mul for the candidate-tree INTERNAL
+ * nodes only (product-tree up-pass, inverse down-pass intermediates). These
+ * outputs feed only further muls, so a loose representative is admissible
+ * (RESEARCH.md); the root and the final leaf muls feeding _ModInv / published
+ * coords stay on the carry-complete qsb_field_mul + qsb_field_normalize
+ * boundary. With QSB_TREE_F8DROP the body additionally drops the fold1
+ * even-carry f8 (2^-22.5/use premise, divergence {f8 != 0}). */
+__device__ __forceinline__ void qsb_field_mul_tree(uint64_t *out,uint64_t *a,uint64_t *b){
+#if QSB_SHORT_CARRY && QSB_FIELD_SC && QSB_FIELD_SC_TREE
+#if QSB_TREE_F8DROP
+    _ModMultCore_tree(out,a,b); out[4]=0;
+#else
+    _ModMultCore(out,a,b); out[4]=0;
+#endif
+#else
+    qsb_field_mul(out,a,b);
+#endif
+}
+
 /* qsb_field_mul is an exact residue in [0,2^256), while _ModInv expects its
  * input below p and callers expect canonical leaf inverses.  Tree-internal
  * products need only congruent representatives, so normalize the root and 256
@@ -1459,7 +1515,7 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
                 b[k]=products[k][offset+half+tid];
             }
             a[4]=b[4]=0;
-            qsb_field_mul(out,a,b);
+            qsb_field_mul_tree(out,a,b);
             #pragma unroll
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
@@ -1507,7 +1563,7 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
-            qsb_field_mul(child_inv,parent_inv,sibling);
+            qsb_field_mul_tree(child_inv,parent_inv,sibling);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-256+tid]=child_inv[k];
         }
@@ -1562,7 +1618,7 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
                 b[k]=products[k][offset+half+tid];
             }
             a[4]=b[4]=0;
-            qsb_field_mul(out,a,b);
+            qsb_field_mul_tree(out,a,b);
             int node=offset+count+tid;
             #pragma unroll
             for(int k=0;k<4;k++){
@@ -1622,7 +1678,7 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
-            qsb_field_mul(child_inv,parent_inv,sibling);
+            qsb_field_mul_tree(child_inv,parent_inv,sibling);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
@@ -2895,6 +2951,27 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+#if QSB_FINISH_BGAUGE
+    {   /* Q274: setup-proven b=u2r_y gauge — ONE compare on u2r_y[3] after load_pinning2.
+         * pp.u2r_y is the device limb image (pin_u2ry_words): limb 3 = bytes 24..31.
+         * Gauge failure probability 2^192/p = 2^-64*(1+K/p). On failure the block-uniform
+         * qsb_b_gauge_ok routes every candidate through the generic windowed finish
+         * (cold fallback; it normalizes via the qsb_sum_parity carry correction for all
+         * canonical b). The selection is fixed at setup — never per-candidate at runtime. */
+        uint64_t ytop;
+        memcpy(&ytop,pp.u2r_y+24,sizeof(ytop));   /* LE device limb 3 */
+        uint32_t gauge_ok=(ytop!=0)?1u:0u;
+        cudaError_t berr=cudaMemcpyToSymbol(qsb_b_gauge_ok,&gauge_ok,sizeof(gauge_ok));
+        if(berr!=cudaSuccess){
+            fprintf(stderr,"Failed to upload the Q274 b-gauge selection: %s\n",
+                    cudaGetErrorString(berr));
+            return 1;
+        }
+        printf("  Q274 b-gauge: u2r_y[3]=%016llx -> %s\n",
+               (unsigned long long)ytop,
+               gauge_ok ? "specialized finish" : "generic finish (fallback)");
+    }
+#endif
 
     /* Compute neg_2u2R */
     {
