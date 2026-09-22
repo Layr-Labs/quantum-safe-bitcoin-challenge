@@ -5,6 +5,21 @@
 #ifndef QSB_K2S_PARITY_WINDOW
 #define QSB_K2S_PARITY_WINDOW 1
 #endif
+/* Exact three-input fold of the limb-8 bit-parity terms.  Only bit 0 of each
+ * a_i*b_j with i+j==8 reaches the parity, and bit 0 of a product is the AND of
+ * the operands' bit 0, so the surviving accumulator is an XOR of ANDs that is
+ * masked to bit 0 afterwards.  lop3 with immLut 0x6a is exactly (a&b)^c on all
+ * 32 bits, so the folded form is bit-identical to the and/xor pair it
+ * replaces; 0 restores the pair sequence. */
+#ifndef QSB_PW_LOP3_PARITY
+#define QSB_PW_LOP3_PARITY 1
+#endif
+/* The carry counters start at zero, so the first addc of each column chain can
+ * materialise them directly instead of following a zero move.  Same value, one
+ * instruction less per counter; 0 restores the move. */
+#ifndef QSB_PW_CARRY_SEED
+#define QSB_PW_CARRY_SEED 1
+#endif
 #if QSB_K2S_PARITY_WINDOW
 __device__ __forceinline__ void qsb_parity_window_words(
     uint64_t &mid, uint64_t &top, const uint64_t *a, const uint64_t *b) {
@@ -22,10 +37,16 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mov.b64 {b4,b5}, %8;\n"
         "mov.b64 {b6,b7}, %9;\n"
         "mul.wide.u32 acc,a0,b5;\n"
+#if QSB_PW_CARRY_SEED
+        "mul.wide.u32 t,a1,b4;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 pcarry,0,0;\n"
+#else
         "mov.u32 pcarry,0;\n"
         "mul.wide.u32 t,a1,b4;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 pcarry,pcarry,0;\n"
+#endif
         "mul.wide.u32 t,a2,b3;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 pcarry,pcarry,0;\n"
@@ -40,10 +61,16 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "addc.u32 pcarry,pcarry,0;\n"
         "mov.b64 {lo,hi},acc;\n"
         "mov.b64 acc,{hi,pcarry};\n"
+#if QSB_PW_CARRY_SEED
+        "mul.wide.u32 t,a0,b6;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 top,0,0;\n"
+#else
         "mov.u32 top,0;\n"
         "mul.wide.u32 t,a0,b6;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
+#endif
         "mul.wide.u32 t,a1,b5;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
@@ -81,6 +108,15 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a7,b0;\n"
         "add.u64 mid,mid,t;\n"
         "mov.b64 {mid0,mid1},mid;\n"
+#if QSB_PW_LOP3_PARITY
+        "lop3.b32 mid1,a1,b7,mid1,0x6a;\n"
+        "lop3.b32 mid1,a2,b6,mid1,0x6a;\n"
+        "lop3.b32 mid1,a3,b5,mid1,0x6a;\n"
+        "lop3.b32 mid1,a4,b4,mid1,0x6a;\n"
+        "lop3.b32 mid1,a5,b3,mid1,0x6a;\n"
+        "lop3.b32 mid1,a6,b2,mid1,0x6a;\n"
+        "lop3.b32 mid1,a7,b1,mid1,0x6a;\n"
+#else
         "and.b32 bit,a1,b7;\n"
         "xor.b32 mid1,mid1,bit;\n"
         "and.b32 bit,a2,b6;\n"
@@ -95,22 +131,35 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "xor.b32 mid1,mid1,bit;\n"
         "and.b32 bit,a7,b1;\n"
         "xor.b32 mid1,mid1,bit;\n"
+#endif
         "and.b32 mid1,mid1,1;\n"
         "mov.b64 %0,{mid0,mid1};\n"
         "mul.wide.u32 acc,a5,b7;\n"
+#if QSB_PW_CARRY_SEED
+        "mul.wide.u32 t,a6,b6;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 pcarry,0,0;\n"
+#else
         "mov.u32 pcarry,0;\n"
         "mul.wide.u32 t,a6,b6;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 pcarry,pcarry,0;\n"
+#endif
         "mul.wide.u32 t,a7,b5;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 pcarry,pcarry,0;\n"
         "mov.b64 {lo,hi},acc;\n"
         "mov.b64 acc,{hi,pcarry};\n"
+#if QSB_PW_CARRY_SEED
+        "mul.wide.u32 t,a6,b7;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 top,0,0;\n"
+#else
         "mov.u32 top,0;\n"
         "mul.wide.u32 t,a6,b7;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
+#endif
         "mul.wide.u32 t,a7,b6;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
