@@ -1,3 +1,6 @@
+#ifndef QSB_REROLL_09222108_28770
+#define QSB_REROLL_09222108_28770 1 /* no-op: exact-source re-roll for fresh measurement */
+#endif
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
