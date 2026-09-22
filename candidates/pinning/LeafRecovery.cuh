@@ -35,15 +35,35 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     // congruent representative.
 #if QSB_ISO_XR
     (void)a;
+#ifndef QSB_ISO_DEN_LEAN
+#define QSB_ISO_DEN_LEAN 1
+#endif
+#if QSB_ISO_DEN_LEAN
+    // pin_iso_xneg is a launch constant, so this test is launch-uniform (never divergent)
+    // and the a=+1 problems lose the four XORs, the AND and the whole four-limb constant
+    // add: the subtraction reads U directly.  The a=-1 arm keeps the exact mod-2^256
+    // identity ~U + (p+1) = 2^256 + (p-U); for U<p the carry out is certain, so the
+    // retained low words are exactly p-U, the same representative HEAD forms here (and
+    // the same 2^-224 raw-U exposure this cofactor path already documents).
+    if(pin_iso_xneg) {
+        d[0]=~U[0];d[1]=~U[1];d[2]=~U[2];d[3]=~U[3];
+        UADDO1(d[0],0xFFFFFFFEFFFFFC30ULL);UADDC1(d[1],~0ULL);UADDC1(d[2],~0ULL);UADD1(d[3],~0ULL);
+        _ModSub256(d,X);
+    } else {
+        _ModSub256(d,U,X);
+    }
+#else
     uint64_t mask=0ULL-(uint64_t)pin_iso_xneg;
     d[0]=U[0]^mask;d[1]=U[1]^mask;d[2]=U[2]^mask;d[3]=U[3]^mask;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&mask;
     UADDO1(d[0],c0);UADDC1(d[1],mask);UADDC1(d[2],mask);UADD1(d[3],mask);
+    _ModSub256(d,X);
+#endif
 #else
     uint64_t raw[5];qsb_field_mul_sc(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
-#endif
     _ModSub256(d,X);
+#endif
 #if QSB_RAW_DEN
     { uint64_t rw[5]; qsb_field_mul_sc(rw,V,d); Load256(W,rw); }   // P8: raw leaf, W = V*(a*U-X)
 #else

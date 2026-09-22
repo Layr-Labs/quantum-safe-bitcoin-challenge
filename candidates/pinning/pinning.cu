@@ -213,11 +213,21 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_STREAM_PARM
 #define QSB_STREAM_ARG
 #endif
+#ifndef QSB_S0_OCC
+#define QSB_S0_OCC 1          /* resident prepare threads per SM: 640 (5 x 128) instead of 512.
+                               * The prepare block is 12 KiB of shared arena, so 5 blocks need
+                               * 60 KiB of the 100 KiB SM budget, and the register cap becomes
+                               * 65536/(5*128) = 102 -> 96 after the 8-register granularity.
+                               * The three working-set cuts below (uniform-branch denominator,
+                               * mask-folded unusable lanes, register-seeded first tree level)
+                               * are what frees that headroom; -DQSB_S0_OCC=0 restores 4 x 128. */
+#endif
+#define QSB_S0_RESIDENT (QSB_S0_OCC ? 640 : 512)
 #if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
 #undef QSB_S0_THREADS
 #define QSB_S0_THREADS QSB_TREE_N
 #undef QSB_S0_BLOCKS
-#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */
+#define QSB_S0_BLOCKS (QSB_S0_RESIDENT/QSB_TREE_N)
 #endif
 #if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD
 #error "prepare block size must equal the tree width unless the tree is offloaded"

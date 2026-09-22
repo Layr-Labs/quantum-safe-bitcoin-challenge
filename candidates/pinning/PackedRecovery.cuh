@@ -71,7 +71,19 @@ __device__ __forceinline__ void qsb_packed_prepare(
         qsb_packed_raw_mul(hc,U,D);
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
+#ifndef QSB_PREP_MASK
+#define QSB_PREP_MASK 1
+#endif
+#if QSB_PREP_MASK
+        /* Same two zeroed planes, without the divergent tail branch: `usable` dies into
+         * one all-ones/zero mask and the eight AND's sit in the shadow of the three
+         * multiplies above.  keep = ~0 reproduces vbar/tbar exactly, keep = 0 the zeros. */
+        const uint64_t keep=0ULL-(uint64_t)usable;
+        #pragma unroll
+        for(int k=0;k<4;k++){vbar[k]&=keep;tbar[k]&=keep;}
+#else
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);

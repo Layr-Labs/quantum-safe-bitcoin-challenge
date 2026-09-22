@@ -14,11 +14,32 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     for(int k=0;k<4;k++)products[k][tid]=value[k];
     __syncthreads();
     int offset=0;
+#ifndef QSB_COF_SEED_REG
+#define QSB_COF_SEED_REG 1
+#endif
+#if QSB_COF_SEED_REG
+    /* The first level reads products[k][tid], which this lane itself just stored from
+     * `value`: take the left operand from its own registers and enter the rolled loop one
+     * level in.  Operand pair, multiply order and destination node are unchanged, so the
+     * whole tree -- root, checkpoints and every exclusion product -- is bit-identical; the
+     * block only loses N/2 x 4 LDS and the dependence of that level on the shared reload. */
+    if(tid<(N>>1)) {
+        uint64_t a[5],b[5],out[5];
+        #pragma unroll
+        for(int k=0;k<4;k++){a[k]=value[k];b[k]=products[k][(N>>1)+tid];}
+        a[4]=b[4]=0;qsb_field_mul_sc(out,a,b);
+        #pragma unroll
+        for(int k=0;k<4;k++)products[k][N+tid]=out[k];
+    }
+    offset=N;
+    if((N>>1)>32)__syncthreads();else __syncwarp();
+#endif
+    constexpr int up_start=QSB_COF_SEED_REG ? (N>>1) : N;
     #pragma unroll 1
 #if QSB_TREE_TOP2
-    for(int count=N;count>2;count>>=1) {   /* stop below the root: the top pair is merged into the down-sweep */
+    for(int count=up_start;count>2;count>>=1) {
 #else
-    for(int count=N;count>1;count>>=1) {
+    for(int count=up_start;count>1;count>>=1) {
 #endif
         int half=count>>1;
         if(tid<half) {
