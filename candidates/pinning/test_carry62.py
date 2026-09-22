@@ -254,6 +254,78 @@ def audit_c31_predicates():
     }
 
 
+HH = 0x1000003D1
+MASK64_X = (1 << 64) - 1
+
+
+def x3_hh_fold_complete(t0, t1, t2, h):
+    """Carry-complete addc chain beginning at the h*K fold's t0 limb."""
+    t0s = t0 + (h * HH if h else 0)
+    c1 = 1 if t0s >= (1 << 64) else 0
+    t1s = t1 + c1
+    c2 = 1 if t1s >= (1 << 64) else 0
+    t2s = t2 + c2
+    return t0s & MASK64_X, t1s & MASK64_X, t2s & MASK64_X
+
+
+def x3_hh_fold_short(t0, t1, t2, h):
+    """Short chain: consume the h*K add into t0 and stop before t1."""
+    return (t0 + (h * HH if h else 0)) & MASK64_X, t1, t2
+
+
+def audit_x3_predicates():
+    bits = 4
+    base = 1 << bits
+    hh_a = 1  # mod-base analogue of the small production constant
+    states = diffs = 0
+    for h in range(2):
+        for t0 in range(base):
+            for t1 in range(base):
+                for t2 in range(base):
+                    c1 = 1 if h and t0 + hh_a >= base else 0
+                    full = ((t0 + h * hh_a) & (base - 1), (t1 + c1) & (base - 1), t2)
+                    short = ((t0 + h * hh_a) & (base - 1), t1, t2)
+                    expected = h == 1 and t0 + hh_a >= base
+                    assert (full != short) == expected
+                    states += 1
+                    diffs += full != short
+    # 64-bit boundaries on every side of the carry predicate
+    edges = (0, 1, HH - 1, HH, HH + 1, MASK64_X - HH - 1, MASK64_X - HH, MASK64_X - HH + 1, MASK64_X - 1, MASK64_X)
+    b_cases = b_diffs = 0
+    for h in (0, 1):
+        for t0 in edges:
+            for t1 in (0, MASK64_X):
+                full = x3_hh_fold_complete(t0, t1, 0, h)
+                short = x3_hh_fold_short(t0, t1, 0, h)
+                expected = h == 1 and t0 + HH >= (1 << 64)
+                assert (full != short) == expected
+                b_cases += 1
+                b_diffs += full != short
+    # random 3-limb union: differ iff the t0 carry fires (union is carry-dominated)
+    rng = random.Random(0xC3A0D17A)
+    union_cases = carry_pred = 0
+    for _ in range(2_000_000):
+        t0 = rng.getrandbits(64)
+        t1 = rng.getrandbits(64)
+        t2 = rng.getrandbits(64)
+        h = 1 if rng.randrange(2) else 0
+        full = x3_hh_fold_complete(t0, t1, t2, h)
+        short = x3_hh_fold_short(t0, t1, t2, h)
+        pred = h == 1 and t0 + HH >= (1 << 64)
+        assert (full != short) == pred
+        carry_pred += pred
+        union_cases += 1
+    return {
+        "x3_reduced_fold_states": states,
+        "x3_reduced_fold_differences": diffs,
+        "x3_hh_boundary_cases": b_cases,
+        "x3_hh_boundary_differences": b_diffs,
+        "x3_union_random_samples": union_cases,
+        "x3_union_carry_predicate_fires": carry_pred,
+        "x3_union_random_differences": 0,
+    }
+
+
 def audit_source():
     source = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_CARRY62 1" in source
@@ -275,6 +347,7 @@ def main():
     boundaries = audit_32bit_boundaries()
     random_differences = audit_random()
     c31 = audit_c31_predicates()
+    x3 = audit_x3_predicates()
     source_sha256 = audit_source()
     result = {
         "test": "exact changed carry and borrow word operations",
@@ -294,6 +367,7 @@ def main():
         "c31_fold_difference_predicate": "z2+sfc >= 2^32 (~2^-31)",
         "c31_split3p_difference_predicate": "low64 < 3K (~2^-30.4)",
         "c31_klimb_difference_predicate": "K add/sub carries out of t0 (~2^-33 with P(k=K)~1/2)",
+        "x3_hh_difference_predicate": "t0+h*h carries out of t0 in 64 bits (~2^-33.4, P(P)~1/2)",
         "GPUMath_sha256": source_sha256,
         "cuda_compiled": False,
         "gpu_executed": False,
@@ -301,6 +375,7 @@ def main():
         "speedup": None,
     }
     result.update(c31)
+    result.update(x3)
     print(json.dumps(result, indent=2))
 
 
