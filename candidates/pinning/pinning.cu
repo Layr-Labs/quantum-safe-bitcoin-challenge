@@ -640,12 +640,113 @@ __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
         codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
     }
 }
+/* QSB_DEC_REP: the sign mask for a decoded digit is the sign bit replicated to
+ * both 32-bit halves. mov.b64 {m,m} does that in one instruction instead of a
+ * shift and an OR. (Public mechanism, fkiene's pending bundle note.) */
+#ifndef QSB_DEC_REP
+#define QSB_DEC_REP 1
+#endif
 __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
     unsigned base,uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    { uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_DEC_REP
+      uint64_t m64; asm("mov.b64 %0,{%1,%1};" : "=l"(m64) : "r"(m32));
+      gt_load_signed_flat_m(table,base,code&0x1ffffu,m64,x,y);
+#else
+      gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y);
+#endif
+    }  /* P6: same mask, one SHF */
 }
+
+/* QSB_CHAIN_PIPE: depth-1 gather software pipeline inside the signed-digit
+ * chain. The next chunk's table point is gathered the moment both of its
+ * target registers die: X2 after U2 = X2*ZZ1 and Yoff after
+ * S2 = (Y2+Yoff)*ZZZ1. The remaining ~5M+2S of this addition cover the next
+ * gather's L2 latency, so the loop never waits on a load at its head. The
+ * load lands in X2 and Yoff, which the caller rotates: after the call
+ * (x,y,o) holds (next x, dead anchor slot, current y) so the next iteration
+ * consumes (x,o,y) -- y and o trade roles each step. Zero net register
+ * growth: the prefetch reuses registers that are already dead, unlike the
+ * dedicated nx/ny buffers of the retired QSB_EARLY_LOAD experiment.
+ * Measured on the pre-isomorphism pipeline (our v6, d83b6aa0): +0.8-1.4%
+ * self-reported throughput vs the same-kernel tip family. Ported here onto
+ * the QSB_YOFF chain (offset ordinates make the signed gather a pure XOR). */
+#ifndef QSB_CHAIN_PIPE
+#define QSB_CHAIN_PIPE 1
+#endif
+#if QSB_CHAIN_PIPE
+template<bool DEFER_Y>
+__device__ __forceinline__ void _PointAddXYZZT_pipe(
+    uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
+    uint64_t *X2, uint64_t *Y2, uint64_t *Yoff,
+    const uint8_t *table, unsigned nc)
+{
+  uint64_t U2[4];
+  uint64_t S2[4];
+  uint64_t P[4];
+  uint64_t R[4];
+  uint64_t PP[4];
+  uint64_t PPP[4];
+  uint64_t Q[4];
+  uint64_t T[4];
+  volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+  uint32_t ncode=codes[(size_t)nc*QSB_TREE_N+threadIdx.x];
+
+#if QSB_YOFF
+  _ModAddLazyOff(S2, Y2, Yoff);        // offset ordinates: y2 + yoff (mod p)
+#elif QSB_LAZY
+  _ModAddLazy(S2, Y2, Yoff);
+#else
+  _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
+#endif
+  _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1 ; Yoff dead
+  _ModSub256(R, S2, Y1);               // R  = S2 - Y1
+  _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1           ; X2 dead
+  { uint32_t m32=(uint32_t)((int32_t)ncode>>31);
+#if QSB_DEC_REP
+    uint64_t m64; asm("mov.b64 %0,{%1,%1};" : "=l"(m64) : "r"(m32));
+    gt_load_signed_flat_m(table, gt_offset(nc), ncode&0x1ffffu, m64, X2, Yoff);
+#else
+    gt_load_signed_flat_m(table, gt_offset(nc), ncode&0x1ffffu,
+                          ((uint64_t)m32<<32)|m32, X2, Yoff);
+#endif
+  }                                    // next point -> dead regs
+  _ModSub256(P, U2, X1);               // P  = U2 - X1
+  _ModSqr(PP, P);                      // PP = P^2
+  _ModMult(PPP, PP, P);                // PPP = P*PP
+  _ModMult(Q, U2, PP);                 // V  = U2*PP
+
+#if QSB_FUSE_SQRADDSUB2
+  /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
+  _ModSqrAddSub2(T, R, PPP, Q);        // X3 = R^2 + PPP - 2V
+#else
+  _ModSqr(T, R);                       // R^2
+#if QSB_LAZY
+  _ModX3Fused(T, T, PPP, Q);           // X3 = R^2 + PPP - 2V
+#else
+  _ModAdd256(T, T, PPP);
+  _ModSub256(T, T, Q);
+  _ModSub256(T, T, Q);                 // X3 = R^2 + PPP - 2V
+#endif
+#endif
+
+  _ModMult(ZZZ1, PPP);                 // ZZZ3
+  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
+                                       // on the paired-carry schedule without predicate spills)
+  _ModSub256(Q, Q, T);                 // V - X3
+  _ModMult(Q, R);                      // R*(V - X3)
+  if (DEFER_Y) {
+    Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
+  } else {
+    _ModMult(S2, (uint64_t *)Y2, ZZZ1);// affine Y2*ZZZ3
+    _ModSub256(Y1, Q, S2);             // exact Y3
+  }
+
+  Load256(X1, T);                      // X3
+}
+#endif
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
@@ -655,6 +756,32 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_decoded(table,1,gt_offset(1),x1,y1);
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_CHAIN_PIPE
+    /* Rotating point buffers: iteration consumes (x,y,o) and prefetches the
+     * next chunk into (x,o); the following iteration therefore consumes
+     * (x,o,y) -- y and o trade roles each step. The role swap also absorbs
+     * the old Load256(y0,y1) anchor copy for free. The final iteration uses
+     * the classic body (nothing left to prefetch), and the anchor copy it
+     * would have produced is exactly the last point's y, already in y. */
+    uint64_t x[4],y[4],o[4];
+    /* The two-calls-per-iteration rotation prefetches c+1 and c+2, so the
+     * last prefetch index is GT_CHUNKS-1 only when GT_CHUNKS is odd. */
+    static_assert(GT_CHUNKS&1,"QSB_CHAIN_PIPE requires odd GT_CHUNKS");
+    Load256(o,y0);                     /* deferred-Y anchor = first point's y (the
+                                        * affine anchor of the mm seed), matching the
+                                        * classic loop's y0 carried into iteration 2. */
+    qsb_load_decoded(table,2,gt_offset(2),x,y);
+    #pragma unroll 1
+    for(int c=2;c+1<GT_CHUNKS;c+=2) {
+        _PointAddXYZZT_pipe<true>(X,Y,U,V,x,y,o,table,(unsigned)c+1u);
+        _PointAddXYZZT_pipe<true>(X,Y,U,V,x,o,y,table,(unsigned)c+2u);
+    }
+    _PointAddXYZZT<true>(X,Y,U,V,x,y,o);
+#if QSB_YOFF
+    qsb_yoff_to_y(y);
+#endif
+    _ModMult(x1,y,V);_ModSub256(Y,Y,x1);
+#else
     unsigned base=gt_offset(2);
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
@@ -667,6 +794,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_yoff_to_y(y0);
 #endif
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
+#endif
 }
 
 
