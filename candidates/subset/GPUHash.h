@@ -159,14 +159,81 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
 #define Maj(x,y,z) ((x & y) | (z & (x | y)))
 #define Ch(x,y,z) (z ^ (x & (y ^ z)))
 
+/* QSB_SHA_FMA_ADD: pipe balance. On sm_89 the ALU pipe (SHF/LOP3/IADD3, 64 lanes/SM/clk) and
+ * the FMA pipe (IMAD, 64 lanes/SM/clk) issue independently. kernel_digest measures 15300 ALU
+ * against 5608 FMA issue slots, i.e. the ALU pipe is 2.73x oversubscribed while the FMA pipe
+ * idles. Writing each two-input SHA add as `mad.lo.u32 d, a, one, b` forces it onto IMAD.
+ * `one` comes from a constant the compiler cannot fold, so ptxas cannot turn it back into an
+ * add. Exact: a*1 + b == a + b (mod 2^32) for every a, b. */
+#ifndef QSB_SHA_FMA_ADD
+#define QSB_SHA_FMA_ADD 1
+#endif
+#ifndef QSB_SHA_FMA_RND
+#define QSB_SHA_FMA_RND 1
+#endif
+#if QSB_SHA_FMA_ADD
+__device__ __constant__ uint32_t qsb_one_mul = 1u;   /* 1; never written again */
+#ifdef __CUDA_ARCH__
+#define QSB_FMA_ONE qsb_one_mul
+#else
+#define QSB_FMA_ONE 1u
+#endif
+__host__ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t b)
+{
+#ifdef __CUDA_ARCH__
+    uint32_t r;
+    asm("mad.lo.u32 %0, %1, %2, %3;" : "=r"(r) : "r"(a), "r"(one), "r"(b));
+    return r;
+#else
+    return a * one + b;
+#endif
+}
+#endif
+
 // SHA-256 inner round
+#if QSB_SHA_FMA_ADD && QSB_SHA_FMA_RND
+#define S2Round(a, b, c, d, e, f, g, h, k, w) { \
+    const uint32_t qsb_one_ = QSB_FMA_ONE; \
+    t1 = qsb_fadd(h, qsb_one_, (k)); \
+    t1 = qsb_fadd(t1, qsb_one_, (w)); \
+    t1 = qsb_fadd(t1, qsb_one_, S1(e)); \
+    t1 = qsb_fadd(t1, qsb_one_, Ch(e,f,g)); \
+    d  = qsb_fadd(d, qsb_one_, t1); \
+    t2 = qsb_fadd(t1, qsb_one_, S0(a)); \
+    h  = qsb_fadd(t2, qsb_one_, Maj(a,b,c)); }
+#else
 #define S2Round(a, b, c, d, e, f, g, h, k, w) \
     t1 = h + S1(e) + Ch(e,f,g) + k + (w); \
     t2 = S0(a) + Maj(a,b,c); \
     d += t1; \
     h = t1 + t2;
+#endif
 
 // WMIX
+#ifndef QSB_SHA_FMA_WMIX
+#define QSB_SHA_FMA_WMIX 1
+#endif
+#if QSB_SHA_FMA_ADD && QSB_SHA_FMA_WMIX
+#define WMIX() { \
+const uint32_t qsb_one_ = QSB_FMA_ONE;\
+w[0] = qsb_fadd(w[0], qsb_one_, s1(w[14])); w[0] = qsb_fadd(w[0], qsb_one_, w[9]); w[0] = qsb_fadd(w[0], qsb_one_, s0(w[1]));\
+w[1] = qsb_fadd(w[1], qsb_one_, s1(w[15])); w[1] = qsb_fadd(w[1], qsb_one_, w[10]); w[1] = qsb_fadd(w[1], qsb_one_, s0(w[2]));\
+w[2] = qsb_fadd(w[2], qsb_one_, s1(w[0])); w[2] = qsb_fadd(w[2], qsb_one_, w[11]); w[2] = qsb_fadd(w[2], qsb_one_, s0(w[3]));\
+w[3] = qsb_fadd(w[3], qsb_one_, s1(w[1])); w[3] = qsb_fadd(w[3], qsb_one_, w[12]); w[3] = qsb_fadd(w[3], qsb_one_, s0(w[4]));\
+w[4] = qsb_fadd(w[4], qsb_one_, s1(w[2])); w[4] = qsb_fadd(w[4], qsb_one_, w[13]); w[4] = qsb_fadd(w[4], qsb_one_, s0(w[5]));\
+w[5] = qsb_fadd(w[5], qsb_one_, s1(w[3])); w[5] = qsb_fadd(w[5], qsb_one_, w[14]); w[5] = qsb_fadd(w[5], qsb_one_, s0(w[6]));\
+w[6] = qsb_fadd(w[6], qsb_one_, s1(w[4])); w[6] = qsb_fadd(w[6], qsb_one_, w[15]); w[6] = qsb_fadd(w[6], qsb_one_, s0(w[7]));\
+w[7] = qsb_fadd(w[7], qsb_one_, s1(w[5])); w[7] = qsb_fadd(w[7], qsb_one_, w[0]); w[7] = qsb_fadd(w[7], qsb_one_, s0(w[8]));\
+w[8] = qsb_fadd(w[8], qsb_one_, s1(w[6])); w[8] = qsb_fadd(w[8], qsb_one_, w[1]); w[8] = qsb_fadd(w[8], qsb_one_, s0(w[9]));\
+w[9] = qsb_fadd(w[9], qsb_one_, s1(w[7])); w[9] = qsb_fadd(w[9], qsb_one_, w[2]); w[9] = qsb_fadd(w[9], qsb_one_, s0(w[10]));\
+w[10] = qsb_fadd(w[10], qsb_one_, s1(w[8])); w[10] = qsb_fadd(w[10], qsb_one_, w[3]); w[10] = qsb_fadd(w[10], qsb_one_, s0(w[11]));\
+w[11] = qsb_fadd(w[11], qsb_one_, s1(w[9])); w[11] = qsb_fadd(w[11], qsb_one_, w[4]); w[11] = qsb_fadd(w[11], qsb_one_, s0(w[12]));\
+w[12] = qsb_fadd(w[12], qsb_one_, s1(w[10])); w[12] = qsb_fadd(w[12], qsb_one_, w[5]); w[12] = qsb_fadd(w[12], qsb_one_, s0(w[13]));\
+w[13] = qsb_fadd(w[13], qsb_one_, s1(w[11])); w[13] = qsb_fadd(w[13], qsb_one_, w[6]); w[13] = qsb_fadd(w[13], qsb_one_, s0(w[14]));\
+w[14] = qsb_fadd(w[14], qsb_one_, s1(w[12])); w[14] = qsb_fadd(w[14], qsb_one_, w[7]); w[14] = qsb_fadd(w[14], qsb_one_, s0(w[15]));\
+w[15] = qsb_fadd(w[15], qsb_one_, s1(w[13])); w[15] = qsb_fadd(w[15], qsb_one_, w[8]); w[15] = qsb_fadd(w[15], qsb_one_, s0(w[0]));\
+}
+#else
 #define WMIX() { \
 w[0] += s1(w[14]) + w[9] + s0(w[1]);\
 w[1] += s1(w[15]) + w[10] + s0(w[2]);\
@@ -185,6 +252,7 @@ w[13] += s1(w[11]) + w[6] + s0(w[14]);\
 w[14] += s1(w[12]) + w[7] + s0(w[15]);\
 w[15] += s1(w[13]) + w[8] + s0(w[0]);\
 }
+#endif
 
 // ROUND
 #define SHA256_RND(k) {\
