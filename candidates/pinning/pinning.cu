@@ -647,8 +647,56 @@ __device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c
     { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
 }
 
+/* QSB_REG_DIGITS: keep the recode window in registers instead of the shared
+ * code arena. The arena codes are written and read by the SAME thread only
+ * (qsb_decode_to_shared/qsb_load_decoded), so the shared round-trip and the
+ * barrier that guarded it in qsb_packed_prepare are pure overhead. The window
+ * carries M[0..3] plus a shift (5 registers); each chunk peels its field with
+ * the same bit algebra as the shared decoder, so every (idx, neg) pair is
+ * bit-identical. -DQSB_REG_DIGITS=0 restores the shared-code path. */
+#ifndef QSB_REG_DIGITS
+#define QSB_REG_DIGITS 1
+#endif
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;
+#if QSB_REG_DIGITS
+    uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
+    qsb_digit_window win;win.init(M,1u);
+    uint64_t x0[4],y0[4],x1[4],y1[4];
+    {   /* chunk 0: 18-bit field, tm = (f>>17)-1 */
+        uint32_t f=win.peek()&0x3FFFFu;
+        int32_t tm=(int32_t)(f>>17u)-1;
+        uint32_t idx=(f^(uint32_t)tm)&0x1FFFFu;
+        uint32_t m32=(uint32_t)(tm<0?-1:0);
+        gt_load_signed_flat_m(table,gt_offset(0),idx,((uint64_t)m32<<32)|m32,x0,y0);
+        win.advance(18u);
+    }
+    {   /* chunk 1: 17-bit field */
+        uint32_t f=win.peek()&0x1FFFFu;
+        int32_t tm=(int32_t)(f>>16u)-1;
+        uint32_t idx=(f^(uint32_t)tm)&0xFFFFu;
+        uint32_t m32=(uint32_t)(tm<0?-1:0);
+        gt_load_signed_flat_m(table,gt_offset(1),idx,((uint64_t)m32<<32)|m32,x1,y1);
+        win.advance(17u);
+    }
+    // INIT_ANCHOR
+    _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+    unsigned base=gt_offset(2);
+    #pragma unroll 1
+    for(int c=2;c<GT_CHUNKS;c++) {
+        uint32_t f=win.peek()&0x1FFFFu;
+        int32_t tm=(c==GT_CHUNKS-1)?-negative:(int32_t)(f>>16u)-1;
+        uint32_t idx=(f^(uint32_t)tm)&0xFFFFu;
+        uint32_t m32=(uint32_t)(tm<0?-1:0);
+        gt_load_signed_flat_m(table,base,idx,((uint64_t)m32<<32)|m32,x1,y1);
+        win.advance(17u);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        base+=1u<<16;
+    }
+#else
     qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
     qsb_load_decoded(table,0,gt_offset(0),x0,y0);
@@ -663,6 +711,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         Load256(y0,y1);
         base+=1u<<16;
     }
+#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
@@ -1532,6 +1581,14 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
+
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -2022,7 +2079,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2054,6 +2111,16 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
 #if QSB_ROOT_V2
+#if QSB_ROOT_CS
+    {   /* roots is cudaMalloc'd (256-byte aligned) and indexed in 4-limb (32-byte) records;
+         * the .cs load matches the evict-first store in the merged cofactor top. */
+        const ulonglong2 *r2=(const ulonglong2 *)roots;
+        ulonglong2 a01=qsb_ld_v2(&r2[2ull*blockIdx.x]),a23=qsb_ld_v2(&r2[2ull*blockIdx.x+1]);
+        ulonglong2 b01=qsb_ld_v2(&r2[2ull*(root_count+blockIdx.x)]),b23=qsb_ld_v2(&r2[2ull*(root_count+blockIdx.x)+1]);
+        prod[0]=a01.x;prod[1]=a01.y;prod[2]=a23.x;prod[3]=a23.y;
+        weighted_inv[0]=b01.x;weighted_inv[1]=b01.y;weighted_inv[2]=b23.x;weighted_inv[3]=b23.y;
+    }
+#else
     {   /* roots is cudaMalloc'd (256-byte aligned) and indexed in 4-limb (32-byte) records */
         const ulonglong2 *r2=(const ulonglong2 *)roots;
         ulonglong2 a01=r2[2ull*blockIdx.x],a23=r2[2ull*blockIdx.x+1];
@@ -2061,6 +2128,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         prod[0]=a01.x;prod[1]=a01.y;prod[2]=a23.x;prod[3]=a23.y;
         weighted_inv[0]=b01.x;weighted_inv[1]=b01.y;weighted_inv[2]=b23.x;weighted_inv[3]=b23.y;
     }
+#endif
 #else
     for(int k=0;k<4;k++)prod[k]=roots[4ull*blockIdx.x+k];
     for(int k=0;k<4;k++)weighted_inv[k]=roots[4ull*(root_count+blockIdx.x)+k];
