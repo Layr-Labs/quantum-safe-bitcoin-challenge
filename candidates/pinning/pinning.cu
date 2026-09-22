@@ -409,6 +409,27 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
 }
 
+/* Offset-taking variant: the caller's digit record already holds the table
+ * byte offset of the entry, so the loader forms no index arithmetic at all.
+ * Entry count is 2^20 and records are 64 B, so every offset is below 2^26 and
+ * the record's sign bit (31) can never collide with it. */
+__device__ __forceinline__ void gt_load_signed_flat_off(const uint8_t *__restrict__ gTable,
+                                                        uint32_t off,
+                                                        uint64_t m,
+                                                        uint64_t *__restrict__ gx,
+                                                        uint64_t *__restrict__ gy) {
+    const ulonglong2 *tx=(const ulonglong2 *)(gTable+(size_t)off);
+    const ulonglong2 *ty=(const ulonglong2 *)(gTable+(size_t)off+32);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
+#if !QSB_YOFF
+    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
+    UADDO1(r0,c0); UADDC1(r1,m); UADDC1(r2,m); UADD1(r3,m);
+#endif
+    gy[0]=r0; gy[1]=r1; gy[2]=r2; gy[3]=r3;
+}
+
 __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
                                                      uint64_t neg,
@@ -623,45 +644,122 @@ __device__ __forceinline__ void qsb_signed_recode_setup(const uint64_t k[4], uin
     *sign=(int)(((k3>>63)|carry)^1ULL); // negative flag for signed2k-n
 }
 
+/* Digit-record layout of the rolled fixed-base chain.
+ *
+ * QSB_DIGIT_OFF: the recode stores the table BYTE OFFSET of the selected
+ * record, (gt_offset(c)+idx)*64, instead of the bare index.  The chunk base is
+ * a compile-time constant of the fully unrolled recode, so the scaling is free
+ * there, while the rolled consumer loses its loop-carried chunk-base register,
+ * its thirteen 2^16 increments, the 17-bit index mask and the widen-and-scale
+ * that formed the address.  Exact: GT_TOTAL_ENTRIES is 2^20 and records are
+ * 64 B, so an offset is at most (15*2^16 + 2^16 - 1)*64 = 67,108,736 < 2^26;
+ * bits 26..30 stay clear and the sign bit 31 is recovered by the same test.
+ * -DQSB_DIGIT_OFF=0 restores the index record and the masked index loader.
+ *
+ * QSB_DIGIT_PAIR: two 32-bit records share one 64-bit arena word, so the
+ * recode issues eight shared stores instead of fifteen and the chain reads a
+ * word every second chunk (seven loads instead of thirteen), with the odd
+ * chunk's record already in a register one iteration early.  The pair index
+ * c>>1 and the half select c&1 are warp-uniform loop-counter expressions, so
+ * no lane diverges and no record changes value.  Arena use falls from 7.5 KiB
+ * to 8 KiB of the same 12 KiB allocation, so occupancy is unchanged.
+ * -DQSB_DIGIT_PAIR=0 restores one 32-bit plane per chunk. */
+#ifndef QSB_DIGIT_OFF
+#define QSB_DIGIT_OFF 1
+#endif
+#ifndef QSB_DIGIT_PAIR
+#define QSB_DIGIT_PAIR 1
+#endif
+
+__device__ __forceinline__ uint32_t qsb_digit_record(const uint64_t *M,int negative,unsigned c) {
+    const unsigned pos=c==0?1u:17u*c+2u;
+    const unsigned j=pos/64u,sh=pos%64u;
+    uint64_t value=M[j]>>sh;
+    if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
+    const unsigned bits=c==0?18u:17u;
+    uint32_t f=(uint32_t)value&((1u<<bits)-1u);
+    int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
+    uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
+    uint32_t neg=(uint32_t)(tm<0);
+#if QSB_DIGIT_OFF
+    return ((gt_offset((int)c)+idx)<<6)|(neg<<31);
+#else
+    return idx|(neg<<31);
+#endif
+}
+
 __device__ __forceinline__ void qsb_decode_to_shared(const uint64_t *k) {
     uint64_t M[4];int negative;qsb_signed_recode_setup(k,M,&negative);
+#if QSB_DIGIT_PAIR
+    volatile uint64_t *words=(volatile uint64_t*)qsb_digit_arena();
+    #pragma unroll
+    for(int j=0;j<(GT_CHUNKS+1)/2;j++) {
+        uint32_t lo=qsb_digit_record(M,negative,(unsigned)(2*j));
+        uint32_t hi=(2*j+1<GT_CHUNKS)?qsb_digit_record(M,negative,(unsigned)(2*j+1)):0u;
+        words[(size_t)j*QSB_TREE_N+threadIdx.x]=(uint64_t)lo|((uint64_t)hi<<32);
+    }
+#else
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++) {
-        const unsigned pos=c==0?1u:17u*c+2u;
-        const unsigned j=pos/64u,sh=pos%64u;
-        uint64_t value=M[j]>>sh;
-        if(j<3 && sh>46u)value|=M[j+1]<<(64u-sh);
-        const unsigned bits=c==0?18u:17u;
-        uint32_t f=(uint32_t)value&((1u<<bits)-1u);
-        int32_t tm=c==GT_CHUNKS-1?-negative:(int32_t)(f>>(bits-1u))-1;
-        uint32_t idx=(f^(uint32_t)tm)&((1u<<(bits-1u))-1u);
-        uint32_t neg=(uint32_t)(tm<0);
-        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=idx|(neg<<31);
-    }
+    for(int c=0;c<GT_CHUNKS;c++)
+        codes[(size_t)c*QSB_TREE_N+threadIdx.x]=qsb_digit_record(M,negative,(unsigned)c);
+#endif
 }
-__device__ __forceinline__ void qsb_load_decoded(const uint8_t *table,unsigned c,
-    unsigned base,uint64_t *x,uint64_t *y) {
+
+__device__ __forceinline__ uint64_t qsb_record_pair(unsigned j) {
+    volatile uint64_t *words=(volatile uint64_t*)qsb_digit_arena();
+    return words[(size_t)j*QSB_TREE_N+threadIdx.x];
+}
+__device__ __forceinline__ uint32_t qsb_record_at(unsigned c) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)c*QSB_TREE_N+threadIdx.x];
-    { uint32_t m32=(uint32_t)((int32_t)code>>31); gt_load_signed_flat_m(table,base,code&0x1ffffu,((uint64_t)m32<<32)|m32,x,y); }  /* P6: same mask, one SHF */
+    return codes[(size_t)c*QSB_TREE_N+threadIdx.x];
+}
+__device__ __forceinline__ void qsb_load_record(const uint8_t *table,unsigned base,
+    uint32_t code,uint64_t *x,uint64_t *y) {
+    uint32_t m32=(uint32_t)((int32_t)code>>31);
+    const uint64_t m=((uint64_t)m32<<32)|m32;   /* P6: same mask, one SHF */
+#if QSB_DIGIT_OFF
+    (void)base;
+    gt_load_signed_flat_off(table,code&0x7FFFFFFFu,m,x,y);
+#else
+    gt_load_signed_flat_m(table,base,code&0x1ffffu,m,x,y);
+#endif
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
-    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table) {
-    qsb_decode_to_shared(k);
+    uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
+    uint64_t (*unused)[2*QSB_TREE_N]) {
+    (void)unused;qsb_decode_to_shared(k);
     uint64_t x0[4],y0[4],x1[4],y1[4];
-    qsb_load_decoded(table,0,gt_offset(0),x0,y0);
-    qsb_load_decoded(table,1,gt_offset(1),x1,y1);
+#if QSB_DIGIT_PAIR
+    uint64_t pair=qsb_record_pair(0u);
+    qsb_load_record(table,gt_offset(0),(uint32_t)pair,x0,y0);
+    qsb_load_record(table,gt_offset(1),(uint32_t)(pair>>32),x1,y1);
+#else
+    qsb_load_record(table,gt_offset(0),qsb_record_at(0u),x0,y0);
+    qsb_load_record(table,gt_offset(1),qsb_record_at(1u),x1,y1);
+#endif
     // INIT_ANCHOR
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_DIGIT_OFF
+    const unsigned base=0u;
+#else
     unsigned base=gt_offset(2);
+#endif
     #pragma unroll 1
     for(int c=2;c<GT_CHUNKS;c++) {
-        qsb_load_decoded(table,c,base,x1,y1);
+#if QSB_DIGIT_PAIR
+        if(!(c&1))pair=qsb_record_pair((unsigned)(c>>1));
+        const uint32_t code=(c&1)?(uint32_t)(pair>>32):(uint32_t)pair;
+#else
+        const uint32_t code=qsb_record_at((unsigned)c);
+#endif
+        qsb_load_record(table,base,code,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
+#if !QSB_DIGIT_OFF
         base+=1u<<16;
+#endif
     }
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
@@ -1532,6 +1630,14 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #define QSB_CHECKPOINT_STRIDE 256
 /* Candidate trees may be narrower than the 256-wide root-group trees. */
 #define QSB_CAND_STRIDE (QSB_TREE_N)
+/* Shared scratch for the prepare kernel: the product tree (2N leaves x 32 B)
+ * is dead during the fixed-base chain, so the chain may park cold per-thread
+ * state there when QSB_S0_SHM is set. */
+__device__ __forceinline__ uint64_t (*qsb_prepare_scratch())[2*QSB_TREE_N] {
+    __shared__ uint64_t products[4][2*QSB_TREE_N];
+    return products;
+}
+
 /* Split form of qsb_block_inverse.  The prepare kernel checkpoints the 254
  * internal non-root product-tree nodes to global memory and publishes the raw root.
  * A small intervening kernel normalizes and inverts each root.  The finish
@@ -2022,7 +2128,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt);
+    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
