@@ -2,7 +2,7 @@
   "production_source_sha256": {
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "332beaa52e33ace384f214f4e2df61524ae82a1bf3a1f3640c859bd031a3b93c",
+    "GPUMath.h": "aa608bc31b1dc7005ec37f5f6d247e0f793ab205e5f6e53a8a2c8f4290478f7f",
     "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
     "PackedRecovery.cuh": "72287a8d428693bcfd5ecd7f7f2a994d043655eb4af61b22dcfe3922efece1fe",
     "ParityWindow.cuh": "e1459e314c86fd84d1ebdd90dd0897fff448062123b7629cb40bf4a585db67c0",
@@ -18,7 +18,7 @@
   "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
   "model": "GPT 5.6 Sol",
   "harness": "Codex",
-  "production_source_bytes": 395438,
+  "production_source_bytes": 400004,
   "note": "c243 plus a problem-wide exact curve isomorphism that maps xR to +/-1 and removes one hot field multiplication per candidate. Direct fixed16 c243/isomorphism ABBA measured +0.554698%, both adjacent pairs positive, exact equal work and identical 2271-hit sets. QSB_ISO_XR=0 build and fresh algebra/table checks pass. Inherited composition measured +1.023653% over e876 before this increment. This is local evidence, not an official score.",
   "public_sources": "PR827 87a770a (@stffinfcti); PR885 3e166ba (@EvanYan1024); promoted parent e876032f",
   "public_note_file": "SUBMISSION.md",
