@@ -159,6 +159,13 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 }
 
 #if ZLAB_DUAL_EPOCH_SHA
+// Public-note inspiration: Akashneelesh cfdd9fc's rolled paired SHA front.
+// Independently choose 16-round bodies: two source eight-round groups per
+// loop iteration, trading a larger body for fewer branches than roll8.
+// No throughput claim; the official target evaluates the fetch/loop tradeoff.
+#ifndef QSB_PAIR_SHA_ROLL16
+#define QSB_PAIR_SHA_ROLL16 1
+#endif
 #ifndef QSB_PAIR_SHA_UNROLL_WINDOW
 #define QSB_PAIR_SHA_UNROLL_WINDOW 1
 #endif
@@ -193,7 +200,9 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
 } while(0)
     QSB_PAIR_STATE_LOAD();
-#if QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
+#if QSB_PAIR_SHA_ROLL16
+    #pragma unroll 2
+#elif QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
     #pragma unroll
 #else
     #pragma unroll 1
@@ -209,14 +218,16 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
     }
     QSB_PAIR_STATE_ADD();
-#if QSB_PAIR_SHA_UNROLL_CONST
+#if QSB_PAIR_SHA_UNROLL_CONST && !QSB_PAIR_SHA_ROLL16
     #pragma unroll
 #else
     #pragma unroll 1
 #endif
     for(int block=0;block<4;block++){
         QSB_PAIR_STATE_LOAD();
-#if QSB_PAIR_SHA_UNROLL_CONST
+#if QSB_PAIR_SHA_ROLL16
+        #pragma unroll 2
+#elif QSB_PAIR_SHA_UNROLL_CONST
         #pragma unroll
 #else
         #pragma unroll 1
