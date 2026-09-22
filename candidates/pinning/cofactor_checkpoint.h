@@ -2,6 +2,15 @@
 // applied here to the distinct public cofactor exclusion traversal.
 // Public cofactor collective: tekkac, submission31e98e47, commit554fa24c.
 #pragma once
+#ifndef QSB_COOP_TREE
+#define QSB_COOP_TREE 1
+#endif
+#if QSB_COOP_TREE
+#if !QSB_C31 || !QSB_SHORT_CARRY || !QSB_FIELD_SC || !QSB_TREE_TOP2
+#error "Cooperative tree requires the promoted raw C31/TOP2 path"
+#endif
+#include "CoopTree.cuh"
+#endif
 
 // The caller supplies nonzero effective leaves (identity for unusable lanes).
 // Preserve immutable products and accumulate exclusion products separately.
@@ -21,6 +30,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     for(int count=N;count>1;count>>=1) {
 #endif
         int half=count>>1;
+#if QSB_COOP_TREE
+        if(half==8) { qsb_tree_coop_up<N,4>(products,offset,count); }
+        else if(half==4 || half==2) { qsb_tree_coop_up<N,8>(products,offset,count); }
+        else
+#endif
         if(tid<half) {
             uint64_t a[5],b[5],out[5];
             #pragma unroll
@@ -38,6 +52,19 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
      * four excluded products of the level below, E(c)=E(parent)*sibling with E(n0)=n1 and
      * E(n1)=n0 (lanes 0..3). Same operands in the same order as the two levels it replaces,
      * so the root and every excluded product are bit-identical. */
+#if QSB_COOP_TREE
+    if(tid<32) {
+        unsigned mask=__ballot_sync(0xffffffffu,tid<20);
+        if(tid<20) {
+            int job=tid/4;
+            const int ia=job<4?2*N-4+((job&1)^1):2*N-4;
+            const int ib=job<4?2*N-8+(job^2):2*N-3;
+            uint64_t *dest=job<4?&excluded[0][N-8+job]:roots+(size_t)blockIdx.x*4;
+            qsb_tree_coop_product<4>(&products[0][ia],2*N,&products[0][ib],2*N,
+                                     dest,job<4?N:1,mask);
+        }
+    }
+#else
     if(tid<5) {
         uint64_t a[5],b[5],out[5];
         const int ia=tid<4 ? 2*N-4+((tid&1)^1) : 2*N-4;
@@ -53,6 +80,7 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=out[k];
         }
     }
+#endif
     __syncwarp();
     offset=2*N-16;
     #pragma unroll 1
@@ -71,6 +99,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     for(int count=2;count<N;count<<=1) {
 #endif
         int half=count>>1;
+#if QSB_COOP_TREE
+        if(count==8) { qsb_tree_coop_down<N,4>(products,excluded,offset,count); }
+        else if(count==16) { qsb_tree_coop_down<N,2>(products,excluded,offset,count); }
+        else
+#endif
         if(tid<count) {
             uint64_t parent[5],sibling[5],out[5];
             #pragma unroll
