@@ -108,7 +108,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 8388608    /* candidates per pipeline launch */
+#define QSB_BATCH 16777216    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -151,7 +151,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
+#define QSB_S2_BLOCKS 8 /* Measured finish occupancy setting from 0b204c4f. */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
@@ -205,7 +205,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
