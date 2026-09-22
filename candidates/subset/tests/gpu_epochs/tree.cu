@@ -411,6 +411,23 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
 #endif
 }
 
+/* Warm one table record into L1 without holding its data: two dead 16-byte
+ * loads cover the x and y sectors of the 64-byte line. Issued one point-add
+ * ahead, the add's dependency chain covers the gather latency; the real
+ * load then hits L1. Discarded values cost zero sustained registers. */
+__device__ __forceinline__ void gt_prefetch_flat_f(const uint8_t *__restrict__ gTable,
+                                                    uint32_t base, uint32_t idx) {
+#ifdef __CUDA_ARCH__
+    size_t off = ((size_t)base + idx) * 64;
+    uint64_t d0,d1,d2,d3;
+    asm volatile("ld.global.nc.v2.u64 {%0,%1}, [%2];" : "=l"(d0),"=l"(d1) : "l"(gTable+off));
+    asm volatile("ld.global.nc.v2.u64 {%0,%1}, [%2];" : "=l"(d2),"=l"(d3) : "l"(gTable+off+32));
+    (void)d0;(void)d1;(void)d2;(void)d3;
+#else
+    (void)gTable;(void)base;(void)idx;
+#endif
+}
+
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
  * 16 signed digits -> 1 seed load + 15 mixed adds; the next chunk's load is
  * issued one iteration ahead. Returns (qx,qy,qz) WITHOUT affine conversion so
@@ -762,6 +779,17 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+/* ZLAB_CHAIN_PIPE (kill switch): depth-1 gather software pipeline in the
+ * digit-shift chain. Chunk c+1's table point is decoded and loaded BEFORE the
+ * point-add that consumes chunk c, into whichever of the two point buffers is
+ * dead ((cx,cy) and the post-seed (x1,y1) alternate as load targets), so the
+ * add's ~600-instruction dependency chain covers the gather latency. The
+ * anchor contract is unchanged: each deferred add writes the consumed point's
+ * affine y into y0 (QSB_CHAIN_ANCHOR_UPDATE), feeding the next addition.
+ * 0 = the original load-at-head loop, kept verbatim below. */
+#ifndef ZLAB_CHAIN_PIPE
+#define ZLAB_CHAIN_PIPE 1
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -847,6 +875,50 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
         w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
     }
+#if ZLAB_CHAIN_PIPE
+    /* Depth-1 gather pipeline with no extra live point registers: chunk c+1's
+     * digit is decoded and its 64-byte record is warmed into L1 by
+     * gt_prefetch_flat_f BEFORE the point-add that consumes chunk c, so the
+     * add's dependency chain covers the gather latency and the consume-time
+     * load hits L1. Only idx_n/neg_n persist between prefetch and load --
+     * unlike a second point buffer they do not break the 128-reg envelope.
+     * Each add still publishes the consumed point's affine y into the anchor
+     * y0 (QSB_CHAIN_ANCHOR_UPDATE), so the Yoff chain is byte identical, and
+     * the funnel-shift window advances exactly once per decoded chunk, at the
+     * same window states as the rolled loop (chunk 14 keeps its no-shift
+     * remainder decode). */
+    {
+        const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
+        idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
+        neg=(uint64_t)(t^1u)^sflag;
+        w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
+        w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);       /* chunk 2 */
+        table_base += 1u << 16;
+    }
+    uint32_t idx_n; uint64_t neg_n;
+    #pragma unroll 1
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        if (c<GT_CHUNKS-2) {
+            const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
+            idx_n=(f^(t-1u))&((1u<<(W2-1u))-1u);
+            neg_n=(uint64_t)(t^1u)^sflag;
+            w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
+            w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+        } else {
+            const uint32_t f=w0&((1u<<W2)-1u);
+            idx_n=f&((1u<<(W2-1u))-1u); neg_n=sflag;                      /* chunk 14 remainder */
+        }
+        const uint32_t base_n=(uint32_t)gt_offset(c+1);
+        gt_prefetch_flat_f(gTable,base_n,idx_n);                          /* chunk c+1 -> L1 */
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);            /* consumes chunk c */
+#if !QSB_CHAIN_ANCHOR_UPDATE
+        Load256(y0, cy);                /* current affine y anchors next madd */
+#endif
+        gt_load_signed_flat_f(gTable,base_n,idx_n,neg_n,cx,cy);           /* chunk c+1, L1 hit */
+    }
+    qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);                     /* consumes chunk 14 */
+#else
     constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
     #pragma unroll (kChainUnroll)
     for (int c=2;c<GT_CHUNKS-1;c++){
@@ -870,6 +942,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
     }
+#endif
 #else
     unsigned pos=(unsigned)gt_shift(2)+1u;
     #pragma unroll 1
