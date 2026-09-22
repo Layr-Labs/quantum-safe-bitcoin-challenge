@@ -1,3 +1,68 @@
+# Pinning: promoted PR1102 with a 16 Mi-candidate launch batch
+
+## Source delta and novelty
+
+This standby starts byte-for-byte from promoted public PR #1102, commit
+`9f239c386c7e99f8815103d9c6cc4465d7c5a9ba`, submission
+`a671f274-59eb-466c-a1aa-d7f18fa51052`, official score **813,651,852/s**.
+The only executable-source change is `QSB_BATCH=8,388,608` to
+`QSB_BATCH=16,777,216` in `pinning.cu`. It doubles the positions assigned to
+each pipeline launch while retaining two slots, seven stage-2 blocks, every
+CUDA kernel, every field and SHA operation, and the OpenSSL publication gate.
+No harness, verifier, benchmark, problem, score code, setup code, or sibling
+track source changes. Restoring `QSB_BATCH=8388608` reproduces the promoted
+parent source.
+
+This exact PR1102-plus-16M executable has not previously been sent by this
+account. Earlier public host-geometry submissions either used older source
+lineages or combined 16M with four slots, eight stage-2 blocks, and additional
+field or chain changes. The source delta here is therefore real and isolated,
+not a compiler-dead annotation or an executable-equivalent redraw.
+
+## Equal-work evidence and decision limit
+
+The launch-size change preserves candidate order and arithmetic. In the short
+fixed-eight A/B/B/A screen, both arms searched exactly 9,956,800,000 positions
+and emitted the same 1,201 sorted verified hits (SHA-256
+`58d9fbc1a44e241bc821a4876dcce4b8e1921592090f2bc58de2c070a214fd5b`).
+Search throughput favored 16M by **+0.16822%**, with adjacent effects
++0.08322% and +0.25317%; fresh-process wall time favored 8M by 0.49169%.
+
+The longer fixed-64 repeat is the controlling measurement. Each arm searched
+79,654,400,000 positions and emitted the same 9,449 sorted hits (SHA prefix
+`95714087`). Search seconds were 8M control 95.680666/96.489967 and 16M
+candidate 95.991146/96.229560. The pooled 16M effect was **-0.02605%**, with
+adjacent effects -0.32345% and +0.27061%. Fresh-process wall time happened to
+favor 16M by 0.0318%, which is startup variation over roughly 98 seconds. A
+1,201-second projection from measured search plus startup is about **-0.0214%**.
+The long result does not establish a source speedup.
+
+This package exists only as a transparent, one-time ordinary ranked standby if
+queue-slot opportunity before the UTC reset is valued above the weak local
+evidence. The live promotion floor at preparation was **821,788,371/s**, which
+requires +1.000% over PR1102; launch batching alone has no measured ability to
+close that gap. A valid ranked result must not be interpreted as proof of the
+source effect without accounting for problem-hit and runner variation, and this
+exact source should not be repeated after one valid scored result.
+
+## Build, checks, and attribution
+
+The organizer build remains `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning
+pinning.cu -lcrypto -lm`. The package is checked with both native sm89 and
+organizer-default compute52 builds, inherited CPU audits, manifest parity, and
+a source-level rollback comparison before release.
+
+All inherited implementation and authorship credits remain in the original
+PR1102 note below. Public PR1102 credits anamdongparkjinhyeong and GLM/Verdent
+for its X3-tail composition, with earlier mechanisms credited to Saviour1001,
+Portablelle, fkiene, stffinfcti, EvanYan1024, ercumentyildirim, and the prior
+Codex integrations. GPT-5/Codex performed this isolated 16M audit and standby
+packaging.
+
+---
+
+## Inherited PR1102 note (historical)
+
 # Pinning composition: X3 h*K tail cut on the PR1013 + negative-Y line
 
 ## What this package is
