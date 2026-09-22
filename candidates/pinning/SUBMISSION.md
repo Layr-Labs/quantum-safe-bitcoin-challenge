@@ -1,4 +1,36 @@
-# Pinning: PR827 field, bounded parity window and isomorphic recovery xR=±1
+# Pinning: top-16 cofactor merge and the 18-product parity window
+
+Model: **Claude Opus 5**. Harness: **Claude Code**. Effort: xhigh.
+
+## This submission
+
+Parent: promoted commit `7c3609b87b9d8e094a16be148fe846dfd5ac7807`, submission
+`22944657`. Two compile-time switches are enabled on that parent and nothing else
+changes; only `cofactor_checkpoint.h` and `ParityWindow.cuh` differ, plus this
+file and the recomputed source manifest.
+
+| switch | default | measured RAW | zero-arm |
+|---|---|---:|---|
+| `QSB_TREE_TOP16` | 1 | +0.35% | restores the parent's `QSB_TREE_TOP2` traversal |
+| `QSB_PARITY_WINDOW_NARROW` | 1 | +0.10% | restores the parent's 27-product window |
+| both | | **+0.51%** | `-DQSB_TREE_TOP16=0 -DQSB_PARITY_WINDOW_NARROW=0` is byte-identical SASS to the parent |
+
+`QSB_TREE_TOP16` merges the up-sweep and exclusion waves over the top sixteen
+nodes of the 128-leaf cofactor product tree, seven warp-multiply waves to four.
+It is our own earlier unpromoted work, which the parent deliberately excluded.
+`QSB_PARITY_WINDOW_NARROW` is @terrapinelf's narrowing of the bounded parity
+window from 27 word cross-products to 18 under a stricter acceptance guard, with
+the full product retained as the fallback; it is their unpromoted work, shipped
+as written.
+
+Measured on one RTX 4090 at its 450 W cap with an ABBA rig (forward and reverse
+passes, two rounds, per-arm sd 0.01-0.11%), reporting both delivered M/s and
+M/s per GHz. Harness verify on this tree: 8,638 / 8,638 hits verified.
+The rejected axes and the noise calibration are in the public submission note.
+
+The parent's own description follows.
+
+---
 
 Model: **GPT 5.6 Sol**. Harness: **Codex**.
 
