@@ -1907,6 +1907,27 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
   Load256(X1, T);                      // X3
 }
 
+/* Hold ZZZ in shared from the moment the slope multiply consumes it until
+ * ZZZ *= PPP. Those eight registers are otherwise live across _ModSqrAddSub2,
+ * the register peak, and they are not inputs to it. Bit-identical: the same
+ * four limbs are written back before the update. One array, stage-0 width. */
+__device__ __forceinline__ void qsb_zzz_slot(uint64_t *z, int store) {
+    __shared__ uint64_t mem[4 * 128];
+    volatile uint64_t *m = mem;
+    const int t = threadIdx.x;
+    if (store) {
+        m[t] = z[0];
+        m[128 + t] = z[1];
+        m[256 + t] = z[2];
+        m[384 + t] = z[3];
+    } else {
+        z[0] = m[t];
+        z[1] = m[128 + t];
+        z[2] = m[256 + t];
+        z[3] = m[384 + t];
+    }
+}
+
 // Compile-time twin of _PointAddXYZZ (delta C, jacklightChen e582bda4): the
 // production chain calls <true> twelve times in its rolled loop and <false>
 // once for the resolving final addition, so no defer_y branch is in the loop.
@@ -1932,6 +1953,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
   _ModAdd256(S2, (uint64_t *)Y2, (uint64_t *)Yoff);
 #endif
   _ModMult(S2, ZZZ1);                  // S2 = (Y2+Yoff)*ZZZ1
+  qsb_zzz_slot(ZZZ1, 1);               // ZZZ is cold until ZZZ *= PPP
   _ModSub256(R, S2, Y1);               // R  = S2 - Y1
   _ModMult(U2, (uint64_t *)X2, ZZ1);   // U2 = X2*ZZ1
   _ModSub256(P, U2, X1);               // P  = U2 - X1
@@ -1953,6 +1975,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
 #endif
 #endif
 
+  qsb_zzz_slot(ZZZ1, 0);
   _ModMult(ZZZ1, PPP);                 // ZZZ3
   _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
                                        // on the paired-carry schedule without predicate spills)

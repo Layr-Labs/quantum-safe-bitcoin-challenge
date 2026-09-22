@@ -217,7 +217,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S0_THREADS
 #define QSB_S0_THREADS QSB_TREE_N
 #undef QSB_S0_BLOCKS
-#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */
+/* Five resident 128-thread blocks. sm_52 ptxas already schedules stage 0 in
+ * 101 registers with zero spill (SUBMISSION.md); launch_bounds(128, 4) still
+ * lets the sm_89 JIT spend 128 and stay at four blocks. Ada's register
+ * granule is 8/thread, so five blocks require <=96. qsb_zzz_slot holds the
+ * one cold accumulator (ZZZ, 8 regs) in shared across the fused square so
+ * that cap does not spill the live multiply. 5 * (12 KiB arena + 4 KiB park)
+ * = 80 KiB, inside AD102's 100 KiB shared. */
+#define QSB_S0_BLOCKS (640/QSB_TREE_N)
 #endif
 #if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD
 #error "prepare block size must equal the tree width unless the tree is offloaded"
