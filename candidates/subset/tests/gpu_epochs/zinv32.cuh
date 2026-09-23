@@ -40,6 +40,9 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 #define ZI_B 30
 #define ZI_MM32 0xD2253531u            /* -p^-1 mod 2^32 */
 #define ZI_MASK30 0x3FFFFFFFu
+#ifndef QSB_ZI_FUSED_SHIFT
+#define QSB_ZI_FUSED_SHIFT 1
+#endif
 
 /* Table-driven Bernstein-Yang mechanism from ercumentyildirim's
  * public PR296, commit b3a7a64733349f722bb4b1ce969d430f3e2835bd.
@@ -250,6 +253,29 @@ uint32_t zi_x(uint32_t v,int src);
 
 /* In place: X = (a*X + b*Y [+ m*p]) >> 30. */
 ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t modp){
+#if QSB_ZI_FUSED_SHIFT
+    int64_t acc=(int64_t)a*(int64_t)X[0]+(int64_t)b*(int64_t)Y[0];
+    uint32_t m=((uint32_t)acc*ZI_MM32)&ZI_MASK30&(0u-modp);
+    acc-=(int64_t)977*(int64_t)m;
+    uint32_t prev=(uint32_t)acc; acc>>=32;
+
+    acc+=(int64_t)a*(int64_t)X[1]+(int64_t)b*(int64_t)Y[1]-(int64_t)m;
+    uint32_t cur=(uint32_t)acc;
+    X[0]=(prev>>ZI_B)|(cur<<(32-ZI_B));
+    prev=cur; acc>>=32;
+
+    for(int i=2;i<8;i++){
+        acc+=(int64_t)a*(int64_t)X[i]+(int64_t)b*(int64_t)Y[i];
+        cur=(uint32_t)acc;
+        X[i-1]=(prev>>ZI_B)|(cur<<(32-ZI_B));
+        prev=cur; acc>>=32;
+    }
+
+    acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
+    cur=(uint32_t)acc;
+    X[7]=(prev>>ZI_B)|(cur<<(32-ZI_B));
+    X[8]=(uint32_t)(acc>>ZI_B);
+#else
     int64_t acc=(int64_t)a*(int64_t)X[0]+(int64_t)b*(int64_t)Y[0];
     uint32_t m=((uint32_t)acc*ZI_MM32)&ZI_MASK30&(0u-modp);
     acc-=(int64_t)977*(int64_t)m;
@@ -263,9 +289,8 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
     X[8]=(uint32_t)acc;
     for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
-    // Keep the full signed top accumulator until after the delayed shift.
-    // R/S may have grown to 32*p at the cap; pre-shift rows need >288 bits.
     X[8]=(uint32_t)(acc>>ZI_B);
+#endif
 }
 ZI_DEV void zi_condneg(uint32_t *X,uint32_t neg){
     const uint32_t msk=0u-neg; uint64_t c=neg;
