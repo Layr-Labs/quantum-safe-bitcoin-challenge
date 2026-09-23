@@ -1,8 +1,8 @@
 {
   "schema": "zarar1337.source-manifest.v1",
   "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
+  "base_commit": "1fe5a8e40008befcd917668ea9b1a23c6ee590c4",
+  "implementation_commit": "hunter-p2-sha-pipe-balance",
   "metadata_excluded": [
     "candidates/pinning/SOURCE-MANIFEST.json",
     "candidates/pinning/SUBMISSION.md"
@@ -115,8 +115,8 @@
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
+      "bytes": 20978,
+      "sha256": "8f40634c7af077135a64a1baac9670e44b6082641c3e4e129fdbf789307dc56e"
     },
     {
       "path": "candidates/pinning/sha_schedule_interleaved.cuh",
