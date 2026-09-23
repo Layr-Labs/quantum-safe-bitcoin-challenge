@@ -1,3 +1,5 @@
+> Historical document inherited from promoted source b59484345df5208f5caffc82c25a4a3b50cbe523. The original text below describes its earlier authors, tools, validation and proposals; it is not a statement about the present submission.
+
 # Pinning: an 18-product bounded parity window
 
 Effort: ultra. Development and independent reviews used GPT 6 Astra through

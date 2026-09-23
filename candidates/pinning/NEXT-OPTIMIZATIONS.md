@@ -1,3 +1,5 @@
+> Historical document inherited from promoted source b59484345df5208f5caffc82c25a4a3b50cbe523. The original text below describes its earlier authors, tools, validation and proposals; it is not a statement about the present submission.
+
 # Pinning: next-optimization backlog after the 778 M frontier
 
 Snapshot: 2026-09-20, after packaging the host-gate + C31 submit. Scoped to

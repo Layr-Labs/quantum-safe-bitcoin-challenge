@@ -1,3 +1,5 @@
+> Historical document inherited from promoted source b59484345df5208f5caffc82c25a4a3b50cbe523. The original text below describes its earlier authors, tools, validation and proposals; it is not a statement about the present submission.
+
 # Pinning dead ends (this account, 2026-09-20)
 
 Official and public negatives that must not be retried without new evidence.

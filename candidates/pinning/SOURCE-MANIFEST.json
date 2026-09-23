@@ -1,11 +1,22 @@
 {
   "schema": "zarar1337.source-manifest.v1",
   "track": "pinning",
-  "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
-  "implementation_commit": "3700ffd0788d759b242a6b0e13d2a7a0663956b3",
+  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
+  "implementation_commit": "9867b6b5c83103ec895dac3d1b7fd3254194a064",
   "metadata_excluded": [
     "candidates/pinning/SOURCE-MANIFEST.json",
     "candidates/pinning/SUBMISSION.md"
+  ],
+  "removed_inherited_nonruntime_files": [
+    "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
+    "candidates/pinning/PRIORITY-SUBMISSION.md",
+    "candidates/pinning/PRIORITY-VALIDATION.json"
+  ],
+  "historical_documents_with_provenance_banner": [
+    "candidates/pinning/DEAD-ENDS.md",
+    "candidates/pinning/NEXT-OPTIMIZATIONS.md",
+    "candidates/pinning/RESEARCH.md",
+    "candidates/pinning/NARROW-PARITY.md"
   ],
   "files": [
     {
@@ -20,8 +31,8 @@
     },
     {
       "path": "candidates/pinning/DEAD-ENDS.md",
-      "bytes": 2477,
-      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
+      "bytes": 2713,
+      "sha256": "e3c19e389c99c12f02b0384f8364df08a6c30eaa0d282eb3c6682cada2c86a4e"
     },
     {
       "path": "candidates/pinning/GLVScalar.cuh",
@@ -35,8 +46,8 @@
     },
     {
       "path": "candidates/pinning/GPUMath.h",
-      "bytes": 117814,
-      "sha256": "ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c"
+      "bytes": 121411,
+      "sha256": "0377e874a0343e8e05ba89c6ebd8cd940590900cf64d47aeeeafadc1dbbfbfdc"
     },
     {
       "path": "candidates/pinning/LeafRecovery.cuh",
@@ -45,13 +56,13 @@
     },
     {
       "path": "candidates/pinning/NARROW-PARITY.md",
-      "bytes": 11898,
-      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
+      "bytes": 12134,
+      "sha256": "e11e375198795fe95cc839057bebcf77d13ea0b79f17b97a28c69d68bfc417c6"
     },
     {
       "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
-      "bytes": 2521,
-      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
+      "bytes": 2757,
+      "sha256": "1c0900ccc2e2f07a6f175b5418f1d97dad8b063eb6879038313a63b114e52411"
     },
     {
       "path": "candidates/pinning/PackedRecovery.cuh",
@@ -64,9 +75,14 @@
       "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
     },
     {
+      "path": "candidates/pinning/PriorityPipeline.h",
+      "bytes": 2435,
+      "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
+    },
+    {
       "path": "candidates/pinning/RESEARCH.md",
-      "bytes": 23810,
-      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
+      "bytes": 24046,
+      "sha256": "3a6e23d2df9cc55700c1e9ba762eb0e33dd15c3f6336eba1741759dbb9ce9bfd"
     },
     {
       "path": "candidates/pinning/RecoveryConstant.h",
@@ -90,8 +106,8 @@
     },
     {
       "path": "candidates/pinning/pinning.cu",
-      "bytes": 162157,
-      "sha256": "e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2"
+      "bytes": 165100,
+      "sha256": "a11ac0e88c944fa54654ee22c19c099d8d22a24688a1807b040e64f956a8329f"
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
@@ -112,6 +128,11 @@
       "path": "candidates/pinning/test_host_gate.py",
       "bytes": 6491,
       "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
+    },
+    {
+      "path": "candidates/pinning/test_priority_pipeline.py",
+      "bytes": 16765,
+      "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
     },
     {
       "path": "candidates/pinning/test_sha_interleave.py",
