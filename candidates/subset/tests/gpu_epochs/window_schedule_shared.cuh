@@ -4,7 +4,7 @@
 #pragma once
 #define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
 #ifndef QSB_SHA_UNROLL_CONST
-#define QSB_SHA_UNROLL_CONST 1
+#define QSB_SHA_UNROLL_CONST 0
 #endif   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
@@ -160,10 +160,10 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 
 #if ZLAB_DUAL_EPOCH_SHA
 #ifndef QSB_PAIR_SHA_UNROLL_WINDOW
-#define QSB_PAIR_SHA_UNROLL_WINDOW 1
+#define QSB_PAIR_SHA_UNROLL_WINDOW 0
 #endif
 #ifndef QSB_PAIR_SHA_UNROLL_CONST
-#define QSB_PAIR_SHA_UNROLL_CONST 1
+#define QSB_PAIR_SHA_UNROLL_CONST 0
 #endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
  * second block and constant suffix) in both epochs.  Load each schedule word
