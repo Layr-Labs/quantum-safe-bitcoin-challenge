@@ -1,4 +1,3 @@
-// Derived from the upstream square and xlib fused reduction; see package provenance.
 // GPU throughput has not been established by the CPU semantic tests.
 /*
 * This file is part of the VanitySearch distribution (https://github.com/JeanLucPons/VanitySearch).
