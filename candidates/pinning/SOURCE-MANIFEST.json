@@ -1,127 +1,127 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
-  "track": "pinning",
-  "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
-  "implementation_commit": "3700ffd0788d759b242a6b0e13d2a7a0663956b3",
-  "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
-  ],
-  "files": [
-    {
-      "path": "candidates/pinning/COPYING",
-      "bytes": 35149,
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    },
-    {
-      "path": "candidates/pinning/COPYING-secp256k1",
-      "bytes": 1057,
-      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
-    },
-    {
-      "path": "candidates/pinning/DEAD-ENDS.md",
-      "bytes": 2477,
-      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
-    },
-    {
-      "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
-    },
-    {
-      "path": "candidates/pinning/GPUHash.h",
-      "bytes": 35133,
-      "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
-    },
-    {
-      "path": "candidates/pinning/GPUMath.h",
-      "bytes": 117814,
-      "sha256": "ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c"
-    },
-    {
-      "path": "candidates/pinning/LeafRecovery.cuh",
-      "bytes": 6880,
-      "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
-    },
-    {
-      "path": "candidates/pinning/NARROW-PARITY.md",
-      "bytes": 11898,
-      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
-    },
-    {
-      "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
-      "bytes": 2521,
-      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
-    },
-    {
-      "path": "candidates/pinning/PackedRecovery.cuh",
-      "bytes": 7733,
-      "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
-    },
-    {
-      "path": "candidates/pinning/ParityWindow.cuh",
-      "bytes": 6292,
-      "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
-    },
-    {
-      "path": "candidates/pinning/RESEARCH.md",
-      "bytes": 23810,
-      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
-    },
-    {
-      "path": "candidates/pinning/RecoveryConstant.h",
-      "bytes": 1091,
-      "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
-    },
-    {
-      "path": "candidates/pinning/SlotReadback.h",
-      "bytes": 1756,
-      "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
-    },
-    {
-      "path": "candidates/pinning/cofactor_checkpoint.h",
-      "bytes": 9186,
-      "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
-    },
-    {
-      "path": "candidates/pinning/negative_y_mac.cuh",
-      "bytes": 8242,
-      "sha256": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6"
-    },
-    {
-      "path": "candidates/pinning/pinning.cu",
-      "bytes": 162157,
-      "sha256": "e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2"
-    },
-    {
-      "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
-    },
-    {
-      "path": "candidates/pinning/sha_schedule_interleaved.cuh",
-      "bytes": 1597,
-      "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
-    },
-    {
-      "path": "candidates/pinning/test_carry62.py",
-      "bytes": 13593,
-      "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
-    },
-    {
-      "path": "candidates/pinning/test_host_gate.py",
-      "bytes": 6491,
-      "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
-    },
-    {
-      "path": "candidates/pinning/test_sha_interleave.py",
-      "bytes": 4040,
-      "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
-    },
-    {
-      "path": "candidates/pinning/test_slot_readback.py",
-      "bytes": 11396,
-      "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
-    }
-  ]
+ "schema": "zarar1337.source-manifest.v1",
+ "track": "pinning",
+ "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
+ "implementation_commit": "3700ffd0788d759b242a6b0e13d2a7a0663956b3",
+ "metadata_excluded": [
+  "candidates/pinning/SOURCE-MANIFEST.json",
+  "candidates/pinning/SUBMISSION.md"
+ ],
+ "files": [
+  {
+   "path": "candidates/pinning/COPYING",
+   "bytes": 35149,
+   "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+   "path": "candidates/pinning/COPYING-secp256k1",
+   "bytes": 1057,
+   "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
+  },
+  {
+   "path": "candidates/pinning/DEAD-ENDS.md",
+   "bytes": 2477,
+   "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
+  },
+  {
+   "path": "candidates/pinning/GLVScalar.cuh",
+   "bytes": 20416,
+   "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+  },
+  {
+   "path": "candidates/pinning/GPUHash.h",
+   "bytes": 35133,
+   "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
+  },
+  {
+   "path": "candidates/pinning/GPUMath.h",
+   "bytes": 117814,
+   "sha256": "ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c"
+  },
+  {
+   "path": "candidates/pinning/LeafRecovery.cuh",
+   "bytes": 6880,
+   "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
+  },
+  {
+   "path": "candidates/pinning/NARROW-PARITY.md",
+   "bytes": 11898,
+   "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
+  },
+  {
+   "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
+   "bytes": 2521,
+   "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
+  },
+  {
+   "path": "candidates/pinning/PackedRecovery.cuh",
+   "bytes": 8727,
+   "sha256": "3c73e2f1ebf7242c6305551462a233b32156780bfc81892b5c3ad5da80a795e5"
+  },
+  {
+   "path": "candidates/pinning/ParityWindow.cuh",
+   "bytes": 6292,
+   "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
+  },
+  {
+   "path": "candidates/pinning/RESEARCH.md",
+   "bytes": 23810,
+   "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
+  },
+  {
+   "path": "candidates/pinning/RecoveryConstant.h",
+   "bytes": 1091,
+   "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
+  },
+  {
+   "path": "candidates/pinning/SlotReadback.h",
+   "bytes": 1756,
+   "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
+  },
+  {
+   "path": "candidates/pinning/cofactor_checkpoint.h",
+   "bytes": 10055,
+   "sha256": "630dcf4eaf296e1375f97249ace2cc56e2b16b510002299e18a196bfe1952e14"
+  },
+  {
+   "path": "candidates/pinning/negative_y_mac.cuh",
+   "bytes": 8242,
+   "sha256": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6"
+  },
+  {
+   "path": "candidates/pinning/pinning.cu",
+   "bytes": 165033,
+   "sha256": "7dec5ab275870ee901a8e0d3e1ad3c2d4a49b38e3e04a006fff52fef812d2f45"
+  },
+  {
+   "path": "candidates/pinning/sha_pinsha.cuh",
+   "bytes": 18132,
+   "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
+  },
+  {
+   "path": "candidates/pinning/sha_schedule_interleaved.cuh",
+   "bytes": 1597,
+   "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  {
+   "path": "candidates/pinning/test_carry62.py",
+   "bytes": 13593,
+   "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
+  },
+  {
+   "path": "candidates/pinning/test_host_gate.py",
+   "bytes": 6491,
+   "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
+  },
+  {
+   "path": "candidates/pinning/test_sha_interleave.py",
+   "bytes": 4040,
+   "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
+  },
+  {
+   "path": "candidates/pinning/test_slot_readback.py",
+   "bytes": 11396,
+   "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
+  }
+ ]
 }
