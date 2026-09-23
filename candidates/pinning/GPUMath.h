@@ -177,7 +177,14 @@
 #define QSB_MUL_F8_CAP "\taddc.u32 f8, 0, 0;\n"
 #define QSB_MUL_Z8 "\taddc.u32 z8, f8, w7;\n"
 #endif
-#if QSB_SQR_FOLD8_CUT && QSB_SHORT_CARRY && QSB_SAS_Z9SUB_ALL
+/* Retest square/fused f8 retention; leave the multiply-side cut enabled. */
+#ifndef QSB_RESTORE_SQR_F8
+#define QSB_RESTORE_SQR_F8 1
+#endif
+#if QSB_RESTORE_SQR_F8 != 0 && QSB_RESTORE_SQR_F8 != 1
+#error "QSB_RESTORE_SQR_F8 must be 0 or 1"
+#endif
+#if QSB_SQR_FOLD8_CUT && QSB_SHORT_CARRY && QSB_SAS_Z9SUB_ALL && !QSB_RESTORE_SQR_F8
 #define QSB_SQR_F8_CAP ""
 #define QSB_SQR_F8SRC "0"
 #else
@@ -2208,6 +2215,12 @@ __device__ __forceinline__ void _PointAddXYZZT(
 // is then (Ythird+Y1)*ZZZ3-R*(Q-X3) = Ythird*ZZZ3-Y(P1+P2), while its final
 // affine anchor remains Ythird. The combined seed is therefore exact and costs
 // 11M+4S rather than 12M+4S.
+#ifndef QSB_SEED_FUSE_X3
+#define QSB_SEED_FUSE_X3 1
+#endif
+#if QSB_SEED_FUSE_X3 != 0 && QSB_SEED_FUSE_X3 != 1
+#error "QSB_SEED_FUSE_X3 must be 0 or 1"
+#endif
 __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                  const uint64_t *X1, const uint64_t *Y1,
                                  const uint64_t *X2, const uint64_t *Y2)
@@ -2217,16 +2230,28 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t Q[4];
   uint64_t T[4];
 
+#if QSB_SEED_FUSE_X3
+  /* Negating both differences changes (Y3, ZZZ3) to (-Y3, -ZZZ3),
+   * preserving the represented affine point and the deferred Y anchor.
+   * Since PPP is now -PPP_original, X3 = R^2 + PPP - 2Q. */
+  _ModSub256(P, (uint64_t *)X1, (uint64_t *)X2);
+  _ModSub256(R, (uint64_t *)Y1, (uint64_t *)Y2);
+#else
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
+#endif
   _ModSqr(ZZ3, P);                                 // ZZ3  = PP  = P^2
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
+#if QSB_SEED_FUSE_X3
+  _ModSqrAddSub2(T, R, ZZZ3, Q);                   // R^2 + PPP - 2Q
+#else
   _ModSqr(T, R);                                   // R^2
   _ModSub256(T, T, ZZZ3);
   _ModSub256(T, T, Q);
   _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+#endif
 
 #if QSB_NEG_Y_MAC
   _ModSub256(Q, T, Q); // seed negative deferred ordinate
