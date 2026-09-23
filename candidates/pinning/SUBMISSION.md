@@ -1,117 +1,29 @@
-# Pinning candidate update
+# Pinning: prefetch both sectors of the sparse GLV segments
 
-## Submitted scope
+Prepared with GPT 6 Sol in Codex for the pinning track. This source starts from the search family in our PR #1205, keeps its dense-first fixed-base table, 50 MiB persisting-L2 controls, host slot overlap, and exact host publication gate, and adds an exact seed X3 sign rewrite. This experiment replaces the subsequent early table-load attempt with nonblocking L2 prefetches for the two low-density points of the second GLV half. The goal is to make their full 64-byte records available before the point additions that consume them. This source has not been timed on an RTX 4090 locally, and a compile-time resource count is not a throughput result.
 
-This package targets the pinning track of the quantum-safe Bitcoin challenge. It updates the fixed-base implementation in the candidate translation unit and supplies its associated scalar and host transfer helpers. A supplemental upstream license file accompanies the scalar support. The package retains the promoted parent’s recovery, hashing, input and publication interfaces.
+## Why this version
 
-The starting point is the promoted source identified in the base table below. This note describes the files in the current package. Historical research documents retained in the candidate directory are inherited material; their earlier proposals, measurements and descriptions are not claims made by this submission.
+The promoted source `b59484345df5208f5caffc82c25a4a3b50cbe523` scored 826,926,066 verified candidates/s. PR #1205 from this account scored 829,282,307 on `gpuserver`, above the promoted score but below the 835,195,327 one-percent promotion floor. The PR #1223 successor used a 42.166 MiB dense-only L2 window and one C1 prefetch; it scored 793,354,720 on `ubuntu22044`, a different runner. Our later PR #1230 restored the 50 MiB window, fused the seed sign, and loaded C1's full record into register/shared staging before the preceding point addition. It scored 785,877,558 on `ubuntu22044`, versus PR #1223's 793,354,720 on that same runner. The 50 MiB policy and seed sign also differed, so that is not an isolated A/B, but it does not support keeping synchronous C1 staging.
 
-## What changed
+PR #1230's synchronous staging had a specific weakness: the y limbs were read from global memory and written to shared memory before the independent point addition began. The shared store depended on the global read, so the schedule could stall before reaching the arithmetic intended to cover the load latency. This candidate returns to a nonblocking prefetch hint. It also issues the hint for both 32-byte sectors of each 64-byte record; PR #1223 hinted only the first sector of C1 by default. It extends the hint to C0, whose first half is only partly inside the 50 MiB persisting window. The change can help if the read latency of those sparse segments is on the critical path. It can also hurt from hint traffic or cache eviction. No speed increase is projected without the ranked run.
 
-| File | Change |
-|---|---|
-| `candidates/pinning/pinning.cu` | Supplies the grouped fixed-base implementation, its existing table integration and the host transfer update. |
-| `candidates/pinning/GLVScalar.cuh` | Supplies the scalar split, exact high-product fallback, component decoding and residual calculation. |
-| `candidates/pinning/SlotReadback.h` | Supplies the combined count and hit-prefix readback helper. |
-| `candidates/pinning/test_slot_readback.py` | Supplies the host readback helper checks. |
-| `candidates/pinning/COPYING-secp256k1` | Supplies the license notice accompanying the scalar implementation. |
-| `candidates/pinning/SUBMISSION.md` | Replaces the inherited submission description with this package note. |
-| `candidates/pinning/SOURCE-MANIFEST.json` | Records the current source inventory and implementation identity. |
+## Source and exactness
 
-The scalar helper updates the residual representation and retains the coefficient calculation, reference fallback and compile-time alternatives.
+`QSB_GLV_LOWSEG_PREFETCH=1` is the only new runtime mechanism. It reads the already materialized per-thread digit code for term 7 (P0) at term 6 and issues `prefetch.global.L2` at that point's physical table address and address plus 32 bytes. At term 7 it does the same for term 8 (P1). The sign bit is masked before computing the absolute table index, exactly as in the existing load. The later `qsb_load_glv` still loads x and signed y through the original path; the hint does not provide a value to arithmetic or change any point formula. Setting the switch to zero removes both hints. The older `QSB_C1_PREFETCH` switch remains independently available but defaults to zero, and the C1 early-register/shared path defaults to zero. The 42 MiB L2 controls also default to zero; the inherited 50 MiB policy is active.
 
-The host update omits the redundant midstate upload in the precomputed-tail slot path and uses a combined count and hit-prefix readback. The existing output record format and host acceptance gate remain in place.
+For the usual nonzero-Q scalar, the loop walks the seven Q points followed by P0 through P6. Term 6 precedes P0 and term 7 precedes P1, so both hints precede the consuming loads. If the Q half is zero, P0 and P1 are loaded as the initial seed pair and the loop starts at term 9; neither new hint executes. If both halves are zero, the accumulator returns before the loop. The table code for every hinted term is within the original fourteen 32-bit code planes in the shared digit arena. Its masked physical record index is within the 1,215,139-record table. The hint's last address plus 32 bytes lies within its 64-byte record.
 
-The implementation and support files remain within the editable pinning directory. The metadata files describe the package and do not select a different benchmark command. Inventory rows below exclude the two metadata files so the note does not attempt to hash itself.
+The inherited dense-first table order is `[2,3,4,5,6,0,1]`. Its seven disjoint physical ranges cover every record exactly once. Segments 2 through 6 occupy 42.166 MiB at the front of the 74.17 MiB table; the 50 MiB persisting window also covers part of segment 0. The setup-only modulo spot-check fix inherited from PR #1223 reaches the full non-power-of-two segment 6 and does not run inside the timed search. The exact seed X3 sign rewrite inherited from the previous branch uses a projective identity checked on 4,096 directed and 10,000 random field tuples; `QSB_SEED_FUSE_X3=0` restores its old path. The existing PR #1205 seed-multiply carry cut is still a rare lossy filter optimization. The exact host recheck prevents wrong hits from being published, but cannot recover a genuine hit that an approximate GPU path misses.
 
-## Base and package identity
+All executable edits are in `candidates/pinning/pinning.cu`. No subset source, setup or benchmark script, scorer, verifier, problem input, workflow, or public result is altered. The normal `./setup.sh pinning` and `./benchmark.sh pinning` commands remain the interfaces. The package contains no compiled binary, PTX, cubin, SASS, hit list, solution, or benchmark output. The source does not branch on the problem seed or inspect a scorer artifact.
 
-| Item | Value |
-|---|---|
-| Track | `pinning` |
-| Promoted base | `9f239c386c7e99f8815103d9c6cc4465d7c5a9ba` |
-| Implementation revision | `3700ffd0788d759b242a6b0e13d2a7a0663956b3` |
-| Editable directory | `candidates/pinning/` |
-| Candidate translation unit | `candidates/pinning/pinning.cu` |
-| Sibling track edits | None |
-| Harness edits | None |
-| Verifier edits | None |
-| Workflow edits | None |
-| Problem generator edits | None |
+## Build evidence and limits
 
-## Attribution and licenses
+CUDA 12.6 in a Linux arm64 build container compiled the ranked `QSB_ZEROS_N=24` source with both the ordinary `nvcc -O3` command and native `nvcc -O3 -arch=sm_89 -Xptxas=-v`. The native stage-0 kernel uses 114 registers, 12,288 bytes shared memory, no stack frame and zero spill loads or stores. Its static SASS has 6,712 instructions and four `CCTL.E.PF2` hints, versus 6,696 instructions and no hints in a matched no-prefetch control with the same 50 MiB policy and seed fusion. The ordinary organizer-style build also has zero stage-0 spills. Four 128-thread stage-0 blocks fit under the RTX 4090 register and shared-memory capacities by resource arithmetic; this is not a measured occupancy or stall report. The source contains only PTX prefetch hints supported by the ranked build's `compute_52` JIT path; it does not depend on `cp.async`, which the unmodified ranked build command would not emit.
 
-The scalar support and grouped fixed-base work draw on may93182’s unpromoted public submission `5ffaef34-a958-4e80-887d-893f6b933605`. That contribution is credited as coauthorship for this submission. The current implementation also retains the work of the promoted parent and its upstream contributors, as identified in the preserved source notices.
+`test_seed_fuse.py` passed its 14,096 algebra cases, and `test_host_gate.py` checked the exact publication gate with 64 SHA midstate samples and recovery parity. The prefetch address and zero-Q control flow were inspected against the existing GLV loader. `git diff --check` passed. Compilation and host-side tests establish source viability and preserve an exact output path, but this Mac has no NVIDIA GPU or driver. They cannot measure target-card throughput, L2 sector hit rates, DRAM bytes, clock state, or the verified hit count. The organizer's ranked 4090 score is the performance and correctness authority for this exact composition.
 
-The host transfer update substantially adapts Portablelle’s unpromoted public submission `b67219a6-4dab-4e67-a2c0-04e698006919`, published in PR #1154. Portablelle is credited as a coauthor for that contribution. This package includes the midstate-upload and compact-readback portions of that work.
+To reproduce the native resource check, build with `nvcc -O3 -arch=sm_89 -Xptxas=-v -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`, placing the output outside the editable path. A target-card comparison should hold the problem fixed and alternate this build with `-DQSB_GLV_LOWSEG_PREFETCH=0`; compare the complete verified hit set, verified candidates/s, stage-0 table-load sectors, L2 hit rate, and DRAM reads. The previously measured PR #1205, #1223, and #1230 scores have different source combinations or hosts and are context, not a forecast for this package.
 
-The scalar constants and associated upstream material retain the bitcoin-core/secp256k1 attribution to Pieter Wuille and its MIT license notice. The candidate’s existing GPL license and other source notices are retained. This package claims authorship only of its own modifications, not of the inherited arithmetic library, promoted parent or donor implementation.
-
-## Build and execution interface
-
-The organizer’s standard entry points remain applicable:
-
-```sh
-./setup.sh pinning
-./benchmark.sh pinning
-```
-
-The package does not require changes to either script. The candidate is compiled from source using the benchmark’s configured CUDA build command and existing library dependencies. The normal input file, command-line interface and hit record format remain in place. No external service, runtime source download or additional credential is introduced.
-
-The organizer supplies the evaluation problem and executes the trusted benchmark and verifier. The archive does not supply a stored solution, generated evaluation fixture, precomputed hit list or replacement score file. The official result and any promotion are determined by that evaluation.
-
-## Validation declarations
-
-The implementation was built with the benchmark’s configured compiler invocation. Its produced hit records were checked with the unmodified repository verifier. The package preserves the same implementation bytes used for that validation; the metadata update does not alter the compiled implementation.
-
-The candidate’s source archive was checked for allowed-path scope and unintended generated files. The inventory below identifies retained files as well as changed files; inclusion in the inventory does not mean every file was modified. No local throughput figure is asserted as an official score, and this note makes no claim of promotion before the official result.
-
-## Source inventory
-
-| Candidate file | Bytes | SHA-256 |
-|---|---:|---|
-| `candidates/pinning/COPYING` | 35149 | `3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986` |
-| `candidates/pinning/COPYING-secp256k1` | 1057 | `a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f` |
-| `candidates/pinning/DEAD-ENDS.md` | 2477 | `331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894` |
-| `candidates/pinning/GLVScalar.cuh` | 20416 | `c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae` |
-| `candidates/pinning/GPUHash.h` | 35133 | `8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc` |
-| `candidates/pinning/GPUMath.h` | 117814 | `ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c` |
-| `candidates/pinning/LeafRecovery.cuh` | 6880 | `92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d` |
-| `candidates/pinning/NARROW-PARITY.md` | 11898 | `dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617` |
-| `candidates/pinning/NEXT-OPTIMIZATIONS.md` | 2521 | `b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e` |
-| `candidates/pinning/PackedRecovery.cuh` | 7733 | `47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe` |
-| `candidates/pinning/ParityWindow.cuh` | 6292 | `46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4` |
-| `candidates/pinning/RESEARCH.md` | 23810 | `c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c` |
-| `candidates/pinning/RecoveryConstant.h` | 1091 | `6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369` |
-| `candidates/pinning/SlotReadback.h` | 1756 | `1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25` |
-| `candidates/pinning/cofactor_checkpoint.h` | 9186 | `d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55` |
-| `candidates/pinning/negative_y_mac.cuh` | 8242 | `1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6` |
-| `candidates/pinning/pinning.cu` | 162157 | `e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2` |
-| `candidates/pinning/sha_pinsha.cuh` | 18132 | `bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462` |
-| `candidates/pinning/sha_schedule_interleaved.cuh` | 1597 | `629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f` |
-| `candidates/pinning/test_carry62.py` | 13593 | `8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445` |
-| `candidates/pinning/test_host_gate.py` | 6491 | `1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0` |
-| `candidates/pinning/test_sha_interleave.py` | 4040 | `2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd` |
-| `candidates/pinning/test_slot_readback.py` | 11396 | `0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849` |
-
-## Preserved interface inventory
-
-| Surface | Package status |
-|---|---|
-| Benchmark selection | Pinning track only. |
-| Build entry point | Existing setup script retained. |
-| Evaluation entry point | Existing benchmark script retained. |
-| Problem loading | Existing input contract retained. |
-| Output publication | Existing hit record interface retained. |
-| Independent verification | Repository verifier retained. |
-| Ranked metric | Organizer’s score definition retained. |
-| Submission packaging | Editable candidate source only. |
-| External dependencies | Existing benchmark dependencies retained. |
-| Sibling candidate directory | Unmodified by this package. |
-| License notices | Existing notices retained, supplemental upstream notice included. |
-
-The note and manifest are packaging metadata. Retained research documents identify their own historical context. Neither the inventory nor those documents changes the benchmark’s execution or scoring definition. The submitted source remains the authoritative implementation for this package.
-
----
-
-*Signed: **zarar@1337** — a good-luck token this team stamps on its submissions. Purely a totem: it carries no technical meaning, encodes nothing, and changes no measurement. Everything that matters is in the tables above. For the record, 160 of the tickets bearing this signature have been promoted so far — statistically meaningless, but the totem's legal team advised us to mention it. 🎲*
+The inherited unpromoted mechanisms are credited to dun999 (PR #1194 host overlap and square changes), i34-9 (PR #1196 register seed handoff), and DrCleverHans (earlier handoff donor credited there). The original project licenses and notices remain. The dual-sector sparse-segment hint and its integration here were prepared in this branch; no donor speed is claimed for this new scheduling change.

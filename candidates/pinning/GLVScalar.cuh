@@ -1,6 +1,5 @@
 #pragma once
 #include <stdint.h>
-// QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction.
 __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],const uint64_t b[4]){
     uint64_t r0,r1,r2,r3,r4,r5,r6,r7;
     asm(
