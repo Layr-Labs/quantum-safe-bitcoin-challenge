@@ -108,6 +108,14 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top16(
 }
 #endif /* QSB_TOP16 */
 
+/* QSB_TREE_FLAT: under the merged top-16 traversal the up-sweep stops at
+ * count = 32 (always > 2), the down-sweep starts at count = 32 (never == 2)
+ * and N >= 32, so the count>2 barrier test, the count==2 copy arm and the
+ * N==2 leaf arm are compile-time dead. Removing them changes no value. */
+#ifndef QSB_TREE_FLAT
+#define QSB_TREE_FLAT 1
+#endif
+
 // The caller supplies nonzero effective leaves (identity for unusable lanes).
 // Preserve immutable products and accumulate exclusion products separately.
 // All N lanes participate in every barrier; one block publishes one raw root.
@@ -141,7 +149,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
+#if QSB_TOP16 && QSB_TREE_FLAT
+        if(half>32)__syncthreads();else __syncwarp();
+#else
         if(count>2){if(half>32)__syncthreads();else __syncwarp();}
+#endif
     }
 #if QSB_TOP16
     qsb_cofactor_top16<N>(roots,products,excluded);
@@ -195,7 +207,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent[4]=sibling[4]=0;
+#if QSB_TOP16 && QSB_TREE_FLAT
+            qsb_field_mul_sc(out,parent,sibling);
+#else
             if(count==2){Load256(out,sibling);}else{qsb_field_mul_sc(out,parent,sibling);}
+#endif
             #pragma unroll
             for(int k=0;k<4;k++)excluded[k][offset-N+tid]=out[k];
         }
@@ -209,6 +225,10 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
         sibling[k]=products[k][tid^(N/2)];
     }
     parent[4]=sibling[4]=0;
+#if QSB_TOP16 && QSB_TREE_FLAT
+    qsb_field_mul_sc(value,parent,sibling);
+#else
     if(N==2){Load256(value,sibling);}else{qsb_field_mul_sc(value,parent,sibling);}
+#endif
     value[4]=0;
 }

@@ -676,13 +676,27 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k) {
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
 }
+/* v15 drew 794,155,983 official (rejected, ratio 0.937 — unlucky hit draw;
+ * identical bytes re-measured in this package). */
+/* QSB_DEC_REP: the sign mask for a decoded digit is the sign bit replicated to
+ * both 32-bit halves. mov.b64 {m,m} does that in one instruction instead of a
+ * shift and an OR. (Our mechanism on the 15-chunk chain; re-applied to the
+ * GLV14 record load.  -DQSB_DEC_REP=0 restores shift+or.) */
+#ifndef QSB_DEC_REP
+#define QSB_DEC_REP 1
+#endif
 __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
                                              uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_DEC_REP
+    uint64_t m64; asm("mov.b64 %0,{%1,%1};" : "=l"(m64) : "r"(m32));
+    gt_load_signed_flat_m(table,0u,code&0x1fffffu,m64,x,y);
+#else
     gt_load_signed_flat_m(table,0u,code&0x1fffffu,
                           ((uint64_t)m32<<32)|m32,x,y);
+#endif
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
@@ -1899,6 +1913,25 @@ __device__ __constant__ uint64_t pin_recovery_c[4];
 #include "PackedRecovery.cuh"
 static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 
+#ifndef QSB_LAZY_ADD_FINISH
+#define QSB_LAZY_ADD_FINISH 1
+#endif
+#if QSB_LAZY_ADD_FINISH != 0 && QSB_LAZY_ADD_FINISH != 1
+#error QSB_LAZY_ADD_FINISH must be 0 or 1
+#endif
+/* QSB_LAZY_ADD_FINISH: the two stage-2 finish additions whose consumer either
+ * normalizes or multiplies take the lazy form.  _ModAddLazy folds the 2^256
+ * carry once with the single-limb constant K instead of running the full
+ * conditional p-subtraction, so its result is congruent mod p and below 2^256.
+ * x_minus is consumed by qsb_field_normalize and h = u+v by _ModMult; both
+ * published outputs remain bit-identical.  Donor: fkiene 6206fb1d.
+ * -DQSB_LAZY_ADD_FINISH=0 restores _ModAdd256 at both sites. */
+#if QSB_LAZY_ADD_FINISH
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
+
 /* Delta E (xlib 0c6f4c8). With I=1/W and V=ZZZ, t=V^2*I=1/(xR-xP). Let
  * u=yR*t and v=Y*V*I, so u-v and -(u+v) are the slopes for P+R and P-R.
  * K=3*xR^2 is fixed for the entire problem. The shared x base is
@@ -1930,7 +1963,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1941,7 +1974,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);
