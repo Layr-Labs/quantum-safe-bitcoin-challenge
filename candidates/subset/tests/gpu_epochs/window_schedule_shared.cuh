@@ -7,7 +7,18 @@
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
+#ifndef QSB_WINDOW_PACK
+#define QSB_WINDOW_PACK 1
+#endif
+#if QSB_WINDOW_PACK != 0 && QSB_WINDOW_PACK != 1
+#error "QSB_WINDOW_PACK must be 0 or 1"
+#endif
+#if QSB_WINDOW_PACK
+#include "window_lane_pack.h"
+__device__ __align__(32) uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
+#else
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
+#endif
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
