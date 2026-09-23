@@ -209,7 +209,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 // Root-priority scheduling: 0 baseline, 1 priority roots, 2 priority tail,
 // 3 same-priority split control. No change to device arithmetic.
 #ifndef QSB_COMPLETION_MODE
-#define QSB_COMPLETION_MODE 1
+#define QSB_COMPLETION_MODE 3 /* same-priority split control experiment */
 #endif
 static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion mode");
 #if QSB_COMPLETION_MODE && !QSB_SLOTPIPE
