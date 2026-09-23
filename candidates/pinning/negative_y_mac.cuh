@@ -2,6 +2,9 @@
 // Research only: seed the promoted integer product with c.
 // The changed point representation stores the negative deferred ordinate.
 #pragma once
+#ifndef QSB_SEED_MUL_CUT
+#define QSB_SEED_MUL_CUT 1
+#endif
 __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,const uint64_t *b,const uint64_t *c){
 #ifdef __CUDA_ARCH__
  uint64_t r0,r1,r2,r3;
@@ -198,7 +201,11 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n"
   "\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n"
   "\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n"
+#if QSB_SEED_MUL_CUT
+  QSB_MUL_F8_CAP
+#else
   "\taddc.u32 f8, 0, 0;\n"
+#endif
   "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n"
   "\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n"
   "\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n"
@@ -219,10 +226,18 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\taddc.cc.u32 z5, z5, w4;\n"
   "\taddc.cc.u32 z6, z6, w5;\n"
   "\taddc.cc.u32 z7, z7, w6;\n"
+#if QSB_SEED_MUL_CUT
+  QSB_MUL_Z8
+#else
   "\taddc.u32 z8, f8, w7;\n"
+#endif
   "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n"
+#if QSB_SEED_MUL_CUT
+  QSB_MUL_SF_HEAD
+#else
   "mov.u32 sfq, z8;\n"
   "mov.b64 sfz, {z0, sfq};\n"
+#endif
   "mul.wide.u32 sft, z8, 977;\n"
   "add.cc.u64 sft, sft, sfz;\n"
   "addc.u32 sfc, 0, 0;\n"

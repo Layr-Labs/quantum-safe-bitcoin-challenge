@@ -60,6 +60,13 @@
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
+/* Keep independent slots live across sequence boundaries. */
+#ifndef QSB_OVERLAP_SEQUENCES
+#define QSB_OVERLAP_SEQUENCES 1
+#endif
+#if QSB_OVERLAP_SEQUENCES != 0 && QSB_OVERLAP_SEQUENCES != 1
+#error "QSB_OVERLAP_SEQUENCES must be 0 or 1"
+#endif
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -221,6 +228,13 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #ifndef QSB_SKIP_UNUSED_MIDSTATE
 #define QSB_SKIP_UNUSED_MIDSTATE 1 /* scored TAIL_PRE path already carries the midstate in qsb_tail_pre */
 #endif
+/* Enqueue replacement GPU work before gating a completed hit snapshot. */
+#ifndef QSB_REFILL_BEFORE_GATE
+#define QSB_REFILL_BEFORE_GATE 1
+#endif
+#if QSB_REFILL_BEFORE_GATE != 0 && QSB_REFILL_BEFORE_GATE != 1
+#error "QSB_REFILL_BEFORE_GATE must be 0 or 1"
+#endif
 #ifndef QSB_COMPACT_READBACK
 #define QSB_COMPACT_READBACK 1 /* one count+64-index D2H instead of two adjacent transfers */
 #endif
@@ -320,6 +334,28 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
+#if QSB_BIGTBL
+/* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
+ * The two remaining ordinary segments and the bounded top stream from DRAM.
+ * One 32-bit code still holds the absolute record index and Y sign. */
+#define GT_CHUNKS 6
+#define GT_GLV_TERMS 12
+#define GT_TOTAL_ENTRIES 22893641u
+#define GT_LO 4096
+#define GT_HI 4096
+__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
+    return q9_bigtbl_entries(c);
+}
+__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+    return q9_bigtbl_offset(c);
+}
+__host__ __device__ __forceinline__ int gt_shift(int c) {
+    return (int)q9_bigtbl_shift(c);
+}
+static_assert(GT_TOTAL_ENTRIES*64ULL == 1465193024ULL,
+              "GLV12 table must contain exactly 1,465,193,024 bytes");
+static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
+#else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
  * physical segments use widths [18,19,18,18,18,18,19] at shifts
  * [0,18,37,55,73,91,109].  Segment zero is the biased unsigned first term;
@@ -333,18 +369,32 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #define GT_TOTAL_ENTRIES 1215139u
 #define GT_LO 256
 #define GT_HI 2048
+/* Place the highest-density segments at the start of the L2 window. */
+#ifndef QSB_GLV_DENSE_FIRST
+#define QSB_GLV_DENSE_FIRST 1
+#endif
+#if QSB_GLV_DENSE_FIRST != 0 && QSB_GLV_DENSE_FIRST != 1
+#error "QSB_GLV_DENSE_FIRST must be 0 or 1"
+#endif
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
     return c < 2 ? 262144u : (c < 6 ? 131072u : 166563u);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+#if QSB_GLV_DENSE_FIRST
+    return c==0?690851u:c==1?952995u:c==2?0u:c==3?131072u:
+           c==4?262144u:c==5?393216u:524288u;
+#else
     return c==0?0u:c==1?262144u:c==2?524288u:c==3?655360u:
            c==4?786432u:c==5?917504u:1048576u;
+#endif
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
     return c==0?0:c==1?18:c==2?37:c==3?55:c==4?73:c==5?91:109;
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL == 77768896ULL,
               "GLV14 table must contain exactly 77,768,896 bytes");
+
+#endif
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -616,6 +666,12 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #endif
 
 /* Production scalar-entry form for the exact 14-term GLV chain. */
+#ifndef QSB_GLV_SEED_REG
+#define QSB_GLV_SEED_REG 1
+#endif
+#if QSB_GLV_SEED_REG != 0 && QSB_GLV_SEED_REG != 1
+#error "QSB_GLV_SEED_REG must be 0 or 1"
+#endif
 
 // First used as 14 per-lane GLV record-code planes (7 KiB); after the handoff,
 // the same 12 KiB holds the cofactor tree.
@@ -637,9 +693,23 @@ __device__ __forceinline__ uint64_t qsb_glv_extract(const uint64_t m[2],
  * and bit31 as the table-Y negation. */
 template<int SIDE>
 __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsigned sign,
-                                                     volatile uint32_t *codes) {
+                                                     volatile uint32_t *codes
+#if QSB_GLV_SEED_REG
+                                                     ,uint32_t *seed0,uint32_t *seed1
+#endif
+                                                     ) {
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
+#if QSB_BIGTBL
+        const unsigned slot=SIDE?c:GT_CHUNKS+c;
+        const uint32_t code=q9_bigtbl_code(mag,sign,c);
+#if QSB_GLV_SEED_REG
+        if(SIDE==1 && c==0)*seed0=code;
+        else if(SIDE==1 && c==1)*seed1=code;
+        else
+#endif
+        codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
+#else
         const unsigned shift=gt_shift(c);
         const unsigned bits=(c==1||c==6)?19u:18u;
         uint32_t f=(uint32_t)qsb_glv_extract(mag,shift);
@@ -658,7 +728,18 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
         }
         const unsigned slot=SIDE?c:GT_CHUNKS+c;
         const uint32_t record=gt_offset(c)+idx;
+#if QSB_GLV_SEED_REG
+        const uint32_t code=record|((neg_digit^sign)<<31);
+        // Only Q's two seed codes bypass shared memory. P7/P8 remain available
+        // for the exact Q-zero path; all later codes keep their old lifetime.
+        if(SIDE==1 && c==0)*seed0=code;
+        else if(SIDE==1 && c==1)*seed1=code;
+        else
+        codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
+#else
         codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=record|((neg_digit^sign)<<31);
+#endif
+#endif
     }
 }
 
@@ -666,12 +747,24 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
  * the Q planes first. The bounded top digit is centered at333125, not a
  * power-of-two midpoint. Explicit specializations keep component selection
  * out of the generated inner loop. */
-__device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k) {
+__device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
+#if QSB_GLV_SEED_REG
+                                                    ,uint32_t *seed0,uint32_t *seed1
+#endif
+                                                    ) {
     uint64_t mag[2][2]; unsigned sign[2];
     q9_glv_split(k,mag[0],mag[1],&sign[0],&sign[1]);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    qsb_decode_glv_side<0>(mag[0],sign[0],codes);
-    qsb_decode_glv_side<1>(mag[1],sign[1],codes);
+    qsb_decode_glv_side<0>(mag[0],sign[0],codes
+#if QSB_GLV_SEED_REG
+                             ,seed0,seed1
+#endif
+                             );
+    qsb_decode_glv_side<1>(mag[1],sign[1],codes
+#if QSB_GLV_SEED_REG
+                             ,seed0,seed1
+#endif
+                             );
     unsigned p_nonzero=(mag[0][0]|mag[0][1])!=0;
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
@@ -681,14 +774,24 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_BIGTBL
+    gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
+#else
     gt_load_signed_flat_m(table,0u,code&0x1fffffu,
+#endif
                           ((uint64_t)m32<<32)|m32,x,y);
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused; unsigned nonzero=qsb_decode_glv(k);
+    (void)unused;
+#if QSB_GLV_SEED_REG
+    uint32_t seed0,seed1;
+    unsigned nonzero=qsb_decode_glv(k,&seed0,&seed1);
+#else
+    unsigned nonzero=qsb_decode_glv(k);
+#endif
     if(!nonzero) {
         #pragma unroll
         for(int i=0;i<4;i++) X[i]=Y[i]=U[i]=V[i]=0;
@@ -697,8 +800,30 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_CHUNKS;
     int last=GT_GLV_TERMS;
+#if QSB_GLV_SEED_REG
+    if(!(nonzero&1u)) {
+        volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+        seed0=codes[(size_t)GT_CHUNKS*QSB_TREE_N+threadIdx.x];
+        seed1=codes[(size_t)(GT_CHUNKS+1)*QSB_TREE_N+threadIdx.x];
+    }
+    uint32_t m0=(uint32_t)((int32_t)seed0>>31);
+#if QSB_BIGTBL
+    gt_load_signed_flat_m(table,0u,seed0&0x7fffffffu,
+#else
+    gt_load_signed_flat_m(table,0u,seed0&0x1fffffu,
+#endif
+                         ((uint64_t)m0<<32)|m0,x0,y0);
+    uint32_t m1=(uint32_t)((int32_t)seed1>>31);
+#if QSB_BIGTBL
+    gt_load_signed_flat_m(table,0u,seed1&0x7fffffffu,
+#else
+    gt_load_signed_flat_m(table,0u,seed1&0x1fffffu,
+#endif
+                         ((uint64_t)m1<<32)|m1,x1,y1);
+#else
     qsb_load_glv(table,first,x0,y0);
     qsb_load_glv(table,first+1,x1,y1);
+#endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
@@ -2390,12 +2515,18 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-    int ch=0;
+    int ch=-1;
     #pragma unroll
-    for(int c=1;c<GT_CHUNKS;c++) if(t>=gt_offset(c)) ch=c;
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    if(ch<0) return;
     int d=(int)(t-gt_offset(ch));
     int m  = ch==0?d:2*d+1;
+#if QSB_BIGTBL
+    int hi = m >> 12, lo = m & 4095;
+#else
     int hi = m >> 8, lo = m & 255;
+#endif
 
     const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
@@ -2516,7 +2647,11 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
+#if QSB_BIGTBL
+    BN_set_word(bias,10659986); BN_lshift(bias,bias,103); BN_sub_word(bias,1u<<17);
+#else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
+#endif
     memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
     memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
     for(int ch=0;ch<GT_CHUNKS;ch++) {
@@ -2535,10 +2670,18 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
             gt_batch_ladder(grp,base,GT_LO-1,
                 hL+(size_t)ch*GT_LO*8,x,y,alpha,beta,field_p,ctx);
         }
+#if QSB_BIGTBL
+        BN_set_word(factor,GT_LO);
+#else
         BN_set_word(factor,256);
+#endif
         EC_POINT_mul(grp,step,NULL,base,factor,ctx);
         unsigned max_m=ch==0?gt_entries(ch)-1:2*(gt_entries(ch)-1)+1;
+#if QSB_BIGTBL
+        int high=(int)(max_m>>12);
+#else
         int high=(int)(max_m>>8);
+#endif
         gt_batch_ladder(grp,step,high,
             hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
     }
@@ -2550,7 +2693,11 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
     if(ch==0) {
+#if QSB_BIGTBL
+        BN_set_word(k,10659986); BN_lshift(k,k,103);
+#else
         BN_set_word(k,333126); BN_lshift(k,k,108);
+#endif
         BN_sub_word(k,1u<<17); BN_add_word(k,index);
     } else {
         BN_one(k); BN_lshift(k,k,gt_shift(ch)-1);
@@ -2589,7 +2736,13 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         } else {
             seed = seed * 1664525u + 1013904223u;
             ch = (int)(seed >> 28) % GT_CHUNKS;
+#if QSB_BIGTBL
+            /* Modulo samples the non-power-of-two top segment as well. */
+            seed = seed * 1664525u + 1013904223u;
+            i = (int)(seed % gt_entries(ch));
+#else
             i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
+#endif
         }
         gt_table_scalar(k,ch,(unsigned)i);
         BN_mod_mul(k,k,nri,order,ctx);
@@ -2612,7 +2765,11 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
  * coefficients as the GPU builder. */
 static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
                            const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+#if QSB_BIGTBL
+    printf("  Computing GLV12 GTable (OpenSSL fallback; discard this timing arm)...\n");
+#else
     printf("  Computing GLV14 GTable (OpenSSL fallback)...\n");
+#endif
     EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1); BN_CTX *ctx=BN_CTX_new();
     BIGNUM *x=BN_new(),*y=BN_new(),*k=BN_new(),*stepk=BN_new(),*order=BN_new(),
            *nri=BN_new(),*field_p=BN_new(),*alpha=BN_new(),*beta=BN_new();
@@ -2888,7 +3045,15 @@ int main(int argc, char **argv) {
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
     uint8_t *d_gt;
+#if QSB_BIGTBL
+    cudaError_t gt_alloc=cudaMalloc(&d_gt,gt_sz);
+    if(gt_alloc!=cudaSuccess) {
+        fprintf(stderr,"GLV12 table allocation failed: %s\n",cudaGetErrorString(gt_alloc));
+        return 1;
+    }
+#else
     cudaMalloc(&d_gt,gt_sz);
+#endif
     {
         /* Build the fixed-base table on the GPU. The host only produces the two
          * small ladders; the million entries are one parallel addition each.
@@ -2907,14 +3072,25 @@ int main(int argc, char **argv) {
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+#if QSB_BIGTBL
+        cudaError_t gerr = cudaDeviceSynchronize();
+        if(gerr==cudaSuccess) gerr=cudaGetLastError();
+#else
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
+#endif
         cudaFree(dL); cudaFree(dH);
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
+#if QSB_BIGTBL
+            gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+            gt_ok=(gerr==cudaSuccess);
+            if(gt_ok)
+#else
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+#endif
             gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
         }
@@ -3112,7 +3288,12 @@ int main(int argc, char **argv) {
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+#if QSB_BIGTBL
+        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+#else
+        size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
+                      (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
+#endif
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
@@ -3181,7 +3362,12 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+#if QSB_BIGTBL
+        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+#else
+        size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
+                      (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
+#endif
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};
@@ -3377,6 +3563,10 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_REFILL_BEFORE_GATE
+    auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
+                            uint32_t h_hit, const uint32_t *hits) -> int {
+#else
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
         cudaError_t err = cudaEventSynchronize(slot_done[s]);
@@ -3391,6 +3581,7 @@ int main(int argc, char **argv) {
         const uint32_t h_hit = h_hit_cnt[s];
         const uint32_t *hits = h_hit_idx + (size_t)s*64;
 #endif
+#endif
         if (h_hit > 0) {
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
             mkdir("results", 0755);
@@ -3401,7 +3592,11 @@ int main(int argc, char **argv) {
             if (f) {
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
+#if QSB_REFILL_BEFORE_GATE
+                    uint32_t lt = hit_lt + (raw & 0x3FFFFFFF);
+#else
                     uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
+#endif
                     int ri = (raw >> 30) & 1;
                     int hc = (raw >> 31) & 1;
                     /* One line per hit: harness/gpu_wrap.py searches every line for
@@ -3411,12 +3606,22 @@ int main(int argc, char **argv) {
                      * shorten the in-window hit parse. */
                     (void)hc;
 #if QSB_HOST_GATE
+#if QSB_REFILL_BEFORE_GATE
+                    ri = qsb_gate_accept(&pp, hit_seq, lt, ri,
+                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#else
                     ri = qsb_gate_accept(&pp, slot_seq[s], lt, ri,
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#endif
                     if (ri < 0) continue;
 #endif
+#if QSB_REFILL_BEFORE_GATE
+                    fprintf(f, "sequence=%u locktime=%u recid=%d\n",
+                            hit_seq, lt, ri);
+#else
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n",
                             slot_seq[s], lt, ri);
+#endif
                     wrote = 1;
                 }
                 fclose(f);
@@ -3425,6 +3630,34 @@ int main(int argc, char **argv) {
         }
         return 0;
     };
+#if QSB_REFILL_BEFORE_GATE
+    auto collect_slot = [&](int s, uint32_t &count, uint32_t *hits) -> int {
+        count = 0;
+        if (!slot_busy[s]) return 0;
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+        err = cudaGetLastError();
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_COMPACT_READBACK
+        count = slot_readback[s].count();
+        const uint32_t *source = slot_readback[s].indices();
+#else
+        count = h_hit_cnt[s];
+        const uint32_t *source = h_hit_idx + (size_t)s*64;
+#endif
+        if (count > 64) count = 64;
+        /* Copy before reuse: the next D2H is allowed to overwrite the pinned
+         * report while OpenSSL checks this ordinary host-stack snapshot. */
+        if (count) memcpy(hits, source, count*sizeof(uint32_t));
+        slot_busy[s] = 0;
+        return 0;
+    };
+    auto drain_slot = [&](int s) -> int {
+        uint32_t count = 0, hits[64];
+        if (collect_slot(s, count, hits)) return 1;
+        return publish_hits(slot_seq[s], slot_lt[s], count, hits);
+    };
+#endif
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -3458,7 +3691,13 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
+#if QSB_REFILL_BEFORE_GATE
+            const uint32_t completed_seq = slot_seq[s], completed_lt = slot_lt[s];
+            uint32_t completed_count = 0, completed_hits[64];
+            if (collect_slot(s, completed_count, completed_hits)) return 1;
+#else
             if (drain_slot(s)) return 1;
+#endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
@@ -3503,6 +3742,11 @@ int main(int argc, char **argv) {
                 return 1;
             }
             slot_busy[s] = 1;
+#if QSB_REFILL_BEFORE_GATE
+            /* All replacement kernels and readback are queued before the CPU
+             * gate or filesystem work. No worker thread or extra link flag. */
+            if (publish_hits(completed_seq, completed_lt, completed_count, completed_hits)) return 1;
+#endif
 
             total_searched += batch_sz;
 
@@ -3518,10 +3762,16 @@ int main(int argc, char **argv) {
             }
         }
 
+        /* slot_seq/slot_lt remain attached to the old batch until its done
+         * event is synchronized on reuse. cur_tp is passed to the kernel by
+         * value; the optional uploaded midstate is also private to each slot.
+         * Only pin_tail_tab is shared across sequences and needs this drain. */
+#if !QSB_OVERLAP_SEQUENCES || QSB_TAIL_TAB
         /* Every slot's hits are drained before the sequence rolls over, so a
          * hit can never be attributed to the wrong sequence and at most
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#endif
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;

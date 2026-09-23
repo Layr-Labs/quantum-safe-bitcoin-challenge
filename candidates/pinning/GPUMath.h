@@ -177,7 +177,14 @@
 #define QSB_MUL_F8_CAP "\taddc.u32 f8, 0, 0;\n"
 #define QSB_MUL_Z8 "\taddc.u32 z8, f8, w7;\n"
 #endif
-#if QSB_SQR_FOLD8_CUT && QSB_SHORT_CARRY && QSB_SAS_Z9SUB_ALL
+/* Retest square/fused f8 retention; leave the multiply-side cut enabled. */
+#ifndef QSB_RESTORE_SQR_F8
+#define QSB_RESTORE_SQR_F8 1
+#endif
+#if QSB_RESTORE_SQR_F8 != 0 && QSB_RESTORE_SQR_F8 != 1
+#error "QSB_RESTORE_SQR_F8 must be 0 or 1"
+#endif
+#if QSB_SQR_FOLD8_CUT && QSB_SHORT_CARRY && QSB_SAS_Z9SUB_ALL && !QSB_RESTORE_SQR_F8
 #define QSB_SQR_F8_CAP ""
 #define QSB_SQR_F8SRC "0"
 #else
