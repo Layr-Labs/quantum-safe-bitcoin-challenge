@@ -2215,7 +2215,6 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   uint64_t P[4];
   uint64_t R[4];
   uint64_t Q[4];
-  uint64_t T[4];
 
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
@@ -2223,16 +2222,17 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModMult(ZZZ3, ZZ3, P);                          // ZZZ3 = PPP = P*PP
   _ModMult(Q, (uint64_t *)X1, ZZ3);                // Q = X1*PP
 
-  _ModSqr(T, R);                                   // R^2
-  _ModSub256(T, T, ZZZ3);
-  _ModSub256(T, T, Q);
-  _ModSub256(T, T, Q);                             // X3 = R^2 - PPP - 2Q
+  /* X3 is output-only: write R^2 - PPP - 2Q directly into X3 instead of
+   * the T temporary plus the trailing copy. Exact for every input. */
+  _ModSqr(X3, R);                                  // R^2
+  _ModSub256(X3, X3, ZZZ3);
+  _ModSub256(X3, X3, Q);
+  _ModSub256(X3, X3, Q);                           // X3 = R^2 - PPP - 2Q
 
 #if QSB_NEG_Y_MAC
-  _ModSub256(Q, T, Q); // seed negative deferred ordinate
+  _ModSub256(Q, X3, Q); // seed negative deferred ordinate
 #else
-  _ModSub256(Q, Q, T);
+  _ModSub256(Q, Q, X3);
 #endif                             // Q - X3
   _ModMult(Y3, Q, R);                              // deferred R*(Q-X3)
-  Load256(X3, T);                                  // X3
 }
