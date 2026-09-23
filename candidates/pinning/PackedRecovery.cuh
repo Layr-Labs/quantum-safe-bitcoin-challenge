@@ -56,6 +56,20 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
 #include "ParityWindow.cuh"
 #endif
 
+/* QSB_SUM_2U: the slope sum l+m is congruent to 2u, so it can be formed from u
+ * alone one lazy-add earlier instead of waiting on both l and m. u,v,l,m are
+ * all congruent representatives, so the identity holds under either arm. */
+#ifndef QSB_SUM_2U
+#define QSB_SUM_2U 1
+#endif
+/* QSB_PREP_MASK: unusable lanes need vbar=tbar=0. Masking the shared factor
+ * hc once (four limbs) between the dependent multiplies makes both products
+ * zero, replacing the eight-limb tail mask and removing it from the store
+ * dependency. */
+#ifndef QSB_PREP_MASK
+#define QSB_PREP_MASK 1
+#endif
+
 // Combine the public cofactor traversal with our existing exact/canonical
 // recovery boundary and the odinfree square-free finish identity.
 __device__ __forceinline__ void qsb_packed_prepare(
@@ -69,9 +83,14 @@ __device__ __forceinline__ void qsb_packed_prepare(
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
         qsb_packed_raw_mul(hc,U,D);
+#if QSB_PREP_MASK
+        if(!usable)for(int k=0;k<4;k++)hc[k]=0;
+#endif
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
+#if !QSB_PREP_MASK
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -110,7 +129,11 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
 #else
     _ModSub256(l,u,v); _ModAddLazy(m,u,v);
 #endif
+#if QSB_SUM_2U
+    _ModAddLazy(sum,u,u);   /* l+m == 2u (mod p): holds under either slope arm */
+#else
     _ModAddLazy(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
