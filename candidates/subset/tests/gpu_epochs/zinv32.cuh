@@ -233,6 +233,13 @@ ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
     return delta;
 }
 
+#ifndef QSB_DIRECT_JUMP_ROOT
+#define QSB_DIRECT_JUMP_ROOT 1
+#endif
+#if QSB_DIRECT_JUMP_ROOT
+#include "direct_jump_root.cuh"
+#endif
+
 /* ======================= 4-lane cooperative form =======================
  * Lanes 0..3 of one warp run the SAME instruction stream except the decision loop
  * (lanes 0,1 only; they hold identical u,v so they take identical branches).
@@ -308,6 +315,16 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
         // Uniform across all four lanes; original R is still unchanged.
         if(batches==ZI_ROOT_MAX_BATCHES)return false;
         ++batches;
+#if QSB_DIRECT_JUMP_ROOT
+        int32_t col0=0,col1=0;
+        if(lane<2){
+            const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
+            delta=qsb_divstep30_column(delta,f0,g0,odd!=0,&col0,&col1);
+        }
+        int32_t ka=odd?col1:col0,kb=odd?col0:col1;
+        ka=(int32_t)zi_x((uint32_t)ka,lane&1);
+        kb=(int32_t)zi_x((uint32_t)kb,(lane&1)^1);
+#else
         int32_t a=0,b=0,c=0,d=0;
         if(lane<2){
             const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
@@ -316,6 +333,7 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
         int32_t ka=odd?d:a,kb=odd?c:b;
         ka=(int32_t)zi_x((uint32_t)ka,lane&1);
         kb=(int32_t)zi_x((uint32_t)kb,lane&1);
+#endif
         zi_row_ip(P,Q,ka,kb,rs);
         uint32_t nz=0;
         for(int i=0;i<9;i++)nz|=P[i];
