@@ -1,0 +1,63 @@
+{
+  "compiler": "CUDA 12.8.93, GCC 13",
+  "gpu_executed": false,
+  "promoted_control": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
+  "previous_submission_head": "f60940f15ce04bb641e893ff801e295d36eaad3f",
+  "previous_official_score": 814080739,
+  "active_flags": {
+    "QSB_COMPLETION_MODE": 2,
+    "QSB_COMPACT_READBACK": 1,
+    "QSB_SKIP_UNUSED_MIDSTATE": 1,
+    "QSB_OVERLAP_PUBLICATION": 1
+  },
+  "builds_passed": [
+    "organizer_default_sm52",
+    "native_sm89",
+    "components_off_mode1",
+    "QSB_TAIL_PRE=0_fallback"
+  ],
+  "sass": {
+    "sm52": {
+      "equal_to_promoted": true,
+      "functions": 7,
+      "instructions": 51804
+    },
+    "sm89": {
+      "equal_to_promoted": true,
+      "functions": 7,
+      "instructions": 15864
+    }
+  },
+  "cpu_tests": {
+    "priority_helper_tests": 5,
+    "priority_scenarios": 79,
+    "priority_failures": 18,
+    "priority_wait_mutations": 2,
+    "readback_tests": 3,
+    "readback_batches": 36,
+    "readback_failures": 4,
+    "readback_offset_mutations": 1,
+    "snapshot_tests": 2,
+    "snapshot_scenarios": 132,
+    "snapshot_boundary_counts": 7,
+    "host_gate_midstate_samples": 64
+  },
+  "gpu_operations_removed_per_batch_vs1139": 4,
+  "source_sha256": {
+    "pinning.cu": "bcf923f64aae89832c26f6c69377f1e17ed28e375e3399693d6bc5100bf5bd7a",
+    "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "HitSnapshot.h": "4ab2bf6135db28ed1f5296dccf80899c6b19376437af6f9afcce541a165404aa"
+  },
+  "cpu_gate_probe": {
+    "microseconds_per_call": [
+      368.96,
+      383.934,
+      374.496
+    ],
+    "calls_per_run": 3000,
+    "runs": 3,
+    "gpu_timing": false,
+    "generated_cpp_sha256": "c1aad16df8c0ac11b4d5c828c3040cdd86580ec04fb0e04fc1360ac6266762a7"
+  }
+}

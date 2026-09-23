@@ -58,6 +58,9 @@
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
 #include "GPUMath.h"
+#include "PriorityPipeline.h"
+#include "SlotReadback.h"
+#include "HitSnapshot.h"
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -204,6 +207,24 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    to 31e98e47's.  31e98e47 scored 702,050,398 and 260879f4 scored
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
+// Root-priority scheduling: 0 baseline, 1 priority roots, 2 priority tail,
+// 3 same-priority split control. No change to device arithmetic.
+#ifndef QSB_COMPLETION_MODE
+#define QSB_COMPLETION_MODE 2
+#endif
+#ifndef QSB_COMPACT_READBACK
+#define QSB_COMPACT_READBACK 1
+#endif
+#ifndef QSB_SKIP_UNUSED_MIDSTATE
+#define QSB_SKIP_UNUSED_MIDSTATE 1
+#endif
+#ifndef QSB_OVERLAP_PUBLICATION
+#define QSB_OVERLAP_PUBLICATION 1
+#endif
+static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion mode");
+#if QSB_COMPLETION_MODE && !QSB_SLOTPIPE
+#error "completion streams require the slotted pipeline"
+#endif
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
@@ -213,7 +234,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_SLOTPIPE
 /* The launch helper takes the slot's stream; at QSB_SLOTPIPE=0 the parameter and
  * the launch suffix vanish so the emitted code is the single-stream one. */
-#define QSB_STREAM_PARM , cudaStream_t st
+#define QSB_STREAM_PARM , cudaStream_t st, qsb::CompletionLane *flow = nullptr
 #define QSB_STREAM_ARG  ,0,st
 #else
 #define QSB_STREAM_PARM
@@ -2259,6 +2280,15 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #endif
+#if QSB_SLOTPIPE
+    if (flow) {
+        err = flow->begin_roots(st);
+        if (err != cudaSuccess) {
+            fprintf(stderr,"Prepare/root dependency failed: %s\n",cudaGetErrorString(err));
+            exit(2);
+        }
+    }
+#endif
     int root_groups=(blocks+255)/256;
     qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
@@ -2280,6 +2310,15 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#if QSB_SLOTPIPE
+    if (flow) {
+        err = flow->end_roots(st);
+        if (err != cudaSuccess) {
+            fprintf(stderr,"Root/finish dependency failed: %s\n",cudaGetErrorString(err));
+            exit(2);
+        }
+    }
+#endif
 #if QSB_TREE_OFFLOAD2
     qsb_leaf_tree_finish<<<blocks,256 QSB_STREAM_ARG>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
@@ -3065,19 +3104,37 @@ int main(int argc, char **argv) {
      * non-blocking stream, so it is installed again on each slot stream with
      * exactly the same base/size/QSB_L2_SKIP arithmetic.  The device-wide
      * cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize) above is not repeated. */
+    qsb::CompletionLane slot_flow[QSB_SLOTS];
     cudaStream_t slot_stream[QSB_SLOTS];
     cudaEvent_t  slot_done[QSB_SLOTS];
     uint32_t *d_hit_cnt_s[QSB_SLOTS], *d_hit_idx_s[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
-    uint32_t *h_hit_cnt=NULL, *h_hit_idx=NULL, *h_mid=NULL;
+    uint32_t *h_mid=NULL;
+#if QSB_COMPACT_READBACK
+    qsb::SlotReadback slot_readback[QSB_SLOTS];
+#else
+    uint32_t *h_hit_cnt=NULL, *h_hit_idx=NULL;
+#endif
     {
-        cudaError_t se = cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*sizeof(uint32_t), cudaHostAllocDefault);
+        cudaError_t se = cudaSuccess;
+#if !QSB_COMPACT_READBACK
+        se = cudaHostAlloc((void**)&h_hit_cnt, QSB_SLOTS*sizeof(uint32_t), cudaHostAllocDefault);
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_hit_idx, QSB_SLOTS*64*sizeof(uint32_t), cudaHostAllocDefault);
+#endif
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
+            if (se==cudaSuccess) se = slot_flow[s].init(slot_stream[s], QSB_COMPLETION_MODE);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
+#if QSB_COMPACT_READBACK
+            if (se==cudaSuccess) se = slot_readback[s].init();
+            if (se==cudaSuccess) {
+                d_hit_cnt_s[s] = slot_readback[s].device_count();
+                d_hit_idx_s[s] = slot_readback[s].device_indices();
+            }
+#else
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
+#endif
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], 32);
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
         }
@@ -3285,15 +3342,10 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
-    auto drain_slot = [&](int s) -> int {
-        if (!slot_busy[s]) return 0;
-        cudaEventSynchronize(slot_done[s]);
-        slot_busy[s] = 0;
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-        uint32_t h_hit = h_hit_cnt[s];
+    auto publish_hits = [&](const qsb::HitSnapshot &report) -> int {
+        const uint32_t h_hit = report.count;
+        const uint32_t *hits = report.indices;
         if (h_hit > 0) {
-            const uint32_t *hits = h_hit_idx + (size_t)s*64;
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
             mkdir("results", 0755);
             char fname[256];
@@ -3303,7 +3355,7 @@ int main(int argc, char **argv) {
             if (f) {
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
-                    uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
+                    uint32_t lt = report.locktime + (raw & 0x3FFFFFFF);
                     int ri = (raw >> 30) & 1;
                     int hc = (raw >> 31) & 1;
                     /* One line per hit: harness/gpu_wrap.py searches every line for
@@ -3313,12 +3365,12 @@ int main(int argc, char **argv) {
                      * shorten the in-window hit parse. */
                     (void)hc;
 #if QSB_HOST_GATE
-                    ri = qsb_gate_accept(&pp, slot_seq[s], lt, ri,
+                    ri = qsb_gate_accept(&pp, report.sequence, lt, ri,
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
                     if (ri < 0) continue;
 #endif
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n",
-                            slot_seq[s], lt, ri);
+                            report.sequence, lt, ri);
                     wrote = 1;
                 }
                 fclose(f);
@@ -3326,6 +3378,27 @@ int main(int argc, char **argv) {
             if (wrote) found = 1;
         }
         return 0;
+    };
+    auto drain_slot = [&](int s, qsb::HitSnapshot *deferred) -> int {
+        qsb::HitSnapshot local;
+        qsb::HitSnapshot &report = deferred ? *deferred : local;
+        report.count = 0;
+        if (!slot_busy[s]) return 0;
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+        slot_busy[s] = 0;
+        err = cudaGetLastError();
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_COMPACT_READBACK
+        const uint32_t count = slot_readback[s].count();
+        const uint32_t *indices = slot_readback[s].indices();
+#else
+        const uint32_t count = h_hit_cnt[s];
+        const uint32_t *indices = h_hit_idx + (size_t)s*64;
+#endif
+        // Own the old result and metadata before a new batch can overwrite them.
+        report.capture(slot_seq[s], slot_lt[s], count, indices);
+        return deferred ? 0 : publish_hits(report);
     };
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
@@ -3360,13 +3433,29 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
-            if (drain_slot(s)) return 1;
+            qsb::HitSnapshot pending;
+#if QSB_OVERLAP_PUBLICATION
+            if (drain_slot(s, &pending)) return 1;
+#else
+            if (drain_slot(s, nullptr)) return 1;
+#endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
+            cudaError_t slot_error = cudaSuccess;
+#if !QSB_TAIL_PRE || !QSB_SKIP_UNUSED_MIDSTATE
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);
-            cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
-            cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
+            slot_error = cudaMemcpyAsync(
+                d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
+#endif
+            // FAST_TAIL + QSB_TAIL_PRE reads tp.mid, already passed in cur_tp;
+            // d_mid_slot is not read in that compiled prepare path.
+            if (slot_error == cudaSuccess)
+                slot_error = cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
+            if (slot_error != cudaSuccess) {
+                fprintf(stderr, "Slot input enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                return 1;
+            }
 
             launch_pinning_pipeline<true>(
                 d_mid_slot[s], d_suffix, gpu_suffix_len,
@@ -3378,13 +3467,27 @@ int main(int argc, char **argv) {
                 d_hit_cnt_s[s], d_hit_idx_s[s],
                 batch_sz, easy, single_hash,
                 d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
-                d_super_roots[s],d_root_checkpoint[s], cur_tp, st);
-            cudaMemcpyAsync(h_hit_cnt + s, d_hit_cnt_s[s], sizeof(uint32_t),
-                            cudaMemcpyDeviceToHost, st);
-            cudaMemcpyAsync(h_hit_idx + (size_t)s*64, d_hit_idx_s[s], 64*sizeof(uint32_t),
-                            cudaMemcpyDeviceToHost, st);
-            cudaEventRecord(slot_done[s], st);
+                d_super_roots[s],d_root_checkpoint[s], cur_tp, st, &slot_flow[s]);
+            st = slot_flow[s].completion_stream();
+#if QSB_COMPACT_READBACK
+            slot_error = slot_readback[s].enqueue(st, slot_done[s]);
+#else
+            slot_error = cudaMemcpyAsync(h_hit_cnt + s, d_hit_cnt_s[s], sizeof(uint32_t),
+                                         cudaMemcpyDeviceToHost, st);
+            if (slot_error == cudaSuccess)
+                slot_error = cudaMemcpyAsync(h_hit_idx + (size_t)s*64, d_hit_idx_s[s],
+                                             64*sizeof(uint32_t), cudaMemcpyDeviceToHost, st);
+            if (slot_error == cudaSuccess) slot_error = cudaEventRecord(slot_done[s], st);
+#endif
+            if (slot_error != cudaSuccess) {
+                fprintf(stderr, "Slot completion enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                return 1;
+            }
             slot_busy[s] = 1;
+#if QSB_OVERLAP_PUBLICATION
+            // The GPU can start the new batch while the CPU verifies the saved hits.
+            if (publish_hits(pending)) return 1;
+#endif
 
             total_searched += batch_sz;
 
@@ -3400,10 +3503,10 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Every slot's hits are drained before the sequence rolls over, so a
-         * hit can never be attributed to the wrong sequence and at most
-         * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
-        for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+        /* Drain and publish every slot before changing sequence constants.
+         * A forced stop inside the batch loop can leave in-flight work or a
+         * saved report not yet published; that report still owns its metadata. */
+        for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s, nullptr)) return 1;
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
