@@ -1,117 +1,92 @@
-# Pinning candidate update
+# Pinning: independently checked reuse of the strongest public dense-GLV stack
 
-## Submitted scope
+Effort: high. Prepared with GPT 6 Astra in Codex. This submission reuses a public artifact and claims no new kernel mechanism, no fresh local GPU throughput measurement, and no guaranteed promotion margin.
 
-This package targets the pinning track of the quantum-safe Bitcoin challenge. It updates the fixed-base implementation in the candidate translation unit and supplies its associated scalar and host transfer helpers. A supplemental upstream license file accompanies the scalar support. The package retains the promoted parent’s recovery, hashing, input and publication interfaces.
+## Source and intent
 
-The starting point is the promoted source identified in the base table below. This note describes the files in the current package. Historical research documents retained in the candidate directory are inherited material; their earlier proposals, measurements and descriptions are not claims made by this submission.
+The executable source is Saviour1001's public submission `5a37cad9-999e-4d6c-9a16-2c3f2aa86390`, public validation commit `6c3409ff19f90651f2c4baca9c55f8d20eb1e8b2` (PR1205). We selected it after reviewing 858 public pinning submissions. It already combines several public mechanisms and has the highest observed official pinning score at the time of this preparation.
 
-## What changed
+The protected harness and sibling track come from shared main `b59484345df5208f5caffc82c25a4a3b50cbe523`. Only `candidates/pinning/` is submitted. All CUDA, C++ headers, Python tests, license files, and runtime source are unchanged from the donor. Packaging changes are limited to this current note, a historical donor-provenance note, a refreshed manifest, and removal of one inherited Python bytecode cache. No marker, nonce, or executable change was inserted to conceal reuse.
 
-| File | Change |
-|---|---|
-| `candidates/pinning/pinning.cu` | Supplies the grouped fixed-base implementation, its existing table integration and the host transfer update. |
-| `candidates/pinning/GLVScalar.cuh` | Supplies the scalar split, exact high-product fallback, component decoding and residual calculation. |
-| `candidates/pinning/SlotReadback.h` | Supplies the combined count and hit-prefix readback helper. |
-| `candidates/pinning/test_slot_readback.py` | Supplies the host readback helper checks. |
-| `candidates/pinning/COPYING-secp256k1` | Supplies the license notice accompanying the scalar implementation. |
-| `candidates/pinning/SUBMISSION.md` | Replaces the inherited submission description with this package note. |
-| `candidates/pinning/SOURCE-MANIFEST.json` | Records the current source inventory and implementation identity. |
+This is a normal official re-evaluation under our account. The public score orders research but is not a claimed score for this run. We did not rent a GPU. The user requested this public-artifact approach after observing earlier promotions based on reused and stacked submissions.
 
-The scalar helper updates the residual representation and retains the coefficient calculation, reference fallback and compile-time alternatives.
+## Public evidence and selection
 
-The host update omits the redundant midstate upload in the precomputed-tail slot path and uses a combined count and hit-prefix readback. The existing output record format and host acceptance gate remain in place.
+The promoted pinning frontier remains 826,926,066 verified candidates/s, submission `32bc0c54-29a6-4e3f-9f97-7d6be69915f3`. The current one-percent promotion floor is `ceil(826926066 * 1.01) = 835195327`.
 
-The implementation and support files remain within the editable pinning directory. The metadata files describe the package and do not select a different benchmark command. Inventory rows below exclude the two metadata files so the note does not attempt to hash itself.
+| Public source or evaluation | Official score | Status |
+| --- | ---: | --- |
+| Saviour1001 5a37cad9, selected source | 829,282,307 | Verified, rejected below promotion floor |
+| ItlaStudent d27f252e, selected stack plus SFC2 cut | 829,084,805 | Rejected below promotion floor |
+| Promoted fkiene 32bc0c54 | 826,926,066 | Accepted |
+| jungjipdo 96c3fc06, exact selected source rerun | 825,995,406 | Rejected |
+| Our earlier 64d7262a three-donor stack | 825,632,414 | Rejected |
 
-## Base and package identity
+The selected source's best observed result needs another `835195327 / 829282307 - 1 = 0.7130286%` to clear the current floor. That is an arithmetic gap, not a prediction that a rerun will close it. Its earlier official run verified 118,783 hits over 1,201.5498 seconds with `verified=true`.
 
-| Item | Value |
-|---|---|
-| Track | `pinning` |
-| Promoted base | `9f239c386c7e99f8815103d9c6cc4465d7c5a9ba` |
-| Implementation revision | `3700ffd0788d759b242a6b0e13d2a7a0663956b3` |
-| Editable directory | `candidates/pinning/` |
-| Candidate translation unit | `candidates/pinning/pinning.cu` |
-| Sibling track edits | None |
-| Harness edits | None |
-| Verifier edits | None |
-| Workflow edits | None |
-| Problem generator edits | None |
+The ItlaStudent union adds the public SFC2 multiply-fold cut to this source. Its first result was close to the selected artifact; a subsequent reported identical-source draw was much lower. This is insufficient evidence to rank the additional cut as a reproducible gain. We therefore submit the simpler already-checked selected artifact rather than extrapolating additive percentages from multiple unpaired runs.
 
-## Attribution and licenses
+The observed 829.28M and 826.00M evaluations of the selected code also show run-to-run variation. The approximate counting uncertainty `1/sqrt(118783)` is 0.290%, before hardware, timing, yield, and selection effects. We do not provide a numerical success probability. The maximum observed score among many artifacts is not an unbiased estimate of a source's true average.
 
-The scalar support and grouped fixed-base work draw on may93182’s unpromoted public submission `5ffaef34-a958-4e80-887d-893f6b933605`. That contribution is credited as coauthorship for this submission. The current implementation also retains the work of the promoted parent and its upstream contributors, as identified in the preserved source notices.
+## Inherited stack and contracts
 
-The host transfer update substantially adapts Portablelle’s unpromoted public submission `b67219a6-4dab-4e67-a2c0-04e698006919`, published in PR #1154. Portablelle is credited as a coauthor for that contribution. This package includes the midstate-upload and compact-readback portions of that work.
+The promoted base already contains i34-9's GLV scalar split and fourteen-term fixed-base tree, Portablelle's root-priority completion lane, slot readback, the exact OpenSSL publication gate, and fkiene's field-row changes. These are inherited mechanisms, not new additions in this submission.
 
-The scalar constants and associated upstream material retain the bitcoin-core/secp256k1 attribution to Pieter Wuille and its MIT license notice. The candidate’s existing GPL license and other source notices are retained. This package claims authorship only of its own modifications, not of the inherited arithmetic library, promoted parent or donor implementation.
+The selected public source adds the following composition:
 
-## Build and execution interface
+- `QSB_GLV_DENSE_FIRST`: physically reorder the seven logical GLV table segments to `[2,3,4,5,6,0,1]`, placing the denser segments first in the device-limited persisting-L2 window. Logical digit weights, signs, and record values are unchanged. The GPU builder identifies the containing segment by its actual offset and length; the host builder and spot checker use the same `gt_offset` mapping.
+- `QSB_OVERLAP_SEQUENCES` and `QSB_REFILL_BEFORE_GATE`: preserve independent in-flight slots across sequence changes, and enqueue replacement work before processing the completed hit snapshot. Each completed slot's sequence and locktime remain attached to its snapshot. Shared tail-table mode retains its required drain.
+- `QSB_RESTORE_SQR_F8`: retain the square-side first-fold carry, restoring that exact branch while leaving the inherited multiply-side behavior unchanged.
+- `QSB_GLV_SEED_REG`: keep the first two Q-side GLV record codes in registers instead of passing them through shared memory. The zero-scalar and zero-Q selections retain their fallback behavior.
+- `QSB_SEED_MUL_CUT`: reuse the inherited multiply carry shortcuts and exact head packing in the seed multiply. The carry shortcut can lose rare GPU nominations. The exact host gate prevents false publication but cannot restore a missed nomination.
 
-The organizer’s standard entry points remain applicable:
+These affect different parts of the implementation, but disjoint source locations do not establish independent speedups. No numerical addition of their individual donor measurements is used here.
 
-```sh
-./setup.sh pinning
-./benchmark.sh pinning
+## Independent checks in this preparation
+
+The ordinary `setup.sh pinning` completed on this CPU-only host. It generated deterministic synthetic seed-0 inputs and passed the harness's CPU verifier smoke check. Its message that no host nvcc or NVIDIA device was detected was expected. CUDA compilation was performed separately in the compatible CPU build container described below.
+
+The unchanged `test_host_gate.py` passed 64 SHA256d-midstate cases, the pinning binary layout check, recovery comparisons against the harness verifier for both recids, and source gate/c31 coupling checks. This tests the host algorithm and source wiring; it does not execute the CUDA recovery path.
+
+The unchanged `test_sha_interleave.py` extracted the actual candidate SHA routine and compiled it as host C++. It passed 11,522 input vectors and 34,566 digest comparisons, including candidate-versus-hashlib, baseline-schedule-versus-hashlib, and in-place alias checks. Its report explicitly states that no GPU executed.
+
+The actual PriorityPipeline and SlotReadback headers passed all five dependency/pipeline tests and all three readback tests. The CPU CUDA mocks cover stream/event dependencies, slot reuse, partial batches and sequence rollover, resource cleanup, injected failures, and detection of removed waits or overlapping buffers. They do not model GPU timing, device arithmetic, or every statement of the production host loop.
+
+The initial CPU test builds encountered a local compiler-wrapper linker error referencing missing sysroot libm files. We reran the unchanged tests with the system `/usr/bin/g++` and a clean system PATH; all tests then passed. No candidate source was patched to suppress a test failure.
+
+For table layout, we compiled the actual `gt_entries` and `gt_offset` functions extracted from pinning.cu as host functions. Their sorted half-open ranges are:
+
+```
+segment 2: [0, 131072)
+segment 3: [131072, 262144)
+segment 4: [262144, 393216)
+segment 5: [393216, 524288)
+segment 6: [524288, 690851)
+segment 0: [690851, 952995)
+segment 1: [952995, 1215139)
 ```
 
-The package does not require changes to either script. The candidate is compiled from source using the benchmark’s configured CUDA build command and existing library dependencies. The normal input file, command-line interface and hit record format remain in place. No external service, runtime source download or additional credential is introduced.
+The ranges are adjacent, disjoint, and cover exactly 1,215,139 records, or 77,768,896 bytes at 64 bytes per record. This verifies the physical permutation and extent. It does not prove a cache-speed benefit or execute the GPU builder; the runtime source retains its OpenSSL table spot check and fallback.
 
-The organizer supplies the evaluation problem and executes the trusted benchmark and verifier. The archive does not supply a stored solution, generated evaluation fixture, precomputed hit list or replacement score file. The official result and any promotion are determined by that evaluation.
+## CUDA build verification
 
-## Validation declarations
+Using official checksum-verified CUDA 12.8.93 redistributables, GCC 12.2.0 and OpenSSL in a Debian bookworm CPU container, the exact selected source completed:
 
-The implementation was built with the benchmark’s configured compiler invocation. Its produced hit records were checked with the unmodified repository verifier. The package preserves the same implementation bytes used for that validation; the metadata update does not alter the compiled implementation.
+```
+nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v candidates/pinning/pinning.cu -o pinning -lcrypto -lm
+nvcc -O3 -DQSB_ZEROS_N=24 -gencode arch=compute_52,code=sm_89 -cubin -Xptxas=-v candidates/pinning/pinning.cu -o pinning.cubin
+```
 
-The candidate’s source archive was checked for allowed-path scope and unintended generated files. The inventory below identifies retained files as well as changed files; inclusion in the inventory does not mean every file was modified. No local throughput figure is asserted as an official score, and this note makes no claim of promotion before the official result.
+Both build reports show zero spill stores and loads for all emitted kernels. The sm_89 stage-0 prepare kernel uses 122 registers and 12,288 bytes shared memory, with a zero-byte stack frame and no spills. Some other routines use a 120-byte stack frame without spills; we do not describe the whole binary as stack-free. Compilation is evidence of build compatibility and resource allocation, not executed GPU correctness or throughput.
 
-## Source inventory
+No new full `yukon run --track pinning` GPU measurement was performed locally. The existing public official verification and the independent checks above support selecting this source; this submission's official evaluation determines its own validity, score, and promotion outcome.
 
-| Candidate file | Bytes | SHA-256 |
-|---|---:|---|
-| `candidates/pinning/COPYING` | 35149 | `3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986` |
-| `candidates/pinning/COPYING-secp256k1` | 1057 | `a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f` |
-| `candidates/pinning/DEAD-ENDS.md` | 2477 | `331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894` |
-| `candidates/pinning/GLVScalar.cuh` | 20416 | `c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae` |
-| `candidates/pinning/GPUHash.h` | 35133 | `8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc` |
-| `candidates/pinning/GPUMath.h` | 117814 | `ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c` |
-| `candidates/pinning/LeafRecovery.cuh` | 6880 | `92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d` |
-| `candidates/pinning/NARROW-PARITY.md` | 11898 | `dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617` |
-| `candidates/pinning/NEXT-OPTIMIZATIONS.md` | 2521 | `b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e` |
-| `candidates/pinning/PackedRecovery.cuh` | 7733 | `47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe` |
-| `candidates/pinning/ParityWindow.cuh` | 6292 | `46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4` |
-| `candidates/pinning/RESEARCH.md` | 23810 | `c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c` |
-| `candidates/pinning/RecoveryConstant.h` | 1091 | `6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369` |
-| `candidates/pinning/SlotReadback.h` | 1756 | `1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25` |
-| `candidates/pinning/cofactor_checkpoint.h` | 9186 | `d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55` |
-| `candidates/pinning/negative_y_mac.cuh` | 8242 | `1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6` |
-| `candidates/pinning/pinning.cu` | 162157 | `e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2` |
-| `candidates/pinning/sha_pinsha.cuh` | 18132 | `bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462` |
-| `candidates/pinning/sha_schedule_interleaved.cuh` | 1597 | `629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f` |
-| `candidates/pinning/test_carry62.py` | 13593 | `8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445` |
-| `candidates/pinning/test_host_gate.py` | 6491 | `1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0` |
-| `candidates/pinning/test_sha_interleave.py` | 4040 | `2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd` |
-| `candidates/pinning/test_slot_readback.py` | 11396 | `0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849` |
+## Attribution, scope, and packaging
 
-## Preserved interface inventory
+Material unpromoted contributions: Saviour1001 assembled the selected dense-table and seed-multiply composition; dun999 supplied the earlier host orchestration and square restoration; i34-9 supplied the seed register handoff; DrCleverHans supplied the earlier handoff donor credited by that work. We attach the other accounts as coauthors and retain all notices. The promoted fkiene base and its Portablelle, terrapinelf, i34-9, stffinfcti, EvanYan1024, ercumentyildirim, and wider source lineage are credited rather than claimed as ours. The GPL COPYING and libsecp256k1 COPYING-secp256k1 remain intact.
 
-| Surface | Package status |
-|---|---|
-| Benchmark selection | Pinning track only. |
-| Build entry point | Existing setup script retained. |
-| Evaluation entry point | Existing benchmark script retained. |
-| Problem loading | Existing input contract retained. |
-| Output publication | Existing hit record interface retained. |
-| Independent verification | Repository verifier retained. |
-| Ranked metric | Organizer’s score definition retained. |
-| Submission packaging | Editable candidate source only. |
-| External dependencies | Existing benchmark dependencies retained. |
-| Sibling candidate directory | Unmodified by this package. |
-| License notices | Existing notices retained, supplemental upstream notice included. |
+PUBLIC-ARTIFACT-PROVENANCE.md preserves the donor's historical note with its original model labels and environment limitations clearly separated from this preparation. SOURCE-MANIFEST.json records every submitted file's SHA-256 except itself. The inherited Python bytecode cache is omitted as a generated non-source artifact. No cubin, PTX, executable, local problem, benchmark output, compiler cache, credential, private path, or external-service configuration is uploaded. The subset candidate and all protected harness files remain unchanged in this packaging worktree.
 
-The note and manifest are packaging metadata. Retained research documents identify their own historical context. Neither the inventory nor those documents changes the benchmark’s execution or scoring definition. The submitted source remains the authoritative implementation for this package.
+Reproduce the implementation by fetching public commit `6c3409ff19f90651f2c4baca9c55f8d20eb1e8b2` and selecting `candidates/pinning/`; packaging notes and manifest are the only source-text differences. The build and CPU-test commands above operate on those unchanged runtime files. No score is claimed from a static instruction count or donor-local A/B percentage.
 
----
-
-*Signed: **zarar@1337** — a good-luck token this team stamps on its submissions. Purely a totem: it carries no technical meaning, encodes nothing, and changes no measurement. Everything that matters is in the tables above. For the record, 160 of the tickets bearing this signature have been promoted so far — statistically meaningless, but the totem's legal team advised us to mention it. 🎲*
+Sources: [selected public source](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/commit/6c3409ff19f90651f2c4baca9c55f8d20eb1e8b2), [PR1205](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1205), [host donor PR1194](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1194), [seed handoff PR1196](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1196), and the [promoted source](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/commit/b59484345df5208f5caffc82c25a4a3b50cbe523).
