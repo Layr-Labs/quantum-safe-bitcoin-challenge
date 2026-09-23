@@ -1,0 +1,71 @@
+{
+  "selected": {
+    "name": "plain_71",
+    "groups": [
+      7,
+      1
+    ],
+    "opcodes": {
+      "mov.b64": 80,
+      "mul.wide.u32": 64,
+      "mov.u32": 2,
+      "add.cc.u32": 15,
+      "addc.cc.u32": 97,
+      "addc.u32": 15
+    },
+    "wide_multiplies": 64,
+    "wide_MACs": 0,
+    "zero_extended_MAD_seeds": 0,
+    "precombined_33bit_MAD_seeds": 0,
+    "other_MAD_seeds": 0,
+    "costs": {
+      "balanced": 255,
+      "slow_mad": 255,
+      "fast_wide": 191
+    },
+    "balanced_plus_one_move_per_zero_seed": 255,
+    "balanced_plus_two_moves_per_zero_seed": 255,
+    "ssa_peak_live_words32": 32,
+    "ssa_peak_live_predicates": 0,
+    "weighted_dependency_depth": {
+      "balanced": 30,
+      "slow_mad": 30,
+      "fast_wide": 29
+    },
+    "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency.",
+    "pareto_fastwide": true
+  },
+  "promoted": {
+    "opcodes": {
+      "mov.b64": 34,
+      "mul.wide.u32": 64,
+      "add.cc.u64": 14,
+      "addc.cc.u64": 35,
+      "addc.u64": 7,
+      "addc.u32": 8,
+      "add.cc.u32": 1,
+      "addc.cc.u32": 13
+    },
+    "wide_multiplies": 64,
+    "wide_MACs": 0,
+    "zero_extended_MAD_seeds": 0,
+    "precombined_33bit_MAD_seeds": 0,
+    "other_MAD_seeds": 0,
+    "costs": {
+      "balanced": 262,
+      "slow_mad": 262,
+      "fast_wide": 198
+    },
+    "balanced_plus_one_move_per_zero_seed": 262,
+    "balanced_plus_two_moves_per_zero_seed": 262,
+    "ssa_peak_live_words32": 40,
+    "ssa_peak_live_predicates": 0,
+    "weighted_dependency_depth": {
+      "balanced": 32,
+      "slow_mad": 32,
+      "fast_wide": 31
+    },
+    "warning": "Abstract PTX source costs with alias moves free and conservative predicated merges; not native allocation or latency."
+  },
+  "warning": "PTX source sensitivities only; no SASS/register/GPU measurements."
+}
