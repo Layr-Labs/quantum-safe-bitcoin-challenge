@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "gpu_executed": false,
+  "ubsan": true,
+  "summary": "PASS: four/two arms, every winner, ties, margin, count normalization, warmups, invalid timing, event lifetime, disabled mode",
+  "source_sha256": {
+    "pinning.cu": "60f986eb5f651930116bfe1a492ba2646acf7e5836b2c22234e3ebcaaf4c71e8",
+    "adaptive_policy.cuh": "30824bdccd708d7bba817c6996d0876bc04c0534875b988f9e6cd751e83c7566",
+    "adaptive_tuner.cuh": "e226487f8669a8eb1916390c12463a2123e43f232a980846ba14384e01ae1fbc",
+    "adaptive_resources.cuh": "5bf2d7995521751bd21753384fb0d34dc245222c3e9a00f6e758ac526c542cab"
+  },
+  "limits": "Synthetic timings and stub CUDA events; source ordering check. No GPU event execution, table allocation or throughput measurement."
+}
