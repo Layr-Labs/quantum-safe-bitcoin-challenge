@@ -197,6 +197,28 @@ __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],cons
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     out[0]=r0;out[1]=r1;out[2]=r2;out[3]=r3;out[4]=r4;out[5]=r5;out[6]=r6;out[7]=r7;
 }
+
+/* QSB_GLV_LEAN (e2e 2): the split's 32x32 products as explicit PTX mul.wide.u32 /
+ * mad.wide.u32, and the high15 overflow count from the add's carry flag.  The C form
+ * (uint64_t)a*b is the same exact product, but ptxas lowers it through a 64x64
+ * multiply whose zero high halves it keeps in a uniform register (one wasted IADD3
+ * per product), and counts overflow with two compares.  Every value is identical;
+ * with the switch off the original lines below compile unchanged. */
+#ifndef QSB_GLV_LEAN
+#define QSB_GLV_LEAN 1
+#endif
+#if QSB_GLV_LEAN != 0 && QSB_GLV_LEAN != 1
+#error QSB_GLV_LEAN must be 0 or 1
+#endif
+#if QSB_GLV_LEAN
+__device__ __forceinline__ uint64_t q9_mulw(uint32_t a,uint32_t b){
+    uint64_t r;asm("mul.wide.u32 %0,%1,%2;":"=l"(r):"r"(a),"r"(b));return r;
+}
+/* a*b+c modulo 2^64, the value of the C form (uint64_t)a*b+c. */
+__device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
+    uint64_t r;asm("mad.wide.u32 %0,%1,%2,%3;":"=l"(r):"r"(a),"r"(b),"l"(c));return r;
+}
+#endif
 // GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1
 // v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT.
 // The original MIT license is supplied as COPYING-secp256k1.
@@ -229,7 +251,12 @@ __device__ __noinline__ ulonglong2 q9_coeff_fallback(uint64_t k0,uint64_t k1,
 }
 
 __device__ __forceinline__ void q9_high15_add(uint64_t *acc,uint32_t *overflow,uint64_t product){
+#if QSB_GLV_LEAN
+    /* The same sum and lost-2^64 count, taken from the add's carry flag. */
+    asm("{add.cc.u64 %0,%0,%2; addc.u32 %1,%1,0;}":"+l"(*acc),"+r"(*overflow):"l"(product));
+#else
     uint64_t before=*acc;*acc=before+product;*overflow+=(uint32_t)(*acc<before);
+#endif
 }
 
 #ifndef QSB_GLV_COEFF_BOUNDS
@@ -255,6 +282,40 @@ __device__ __forceinline__ void q9_high15_begin(uint64_t *acc,uint32_t *overflow
 #endif
 }
 
+/* New exact coefficient screen: diagonal 10 contributes only its five high
+ * product words. All omitted terms are nonnegative and below 9*2^352 for g1,
+ * 8*2^352 for g2. Widening the bit-383 rounding guard preserves exactness.
+ * test_glv_coeff.py computes the bound and exercises the actual function. */
+#ifndef QSB_GLV_HIGH10_HI
+#define QSB_GLV_HIGH10_HI 1
+#endif
+#if QSB_GLV_HIGH10_HI != 0 && QSB_GLV_HIGH10_HI != 1
+#error "QSB_GLV_HIGH10_HI must be 0 or 1"
+#endif
+__device__ __forceinline__ uint32_t q9_mulhi32(uint32_t a,uint32_t b) {
+#ifdef __CUDA_ARCH__
+    return __umulhi(a,b);
+#else
+    return (uint32_t)(((uint64_t)a*b)>>32);
+#endif
+}
+
+#ifndef QSB_GLV_ROUND_CC
+#define QSB_GLV_ROUND_CC 1
+#endif
+#if QSB_GLV_ROUND_CC != 0 && QSB_GLV_ROUND_CC != 1
+#error "QSB_GLV_ROUND_CC must be 0 or 1"
+#endif
+__device__ __forceinline__ void q9_round_coeff(uint64_t out[2],uint64_t lo,uint64_t hi,uint64_t round) {
+#if QSB_GLV_ROUND_CC && defined(__CUDA_ARCH__)
+    asm("{add.cc.u64 %0,%2,%4; addc.u64 %1,%3,0;}"
+        : "=l"(out[0]),"=l"(out[1]) : "l"(lo),"l"(hi),"l"(round));
+#else
+    const uint64_t rounded=lo+round;
+    out[0]=rounded;out[1]=hi+(uint64_t)(rounded<lo);
+#endif
+}
+
 template<int WHICH,uint32_t FALLBACK_WORD>
 __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
     const uint32_t a3=(uint32_t)(k[1]>>32);
@@ -266,6 +327,34 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
 
     /* Diagonal 10: (3,7)..(7,3). A 64-bit sum is insufficient for five
      * products, so overflow counts its lost 2^64 units explicitly. */
+#if QSB_GLV_LEAN
+#if QSB_GLV_HIGH10_HI
+    // b7+b6 < 2^32 for both production reciprocals: the first sum fits u32.
+    const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
+    carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+    w10=0;
+#else
+    q9_high15_begin(&acc,&overflow,carry,q9_mulw(a3,b7),q9_mulw(a4,b6));
+    q9_high15_add(&acc,&overflow,q9_mulw(a5,b5));
+    q9_high15_add(&acc,&overflow,q9_mulw(a6,b4));
+    q9_high15_add(&acc,&overflow,q9_mulw(a7,b3));
+    w10=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+#endif
+
+    q9_high15_begin(&acc,&overflow,carry,q9_mulw(a4,b7),q9_mulw(a5,b6));
+    q9_high15_add(&acc,&overflow,q9_mulw(a6,b5));
+    q9_high15_add(&acc,&overflow,q9_mulw(a7,b4));
+    w11=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+
+    q9_high15_begin(&acc,&overflow,carry,q9_mulw(a5,b7),q9_mulw(a6,b6));
+    q9_high15_add(&acc,&overflow,q9_mulw(a7,b5));
+    w12=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+
+    q9_high15_begin(&acc,&overflow,carry,q9_mulw(a6,b7),q9_mulw(a7,b6));
+    w13=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+
+    acc=q9_madw(a7,b7,carry);
+#else
     q9_high15_begin(&acc,&overflow,carry,(uint64_t)a3*b7,(uint64_t)a4*b6);
     q9_high15_add(&acc,&overflow,(uint64_t)a5*b5);
     q9_high15_add(&acc,&overflow,(uint64_t)a6*b4);
@@ -285,14 +374,17 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w13=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
 
     acc=carry+(uint64_t)a7*b7;
+#endif
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
-    if(w11<FALLBACK_WORD || w11>=0x80000000U){
+    constexpr uint32_t guard=(QSB_GLV_HIGH10_HI && QSB_GLV_LEAN)
+        ? (WHICH==1 ? 0x7ffffff7U : 0x7ffffff8U) : FALLBACK_WORD;
+    if(w11<guard || w11>=0x80000000U){
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
         const uint64_t round=(uint64_t)(w11>>31);
-        uint64_t rounded=lo+round;out[0]=rounded;out[1]=hi+(uint64_t)(rounded<lo);
+        q9_round_coeff(out,lo,hi,round);
     }else{
         ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
         out[0]=r.x;out[1]=r.y;
@@ -409,6 +501,18 @@ struct q9_u129 { uint64_t lo,hi;uint32_t top; };
 __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint32_t d[4]) {
     const uint32_t x0=(uint32_t)x[0],x1=(uint32_t)(x[0]>>32);
     const uint32_t x2=(uint32_t)x[1],x3=(uint32_t)(x[1]>>32);
+#if QSB_GLV_LEAN
+    uint64_t t=q9_mulw(x0,d[0]);const uint32_t w0=(uint32_t)t;uint64_t carry=t>>32;
+    t=q9_madw(x0,d[1],carry);uint32_t w1=(uint32_t)t;carry=t>>32;
+    t=q9_madw(x0,d[2],carry);uint32_t w2=(uint32_t)t;carry=t>>32;
+    t=q9_madw(x0,d[3],carry);uint32_t w3=(uint32_t)t;uint32_t top=(uint32_t)(t>>32);
+    t=q9_madw(x1,d[0],w1);w1=(uint32_t)t;carry=t>>32;
+    t=q9_madw(x1,d[1],(uint64_t)w2+carry);w2=(uint32_t)t;carry=t>>32;
+    t=q9_madw(x1,d[2],(uint64_t)w3+carry);w3=(uint32_t)t;top^=(uint32_t)(t>>32);
+    t=q9_madw(x2,d[0],w2);w2=(uint32_t)t;carry=t>>32;
+    t=q9_madw(x2,d[1],(uint64_t)w3+carry);w3=(uint32_t)t;top^=(uint32_t)(t>>32);
+    t=q9_madw(x3,d[0],w3);w3=(uint32_t)t;top^=(uint32_t)(t>>32);
+#else
     uint64_t t=(uint64_t)x0*d[0];const uint32_t w0=(uint32_t)t;uint64_t carry=t>>32;
     t=(uint64_t)x0*d[1]+carry;uint32_t w1=(uint32_t)t;carry=t>>32;
     t=(uint64_t)x0*d[2]+carry;uint32_t w2=(uint32_t)t;carry=t>>32;
@@ -419,6 +523,7 @@ __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint3
     t=(uint64_t)x2*d[0]+w2;w2=(uint32_t)t;carry=t>>32;
     t=(uint64_t)x2*d[1]+w3+carry;w3=(uint32_t)t;top^=(uint32_t)(t>>32);
     t=(uint64_t)x3*d[0]+w3;w3=(uint32_t)t;top^=(uint32_t)(t>>32);
+#endif
     top^=(x1&d[3])^(x2&d[2])^(x3&d[1]);
     q9_u129 r={(uint64_t)w0|((uint64_t)w1<<32),
                  (uint64_t)w2|((uint64_t)w3<<32),top&1U};
