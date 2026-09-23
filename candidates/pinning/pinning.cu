@@ -333,12 +333,25 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #define GT_TOTAL_ENTRIES 1215139u
 #define GT_LO 256
 #define GT_HI 2048
+/* Isolated physical table-layout ablation. Logical GLV digits, record values,
+ * signs and term order are unchanged; only physical segment placement moves. */
+#ifndef QSB_GLV_DENSE_FIRST
+#define QSB_GLV_DENSE_FIRST 1
+#endif
+#if QSB_GLV_DENSE_FIRST != 0 && QSB_GLV_DENSE_FIRST != 1
+#error "QSB_GLV_DENSE_FIRST must be 0 or 1"
+#endif
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
     return c < 2 ? 262144u : (c < 6 ? 131072u : 166563u);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+#if QSB_GLV_DENSE_FIRST
+    return c==0?690851u:c==1?952995u:c==2?0u:c==3?131072u:
+           c==4?262144u:c==5?393216u:524288u;
+#else
     return c==0?0u:c==1?262144u:c==2?524288u:c==3?655360u:
            c==4?786432u:c==5?917504u:1048576u;
+#endif
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
     return c==0?0:c==1?18:c==2?37:c==3?55:c==4?73:c==5?91:109;
@@ -2390,9 +2403,17 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
+#if QSB_GLV_DENSE_FIRST
+    int ch=-1;
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    if(ch<0) return;
+#else
     int ch=0;
     #pragma unroll
     for(int c=1;c<GT_CHUNKS;c++) if(t>=gt_offset(c)) ch=c;
+#endif
     int d=(int)(t-gt_offset(ch));
     int m  = ch==0?d:2*d+1;
     int hi = m >> 8, lo = m & 255;
@@ -3112,7 +3133,8 @@ int main(int argc, char **argv) {
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
+                      (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
@@ -3181,7 +3203,8 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
+                      (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};
