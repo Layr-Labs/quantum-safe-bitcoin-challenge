@@ -309,6 +309,22 @@ __device__ __forceinline__ void q9_high15_begin(uint64_t *acc,uint32_t *overflow
 #endif
 }
 
+/* Diagonal-10 high-word screen. The omitted low products are nonnegative;
+ * the widened guard below absorbs their proven <9*2^352 / <8*2^352 bounds. */
+#ifndef QSB_GLV_HIGH10_HI
+#define QSB_GLV_HIGH10_HI 1
+#endif
+#if QSB_GLV_HIGH10_HI != 0 && QSB_GLV_HIGH10_HI != 1
+#error QSB_GLV_HIGH10_HI must be 0 or 1
+#endif
+__device__ __forceinline__ uint32_t q9_mulhi32(uint32_t a,uint32_t b) {
+#ifdef __CUDA_ARCH__
+    return __umulhi(a,b);
+#else
+    return (uint32_t)(((uint64_t)a*b)>>32);
+#endif
+}
+
 template<int WHICH,uint32_t FALLBACK_WORD>
 __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
     const uint32_t a3=(uint32_t)(k[1]>>32);
@@ -318,13 +334,19 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     const uint32_t b5=(uint32_t)(g[2]>>32),b6=(uint32_t)g[3],b7=(uint32_t)(g[3]>>32);
     uint64_t carry=0,acc;uint32_t overflow,w10,w11,w12,w13,w14,w15;
 
-    /* Diagonal 10: (3,7)..(7,3). A 64-bit sum is insufficient for five
-     * products, so overflow counts its lost 2^64 units explicitly. */
+    /* For the fixed reciprocals b7+b6 < 2^32, so the first two high-word
+     * products fit u32. The remaining four high words fit u64. */
+#if QSB_GLV_HIGH10_HI
+    const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
+    carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+    w10=0;
+#else
     q9_high15_begin(&acc,&overflow,carry,(uint64_t)a3*b7,(uint64_t)a4*b6);
     q9_high15_add(&acc,&overflow,(uint64_t)a5*b5);
     q9_high15_add(&acc,&overflow,(uint64_t)a6*b4);
     q9_high15_add(&acc,&overflow,(uint64_t)a7*b3);
     w10=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+#endif
 
     q9_high15_begin(&acc,&overflow,carry,(uint64_t)a4*b7,(uint64_t)a5*b6);
     q9_high15_add(&acc,&overflow,(uint64_t)a6*b5);
@@ -342,7 +364,9 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
-    if(w11<FALLBACK_WORD || w11>=0x80000000U){
+    const uint32_t guard=QSB_GLV_HIGH10_HI
+        ? (WHICH==1 ? 0x7ffffff7U : 0x7ffffff8U) : FALLBACK_WORD;
+    if(w11<guard || w11>=0x80000000U){
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
         const uint64_t round=(uint64_t)(w11>>31);

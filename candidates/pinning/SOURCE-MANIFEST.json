@@ -1,8 +1,8 @@
 {
   "schema": "zarar1337.source-manifest.v1",
   "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
+  "base_commit": "1fe5a8e40008befcd917668ea9b1a23c6ee590c4",
+  "implementation_commit": "372461625aa2a4f33ff4d8b68675093cfefbac02",
   "metadata_excluded": [
     "candidates/pinning/SOURCE-MANIFEST.json",
     "candidates/pinning/SUBMISSION.md"
@@ -25,8 +25,8 @@
     },
     {
       "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+      "bytes": 23153,
+      "sha256": "8dfcafee028ad5b60ebf18fe3aa76808ea94776160ab939753a45cbd13c1f276"
     },
     {
       "path": "candidates/pinning/GPUHash.h",
@@ -35,8 +35,8 @@
     },
     {
       "path": "candidates/pinning/GPUMath.h",
-      "bytes": 121679,
-      "sha256": "7f67eba59dd01125151f2ae257ad4782d37d98e2e2b37a196c4e7deb81229a2d"
+      "bytes": 121593,
+      "sha256": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda"
     },
     {
       "path": "candidates/pinning/LeafRecovery.cuh",
@@ -94,11 +94,6 @@
       "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
     },
     {
-      "path": "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
-      "bytes": 20260,
-      "sha256": "6109f51ebf5321f27fc86211c2de122c372d20ffc495cfe30e36514b05b1fde9"
-    },
-    {
       "path": "candidates/pinning/cofactor_checkpoint.h",
       "bytes": 9186,
       "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
@@ -110,8 +105,8 @@
     },
     {
       "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
+      "bytes": 171798,
+      "sha256": "2dbd4ee73c05e28654e81904a377a12838f1b11b2c3f8ceda7dd4d121c198f41"
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
@@ -127,6 +122,11 @@
       "path": "candidates/pinning/test_carry62.py",
       "bytes": 13593,
       "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
+    },
+    {
+      "path": "candidates/pinning/test_glv_high10.py",
+      "bytes": 7016,
+      "sha256": "4f928a6e5f0c30b1a85465aa2e51a058488977f232f8bdbc7c4c80c947be8ebf"
     },
     {
       "path": "candidates/pinning/test_host_gate.py",
