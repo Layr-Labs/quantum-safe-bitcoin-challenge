@@ -1,38 +1,108 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning: depth-1 gather pipeline (CHAIN_PIPE) on the 809.95M source
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+## What this source changes
 
-## Goal and selection
+This source starts from public commit
+`0ace23d47b97a5b7816fd6e251c31a08582ac877` (submission `3c124ec`, official
+**809,952,202/s** — the strongest measured public source, above the promoted
+frontier `7c3609b` at **805,428,058/s**). The newly changed executable files
+are `pinning.cu`, `PackedRecovery.cuh`, and `cofactor_checkpoint.h`.
+`GPUMath.h` gains a comment block only; `LeafRecovery.cuh` is byte-identical
+to the base. No verifier, benchmark harness, input problem, or scoring code
+changes.
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+New work on top of the base:
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+- **`QSB_CHAIN_PIPE`** (`pinning.cu`, default on): depth-1 software pipeline
+  of the table gathers inside the signed-digit chain. A new
+  `_PointAddXYZZT_pipe` issues the gather for chunk `c+1` the moment its
+  target registers die inside the current addition — `X2` after
+  `U2 = X2*ZZ1`, `Yoff` after `S2 = (Y2+Yoff)*ZZZ1`. The remaining ~5M+2S of
+  the addition covers the L2 latency. The caller rotates three buffers
+  `(x,y,o)`; since `S2 = Y2 + Yoff` is a sum the anchor/ordinate roles
+  commute and `y`/`o` swap each call, so the loop steps `c += 2`. The final
+  point uses the classic `_PointAddXYZZT` tail. A
+  `_Static_assert(GT_CHUNKS & 1)` guards the required parity. Unlike the
+  retired `QSB_EARLY_LOAD` (dedicated registers, spilled), the prefetch
+  reuses dead registers: sm_89 N24 hot kernel is **124 regs / 0 spills**
+  with the pipe vs **126 regs / 0 spills** without. `-DQSB_CHAIN_PIPE=0`
+  restores the classic loop.
+- **`QSB_DEC_REP`** (`pinning.cu`, default on): the decoded-digit sign mask
+  is the sign bit replicated to both 32-bit halves; `mov.b64 {m,m}` does it
+  in one instruction instead of SHF+OR. `-DQSB_DEC_REP=0` restores it.
+- **`QSB_SUM_2U`** (`PackedRecovery.cuh`, default on): the slope sum is
+  formed directly as `2u` using `l + m == 2u (mod p)` — congruent, not a
+  new approximation.
+- **`QSB_PREP_MASK`** (`PackedRecovery.cuh`, default on): the shared `hc`
+  factor is masked once for unusable lanes, so both downstream products are
+  zero without separately clearing both outputs.
+- **`QSB_TREE_FLAT`** (`cofactor_checkpoint.h`, default on): under
+  `QSB_TOP16` the tree traversal starts and ends at compile-time-known
+  sizes; the dead `count > 2` / `count == 2` / `N == 2` branches are
+  removed. Value flow and synchronization are unchanged.
 
-## Implementation
+## Correctness evidence
 
-All executable changes are under `candidates/pinning/`:
+CPU bitwise oracle (`research/check_chain_pipe.py`) extracting the real
+device functions verbatim into a host harness:
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+- 1,500 fake-table cases: pipelined chain **bitwise identical** to the
+  classic chain (X, Y, ZZ, ZZZ limb-for-limb).
+- 120 OpenSSL-anchored cases: both chains affine-equal to the independent
+  OpenSSL reference `z*A`.
+- `test_carry62.py`: 200,000 random samples, 0 diffs.
+- `test_host_gate.py`: pass.
+- `test_sha_interleave.py`: 11,522 vectors / 34,566 digest comparisons vs
+  hashlib, plus baseline-schedule and in-place alias checks.
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+Native build (CUDA 12.8.93): `nvcc -O3 -DQSB_ZEROS_N=24` clean for sm_89 and
+organizer-default flags; `-Xptxas=-v,--warn-on-spills` reports zero spills
+on every kernel. `git diff --check` clean.
 
-## Checks completed
+## A negative finding: RAW_DIFF is invalid for secp256k1
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+The pending public "RAW_DIFF" idea (raw subtraction mod 2^256 in place of
+`_ModSub256`) was evaluated and **rejected**. With `B = 2^256`,
+`p = B - K`, `K = 2^32 + 977`: a borrow wraps by `B`, and `B == K (mod p)`
+— not 0 — so the result is off by exactly `K` per borrow.
+Congruence-tolerant consumers cannot repair that; the OpenSSL-anchored
+oracle fails every case under it. The pending public bundle shipping it
+also dropped the `R*(V-X3)` multiply; its validation failed
+(`b7b11e5`/`614c5398`). The `GPUMath.h` comment records this; no raw
+subtraction remains in this source.
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+## Inherited source and attribution
 
-## Reproduction and follow-up
+The base `0ace23d4` is @terrapinelf's public K32 package (GPT-5 / Codex):
+promoted parent `94abdd0d72847b780c7d4f99da4f367e6f9f0fd1` (submission
+`07009ac3`, official **797,446,582/s**, GPT 5.6 Sol / Codex), which
+integrates @stffinfcti's PR #827 field schedule, @EvanYan1024's PR #885
+bounded parity window, and the recovery isomorphism; plus PR #927 TOP16
+cofactor traversal (@ercumentyildirim, Claude Opus 5 / Claude Code; TOP16
+idea @EvanYan1024), PR #965 narrow speculative parity window
+(@Portablelle, GPT 6 Astra / Codex), PR #993 RAW-only finish
+(@fkiene co-author, ticket `52a058ef`), and PR #1002 K32 exact low-limb
+corrections with `QSB_SAS_FRMOV` (@fkiene, ticket `dfba4ce2`). Earlier
+public PR #849 and PR #866 used raw finish products. `QSB_DEC_REP` follows
+a mechanism described in fkiene's public pending-bundle note. All other
+inherited source credit is retained in file headers and git history.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+The CHAIN_PIPE design, its port onto the QSB_YOFF offset-ordinate chain,
+the RAW_DIFF falsification, the bitwise oracle, and this package were
+prepared with **SWE-2 Max / Devin CLI**. We do not claim to have invented
+the inherited mechanisms.
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+## Expectations and caveats
+
+No local GPU is available; our own deltas are supported by structural
+evidence (oracle, register counts) plus the published official measurement
+of the base (809,952,202/s) and the +0.8–1.4% this mechanism measured on
+our earlier pre-isomorphism base (submission `d83b6aa0`). The promotion
+floor at packaging time is **813,482,339/s** (805,428,058 × 1.01). The base
+sits within ~0.55% of it; official runs carry ±2–4% hit-draw variance — a
+same-family source measured 809.9M and later 775.8M — so no ranked-gain
+claim is made. The organizer's independent ranked run and verifier
+determine the score.
+
+`SOURCE-MANIFEST.json` records SHA256 and byte counts for every included
+pinning source, license, and note file.

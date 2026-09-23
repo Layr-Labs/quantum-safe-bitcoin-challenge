@@ -57,6 +57,16 @@
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
+// v19: Saviour1001's 5a37cad9 tree (pr1205, self-rate 851.2M measured on the
+// ranked verifier) + QSB_MUL_SFC2_DROP restored from dun999's 64d7262a (pr1201).
+// Union of the two strongest public stacks. Provenance comment only.
+// v19b: byte-identical re-draw. v19 (d27f252e) officially scored 829,084,805
+// (self 849.3M, ratio 0.976) — above frontier 826,926,066 but below the x1.01
+// promotion floor 835,195,327. This ticket re-measures the same bytes.
+// v19c: second re-draw. v19b (ad10074d) drew poorly: 791,023,360 (self 840.8M,
+// ratio 0.940). Same bytes, third independent sample of the verifier draw.
+// v19d: third re-draw. v19c (3cfd54c5) hit the fast worker: self 851.0M
+// (ties field-best) but ratio 0.973 -> 827,827,523. Fourth sample.
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
@@ -334,28 +344,6 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
-#if QSB_BIGTBL
-/* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
- * The two remaining ordinary segments and the bounded top stream from DRAM.
- * One 32-bit code still holds the absolute record index and Y sign. */
-#define GT_CHUNKS 6
-#define GT_GLV_TERMS 12
-#define GT_TOTAL_ENTRIES 22893641u
-#define GT_LO 4096
-#define GT_HI 4096
-__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    return q9_bigtbl_entries(c);
-}
-__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return q9_bigtbl_offset(c);
-}
-__host__ __device__ __forceinline__ int gt_shift(int c) {
-    return (int)q9_bigtbl_shift(c);
-}
-static_assert(GT_TOTAL_ENTRIES*64ULL == 1465193024ULL,
-              "GLV12 table must contain exactly 1,465,193,024 bytes");
-static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
-#else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
  * physical segments use widths [18,19,18,18,18,18,19] at shifts
  * [0,18,37,55,73,91,109].  Segment zero is the biased unsigned first term;
@@ -393,8 +381,6 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL == 77768896ULL,
               "GLV14 table must contain exactly 77,768,896 bytes");
-
-#endif
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -700,16 +686,6 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
                                                      ) {
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
-#if QSB_BIGTBL
-        const unsigned slot=SIDE?c:GT_CHUNKS+c;
-        const uint32_t code=q9_bigtbl_code(mag,sign,c);
-#if QSB_GLV_SEED_REG
-        if(SIDE==1 && c==0)*seed0=code;
-        else if(SIDE==1 && c==1)*seed1=code;
-        else
-#endif
-        codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
-#else
         const unsigned shift=gt_shift(c);
         const unsigned bits=(c==1||c==6)?19u:18u;
         uint32_t f=(uint32_t)qsb_glv_extract(mag,shift);
@@ -738,7 +714,6 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
         codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
 #else
         codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=record|((neg_digit^sign)<<31);
-#endif
 #endif
     }
 }
@@ -774,11 +749,7 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
-#if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
-#else
     gt_load_signed_flat_m(table,0u,code&0x1fffffu,
-#endif
                           ((uint64_t)m32<<32)|m32,x,y);
 }
 
@@ -807,18 +778,10 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         seed1=codes[(size_t)(GT_CHUNKS+1)*QSB_TREE_N+threadIdx.x];
     }
     uint32_t m0=(uint32_t)((int32_t)seed0>>31);
-#if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,seed0&0x7fffffffu,
-#else
     gt_load_signed_flat_m(table,0u,seed0&0x1fffffu,
-#endif
                          ((uint64_t)m0<<32)|m0,x0,y0);
     uint32_t m1=(uint32_t)((int32_t)seed1>>31);
-#if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,seed1&0x7fffffffu,
-#else
     gt_load_signed_flat_m(table,0u,seed1&0x1fffffu,
-#endif
                          ((uint64_t)m1<<32)|m1,x1,y1);
 #else
     qsb_load_glv(table,first,x0,y0);
@@ -2522,11 +2485,7 @@ __global__ void kernel_build_gtable(
     if(ch<0) return;
     int d=(int)(t-gt_offset(ch));
     int m  = ch==0?d:2*d+1;
-#if QSB_BIGTBL
-    int hi = m >> 12, lo = m & 4095;
-#else
     int hi = m >> 8, lo = m & 255;
-#endif
 
     const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
@@ -2647,11 +2606,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
-#if QSB_BIGTBL
-    BN_set_word(bias,10659986); BN_lshift(bias,bias,103); BN_sub_word(bias,1u<<17);
-#else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
-#endif
     memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
     memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
     for(int ch=0;ch<GT_CHUNKS;ch++) {
@@ -2670,18 +2625,10 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
             gt_batch_ladder(grp,base,GT_LO-1,
                 hL+(size_t)ch*GT_LO*8,x,y,alpha,beta,field_p,ctx);
         }
-#if QSB_BIGTBL
-        BN_set_word(factor,GT_LO);
-#else
         BN_set_word(factor,256);
-#endif
         EC_POINT_mul(grp,step,NULL,base,factor,ctx);
         unsigned max_m=ch==0?gt_entries(ch)-1:2*(gt_entries(ch)-1)+1;
-#if QSB_BIGTBL
-        int high=(int)(max_m>>12);
-#else
         int high=(int)(max_m>>8);
-#endif
         gt_batch_ladder(grp,step,high,
             hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
     }
@@ -2693,11 +2640,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
     if(ch==0) {
-#if QSB_BIGTBL
-        BN_set_word(k,10659986); BN_lshift(k,k,103);
-#else
         BN_set_word(k,333126); BN_lshift(k,k,108);
-#endif
         BN_sub_word(k,1u<<17); BN_add_word(k,index);
     } else {
         BN_one(k); BN_lshift(k,k,gt_shift(ch)-1);
@@ -2736,13 +2679,7 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         } else {
             seed = seed * 1664525u + 1013904223u;
             ch = (int)(seed >> 28) % GT_CHUNKS;
-#if QSB_BIGTBL
-            /* Modulo samples the non-power-of-two top segment as well. */
-            seed = seed * 1664525u + 1013904223u;
-            i = (int)(seed % gt_entries(ch));
-#else
             i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
-#endif
         }
         gt_table_scalar(k,ch,(unsigned)i);
         BN_mod_mul(k,k,nri,order,ctx);
@@ -2765,11 +2702,7 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
  * coefficients as the GPU builder. */
 static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
                            const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
-#if QSB_BIGTBL
-    printf("  Computing GLV12 GTable (OpenSSL fallback; discard this timing arm)...\n");
-#else
     printf("  Computing GLV14 GTable (OpenSSL fallback)...\n");
-#endif
     EC_GROUP *grp=EC_GROUP_new_by_curve_name(NID_secp256k1); BN_CTX *ctx=BN_CTX_new();
     BIGNUM *x=BN_new(),*y=BN_new(),*k=BN_new(),*stepk=BN_new(),*order=BN_new(),
            *nri=BN_new(),*field_p=BN_new(),*alpha=BN_new(),*beta=BN_new();
@@ -3045,15 +2978,7 @@ int main(int argc, char **argv) {
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
     uint8_t *d_gt;
-#if QSB_BIGTBL
-    cudaError_t gt_alloc=cudaMalloc(&d_gt,gt_sz);
-    if(gt_alloc!=cudaSuccess) {
-        fprintf(stderr,"GLV12 table allocation failed: %s\n",cudaGetErrorString(gt_alloc));
-        return 1;
-    }
-#else
     cudaMalloc(&d_gt,gt_sz);
-#endif
     {
         /* Build the fixed-base table on the GPU. The host only produces the two
          * small ladders; the million entries are one parallel addition each.
@@ -3072,25 +2997,14 @@ int main(int argc, char **argv) {
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
-#if QSB_BIGTBL
-        cudaError_t gerr = cudaDeviceSynchronize();
-        if(gerr==cudaSuccess) gerr=cudaGetLastError();
-#else
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
-#endif
         cudaFree(dL); cudaFree(dH);
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-#if QSB_BIGTBL
-            gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok=(gerr==cudaSuccess);
-            if(gt_ok)
-#else
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-#endif
             gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
         }
@@ -3288,12 +3202,8 @@ int main(int argc, char **argv) {
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
-#if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
-#else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
-#endif
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
@@ -3362,12 +3272,8 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-#if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
-#else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
-#endif
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};
