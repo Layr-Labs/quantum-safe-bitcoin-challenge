@@ -57,6 +57,10 @@
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
+// v17: byte-identical device tree to promoted b5948434 (fkiene 826,926,066).
+// Our v15/v16 deltas (DEC_REP/LAZY_ADD_FINISH/SUM_2U/PREP_MASK/TREE_FLAT) cost
+// ~1.4% self-rate on the GLV tree (832-837M vs 847.1M clean) — removed.
+// This package re-measures the promoted bytes under a fresh draw.
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
