@@ -7,7 +7,18 @@
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
+#ifndef QSB_WINDOW_PACK
+#define QSB_WINDOW_PACK 1
+#endif
+#if QSB_WINDOW_PACK != 0 && QSB_WINDOW_PACK != 1
+#error "QSB_WINDOW_PACK must be 0 or 1"
+#endif
+#if QSB_WINDOW_PACK
+#include "window_lane_pack.h"
+__device__ __align__(32) uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
+#else
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
+#endif
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
@@ -173,11 +184,31 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     const uint32_t *firstA, const uint32_t *firstB) {
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
+#ifndef QSB_PAIR_FIRST_VEC4
+#define QSB_PAIR_FIRST_VEC4 1
+#endif
+#if QSB_PAIR_FIRST_VEC4 != 0 && QSB_PAIR_FIRST_VEC4 != 1
+#error "QSB_PAIR_FIRST_VEC4 must be 0 or 1"
+#endif
+#if QSB_PAIR_FIRST_VEC4
+    // DrCleverHans PR1189 / 2edbddb8: paired consumer only; each record is
+    // 32 bytes at a 32-byte offset from its cudaMalloc allocation.
+    {
+        const uint4 *pA=reinterpret_cast<const uint4*>(firstA+first_slot*8);
+        const uint4 *pB=reinterpret_cast<const uint4*>(firstB+first_slot*8);
+        const uint4 vA0=pA[0],vA1=pA[1],vB0=pB[0],vB1=pB[1];
+        stateA[0]=vA0.x;stateA[1]=vA0.y;stateA[2]=vA0.z;stateA[3]=vA0.w;
+        stateA[4]=vA1.x;stateA[5]=vA1.y;stateA[6]=vA1.z;stateA[7]=vA1.w;
+        stateB[0]=vB0.x;stateB[1]=vB0.y;stateB[2]=vB0.z;stateB[3]=vB0.w;
+        stateB[4]=vB1.x;stateB[5]=vB1.y;stateB[6]=vB1.z;stateB[7]=vB1.w;
+    }
+#else
     #pragma unroll
     for(int j=0;j<8;j++){
         stateA[j]=firstA[first_slot*8+j];
         stateB[j]=firstB[first_slot*8+j];
     }
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
