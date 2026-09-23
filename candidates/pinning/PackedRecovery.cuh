@@ -87,12 +87,6 @@ __device__ __forceinline__ void qsb_packed_prepare(
     }
 }
 
-/* Public PR993 QSB_FIN_RAWS, isolated on the PR976 source. Both slope products
- * may remain raw in [0,2^256): the parity window accepts congruent raw input,
- * while qsb_add_boundary preserves canonical x-coordinate addition. */
-#ifndef QSB_FIN_RAWS
-#define QSB_FIN_RAWS 1
-#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -105,21 +99,11 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     qsb_packed_raw_mul(u,tbar,weighted_inv);
     qsb_packed_raw_mul(v,vbar,root_inv);
-#if QSB_NEG_Y_MAC
-    _ModAddLazy(l,u,v); _ModSub256(m,u,v);
-#else
-    _ModSub256(l,u,v); _ModAddLazy(m,u,v);
-#endif
-    _ModAddLazy(sum,l,m);
+    _ModSub256(l,u,v); _ModAddLazy(m,u,v); _ModAddLazy(sum,l,m);
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
-#if QSB_NEG_Y_MAC
-    _ModAdd256(l,u,v); _ModSub256(m,u,v);
-#else
-    _ModSub256(l,u,v); _ModAdd256(m,u,v);
-#endif
-    _ModAdd256(sum,l,m);
+    _ModSub256(l,u,v); _ModAdd256(m,u,v); _ModAdd256(sum,l,m);
 #endif
 #if QSB_RAW_X
     /* P7: x1, x2 stay raw; raw + a < 2p whenever a[3] != 2^64-1, so the one conditional
@@ -135,22 +119,6 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     /* P9: r_i = x_i - a is the canonical product before "+a" (re-derived here with one
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
-#if QSB_FIN_RAWS
-    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t);
-#if QSB_PARITY_WINDOW
-    const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
-#else
-    qsb_packed_raw_mul(u,l,s);
-#endif
-    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
-    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t);
-#if QSB_PARITY_WINDOW
-    const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
-#else
-    qsb_packed_raw_mul(v,m,s);
-#endif
-    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
-#else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
@@ -162,7 +130,6 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
-#endif
 #endif
 #if QSB_PARITY_WINDOW
     return parity_u|(parity_v<<1);
