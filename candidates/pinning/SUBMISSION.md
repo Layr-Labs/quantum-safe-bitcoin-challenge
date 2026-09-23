@@ -1,117 +1,176 @@
-# Pinning candidate update
+# Pinning: combine a sub-threshold GLV composition with exact even/odd residual products
 
-## Submitted scope
+Effort: medium. Prepared with GPT 6 Astra through Codex. The model and effort
+were read from the active task metadata rather than inherited from a donor note.
+This is a source candidate for the pinning track, with no claimed local GPU score.
 
-This package targets the pinning track of the quantum-safe Bitcoin challenge. It updates the fixed-base implementation in the candidate translation unit and supplies its associated scalar and host transfer helpers. A supplemental upstream license file accompanies the scalar support. The package retains the promoted parent’s recovery, hashing, input and publication interfaces.
+## Starting point and public evidence
 
-The starting point is the promoted source identified in the base table below. This note describes the files in the current package. Historical research documents retained in the candidate directory are inherited material; their earlier proposals, measurements and descriptions are not claims made by this submission.
+The clean checkout starts at promoted commit
+`b59484345df5208f5caffc82c25a4a3b50cbe523`, with an official score of
+826,926,066 verified candidates per second. The live benchmark still reported
+that frontier immediately before packaging. A one-percent increase requires
+835,195,327 candidates/s after integer rounding.
 
-## What changed
+The concrete unpromoted starting composition is
+[PR #1205](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1205),
+submission `5a37cad9-999e-4d6c-9a16-2c3f2aa86390`, candidate commit
+`6c3409ff19f90651f2c4baca9c55f8d20eb1e8b2`. Its public verified result is
+829,282,307 candidates/s, with 118,783 verified hits over 1,201.5498 seconds.
+That is approximately **+0.285 percent** over the promoted frontier, not a
+one-percent improvement. The closing comment explicitly says the improvement
+fell short of the required 100 basis points. The score remains publicly recorded;
+it simply did not become the promoted source. The percentage in the CLI's
+submission listing is not used as a frontier-relative percentage in this note.
 
-| File | Change |
-|---|---|
-| `candidates/pinning/pinning.cu` | Supplies the grouped fixed-base implementation, its existing table integration and the host transfer update. |
-| `candidates/pinning/GLVScalar.cuh` | Supplies the scalar split, exact high-product fallback, component decoding and residual calculation. |
-| `candidates/pinning/SlotReadback.h` | Supplies the combined count and hit-prefix readback helper. |
-| `candidates/pinning/test_slot_readback.py` | Supplies the host readback helper checks. |
-| `candidates/pinning/COPYING-secp256k1` | Supplies the license notice accompanying the scalar implementation. |
-| `candidates/pinning/SUBMISSION.md` | Replaces the inherited submission description with this package note. |
-| `candidates/pinning/SOURCE-MANIFEST.json` | Records the current source inventory and implementation identity. |
+The account's earlier submission `59b3693` scored 814,080,739 against a then
+813,651,852 frontier: approximately +0.053 percent. Its root-priority mechanism
+is already enabled in the current promoted source, so it is retained and is not
+counted as a new gain. The separate account experiments `b67219a` (797,802,186)
+and `989d7bd` (43,660,202) were rejected; their complete compositions are not
+reintroduced. The promoted source already contains selected host-transfer
+improvements from the former, with their existing provenance.
 
-The scalar helper updates the residual representation and retains the coefficient calculation, reference fallback and compile-time alternatives.
+[PR #1223](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1223)
+was still validating during the review. It extends #1205 with a smaller cache
+reserve and an early prefetch. This submission does not copy those unmeasured
+changes and does not cancel or alter that run. Its experiment instead changes
+the exact scalar residual product implementation on the measured #1205 base.
+Research Discussions are disabled for this benchmark, so no Discussion was posted.
 
-The host update omits the redundant midstate upload in the precomputed-tail slot path and uses a combined count and hit-prefix readback. The existing output record format and host acceptance gate remain in place.
+## Imported composition and attribution
 
-The implementation and support files remain within the editable pinning directory. The metadata files describe the package and do not select a different benchmark command. Inventory rows below exclude the two metadata files so the note does not attempt to hash itself.
+Three runtime files from #1205 were applied to the clean promoted checkout:
+`pinning.cu`, `GPUMath.h`, and `negative_y_mac.cuh`. The exact imported changes are:
 
-## Base and package identity
+- Dense-first physical GLV table ordering `[2,3,4,5,6,0,1]`, keeping the same
+  logical digit widths, point records, scalar weights, and signs. The table
+  builder resolves physical ranges through the logical segment offsets.
+- Independent sequence slots remain live across rollover; a completed slot's
+  report is copied before reuse, its replacement GPU work is enqueued, and the
+  exact OpenSSL publication gate then processes the saved report with its saved
+  sequence and locktime. Shared tail-table mode still requires a boundary drain.
+- The square-side first-fold carry is retained. The promoted multiply-side
+  speculative carry cut is not changed by that restoration.
+- Two Q-side seed record codes remain in registers instead of shared memory;
+  the zero-component paths retain their original selection behavior.
+- The seed multiply reuses the existing multiply reduction macros. These
+  inherited speculative field shortcuts can lose nominations in rare carry
+  cases. The existing exact host publication gate is retained; this submission
+  does not claim that the entire inherited GPU field path is exact.
 
-| Item | Value |
-|---|---|
-| Track | `pinning` |
-| Promoted base | `9f239c386c7e99f8815103d9c6cc4465d7c5a9ba` |
-| Implementation revision | `3700ffd0788d759b242a6b0e13d2a7a0663956b3` |
-| Editable directory | `candidates/pinning/` |
-| Candidate translation unit | `candidates/pinning/pinning.cu` |
-| Sibling track edits | None |
-| Harness edits | None |
-| Verifier edits | None |
-| Workflow edits | None |
-| Problem generator edits | None |
+Saviour1001 authored the imported #1205 composition. Its unpromoted donor chain
+credits dun999 for the host/square changes, i34-9 for the register seed handoff,
+and DrCleverHans for its preceding donor. These contributors are included as
+coauthors because their unpromoted work substantially supplies this candidate.
+The promoted source, including fkiene's GLV14 promotion, existing Portablelle
+work, and the upstream secp256k1 constants, retains its source and license
+notices. No donor throughput is attributed to the new product implementation.
 
-## Attribution and licenses
+## New exact product schedule
 
-The scalar support and grouped fixed-base work draw on may93182’s unpromoted public submission `5ffaef34-a958-4e80-887d-893f6b933605`. That contribution is credited as coauthorship for this submission. The current implementation also retains the work of the promoted parent and its upstream contributors, as identified in the preserved source notices.
+`GLVScalar.cuh` changes only the product helper used by the existing modulo
+2^129 GLV residual computation. The former row schedule remains available as
+`q9_product129_rows`. `QSB_GLV_PRODUCT129_EVENODD=0` selects it; the new default
+is one. The split constants, coefficient rounding, coefficient fallback,
+residual equations, component signs, table decoding, and point walk remain
+unchanged relative to the imported composition.
 
-The host transfer update substantially adapts Portablelle’s unpromoted public submission `b67219a6-4dab-4e67-a2c0-04e698006919`, published in PR #1154. Portablelle is credited as a coauthor for that contribution. This package includes the midstate-upload and compact-readback portions of that work.
+For four 32-bit input limbs a0..a3 and constant limbs d0..d3, only the low
+129 product bits are required. Ten full 32-by-32 products cover diagonals zero
+through three. The parity of diagonal four supplies the additional top bit.
+The new schedule groups those products into independent even and odd streams:
 
-The scalar constants and associated upstream material retain the bitcoin-core/secp256k1 attribution to Pieter Wuille and its MIT license notice. The candidate’s existing GPL license and other source notices are retained. This package claims authorship only of its own modifications, not of the inherited arithmetic library, promoted parent or donor implementation.
-
-## Build and execution interface
-
-The organizer’s standard entry points remain applicable:
-
-```sh
-./setup.sh pinning
-./benchmark.sh pinning
+```
+e0 = a0*d0
+e1 = a0*d2 + a1*d1 + a2*d0
+o0 = a0*d1 + a1*d0
+o1 = a0*d3 + a1*d2 + a2*d1 + a3*d0 + carry(o0)
 ```
 
-The package does not require changes to either script. The candidate is compiled from source using the benchmark’s configured CUDA build command and existing library dependencies. The normal input file, command-line interface and hit record format remain in place. No external service, runtime source download or additional credential is introduced.
+The even stream represents `e0 + e1*2^64`. Carries out of e1 are retained in
+bit 128. The odd stream is shifted by 32 bits when added to the even stream.
+The carry from the final 128-bit addition, bit 32 of o1, and the parity of
+`a1*d3 + a2*d2 + a3*d1` complete bit 128. Carries above bit 128 cannot affect
+this modular result and are discarded. Every carry affecting the retained
+129 bits is included. This new helper introduces no probabilistic truncation,
+loss tolerance, sampling shortcut, or skipped candidate.
 
-The organizer supplies the evaluation problem and executes the trusted benchmark and verifier. The archive does not supply a stored solution, generated evaluation fixture, precomputed hit list or replacement score file. The official result and any promotion are determined by that evaluation.
+A portable C++ form expresses the same schedule for auditing. The device form
+uses a short inline PTX sequence with explicit carry instructions. An initial
+C++-only device version compiled to 6,720 static preparation instructions,
+compared with 6,696 for the row control. Explicit PTX carry handling reduced
+that to 6,656, so the PTX version was selected. This is a compiler result, not
+an assertion that forty saved static instructions guarantee a speedup.
 
-## Validation declarations
+## Local environment and checks
 
-The implementation was built with the benchmark’s configured compiler invocation. Its produced hit records were checked with the unmodified repository verifier. The package preserves the same implementation bytes used for that validation; the metadata update does not alter the compiled implementation.
+The CLI and agent skill were installed, the skill was read again from inside
+the new benchmark checkout, and the manifest and candidate directory were
+inspected before edits. `yukon setup --track pinning` completed and its CPU
+verifier smoke test passed. The required unmodified `yukon run --track pinning`
+was attempted. It failed because this machine has no organizer GPU bridge at
+the configured location and no usable NVIDIA GPU. No ranked baseline score was
+produced locally, and no CPU-reference throughput is substituted for it.
 
-The candidate’s source archive was checked for allowed-path scope and unintended generated files. The inventory below identifies retained files as well as changed files; inclusion in the inventory does not mean every file was modified. No local throughput figure is asserted as an official score, and this note makes no claim of promotion before the official result.
+A previously available CUDA 12.8.93 toolchain was located for source compilation.
+The host compiler wrapper uses GCC 13 and compatible glibc headers; the default
+system GCC 15 is rejected by this CUDA release. Builds use the normal candidate
+translation unit, ranked N=24, optimization level O3, and OpenSSL/math libraries.
+No harness files or build commands in the repository were changed.
 
-## Source inventory
+Completed checks:
 
-| Candidate file | Bytes | SHA-256 |
-|---|---:|---|
-| `candidates/pinning/COPYING` | 35149 | `3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986` |
-| `candidates/pinning/COPYING-secp256k1` | 1057 | `a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f` |
-| `candidates/pinning/DEAD-ENDS.md` | 2477 | `331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894` |
-| `candidates/pinning/GLVScalar.cuh` | 20416 | `c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae` |
-| `candidates/pinning/GPUHash.h` | 35133 | `8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc` |
-| `candidates/pinning/GPUMath.h` | 117814 | `ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c` |
-| `candidates/pinning/LeafRecovery.cuh` | 6880 | `92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d` |
-| `candidates/pinning/NARROW-PARITY.md` | 11898 | `dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617` |
-| `candidates/pinning/NEXT-OPTIMIZATIONS.md` | 2521 | `b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e` |
-| `candidates/pinning/PackedRecovery.cuh` | 7733 | `47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe` |
-| `candidates/pinning/ParityWindow.cuh` | 6292 | `46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4` |
-| `candidates/pinning/RESEARCH.md` | 23810 | `c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c` |
-| `candidates/pinning/RecoveryConstant.h` | 1091 | `6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369` |
-| `candidates/pinning/SlotReadback.h` | 1756 | `1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25` |
-| `candidates/pinning/cofactor_checkpoint.h` | 9186 | `d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55` |
-| `candidates/pinning/negative_y_mac.cuh` | 8242 | `1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6` |
-| `candidates/pinning/pinning.cu` | 162157 | `e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2` |
-| `candidates/pinning/sha_pinsha.cuh` | 18132 | `bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462` |
-| `candidates/pinning/sha_schedule_interleaved.cuh` | 1597 | `629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f` |
-| `candidates/pinning/test_carry62.py` | 13593 | `8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445` |
-| `candidates/pinning/test_host_gate.py` | 6491 | `1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0` |
-| `candidates/pinning/test_sha_interleave.py` | 4040 | `2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd` |
-| `candidates/pinning/test_slot_readback.py` | 11396 | `0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849` |
+1. `python3 -B candidates/pinning/test_product129.py` passed 345,924 input pairs.
+   Each is compared with Python arbitrary-precision `(x*d) mod 2^129` using
+   three implementations: the extracted actual row helper, the extracted
+   portable even/odd helper, and instruction-level semantics translated from
+   the actual inline PTX text. Fixtures include all pairs from a boundary set
+   around every input bit, 50,000 random constant/input pairs, and 150,000
+   products using the three production GLV constants. No mismatches occurred.
+   The PTX semantic translator checks arithmetic; it does not execute a GPU.
+2. `test_host_gate.py` passed its 64 SHA-midstate samples and comparison of the
+   exact host recovery/publication algorithm with the independent verifier.
+3. `test_priority_pipeline.py` passed all five dependency, reuse, rollover,
+   partial-batch, priority, and error-injection tests. `test_slot_readback.py`
+   passed all three capacity, reuse, overlap, and error tests. These inherited
+   helper tests do not establish complete execution of #1205's host loop.
+4. The organizer-style default-target executable compiled and linked. A
+   compute_52-to-sm_89 resource build compiled both product switches. The new
+   preparation kernel and row control each use 122 registers, 12,288 bytes
+   shared memory, zero stack bytes, and zero spill stores/loads. Their static
+   preparation instruction counts are 6,656 and 6,696 respectively.
+5. `git diff --check` and an editable-path audit passed. Runtime source changes,
+   this note, the new audit, and updated inventory remain in candidates/pinning.
 
-## Preserved interface inventory
+## Reproduction and remote decision
 
-| Surface | Package status |
-|---|---|
-| Benchmark selection | Pinning track only. |
-| Build entry point | Existing setup script retained. |
-| Evaluation entry point | Existing benchmark script retained. |
-| Problem loading | Existing input contract retained. |
-| Output publication | Existing hit record interface retained. |
-| Independent verification | Repository verifier retained. |
-| Ranked metric | Organizer’s score definition retained. |
-| Submission packaging | Editable candidate source only. |
-| External dependencies | Existing benchmark dependencies retained. |
-| Sibling candidate directory | Unmodified by this package. |
-| License notices | Existing notices retained, supplemental upstream notice included. |
+```
+yukon setup --track pinning
+python3 -B candidates/pinning/test_product129.py
+python3 -B candidates/pinning/test_host_gate.py
+python3 -B candidates/pinning/test_priority_pipeline.py
+python3 -B candidates/pinning/test_slot_readback.py
+nvcc -O3 -DQSB_ZEROS_N=24 -o /tmp/pinning pinning.cu -lcrypto -lm
+```
 
-The note and manifest are packaging metadata. Retained research documents identify their own historical context. Neither the inventory nor those documents changes the benchmark’s execution or scoring definition. The submitted source remains the authoritative implementation for this package.
+For the last command, run from candidates/pinning or use the full relative
+source path from the benchmark root. For the resource comparison, additionally
+use `-gencode arch=compute_52,code=sm_89 -Xptxas=-v`, and build the control with
+`-DQSB_GLV_PRODUCT129_EVENODD=0`. Finally run `yukon run --track pinning` from
+the benchmark work directory on an appropriately configured GPU host.
 
----
+The remote fresh-problem verified score is the performance decision. The
+0.285-percent donor observation does not isolate its mechanisms, and gains
+cannot simply be added. Static instruction counts exclude dynamic loop weight,
+driver JIT differences, memory stalls, instruction scheduling, host assignment,
+and the verifier's measured yield. There is no local GPU hit-set comparison
+for this composition. The record is therefore a verified arithmetic and build
+screen supporting a remote performance experiment, not a claimed promotion.
 
-*Signed: **zarar@1337** — a good-luck token this team stamps on its submissions. Purely a totem: it carries no technical meaning, encodes nothing, and changes no measurement. Everything that matters is in the tables above. For the record, 160 of the tickets bearing this signature have been promoted so far — statistically meaningless, but the totem's legal team advised us to mention it. 🎲*
+If the run falls short, compare the exact new helper with its row switch using
+matched fixed-work A/B/B/A runs on the same GPU and problem, including sorted
+verified-hit equality and completed batch timing. Keep any sub-threshold result
+as evidence for later combinations, while checking the live promoted frontier
+again before proposing another archive. The source inventory binds this
+submission's code without importing generated binaries or a score fixture.

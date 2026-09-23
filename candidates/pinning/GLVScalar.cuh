@@ -406,7 +406,7 @@ __device__ __forceinline__ void q9_glv_residual3(
  * carry and the parity of diagonal four both contribute to that top bit. */
 struct q9_u129 { uint64_t lo,hi;uint32_t top; };
 
-__device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint32_t d[4]) {
+__device__ __forceinline__ q9_u129 q9_product129_rows(const uint64_t x[2],const uint32_t d[4]) {
     const uint32_t x0=(uint32_t)x[0],x1=(uint32_t)(x[0]>>32);
     const uint32_t x2=(uint32_t)x[1],x3=(uint32_t)(x[1]>>32);
     uint64_t t=(uint64_t)x0*d[0];const uint32_t w0=(uint32_t)t;uint64_t carry=t>>32;
@@ -423,6 +423,76 @@ __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint3
     q9_u129 r={(uint64_t)w0|((uint64_t)w1<<32),
                  (uint64_t)w2|((uint64_t)w3<<32),top&1U};
     return r;
+}
+
+// Independent even/odd diagonals shorten the row-to-row carry dependency.
+// Only bit 128 is retained, so carries above that bit are intentionally absent.
+#ifndef QSB_GLV_PRODUCT129_EVENODD
+#define QSB_GLV_PRODUCT129_EVENODD 1
+#endif
+#if QSB_GLV_PRODUCT129_EVENODD != 0 && QSB_GLV_PRODUCT129_EVENODD != 1
+#error "QSB_GLV_PRODUCT129_EVENODD must be 0 or 1"
+#endif
+__device__ __forceinline__ q9_u129 q9_product129_evenodd(const uint64_t x[2],const uint32_t d[4]) {
+#ifdef __CUDA_ARCH__
+    q9_u129 r;
+    asm("{\n"
+        ".reg .u32 a0,a1,a2,a3,top,otop;\n"
+        ".reg .u64 e0,e1,o0,o1,t,oc,middle,low;\n"
+        "mov.b64 {a0,a1},%3; mov.b64 {a2,a3},%4;\n"
+        "mul.wide.u32 e0,a0,%5;\n"
+        "mul.wide.u32 e1,a0,%7;\n"
+        "mul.wide.u32 t,a1,%6;\n"
+        "add.cc.u64 e1,e1,t; addc.u32 top,0,0;\n"
+        "mul.wide.u32 t,a2,%5;\n"
+        "add.cc.u64 e1,e1,t; addc.u32 top,top,0;\n"
+        "mul.wide.u32 o0,a0,%6;\n"
+        "mul.wide.u32 t,a1,%5;\n"
+        "add.cc.u64 o0,o0,t; addc.u64 oc,0,0;\n"
+        "mul.wide.u32 o1,a0,%8;\n"
+        "mad.wide.u32 o1,a1,%7,o1;\n"
+        "mad.wide.u32 o1,a2,%6,o1;\n"
+        "mad.wide.u32 o1,a3,%5,o1;\n"
+        "add.u64 o1,o1,oc;\n"
+        "shl.b64 low,o0,32; shr.u64 middle,o0,32;\n"
+        "shl.b64 t,o1,32; or.b64 middle,middle,t;\n"
+        "shr.u64 t,o1,32; cvt.u32.u64 otop,t;\n"
+        "add.cc.u64 %0,e0,low; addc.cc.u64 %1,e1,middle;\n"
+        "addc.u32 top,top,otop;\n"
+        "and.b32 otop,a1,%8; xor.b32 top,top,otop;\n"
+        "and.b32 otop,a2,%7; xor.b32 top,top,otop;\n"
+        "and.b32 otop,a3,%6; xor.b32 top,top,otop;\n"
+        "and.b32 %2,top,1;\n"
+        "}"
+        : "=l"(r.lo),"=l"(r.hi),"=r"(r.top)
+        : "l"(x[0]),"l"(x[1]),"r"(d[0]),"r"(d[1]),"r"(d[2]),"r"(d[3]));
+    return r;
+#else
+    const uint32_t a0=(uint32_t)x[0],a1=(uint32_t)(x[0]>>32);
+    const uint32_t a2=(uint32_t)x[1],a3=(uint32_t)(x[1]>>32);
+    const uint64_t e0=(uint64_t)a0*d[0];
+    uint64_t e1=(uint64_t)a0*d[2];
+    uint64_t t=e1+(uint64_t)a1*d[1];
+    uint32_t top=(uint32_t)(t<e1);e1=t;
+    t=e1+(uint64_t)a2*d[0];top^=(uint32_t)(t<e1);e1=t;
+    const uint64_t oa=(uint64_t)a0*d[1];
+    const uint64_t o0=oa+(uint64_t)a1*d[0];
+    const uint64_t o1=(uint64_t)a0*d[3]+(uint64_t)a1*d[2]+
+                      (uint64_t)a2*d[1]+(uint64_t)a3*d[0]+(uint64_t)(o0<oa);
+    const uint64_t lo=e0+(o0<<32);
+    const uint64_t shifted=(o0>>32)|(o1<<32);
+    uint64_t hi=e1+shifted;top^=(uint32_t)(hi<e1);
+    t=hi+(uint64_t)(lo<e0);top^=(uint32_t)(t<hi);hi=t;
+    top^=(uint32_t)(o1>>32)^(a1&d[3])^(a2&d[2])^(a3&d[1]);
+    q9_u129 r={lo,hi,top&1U};return r;
+#endif
+}
+__device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint32_t d[4]) {
+#if QSB_GLV_PRODUCT129_EVENODD
+    return q9_product129_evenodd(x,d);
+#else
+    return q9_product129_rows(x,d);
+#endif
 }
 
 __device__ __forceinline__ q9_u129 q9_sub129(q9_u129 a,q9_u129 b) {
