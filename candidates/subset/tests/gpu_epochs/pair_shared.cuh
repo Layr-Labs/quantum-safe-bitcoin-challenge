@@ -85,7 +85,17 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-    QSB_PRE_FMUL(t, xR, ZZ);
+#if QSB_ISO_FAST_X
+    (void)xR;
+    /* Branchless selection of ZZ or p-ZZ.  This is the same complement/add-p
+     * construction used by signed G-table loads, with a problem-uniform mask. */
+    uint64_t m=0ULL-(uint64_t)QSB_ISO_XNEG;
+    t[0]=ZZ[0]^m;t[1]=ZZ[1]^m;t[2]=ZZ[2]^m;t[3]=ZZ[3]^m;
+    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
+    UADDO1(t[0],c0);UADDC1(t[1],m);UADDC1(t[2],m);UADD1(t[3],m);
+#else
+    QSB_PRE_FMUL(t,xR,ZZ);
+#endif
     QSB_PRE_FSUB(t, t, X_D);
     Load256(X_D, t);             /* X_D becomes d */
     QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
@@ -359,12 +369,25 @@ __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *
     *o1=I[0]+a1+S1(f1)+Ch(f1,g1,h1)+K[63]+w1[15]+S0(b1)+Maj(b1,c1,d1);
 }
 
+// PR925 port: preserve the donor's standalone SHA helper and switchable gate.
+#ifndef QSB_GATE_H0_FMA
+#define QSB_GATE_H0_FMA 1
+#endif
+#if QSB_GATE_H0_FMA
+#include "../../sha_gate_fma.cuh"
+#endif
+
 __device__ __forceinline__ int qsb_k2s_gate_h0(
     uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
     uint32_t pb0[16],pb1[16],h0,h1;
     qsb_gate_block(pb0,q1x,y_parities);
     qsb_gate_block(pb1,q2x,y_parities>>1);
+#if QSB_GATE_H0_FMA
+    h0=_SHA256Pubkey33H0(pb0);
+    h1=_SHA256Pubkey33H0(pb1);
+#else
     qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
+#endif
     if((h0>>(32-QSB_ZEROS_N))==0){*recid_out=0;return 1;}
     if((h1>>(32-QSB_ZEROS_N))==0){*recid_out=1;return 1;}
     return 0;
@@ -436,11 +459,15 @@ __device__ __noinline__ int qsb_pair_tail_value(
 // cannot bypass it, and neither the external verifier nor its inputs changes.
 __device__ __noinline__ int qsb_pair_verify_candidate(
     const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt){
-    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+    uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
+    uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
     uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
     if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
     _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
+    uint64_t invu[4]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3]};
+    _ModMult(inv,invu);             // transformed inverse -> original slope scale
+    rx[0]=QSB_U2R[0];rx[1]=QSB_U2R[1];rx[2]=QSB_U2R[2];rx[3]=QSB_U2R[3];
+    ry[0]=QSB_U2R[4];ry[1]=QSB_U2R[5];ry[2]=QSB_U2R[6];ry[3]=QSB_U2R[7];
     uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
     int recid=0;
     return qsb_k2s_gate(x1,x2,par,&recid)?recid+1:0;
