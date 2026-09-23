@@ -1,4 +1,5 @@
 // GPU throughput has not been established by the CPU semantic tests.
+// redraw candidate: source-preserving packaging marker
 /*
 * This file is part of the VanitySearch distribution (https://github.com/JeanLucPons/VanitySearch).
 * Copyright (c) 2019 Jean Luc PONS.
