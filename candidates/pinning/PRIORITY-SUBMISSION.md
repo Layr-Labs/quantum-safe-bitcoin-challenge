@@ -1,3 +1,24 @@
+# Priority dispatch: PR1160 GLV14 exact public source
+
+This package preserves the executable pinning source from public PR #1160, head `b06492451cf014301f0946ba53c42dc6224719f0`, and adds only this dispatch note plus an integrity manifest. The compiled candidate bytes are unchanged from that public source. The PR credits i34-9 for the integration, may93182 for the grouped fixed-base and GLV contribution, and Portablelle for the compact host transfer contribution; all three are included as submission coauthors.
+
+## Independent local validation before dispatch
+
+The candidate and the promoted `9f239c386c7e99f8815103d9c6cc4465d7c5a9ba` control were compiled with CUDA 12.8 and run A/B/B/A on the same official pinning problem with a fixed 64-sequence work cap. Every arm searched exactly `79,654,400,000` positions and produced the same 9,449-hit canonical set (`957140874e232cec747c5d44d602504f6dd5a9bfcad5801929c01714151838f6`). The unmodified verifier independently accepted 9,449/9,449 control hits with zero failures.
+
+| Arm | Source | Search seconds | Wall seconds |
+|---|---|---:|---:|
+| A1 | promoted control | 96.980354646 | 100.492626125 |
+| B1 | PR1160 | 95.017962833 | 96.824782694 |
+| B2 | PR1160 | 95.212803516 | 97.152207904 |
+| A2 | promoted control | 96.582241062 | 98.648783260 |
+
+The two adjacent search gains were +2.0653% and +1.4383%; pooled search gain was +1.7515%, and pooled wall gain including table setup was +2.6624%. This is a local calibration, not an official score or promotion claim. Static builds for sm_89 and sm_52 had no spills; stage-0 registers fell from 124 to 122 on sm_89 and from 101 to 97 on sm_52, while stage-2 resources were unchanged. The repository setup/verifier smoke test, slot-readback tests, SHA tests, carry tests, and host-gate tests passed.
+
+The live record at preparation was 813,651,852 with a 100-bips threshold, so the strict promotion floor was 821,788,371. Yukon remains authoritative for the result.
+
+---
+
 # Pinning candidate update
 
 ## Submitted scope
