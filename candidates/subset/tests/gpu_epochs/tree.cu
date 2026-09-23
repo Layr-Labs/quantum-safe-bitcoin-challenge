@@ -536,6 +536,7 @@ __device__ __forceinline__ void qsb_filter_last_add(
     _ModSub256(Y,Y,scaled_y);
 #endif
 }
+#include "glv_joint_chain.cuh"
 __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
@@ -764,160 +765,11 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
-    uint64_t M[4]; int sign;
-    gt_recode_setup(k, M, &sign);
-    uint32_t idx; uint64_t neg;
-    uint64_t x0[4],y0[4],x1[4],y1[4];
-#if ZLAB_T14
-#if ZLAB_DIRDIG
-    uint64_t sflag=(uint64_t)(sign<0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
-    gt_load_signed(gTable,0,idx,neg,x0,y0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
-    gt_load_signed(gTable,1,idx,neg,x1,y1);
-#else
-    int32_t ec=gt_mixed_step<19>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<19>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-#endif
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
-    uint64_t cx[4],cy[4];
-    uint32_t table_base=gt_offset(2);
-#if ZLAB_DIRDIG
-    unsigned pos=(unsigned)gt_shift(2)+1u;
-#endif
-    #pragma unroll 1
-    for (int c=2;c<GT_BIG;c++){
-#if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg); pos+=gt_width(2);
-#else
-        ec=gt_mixed_step<19>(M,sign);
-        gt_digit_idx(ec, &idx, &neg);
-#endif
-        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-        Load256(y0, cy);
-        table_base += 1u << 18;
-    }
-    #pragma unroll 1
-    for (int c=GT_BIG;c<GT_CHUNKS-1;c++){
-#if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),false,&idx,&neg); pos+=gt_width(GT_BIG);
-#else
-        ec=gt_mixed_step<18>(M,sign);
-        gt_digit_idx(ec, &idx, &neg);
-#endif
-        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-        Load256(y0, cy);
-        table_base += 1u << 17;
-    }
-    {
-#if ZLAB_DIRDIG
-        gt_direct_digit(M,sflag,pos,gt_width(GT_BIG),true,&idx,&neg);
-#else
-        ec=sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg);
-#endif
-        gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-    }
-#else
-#if ZLAB_DIRDIG
-    uint64_t sflag=(uint64_t)(sign<0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(0)+1u,gt_width(0),false,&idx,&neg);
-    gt_load_signed_flat_f(gTable,gt_offset(0),idx,neg,x0,y0);
-    gt_direct_digit(M,sflag,(unsigned)gt_shift(1)+1u,gt_width(1),false,&idx,&neg);
-    gt_load_signed_flat_f(gTable,gt_offset(1),idx,neg,x1,y1);
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
-    uint64_t cx[4],cy[4];
-    uint32_t table_base=gt_offset(2);
-#if QSB_DIGIT_SHIFT
-    /* Same digits as gt_direct_digit at pos = gt_shift(c)+1: keep S = M >> pos in registers and
-     * shift it by one chunk width per step, instead of selecting limb pos>>6 each iteration. */
-    /* 15-chunk mixed geometry: chunk c>=1 starts at bit 17c+1, digit field at 17c+2, width 17
-     * (gt_shift(2)+1 == 36, gt_width(2) == 17; checked on the host at startup). */
-    constexpr unsigned P0=36u, W2=17u;
-    /* S = M >> 36 as 7 words (220 bits); one 32-bit funnel shift per word per step. */
-    uint32_t w0,w1,w2,w3,w4,w5,w6;
-    {
-        const uint64_t S0=(M[0]>>P0)|(M[1]<<(64-P0)), S1=(M[1]>>P0)|(M[2]<<(64-P0));
-        const uint64_t S2=(M[2]>>P0)|(M[3]<<(64-P0)), S3=M[3]>>P0;
-        w0=(uint32_t)S0; w1=(uint32_t)(S0>>32); w2=(uint32_t)S1; w3=(uint32_t)(S1>>32);
-        w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
-    }
-    constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
-    #pragma unroll (kChainUnroll)
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        {
-            const uint32_t f=w0&((1u<<W2)-1u), t=f>>(W2-1u);
-            idx=(f^(t-1u))&((1u<<(W2-1u))-1u);
-            neg=(uint64_t)(t^1u)^sflag;
-        }
-        w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
-        w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
-        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-#if !QSB_CHAIN_ANCHOR_UPDATE
-        Load256(y0, cy);                /* current affine y anchors next madd */
-#endif
-        table_base += 1u << 16;
-    }
-    {
-        const uint32_t f=w0&((1u<<W2)-1u);
-        idx=f&((1u<<(W2-1u))-1u); neg=sflag;
-        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-    }
-#else
-    unsigned pos=(unsigned)gt_shift(2)+1u;
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        gt_direct_digit(M,sflag,pos,gt_width(2),false,&idx,&neg);
-        pos+=gt_width(2);
-        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
-    {
-        gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
-        gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-    }
-#endif
-#else
-    int32_t ec=gt_mixed_step<18>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
-    gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
-    qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
-    uint64_t cx[4],cy[4];
-    uint32_t table_base=gt_offset(2);
-    #pragma unroll 1
-    for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-        Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
-    }
-    {
-        ec=sign*(int32_t)M[0];
-        gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
-        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
-    }
-#endif
-#endif
+    glvj_fixed_base<true>(X,Y,ZZ,ZZZ,k,gTable,bad);
 }
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
-    // The original scalar survives even if an output aliases the input k.
-    uint64_t saved_k[4];Load256(saved_k,k);
-    uint32_t bad=0;
-    qsb_replay_chain_trial(X,Y,ZZ,ZZZ,saved_k,gTable,bad);
-    if(bad)qsb_replay_chain_exact(X,Y,ZZ,ZZZ,saved_k,gTable);
+    uint32_t unused=0;glvj_fixed_base<false>(X,Y,ZZ,ZZZ,k,gTable,unused);
 }
 
 
@@ -1551,6 +1403,33 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
+// Saviour1001 PR1072: recreate cheap indices rather than retain them across
+// field calls. Volatile special-register reads prevent common-subexpression
+// reuse; these values depend only on the actual launch, never input contents.
+__device__ __forceinline__ unsigned qsb_geometry_tid(){
+#ifdef __CUDA_ARCH__
+    unsigned v;asm volatile("mov.u32 %0, %%tid.x;":"=r"(v));return v;
+#else
+    return threadIdx.x;
+#endif
+}
+__device__ __forceinline__ unsigned qsb_geometry_bid(){
+#ifdef __CUDA_ARCH__
+    unsigned v;asm volatile("mov.u32 %0, %%ctaid.x;":"=r"(v));return v;
+#else
+    return blockIdx.x;
+#endif
+}
+template<bool SECOND>
+__device__ __forceinline__ unsigned qsb_geometry_epoch(){
+    return QSB_PAIR_MUL*qsb_geometry_bid()
+        +2u*(qsb_geometry_tid()/(unsigned)QSB_SE_WINDOWS)+(SECOND?1u:0u);
+}
+template<bool SECOND>
+__device__ __forceinline__ bool qsb_geometry_active(unsigned batch,unsigned epochs){
+    return qsb_geometry_bid()*QSB_SE_BLOCK+qsb_geometry_tid()<batch
+        && qsb_geometry_epoch<SECOND>()<epochs;
+}
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -1622,7 +1501,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
-        okA=fa.ok && active;
+        okA=fa.ok && qsb_geometry_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch);
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
 #if ZLAB_DUAL_EPOCH_SHA
         #pragma unroll
@@ -1639,7 +1518,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint64_t m1[4],m2[4];
         QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
         Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
-        okA=fa.ok && active;
+        okA=fa.ok && qsb_geometry_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch);
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
         #pragma unroll
         for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
@@ -1659,7 +1538,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
 #endif
-    okB=fb.ok && active && hasB;
+    okB=fb.ok && qsb_geometry_active<true>((unsigned)batch_size,(unsigned)epochs_in_batch);
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);
@@ -1685,9 +1564,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=(eA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
-                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
-                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+                const unsigned hit_epoch=qsb_geometry_epoch<false>();
+                const unsigned hit_lane=qsb_geometry_tid()&(QSB_SE_WINDOWS-1u);
+                d_hit_idx[pslot*4]=(hit_epoch*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
             }
         }
     }
@@ -1706,9 +1587,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=((eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
-                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
-                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+                const unsigned hit_epoch=qsb_geometry_epoch<true>();
+                const unsigned hit_lane=qsb_geometry_tid()&(QSB_SE_WINDOWS-1u);
+                d_hit_idx[pslot*4]=(hit_epoch*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
             }
         }
     }
@@ -2235,6 +2118,8 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
 
+#include "glv_joint_table.cuh"
+
 /* Digest params loader */
 typedef struct {
     uint32_t n, t;
@@ -2695,27 +2580,27 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-    size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
+    size_t gt_sz = (size_t)GLVJ_GT_TOTAL_ENTRIES*64;
     uint8_t *d_gt;
     cudaMalloc(&d_gt,gt_sz);
     {
-        /* Build the fixed-base table on the GPU (mixed 15-chunk geometry, one
+        /* Build the fixed-base table on the GPU (joint top-digit GLV geometry, one
          * interleaved X||Y record per entry). The host only produces the two
-         * small ladders; the million entries are one parallel addition each.
+         * small ladders; the 622592 entries are one parallel addition each.
          * The result is then spot-checked against OpenSSL and falls back to the
          * host builder on any mismatch. */
         struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
-        size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
-        size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
+        size_t lb = (size_t)GLVJ_GT_CHUNKS*GLVJ_GT_LO*8*sizeof(uint64_t);
+        size_t hb = (size_t)GLVJ_GT_CHUNKS*GLVJ_GT_HI*8*sizeof(uint64_t);
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
-        gt_build_ladders(hL,hH,dp.neg_r_inv);
+        glvj_gt_build_ladders(hL,hH,dp.neg_r_inv);
         uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
         cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
-        int gt_total = GT_TOTAL_ENTRIES;
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+        int gt_total = GLVJ_GT_TOTAL_ENTRIES;
+        glvj_kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
@@ -2724,7 +2609,7 @@ int main(int argc, char **argv) {
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,dp.neg_r_inv);
+            gt_ok = glvj_gt_spot_check(chk_table,GLVJ_GT_CHUNKS*4+192,dp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -2734,7 +2619,7 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
-            compute_gtable(chk_table,dp.neg_r_inv);
+            glvj_compute_gtable(chk_table,dp.neg_r_inv);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
         fflush(stdout);
