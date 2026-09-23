@@ -494,7 +494,7 @@ __device__ __forceinline__ void qsb_double_affine(uint64_t *X,uint64_t *Y,uint64
     _ModAdd256(ZZ,yy,yy);_ModAdd256(ZZ,ZZ,ZZ);
     _ModMult(ZZZ,(uint64_t*)y,ZZ);_ModAdd256(ZZZ,ZZZ,ZZZ);
 }
-__device__ __forceinline__ void qsb_complete_last_add(
+__device__ __noinline__ void qsb_complete_last_add(
     uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
     const uint64_t *X2,const uint64_t *Y2,const uint64_t *Yoff){
     uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4],T[4];

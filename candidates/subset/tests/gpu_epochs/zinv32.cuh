@@ -13,6 +13,12 @@
  * _ModInv and 28,155 with this form (-29.4%); 85-90% of what remains is the ~190-iteration
  * divstep decision chain, which is serial in any design. */
 #pragma once
+#ifndef QSB_ROOT_SIGN_CANON
+#define QSB_ROOT_SIGN_CANON 1
+#endif
+#if QSB_ROOT_SIGN_CANON != 0 && QSB_ROOT_SIGN_CANON != 1
+#error "QSB_ROOT_SIGN_CANON must be 0 or 1"
+#endif
 // Derived from i34-9 public PR216; bounded and wide-top-word changes below.
 #ifndef ZI_ROOT_MAX_BATCHES
 #define ZI_ROOT_MAX_BATCHES (2*QSB_ROOT_MAX_BATCHES)
@@ -289,6 +295,30 @@ ZI_DEV void zi_canon(uint32_t *X){
     const uint32_t keep=(uint32_t)((int32_t)T[8]>>31);
     for(int i=0;i<8;i++)X[i]=(X[i]&keep)|(T[i]&~keep);
 }
+#if QSB_ROOT_SIGN_CANON
+/* Canonicalize (-1)^neg * X without materializing its signed 288-bit
+ * negation. For B=2^256 and K=2^32+977, complemented low limbs L and
+ * signed high limb h satisfy (-1)^neg*X=L+B*h+neg. Fold L+K*h+neg
+ * directly; |X|<2^261 keeps it in (-p,2p), covered by both corrections. */
+ZI_DEV void zi_canon_signed(uint32_t *X,uint32_t neg){
+    const uint32_t ZI_PL[9]=ZI_PL_INIT;
+    const uint32_t mask=0u-neg;
+    const int32_t hi=(int32_t)(X[8]^mask);
+    int64_t acc=(int64_t)(X[0]^mask)+(int64_t)hi*977+(int64_t)neg;
+    X[0]=(uint32_t)acc; acc>>=32;
+    acc+=(int64_t)(X[1]^mask)+(int64_t)hi;
+    X[1]=(uint32_t)acc; acc>>=32;
+    for(int i=2;i<8;i++){acc+=(int64_t)(X[i]^mask);X[i]=(uint32_t)acc;acc>>=32;}
+    X[8]=(uint32_t)acc;
+    const uint32_t mneg=(uint32_t)((int32_t)X[8]>>31);
+    uint64_t c=0;
+    for(int i=0;i<9;i++){c+=(uint64_t)X[i]+(uint64_t)(ZI_PL[i]&mneg);X[i]=(uint32_t)c;c>>=32;}
+    uint32_t T[9]; c=1;
+    for(int i=0;i<9;i++){c+=(uint64_t)X[i]+(uint64_t)(uint32_t)~ZI_PL[i];T[i]=(uint32_t)c;c>>=32;}
+    const uint32_t keep=(uint32_t)((int32_t)T[8]>>31);
+    for(int i=0;i<8;i++)X[i]=(X[i]&keep)|(T[i]&~keep);
+}
+#endif
 /* All four lanes pass the same canonical root in R[0..3]; all return the canonical inverse
  * (0 for root 0: v starts at 0, one batch gives r=0, canon(0)=0 -- no gcd test needed since p is prime). */
 ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
@@ -325,8 +355,12 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     }
     uint32_t fneg=(uint32_t)((int32_t)P[8]<0);
     fneg=zi_x(fneg,0);
+#if QSB_ROOT_SIGN_CANON
+    zi_canon_signed(P,fneg);
+#else
     zi_condneg(P,fneg);
     zi_canon(P);
+#endif
     for(int i=0;i<8;i++)P[i]=zi_x(P[i],2);
     for(int i=0;i<4;i++)R[i]=(uint64_t)P[2*i]|((uint64_t)P[2*i+1]<<32);
     R[4]=0;
