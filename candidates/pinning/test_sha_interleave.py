@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import random
 import subprocess
+import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
@@ -54,6 +55,10 @@ extern "C" void baseline(uint32_t *o, const uint32_t *m) { baseline_pubkey33(o,m
         cpp, so = Path(tmp) / 'test.cpp', Path(tmp) / 'test.so'
         cpp.write_text(harness)
         cmd = ['g++', '-std=c++17', '-O2', '-Wall', '-Wextra', '-Wno-unknown-pragmas', '-shared', '-fPIC', str(cpp), '-o', str(so)]
+        if sys.platform == 'darwin':
+            sdk = subprocess.run(['xcrun', '--show-sdk-path'], capture_output=True, text=True)
+            if sdk.returncode == 0 and sdk.stdout.strip():
+                cmd += ['-isysroot', sdk.stdout.strip(), '-I', sdk.stdout.strip() + '/usr/include/c++/v1']
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode:
             raise RuntimeError(proc.stderr)

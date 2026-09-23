@@ -30,12 +30,6 @@
 #if QSB_C31 && !QSB_HOST_GATE
 #error "QSB_C31 requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
 #endif
-#ifndef QSB_X3_TAIL
-#define QSB_X3_TAIL 1   /* h*K fold one-limb cut in _ModX3Fused; defined in GPUMath.h */
-#endif
-#if QSB_X3_TAIL && !QSB_HOST_GATE
-#error "QSB_X3_TAIL requires QSB_HOST_GATE so false GPU hits cannot reach the verifier"
-#endif
 #ifndef QSB_YOFF
 #define QSB_YOFF 1   /* table stores y + (K-1)/2 so that a signed load is a pure XOR */
 #endif
@@ -58,6 +52,7 @@
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
 #include "GPUMath.h"
+#include "PriorityPipeline.h"
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -108,7 +103,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 8388608    /* candidates per pipeline launch */
+#define QSB_BATCH 16777216   /* candidates per pipeline launch (i34-9 0b204c4: 8M->16M amortizes launch+root work) */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -151,7 +146,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
-#define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
+#define QSB_S2_BLOCKS 8 /* Weighted finish register headroom; 7->8 (i34-9 0b204c4): 64 regs + 12B spill, net positive screen */
 #endif
 #if QSB_S2_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD2
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
@@ -204,8 +199,17 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    to 31e98e47's.  31e98e47 scored 702,050,398 and 260879f4 scored
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
+// Root-priority scheduling: 0 baseline, 1 priority roots, 2 priority tail,
+// 3 same-priority split control. No change to device arithmetic.
+#ifndef QSB_COMPLETION_MODE
+#define QSB_COMPLETION_MODE 1
+#endif
+static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion mode");
+#if QSB_COMPLETION_MODE && !QSB_SLOTPIPE
+#error "completion streams require the slotted pipeline"
+#endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; 2->4 (i34-9 0b204c4): ~10.5 GiB on 24 GiB RTX 4090 */
 #endif
 #if QSB_SLOTPIPE && QSB_SLOTS < 2
 #error "QSB_SLOTPIPE=1 needs QSB_SLOTS >= 2"
@@ -213,7 +217,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_SLOTPIPE
 /* The launch helper takes the slot's stream; at QSB_SLOTPIPE=0 the parameter and
  * the launch suffix vanish so the emitted code is the single-stream one. */
-#define QSB_STREAM_PARM , cudaStream_t st
+#define QSB_STREAM_PARM , cudaStream_t st, qsb::CompletionLane *flow = nullptr
 #define QSB_STREAM_ARG  ,0,st
 #else
 #define QSB_STREAM_PARM
@@ -1860,6 +1864,26 @@ static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && Q
  * F=2*u^2-K*t+xR; H=2*u*v gives x_plus=F-H, x_minus=F+H. Both y
  * coordinates are anchored at R. Returns their parities in bits 0,1.
  * Only Y, ZZZ and W cross the kernel boundary (six planes). */
+#ifndef QSB_LAZY_ADD_FINISH
+#define QSB_LAZY_ADD_FINISH 1
+#endif
+#if QSB_LAZY_ADD_FINISH != 0 && QSB_LAZY_ADD_FINISH != 1
+#error QSB_LAZY_ADD_FINISH must be 0 or 1
+#endif
+/* QSB_LAZY_ADD_FINISH: the two stage-2 finish additions whose consumer either
+ * normalizes or multiplies take the lazy form.  _ModAddLazy folds the 2^256
+ * carry once with the single-limb constant K instead of running the full
+ * conditional p-subtraction, so its result is congruent mod p and below 2^256
+ * rather than canonical.  x_minus is canonicalized by qsb_field_normalize on
+ * the next line and V (from h = u+v) by qsb_field_normalize before its parity
+ * bit is read, and _ModMult reduces any operand below 2^256, so both parity
+ * bits and both published x-coordinates are bit-identical to the _ModAdd256
+ * form.  -DQSB_LAZY_ADD_FINISH=0 restores _ModAdd256 at both sites. */
+#if QSB_LAZY_ADD_FINISH
+#define QSB_FINISH_ADD(r,a,b) _ModAddLazy(r,a,b)
+#else
+#define QSB_FINISH_ADD(r,a,b) _ModAdd256(r,a,b)
+#endif
 __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     uint64_t *Y, uint64_t *V, uint64_t *inv,
     uint64_t *xR, uint64_t *yR, uint64_t *K,
@@ -1885,7 +1909,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     _ModMult(h, u, v);
     _ModAdd256(h, h, h);         /* H = 2*u*v */
     _ModSub256(x_plus, f, h);
-    _ModAdd256(x_minus, f, h);
+    QSB_FINISH_ADD(x_minus, f, h);
     qsb_field_normalize(x_plus);
     qsb_field_normalize(x_minus);
 
@@ -1896,7 +1920,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     qsb_field_normalize(h);
     uint32_t parities = (uint32_t)(h[0] & 1ULL);
 
-    _ModAdd256(h, u, v);
+    QSB_FINISH_ADD(h, u, v);
     _ModSub256(V, xR, x_minus);
     _ModMult(h, V);
     _ModSub256(V, yR, h);
@@ -2259,6 +2283,15 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #endif
+#if QSB_SLOTPIPE
+    if (flow) {
+        err = flow->begin_roots(st);
+        if (err != cudaSuccess) {
+            fprintf(stderr,"Prepare/root dependency failed: %s\n",cudaGetErrorString(err));
+            exit(2);
+        }
+    }
+#endif
     int root_groups=(blocks+255)/256;
     qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
@@ -2280,6 +2313,15 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#if QSB_SLOTPIPE
+    if (flow) {
+        err = flow->end_roots(st);
+        if (err != cudaSuccess) {
+            fprintf(stderr,"Root/finish dependency failed: %s\n",cudaGetErrorString(err));
+            exit(2);
+        }
+    }
+#endif
 #if QSB_TREE_OFFLOAD2
     qsb_leaf_tree_finish<<<blocks,256 QSB_STREAM_ARG>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
@@ -2995,7 +3037,6 @@ int main(int argc, char **argv) {
         }
         printf("  SHA path: per-sequence midstate + one static tail block\n");
     }
-    printf("  X3 h*h correction cut: %s\n", QSB_X3_TAIL ? "on" : "off");
     printf("  Host publication gate: %s; C31 approx: %s\n",
            QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
 
@@ -3065,6 +3106,7 @@ int main(int argc, char **argv) {
      * non-blocking stream, so it is installed again on each slot stream with
      * exactly the same base/size/QSB_L2_SKIP arithmetic.  The device-wide
      * cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize) above is not repeated. */
+    qsb::CompletionLane slot_flow[QSB_SLOTS];
     cudaStream_t slot_stream[QSB_SLOTS];
     cudaEvent_t  slot_done[QSB_SLOTS];
     uint32_t *d_hit_cnt_s[QSB_SLOTS], *d_hit_idx_s[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
@@ -3075,6 +3117,7 @@ int main(int argc, char **argv) {
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
+            if (se==cudaSuccess) se = slot_flow[s].init(slot_stream[s], QSB_COMPLETION_MODE);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_cnt_s[s], sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMalloc(&d_hit_idx_s[s], 1024*sizeof(uint32_t));
@@ -3287,9 +3330,10 @@ int main(int argc, char **argv) {
     uint64_t batch_no = 0;
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         slot_busy[s] = 0;
-        cudaError_t err = cudaGetLastError();
+        err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         uint32_t h_hit = h_hit_cnt[s];
         if (h_hit > 0) {
@@ -3365,8 +3409,14 @@ int main(int argc, char **argv) {
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);
-            cudaMemcpyAsync(d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
-            cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
+            cudaError_t slot_error = cudaMemcpyAsync(
+                d_mid_slot[s], h_mid + (size_t)s*8, 32, cudaMemcpyHostToDevice, st);
+            if (slot_error == cudaSuccess)
+                slot_error = cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
+            if (slot_error != cudaSuccess) {
+                fprintf(stderr, "Slot input enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                return 1;
+            }
 
             launch_pinning_pipeline<true>(
                 d_mid_slot[s], d_suffix, gpu_suffix_len,
@@ -3378,12 +3428,18 @@ int main(int argc, char **argv) {
                 d_hit_cnt_s[s], d_hit_idx_s[s],
                 batch_sz, easy, single_hash,
                 d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
-                d_super_roots[s],d_root_checkpoint[s], cur_tp, st);
-            cudaMemcpyAsync(h_hit_cnt + s, d_hit_cnt_s[s], sizeof(uint32_t),
-                            cudaMemcpyDeviceToHost, st);
-            cudaMemcpyAsync(h_hit_idx + (size_t)s*64, d_hit_idx_s[s], 64*sizeof(uint32_t),
-                            cudaMemcpyDeviceToHost, st);
-            cudaEventRecord(slot_done[s], st);
+                d_super_roots[s],d_root_checkpoint[s], cur_tp, st, &slot_flow[s]);
+            st = slot_flow[s].completion_stream();
+            slot_error = cudaMemcpyAsync(h_hit_cnt + s, d_hit_cnt_s[s], sizeof(uint32_t),
+                                         cudaMemcpyDeviceToHost, st);
+            if (slot_error == cudaSuccess)
+                slot_error = cudaMemcpyAsync(h_hit_idx + (size_t)s*64, d_hit_idx_s[s],
+                                             64*sizeof(uint32_t), cudaMemcpyDeviceToHost, st);
+            if (slot_error == cudaSuccess) slot_error = cudaEventRecord(slot_done[s], st);
+            if (slot_error != cudaSuccess) {
+                fprintf(stderr, "Slot completion enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                return 1;
+            }
             slot_busy[s] = 1;
 
             total_searched += batch_sz;
