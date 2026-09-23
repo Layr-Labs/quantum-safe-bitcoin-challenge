@@ -1,3 +1,49 @@
+# Pinning: tip X3/negY line + S0_SHM register relief + 16M/4-slot geometry
+
+## What this package changes relative to tip `9f239c3`
+
+Tip already carries the promoted/record arithmetic stack (PR1013+K32+negY+X3,
+host gate, C31). Prior package of that exact tree was rejected as identical to
+source tip. This package keeps that arithmetic byte-identical and changes only
+host-orchestration / register-pressure defaults:
+
+1. **`QSB_S0_SHM=1`** (was 0): parks prepare-kernel cold recode state and y
+   anchor in the product-tree shared scratch (dead during the fixed-base chain).
+   Disables `QSB_DIRECT_DIGITS` via the existing coupling; that path was measured
+   neutral. No field arithmetic change. Public ABBA Ada measurements on this
+   switch alone: about +0.08% / +0.24% / +0.15% (three runs; PR #1166 note).
+2. **`QSB_BATCH=16777216`** and **`QSB_SLOTS=4`** (were 8M / 2): i34-9 launch
+   geometry used by several above-record near-miss packages (e.g. PR #1151 drew
+   815,948,628 on the 16M batch line). Device kernels unchanged; only host
+   slotted pipeline sizing changes. `QSB_BATCH % 256 == 0` preserved for
+   `QSB_SHA_UNIF`.
+3. Composition marker `QSB_GEO_S0SHM_16M4` replaces the tip inert
+   `QSB_RESUB_0920120629` tag so the package is source-distinct.
+
+Kill switches: `-DQSB_S0_SHM=0 -DQSB_BATCH=8388608 -DQSB_SLOTS=2` restore tip
+geometry/register defaults (aside from the marker define).
+
+## Host-gate safety
+
+No GPU field path is edited. `QSB_HOST_GATE=1` and `QSB_C31=1` remain default.
+False nominations cannot reach the verifier; these defaults cannot invent hits.
+
+## Expected outcome
+
+Self-rate lift is modeled as small (geometry + register relief, well under the
+100-bip floor alone). Official score depends on runner host and hit draw. Goal
+of this ticket is a **non-empty code package** that Yukon will accept into the
+scoring queue on the current tip arithmetic base.
+
+## Verification on this host
+
+No CUDA/GPU here. CPU audits expected to pass unchanged (arithmetic identical).
+Attribution: tip arithmetic lineage as in the inherited note below; S0_SHM /
+16M/4 geometry defaults as publicly measured by newjordan (PR #1166) and i34-9
+geometry packages; packaging via omp harness.
+
+---
+
 # Pinning composition: X3 h*K tail cut on the PR1013 + negative-Y line
 
 ## What this package is
