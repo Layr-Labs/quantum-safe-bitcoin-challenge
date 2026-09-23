@@ -1,8 +1,8 @@
 {
   "schema": "zarar1337.source-manifest.v1",
   "track": "pinning",
-  "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
-  "implementation_commit": "3700ffd0788d759b242a6b0e13d2a7a0663956b3",
+  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
+  "implementation_commit": "hunter-p1-glv-dense-first",
   "metadata_excluded": [
     "candidates/pinning/SOURCE-MANIFEST.json",
     "candidates/pinning/SUBMISSION.md"
@@ -90,8 +90,8 @@
     },
     {
       "path": "candidates/pinning/pinning.cu",
-      "bytes": 162157,
-      "sha256": "e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2"
+      "bytes": 164085,
+      "sha256": "bc9d2e648b153f1c0d40cc31e9cd8e45f07dc5699151bfcb83ab33fac09da35a"
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
