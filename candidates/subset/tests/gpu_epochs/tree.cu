@@ -81,6 +81,13 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
+#ifndef QSB_RUNTIME_GLV
+#define QSB_RUNTIME_GLV 1
+#endif
+#if QSB_RUNTIME_GLV
+__device__ __constant__ unsigned QSB_GLV_ACTIVE=0;
+#include "geometry_tuning.cuh"
+#endif
 /* c = 3*xR^2 / (2*yR) mod p for R = u2R: the constant that lets the recovery
  * finish derive both x-coordinates from the two slopes alone (see
  * qsb_xyzz_finish_precomputed). Uploaded next to QSB_U2R. */
@@ -536,6 +543,10 @@ __device__ __forceinline__ void qsb_filter_last_add(
     _ModSub256(Y,Y,scaled_y);
 #endif
 }
+#if QSB_RUNTIME_GLV
+#include "glv_splitter.cuh"
+#include "glv_chain.cuh"
+#endif
 __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     uint64_t M[4]; int sign;
@@ -762,8 +773,26 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#ifndef QSB_GLV_AFFINE
+#define QSB_GLV_AFFINE 1
+#endif
+#if QSB_RUNTIME_GLV && QSB_GLV_AFFINE
+__device__ __forceinline__ void glv_affine_collective(uint64_t *,uint64_t *,uint64_t *,uint64_t *,const uint64_t[4],const uint8_t *);
+#endif
+template<bool QSB_USE_AFFINE=(QSB_RUNTIME_GLV && QSB_GLV_AFFINE)>
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+#if QSB_RUNTIME_GLV
+    if(QSB_GLV_ACTIVE){
+#if QSB_GLV_AFFINE
+        if(QSB_USE_AFFINE){glv_affine_collective(X,Y,ZZ,ZZZ,k,gTable);bad=0;}
+        else
+#endif
+        {glv_fixed_base<true>(X,Y,ZZ,ZZZ,k,gTable,bad);}
+        return;
+    }
+#endif
+
     uint64_t M[4]; int sign;
     gt_recode_setup(k, M, &sign);
     uint32_t idx; uint64_t neg;
@@ -913,6 +942,10 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 }
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
+#if QSB_RUNTIME_GLV
+    if(QSB_GLV_ACTIVE){uint32_t unused=0;glv_fixed_base<false>(X,Y,ZZ,ZZZ,k,gTable,unused);return;}
+#endif
+
     // The original scalar survives even if an output aliases the input k.
     uint64_t saved_k[4];Load256(saved_k,k);
     uint32_t bad=0;
@@ -1518,6 +1551,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+#if QSB_RUNTIME_GLV && QSB_GLV_AFFINE
+#include "glv_affine.cuh"
+#endif
 #include "pair_shared.cuh"
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
@@ -1551,7 +1587,39 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+#if QSB_RUNTIME_GLV
+// Saviour1001 PR1072: recreate cheap indices rather than retain them across
+// field calls. Volatile special-register reads prevent common-subexpression
+// reuse; these values depend only on the actual launch, never input contents.
+__device__ __forceinline__ unsigned qsb_geometry_tid(){
+#ifdef __CUDA_ARCH__
+    unsigned v;asm volatile("mov.u32 %0, %%tid.x;":"=r"(v));return v;
+#else
+    return threadIdx.x;
+#endif
+}
+__device__ __forceinline__ unsigned qsb_geometry_bid(){
+#ifdef __CUDA_ARCH__
+    unsigned v;asm volatile("mov.u32 %0, %%ctaid.x;":"=r"(v));return v;
+#else
+    return blockIdx.x;
+#endif
+}
+template<bool SECOND>
+__device__ __forceinline__ unsigned qsb_geometry_epoch(){
+    return QSB_PAIR_MUL*qsb_geometry_bid()
+        +2u*(qsb_geometry_tid()/(unsigned)QSB_SE_WINDOWS)+(SECOND?1u:0u);
+}
+template<bool SECOND>
+__device__ __forceinline__ bool qsb_geometry_active(unsigned batch,unsigned epochs){
+    return qsb_geometry_bid()*QSB_SE_BLOCK+qsb_geometry_tid()<batch
+        && qsb_geometry_epoch<SECOND>()<epochs;
+}
+#endif
+// Separate entry points prevent affine live ranges from fixing the regular
+// arm's register allocation. Dispatch changes only between completed batches.
+template<bool QSB_USE_AFFINE>
+__global__ void __launch_bounds__(256, QSB_USE_AFFINE ? 1 : 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -1617,12 +1685,16 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     {
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront3 fa=qsb_pair_front3_z_value<QSB_USE_AFFINE>(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
-        QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront3 fa=qsb_pair_front3_value<QSB_USE_AFFINE>(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
+        #if QSB_RUNTIME_GLV
+        okA=fa.ok && qsb_geometry_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch);
+#else
         okA=fa.ok && active;
+#endif
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
 #if ZLAB_DUAL_EPOCH_SHA
         #pragma unroll
@@ -1637,9 +1709,13 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
 #else
         uint64_t m1[4],m2[4];
-        QsbPairFront fa=qsb_pair_front_value(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront fa=qsb_pair_front_value<QSB_USE_AFFINE>(e0,f0,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
         Load256(prodA,fa.words);prodA[4]=0;Load256(m1,fa.words+4);Load256(m2,fa.words+8);
+        #if QSB_RUNTIME_GLV
+        okA=fa.ok && qsb_geometry_active<false>((unsigned)batch_size,(unsigned)epochs_in_batch);
+#else
         okA=fa.ok && active;
+#endif
         if(!okA){prodA[0]=1;prodA[1]=prodA[2]=prodA[3]=prodA[4]=0;}
         #pragma unroll
         for(int k=0;k<4;k++){parkA[k][tid]=m1[k];parkA[4+k][tid]=m2[k];}
@@ -1648,18 +1724,22 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront3 fb=qsb_pair_front3_z_value<QSB_USE_AFFINE>(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #else
-    QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront3 fb=qsb_pair_front3_value<QSB_USE_AFFINE>(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
     for(int k=0;k<12;k++)nB[k]=fb.words[4+k];
 #else
-    QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront fb=qsb_pair_front_value<QSB_USE_AFFINE>(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
 #endif
-    okB=fb.ok && active && hasB;
+    #if QSB_RUNTIME_GLV
+        okB=fb.ok && qsb_geometry_active<true>((unsigned)batch_size,(unsigned)epochs_in_batch);
+#else
+        okB=fb.ok && active && hasB;
+#endif
     if(!okB){prodB[0]=1;prodB[1]=prodB[2]=prodB[3]=prodB[4]=0;}
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);
@@ -1685,9 +1765,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
+#if QSB_RUNTIME_GLV
+                const unsigned hit_epoch=qsb_geometry_epoch<false>();
+                const unsigned hit_lane=qsb_geometry_tid()&(QSB_SE_WINDOWS-1u);
+                d_hit_idx[pslot*4]=(hit_epoch*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
+#else
                 d_hit_idx[pslot*4]=(eA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+#endif
             }
         }
     }
@@ -1706,9 +1794,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
+#if QSB_RUNTIME_GLV
+                const unsigned hit_epoch=qsb_geometry_epoch<true>();
+                const unsigned hit_lane=qsb_geometry_tid()&(QSB_SE_WINDOWS-1u);
+                d_hit_idx[pslot*4]=(hit_epoch*QSB_SE_WINDOWS+hit_lane)|((uint32_t)recid<<30);
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=d_epochs[hit_epoch].early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[hit_lane][i];
+#else
                 d_hit_idx[pslot*4]=((eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+#endif
             }
         }
     }
@@ -2235,6 +2331,9 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
 
+#if QSB_RUNTIME_GLV
+#include "glv18_table.cuh"
+#endif
 /* Digest params loader */
 typedef struct {
     uint32_t n, t;
@@ -2741,6 +2840,55 @@ int main(int argc, char **argv) {
         free(chk_table);
     }
 
+#if QSB_RUNTIME_GLV
+    uint8_t *d_regular_gt=d_gt;
+    size_t glv_gt_sz = (size_t)GLV18_GT_TOTAL_ENTRIES*64;
+    uint8_t *d_glv_gt;
+    cudaMalloc(&d_glv_gt,glv_gt_sz);
+    {
+        /* Build the compact fixed-base table on the GPU (8-bank GLV geometry, one
+         * interleaved X||Y record per entry). The host only produces the two
+         * small ladders; the 294,912 entries are parallel point combinations.
+         * The result is then spot-checked against OpenSSL and falls back to the
+         * host builder on any mismatch. */
+        struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
+        size_t lb = (size_t)GLV18_GT_CHUNKS*GLV18_GT_LO*8*sizeof(uint64_t);
+        size_t hb = (size_t)GLV18_GT_CHUNKS*GLV18_GT_HI*8*sizeof(uint64_t);
+        uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
+        if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
+        glv18_gt_build_ladders(hL,hH,dp.neg_r_inv);
+        uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
+        cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
+        cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
+        free(hL); free(hH);
+        int gt_total = GLV18_GT_TOTAL_ENTRIES;
+        glv18_kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_glv_gt);
+        cudaDeviceSynchronize();
+        cudaError_t gerr = cudaGetLastError();
+        cudaFree(dL); cudaFree(dH);
+        uint8_t *chk_table=(uint8_t*)malloc(glv_gt_sz);
+        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+        int gt_ok = (gerr==cudaSuccess);
+        if(gt_ok){
+            cudaMemcpy(chk_table,d_glv_gt,glv_gt_sz,cudaMemcpyDeviceToHost);
+            gt_ok = glv18_gt_spot_check(chk_table,GLV18_GT_CHUNKS*4+192,dp.neg_r_inv);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &tb);
+        double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
+        if(gt_ok){
+            printf("  GLV18 GTable built on GPU in %.2fs (%d points, %.0f MiB total, spot check passed)\n",
+                   gt_secs, gt_total, (double)glv_gt_sz/(1024*1024));
+        } else {
+            printf("  GLV18 GTable GPU build rejected (%s); using the host builder\n",
+                   gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+            glv18_compute_gtable(chk_table,dp.neg_r_inv);
+            cudaMemcpy(d_glv_gt,chk_table,glv_gt_sz,cudaMemcpyHostToDevice);
+        }
+        fflush(stdout);
+        free(chk_table);
+    }
+
+#endif
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
     cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
@@ -3087,7 +3235,21 @@ int main(int argc, char **argv) {
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
 #endif
+#if QSB_RUNTIME_GLV
+        QsbGeometryTuning geometry_tuning;
+        unsigned active_geometry=~0u;
+#endif
         while (1) {
+#if QSB_RUNTIME_GLV
+            const unsigned geometry=geometry_tuning.route();
+            if(geometry!=active_geometry){
+                if(cudaMemcpyToSymbol(QSB_GLV_ACTIVE,&geometry,sizeof(geometry))!=cudaSuccess)return 1;
+                active_geometry=geometry;
+            }
+            d_gt=geometry?d_glv_gt:d_regular_gt;
+            struct timespec geometry_start;
+            clock_gettime(CLOCK_MONOTONIC,&geometry_start);
+#endif
             uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
             const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
@@ -3141,7 +3303,9 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+#if QSB_RUNTIME_GLV && QSB_GLV_AFFINE
+            if(geometry){
+            kernel_digest<true><<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -3160,6 +3324,29 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+            } else
+#endif
+            {
+            kernel_digest<false><<<nblk, QSB_SE_BLOCK>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+            }
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
@@ -3251,6 +3438,19 @@ int main(int argc, char **argv) {
             }
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
+#if QSB_RUNTIME_GLV
+            const double geometry_seconds=(t_now.tv_sec-geometry_start.tv_sec)
+                +(t_now.tv_nsec-geometry_start.tv_nsec)/1e9;
+            if(geometry_tuning.observe(geometry_seconds,(uint64_t)epochs_in_batch*QSB_SE_PER_EPOCH)){
+                const unsigned selected=geometry_tuning.route();
+                printf("Subset geometry selected %u; GLV relative time %.6f\n",
+                       selected,geometry_tuning.relative_time);
+                uint8_t *unused=selected?d_regular_gt:d_glv_gt;
+                if(cudaFree(unused)!=cudaSuccess)return 1;
+                if(selected)d_regular_gt=NULL;else d_glv_gt=NULL;
+                d_gt=selected?d_glv_gt:d_regular_gt;
+            }
+#endif
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
                 + (t_now.tv_nsec - t_last_se.tv_nsec) / 1e9;
             if (secs_since >= 15.0) {
@@ -3330,7 +3530,7 @@ int main(int argc, char **argv) {
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
                 qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
 #endif
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -3532,7 +3732,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            kernel_digest<false><<<grdsz, BLKSZ>>>(
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
