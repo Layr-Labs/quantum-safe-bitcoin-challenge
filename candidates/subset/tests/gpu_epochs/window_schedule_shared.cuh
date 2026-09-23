@@ -6,10 +6,22 @@
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
+/* QSB_FIRST_V4 (default on): each first-block state is 32 bytes at a 32-byte
+ * aligned offset of d_first (cudaMalloc base; index (epoch*SLOTS+class)*8
+ * words), so the producer stores it and the paired digest loads it as two
+ * 16-byte vectors instead of eight 4-byte accesses, and the digest reads its
+ * lane's two class indices (first slot < 64, second slot < 64) from one packed
+ * word (first<<16 | second). Same bytes, same values: 0 = parent accesses. */
+#ifndef QSB_FIRST_V4
+#define QSB_FIRST_V4 1
+#endif
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
+#if QSB_FIRST_V4
+__device__ uint32_t QSB_LANE_CLASS[QSB_SE_PER_EPOCH];
+#endif
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
@@ -76,6 +88,13 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
     if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
     if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
+#if QSB_FIRST_V4
+    {   uint32_t packed[QSB_SE_PER_EPOCH];
+        for(int lane=0;lane<QSB_SE_PER_EPOCH;lane++)
+            packed[lane]=(first_classes[lane]<<16)|classes[lane];
+        if(cudaMemcpyToSymbol(QSB_LANE_CLASS,packed,sizeof(packed))!=cudaSuccess)return 1;
+    }
+#endif
     if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
     if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
     if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
@@ -96,15 +115,30 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     if (e >= n_epochs) return;
     const epoch_desc_t *ep = d_epochs + e;
     uint32_t st[8], W[16];
+#if QSB_L2_HINTS
+    /* mid[0..7] at 0..28, remW at 32/36: written by the epoch producer, read here once. */
+    st[0]=qsb_ldcs_u32<0>(ep); st[1]=qsb_ldcs_u32<4>(ep); st[2]=qsb_ldcs_u32<8>(ep); st[3]=qsb_ldcs_u32<12>(ep); st[4]=qsb_ldcs_u32<16>(ep); st[5]=qsb_ldcs_u32<20>(ep); st[6]=qsb_ldcs_u32<24>(ep); st[7]=qsb_ldcs_u32<28>(ep);
+    W[0]=qsb_ldcs_u32<32>(ep); W[1]=qsb_ldcs_u32<36>(ep);
+#else
     #pragma unroll
     for(int j=0;j<8;j++)st[j]=ep->mid[j];
     W[0]=ep->remW[0];W[1]=ep->remW[1];
+#endif
     #pragma unroll
-    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+    for(int j=2;j<16;j++)W[j]=QSB_LDG_RO(&QSB_FIRST_UNIQUE[j-2][c]);
     _SHA256Transform(st,W);
     const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+#if QSB_FIRST_V4 && QSB_L2_HINTS
+    { uint32_t *fo=d_first+base; qsb_stcs_v4<0>(fo,st[0],st[1],st[2],st[3]); qsb_stcs_v4<16>(fo,st[4],st[5],st[6],st[7]); }
+#elif QSB_FIRST_V4
+    { uint4 *fo=reinterpret_cast<uint4*>(d_first+base);
+      fo[0]=make_uint4(st[0],st[1],st[2],st[3]); fo[1]=make_uint4(st[4],st[5],st[6],st[7]); }
+#elif QSB_L2_HINTS
+    { uint32_t *fo=d_first+base; qsb_stcs_u32<0>(fo,st[0]); qsb_stcs_u32<4>(fo,st[1]); qsb_stcs_u32<8>(fo,st[2]); qsb_stcs_u32<12>(fo,st[3]); qsb_stcs_u32<16>(fo,st[4]); qsb_stcs_u32<20>(fo,st[5]); qsb_stcs_u32<24>(fo,st[6]); qsb_stcs_u32<28>(fo,st[7]); }
+#else
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
+#endif
 }
 #if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,
@@ -165,19 +199,64 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 #ifndef QSB_PAIR_SHA_UNROLL_CONST
 #define QSB_PAIR_SHA_UNROLL_CONST 1
 #endif
+/* QSB_WSEC_RO (default on): the paired digest reads its lane's class word and
+ * the 64 second-block schedule words of its class through the read-only data
+ * path (ld.global.nc). Both tables are written only by cudaMemcpyToSymbol in
+ * qsb_prepare_window_schedule, before the first launch, and never by any kernel;
+ * kernel_digest stores through non-restrict hit pointers, so the compiler cannot
+ * prove that on its own and keeps them as ordinary loads ordered behind stores.
+ * Same addresses, same values: exact. 0 = plain loads. */
+#ifndef QSB_WSEC_RO
+#define QSB_WSEC_RO 0
+#endif
+#if QSB_WSEC_RO
+#define QSB_WSEC(r) __ldg(&QSB_WINDOW_SECOND[(r)][slot])
+#else
+#define QSB_WSEC(r) QSB_WINDOW_SECOND[(r)][slot]
+#endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
  * second block and constant suffix) in both epochs.  Load each schedule word
  * once and advance two independent SHA-256 states with it. */
 __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     uint32_t *stateA, uint32_t *stateB, int lane,
     const uint32_t *firstA, const uint32_t *firstB) {
+#if QSB_FIRST_V4
+#if QSB_WSEC_RO
+    const uint32_t lane_rec=__ldg(&QSB_LANE_CLASS[lane]);
+#else
+    const uint32_t lane_rec=QSB_LANE_CLASS[lane];
+#endif
+    const int first_slot=(int)(lane_rec>>16);
+    const int slot=(int)(lane_rec&0xffffu);
+#else
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
+#endif
+#if QSB_FIRST_V4
+    { const uint32_t *fa=firstA+first_slot*8, *fb=firstB+first_slot*8;
+#if QSB_L2_HINTS
+      const uint4 a0v=qsb_ldcs_v4<0>(fa), a1v=qsb_ldcs_v4<16>(fa), b0v=qsb_ldcs_v4<0>(fb), b1v=qsb_ldcs_v4<16>(fb);
+#else
+      const uint4 a0v=reinterpret_cast<const uint4*>(fa)[0], a1v=reinterpret_cast<const uint4*>(fa)[1];
+      const uint4 b0v=reinterpret_cast<const uint4*>(fb)[0], b1v=reinterpret_cast<const uint4*>(fb)[1];
+#endif
+      stateA[0]=a0v.x;stateA[1]=a0v.y;stateA[2]=a0v.z;stateA[3]=a0v.w;
+      stateA[4]=a1v.x;stateA[5]=a1v.y;stateA[6]=a1v.z;stateA[7]=a1v.w;
+      stateB[0]=b0v.x;stateB[1]=b0v.y;stateB[2]=b0v.z;stateB[3]=b0v.w;
+      stateB[4]=b1v.x;stateB[5]=b1v.y;stateB[6]=b1v.z;stateB[7]=b1v.w; }
+#elif QSB_L2_HINTS
+    /* The digest's only read of each first-block state (32 B per lane class per
+     * epoch, 512 MiB per launch): evict-first, [base+imm] like the plain loads. */
+    { const uint32_t *fa=firstA+first_slot*8, *fb=firstB+first_slot*8;
+      stateA[0]=qsb_ldcs_u32<0>(fa); stateA[1]=qsb_ldcs_u32<4>(fa); stateA[2]=qsb_ldcs_u32<8>(fa); stateA[3]=qsb_ldcs_u32<12>(fa); stateA[4]=qsb_ldcs_u32<16>(fa); stateA[5]=qsb_ldcs_u32<20>(fa); stateA[6]=qsb_ldcs_u32<24>(fa); stateA[7]=qsb_ldcs_u32<28>(fa);
+      stateB[0]=qsb_ldcs_u32<0>(fb); stateB[1]=qsb_ldcs_u32<4>(fb); stateB[2]=qsb_ldcs_u32<8>(fb); stateB[3]=qsb_ldcs_u32<12>(fb); stateB[4]=qsb_ldcs_u32<16>(fb); stateB[5]=qsb_ldcs_u32<20>(fb); stateB[6]=qsb_ldcs_u32<24>(fb); stateB[7]=qsb_ldcs_u32<28>(fb); }
+#else
     #pragma unroll
     for(int j=0;j<8;j++){
         stateA[j]=firstA[first_slot*8+j];
         stateB[j]=firstB[first_slot*8+j];
     }
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
@@ -199,14 +278,14 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     #pragma unroll 1
 #endif
     for(int r=0;r<64;r+=8){
-        {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+2][slot];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+3][slot];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+4][slot];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+5][slot];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+6][slot];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+        {const uint32_t w=QSB_WSEC(r);S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+1);S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+2);S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+3);S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+4);S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+5);S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+6);S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+        {const uint32_t w=QSB_WSEC(r+7);S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
     }
     QSB_PAIR_STATE_ADD();
 #if QSB_PAIR_SHA_UNROLL_CONST

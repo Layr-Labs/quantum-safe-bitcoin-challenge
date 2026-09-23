@@ -212,6 +212,10 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
+#if QSB_SHA_FOLD
+    uint32_t s2[8];
+    _SHA256TransformDigest32Q(s2,state);
+#else
     uint32_t b2[16];
     #pragma unroll
     for(int i=0;i<8;i++)b2[i]=state[i];
@@ -222,6 +226,7 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
     _SHA256Transform(s2,b2);
+#endif
     z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
     z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
@@ -334,6 +339,10 @@ __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uin
 #endif
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
 __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
+#if QSB_SHA_FOLD
+    *o0=_SHA256Pubkey33H0(w0);
+    *o1=_SHA256Pubkey33H0(w1);
+#else
     uint32_t t1, t2;
     uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
     uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
@@ -357,6 +366,7 @@ __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *
     QSB_GP_R2(c,d,e,f,g,h,a,b,48,14)
     *o0=I[0]+a0+S1(f0)+Ch(f0,g0,h0)+K[63]+w0[15]+S0(b0)+Maj(b0,c0,d0);
     *o1=I[0]+a1+S1(f1)+Ch(f1,g1,h1)+K[63]+w1[15]+S0(b1)+Maj(b1,c1,d1);
+#endif
 }
 
 __device__ __forceinline__ int qsb_k2s_gate_h0(
@@ -446,15 +456,35 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
     return qsb_k2s_gate(x1,x2,par,&recid)?recid+1:0;
 }
 #if ZLAB_K2S3M
+/* QSB_U2R_BANK (default 0; measured -0.39% on the RTX 4090 A/B): the recovery base R = u2R (QSB_U2R, eight words of
+ * __constant__ memory written once by the host before any launch) is read from
+ * the constant bank inside the noinline front/tail helpers instead of being
+ * copied into sixteen 32-bit registers by kernel_digest and passed through the
+ * call ABI to each of the four calls per thread. Same eight words, same
+ * arithmetic: exact. 0 = the parent's by-value arguments. */
+#ifndef QSB_U2R_BANK
+#define QSB_U2R_BANK 0
+#endif
+#if QSB_U2R_BANK
+#define QSB_U2R_PARAMS
+#define QSB_U2R_ARGS(x,y)
+#define QSB_U2R_LOCALS \
+    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]}, \
+             ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]}
+#else
+#define QSB_U2R_PARAMS ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3, \
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#define QSB_U2R_ARGS(x,y) ,x[0],x[1],x[2],x[3],y[0],y[1],y[2],y[3]
+#define QSB_U2R_LOCALS uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3}
+#endif
 
 struct QsbPairFront3 {uint64_t words[16];int ok;};
 #if ZLAB_DUAL_EPOCH_SHA
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
-    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt
+    QSB_U2R_PARAMS){
     uint64_t z[4]={z0,z1,z2,z3};
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    QSB_U2R_LOCALS;
     uint64_t prod[5],n[12];QsbPairFront3 out;
     out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
     Load256(out.words,prod);
@@ -464,10 +494,9 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
 }
 #endif
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
-    const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt
+    QSB_U2R_PARAMS){
+    QSB_U2R_LOCALS;
     uint64_t prod[5],n[12];QsbPairFront3 out;
     out.ok=qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
     Load256(out.words,prod);
@@ -480,12 +509,11 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
     uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
+    QSB_U2R_PARAMS){
     uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
     uint64_t inv[4]={v0,v1,v2,v3};
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+    QSB_U2R_LOCALS;
     uint64_t q1x[4],q2x[4];int recid=0;
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32

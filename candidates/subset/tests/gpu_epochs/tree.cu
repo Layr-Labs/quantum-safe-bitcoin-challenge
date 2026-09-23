@@ -45,8 +45,106 @@
 #endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
+/* QSB_HOST_PIPE (host-only switch, default off): 1 = two-slot non-blocking
+ * launch pipeline for the ranked short-epoch loop. Batch k runs on slot k&1:
+ * its own non-blocking stream, epoch/first/group buffers and tentative +
+ * verified hit buffers, with the verified-hit readback as an async copy into
+ * pinned host memory and one event per slot. The host waits only on the slot
+ * it is about to reuse, so batch k+1's producer kernels overlap digest k and
+ * batch k's verify kernel + readback overlap digest k+1; the host's formatting
+ * and write() never idle the GPU. Device code is byte-for-byte unchanged (no
+ * device code sees this switch); 0 = the promoted single-stream loop. */
+#ifndef QSB_HOST_PIPE
+#define QSB_HOST_PIPE 1
+#endif
+/* QSB_DRAIN_ALL (host-only, default on; pipeline path): the drain publishes every
+ * verified record the device verifier wrote (its buffer holds 1024) instead of
+ * the first 64. A launch is ~1.3e8 candidates, so at a low zero-bit threshold a
+ * batch holds more than 64 verified hits and the 64 cap silently dropped real,
+ * verified lines while the candidate counter still counted their work. At the
+ * ranked threshold a batch holds far fewer than 64, so the published set there
+ * is unchanged. 0 = the 64-record cap. */
+#ifndef QSB_DRAIN_ALL
+#define QSB_DRAIN_ALL 1
+#endif
+/* QSB_STARTUP_TRIM (host-only switch, default off): exact startup trims --
+ * (a) the GTable spot check copies only its sampled 64-byte records instead of
+ * the whole 64 MiB table into pageable memory, (b) the ladder builder makes
+ * each ladder affine with one batched inversion (EC_POINTs_make_affine)
+ * instead of one inversion per point, (c) no cudaDeviceSetLimit(StackSize):
+ * every kernel's ptxas stack frame is <= 120 B, under the 1 KiB default, and
+ * the driver grows the stack on demand anyway. 0 = promoted startup. */
+#ifndef QSB_STARTUP_TRIM
+#define QSB_STARTUP_TRIM 1
+#endif
+#ifndef QSB_SHA_FOLD
+#define QSB_SHA_FOLD 1
+#endif
+/* QSB_DIRECT_BASE (default on): recode the reduced scalar k itself against a
+ * table built on base A = neg_r_inv*G, instead of 2k mod n against base A/2.
+ * Both are an odd representative M < n with a global sign, peeled by the same
+ * regular recoder, so digit ranges and table geometry are unchanged; entry
+ * (c,d) becomes (2d+1)*2^shift*A = 2 * old entry. Removes the per-candidate
+ * 4-limb doubling, 4-limb conditional subtract and 4 selects from
+ * gt_recode_setup. 0 = promoted A/2 convention byte-for-byte. */
+#ifndef QSB_DIRECT_BASE
+#define QSB_DIRECT_BASE 1
+#endif
+/* QSB_L2_HYGIENE (default off): keep the 64 MiB fixed-base table resident in
+ * L2 while the per-launch producer streams (d_first, d_groups, d_epochs,
+ * d_epoch_group: written once and read once per launch) pass through it.
+ *   1 = both mechanisms, 2 = cache hints only, 3 = access-policy window only.
+ * Hints: st.global.cs / ld.global.cs (evict-first) on every producer-written,
+ * consumer-read-once element of those buffers. The only device-code change is
+ * the cache-operator suffix on those LDG/STG instructions: the table's
+ * ld.global.nc loads, the QSB_WINDOW_* tables and every arithmetic or control
+ * instruction are untouched (the two accesses the compiler already vectorises
+ * are mirrored at the same width). Window: a persisting-L2 access-policy
+ * window over the table on every stream the digest runs on, sized to the
+ * device's persisting-L2 limit; every runtime call is checked and an
+ * unsupported API silently leaves the promoted behaviour in place. */
+#ifndef QSB_L2_HYGIENE
+#define QSB_L2_HYGIENE 1
+#endif
+#define QSB_L2_HINTS  (QSB_L2_HYGIENE == 1 || QSB_L2_HYGIENE == 2)
+#define QSB_L2_WINDOW (QSB_L2_HYGIENE == 1 || QSB_L2_HYGIENE == 3)
+#if QSB_HOST_PIPE && !ZLAB_HITPATH
+#error "QSB_HOST_PIPE=1 needs ZLAB_HITPATH=1"
+#endif
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
+#if QSB_L2_HINTS
+/* Evict-first (streaming) global accesses with an immediate byte offset from a
+ * shared base register: ptxas sees the same [base+imm] addressing as the plain
+ * accesses they replace and emits the same instruction stream with only the
+ * cache-operator suffix changed (the CUDA __ldcs/__stcs intrinsics take a full
+ * pointer per access, which costs a LEA pair per element). Loads are plain asm
+ * so an unused result is removable exactly like the load it replaces; stores
+ * are volatile without a "memory" clobber: nothing in these kernels reads what
+ * they write, and the clobber would strip the compiler's ld.global.nc proof
+ * from the unrelated read-only tables (BINOM_C, QSB_FIRST_UNIQUE) it also reads. */
+template <int OFF> __device__ __forceinline__ uint32_t qsb_ldcs_u32(const void *base) {
+    uint32_t v; asm("ld.global.cs.u32 %0, [%1+%2];" : "=r"(v) : "l"(base), "n"(OFF)); return v; }
+template <int OFF> __device__ __forceinline__ uint8_t qsb_ldcs_u8(const void *base) {
+    uint16_t v; asm("ld.global.cs.u8 %0, [%1+%2];" : "=h"(v) : "l"(base), "n"(OFF)); return (uint8_t)v; }
+template <int OFF> __device__ __forceinline__ uint4 qsb_ldcs_v4(const void *base) {
+    uint4 v; asm("ld.global.cs.v4.u32 {%0,%1,%2,%3}, [%4+%5];"
+                 : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(base), "n"(OFF)); return v; }
+template <int OFF> __device__ __forceinline__ void qsb_stcs_u32(void *base, uint32_t v) {
+    asm volatile("st.global.cs.u32 [%0+%1], %2;" :: "l"(base), "n"(OFF), "r"(v)); }
+template <int OFF> __device__ __forceinline__ void qsb_stcs_u8(void *base, uint8_t v) {
+    uint16_t t = v; asm volatile("st.global.cs.u8 [%0+%1], %2;" :: "l"(base), "n"(OFF), "h"(t)); }
+template <int OFF> __device__ __forceinline__ void qsb_stcs_v2(void *base, uint32_t a, uint32_t b) {
+    asm volatile("st.global.cs.v2.u32 [%0+%1], {%2,%3};" :: "l"(base), "n"(OFF), "r"(a), "r"(b)); }
+template <int OFF> __device__ __forceinline__ void qsb_stcs_v4(void *base, uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+    asm volatile("st.global.cs.v4.u32 [%0+%1], {%2,%3,%4,%5};" :: "l"(base), "n"(OFF), "r"(a), "r"(b), "r"(c), "r"(d)); }
+/* Read-only device tables next to the streaming stores: the promoted build
+ * proves them unwritten and loads them through ld.global.nc; the opaque
+ * streaming stores hide that proof, so say it explicitly (same instruction). */
+#define QSB_LDG_RO(p) __ldg(p)
+#else
+#define QSB_LDG_RO(p) (*(p))
+#endif
 
 #include "../../GPUMath.h"
 
@@ -78,6 +176,16 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #define ASSEMBLY_SIGMA 1  /* funnel-shift sigma macros in GPUHash.h (test) */
 #include "../../GPUHash.h"
+
+#if QSB_SHA_FOLD
+/* Reuse the independently audited literal-K/IV/R63 identities from pinning.
+ * Keep its pipe-balancing experiments disabled: this switch measures deletion
+ * only, on the subset kernel's existing pipe assignment. */
+#define QSB_SHA_FMA_ADD 0
+#define QSB_SHA_FMA_ROT 0
+#define QSB_SHA_ALU_ADD 0
+#include "sha_pinsha.cuh"   /* local copy of pinning/sha_pinsha.cuh @94abdd0 (blob 15550621), byte-identical */
+#endif
 
 __device__ __constant__ uint32_t QSB_CONST_SCHEDULE[4][64];
 __device__ __constant__ uint64_t QSB_U2R[8];
@@ -314,6 +422,11 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
         s=(__uint128_t)k2-n2-kb; k2=(uint64_t)s; kb=(uint64_t)(s>>64)&1;
         s=(__uint128_t)k3-n3-kb; k3=(uint64_t)s;
     }
+#if QSB_DIRECT_BASE
+    /* k < n here; M in {k, n-k} is odd and < n: same range as the 2k path. */
+    uint64_t m0=k0, m1=k1, m2=k2, m3=k3;
+    uint64_t br;
+#else
     uint64_t t0=k0<<1;
     uint64_t t1=(k1<<1)|(k0>>63);
     uint64_t t2=(k2<<1)|(k1>>63);
@@ -326,6 +439,7 @@ __device__ __forceinline__ void gt_recode_setup(const uint64_t k[4], uint64_t M[
     uint64_t ge = tc | (1u - (uint64_t)br);
     uint64_t gm = 0 - ge;
     uint64_t m0=(t0&~gm)|(d0&gm), m1=(t1&~gm)|(d1&gm), m2=(t2&~gm)|(d2&gm), m3=(t3&~gm)|(d3&gm);
+#endif
     uint64_t odd = m0 & 1ULL;
     s=(__uint128_t)n0-m0;    uint64_t p0=(uint64_t)s; br=(s>>64)&1;
     s=(__uint128_t)n1-m1-br; uint64_t p1=(uint64_t)s; br=(s>>64)&1;
@@ -1127,8 +1241,8 @@ __device__ __forceinline__ void unrank_combo(uint64_t rank, int n, int t, uint8_
         while (lo < hi) {
             int mid = (lo + hi) >> 1;
             /* prefix(lo..mid) = C[n-lo][k+1] - C[n-mid-1][k+1] */
-            uint64_t a = BINOM_C[n - lo][k + 1];
-            uint64_t b = BINOM_C[n - mid - 1][k + 1];
+            uint64_t a = QSB_LDG_RO(&BINOM_C[n - lo][k + 1]);
+            uint64_t b = QSB_LDG_RO(&BINOM_C[n - mid - 1][k + 1]);
             uint64_t pref = (a >= b) ? (a - b) : 0;
             if (rank < pref) hi = mid;
             else { rank -= pref; lo = mid + 1; }
@@ -1617,9 +1731,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     {
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt QSB_U2R_ARGS(u2rx,u2ry));
 #else
-        QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt QSB_U2R_ARGS(u2rx,u2ry));
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
         okA=fa.ok && active;
@@ -1648,9 +1762,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt QSB_U2R_ARGS(u2rx,u2ry));
 #else
-    QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+    QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt QSB_U2R_ARGS(u2rx,u2ry));
 #endif
     Load256(prodB,fb.words);prodB[4]=0;
     #pragma unroll
@@ -1670,7 +1784,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
         #pragma unroll
         for(int k=0;k<12;k++)n[k]=parkA[k][tid];
-        int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3] QSB_U2R_ARGS(u2rx,u2ry));
 #else
         uint64_t inv[5],m1[4],m2[4];
         QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
@@ -1695,7 +1809,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         uint64_t inv[5];
         QSB_TREE_MUL(inv,leaf,prodA);    /* 1/WB */
 #if ZLAB_K2S3M
-        int encoded=qsb_pair_tail3_value(nB[0],nB[1],nB[2],nB[3],nB[4],nB[5],nB[6],nB[7],nB[8],nB[9],nB[10],nB[11],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+        int encoded=qsb_pair_tail3_value(nB[0],nB[1],nB[2],nB[3],nB[4],nB[5],nB[6],nB[7],nB[8],nB[9],nB[10],nB[11],inv[0],inv[1],inv[2],inv[3] QSB_U2R_ARGS(u2rx,u2ry));
 #else
         int encoded=qsb_pair_tail_value(m1B[0],m1B[1],m1B[2],m1B[3],m2B[0],m2B[1],m2B[2],m2B[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -2122,25 +2236,67 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
     BN_lebin2bn(neg_r_inv, 32, nri);                     /* neg_r_inv is LE, like d_nri */
+#if QSB_DIRECT_BASE
+    BN_copy(bscal, nri);                                 /* base = A */
+#else
     BN_mod_mul(bscal, inv2, nri, order, ctx);            /* (2^-1 * neg_r_inv) mod n */
+#endif
     EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);     /* base = bscal * G = A/2 */
     memset(hL, 0, (size_t)GT_CHUNKS * GT_LO * 8 * sizeof(uint64_t));
     memset(hH, 0, (size_t)GT_CHUNKS * GT_HI * 8 * sizeof(uint64_t));
+#if QSB_STARTUP_TRIM
+    /* Exact: each ladder is accumulated in Jacobian form and made affine once
+     * (EC_POINTs_make_affine: one inversion + 3 multiplications per point)
+     * instead of inside every gt_point_to_limbs (one inversion per point,
+     * ~12,000 in all). Affine coordinates are unique, so the limbs are the
+     * same bytes; if make_affine ever fails the points stay Jacobian and
+     * gt_point_to_limbs still converts them itself. */
+    EC_POINT *pts[GT_HI];
+    for (int i = 0; i < GT_HI; i++) pts[i] = EC_POINT_new(grp);
+#endif
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, 1ul << (gt_shift(ch) - gt_shift(ch-1))); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
         EC_POINT_copy(acc, base);
+#if QSB_STARTUP_TRIM
+        for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
+            EC_POINT_copy(pts[lo], acc);
+            EC_POINT_add(grp, acc, acc, base, ctx);
+        }
+        EC_POINTs_make_affine(grp, (size_t)(GT_LO - 1), pts + 1, ctx);
+        for (int lo = 1; lo < GT_LO; lo++)
+            gt_point_to_limbs(grp, pts[lo], x, y, ctx,
+                              hL + ((size_t)ch * GT_LO + lo) * 8);
+#else
         for (int lo = 1; lo < GT_LO; lo++) {                 /* L[lo] = lo * B */
             gt_point_to_limbs(grp, acc, x, y, ctx, hL + ((size_t)ch * GT_LO + lo) * 8);
             EC_POINT_add(grp, acc, acc, base, ctx);
         }
+#endif
         BN_set_word(shift, 256);                             /* step = 256 * B */
         EC_POINT_mul(grp, step, NULL, base, shift, ctx);
         EC_POINT_copy(acc, step);
+#if QSB_STARTUP_TRIM
+        {
+            const int n_hi = (int)(gt_entries(ch) >> 7);      /* m=2d+1 < 2*entries; n_hi <= GT_HI */
+            for (int hi = 1; hi < n_hi; hi++) {              /* H[hi] = hi * 256 * B */
+                EC_POINT_copy(pts[hi], acc);
+                EC_POINT_add(grp, acc, acc, step, ctx);
+            }
+            EC_POINTs_make_affine(grp, (size_t)(n_hi - 1), pts + 1, ctx);
+            for (int hi = 1; hi < n_hi; hi++)
+                gt_point_to_limbs(grp, pts[hi], x, y, ctx,
+                                  hH + ((size_t)ch * GT_HI + hi) * 8);
+        }
+#else
         for (int hi = 1; hi < (int)(gt_entries(ch) >> 7); hi++) {   /* m=2d+1 < 2*entries */                 /* H[hi] = hi * 256 * B */
             gt_point_to_limbs(grp, acc, x, y, ctx, hH + ((size_t)ch * GT_HI + hi) * 8);
             EC_POINT_add(grp, acc, acc, step, ctx);
         }
+#endif
     }
+#if QSB_STARTUP_TRIM
+    for (int i = 0; i < GT_HI; i++) EC_POINT_free(pts[i]);
+#endif
     BN_free(x); BN_free(y); BN_free(shift); BN_free(inv2); BN_free(order);
     BN_free(nri); BN_free(bscal);
     EC_POINT_free(base); EC_POINT_free(step); EC_POINT_free(acc);
@@ -2151,8 +2307,27 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
+/* Sample t of the spot check: the corners of each chunk, then pseudo-random
+ * entries from a fixed LCG. Shared by the full-table and the gathered check so
+ * both test exactly the same records. */
+static void gt_spot_sample(int t, unsigned *seed, int *ch_out, int *i_out) {
+    int ch, i;
+    if (t < GT_CHUNKS * 4) {
+        ch = t / 4;
+        const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
+        i = corner[t % 4];
+    } else {
+        *seed = *seed * 1664525u + 1013904223u;
+        ch = (int)(*seed >> 28) % GT_CHUNKS;
+        i  = (int)((*seed >> 4) & (gt_entries(ch) - 1));
+    }
+    *ch_out = ch; *i_out = i;
+}
+/* gathered != NULL: record t is the 64 bytes at gathered + 64*t (QSB_STARTUP_TRIM
+ * copies only the sampled records); otherwise it is read from the full table. */
 static int gt_spot_check(const uint8_t *gTable, int samples,
-                         const uint8_t neg_r_inv[32]) {
+                         const uint8_t neg_r_inv[32],
+                         const uint8_t *gathered) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *inv2 = BN_new(), *order = BN_new(),
@@ -2164,19 +2339,15 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(k, 2); BN_mod_inverse(inv2, k, order, ctx);   /* inv2 = 2^-1 mod n */
     BN_lebin2bn(neg_r_inv, 32, nri);
+#if QSB_DIRECT_BASE
+    BN_copy(half_nri, nri);                                   /* table base scalar = neg_r_inv */
+#else
     BN_mod_mul(half_nri, inv2, nri, order, ctx);              /* (2^-1 * neg_r_inv) mod n = A/2 scalar */
+#endif
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
-        if (t < GT_CHUNKS * 4) {
-            ch = t / 4;
-            const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
-            i = corner[t % 4];
-        } else {
-            seed = seed * 1664525u + 1013904223u;
-            ch = (int)(seed >> 28) % GT_CHUNKS;
-            i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
-        }
+        gt_spot_sample(t, &seed, &ch, &i);
         /* want = (2i+1) * 2^gt_shift(ch) * (A/2). */
         BN_one(k);
         BN_lshift(k, k, gt_shift(ch));
@@ -2184,9 +2355,10 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         BN_mod_mul(k, k, half_nri, order, ctx);
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, ctx, want);
-        size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        if (memcmp(gTable + off,      want,     32) != 0 ||
-            memcmp(gTable + off + 32, want + 4, 32) != 0) {
+        const uint8_t *rec = gathered ? gathered + (size_t)t * 64
+                                      : gTable + ((size_t)gt_offset(ch) + i) * 64;
+        if (memcmp(rec,      want,     32) != 0 ||
+            memcmp(rec + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -2211,7 +2383,11 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
     EC_GROUP_get_order(grp, order, ctx);
     BN_set_word(shift, 2); BN_mod_inverse(inv2, shift, order, ctx);
     BN_lebin2bn(neg_r_inv, 32, nri);
+#if QSB_DIRECT_BASE
+    BN_copy(bscal, nri);
+#else
     BN_mod_mul(bscal, inv2, nri, order, ctx);
+#endif
     EC_POINT_mul(grp, base, bscal, NULL, NULL, ctx);
     for (int ch = 0; ch < GT_CHUNKS; ch++) {
         if (ch > 0) { BN_set_word(shift, 1ul << (gt_shift(ch) - gt_shift(ch-1))); EC_POINT_mul(grp, base, NULL, base, shift, ctx); }
@@ -2394,8 +2570,22 @@ static void build_epoch_prefix(const digest_params_t *dp, int window_start, int 
 static volatile FILE *g_summary_f = NULL;
 static volatile uint64_t g_hit_counter = 0;
 static volatile uint64_t g_total_searched = 0;
+#if QSB_HOST_PIPE
+/* Pipelined loop: the handler only records the signal (async-signal-safe: no
+ * stdio, no fsync). The main thread sees the flag at its next drain/launch
+ * step, drains every batch already launched (wait on its event, write its
+ * hits, count it) exactly as at exhaustion, writes the STATUS line itself and
+ * exits 0. `timeout` sends SIGTERM and waits for the process, so the <= 2
+ * batch-times of draining recover up to two batches of verified hits instead
+ * of dropping them, and nothing runs inside the handler that could deadlock. */
+static volatile sig_atomic_t g_stop_signal = 0;
+#endif
 
 static void on_term_signal(int sig) {
+#if QSB_HOST_PIPE
+    g_stop_signal = sig;
+    return;
+#endif
     if (g_summary_f) {
         time_t now_epoch = time(NULL);
         fprintf((FILE*)g_summary_f,
@@ -2411,6 +2601,57 @@ static void on_term_signal(int sig) {
     raise(sig);
 }
 
+
+#if QSB_L2_WINDOW
+/* Persisting-L2 access-policy window over the table on the given streams
+ * (hitRatio 1.0, hit = persisting, miss = streaming), sized to the device's
+ * persisting-L2 limit and maximum window. Every call is checked; on any
+ * failure the promoted behaviour (no window) is kept and the error state is
+ * cleared so the launch loop's cudaGetLastError checks stay clean. */
+static void qsb_l2_window_apply(cudaStream_t *streams, int n_streams,
+                                const uint8_t *d_gt, size_t gt_sz) {
+    int dev = 0, max_persist = 0, max_window = 0;
+    size_t limit = 0, want = 0;
+    int applied = 0;
+    cudaError_t we = cudaGetDevice(&dev);
+    if (we == cudaSuccess) we = cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, dev);
+    if (we == cudaSuccess) we = cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, dev);
+    if (we == cudaSuccess && max_persist > 0 && max_window > 0) {
+        we = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, (size_t)max_persist);
+        if (we == cudaSuccess) we = cudaDeviceGetLimit(&limit, cudaLimitPersistingL2CacheSize);
+        if (we == cudaSuccess) {
+            want = gt_sz;
+            if (want > limit) want = limit;
+            if (want > (size_t)max_window) want = (size_t)max_window;
+        }
+        if (we == cudaSuccess && want > 0) {
+            cudaStreamAttrValue av;
+            memset(&av, 0, sizeof(av));
+            av.accessPolicyWindow.base_ptr  = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want;
+            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
+            for (int s = 0; s < n_streams && we == cudaSuccess; s++)
+                we = cudaStreamSetAttribute(streams[s], cudaStreamAttributeAccessPolicyWindow, &av);
+            applied = (we == cudaSuccess);
+        }
+    }
+    if (applied) {
+        printf("  L2 hygiene: persisting window over %.1f of %.1f MiB of the table on %d stream%s "
+               "(persisting limit %.1f MiB, max window %.1f MiB)%s\n",
+               (double)want / (1024.0 * 1024.0), (double)gt_sz / (1024.0 * 1024.0),
+               n_streams, n_streams == 1 ? "" : "s",
+               (double)limit / (1024.0 * 1024.0), (double)max_window / (1024.0 * 1024.0),
+               want < gt_sz ? "; the rest of the table is cached normally" : "");
+    } else {
+        printf("  L2 hygiene: access-policy window not applied (%s); table cached normally\n",
+               we == cudaSuccess ? "no persisting L2 on this device" : cudaGetErrorString(we));
+    }
+    (void)cudaGetLastError();   /* leave no error behind for the loop's checks */
+    fflush(stdout);
+}
+#endif
 
 int main(int argc, char **argv) {
     if (argc < 5) {
@@ -2719,13 +2960,39 @@ int main(int argc, char **argv) {
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
+#if QSB_STARTUP_TRIM
+        /* Gathered spot check: only the sampled 64-byte records leave the
+         * device (as one async copy each into pinned memory), not the whole
+         * 64 MiB table into freshly malloc'd pageable memory. The full table
+         * is materialised on the host only if the check fails. */
+        uint8_t *chk_table=NULL;
+        int gt_ok = (gerr==cudaSuccess);
+        if(gt_ok){
+            const int samples=GT_CHUNKS*4+192;
+            uint8_t *h_samp=NULL;
+            const int pinned=(cudaHostAlloc((void**)&h_samp,(size_t)samples*64,cudaHostAllocDefault)==cudaSuccess);
+            if(!pinned){ h_samp=(uint8_t*)malloc((size_t)samples*64); if(!h_samp){ fprintf(stderr,"OOM: gtable check\n"); return 1; } }
+            unsigned seed=0x9e3779b9u;
+            cudaError_t ce=cudaSuccess;
+            for(int t=0;t<samples && ce==cudaSuccess;t++){
+                int ch,i; gt_spot_sample(t,&seed,&ch,&i);
+                const uint8_t *srcp=d_gt+((size_t)gt_offset(ch)+i)*64;
+                ce = pinned ? cudaMemcpyAsync(h_samp+(size_t)t*64,srcp,64,cudaMemcpyDeviceToHost,0)
+                            : cudaMemcpy(h_samp+(size_t)t*64,srcp,64,cudaMemcpyDeviceToHost);
+            }
+            if(ce==cudaSuccess) ce=cudaDeviceSynchronize();
+            gt_ok = (ce==cudaSuccess) && gt_spot_check(NULL,samples,dp.neg_r_inv,h_samp);
+            if(pinned) cudaFreeHost(h_samp); else free(h_samp);
+        }
+#else
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,dp.neg_r_inv);
+            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,dp.neg_r_inv,NULL);
         }
+#endif
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
         if(gt_ok){
@@ -2734,6 +3001,10 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+#if QSB_STARTUP_TRIM
+            chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+#endif
             compute_gtable(chk_table,dp.neg_r_inv);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
@@ -2780,6 +3051,18 @@ int main(int argc, char **argv) {
     #endif
 #endif
     uint32_t *d_first = NULL;
+#if QSB_HOST_PIPE
+    /* Two-slot pipeline: a second copy of every per-batch device buffer (slot 0
+     * is the promoted allocation above; slot 1 is allocated beside it). */
+    epoch_desc_t *d_epochs_s[2] = {NULL, NULL};
+    uint32_t *d_first_s[2] = {NULL, NULL};
+#if QSB_EPOCH_GROUPS
+    qsb_group_t *d_groups_s[2] = {NULL, NULL};
+    #if QSB_EPOCH_GROUPS && QSB_EPOCH_FAST
+    uint32_t *d_epoch_group_s[2] = {NULL, NULL};
+    #endif
+#endif
+#endif
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2834,6 +3117,22 @@ int main(int argc, char **argv) {
 #endif
         cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
         if(first_error!=cudaSuccess){fprintf(stderr,"OOM: first states: %s\n",cudaGetErrorString(first_error));return 1;}
+#if QSB_HOST_PIPE
+        d_epochs_s[0]=d_epochs; d_first_s[0]=d_first;
+        {
+            cudaError_t se=cudaMalloc(&d_epochs_s[1],(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*sizeof(epoch_desc_t));
+            if(se==cudaSuccess) se=cudaMalloc(&d_first_s[1],(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
+#if QSB_EPOCH_GROUPS
+            d_groups_s[0]=d_groups;
+            if(se==cudaSuccess) se=cudaMalloc(&d_groups_s[1],((size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*2+4)*sizeof(qsb_group_t));
+#if QSB_EPOCH_GROUPS && QSB_EPOCH_FAST
+            d_epoch_group_s[0]=d_epoch_group;
+            if(se==cudaSuccess) se=cudaMalloc(&d_epoch_group_s[1],(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*sizeof(uint32_t));
+#endif
+#endif
+            if(se!=cudaSuccess){fprintf(stderr,"OOM: pipeline slot 1: %s\n",cudaGetErrorString(se));return 1;}
+        }
+#endif
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
@@ -2900,7 +3199,9 @@ int main(int argc, char **argv) {
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
+#if !QSB_STARTUP_TRIM
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+#endif
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
@@ -3076,16 +3377,226 @@ int main(int argc, char **argv) {
         cudaMalloc(&d_verified_hitbuf,4+(size_t)1024*ZLAB_HIT_REC);
         if(!d_verified_hitbuf){fprintf(stderr,"OOM: verified hit buffer\n");return 1;}
 
+#if !QSB_HOST_PIPE
         uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
         uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
         uint8_t *zh_combos = d_hitbuf + 8;
+#endif
         mkdir("results", 0755);
         char zh_fname[256];
         if (calibrate) snprintf(zh_fname, sizeof(zh_fname), "results/digest_calibrate_%d.txt", gpu_index);
         else snprintf(zh_fname, sizeof(zh_fname), "results/digest_hit_%d.txt", gpu_index);
         int zh_fd = open(zh_fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (zh_fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", zh_fname); return 1; }
+#if !QSB_HOST_PIPE
         uint8_t zh_host[4 + 64 * ZLAB_HIT_REC];
+#endif
+#endif
+#if ZLAB_HITPATH && QSB_HOST_PIPE
+        /* Two-slot non-blocking launch pipeline (host only: the device runs the
+         * same five kernels with the same arguments for the same batches in the
+         * same order). Batch k lives on slot k&1: its own non-blocking stream,
+         * epoch/first/group buffers, tentative + verified hit buffers and a
+         * pinned host mirror of the verified buffer. Per batch the stream
+         * carries producers -> digest -> verify -> async D2H -> event. The host
+         * waits only on the slot it is about to reuse (batch k-2) before
+         * launching batch k, so one digest is always running while the next
+         * batch's producers and the previous batch's verify + readback run
+         * beside it, and the host's formatting + write() never idle the GPU.
+         *
+         * Invariants: batch k is drained (hits written, total_searched bumped)
+         * exactly once, in batch order, before batch k+2 is launched; the
+         * exhaustion exit drains the two in-flight batches oldest first; a
+         * SIGTERM drops only undrained batches and the summary reports the
+         * drained count, as before. Each slot's tentative count is zeroed by
+         * that slot's producer kernel on that slot's stream, as in the promoted
+         * loop, and its verified count by that slot's verify kernel. */
+#if QSB_DRAIN_ALL
+        enum { HP_MAX_REC = 1024 };                       /* = the verify kernel's own slot cap */
+#else
+        enum { HP_MAX_REC = 64 };
+#endif
+        enum { HP_HOST_BYTES = 4 + HP_MAX_REC * ZLAB_HIT_REC };   /* count + every record the host may consume */
+        cudaStream_t hp_stream[2];
+        cudaEvent_t hp_done[2];
+        uint8_t *d_hitbuf_s[2] = {d_hitbuf, NULL};
+        uint8_t *d_verified_s[2] = {d_verified_hitbuf, NULL};
+        uint8_t *h_verified = NULL;
+        {
+            cudaError_t se = cudaSuccess;
+            for (int s = 0; s < 2 && se == cudaSuccess; s++) {
+                se = cudaStreamCreateWithFlags(&hp_stream[s], cudaStreamNonBlocking);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&hp_done[s], cudaEventDisableTiming);
+            }
+            if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
+            if (se == cudaSuccess) se = cudaMalloc(&d_verified_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
+            if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_verified, 2 * (size_t)HP_HOST_BYTES, cudaHostAllocDefault);
+            if (se != cudaSuccess) { fprintf(stderr, "Host pipeline setup failed: %s\n", cudaGetErrorString(se)); return 1; }
+        }
+        /* Table build and parameter uploads ran on the legacy default stream;
+         * non-blocking streams are not ordered against it. */
+        { cudaError_t se = cudaDeviceSynchronize();
+          if (se == cudaSuccess) se = cudaGetLastError();
+          if (se != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(se)); return 1; } }
+#if QSB_L2_WINDOW
+        qsb_l2_window_apply(hp_stream, 2, d_gt, gt_sz);   /* both slot streams run the digest */
+#endif
+        int hp_busy[2] = {0, 0};
+        int hp_epochs[2] = {0, 0};
+        uint64_t hp_batch_no = 0;    /* index of the next batch to launch; batch k uses slot k&1 */
+        auto hp_drain = [&](int s) -> int {
+            if (!hp_busy[s]) return 0;
+            cudaError_t err = cudaEventSynchronize(hp_done[s]);
+            if (err == cudaSuccess) err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            hp_busy[s] = 0;
+            total_searched += (uint64_t)hp_epochs[s] * QSB_SE_PER_EPOCH;
+            // Publish only completed batches to the termination-time diagnostic.
+            g_total_searched = total_searched;
+            const uint8_t *zh = h_verified + (size_t)s * HP_HOST_BYTES;
+            uint32_t h_hit; memcpy(&h_hit, zh, 4);
+            if (h_hit > 0) {
+                int nh = (h_hit > (uint32_t)HP_MAX_REC) ? HP_MAX_REC : (int)h_hit;
+                /* Complete records only; one write() per batch. */
+                static char wb[HP_MAX_REC * 96];
+                int wl = 0;
+                for (int h = 0; h < nh; h++) {
+                    uint32_t raw; memcpy(&raw, zh + 4 + h * ZLAB_HIT_REC, 4);
+                    const uint8_t *combo = zh + 8 + h * ZLAB_HIT_REC;
+                    /* One line per hit: harness/gpu_wrap.py reads indices= and recid= from the same
+                     * line (its regexes are per line), so the in-window parse is ~2x cheaper. */
+                    wl += snprintf(wb + wl, sizeof(wb) - wl, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
+                                   combo[0], combo[1], combo[2], combo[3], combo[4], combo[5], combo[6], combo[7], combo[8],
+                                   (int)((raw >> 30) & 1));
+                }
+                const char *wp = wb;
+                while (wl > 0) {
+                    ssize_t k = write(zh_fd, wp, (size_t)wl);
+                    if (k < 0) { if (errno == EINTR) continue; fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+                    wp += k; wl -= (int)k;
+                }
+                hit_counter += (uint64_t)nh;
+                g_hit_counter = hit_counter;
+            }
+            return 0;
+        };
+        auto hp_launch = [&](int s, uint64_t base, int epochs_in_batch) -> int {
+            cudaStream_t st = hp_stream[s];
+            epoch_desc_t *d_ep = d_epochs_s[s];
+            uint32_t *d_fi = d_first_s[s];
+            uint8_t *d_hb = d_hitbuf_s[s];
+            uint32_t *cnt = (uint32_t *)d_hb;
+            uint32_t *idx = (uint32_t *)(d_hb + 4);
+            uint8_t *combos = d_hb + 8;
+            const int nblk = (epochs_in_batch + QSB_PAIR_MUL - 1) / QSB_PAIR_MUL;
+            const int batch_pos = nblk * QSB_SE_BLOCK;
+#if QSB_EPOCH_GROUPS
+            {
+                uint8_t h_o[MAX_T];
+                qsb_host_unrank(base, window_start, s_early, h_o);
+                const uint64_t r5a = qsb_host_rank(h_o, s_early - 1, window_start);
+                qsb_host_unrank(base + (uint64_t)epochs_in_batch - 1, window_start, s_early, h_o);
+                const uint64_t r5b = qsb_host_rank(h_o, s_early - 1, window_start);
+                const uint64_t n_groups64 = r5b - r5a + 1;
+                const uint32_t n_groups = (uint32_t)n_groups64;
+                if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
+                    /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
+                    kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256, 0, st>>>(
+                        base, base + epochs_in_batch, window_start, s_early,
+                        d_mid, d_prem, (int)dp.prefix_remainder_len,
+                        d_dsigs, d_ep, cnt);
+                } else {
+                kernel_epoch_groups<<<(n_groups + 255) / 256, 256, 0, st>>>(
+                    r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
+                    d_dsigs, d_groups_s[s]
+#if QSB_EPOCH_FAST
+                    , d_epoch_group_s[s], base, base + (uint64_t)epochs_in_batch
+#endif
+                    );
+                kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256, 0, st>>>(
+                    base, base + epochs_in_batch, window_start, s_early,
+                    d_dsigs, d_groups_s[s], r5a, d_ep, cnt
+#if QSB_EPOCH_FAST
+                    , d_epoch_group_s[s]
+#endif
+                    );
+                }
+            }
+#else
+            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256, 0, st>>>(
+                base, base + epochs_in_batch, window_start, s_early,
+                d_mid, d_prem, (int)dp.prefix_remainder_len,
+                d_dsigs, d_ep, cnt);
+#endif
+            // One producer block for each valid epoch, including an odd tail.
+            { const unsigned nthr = (unsigned)epochs_in_batch * (unsigned)qsb_first_class_count;
+              kernel_build_first_flat<<<(nthr + 255) / 256, 256, 0, st>>>(d_ep, d_fi, (unsigned)epochs_in_batch, (unsigned)qsb_first_class_count); }
+            kernel_digest<<<nblk, QSB_SE_BLOCK, 0, st>>>(
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                cnt, idx,
+                combos, d_hit_sighash,
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_ep, d_fi, epochs_in_batch);
+            kernel_verify_pair_hits<<<1, 64, 0, st>>>(d_hb, d_verified_s[s], d_ep, d_fi, d_gt, epochs_in_batch);
+            cudaError_t err = cudaMemcpyAsync(h_verified + (size_t)s * HP_HOST_BYTES, d_verified_s[s], HP_HOST_BYTES, cudaMemcpyDeviceToHost, st);
+            if (err == cudaSuccess) err = cudaEventRecord(hp_done[s], st);
+            if (err == cudaSuccess) err = cudaGetLastError();
+            if (err != cudaSuccess) { printf("CUDA error: %s (batch %llu enqueue)\n", cudaGetErrorString(err), (unsigned long long)hp_batch_no); return 1; }
+            hp_busy[s] = 1;
+            hp_epochs[s] = epochs_in_batch;
+            return 0;
+        };
+        while (1) {
+            const int s = (int)(hp_batch_no & 1);
+            if (hp_drain(s)) return 1;                       /* batch k-2: the slot about to be reused */
+            if (g_stop_signal || epoch_base >= n_epochs) {
+                /* Exhaustion, or a stop signal seen after the event wait: drain
+                 * the other in-flight batch (k-1) after k-2 and leave the loop. */
+                if (hp_drain(s ^ 1)) return 1;
+                break;
+            }
+            const uint64_t epochs_left = n_epochs - epoch_base;
+            const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
+            const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
+            if (hp_launch(s, epoch_base, epochs_in_batch)) return 1;
+            epoch_base += epochs_in_batch;
+            hp_batch_no++;
+            struct timespec t_now;
+            clock_gettime(CLOCK_MONOTONIC, &t_now);
+            double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
+                + (t_now.tv_nsec - t_last_se.tv_nsec) / 1e9;
+            if (secs_since >= 15.0) {
+                double elapsed_total = (t_now.tv_sec - t0.tv_sec)
+                    + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
+                double rate = total_searched / elapsed_total;
+                printf("  [GPU %d] epoch=%llu/%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
+                       gpu_index,
+                       (unsigned long long)epoch_base, (unsigned long long)n_epochs,
+                       (unsigned long long)(total_searched/1000000),
+                       (unsigned long long)(global_total/1000000),
+                       rate/1e6, elapsed_total);
+                fflush(stdout);
+                if (summary_f) {
+                    time_t now_epoch = time(NULL);
+                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                            (long)now_epoch, (unsigned long long)total_searched,
+                            rate/1e6, elapsed_total, (unsigned long long)hit_counter);
+                    fflush(summary_f);
+                }
+                t_last_se = t_now;
+            }
+        }
+#else
+#if QSB_L2_WINDOW
+        { cudaStream_t legacy = cudaStreamLegacy; qsb_l2_window_apply(&legacy, 1, d_gt, gt_sz); }
 #endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
@@ -3275,8 +3786,35 @@ int main(int argc, char **argv) {
             }
             if (epoch_base >= n_epochs) break;
         }
+#endif /* QSB_HOST_PIPE */
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
+#if QSB_HOST_PIPE
+        if (g_stop_signal) {
+            /* Graceful stop: every launched batch was drained above. Print the
+             * final count in the progress-line format the harness reads, then
+             * the STATUS line the handler used to write. */
+            printf("  [GPU %d] epoch=%llu/%llu (%lluM/%lluM)  %.1fM/s  elapsed=%.0fs\n",
+                   gpu_index, (unsigned long long)epoch_base, (unsigned long long)n_epochs,
+                   (unsigned long long)(total_searched/1000000),
+                   (unsigned long long)(global_total/1000000),
+                   total_searched/elapsed/1e6, elapsed);
+            printf("\n  [GPU %d] Stopped by signal %d after draining every launched batch: %lluM in %.0fs (%.1fM/s)\n",
+                   gpu_index, (int)g_stop_signal, (unsigned long long)(total_searched/1000000), elapsed,
+                   total_searched/elapsed/1e6);
+            fflush(stdout);
+            if (summary_f) {
+                time_t now_epoch = time(NULL);
+                fprintf(summary_f, "STATUS=KILLED %ld signal=%d total_attempts=%llu hits=%llu\n",
+                        (long)now_epoch, (int)g_stop_signal, (unsigned long long)total_searched,
+                        (unsigned long long)hit_counter);
+                fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+                g_summary_f = NULL;
+            }
+            free(h_combos);
+            return 0;
+        }
+#endif
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
                (unsigned long long)(total_searched/1000000), elapsed,
                total_searched/elapsed/1e6);
