@@ -60,6 +60,13 @@
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
+/* Keep independent slots live across sequence boundaries. */
+#ifndef QSB_OVERLAP_SEQUENCES
+#define QSB_OVERLAP_SEQUENCES 1
+#endif
+#if QSB_OVERLAP_SEQUENCES != 0 && QSB_OVERLAP_SEQUENCES != 1
+#error "QSB_OVERLAP_SEQUENCES must be 0 or 1"
+#endif
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -220,6 +227,13 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #endif
 #ifndef QSB_SKIP_UNUSED_MIDSTATE
 #define QSB_SKIP_UNUSED_MIDSTATE 1 /* scored TAIL_PRE path already carries the midstate in qsb_tail_pre */
+#endif
+/* Enqueue replacement GPU work before gating a completed hit snapshot. */
+#ifndef QSB_REFILL_BEFORE_GATE
+#define QSB_REFILL_BEFORE_GATE 1
+#endif
+#if QSB_REFILL_BEFORE_GATE != 0 && QSB_REFILL_BEFORE_GATE != 1
+#error "QSB_REFILL_BEFORE_GATE must be 0 or 1"
 #endif
 #ifndef QSB_COMPACT_READBACK
 #define QSB_COMPACT_READBACK 1 /* one count+64-index D2H instead of two adjacent transfers */
@@ -3377,6 +3391,10 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_REFILL_BEFORE_GATE
+    auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
+                            uint32_t h_hit, const uint32_t *hits) -> int {
+#else
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
         cudaError_t err = cudaEventSynchronize(slot_done[s]);
@@ -3391,6 +3409,7 @@ int main(int argc, char **argv) {
         const uint32_t h_hit = h_hit_cnt[s];
         const uint32_t *hits = h_hit_idx + (size_t)s*64;
 #endif
+#endif
         if (h_hit > 0) {
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
             mkdir("results", 0755);
@@ -3401,7 +3420,11 @@ int main(int argc, char **argv) {
             if (f) {
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
+#if QSB_REFILL_BEFORE_GATE
+                    uint32_t lt = hit_lt + (raw & 0x3FFFFFFF);
+#else
                     uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
+#endif
                     int ri = (raw >> 30) & 1;
                     int hc = (raw >> 31) & 1;
                     /* One line per hit: harness/gpu_wrap.py searches every line for
@@ -3411,12 +3434,22 @@ int main(int argc, char **argv) {
                      * shorten the in-window hit parse. */
                     (void)hc;
 #if QSB_HOST_GATE
+#if QSB_REFILL_BEFORE_GATE
+                    ri = qsb_gate_accept(&pp, hit_seq, lt, ri,
+                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#else
                     ri = qsb_gate_accept(&pp, slot_seq[s], lt, ri,
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#endif
                     if (ri < 0) continue;
 #endif
+#if QSB_REFILL_BEFORE_GATE
+                    fprintf(f, "sequence=%u locktime=%u recid=%d\n",
+                            hit_seq, lt, ri);
+#else
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n",
                             slot_seq[s], lt, ri);
+#endif
                     wrote = 1;
                 }
                 fclose(f);
@@ -3425,6 +3458,34 @@ int main(int argc, char **argv) {
         }
         return 0;
     };
+#if QSB_REFILL_BEFORE_GATE
+    auto collect_slot = [&](int s, uint32_t &count, uint32_t *hits) -> int {
+        count = 0;
+        if (!slot_busy[s]) return 0;
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+        err = cudaGetLastError();
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_COMPACT_READBACK
+        count = slot_readback[s].count();
+        const uint32_t *source = slot_readback[s].indices();
+#else
+        count = h_hit_cnt[s];
+        const uint32_t *source = h_hit_idx + (size_t)s*64;
+#endif
+        if (count > 64) count = 64;
+        /* Copy before reuse: the next D2H is allowed to overwrite the pinned
+         * report while OpenSSL checks this ordinary host-stack snapshot. */
+        if (count) memcpy(hits, source, count*sizeof(uint32_t));
+        slot_busy[s] = 0;
+        return 0;
+    };
+    auto drain_slot = [&](int s) -> int {
+        uint32_t count = 0, hits[64];
+        if (collect_slot(s, count, hits)) return 1;
+        return publish_hits(slot_seq[s], slot_lt[s], count, hits);
+    };
+#endif
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -3458,7 +3519,13 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
+#if QSB_REFILL_BEFORE_GATE
+            const uint32_t completed_seq = slot_seq[s], completed_lt = slot_lt[s];
+            uint32_t completed_count = 0, completed_hits[64];
+            if (collect_slot(s, completed_count, completed_hits)) return 1;
+#else
             if (drain_slot(s)) return 1;
+#endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
@@ -3503,6 +3570,11 @@ int main(int argc, char **argv) {
                 return 1;
             }
             slot_busy[s] = 1;
+#if QSB_REFILL_BEFORE_GATE
+            /* All replacement kernels and readback are queued before the CPU
+             * gate or filesystem work. No worker thread or extra link flag. */
+            if (publish_hits(completed_seq, completed_lt, completed_count, completed_hits)) return 1;
+#endif
 
             total_searched += batch_sz;
 
@@ -3518,10 +3590,16 @@ int main(int argc, char **argv) {
             }
         }
 
+        /* slot_seq/slot_lt remain attached to the old batch until its done
+         * event is synchronized on reuse. cur_tp is passed to the kernel by
+         * value; the optional uploaded midstate is also private to each slot.
+         * Only pin_tail_tab is shared across sequences and needs this drain. */
+#if !QSB_OVERLAP_SEQUENCES || QSB_TAIL_TAB
         /* Every slot's hits are drained before the sequence rolls over, so a
          * hit can never be attributed to the wrong sequence and at most
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#endif
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
