@@ -1,0 +1,70 @@
+--- a/GPUMath.h
++++ b/GPUMath.h
+@@ -1628,43 +1628,30 @@
+         "\tadd.cc.u32 z1, z1, w0; addc.cc.u32 z2, z2, w1; addc.cc.u32 z3, z3, w2;\n"
+         "\taddc.cc.u32 z4, z4, w3; addc.cc.u32 z5, z5, w4; addc.cc.u32 z6, z6, w5;\n"
+         "\taddc.cc.u32 z7, z7, w6; addc.cc.u32 z8, f8, w7;" QSB_SAS_Z9INIT "\n"
+-        "\tmov.b64 {u0,u1}, %8; mov.b64 {u2,u3}, %9;\n"
+-        "\tmov.b64 {u4,u5}, %10; mov.b64 {u6,u7}, %11;\n"
+-        "\tmov.b64 {v0,v1}, %12; mov.b64 {v2,v3}, %13;\n"
+-        "\tmov.b64 {v4,v5}, %14; mov.b64 {v6,v7}, %15;\n"
+-#if QSB_SAS_SPLIT3P
+-        /* 3p = 3*2^256 - 3K: add the 3*2^256 inside the e-chain's z8 limb (free) and subtract
+-         * 3K = 0x3_00000B73 after the two q subtractions (the value never drops below 2^256
+-         * before that). QSB_CARRY62 keeps the borrow through z2 and differs only when low96
+-         * < 3K (< 2^-62); its rollback keeps it through z4 (< 2^-126). */
+-        "\tadd.cc.u32 z0, z0, u0; addc.cc.u32 z1, z1, u1;\n"
+-        "\taddc.cc.u32 z2, z2, u2; addc.cc.u32 z3, z3, u3;\n"
+-        "\taddc.cc.u32 z4, z4, u4; addc.cc.u32 z5, z5, u5;\n"
+-        "\taddc.cc.u32 z6, z6, u6; addc.cc.u32 z7, z7, u7;\n"
+-        "\taddc.cc.u32 z8, z8, 3;" QSB_SAS_Z9ADD_TAIL "\n"
+-#else
+-        "\tadd.cc.u32 z0, z0, 0xfffff48d; addc.cc.u32 z1, z1, 0xfffffffc;\n"
+-        "\taddc.cc.u32 z2, z2, 0xffffffff; addc.cc.u32 z3, z3, 0xffffffff;\n"
+-        "\taddc.cc.u32 z4, z4, 0xffffffff; addc.cc.u32 z5, z5, 0xffffffff;\n"
+-        "\taddc.cc.u32 z6, z6, 0xffffffff; addc.cc.u32 z7, z7, 0xffffffff;\n"
+-        "\taddc.cc.u32 z8, z8, 2; addc.u32 z9, z9, 0;\n"
+-        "\tadd.cc.u32 z0, z0, u0; addc.cc.u32 z1, z1, u1;\n"
+-        "\taddc.cc.u32 z2, z2, u2; addc.cc.u32 z3, z3, u3;\n"
+-        "\taddc.cc.u32 z4, z4, u4; addc.cc.u32 z5, z5, u5;\n"
+-        "\taddc.cc.u32 z6, z6, u6; addc.cc.u32 z7, z7, u7;\n"
+-        "\taddc.cc.u32 z8, z8, 0; addc.u32 z9, z9, 0;\n"
+-#endif
+-
+-        "\tsub.cc.u32 z0, z0, v0; subc.cc.u32 z1, z1, v1;\n"
+-        "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
+-        "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
+-        "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
+-        "\tsubc.cc.u32 z8, z8, 0;" QSB_SAS_SUB_TAIL "\n"
+-        "\tsub.cc.u32 z0, z0, v0; subc.cc.u32 z1, z1, v1;\n"
+-        "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
+-        "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
+-        "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
+-        "\tsubc.cc.u32 z8, z8, 0;" QSB_SAS_SUB_TAIL "\n"
++        "\t.reg .u64 ds0,ds1,ds2,ds3,dv0,dv1,dv2,dv3; .reg .u32 dv8;\n"
++        "\tmov.b64 ds0,{z0,z1};\n"
++        "\tmov.b64 ds1,{z2,z3};\n"
++        "\tmov.b64 ds2,{z4,z5};\n"
++        "\tmov.b64 ds3,{z6,z7};\n"
++        "\tadd.cc.u64 ds0,ds0,%8;\n"
++        "\taddc.cc.u64 ds1,ds1,%9;\n"
++        "\taddc.cc.u64 ds2,ds2,%10;\n"
++        "\taddc.cc.u64 ds3,ds3,%11;\n"
++        "\taddc.cc.u32 z8,z8,3;" QSB_SAS_Z9ADD_TAIL "\n"
++        "\tsub.cc.u64 ds0,ds0,%12;\n"
++        "\tsubc.cc.u64 ds1,ds1,%13;\n"
++        "\tsubc.cc.u64 ds2,ds2,%14;\n"
++        "\tsubc.cc.u64 ds3,ds3,%15;\n"
++        "\tsubc.cc.u32 z8,z8,0;" QSB_SAS_SUB_TAIL "\n"
++        "\tsub.cc.u64 ds0,ds0,%12;\n"
++        "\tsubc.cc.u64 ds1,ds1,%13;\n"
++        "\tsubc.cc.u64 ds2,ds2,%14;\n"
++        "\tsubc.cc.u64 ds3,ds3,%15;\n"
++        "\tsubc.cc.u32 z8,z8,0;" QSB_SAS_SUB_TAIL "\n"
++        "\tmov.b64 {z0,z1},ds0;\n"
++        "\tmov.b64 {z2,z3},ds1;\n"
++        "\tmov.b64 {z4,z5},ds2;\n"
++        "\tmov.b64 {z6,z7},ds3;\n"
+ #if QSB_SAS_SPLIT3P
+ #if QSB_C31 && QSB_SHORT_CARRY
+         "\tsub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;\n"

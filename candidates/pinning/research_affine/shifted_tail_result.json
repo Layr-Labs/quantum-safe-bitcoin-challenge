@@ -1,0 +1,17 @@
+{
+  "header_sha256": "62a1056d981204328a94ebf01696a1065172d7cfd8308b9796efd9615b51400e",
+  "checks": {
+    "table_points": 2368,
+    "signed_loads": 552,
+    "key_pairs": 543,
+    "hashes": 1086,
+    "recoder_cases": 225,
+    "singular_declines": 9,
+    "infinity_declines": 2,
+    "priority_checks": 2172,
+    "builder_chunk_crossings": 1
+  },
+  "mismatches": 0,
+  "GPU_execution": false,
+  "scope": "Actual host table builder, signed loader, denominator and finish C++ bodies; exact field-policy shims; independent affine Python recovery and SHA256."
+}

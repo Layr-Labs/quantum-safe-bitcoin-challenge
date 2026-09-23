@@ -1,0 +1,91 @@
+{
+  "kind": "compile_resource_screen_only",
+  "gpu_executed": false,
+  "compiler": "CUDA 12.8.93",
+  "flags": [
+    "-O3",
+    "-DNDEBUG",
+    "-c",
+    "-Xptxas=-v"
+  ],
+  "probes": [
+    {
+      "callback": "identity",
+      "target": "sm_52",
+      "launch_bounds": [
+        128,
+        4
+      ],
+      "registers": 16,
+      "stack_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0
+    },
+    {
+      "callback": "identity",
+      "target": "sm_89",
+      "launch_bounds": [
+        128,
+        4
+      ],
+      "registers": 18,
+      "stack_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0
+    },
+    {
+      "callback": "ModInv",
+      "target": "sm_89",
+      "launch_bounds": [
+        128,
+        4
+      ],
+      "registers": 118,
+      "stack_bytes": 120,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0
+    },
+    {
+      "callback": "ModInv",
+      "target": "sm_89",
+      "launch_bounds": [
+        128,
+        6
+      ],
+      "registers": 80,
+      "stack_bytes": 192,
+      "caller_spill_store_bytes": 32,
+      "caller_spill_load_bytes": 36,
+      "callee_spill_store_bytes": 80,
+      "callee_spill_load_bytes": 60
+    },
+    {
+      "callback": "Fermat_generic_mul_squares",
+      "target": "sm_89",
+      "launch_bounds": [
+        128,
+        4
+      ],
+      "registers": 80,
+      "stack_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0
+    },
+    {
+      "callback": "Fermat_generic_mul_squares",
+      "target": "sm_89",
+      "launch_bounds": [
+        128,
+        6
+      ],
+      "registers": 76,
+      "stack_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0
+    }
+  ],
+  "limitations": [
+    "Probe includes mailbox and minimal worker only; actual whole-kernel resources must be checked.",
+    "No execution on GPU, throughput comparison, or performance claim."
+  ]
+}

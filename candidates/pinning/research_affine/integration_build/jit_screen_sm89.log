@@ -1,0 +1,53 @@
+ptxas info    : 4099 bytes gmem, 1160 bytes cmem[3], 32 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre' for 'sm_89'
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 64 registers, used 0 barriers, 572 bytes cmem[0]
+ptxas info    : Compile time = 147.107 ms
+ptxas info    : Compiling entry function '_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre' for 'sm_89'
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 122 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]
+ptxas info    : Compile time = 369.506 ms
+ptxas info    : Compiling entry function '_Z17qsb_affine_searchILb1EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit' for 'sm_89'
+ptxas info    : Function properties for _Z17qsb_affine_searchILb1EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 126 registers, used 1 barriers, 120 bytes cumulative stack size, 19968 bytes smem, 496 bytes cmem[0]
+ptxas info    : Compile time = 620.943 ms
+ptxas info    : Function properties for _Z25qsb_affine_search_servicePN19qsb_inverse_service4SlotEjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z17qsb_affine_searchILb0EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit' for 'sm_89'
+ptxas info    : Function properties for _Z17qsb_affine_searchILb0EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 120 bytes cumulative stack size, 19968 bytes smem, 496 bytes cmem[0]
+ptxas info    : Compile time = 632.364 ms
+ptxas info    : Function properties for _Z25qsb_affine_search_servicePN19qsb_inverse_service4SlotEjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z19kernel_build_gtablePKmS0_Ph' for 'sm_89'
+ptxas info    : Function properties for _Z19kernel_build_gtablePKmS0_Ph
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 0 barriers, 120 bytes cumulative stack size, 376 bytes cmem[0]
+ptxas info    : Compile time = 146.303 ms
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z21qsb_root_group_finishPmiPKmS1_' for 'sm_89'
+ptxas info    : Function properties for _Z21qsb_root_group_finishPmiPKmS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 44 registers, used 1 barriers, 24576 bytes smem, 384 bytes cmem[0]
+ptxas info    : Compile time = 19.161 ms
+ptxas info    : Compiling entry function '_Z22qsb_invert_super_rootsPmi' for 'sm_89'
+ptxas info    : Function properties for _Z22qsb_invert_super_rootsPmi
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 114 registers, used 1 barriers, 120 bytes cumulative stack size, 24576 bytes smem, 364 bytes cmem[0]
+ptxas info    : Compile time = 63.033 ms
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z22qsb_root_group_preparePKmiPmS1_' for 'sm_89'
+ptxas info    : Function properties for _Z22qsb_root_group_preparePKmiPmS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 42 registers, used 1 barriers, 16384 bytes smem, 384 bytes cmem[0]
+ptxas info    : Compile time = 9.041 ms

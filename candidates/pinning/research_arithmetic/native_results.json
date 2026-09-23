@@ -1,0 +1,206 @@
+{
+  "baseline": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x11550",
+        "instructions": 1030,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6037,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 124 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "baseline_nobias": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x11590",
+        "instructions": 1034,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6042,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "doubleq": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x11580",
+        "instructions": 1033,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6038,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 124 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "doubleq_nobias": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x11590",
+        "instructions": 1033,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6039,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "fold_pvzq": {
+    "loops": [
+      {
+        "start": "0xd520",
+        "end": "0x11580",
+        "instructions": 1031,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6039,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 118 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "fold_pzvq": {
+    "loops": [
+      {
+        "start": "0xd520",
+        "end": "0x11580",
+        "instructions": 1031,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6039,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 118 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "fold_zpq": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x115d0",
+        "instructions": 1038,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6045,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "fold_zpvq": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x115f0",
+        "instructions": 1040,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6043,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "fold_zqp": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x115d0",
+        "instructions": 1037,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6046,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "fold_zqpv": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x115d0",
+        "instructions": 1037,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6041,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "reordered": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x115b0",
+        "instructions": 1035,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6039,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "sas64": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x11550",
+        "instructions": 1030,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6037,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 124 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "sas64double": {
+    "loops": [
+      {
+        "start": "0xd500",
+        "end": "0x115b0",
+        "instructions": 1036,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6043,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 120 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "subseed": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x11550",
+        "instructions": 1029,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6037,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "subseed_bias": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x115a0",
+        "instructions": 1034,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6041,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "subseed_foldbias": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x11570",
+        "instructions": 1031,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6039,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "subseed_lowbias": {
+    "loops": [
+      {
+        "start": "0xd510",
+        "end": "0x115a0",
+        "instructions": 1034,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6042,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  }
+}

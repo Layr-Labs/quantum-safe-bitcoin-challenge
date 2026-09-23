@@ -1,0 +1,103 @@
+{
+  "kind": "integrated_compile_resources",
+  "compiler": "CUDA 12.8.93",
+  "GPU_execution": false,
+  "driver_JIT_execution": false,
+  "PTX_version": "8.7",
+  "default_virtual_target": "sm_52",
+  "source_sha256": {
+    "pinning.cu": "65c5984e0197fd5ff8cc1709d6d2323d1c7cbe65071301770315b9cdd23ccc06",
+    "affine_search.cuh": "88e1098fe2249d7d76b154fcd46d2191f56710a7d0f1084d8620b7a0029e6386",
+    "affine_driver.cuh": "a788a98ef7f784b707f1dd16a98d85fdab68eacb8d24a354cb88b901a5f767cc",
+    "research_affine/inverse_tree.cuh": "5f752f0b8d392602762dcd8418fcdb2e20407ee5e3ba0f7665591facfff57c7a",
+    "research_affine/inverse_service.cuh": "1c18cbb7174cce1d050eee5d2ef1785f0107276c0112971a9309f1ab069839f1",
+    "research_affine/shifted_tail.cuh": "2a31c85acd5ff732041f1f45177bf433ed516e9395cb20b4a9d2d8692b8c74a0"
+  },
+  "builds": [
+    {
+      "build": "organizer_default_sm52",
+      "log": "research_affine/integration_build/default.log",
+      "log_sha256": "ee12cc9a27f6078851d4ddb8df7d18324c3eb3cd7cb2405feafd9e106cfbea61",
+      "entries": [
+        {
+          "audit": true,
+          "registers": 126,
+          "shared_bytes": 19968,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "barriers": 1
+        },
+        {
+          "audit": false,
+          "registers": 128,
+          "shared_bytes": 19968,
+          "stack_bytes": 144,
+          "spill_store_bytes": 32,
+          "spill_load_bytes": 28,
+          "barriers": 1
+        }
+      ]
+    },
+    {
+      "build": "direct_native_sm89",
+      "log": "research_affine/integration_build/sm89.log",
+      "log_sha256": "e5a6823900e8f3728e5b3db2cd3695f257bc296508b45294880dfedc1d7568e9",
+      "entries": [
+        {
+          "audit": true,
+          "registers": 126,
+          "shared_bytes": 19968,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "barriers": 1
+        },
+        {
+          "audit": false,
+          "registers": 128,
+          "shared_bytes": 19968,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "barriers": 1
+        }
+      ]
+    },
+    {
+      "build": "default_compute52_ptx_assembled_sm89",
+      "log": "research_affine/integration_build/jit_screen_sm89.log",
+      "log_sha256": "408bd594c9c127d2986a8420920ec1aeb8d5d8ad41119e2a33012bc4f5181060",
+      "entries": [
+        {
+          "audit": true,
+          "registers": 126,
+          "shared_bytes": 19968,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "barriers": 1
+        },
+        {
+          "audit": false,
+          "registers": 128,
+          "shared_bytes": 19968,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "barriers": 1
+        }
+      ]
+    }
+  ],
+  "offline_ptx_screen_commands": [
+    "nvcc -O3 -DQSB_ZEROS_N=24 --ptx candidates/pinning/pinning.cu -o jit_screen_compute52.ptx",
+    "ptxas -O3 -arch=sm_89 -v jit_screen_compute52.ptx -o jit_screen_sm89.cubin"
+  ],
+  "limits": [
+    "The compute52-to-sm89 result is offline ptxas compilation, not execution by the remote CUDA driver JIT.",
+    "No local GPU correctness result, occupancy result or performance measurement.",
+    "Runtime cooperative occupancy query remains required; source hashes identify the inspected integration.",
+    "The direct-native build preceded the final host-only CUDA error-check addition; the default and offline PTX screen were rebuilt after it."
+  ]
+}

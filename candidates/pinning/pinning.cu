@@ -1,6 +1,17 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
+#ifndef QSB_AFFINE_SEARCH
+#define QSB_AFFINE_SEARCH 1
+#endif
+#if QSB_AFFINE_SEARCH
+#ifndef QSB_ISO_XR
+#define QSB_ISO_XR 0
+#endif
+#ifndef QSB_YOFF
+#define QSB_YOFF 0
+#endif
+#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -2766,7 +2777,13 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #endif
 
 
+#if QSB_AFFINE_SEARCH
+#include "affine_search.cuh"
+#include "affine_driver.cuh"
+#endif
+
 int main(int argc, char **argv) {
+    struct timespec process_started;clock_gettime(CLOCK_MONOTONIC,&process_started);
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
     uint32_t tail_w0 = 0;   /* W0 of the static tail block with a zero low byte (QSB_TAIL_TAB) */
     if (argc < 2) {
@@ -2793,9 +2810,10 @@ int main(int argc, char **argv) {
     }
 
     /* Use the specified GPU */
-    cudaSetDevice(gpu_index);
-
-    cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
+    cudaError_t init_error=cudaSetDevice(gpu_index);
+    if(init_error!=cudaSuccess){fprintf(stderr,"CUDA initialization failed: %s\n",cudaGetErrorString(init_error));return 1;}
+    cudaDeviceProp prop={};init_error=cudaGetDeviceProperties(&prop,gpu_index);
+    if(init_error!=cudaSuccess){fprintf(stderr,"CUDA device query failed: %s\n",cudaGetErrorString(init_error));return 1;}
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 
@@ -3014,6 +3032,10 @@ int main(int argc, char **argv) {
                         "lt_offset=67, total_preimage_len=9995\n");
         return 1;
     }
+#if QSB_AFFINE_SEARCH
+    return qsb_affine_driver(pp, d_gt, gpu_index, total_gpus_override,
+                             global_offset, seq_start_override, tail_w2, process_started);
+#endif
 #if QSB_SHA_UNIF
     /* QSB_SHA_UNIF derives the tail block's locktime bytes from blockIdx/threadIdx: every
      * launched batch must start at a multiple of 256 and the stage-0 block must be 128 threads.

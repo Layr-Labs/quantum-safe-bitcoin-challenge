@@ -1,0 +1,62 @@
+{
+  "source": "/home/ubuntu/beat/pinning-complement-research/quantum-safe-bitcoin-challenge/candidates/pinning/research_arithmetic/subseed_bias/negative_y_mac.cuh",
+  "sha256": "a8e287c6cd722185b3bc1351e1b543569b47023182847d2b49a29d59bb64fefb",
+  "checks": {
+    "exact_product_cases": 24167,
+    "directed_cases": 12167,
+    "aliases_checked": 720,
+    "directed_field_differences": 4786,
+    "random_cases": 12000,
+    "negative_controls": 1,
+    "random_field_differences": 0
+  },
+  "unexplained_errors": 0,
+  "gpu_execution": false,
+  "examples": [
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0xffffffffffffffff",
+      "losses": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0x10000000000000000",
+      "losses": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0xffffffffffffffffffffffff",
+      "losses": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0x1000000000000000000000000",
+      "losses": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "conclusion": "512-bit biased product exact on corpus; all field differences accounted for by inherited tails or final low64 borrow."
+}

@@ -1,0 +1,22 @@
+--- a/GPUMath.h
++++ b/GPUMath.h
+@@ -2052,7 +2052,8 @@
+   _ModSub256(P, U2, X1);               // P  = U2 - X1
+   _ModSqr(PP, P);                      // PP = P^2
+   _ModMult(PPP, PP, P);                // PPP = P*PP
+-  _ModMult(Q, U2, PP);                 // V  = U2*PP
++  _ModMult(ZZ1, PP);
++  _ModMult(Q, (uint64_t *)X2, ZZ1); // V = X2*ZZnew
+ 
+ #if QSB_FUSE_SQRADDSUB2
+   /* xlib f297b0f9: one reduction for R^2 + PPP - 2V. */
+@@ -2069,8 +2070,7 @@
+ #endif
+ 
+   _ModMult(ZZZ1, PPP);                 // ZZZ3
+-  _ModMult(ZZ1, PP);                   // ZZ3 (after ZZZ3: lets ptxas keep every multiply
+-                                       // on the paired-carry schedule without predicate spills)
++
+ #if QSB_NEG_Y_MAC
+   _ModSub256(Q, T, Q); // negative deferred ordinate
+ #else

@@ -1,0 +1,38 @@
+{
+  "baseline": {
+    "loops": [
+      {
+        "start": "0xd5e0",
+        "end": "0x11630",
+        "instructions": 1030,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6051,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 124 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "subseed": {
+    "loops": [
+      {
+        "start": "0xd5f0",
+        "end": "0x11630",
+        "instructions": 1029,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6051,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 126 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  },
+  "subseed_bias": {
+    "loops": [
+      {
+        "start": "0xd5f0",
+        "end": "0x11680",
+        "instructions": 1034,
+        "wide_mads": 602
+      }
+    ],
+    "total": 6055,
+    "resource": "0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]\nptxas info    :"
+  }
+}

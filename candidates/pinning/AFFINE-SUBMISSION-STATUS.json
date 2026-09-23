@@ -1,0 +1,32 @@
+{
+  "checked_at_utc": "2026-09-23T04:15:40Z",
+  "state": "ready_to_submit",
+  "new_submission_created": false,
+  "track": "pinning",
+  "note_file": "candidates/pinning/SUBMISSION-AFFINE.md",
+  "manifest_file": "candidates/pinning/AFFINE-SOURCE-MANIFEST.json",
+  "validation": "Final-source CPU audits and CUDA builds passed; GPU execution pending",
+  "existing_submission_id": "b67219a6-4dab-4e67-a2c0-04e698006919",
+  "existing_submission_status": "rejected",
+  "existing_submission_cancelled": false,
+  "retry_when": "Existing submission has reached a terminal status",
+  "submission_command": [
+    "rtk",
+    "yukon",
+    "submit",
+    "--track",
+    "pinning",
+    "--note-file",
+    "candidates/pinning/SUBMISSION-AFFINE.md",
+    "--model",
+    "GPT 6 Astra",
+    "--harness",
+    "Codex",
+    "--json"
+  ],
+  "previous_upload_error": {
+    "code": "conflict",
+    "message": "account already has 1 submission(s) in flight for this benchmark (limit 1)"
+  },
+  "existing_submission_score": 797802186
+}

@@ -1,0 +1,52 @@
+--- a/GPUMath.h
++++ b/GPUMath.h
+@@ -1641,7 +1641,7 @@
+         "\taddc.cc.u32 z2, z2, u2; addc.cc.u32 z3, z3, u3;\n"
+         "\taddc.cc.u32 z4, z4, u4; addc.cc.u32 z5, z5, u5;\n"
+         "\taddc.cc.u32 z6, z6, u6; addc.cc.u32 z7, z7, u7;\n"
+-        "\taddc.cc.u32 z8, z8, 3;" QSB_SAS_Z9ADD_TAIL "\n"
++        "\taddc.cc.u32 z8, z8, 0;" QSB_SAS_Z9ADD_TAIL "\n"
+ #else
+         "\tadd.cc.u32 z0, z0, 0xfffff48d; addc.cc.u32 z1, z1, 0xfffffffc;\n"
+         "\taddc.cc.u32 z2, z2, 0xffffffff; addc.cc.u32 z3, z3, 0xffffffff;\n"
+@@ -1655,19 +1655,29 @@
+         "\taddc.cc.u32 z8, z8, 0; addc.u32 z9, z9, 0;\n"
+ #endif
+ 
+-        "\tsub.cc.u32 z0, z0, v0; subc.cc.u32 z1, z1, v1;\n"
+-        "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
+-        "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
+-        "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
+-        "\tsubc.cc.u32 z8, z8, 0;" QSB_SAS_SUB_TAIL "\n"
+-        "\tsub.cc.u32 z0, z0, v0; subc.cc.u32 z1, z1, v1;\n"
+-        "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
+-        "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
+-        "\tsubc.cc.u32 z6, z6, v6; subc.cc.u32 z7, z7, v7;\n"
+-        "\tsubc.cc.u32 z8, z8, 0;" QSB_SAS_SUB_TAIL "\n"
++        "\t.reg .u32 dv0,dv1,dv2,dv3,dv4,dv5,dv6,dv7,dv8;\n"
++        "\tshl.b32 dv0,v0,1;\n"
++        "\tshf.l.wrap.b32 dv1,v0,v1,1;\n"
++        "\tshf.l.wrap.b32 dv2,v1,v2,1;\n"
++        "\tshf.l.wrap.b32 dv3,v2,v3,1;\n"
++        "\tshf.l.wrap.b32 dv4,v3,v4,1;\n"
++        "\tshf.l.wrap.b32 dv5,v4,v5,1;\n"
++        "\tshf.l.wrap.b32 dv6,v5,v6,1;\n"
++        "\tshf.l.wrap.b32 dv7,v6,v7,1;\n"
++        "\tshr.u32 dv8,v7,31;\n"
++        "\tsub.cc.u32 z0,z0,dv0;\n"
++        "\tsubc.cc.u32 z1,z1,dv1;\n"
++        "\tsubc.cc.u32 z2,z2,dv2;\n"
++        "\tsubc.cc.u32 z3,z3,dv3;\n"
++        "\tsubc.cc.u32 z4,z4,dv4;\n"
++        "\tsubc.cc.u32 z5,z5,dv5;\n"
++        "\tsubc.cc.u32 z6,z6,dv6;\n"
++        "\tsubc.cc.u32 z7,z7,dv7;\n"
++        "\tsubc.cc.u32 z8,z8,dv8;\n"
++        QSB_SAS_SUB_TAIL "\n"
+ #if QSB_SAS_SPLIT3P
+ #if QSB_C31 && QSB_SHORT_CARRY
+-        "\tsub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;\n"
++        ""
+ #elif QSB_CARRY62 && QSB_SHORT_CARRY
+         "\tsub.cc.u32 z0, z0, 0xb73; subc.cc.u32 z1, z1, 3; subc.u32 z2, z2, 0;\n"
+ #else

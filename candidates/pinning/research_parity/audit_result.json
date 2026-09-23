@@ -1,0 +1,17 @@
+{
+  "rows": 2161566,
+  "new_fast": 2084944,
+  "fallback": 76622,
+  "additional_fallback": 48297,
+  "max_mid_delta": 12,
+  "max_top_delta": 4,
+  "parity_comparisons": 8646264,
+  "test": "extracted integer PTX semantics: window, device multiplier and sum parity",
+  "cuda_compiled": false,
+  "gpu_executed": false,
+  "speedup": null,
+  "wide_products_original_window": 27,
+  "wide_products_experiment": 9,
+  "high_products_experiment": 9,
+  "total_products_current_and_experiment": 18
+}

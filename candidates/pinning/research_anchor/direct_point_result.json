@@ -1,0 +1,10 @@
+{
+  "source": "/home/ubuntu/beat/pinning-complement-research/quantum-safe-bitcoin-challenge/candidates/pinning/research_arithmetic/subseed_bias/GPUMath.h",
+  "sha256": "ddfdb370fce159ca57eb0fa4e27cec8185427ee67cc9fbf8c0bb4168eb5d4e12",
+  "exact_field_chains": 2032,
+  "checked_point_states": 28521,
+  "singular_exclusions": 16,
+  "mismatches": 0,
+  "gpu_execution": false,
+  "scope": "Actual proposed C++ point and seed bodies with exact field shims; approximate PTX primitive tested separately."
+}

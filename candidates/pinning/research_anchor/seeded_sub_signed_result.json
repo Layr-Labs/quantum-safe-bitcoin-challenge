@@ -1,0 +1,12 @@
+{
+  "source": "research_arithmetic/subseed/negative_y_mac.cuh",
+  "sha256": "d6b6a4f7da40e51b723f3008d743497fbc1c39bb29c4e36dfcb730fcbc4d6410",
+  "rejected": true,
+  "reason": "Signed high seed borrow does not propagate beyond e4.",
+  "a": 0,
+  "b": 0,
+  "c": 1,
+  "integer_product": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "expected_mod_512": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "gpu_execution": false
+}

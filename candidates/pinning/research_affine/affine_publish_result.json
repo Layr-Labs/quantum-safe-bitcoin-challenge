@@ -1,0 +1,16 @@
+{
+  "checks": {
+    "cases": 90,
+    "candidate_slots": 10020,
+    "published_recids": 8088,
+    "exception_slots": 2004,
+    "false_nominations": 1859,
+    "double_hit_candidates": 2040,
+    "exception_only_hits": 391
+  },
+  "mismatches": 0,
+  "gpu_execution": false,
+  "scope": "Actual host mask-drain, both-recid checking and text writer; controlled exact-gate predicate; all partial-word edges and false nominations.",
+  "source_sha256": "a788a98ef7f784b707f1dd16a98d85fdab68eacb8d24a354cb88b901a5f767cc",
+  "extracted_loop_sha256": "26b200d64ccdcf96f8e36fc6fe659c6ebd5af6c9935c8f2a98f637ed5ab7c284"
+}

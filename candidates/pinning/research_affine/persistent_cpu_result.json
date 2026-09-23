@@ -1,0 +1,26 @@
+{
+  "worker_ctas": 2,
+  "worker_threads": 256,
+  "service_lanes": 32,
+  "tiles": 2,
+  "root_roundtrips": 56,
+  "checked_pairs": 512,
+  "checked_affine_arms": 1024,
+  "field_multiplications": 45912,
+  "service_inversions_including_identity_lanes": 1440,
+  "mismatches": 0,
+  "declined": 0,
+  "actual_kernel_body": true,
+  "actual_tree_header": true,
+  "actual_service_header": true,
+  "gpu_execution": false,
+  "source_sha256": {
+    "persistent_affine_probe.cu": "190525749480f84d57a54c39ec54956119cb19c16e03341360f81f75f1f414ad",
+    "inverse_tree.cuh": "5f752f0b8d392602762dcd8418fcdb2e20407ee5e3ba0f7665591facfff57c7a",
+    "inverse_service.cuh": "baef0c69a696db26601ba508aa45673bfcfc51b56d30f6756b81b61872938786",
+    "shifted_tail.cuh": "62a1056d981204328a94ebf01696a1065172d7cfd8308b9796efd9615b51400e",
+    "audit_persistent_cpu.cpp": "1c5f1750ef3b44f551ccece6bb71cd8acc1e1813307a7b78a92d531f63991b36",
+    "audit_persistent_cpu.py": "af85c00a01a0d9a7e9ad1811e3fe6bc53f6230d62dcc85ea23908578cc0069ca"
+  },
+  "extracted_source_sha256": "0549c338e4b829f272a91900400331a19c4e2b956df73d7e692b7f7cd2cfc8ba"
+}

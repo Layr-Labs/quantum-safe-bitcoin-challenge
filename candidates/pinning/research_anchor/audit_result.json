@@ -1,0 +1,7 @@
+{
+  "exact_field_chain_cases": 2037,
+  "checked_point_states": 28577,
+  "singular_exclusions": 11,
+  "mismatches": 0,
+  "scope": "Actual C++ seed and point bodies over exact field operations; not CUDA PTX semantics or device performance."
+}

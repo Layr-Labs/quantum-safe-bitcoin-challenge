@@ -1,0 +1,22 @@
+{
+  "checks": {
+    "sha256d_cases": 2048,
+    "digit_cases": 6155,
+    "recoded_recovery_pairs": 2048,
+    "pubkey_h0_cases": 6666,
+    "both_recids_hit": 7,
+    "recid_1_only_hit": 118,
+    "recid_0_only_hit": 124
+  },
+  "mismatches": 0,
+  "gpu_execution": false,
+  "scope": "Actual SHA, digit extraction and pubkey filter helpers; OpenSSL recovery; independent hashlib and ECDSA recovery; N=4 only in this test.",
+  "source_sha256": {
+    "pinning.cu": "65c5984e0197fd5ff8cc1709d6d2323d1c7cbe65071301770315b9cdd23ccc06",
+    "affine_search.cuh": "88e1098fe2249d7d76b154fcd46d2191f56710a7d0f1084d8620b7a0029e6386",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "extracted_translation_sha256": "bc8afa52105ad9cd324c9df81e17d9882ecf09b4c5efc0ca116ce43cf94356af"
+}

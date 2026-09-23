@@ -1,0 +1,11 @@
+{
+  "ptx_sha256": "e3eb6defbb3f3e696fdb3632830b32aac7622782fef06deaf7efbf0b5d7e4097",
+  "canonical_input_pairs": 34641,
+  "output_alias_checks": 69282,
+  "negations": 34641,
+  "negative_controls": 2,
+  "mismatches": 0,
+  "gpu_execution": false,
+  "contract": "Canonical inputs a,b<p; outputs (a-b) mod p canonically.",
+  "host_oracle_BN_set_word_resets_negative": true
+}

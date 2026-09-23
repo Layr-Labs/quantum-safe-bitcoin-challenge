@@ -1,0 +1,13 @@
+{
+  "blocks": 112,
+  "leaf_inverses": 13440,
+  "multiplications": 39984,
+  "masked_fixture_leaves": 2034,
+  "mismatches": 0,
+  "actual_header": true,
+  "gpu_execution": false,
+  "source_sha256": {
+    "inverse_tree.cuh": "5f752f0b8d392602762dcd8418fcdb2e20407ee5e3ba0f7665591facfff57c7a",
+    "test_inverse_tree.cpp": "c733622cdd4d169d1eacb86bf3200103583121e103b3eaa96956b6258aed83e9"
+  }
+}

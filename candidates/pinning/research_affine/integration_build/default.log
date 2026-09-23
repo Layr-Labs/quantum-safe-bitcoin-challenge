@@ -1,0 +1,236 @@
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+candidates/pinning/sha_pinsha.cuh(366): warning #177-D: variable "one" was declared but never referenced
+          const uint32_t one = pin_one_mul;
+                         ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+candidates/pinning/pinning.cu(3266): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+candidates/pinning/pinning.cu(3330): warning #550-D: variable "hc" was set but never used
+                      int hc = (raw >> 31) & 1;
+                          ^
+
+candidates/pinning/pinning.cu(2788): warning #550-D: variable "tail_w0" was set but never used
+      uint32_t tail_w0 = 0;
+               ^
+
+candidates/pinning/pinning.cu(3154): warning #550-D: variable "BLKSZ" was set but never used
+      int BLKSZ = 256;
+          ^
+
+candidates/pinning/pinning.cu(2166): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, qsb_tail_pre) [with FAST_TAIL=true, STAGE=0]" at line 2259
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, const qsb_tail_pre &, cudaStream_t) [with FAST_TAIL=true]" at line 3393
+
+candidates/pinning/pinning.cu(2166): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, qsb_tail_pre) [with FAST_TAIL=true, STAGE=2]" at line 2307
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, const qsb_tail_pre &, cudaStream_t) [with FAST_TAIL=true]" at line 3393
+
+candidates/pinning/pinning.cu(954): warning #177-D: function "qsb_make_tail_tab" was declared but never referenced
+  static void qsb_make_tail_tab(qsb_tail_tab_t *tab, const qsb_tail_pre &tp, uint32_t tail0) {
+              ^
+
+ptxas info    : 4099 bytes gmem, 1160 bytes cmem[3], 32 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre' for 'sm_52'
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 72 registers, used 0 barriers, 540 bytes cmem[0], 28 bytes cmem[2]
+ptxas info    : Compile time = 259.252 ms
+ptxas info    : Compiling entry function '_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre' for 'sm_52'
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 100 registers, used 1 barriers, 12288 bytes smem, 540 bytes cmem[0], 232 bytes cmem[2]
+ptxas info    : Compile time = 762.971 ms
+ptxas info    : Compiling entry function '_Z17qsb_affine_searchILb1EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit' for 'sm_52'
+ptxas info    : Function properties for _Z17qsb_affine_searchILb1EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 126 registers, used 1 barriers, 120 bytes cumulative stack size, 19968 bytes smem, 464 bytes cmem[0], 240 bytes cmem[2]
+ptxas info    : Compile time = 1203.231 ms
+ptxas info    : Function properties for _Z25qsb_affine_search_servicePN19qsb_inverse_service4SlotEjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z17qsb_affine_searchILb0EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit' for 'sm_52'
+ptxas info    : Function properties for _Z17qsb_affine_searchILb0EEvPKhPK20QsbShiftedTailRecordPN19qsb_inverse_service4SlotEPjS8_jj12qsb_tail_prejjP14QsbAffineAudit
+    144 bytes stack frame, 32 bytes spill stores, 28 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 144 bytes cumulative stack size, 19968 bytes smem, 464 bytes cmem[0], 240 bytes cmem[2]
+ptxas info    : Compile time = 1365.754 ms
+ptxas info    : Function properties for _Z25qsb_affine_search_servicePN19qsb_inverse_service4SlotEjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z19kernel_build_gtablePKmS0_Ph' for 'sm_52'
+ptxas info    : Function properties for _Z19kernel_build_gtablePKmS0_Ph
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 121 registers, used 0 barriers, 120 bytes cumulative stack size, 344 bytes cmem[0]
+ptxas info    : Compile time = 301.063 ms
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z21qsb_root_group_finishPmiPKmS1_' for 'sm_52'
+ptxas info    : Function properties for _Z21qsb_root_group_finishPmiPKmS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 54 registers, used 1 barriers, 24576 bytes smem, 352 bytes cmem[0]
+ptxas info    : Compile time = 43.623 ms
+ptxas info    : Compiling entry function '_Z22qsb_invert_super_rootsPmi' for 'sm_52'
+ptxas info    : Function properties for _Z22qsb_invert_super_rootsPmi
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 115 registers, used 1 barriers, 120 bytes cumulative stack size, 24576 bytes smem, 332 bytes cmem[0]
+ptxas info    : Compile time = 111.978 ms
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z22qsb_root_group_preparePKmiPmS1_' for 'sm_52'
+ptxas info    : Function properties for _Z22qsb_root_group_preparePKmiPmS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 54 registers, used 1 barriers, 16384 bytes smem, 352 bytes cmem[0]
+ptxas info    : Compile time = 16.691 ms
+candidates/pinning/pinning.cu: In function ‘void gt_point_to_limbs(EC_GROUP*, EC_POINT*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*, uint64_t*)’:
+candidates/pinning/pinning.cu:2397:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2397 |     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:678:52: note: declared here
+  678 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/pinning/pinning.cu: In function ‘void gt_batch_ladder(EC_GROUP*, const EC_POINT*, int, uint64_t*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*)’:
+candidates/pinning/pinning.cu:2424:28: warning: ‘int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2424 |     if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+      |       ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:865:52: note: declared here
+  865 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~
+candidates/pinning/pinning.cu: In function ‘void gt_build_ladders(uint64_t*, uint64_t*, const uint8_t*, const uint64_t*, const uint64_t*)’:
+candidates/pinning/pinning.cu:2453:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2453 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+candidates/pinning/pinning.cu: In function ‘int gt_spot_check(const uint8_t*, int, const uint8_t*, const uint64_t*, const uint64_t*)’:
+candidates/pinning/pinning.cu:2494:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2494 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+candidates/pinning/pinning.cu: In function ‘void compute_gtable(uint8_t*, const uint8_t*, const uint64_t*, const uint64_t*)’:
+candidates/pinning/pinning.cu:2547:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2547 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+candidates/pinning/pinning.cu:2559:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2559 |             EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:678:52: note: declared here
+  678 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/pinning/pinning.cu: In function ‘int qsb_host_exact_hit(const pinning2_params_t*, uint32_t, uint32_t, int, EC_GROUP*, BN_CTX*, const BIGNUM*, const BIGNUM*, const EC_POINT*)’:
+candidates/pinning/pinning.cu:2717:12: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2717 |     SHA256_Init(&sc);
+      |     ~~~~~~~^~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+candidates/pinning/pinning.cu:2719:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2719 |     SHA256_Transform(&sc, buf);
+      |     ~~~~~~~~~~~~^~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+candidates/pinning/pinning.cu:2720:34: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2720 |     if (nblk == 2) SHA256_Transform(&sc, buf + 64);
+      |                  ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+candidates/pinning/pinning.cu:2744:53: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2744 |             if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
+      |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:678:52: note: declared here
+  678 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/pinning/research_affine/shifted_tail.cuh: In function ‘bool qsb_build_shifted_tail(QsbShiftedTailRecord*, const uint8_t*, const uint8_t*, const uint8_t*, uint32_t, uint32_t)’:
+candidates/pinning/research_affine/shifted_tail.cuh:130:38: warning: ‘int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+  130 |         if(ok)ok=EC_POINTs_make_affine(g,points.size(),points.data(),ctx)==1;
+      |                 ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:865:52: note: declared here
+  865 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~
+candidates/pinning/affine_driver.cuh: In function ‘qsb_tail_pre qsb_affine_sequence_params(const pinning2_params_t&, uint32_t, uint32_t)’:
+candidates/pinning/affine_driver.cuh:29:28: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+   29 |     SHA256_CTX ctx;SHA256_Init(&ctx);
+      |                 ~~~~~~~~~~~^~~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+candidates/pinning/affine_driver.cuh:31:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+   31 |     SHA256_Transform(&ctx,block);
+      |     ~~~~~~~~~~~~^~~~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+candidates/pinning/affine_driver.cuh: In function ‘bool qsb_affine_reference(const pinning2_params_t&, uint32_t, uint32_t, QsbAffineGate&, QsbAffineAudit&, uint32_t&)’:
+candidates/pinning/affine_driver.cuh:48:27: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+   48 |     SHA256_CTX sc;SHA256_Init(&sc);for(unsigned i=0;i<8;i++)sc.h[i]=pp.midstate[i];
+      |                ~~~~~~~~~~~^~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+candidates/pinning/affine_driver.cuh:49:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+   49 |     SHA256_Transform(&sc,block);SHA256_Transform(&sc,block+64);
+      |     ~~~~~~~~~~~~^~~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+candidates/pinning/affine_driver.cuh:49:47: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+   49 |     SHA256_Transform(&sc,block);SHA256_Transform(&sc,block+64);
+      |                               ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+candidates/pinning/pinning.cu: In function ‘int main(int, char**)’:
+candidates/pinning/pinning.cu:2947:56: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2947 |             if(!field || !bk || !EC_GROUP_get_curve_GFp(grp,field,NULL,NULL,ctx) ||
+      |                                  ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~     
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+candidates/pinning/pinning.cu:2966:36: warning: ‘int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2966 |         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:665:52: note: declared here
+  665 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/pinning/pinning.cu:2971:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2971 |         EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:678:52: note: declared here
+  678 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/pinning/pinning.cu:3281:359: warning: ‘int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3281 |     if (!gate_grp || !gate_ctx || !gate_order || !gate_nri || !gate_rx || !gate_ry || !gate_R ||
+      |                                                                                                                                                                                                                                                                                                                                                                       ^                                             
+/usr/include/openssl/ec.h:665:52: note: declared here
+  665 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/pinning/pinning.cu:3358:12: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3358 |             SHA256_Init(&ctx);
+      |            ^~~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+candidates/pinning/pinning.cu:3360:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3360 |             SHA256_Transform(&ctx,block);
+      |             ~~~~^~~~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          

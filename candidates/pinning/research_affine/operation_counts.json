@@ -1,0 +1,30 @@
+{
+  "batch_candidates": 8388608,
+  "local_lanes": 128,
+  "baseline": {
+    "scalar_M": 95,
+    "scalar_S": 28,
+    "noncollective_recovery_M": 8,
+    "top16_local_tree_M": 399,
+    "all_collectives_M": 26411006,
+    "per_candidate_M": 106.14843726158142,
+    "per_candidate_S": 28,
+    "per_candidate_W": 2,
+    "per_candidate_I": 1.1920928955078125e-07
+  },
+  "affine_target": {
+    "ordinary_add_waves": 13,
+    "paired_tail_waves": 1,
+    "per_candidate_M": 72.671875,
+    "per_candidate_S": 15,
+    "per_candidate_W": 2,
+    "per_candidate_I": 0.109375
+  },
+  "reference_probe_full_products": {
+    "per_candidate_M": 89.671875,
+    "per_candidate_S": 0,
+    "per_candidate_W": 0,
+    "per_candidate_I": 0.109375
+  },
+  "meaning": "Algebraic field-operation ledger. Inversion internals, additions, normalization, memory, synchronization, SHA256 and setup are excluded. No GPU speed result."
+}

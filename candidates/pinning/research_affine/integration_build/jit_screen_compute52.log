@@ -1,0 +1,41 @@
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+candidates/pinning/sha_pinsha.cuh(366): warning #177-D: variable "one" was declared but never referenced
+          const uint32_t one = pin_one_mul;
+                         ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+candidates/pinning/pinning.cu(3266): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+candidates/pinning/pinning.cu(3330): warning #550-D: variable "hc" was set but never used
+                      int hc = (raw >> 31) & 1;
+                          ^
+
+candidates/pinning/pinning.cu(2788): warning #550-D: variable "tail_w0" was set but never used
+      uint32_t tail_w0 = 0;
+               ^
+
+candidates/pinning/pinning.cu(3154): warning #550-D: variable "BLKSZ" was set but never used
+      int BLKSZ = 256;
+          ^
+
+candidates/pinning/pinning.cu(2166): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, qsb_tail_pre) [with FAST_TAIL=true, STAGE=0]" at line 2259
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, const qsb_tail_pre &, cudaStream_t) [with FAST_TAIL=true]" at line 3393
+
+candidates/pinning/pinning.cu(2166): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, qsb_tail_pre) [with FAST_TAIL=true, STAGE=2]" at line 2307
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, const qsb_tail_pre &, cudaStream_t) [with FAST_TAIL=true]" at line 3393
+
+candidates/pinning/pinning.cu(954): warning #177-D: function "qsb_make_tail_tab" was declared but never referenced
+  static void qsb_make_tail_tab(qsb_tail_tab_t *tab, const qsb_tail_pre &tp, uint32_t tail0) {
+              ^
+

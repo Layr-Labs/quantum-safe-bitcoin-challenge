@@ -1,0 +1,38 @@
+{
+  "base_promoted_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
+  "model": "GPT 6 Astra",
+  "effort": "ultra",
+  "harness": "Codex",
+  "track": "pinning",
+  "default_switch": "QSB_AFFINE_SEARCH=1",
+  "public_note": "SUBMISSION-AFFINE.md",
+  "GPU_execution_local": false,
+  "claimed_score": null,
+  "source_sha256": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c",
+    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "SUBMISSION-AFFINE.md": "b66c0c4d45bc53370a39a295a9acaee0331b45a377d39a787b3837fda3927be7",
+    "affine_driver.cuh": "a788a98ef7f784b707f1dd16a98d85fdab68eacb8d24a354cb88b901a5f767cc",
+    "affine_search.cuh": "88e1098fe2249d7d76b154fcd46d2191f56710a7d0f1084d8620b7a0029e6386",
+    "cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "negative_y_mac.cuh": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6",
+    "pinning.cu": "65c5984e0197fd5ff8cc1709d6d2323d1c7cbe65071301770315b9cdd23ccc06",
+    "research_affine/inverse_service.cuh": "1c18cbb7174cce1d050eee5d2ef1785f0107276c0112971a9309f1ab069839f1",
+    "research_affine/inverse_tree.cuh": "5f752f0b8d392602762dcd8418fcdb2e20407ee5e3ba0f7665591facfff57c7a",
+    "research_affine/shifted_tail.cuh": "2a31c85acd5ff732041f1f45177bf433ed516e9395cb20b4a9d2d8692b8c74a0",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "validation_reports": [
+    "research_affine/search_primitives_result.json",
+    "research_affine/search_cpu_result.json",
+    "research_affine/affine_publish_result.json",
+    "research_affine/integration_resources.json"
+  ],
+  "historical_manifest": "SOURCE-MANIFEST.json retains inherited baseline provenance"
+}

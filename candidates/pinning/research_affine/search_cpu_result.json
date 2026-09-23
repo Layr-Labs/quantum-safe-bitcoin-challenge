@@ -1,0 +1,27 @@
+{
+  "active_candidates": 513,
+  "inactive_lane_iterations": 127,
+  "worker_ctas": 2,
+  "service_lanes": 32,
+  "root_roundtrips": 70,
+  "checked_affine_arms": 1026,
+  "ordinary_table_entries": 7146,
+  "shifted_table_entries": 512,
+  "matching_candidates_N4": 63,
+  "matching_recids_N4": 65,
+  "both_hit_candidates_N4": 2,
+  "mismatches": 0,
+  "declined": 0,
+  "actual_search_kernel": true,
+  "gpu_execution": false,
+  "source_sha256": {
+    "pinning.cu": "65c5984e0197fd5ff8cc1709d6d2323d1c7cbe65071301770315b9cdd23ccc06",
+    "affine_search.cuh": "88e1098fe2249d7d76b154fcd46d2191f56710a7d0f1084d8620b7a0029e6386",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "research_affine/inverse_tree.cuh": "5f752f0b8d392602762dcd8418fcdb2e20407ee5e3ba0f7665591facfff57c7a",
+    "research_affine/inverse_service.cuh": "1c18cbb7174cce1d050eee5d2ef1785f0107276c0112971a9309f1ab069839f1",
+    "research_affine/shifted_tail.cuh": "2a31c85acd5ff732041f1f45177bf433ed516e9395cb20b4a9d2d8692b8c74a0"
+  },
+  "extracted_translation_sha256": "d443d795d4c9f4881b079ae3ad161452f8db79e07e7790ef22e0914e4c342f34"
+}

@@ -1,0 +1,54 @@
+{
+  "control": {
+    "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+      "static_instructions": 4048,
+      "backedges": []
+    },
+    "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+      "static_instructions": 6056,
+      "backedges": [
+        {
+          "from": 70992,
+          "to": 54528,
+          "count": 1030
+        },
+        {
+          "from": 77824,
+          "to": 75664,
+          "count": 136
+        },
+        {
+          "from": 88944,
+          "to": 86768,
+          "count": 137
+        }
+      ]
+    }
+  },
+  "anchor": {
+    "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+      "static_instructions": 4048,
+      "backedges": []
+    },
+    "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+      "static_instructions": 6096,
+      "backedges": [
+        {
+          "from": 71696,
+          "to": 54512,
+          "count": 1075
+        },
+        {
+          "from": 78480,
+          "to": 76320,
+          "count": 136
+        },
+        {
+          "from": 89600,
+          "to": 87424,
+          "count": 137
+        }
+      ]
+    }
+  }
+}

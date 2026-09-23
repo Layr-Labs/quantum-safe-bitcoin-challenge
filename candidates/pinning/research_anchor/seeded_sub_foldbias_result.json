@@ -1,0 +1,62 @@
+{
+  "source": "/home/ubuntu/beat/pinning-complement-research/quantum-safe-bitcoin-challenge/candidates/pinning/research_arithmetic/subtract_seed_foldbias.cuh",
+  "sha256": "dafc2caea2677f5962a238719baa9d0c072ca83ec1bcc96878b6223a305b7f20",
+  "checks": {
+    "exact_product_cases": 24167,
+    "directed_cases": 12167,
+    "directed_field_differences": 9950,
+    "aliases_checked": 720,
+    "random_cases": 12000,
+    "negative_controls": 1,
+    "random_field_differences": 0
+  },
+  "unexplained_errors": 0,
+  "gpu_execution": false,
+  "examples": [
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0x0",
+      "losses": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0x1",
+      "losses": [
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0x2",
+      "losses": [
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "a": "0x0",
+      "b": "0x0",
+      "c": "0x3d0",
+      "losses": [
+        0,
+        0,
+        1,
+        1
+      ]
+    }
+  ],
+  "conclusion": "512-bit biased product exact on corpus; all field differences accounted for by inherited tails or first-fold z8 decrement underflow."
+}
