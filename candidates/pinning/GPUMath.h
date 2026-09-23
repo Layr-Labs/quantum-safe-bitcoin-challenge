@@ -662,7 +662,36 @@ __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, cons
 // 2^256 and k the carry, r = t - (K-1) if k = 0 (a+b >= 2c, so no wrap) and r = t + 1 if k = 1
 // (2^256 == K). The correction keeps its borrow/carry through limb 1 (short carry): dropped only
 // if limb0 < K-1 (2^-31) and limb1 == 0 (2^-64), <= 2^-95 per operation.
-#if QSB_K32_OFF
+/* QSB_OFF_LEAN: the offset-anchor sum's correction in four SASS ops instead of nine.
+ * With t = a + b mod 2^256 and kk its carry, the result is t + 1 (kk = 1) or
+ * t - (K-1) (kk = 0).  Written as t + kk + sel, sel = kk ? 0 : 2^64-(K-1) on the low
+ * limb, the "+kk" is the add chain's own carry flag, so the low-limb correction is one
+ * SEL per half plus one carry-in add per half; no mask word is materialised.
+ * The correction stops at limb 0 (C31 class, like _ModSub256 / _ModAddLazy under
+ * QSB_K32_*): limb 1 changes only when kk = 0 and t mod 2^64 < K-1 (a borrow), or
+ * kk = 1 and t mod 2^64 = 2^64-1 (a carry), i.e. < 2^-32 per call for field-random
+ * ordinates (~2^-33 with P(kk=0) ~ 1/2), twelve calls per candidate: ~2^-29.4 per
+ * candidate, host-gated like every C31 drop.  (The older note above that dropping
+ * t1 is a ~1/2 error does not hold: with mk = -1 the limb-1 add is t1 + (2^64-1) + 1
+ * whenever limb 0 carries, which it does unless t0 < K-1.)
+ * 0 restores the K32_OFF short-carry form byte for byte. */
+#ifndef QSB_OFF_LEAN
+#define QSB_OFF_LEAN 1
+#endif
+#if QSB_OFF_LEAN && !(QSB_C31 && QSB_SHORT_CARRY)
+#error "QSB_OFF_LEAN is a C31-class short carry and needs the audited C31 path"
+#endif
+#if QSB_OFF_LEAN
+__device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t r0,r1,r2,r3;
+    /* addc without .cc and setp/selp/mov leave CC.CF alone, so the final addc.cc
+     * adds the carry out of the t3 add. */
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,clo,chi,l0,h0;\n.reg .pred pk;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 kk,0,0; setp.ne.u32 pk,kk,0;\nselp.b32 clo,0,0xFFFFFC30,pk; selp.b32 chi,0,0xFFFFFFFE,pk;\nmov.b64 {l0,h0},t0;\naddc.cc.u32 l0,l0,clo; addc.u32 h0,h0,chi;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#elif QSB_K32_OFF
 __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 kk,0,0; sub.u32 mk,kk,1; and.b32 clo,mk,0xFFFFFC2F; add.u32 clo,clo,1; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\nadd.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"

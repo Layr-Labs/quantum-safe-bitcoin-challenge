@@ -55,6 +55,9 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
  * {hi, lo} = {x >> (32-k), x << k}; the two halves are disjoint, so ROR(x, 32-k) = lo + hi.
  * One IMAD.WIDE.U32 (c-bank multiplier, so ptxas cannot fold it back into shifts) plus one IMAD
  * add replaces one ALU-pipe SHF. Exact for every x and every 1 <= k <= 31. */
+#ifndef QSB_SHA_FMA_EARLY
+#define QSB_SHA_FMA_EARLY 1   /* pubkey rounds 2-15 and first schedule block in the FMA-add form too (e2e 3, timed +0.37% with QSB_SHA_ALU_ADD) */
+#endif
 #ifndef QSB_SHA_FMA_ROT
 #define QSB_SHA_FMA_ROT 0     /* rotations stay on the ALU pipe: IMAD.WIDE measured -0.8..-2.3% */
 #endif
@@ -96,7 +99,7 @@ __device__ __forceinline__ uint32_t qsb_shrf(uint32_t x, int k) {
  * FMA-heavy pipe (IMAD.IADD) spends the scarce pipe there. Adding a constant-bank zero makes them
  * three-input adds, which only IADD3 (ALU pipe) can do - same instruction count, exact. */
 #ifndef QSB_SHA_ALU_ADD
-#define QSB_SHA_ALU_ADD 0     /* stage-0 adds forced onto the ALU pipe (piece G); measured separately */
+#define QSB_SHA_ALU_ADD 1     /* stage-0 SHA-256d adds forced onto the ALU pipe; the pubkey hash keeps its IMAD adds (e2e 3) */
 #endif
 #if QSB_SHA_ALU_ADD
 __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by the host */
@@ -334,6 +337,13 @@ QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
  * W15=0x108, from the IV. Equal to out[0] of _SHA256TransformPubkey33. */
+#if QSB_SHA_ALU_ADD
+/* QSB_SHA_ALU_ADD targets the stage-0 transforms only: the finish kernel is ALU-heavy, so its
+ * pubkey hash keeps IMAD-pipe adds (timed: moving them to IADD3 lost 0.41%). */
+#pragma push_macro("QSB_Z")
+#undef QSB_Z
+#define QSB_Z 0u
+#endif
 __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 {
     uint32_t t1;
@@ -345,6 +355,49 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 #pragma unroll
     for (int i = 0; i < 9; i++) w[i] = m[i];
 
+#if QSB_SHA_FMA_ADD && QSB_SHA_FMA_EARLY
+    /* QSB_SHA_FMA_EARLY: rounds 2-15 and the first schedule block in the same FMA-add form as
+     * rounds 16-63 (exact: only the association of mod-2^32 additions changes). */
+    {
+    const uint32_t one = pin_one_mul;
+    QSB_IV_ROUNDS01(w[0], w[1]);
+    QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
+    QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
+    QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
+    QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
+    QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
+    QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
+    QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(8) + w[8]);
+    QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(15) + 0x108u);
+
+    }
+    {
+        const uint32_t one = pin_one_mul;
+        w[0] = qsb_fadd(w[0], one, QSB_s0M(w[1]));
+        w[1] = qsb_fadd(qsb_fadd(w[1], one, s1(0x108u)), one, QSB_s0M(w[2]));
+        w[2] = qsb_fadd(qsb_fadd(w[2], one, QSB_s1M(w[0])), one, QSB_s0M(w[3]));
+        w[3] = qsb_fadd(qsb_fadd(w[3], one, QSB_s1M(w[1])), one, QSB_s0M(w[4]));
+        w[4] = qsb_fadd(qsb_fadd(w[4], one, QSB_s1M(w[2])), one, QSB_s0M(w[5]));
+        w[5] = qsb_fadd(qsb_fadd(w[5], one, QSB_s1M(w[3])), one, QSB_s0M(w[6]));
+        w[6] = qsb_fadd(qsb_fadd(qsb_fadd(w[6], one, QSB_s1M(w[4])), one, 0x108u), one, QSB_s0M(w[7]));
+        w[7] = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]), one, QSB_s0M(w[8]));
+        w[8] = qsb_fadd(qsb_fadd(w[8], one, QSB_s1M(w[6])), one, w[1]);
+        w[9] = qsb_fadd(QSB_s1M(w[7]), one, w[2]);
+        w[10] = qsb_fadd(QSB_s1M(w[8]), one, w[3]);
+        w[11] = qsb_fadd(QSB_s1M(w[9]), one, w[4]);
+        w[12] = qsb_fadd(QSB_s1M(w[10]), one, w[5]);
+        w[13] = qsb_fadd(QSB_s1M(w[11]), one, w[6]);
+        w[14] = qsb_fadd(qsb_fadd(QSB_s1M(w[12]), one, w[7]), one, s0(0x108u));
+        w[15] = qsb_fadd(qsb_fadd(qsb_fadd(0x108u, one, QSB_s1M(w[13])), one, w[8]), one, QSB_s0M(w[0]));
+    }
+
+#else
     QSB_IV_ROUNDS01(w[0], w[1]);
     QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
     QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
@@ -383,6 +436,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[15] = 0x108u + QSB_s1M(w[13]) + w[8] + QSB_s0M(w[0]);
     }
 
+#endif
 #if QSB_SHA_FMA_ADD
     {
         const uint32_t one = pin_one_mul;
@@ -409,6 +463,9 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     return a + S1(f) + Ch(f,g,h) + w[15] + (qsb_klit(63) + QSB_IV0) + S0(b) + Maj(b,c,d);
 #endif
 }
+#if QSB_SHA_ALU_ADD
+#pragma pop_macro("QSB_Z")
+#endif
 
 /* Ranked gate on digest word 0 (QSB_ZEROS_N <= 32). */
 __device__ __forceinline__ int gpu_bench_valid_h0(uint32_t h0) {
