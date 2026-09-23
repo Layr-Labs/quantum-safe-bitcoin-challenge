@@ -1,0 +1,535 @@
+{
+  "compiler": "CUDA 12.8.93",
+  "target": "compute_52 -> sm_89",
+  "gpu_executed": false,
+  "variants": {
+    "baseline": {
+      "compiled": true,
+      "kernels": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ad9a22839177d559bb67bf67f7dee3edfbcfa213d7966feb2705af2335143aee",
+          "instruction_lines": 4040,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 64
+        },
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ba72ee8d63958506690ebdd972386352528d326886c1c502852700ec7a971277",
+          "instruction_lines": 6680,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 122
+        },
+        "_Z19kernel_build_gtablePKmS0_Ph": {
+          "sass_sha256": "bae2d987fa439668e77076cf301efedd49f1ed393618b850ec01a7d107a96fe8",
+          "instruction_lines": 3104,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 128
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "sass_sha256": "d31e613e90abc030ba84917ae89ede058ec9c3d9bd3f74d1810e909e83123ab0",
+          "instruction_lines": 512,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 44
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "sass_sha256": "90a7e26f96c28668acd7344e288ed5643009d4b96db4a36c8f866fb866eaab58",
+          "instruction_lines": 1904,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 114
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "sass_sha256": "d92488b86a1ab2e220aca8afa664dcfff2ee02531d570a1af761dbb93e8c7290",
+          "instruction_lines": 224,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 42
+        },
+        "_Z18qsb_table_offset_yPh": {
+          "sass_sha256": "bbf01dd64082fd3145bd3eded78ac35013dfca1b8c53271c55c9443281eb4001",
+          "instruction_lines": 40,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 14
+        }
+      },
+      "definitions": [],
+      "source": "base_commit"
+    },
+    "control": {
+      "compiled": true,
+      "kernels": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ad9a22839177d559bb67bf67f7dee3edfbcfa213d7966feb2705af2335143aee",
+          "instruction_lines": 4040,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 64
+        },
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ba72ee8d63958506690ebdd972386352528d326886c1c502852700ec7a971277",
+          "instruction_lines": 6680,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 122
+        },
+        "_Z19kernel_build_gtablePKmS0_Ph": {
+          "sass_sha256": "bae2d987fa439668e77076cf301efedd49f1ed393618b850ec01a7d107a96fe8",
+          "instruction_lines": 3104,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 128
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "sass_sha256": "d31e613e90abc030ba84917ae89ede058ec9c3d9bd3f74d1810e909e83123ab0",
+          "instruction_lines": 512,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 44
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "sass_sha256": "90a7e26f96c28668acd7344e288ed5643009d4b96db4a36c8f866fb866eaab58",
+          "instruction_lines": 1904,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 114
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "sass_sha256": "d92488b86a1ab2e220aca8afa664dcfff2ee02531d570a1af761dbb93e8c7290",
+          "instruction_lines": 224,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 42
+        },
+        "_Z18qsb_table_offset_yPh": {
+          "sass_sha256": "bbf01dd64082fd3145bd3eded78ac35013dfca1b8c53271c55c9443281eb4001",
+          "instruction_lines": 40,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 14
+        }
+      },
+      "baseline_kernel_sass_equal": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": true,
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": true,
+        "_Z19kernel_build_gtablePKmS0_Ph": true,
+        "_Z21qsb_root_group_finishPmiPKmS1_": true,
+        "_Z22qsb_invert_super_rootsPmi": true,
+        "_Z22qsb_root_group_preparePKmiPmS1_": true,
+        "_Z18qsb_table_offset_yPh": true
+      },
+      "definitions": [
+        "QSB_GLV_LEAN=0",
+        "QSB_GLV_HIGH10_HI=0",
+        "QSB_GLV_ROUND_CC=0",
+        "QSB_HOST_GATE_REUSE=0",
+        "QSB_TABLE_SAMPLE_READBACK=0"
+      ],
+      "source": "source_sha256"
+    },
+    "glv": {
+      "compiled": true,
+      "kernels": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ad9a22839177d559bb67bf67f7dee3edfbcfa213d7966feb2705af2335143aee",
+          "instruction_lines": 4040,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 64
+        },
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "fd5e50376af8b37e897fa305590cf9132499973c1e5e78c6c841d1878c7c95d2",
+          "instruction_lines": 6608,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 122
+        },
+        "_Z19kernel_build_gtablePKmS0_Ph": {
+          "sass_sha256": "bae2d987fa439668e77076cf301efedd49f1ed393618b850ec01a7d107a96fe8",
+          "instruction_lines": 3104,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 128
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "sass_sha256": "d31e613e90abc030ba84917ae89ede058ec9c3d9bd3f74d1810e909e83123ab0",
+          "instruction_lines": 512,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 44
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "sass_sha256": "90a7e26f96c28668acd7344e288ed5643009d4b96db4a36c8f866fb866eaab58",
+          "instruction_lines": 1904,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 114
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "sass_sha256": "d92488b86a1ab2e220aca8afa664dcfff2ee02531d570a1af761dbb93e8c7290",
+          "instruction_lines": 224,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 42
+        },
+        "_Z18qsb_table_offset_yPh": {
+          "sass_sha256": "bbf01dd64082fd3145bd3eded78ac35013dfca1b8c53271c55c9443281eb4001",
+          "instruction_lines": 40,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 14
+        }
+      },
+      "baseline_kernel_sass_equal": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": true,
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": false,
+        "_Z19kernel_build_gtablePKmS0_Ph": true,
+        "_Z21qsb_root_group_finishPmiPKmS1_": true,
+        "_Z22qsb_invert_super_rootsPmi": true,
+        "_Z22qsb_root_group_preparePKmiPmS1_": true,
+        "_Z18qsb_table_offset_yPh": true
+      },
+      "definitions": [
+        "QSB_HOST_GATE_REUSE=0",
+        "QSB_TABLE_SAMPLE_READBACK=0"
+      ],
+      "source": "source_sha256"
+    },
+    "own": {
+      "compiled": true,
+      "kernels": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ad9a22839177d559bb67bf67f7dee3edfbcfa213d7966feb2705af2335143aee",
+          "instruction_lines": 4040,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 64
+        },
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ba72ee8d63958506690ebdd972386352528d326886c1c502852700ec7a971277",
+          "instruction_lines": 6680,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 122
+        },
+        "_Z24qsb_gather_table_samplesPKmPKjPmi": {
+          "sass_sha256": "6409feaaa24d9ab8ab73280a6ee1e6e0016ba44c3d09988a9027401bb130b378",
+          "instruction_lines": 32,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 12
+        },
+        "_Z19kernel_build_gtablePKmS0_Ph": {
+          "sass_sha256": "bae2d987fa439668e77076cf301efedd49f1ed393618b850ec01a7d107a96fe8",
+          "instruction_lines": 3104,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 128
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "sass_sha256": "d31e613e90abc030ba84917ae89ede058ec9c3d9bd3f74d1810e909e83123ab0",
+          "instruction_lines": 512,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 44
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "sass_sha256": "90a7e26f96c28668acd7344e288ed5643009d4b96db4a36c8f866fb866eaab58",
+          "instruction_lines": 1904,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 114
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "sass_sha256": "d92488b86a1ab2e220aca8afa664dcfff2ee02531d570a1af761dbb93e8c7290",
+          "instruction_lines": 224,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 42
+        },
+        "_Z18qsb_table_offset_yPh": {
+          "sass_sha256": "bbf01dd64082fd3145bd3eded78ac35013dfca1b8c53271c55c9443281eb4001",
+          "instruction_lines": 40,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 14
+        }
+      },
+      "baseline_kernel_sass_equal": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": true,
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": true,
+        "_Z19kernel_build_gtablePKmS0_Ph": true,
+        "_Z21qsb_root_group_finishPmiPKmS1_": true,
+        "_Z22qsb_invert_super_rootsPmi": true,
+        "_Z22qsb_root_group_preparePKmiPmS1_": true,
+        "_Z18qsb_table_offset_yPh": true
+      },
+      "definitions": [
+        "QSB_GLV_LEAN=0",
+        "QSB_GLV_HIGH10_HI=0",
+        "QSB_GLV_ROUND_CC=0"
+      ],
+      "source": "source_sha256"
+    },
+    "combined": {
+      "compiled": true,
+      "kernels": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ad9a22839177d559bb67bf67f7dee3edfbcfa213d7966feb2705af2335143aee",
+          "instruction_lines": 4040,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 64
+        },
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "fd5e50376af8b37e897fa305590cf9132499973c1e5e78c6c841d1878c7c95d2",
+          "instruction_lines": 6608,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 122
+        },
+        "_Z24qsb_gather_table_samplesPKmPKjPmi": {
+          "sass_sha256": "6409feaaa24d9ab8ab73280a6ee1e6e0016ba44c3d09988a9027401bb130b378",
+          "instruction_lines": 32,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 12
+        },
+        "_Z19kernel_build_gtablePKmS0_Ph": {
+          "sass_sha256": "bae2d987fa439668e77076cf301efedd49f1ed393618b850ec01a7d107a96fe8",
+          "instruction_lines": 3104,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 128
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "sass_sha256": "d31e613e90abc030ba84917ae89ede058ec9c3d9bd3f74d1810e909e83123ab0",
+          "instruction_lines": 512,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 44
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "sass_sha256": "90a7e26f96c28668acd7344e288ed5643009d4b96db4a36c8f866fb866eaab58",
+          "instruction_lines": 1904,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 114
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "sass_sha256": "d92488b86a1ab2e220aca8afa664dcfff2ee02531d570a1af761dbb93e8c7290",
+          "instruction_lines": 224,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 42
+        },
+        "_Z18qsb_table_offset_yPh": {
+          "sass_sha256": "bbf01dd64082fd3145bd3eded78ac35013dfca1b8c53271c55c9443281eb4001",
+          "instruction_lines": 40,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 14
+        }
+      },
+      "baseline_kernel_sass_equal": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": true,
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": false,
+        "_Z19kernel_build_gtablePKmS0_Ph": true,
+        "_Z21qsb_root_group_finishPmiPKmS1_": true,
+        "_Z22qsb_invert_super_rootsPmi": true,
+        "_Z22qsb_root_group_preparePKmiPmS1_": true,
+        "_Z18qsb_table_offset_yPh": true
+      },
+      "definitions": [],
+      "source": "source_sha256"
+    },
+    "glv14": {
+      "compiled": true,
+      "kernels": {
+        "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "ad9a22839177d559bb67bf67f7dee3edfbcfa213d7966feb2705af2335143aee",
+          "instruction_lines": 4040,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 64
+        },
+        "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+          "sass_sha256": "d14a2b60bd1253da02447a6b82daa6a888bbce417dfedee315d23718c6701d54",
+          "instruction_lines": 6624,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 122
+        },
+        "_Z24qsb_gather_table_samplesPKmPKjPmi": {
+          "sass_sha256": "6409feaaa24d9ab8ab73280a6ee1e6e0016ba44c3d09988a9027401bb130b378",
+          "instruction_lines": 32,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 12
+        },
+        "_Z19kernel_build_gtablePKmS0_Ph": {
+          "sass_sha256": "fdb77404c44867d42a7909fffeadfacb992803aedf85e67d7c033718cf9a27c2",
+          "instruction_lines": 3104,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 128
+        },
+        "_Z21qsb_root_group_finishPmiPKmS1_": {
+          "sass_sha256": "d31e613e90abc030ba84917ae89ede058ec9c3d9bd3f74d1810e909e83123ab0",
+          "instruction_lines": 512,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 44
+        },
+        "_Z22qsb_invert_super_rootsPmi": {
+          "sass_sha256": "90a7e26f96c28668acd7344e288ed5643009d4b96db4a36c8f866fb866eaab58",
+          "instruction_lines": 1904,
+          "stack_bytes": 120,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 114
+        },
+        "_Z22qsb_root_group_preparePKmiPmS1_": {
+          "sass_sha256": "d92488b86a1ab2e220aca8afa664dcfff2ee02531d570a1af761dbb93e8c7290",
+          "instruction_lines": 224,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 42
+        },
+        "_Z18qsb_table_offset_yPh": {
+          "sass_sha256": "2dd6400c98d160dfb90d182140c5329cef235978c4a73ceeb2c8c5a71a70c56a",
+          "instruction_lines": 40,
+          "stack_bytes": 0,
+          "spill_store_bytes": 0,
+          "spill_load_bytes": 0,
+          "registers": 14
+        }
+      },
+      "definitions": [
+        "QSB_BIGTBL=0"
+      ],
+      "source": "source_sha256"
+    }
+  },
+  "base_commit": "1fe5a8e40008befcd917668ea9b1a23c6ee590c4",
+  "recorded_date": "2026-09-24",
+  "source_sha256": {
+    "candidates/pinning/GLVScalar.cuh": "5fc55d51352f2d35db5c54b6520f9c4f7bbfa703f8c4ff63af99bb8f32e2e452",
+    "candidates/pinning/GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "candidates/pinning/GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "candidates/pinning/LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "candidates/pinning/PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "candidates/pinning/ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "candidates/pinning/PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "candidates/pinning/RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "candidates/pinning/SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "candidates/pinning/TableSamplePlan.h": "ab25e1977caac859c9385a251d58236f69ad23c4e0442530763808d0c1c99d8c",
+    "candidates/pinning/cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "candidates/pinning/negative_y_mac.cuh": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335",
+    "candidates/pinning/pinning.cu": "1c66bad23808dae7c8511de1bd6138230051fd4685a617cd31b8c1e3f6928600",
+    "candidates/pinning/sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "candidates/pinning/sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "baseline_source_sha256": {
+    "candidates/pinning/GLVScalar.cuh": "822664fb3c4f3ca9805021625303e594a153f73465430ac90af4012f7553dbed",
+    "candidates/pinning/GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "candidates/pinning/GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "candidates/pinning/LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "candidates/pinning/PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "candidates/pinning/ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "candidates/pinning/PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "candidates/pinning/RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "candidates/pinning/SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "candidates/pinning/cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "candidates/pinning/negative_y_mac.cuh": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335",
+    "candidates/pinning/pinning.cu": "2dbd4ee73c05e28654e81904a377a12838f1b11b2c3f8ceda7dd4d121c198f41",
+    "candidates/pinning/sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "candidates/pinning/sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "cubin_command_template": [
+    "nvcc",
+    "-O3",
+    "-DQSB_ZEROS_N=24",
+    "-gencode",
+    "arch=compute_52,code=sm_89",
+    "-Xptxas=-v",
+    "-cubin",
+    "{definitions}",
+    "candidates/pinning/pinning.cu",
+    "-o",
+    "{temporary_output}"
+  ],
+  "ordinary_executable_build": {
+    "compiler": "CUDA 12.8.93",
+    "command_template": [
+      "nvcc",
+      "-O3",
+      "-DQSB_ZEROS_N=24",
+      "-o",
+      "{temporary_output}",
+      "candidates/pinning/pinning.cu",
+      "-lcrypto",
+      "-lm"
+    ],
+    "variants": [
+      "baseline",
+      "combined"
+    ],
+    "compiled": true,
+    "gpu_executed": false,
+    "default_target": "sm_52",
+    "stage0_registers": 97,
+    "stage2_registers": 72
+  },
+  "limits": [
+    "Static compiler evidence only; no CUDA device was available.",
+    "CPU arithmetic shims and OpenSSL checks do not execute GPU PTX or SASS.",
+    "Native sm_89 resource usage is not the default-target or driver-JIT resource usage."
+  ]
+}
