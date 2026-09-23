@@ -1,5 +1,5 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
+#ifndef QSB_RESUB_092316M
+#define QSB_RESUB_092316M 1 /* Money Maker Bot: QSB_BATCH 8M->16M host-amortization attempt */
 #endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
@@ -110,7 +110,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 8388608    /* candidates per pipeline launch */
+#define QSB_BATCH 16777216   /* 16M candidates/launch: amortize host launch/sync/copy */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -3093,7 +3093,7 @@ int main(int argc, char **argv) {
      * launched batch must start at a multiple of 256 and the stage-0 block must be 128 threads.
      * The batch size is checked here; the batch start (LT_MIN) is checked below, where it is
      * defined. Both hold for the ranked geometry (LT_MIN = 500000000 = 256*1953125,
-     * QSB_BATCH = 2^23, QSB_S0_THREADS = 128). */
+     * QSB_BATCH = 2^24, QSB_S0_THREADS = 128). */
     static_assert(QSB_S0_THREADS == 128 && (QSB_BATCH % 256) == 0,
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
