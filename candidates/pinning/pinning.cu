@@ -60,6 +60,13 @@
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
+/* Keep independent slots live across sequence boundaries. */
+#ifndef QSB_OVERLAP_SEQUENCES
+#define QSB_OVERLAP_SEQUENCES 1
+#endif
+#if QSB_OVERLAP_SEQUENCES != 0 && QSB_OVERLAP_SEQUENCES != 1
+#error "QSB_OVERLAP_SEQUENCES must be 0 or 1"
+#endif
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -221,6 +228,13 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #ifndef QSB_SKIP_UNUSED_MIDSTATE
 #define QSB_SKIP_UNUSED_MIDSTATE 1 /* scored TAIL_PRE path already carries the midstate in qsb_tail_pre */
 #endif
+/* Enqueue replacement GPU work before gating a completed hit snapshot. */
+#ifndef QSB_REFILL_BEFORE_GATE
+#define QSB_REFILL_BEFORE_GATE 1
+#endif
+#if QSB_REFILL_BEFORE_GATE != 0 && QSB_REFILL_BEFORE_GATE != 1
+#error "QSB_REFILL_BEFORE_GATE must be 0 or 1"
+#endif
 #ifndef QSB_COMPACT_READBACK
 #define QSB_COMPACT_READBACK 1 /* one count+64-index D2H instead of two adjacent transfers */
 #endif
@@ -333,12 +347,46 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #define GT_TOTAL_ENTRIES 1215139u
 #define GT_LO 256
 #define GT_HI 2048
+/* Place the highest-density segments at the start of the L2 window. */
+#ifndef QSB_GLV_DENSE_FIRST
+#define QSB_GLV_DENSE_FIRST 1
+#endif
+#ifndef QSB_L2_DENSE_WINDOW
+#define QSB_L2_DENSE_WINDOW 1  /* 1: persistence window ends after dense segments 2..6 */
+#endif
+#ifndef QSB_L2_DENSE_RESERVE
+#define QSB_L2_DENSE_RESERVE 1 /* 1: request the same 42.17 MiB device set-aside */
+#endif
+#ifndef QSB_C1_PREFETCH
+#define QSB_C1_PREFETCH 1
+#endif
+#ifndef QSB_C1_PREFETCH_SECOND_SECTOR
+#define QSB_C1_PREFETCH_SECOND_SECTOR 0
+#endif
+#if QSB_C1_PREFETCH != 0 && QSB_C1_PREFETCH != 1
+#error "QSB_C1_PREFETCH must be 0 or 1"
+#endif
+#if QSB_C1_PREFETCH_SECOND_SECTOR != 0 && QSB_C1_PREFETCH_SECOND_SECTOR != 1
+#error "QSB_C1_PREFETCH_SECOND_SECTOR must be 0 or 1"
+#endif
+#if QSB_GLV_DENSE_FIRST != 0 && QSB_GLV_DENSE_FIRST != 1
+#error "QSB_GLV_DENSE_FIRST must be 0 or 1"
+#endif
+#if (QSB_L2_DENSE_WINDOW != 0 && QSB_L2_DENSE_WINDOW != 1) || \
+    (QSB_L2_DENSE_RESERVE != 0 && QSB_L2_DENSE_RESERVE != 1)
+#error "QSB_L2_DENSE_WINDOW and QSB_L2_DENSE_RESERVE must be 0 or 1"
+#endif
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
     return c < 2 ? 262144u : (c < 6 ? 131072u : 166563u);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+#if QSB_GLV_DENSE_FIRST
+    return c==0?690851u:c==1?952995u:c==2?0u:c==3?131072u:
+           c==4?262144u:c==5?393216u:524288u;
+#else
     return c==0?0u:c==1?262144u:c==2?524288u:c==3?655360u:
            c==4?786432u:c==5?917504u:1048576u;
+#endif
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
     return c==0?0:c==1?18:c==2?37:c==3?55:c==4?73:c==5?91:109;
@@ -616,6 +664,12 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #endif
 
 /* Production scalar-entry form for the exact 14-term GLV chain. */
+#ifndef QSB_GLV_SEED_REG
+#define QSB_GLV_SEED_REG 1
+#endif
+#if QSB_GLV_SEED_REG != 0 && QSB_GLV_SEED_REG != 1
+#error "QSB_GLV_SEED_REG must be 0 or 1"
+#endif
 
 // First used as 14 per-lane GLV record-code planes (7 KiB); after the handoff,
 // the same 12 KiB holds the cofactor tree.
@@ -637,7 +691,11 @@ __device__ __forceinline__ uint64_t qsb_glv_extract(const uint64_t m[2],
  * and bit31 as the table-Y negation. */
 template<int SIDE>
 __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsigned sign,
-                                                     volatile uint32_t *codes) {
+                                                     volatile uint32_t *codes
+#if QSB_GLV_SEED_REG
+                                                     ,uint32_t *seed0,uint32_t *seed1
+#endif
+                                                     ) {
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
         const unsigned shift=gt_shift(c);
@@ -658,7 +716,17 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
         }
         const unsigned slot=SIDE?c:GT_CHUNKS+c;
         const uint32_t record=gt_offset(c)+idx;
+#if QSB_GLV_SEED_REG
+        const uint32_t code=record|((neg_digit^sign)<<31);
+        // Only Q's two seed codes bypass shared memory. P7/P8 remain available
+        // for the exact Q-zero path; all later codes keep their old lifetime.
+        if(SIDE==1 && c==0)*seed0=code;
+        else if(SIDE==1 && c==1)*seed1=code;
+        else
+        codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
+#else
         codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=record|((neg_digit^sign)<<31);
+#endif
     }
 }
 
@@ -666,12 +734,24 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
  * the Q planes first. The bounded top digit is centered at333125, not a
  * power-of-two midpoint. Explicit specializations keep component selection
  * out of the generated inner loop. */
-__device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k) {
+__device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
+#if QSB_GLV_SEED_REG
+                                                    ,uint32_t *seed0,uint32_t *seed1
+#endif
+                                                    ) {
     uint64_t mag[2][2]; unsigned sign[2];
     q9_glv_split(k,mag[0],mag[1],&sign[0],&sign[1]);
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    qsb_decode_glv_side<0>(mag[0],sign[0],codes);
-    qsb_decode_glv_side<1>(mag[1],sign[1],codes);
+    qsb_decode_glv_side<0>(mag[0],sign[0],codes
+#if QSB_GLV_SEED_REG
+                             ,seed0,seed1
+#endif
+                             );
+    qsb_decode_glv_side<1>(mag[1],sign[1],codes
+#if QSB_GLV_SEED_REG
+                             ,seed0,seed1
+#endif
+                             );
     unsigned p_nonzero=(mag[0][0]|mag[0][1])!=0;
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
@@ -685,10 +765,28 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
                           ((uint64_t)m32<<32)|m32,x,y);
 }
 
+/* C1 (term 8) lies outside the dense-first persisting L2 window.  Give its
+ * random 64-byte record a head start while term 7's point addition runs. */
+__device__ __forceinline__ void qsb_prefetch_c1(const uint8_t *table) {
+    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[(size_t)(GT_CHUNKS+1)*QSB_TREE_N+threadIdx.x];
+    const uint8_t *p=table+((size_t)(code&0x1fffffu)*64);
+    qsb_prefetch_l2(p);
+#if QSB_C1_PREFETCH_SECOND_SECTOR
+    qsb_prefetch_l2(p+32);
+#endif
+}
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
-    (void)unused; unsigned nonzero=qsb_decode_glv(k);
+    (void)unused;
+#if QSB_GLV_SEED_REG
+    uint32_t seed0,seed1;
+    unsigned nonzero=qsb_decode_glv(k,&seed0,&seed1);
+#else
+    unsigned nonzero=qsb_decode_glv(k);
+#endif
     if(!nonzero) {
         #pragma unroll
         for(int i=0;i<4;i++) X[i]=Y[i]=U[i]=V[i]=0;
@@ -697,11 +795,28 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_CHUNKS;
     int last=GT_GLV_TERMS;
+#if QSB_GLV_SEED_REG
+    if(!(nonzero&1u)) {
+        volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+        seed0=codes[(size_t)GT_CHUNKS*QSB_TREE_N+threadIdx.x];
+        seed1=codes[(size_t)(GT_CHUNKS+1)*QSB_TREE_N+threadIdx.x];
+    }
+    uint32_t m0=(uint32_t)((int32_t)seed0>>31);
+    gt_load_signed_flat_m(table,0u,seed0&0x1fffffu,
+                         ((uint64_t)m0<<32)|m0,x0,y0);
+    uint32_t m1=(uint32_t)((int32_t)seed1>>31);
+    gt_load_signed_flat_m(table,0u,seed1&0x1fffffu,
+                         ((uint64_t)m1<<32)|m1,x1,y1);
+#else
     qsb_load_glv(table,first,x0,y0);
     qsb_load_glv(table,first+1,x1,y1);
+#endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
+#if QSB_C1_PREFETCH && QSB_GLV_DENSE_FIRST
+        if(term==GT_CHUNKS) qsb_prefetch_c1(table);
+#endif
         if(term==GT_CHUNKS) {
             /* phi(X/ZZ,Y/ZZZ)=(beta*X/ZZ,Y/ZZZ).  The isomorphic X scale,
              * Y offset and deferred negative-Y anchor are all unchanged. */
@@ -2390,9 +2505,11 @@ __global__ void kernel_build_gtable(
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
-    int ch=0;
+    int ch=-1;
     #pragma unroll
-    for(int c=1;c<GT_CHUNKS;c++) if(t>=gt_offset(c)) ch=c;
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    if(ch<0) return;
     int d=(int)(t-gt_offset(ch));
     int m  = ch==0?d:2*d+1;
     int hi = m >> 8, lo = m & 255;
@@ -2589,7 +2706,8 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         } else {
             seed = seed * 1664525u + 1013904223u;
             ch = (int)(seed >> 28) % GT_CHUNKS;
-            i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
+            /* The final GLV segment has 166,563 entries, not a power of two. */
+            i  = (int)((seed >> 4) % gt_entries(ch));
         }
         gt_table_scalar(k,ch,(unsigned)i);
         BN_mod_mul(k,k,nri,order,ctx);
@@ -3112,19 +3230,29 @@ int main(int argc, char **argv) {
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
+                      (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
-            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            const size_t dense_bytes = (size_t)gt_offset(0) * 64u;
+            size_t reserve = want;
+            size_t window = want < (size_t)max_window ? want : (size_t)max_window;
+#if QSB_L2_DENSE_RESERVE
+            if (QSB_GLV_DENSE_FIRST && reserve > dense_bytes) reserve = dense_bytes;
+#endif
+#if QSB_L2_DENSE_WINDOW
+            if (QSB_GLV_DENSE_FIRST && window > dense_bytes) window = dense_bytes;
+#endif
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, reserve);
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.num_bytes = window;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
             cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
-            printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
-                   (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+            printf("  L2 persistence: %.2f MiB window, %.2f MiB requested set-aside (max %.0f MiB, max window %.0f MiB) %s\n",
+                   (double)window/(1024*1024), (double)reserve/(1024*1024),
                    (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
                    pe==cudaSuccess?"ok":cudaGetErrorString(pe));
             fflush(stdout);
@@ -3181,12 +3309,18 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        size_t skip = QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u;
+        size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
+                      (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
         if (want > gt_sz - skip) want = gt_sz - skip;
         if (want > 0 && max_window > 0) {
+            const size_t dense_bytes = (size_t)gt_offset(0) * 64u;
+            size_t window = want < (size_t)max_window ? want : (size_t)max_window;
+#if QSB_L2_DENSE_WINDOW
+            if (QSB_GLV_DENSE_FIRST && window > dense_bytes) window = dense_bytes;
+#endif
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
-            av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            av.accessPolicyWindow.num_bytes = window;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
@@ -3377,6 +3511,10 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_REFILL_BEFORE_GATE
+    auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
+                            uint32_t h_hit, const uint32_t *hits) -> int {
+#else
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
         cudaError_t err = cudaEventSynchronize(slot_done[s]);
@@ -3391,6 +3529,7 @@ int main(int argc, char **argv) {
         const uint32_t h_hit = h_hit_cnt[s];
         const uint32_t *hits = h_hit_idx + (size_t)s*64;
 #endif
+#endif
         if (h_hit > 0) {
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
             mkdir("results", 0755);
@@ -3401,7 +3540,11 @@ int main(int argc, char **argv) {
             if (f) {
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
+#if QSB_REFILL_BEFORE_GATE
+                    uint32_t lt = hit_lt + (raw & 0x3FFFFFFF);
+#else
                     uint32_t lt = slot_lt[s] + (raw & 0x3FFFFFFF);
+#endif
                     int ri = (raw >> 30) & 1;
                     int hc = (raw >> 31) & 1;
                     /* One line per hit: harness/gpu_wrap.py searches every line for
@@ -3411,12 +3554,22 @@ int main(int argc, char **argv) {
                      * shorten the in-window hit parse. */
                     (void)hc;
 #if QSB_HOST_GATE
+#if QSB_REFILL_BEFORE_GATE
+                    ri = qsb_gate_accept(&pp, hit_seq, lt, ri,
+                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#else
                     ri = qsb_gate_accept(&pp, slot_seq[s], lt, ri,
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#endif
                     if (ri < 0) continue;
 #endif
+#if QSB_REFILL_BEFORE_GATE
+                    fprintf(f, "sequence=%u locktime=%u recid=%d\n",
+                            hit_seq, lt, ri);
+#else
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n",
                             slot_seq[s], lt, ri);
+#endif
                     wrote = 1;
                 }
                 fclose(f);
@@ -3425,6 +3578,34 @@ int main(int argc, char **argv) {
         }
         return 0;
     };
+#if QSB_REFILL_BEFORE_GATE
+    auto collect_slot = [&](int s, uint32_t &count, uint32_t *hits) -> int {
+        count = 0;
+        if (!slot_busy[s]) return 0;
+        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+        err = cudaGetLastError();
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_COMPACT_READBACK
+        count = slot_readback[s].count();
+        const uint32_t *source = slot_readback[s].indices();
+#else
+        count = h_hit_cnt[s];
+        const uint32_t *source = h_hit_idx + (size_t)s*64;
+#endif
+        if (count > 64) count = 64;
+        /* Copy before reuse: the next D2H is allowed to overwrite the pinned
+         * report while OpenSSL checks this ordinary host-stack snapshot. */
+        if (count) memcpy(hits, source, count*sizeof(uint32_t));
+        slot_busy[s] = 0;
+        return 0;
+    };
+    auto drain_slot = [&](int s) -> int {
+        uint32_t count = 0, hits[64];
+        if (collect_slot(s, count, hits)) return 1;
+        return publish_hits(slot_seq[s], slot_lt[s], count, hits);
+    };
+#endif
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -3458,7 +3639,13 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
+#if QSB_REFILL_BEFORE_GATE
+            const uint32_t completed_seq = slot_seq[s], completed_lt = slot_lt[s];
+            uint32_t completed_count = 0, completed_hits[64];
+            if (collect_slot(s, completed_count, completed_hits)) return 1;
+#else
             if (drain_slot(s)) return 1;
+#endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
 
@@ -3503,6 +3690,11 @@ int main(int argc, char **argv) {
                 return 1;
             }
             slot_busy[s] = 1;
+#if QSB_REFILL_BEFORE_GATE
+            /* All replacement kernels and readback are queued before the CPU
+             * gate or filesystem work. No worker thread or extra link flag. */
+            if (publish_hits(completed_seq, completed_lt, completed_count, completed_hits)) return 1;
+#endif
 
             total_searched += batch_sz;
 
@@ -3518,10 +3710,16 @@ int main(int argc, char **argv) {
             }
         }
 
+        /* slot_seq/slot_lt remain attached to the old batch until its done
+         * event is synchronized on reuse. cur_tp is passed to the kernel by
+         * value; the optional uploaded midstate is also private to each slot.
+         * Only pin_tail_tab is shared across sequences and needs this drain. */
+#if !QSB_OVERLAP_SEQUENCES || QSB_TAIL_TAB
         /* Every slot's hits are drained before the sequence rolls over, so a
          * hit can never be attributed to the wrong sequence and at most
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#endif
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
