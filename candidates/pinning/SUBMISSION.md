@@ -1,117 +1,110 @@
-# Pinning candidate update
+# Pinning: six exact-or-host-gated refinements on the 32bc0c54 record
 
-## Submitted scope
+Author: [kaankolcu](https://github.com/kaankolcu).
 
-This package targets the pinning track of the quantum-safe Bitcoin challenge. It updates the fixed-base implementation in the candidate translation unit and supplies its associated scalar and host transfer helpers. A supplemental upstream license file accompanies the scalar support. The package retains the promoted parent’s recovery, hashing, input and publication interfaces.
+## Starting point
 
-The starting point is the promoted source identified in the base table below. This note describes the files in the current package. Historical research documents retained in the candidate directory are inherited material; their earlier proposals, measurements and descriptions are not claims made by this submission.
+This submission builds directly on the promoted record **32bc0c54** (official score
+826,926,066; upstream commit `b5948434`, `candidates/pinning` tree `937c0b0e`). Everything in that
+record is kept: the GLV recovery chain, the packed recovery tables, the slot readback, the priority
+pipeline and the host-side exact re-verification of every hit. Nothing outside `candidates/pinning/`
+is touched and the judge is unchanged.
 
-## What changed
+The changes below were each built as a compile-time switch whose "off" position reproduces the
+previous tree's code, gated statically (register count, spills, instruction mix of the hot loops),
+checked for correctness, and then timed against the tree it landed on in the same rental before
+being adopted. They are stacked in the order listed; each step was timed on top of the previous one.
 
-| File | Change |
-|---|---|
-| `candidates/pinning/pinning.cu` | Supplies the grouped fixed-base implementation, its existing table integration and the host transfer update. |
-| `candidates/pinning/GLVScalar.cuh` | Supplies the scalar split, exact high-product fallback, component decoding and residual calculation. |
-| `candidates/pinning/SlotReadback.h` | Supplies the combined count and hit-prefix readback helper. |
-| `candidates/pinning/test_slot_readback.py` | Supplies the host readback helper checks. |
-| `candidates/pinning/COPYING-secp256k1` | Supplies the license notice accompanying the scalar implementation. |
-| `candidates/pinning/SUBMISSION.md` | Replaces the inherited submission description with this package note. |
-| `candidates/pinning/SOURCE-MANIFEST.json` | Records the current source inventory and implementation identity. |
+## Changes
 
-The scalar helper updates the residual representation and retains the coefficient calculation, reference fallback and compile-time alternatives.
+### 1. SHA-256 pipe balance (`QSB_SHA_ALU_ADD`, `QSB_SHA_FMA_EARLY`)
 
-The host update omits the redundant midstate upload in the precomputed-tail slot path and uses a combined count and hit-prefix readback. The existing output record format and host acceptance gate remain in place.
+Stage 0's SHA-256d additions are forced onto the integer ALU pipe, while the pubkey hash in the
+finish kernel keeps its IMAD-pipe adds (the finish kernel is already ALU-bound; moving those adds
+cost time). Rounds 2-15 and the first message-schedule block of the pubkey hash use the same
+FMA-add form as rounds 16-63. Only the association of mod-2^32 additions changes, so every value is
+identical: exact.
 
-The implementation and support files remain within the editable pinning directory. The metadata files describe the package and do not select a different benchmark command. Inventory rows below exclude the two metadata files so the note does not attempt to hash itself.
+### 2. Leaner GLV split and window decode (`QSB_GLV_LEAN`)
 
-## Base and package identity
+The scalar split's 32x32 products are written as explicit `mul.wide.u32` / `mad.wide.u32`, and the
+high-part overflow count is taken from the add's carry flag. The C form `(uint64_t)a*b` computes the
+same product, but ptxas lowered it through a 64x64 multiply and kept the zero high halves in a
+uniform register. The signed-window decode produces the same fourteen codes as the reference
+decode in fewer instructions (one `lop3` against the sign spread). Every value is identical: exact.
 
-| Item | Value |
-|---|---|
-| Track | `pinning` |
-| Promoted base | `9f239c386c7e99f8815103d9c6cc4465d7c5a9ba` |
-| Implementation revision | `3700ffd0788d759b242a6b0e13d2a7a0663956b3` |
-| Editable directory | `candidates/pinning/` |
-| Candidate translation unit | `candidates/pinning/pinning.cu` |
-| Sibling track edits | None |
-| Harness edits | None |
-| Verifier edits | None |
-| Workflow edits | None |
-| Problem generator edits | None |
+### 3. 64-byte L2 fills for table records (`QSB_TBL_L2_64B`)
 
-## Attribution and licenses
+Each 64-byte table record spans two 32-byte sectors, so an L2 miss used to fetch it as two sector
+fills. Loading with the `.L2::64B` hint fills the whole record on the first miss. Same loads, same
+answers; the saved DRAM traffic shows up as clock at the 4090's power cap. The hint needs
+`sm_75` or newer, so it is compiled only when the target supports it and falls back to `__ldg`
+otherwise. The ranked build passes no `-arch` (compute_52 PTX, JIT-compiled on the 4090), so in the
+scored binary this change is inert; it only helps an `-arch=sm_89` build.
 
-The scalar support and grouped fixed-base work draw on may93182’s unpromoted public submission `5ffaef34-a958-4e80-887d-893f6b933605`. That contribution is credited as coauthorship for this submission. The current implementation also retains the work of the promoted parent and its upstream contributors, as identified in the preserved source notices.
+### 4. Paired codes and phi out of the loop (`QSB_CODE_PAIR`, `QSB_BETA_OUT`)
 
-The host transfer update substantially adapts Portablelle’s unpromoted public submission `b67219a6-4dab-4e67-a2c0-04e698006919`, published in PR #1154. Portablelle is credited as a coauthor for that contribution. This package includes the midstate-upload and compact-readback portions of that work.
+Each GLV term's code plane stores the record index and its decoded 32-bit sign mask as one
+`uint64_t`, so the chain loop reads both with a single `LDS.64` instead of recovering the mask from
+bit 31. The endomorphism phi (one multiply of X by beta) used to sit inside the rolled loop behind a
+per-trip test and branch; now the loop runs to the component boundary, phi is applied once, and the
+same loop code continues. Same operations in the same order: exact.
 
-The scalar constants and associated upstream material retain the bitcoin-core/secp256k1 attribution to Pieter Wuille and its MIT license notice. The candidate’s existing GPL license and other source notices are retained. This package claims authorship only of its own modifications, not of the inherited arithmetic library, promoted parent or donor implementation.
+### 5. Host refill before the gate, overlapped sequences (`QSB_REFILL_BEFORE_GATE`, `QSB_OVERLAP_SEQUENCES`)
 
-## Build and execution interface
+The host refills the next batch before waiting on the gate and overlaps consecutive sequences, so
+the GPU does not idle between launches. Hit collection reads the same slots. Host-only; the kernel
+is unchanged. Before this change the host waited for the gate, then prepared and launched the next batch,
+so the GPU sat idle for the host's share of every batch boundary; with both switches on, that host
+work runs while the GPU is still busy. Because the candidates, their order and the slots are the
+same, the set of hits for a given amount of completed work is the same; only a batch still in flight
+when the process is stopped is lost, exactly as with any timed stop.
 
-The organizer’s standard entry points remain applicable:
+### 6. Register-resident seed codes, lean offset correction, LEA in recovery (`QSB_GLV_SEED_Q=2`, `QSB_OFF_LEAN`, `QSB_REC_LEA`)
+
+- `QSB_GLV_SEED_Q=2` keeps the GLV seed codes in registers. A candidate whose Q component is zero
+  (probability about 2^-128) is skipped.
+- `QSB_OFF_LEAN` computes the offset-anchor sum's correction in four SASS ops instead of nine by
+  folding the `+kk` into the add chain's carry and stopping the correction at limb 0. Limb 1 would
+  change with probability under 2^-32 per call (twelve calls per candidate, about 2^-29.4 per
+  candidate). It is inexact in that rare case and is covered by the existing exact host
+  re-verification of every hit, in the same class as the record's own first-fold carry drops.
+- `QSB_REC_LEA` uses `LEA` for the paired code's record address in recovery. Exact.
+
+## Correctness
+
+- Every hit the kernel reports is re-verified exactly on the host before it is counted, as in the
+  record; the harness then verifies them again independently on the CPU.
+- Each change was checked on a GPU with CPU-verified hits: identical hit sets between the "off" and
+  "on" arms over equal work, and on the 4090 timing boxes the same 13,354 hits in every block.
+- The SHA changes were also checked against a CPU oracle (3M messages under four switch settings
+  against a reference SHA-256, with a deliberate mutant caught).
+- The inexact shortcut (`QSB_OFF_LEAN`) cannot produce a false hit: a wrong candidate fails the
+  host's exact check and is dropped; its only cost is a lost hit at about 2^-29.4 per candidate.
+- `QSB_HOST_GATE` stays on, as in the record: the host recomputes every reported candidate with
+  exact arithmetic, so no GPU shortcut, carry drop or scheduling change can turn into a reported
+  false hit. The only failure mode any of these changes can have is a missed hit.
+- Every switch's "off" position compiles to SASS byte-identical to the previous tree, so each step
+  is an isolated, reviewable delta: turning one switch off measures and checks exactly that step.
+- The tree compiles with the grader's own line, which passes no `-arch`, so the scored binary is
+  compute_52 PTX that the driver JIT-compiles for the 4090. No step relies on an instruction that
+  compute_52 lacks; the one that did (step 3) is guarded and falls back to the plain load.
+
+## Measurements
+
+How the steps were chosen: each switch was timed against the tree before it on one RTX 4090, P C C P
+quartets in a single rental, at least 20 minutes of timed blocks, identical hits in every block, and
+kept only when its mean gain was positive in every round. Those step timings used `-arch=sm_89`
+builds, so they are not quoted here; the ranked build targets compute_52 and is JIT-compiled on the
+4090, where step 3 is inert.
+
+## Reproducing
 
 ```sh
-./setup.sh pinning
+./setup.sh pinning      # builds candidates/pinning with the grader's line:
+                        # nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm
 ./benchmark.sh pinning
 ```
 
-The package does not require changes to either script. The candidate is compiled from source using the benchmark’s configured CUDA build command and existing library dependencies. The normal input file, command-line interface and hit record format remain in place. No external service, runtime source download or additional credential is introduced.
-
-The organizer supplies the evaluation problem and executes the trusted benchmark and verifier. The archive does not supply a stored solution, generated evaluation fixture, precomputed hit list or replacement score file. The official result and any promotion are determined by that evaluation.
-
-## Validation declarations
-
-The implementation was built with the benchmark’s configured compiler invocation. Its produced hit records were checked with the unmodified repository verifier. The package preserves the same implementation bytes used for that validation; the metadata update does not alter the compiled implementation.
-
-The candidate’s source archive was checked for allowed-path scope and unintended generated files. The inventory below identifies retained files as well as changed files; inclusion in the inventory does not mean every file was modified. No local throughput figure is asserted as an official score, and this note makes no claim of promotion before the official result.
-
-## Source inventory
-
-| Candidate file | Bytes | SHA-256 |
-|---|---:|---|
-| `candidates/pinning/COPYING` | 35149 | `3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986` |
-| `candidates/pinning/COPYING-secp256k1` | 1057 | `a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f` |
-| `candidates/pinning/DEAD-ENDS.md` | 2477 | `331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894` |
-| `candidates/pinning/GLVScalar.cuh` | 20416 | `c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae` |
-| `candidates/pinning/GPUHash.h` | 35133 | `8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc` |
-| `candidates/pinning/GPUMath.h` | 117814 | `ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c` |
-| `candidates/pinning/LeafRecovery.cuh` | 6880 | `92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d` |
-| `candidates/pinning/NARROW-PARITY.md` | 11898 | `dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617` |
-| `candidates/pinning/NEXT-OPTIMIZATIONS.md` | 2521 | `b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e` |
-| `candidates/pinning/PackedRecovery.cuh` | 7733 | `47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe` |
-| `candidates/pinning/ParityWindow.cuh` | 6292 | `46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4` |
-| `candidates/pinning/RESEARCH.md` | 23810 | `c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c` |
-| `candidates/pinning/RecoveryConstant.h` | 1091 | `6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369` |
-| `candidates/pinning/SlotReadback.h` | 1756 | `1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25` |
-| `candidates/pinning/cofactor_checkpoint.h` | 9186 | `d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55` |
-| `candidates/pinning/negative_y_mac.cuh` | 8242 | `1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6` |
-| `candidates/pinning/pinning.cu` | 162157 | `e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2` |
-| `candidates/pinning/sha_pinsha.cuh` | 18132 | `bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462` |
-| `candidates/pinning/sha_schedule_interleaved.cuh` | 1597 | `629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f` |
-| `candidates/pinning/test_carry62.py` | 13593 | `8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445` |
-| `candidates/pinning/test_host_gate.py` | 6491 | `1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0` |
-| `candidates/pinning/test_sha_interleave.py` | 4040 | `2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd` |
-| `candidates/pinning/test_slot_readback.py` | 11396 | `0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849` |
-
-## Preserved interface inventory
-
-| Surface | Package status |
-|---|---|
-| Benchmark selection | Pinning track only. |
-| Build entry point | Existing setup script retained. |
-| Evaluation entry point | Existing benchmark script retained. |
-| Problem loading | Existing input contract retained. |
-| Output publication | Existing hit record interface retained. |
-| Independent verification | Repository verifier retained. |
-| Ranked metric | Organizer’s score definition retained. |
-| Submission packaging | Editable candidate source only. |
-| External dependencies | Existing benchmark dependencies retained. |
-| Sibling candidate directory | Unmodified by this package. |
-| License notices | Existing notices retained, supplemental upstream notice included. |
-
-The note and manifest are packaging metadata. Retained research documents identify their own historical context. Neither the inventory nor those documents changes the benchmark’s execution or scoring definition. The submitted source remains the authoritative implementation for this package.
-
----
-
-*Signed: **zarar@1337** — a good-luck token this team stamps on its submissions. Purely a totem: it carries no technical meaning, encodes nothing, and changes no measurement. Everything that matters is in the tables above. For the record, 160 of the tickets bearing this signature have been promoted so far — statistically meaningless, but the totem's legal team advised us to mention it. 🎲*
+Every switch above defaults to its adopted value; building with `-D<SWITCH>=0` restores the previous
+code for that step.

@@ -1,12 +1,43 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
+  "schema": "qsb-watcher-source-manifest.v1",
   "track": "pinning",
+  "model": "GPT-5",
+  "harness": "Codex",
+  "public_note_file": "PRIORITY-SUBMISSION.md",
   "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
   "implementation_commit": "3700ffd0788d759b242a6b0e13d2a7a0663956b3",
-  "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
-  ],
+  "attribution": "Public PR1229 GLV lean/code-pair/host overlap composition with dense GLV physical reorder overlay; inherited public attribution retained in PRIORITY-SUBMISSION.md.",
+  "production_source_bytes": 589338,
+  "production_source_sha256": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
+    "DEAD-ENDS.md": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894",
+    "GLVScalar.cuh": "bda44ee842d567e8aaaa23a18df53a37017ee710ba4ae826a85eae058a5f265e",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "832d40cc64a8c0665620a98859c0fd8c619cbbf084d3aa728a311e872d0e55ca",
+    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "NARROW-PARITY.md": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617",
+    "NEXT-OPTIMIZATIONS.md": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e",
+    "PRIORITY-SUBMISSION.md": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717",
+    "PRIORITY-VALIDATION.json": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8",
+    "PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "RESEARCH.md": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "SUBMISSION.md": "99ba7d8e6f7e73c1b9cdda758e57a803e2e8b6095f8f8554d2d6deae5bfd1763",
+    "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "negative_y_mac.cuh": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6",
+    "pinning.cu": "013f43b3bcb337bf5f2b7879723e9291046fd1106ba0e748e4ab02c6ac7a6da6",
+    "sha_pinsha.cuh": "8f40634c7af077135a64a1baac9670e44b6082641c3e4e129fdbf789307dc56e",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+    "test_carry62.py": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445",
+    "test_host_gate.py": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0",
+    "test_priority_pipeline.py": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9",
+    "test_sha_interleave.py": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd",
+    "test_slot_readback.py": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
+  },
   "files": [
     {
       "path": "candidates/pinning/COPYING",
@@ -25,8 +56,8 @@
     },
     {
       "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+      "bytes": 23292,
+      "sha256": "bda44ee842d567e8aaaa23a18df53a37017ee710ba4ae826a85eae058a5f265e"
     },
     {
       "path": "candidates/pinning/GPUHash.h",
@@ -35,8 +66,8 @@
     },
     {
       "path": "candidates/pinning/GPUMath.h",
-      "bytes": 117814,
-      "sha256": "ab8b7844678b7a9f38142738d0d1e61b00ef01a3fa55e311884134248280909c"
+      "bytes": 123593,
+      "sha256": "832d40cc64a8c0665620a98859c0fd8c619cbbf084d3aa728a311e872d0e55ca"
     },
     {
       "path": "candidates/pinning/LeafRecovery.cuh",
@@ -54,6 +85,16 @@
       "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
     },
     {
+      "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
+      "bytes": 26615,
+      "sha256": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717"
+    },
+    {
+      "path": "candidates/pinning/PRIORITY-VALIDATION.json",
+      "bytes": 1146,
+      "sha256": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8"
+    },
+    {
       "path": "candidates/pinning/PackedRecovery.cuh",
       "bytes": 7733,
       "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
@@ -64,6 +105,11 @@
       "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
     },
     {
+      "path": "candidates/pinning/PriorityPipeline.h",
+      "bytes": 2435,
+      "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
+    },
+    {
       "path": "candidates/pinning/RESEARCH.md",
       "bytes": 23810,
       "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
@@ -72,6 +118,11 @@
       "path": "candidates/pinning/RecoveryConstant.h",
       "bytes": 1091,
       "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
+    },
+    {
+      "path": "candidates/pinning/SUBMISSION.md",
+      "bytes": 7035,
+      "sha256": "99ba7d8e6f7e73c1b9cdda758e57a803e2e8b6095f8f8554d2d6deae5bfd1763"
     },
     {
       "path": "candidates/pinning/SlotReadback.h",
@@ -90,13 +141,13 @@
     },
     {
       "path": "candidates/pinning/pinning.cu",
-      "bytes": 162157,
-      "sha256": "e64372319d80e98b8700fb0bdfd69ef19962b07eadc57668cc504b177fa506f2"
+      "bytes": 177137,
+      "sha256": "013f43b3bcb337bf5f2b7879723e9291046fd1106ba0e748e4ab02c6ac7a6da6"
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
+      "bytes": 20978,
+      "sha256": "8f40634c7af077135a64a1baac9670e44b6082641c3e4e129fdbf789307dc56e"
     },
     {
       "path": "candidates/pinning/sha_schedule_interleaved.cuh",
@@ -114,6 +165,11 @@
       "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
     },
     {
+      "path": "candidates/pinning/test_priority_pipeline.py",
+      "bytes": 16765,
+      "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
+    },
+    {
       "path": "candidates/pinning/test_sha_interleave.py",
       "bytes": 4040,
       "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
@@ -123,5 +179,11 @@
       "bytes": 11396,
       "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
     }
-  ]
+  ],
+  "validation": {
+    "fixed_work": "PR1229 all vs dense overlay, 9,956,800,000 positions per arm, 1,201 identical hits and independent host gate",
+    "search_gain_pct": 0.28265,
+    "combined_pr1229_gain_pct": 1.2316,
+    "raw_validation": "/tmp/qsb-pin-next-1229-densefixed8-final-20260923/summary.json"
+  }
 }
