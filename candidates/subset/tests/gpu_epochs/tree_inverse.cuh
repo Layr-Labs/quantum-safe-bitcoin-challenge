@@ -26,6 +26,12 @@
 #ifndef ZLAB_TREE
 #define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
 #endif
+/* Exact live-range rewrite for the active HM43 root path. The two immutable
+ * root children do not need to stay in registers across zi_inverse_quad();
+ * reload the one child each output lane needs after the inverse instead. */
+#ifndef QSB_ROOT_CHILD_RELOAD
+#define QSB_ROOT_CHILD_RELOAD 1
+#endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t tree[4][512];
@@ -180,15 +186,41 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // offset == 2n-4: the two root children.
 #if HM43_WARP_ROOT
     if(tid<4){
-        uint64_t a[5],b[5],root[5];
+        uint64_t root[5];
+#if QSB_ROOT_CHILD_RELOAD
+        {
+            // Scope both 256-bit children to root construction. products[] is
+            // immutable after the up-sweep, so output lanes reload only the
+            // child they need after the long cooperative inverse.
+            uint64_t a[5],b[5];
+            #pragma unroll
+            for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
+            a[4]=b[4]=0;
+            __syncwarp(0x0000000f);
+            QSB_TREE_MUL(root,a,b);
+            qsb_field_normalize(root);
+        }
+#else
+        uint64_t a[5],b[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
-        a[4]=b[4]=0;__syncwarp(0x0000000f);QSB_TREE_MUL(root,a,b);qsb_field_normalize(root);
+        a[4]=b[4]=0;
+        __syncwarp(0x0000000f);
+        QSB_TREE_MUL(root,a,b);
+        qsb_field_normalize(root);
+#endif
         root[4]=0;zi_inverse_quad(root,tid);
         if(tid<2){
             uint64_t child[5];
             #pragma unroll
-            for(int k=0;k<4;k++)child[k]=tid?a[k]:b[k];
+            for(int k=0;k<4;k++){
+#if QSB_ROOT_CHILD_RELOAD
+                // tid0 needs b -> 1/a; tid1 needs a -> 1/b.
+                child[k]=products[k][offset+(tid?0:1)];
+#else
+                child[k]=tid?a[k]:b[k];
+#endif
+            }
             child[4]=0;QSB_TREE_MUL(child,root,child);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
