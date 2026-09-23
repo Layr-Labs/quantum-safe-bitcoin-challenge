@@ -187,8 +187,10 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         root[4]=0;zi_inverse_quad(root,tid);
         if(tid<2){
             uint64_t child[5];
+            // The upward products are immutable; reload the sibling after the
+            // inverse so the two root operands do not stay live through it.
             #pragma unroll
-            for(int k=0;k<4;k++)child[k]=tid?a[k]:b[k];
+            for(int k=0;k<4;k++)child[k]=products[k][offset+(tid?0:1)];
             child[4]=0;QSB_TREE_MUL(child,root,child);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
