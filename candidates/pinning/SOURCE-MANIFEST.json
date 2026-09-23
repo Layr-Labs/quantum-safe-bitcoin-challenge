@@ -1,31 +1,152 @@
 {
-  "comparison_baseline_promoted_commit": "94abdd0d72847b780c7d4f99da4f367e6f9f0fd1",
-  "comparison_baseline_submission": "PR1063 base line: PR1013+negY official 810314192 (best above-record draw, host 54598); PR1013 alone 809952202; floor 813482339",
-  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8)",
-  "full_technical_note_file": "SUBMISSION.md",
-  "harness": "omp",
-  "model": "GLM (glm-5.3-flash)",
-  "new_source_head": "d0eeb6784565399397eb95a196404630c7014602",
-  "new_source_public_pr": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1055",
-  "new_source_switch": "QSB_X3_TAIL=1",
-  "note": "Composition: PR1013+negY official base (810,314,192 draw) + X3 h*K tail cut from public PR1055. Model +0.9-1.2% over record; the 100-bips floor needs a fast-host draw (H34 host gradient). CPU audits pass; SASS census owed at dispatch.",
-  "production_source_bytes": 443472,
-  "production_source_sha256": {
-    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
-    "GPUMath.h": "908684ec5346e85a5ea003fb4fd0a2f5898397f5f45ab19a8e62e9305e6be9da",
-    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
-    "NARROW-PARITY.md": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617",
-    "PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
-    "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
-    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
-    "SUBMISSION.md": "5210edd163660bb28ca1518ee35639381ccef9c52504c01d94240d6762de9eb7",
-    "cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
-    "negative_y_mac.cuh": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6",
-    "pinning.cu": "b5b9859e2f361c465cda2ed602757b4ccbd005a75c6f3d0070d84662e86ab4d6",
-    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
-    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
-  },
-  "public_note_file": "SUBMISSION.md",
-  "public_sources": "Promoted parent 94abdd0 (GPT 5.6 Sol/Codex); PR827 @stffinfcti; PR885 @EvanYan1024; PR927 caf7f8c (@ercumentyildirim with Claude Opus 5/Claude Code, TOP16 idea @EvanYan1024); PR965 db3a694 (@Portablelle, GPT 6 Astra/Codex); PR993 ticket 52a058ef (coauthor fkiene; RAW mechanism also in public PR849/866). This RAW-only integration/package: GPT-5/Codex. PR1002 ticket dfba4ce2 (@fkiene, K32 corrections and SAS_FRMOV cleanup). This K32 port, validation, and package: GPT-5/Codex. This exact-source second remeasurement note/manifest: GPT-5/Codex; no new executable contribution. Third exact-source remeasurement note/manifest: GPT-5/Codex; no new executable contribution. New source: PR1060 head 8069a2f894f26b1f9e8122fee4de5f83ce1a59ed, archived coauthors Saviour1001 and Portablelle; NEG_Y_MAC and seeded multiply-add header. Isolated integration and testing onto PR1013 K32 source: GPT-5/Codex."
+  "schema": "zarar1337.source-manifest.v1",
+  "track": "pinning",
+  "base_commit": "9f239c386c7e99f8815103d9c6cc4465d7c5a9ba",
+  "implementation_commit": "01fdd662a533340e669418ad56cb32d8a65bb4b1",
+  "metadata_excluded": [
+    "candidates/pinning/SOURCE-MANIFEST.json",
+    "candidates/pinning/SUBMISSION.md"
+  ],
+  "files": [
+    {
+      "path": "candidates/pinning/COPYING",
+      "mode": "100644",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "candidates/pinning/COPYING-secp256k1",
+      "mode": "100644",
+      "bytes": 1057,
+      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
+    },
+    {
+      "path": "candidates/pinning/DEAD-ENDS.md",
+      "mode": "100644",
+      "bytes": 2477,
+      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
+    },
+    {
+      "path": "candidates/pinning/GLVScalar.cuh",
+      "mode": "100644",
+      "bytes": 20416,
+      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+    },
+    {
+      "path": "candidates/pinning/GPUHash.h",
+      "mode": "100644",
+      "bytes": 35133,
+      "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
+    },
+    {
+      "path": "candidates/pinning/GPUMath.h",
+      "mode": "100644",
+      "bytes": 118480,
+      "sha256": "fa9280de3bbc407b25806cdb07791727a38d8c0bfca8dd706257e624c5d9f4e1"
+    },
+    {
+      "path": "candidates/pinning/LeafRecovery.cuh",
+      "mode": "100644",
+      "bytes": 6880,
+      "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
+    },
+    {
+      "path": "candidates/pinning/NARROW-PARITY.md",
+      "mode": "100644",
+      "bytes": 11898,
+      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
+    },
+    {
+      "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
+      "mode": "100644",
+      "bytes": 2521,
+      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
+    },
+    {
+      "path": "candidates/pinning/PackedRecovery.cuh",
+      "mode": "100644",
+      "bytes": 7733,
+      "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
+    },
+    {
+      "path": "candidates/pinning/ParityWindow.cuh",
+      "mode": "100644",
+      "bytes": 6292,
+      "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
+    },
+    {
+      "path": "candidates/pinning/RESEARCH.md",
+      "mode": "100644",
+      "bytes": 23810,
+      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
+    },
+    {
+      "path": "candidates/pinning/RecoveryConstant.h",
+      "mode": "100644",
+      "bytes": 1091,
+      "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
+    },
+    {
+      "path": "candidates/pinning/SlotReadback.h",
+      "mode": "100644",
+      "bytes": 1756,
+      "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
+    },
+    {
+      "path": "candidates/pinning/cofactor_checkpoint.h",
+      "mode": "100644",
+      "bytes": 9186,
+      "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
+    },
+    {
+      "path": "candidates/pinning/negative_y_mac.cuh",
+      "mode": "100644",
+      "bytes": 8242,
+      "sha256": "1d87940f919328dd7c5a5f5bc7e6adf2947514f4c013c1138c71d39c0eea5aa6"
+    },
+    {
+      "path": "candidates/pinning/pinning.cu",
+      "mode": "100644",
+      "bytes": 163862,
+      "sha256": "1580c3f5a9b177edf2519288eef4b71dd1c919b549131047395baf1f493b21e4"
+    },
+    {
+      "path": "candidates/pinning/sha_pinsha.cuh",
+      "mode": "100644",
+      "bytes": 18132,
+      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
+    },
+    {
+      "path": "candidates/pinning/sha_schedule_interleaved.cuh",
+      "mode": "100644",
+      "bytes": 1597,
+      "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+    },
+    {
+      "path": "candidates/pinning/test_carry62.py",
+      "mode": "100644",
+      "bytes": 13593,
+      "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
+    },
+    {
+      "path": "candidates/pinning/test_host_gate.py",
+      "mode": "100644",
+      "bytes": 6491,
+      "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
+    },
+    {
+      "path": "candidates/pinning/test_sha_interleave.py",
+      "mode": "100644",
+      "bytes": 4040,
+      "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
+    },
+    {
+      "path": "candidates/pinning/test_slot_readback.py",
+      "mode": "100755",
+      "bytes": 11396,
+      "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
+    }
+  ],
+  "implementation_parent": "2f3664c5677efd7e111799ed358417552f85c287",
+  "arithmetic_donor": "jrcarlos2000, public PR1168, source 9fee9add757cf773e338af481dee3a914156cc43"
 }
