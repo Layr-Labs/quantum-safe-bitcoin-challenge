@@ -1,3 +1,4 @@
+#define QSB_REDRAW_0923 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
