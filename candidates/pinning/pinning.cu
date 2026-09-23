@@ -59,7 +59,6 @@
 #endif
 #include "GPUMath.h"
 #include "SlotReadback.h"
-#include "PriorityPipeline.h"
 #ifndef QSB_TAIL_PRE
 #define QSB_TAIL_PRE 1   /* host-precomputed rounds 0-3 of the locktime tail block */
 #endif
@@ -206,15 +205,6 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                *    to 31e98e47's.  31e98e47 scored 702,050,398 and 260879f4 scored
                                *    705,670,530 on the official RTX 4090 runner: +0.5157%. */
 #endif
-// Root-priority scheduling: 0 baseline, 1 priority roots, 2 priority tail,
-// 3 same-priority split control. No change to device arithmetic.
-#ifndef QSB_COMPLETION_MODE
-#define QSB_COMPLETION_MODE 1
-#endif
-static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion mode");
-#if QSB_COMPLETION_MODE && !QSB_SLOTPIPE
-#error "completion streams require the slotted pipeline"
-#endif
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
@@ -234,7 +224,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #if QSB_SLOTPIPE
 /* The launch helper takes the slot's stream; at QSB_SLOTPIPE=0 the parameter and
  * the launch suffix vanish so the emitted code is the single-stream one. */
-#define QSB_STREAM_PARM , cudaStream_t st, qsb::CompletionLane *flow = nullptr
+#define QSB_STREAM_PARM , cudaStream_t st
 #define QSB_STREAM_ARG  ,0,st
 #else
 #define QSB_STREAM_PARM
@@ -2304,15 +2294,6 @@ static void launch_pinning_pipeline(
         exit(2);
     }
 #endif
-#if QSB_SLOTPIPE
-    if (flow) {
-        err = flow->begin_roots(st);
-        if (err != cudaSuccess) {
-            fprintf(stderr,"Prepare/root dependency failed: %s\n",cudaGetErrorString(err));
-            exit(2);
-        }
-    }
-#endif
     int root_groups=(blocks+255)/256;
     qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
@@ -2334,15 +2315,6 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-#if QSB_SLOTPIPE
-    if (flow) {
-        err = flow->end_roots(st);
-        if (err != cudaSuccess) {
-            fprintf(stderr,"Root/finish dependency failed: %s\n",cudaGetErrorString(err));
-            exit(2);
-        }
-    }
-#endif
 #if QSB_TREE_OFFLOAD2
     qsb_leaf_tree_finish<<<blocks,256 QSB_STREAM_ARG>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
@@ -3139,7 +3111,6 @@ int main(int argc, char **argv) {
      * non-blocking stream, so it is installed again on each slot stream with
      * exactly the same base/size/QSB_L2_SKIP arithmetic.  The device-wide
      * cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize) above is not repeated. */
-    qsb::CompletionLane slot_flow[QSB_SLOTS];
     cudaStream_t slot_stream[QSB_SLOTS];
     cudaEvent_t  slot_done[QSB_SLOTS];
     uint32_t *d_hit_cnt_s[QSB_SLOTS], *d_hit_idx_s[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
@@ -3158,7 +3129,6 @@ int main(int argc, char **argv) {
         if (se==cudaSuccess) se = cudaHostAlloc((void**)&h_mid, QSB_SLOTS*8*sizeof(uint32_t), cudaHostAllocDefault);
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
-            if (se==cudaSuccess) se = slot_flow[s].init(slot_stream[s], QSB_COMPLETION_MODE);
             if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
 #if QSB_COMPACT_READBACK
             if (se==cudaSuccess) se = slot_readback[s].init();
@@ -3486,8 +3456,7 @@ int main(int argc, char **argv) {
                 d_hit_cnt_s[s], d_hit_idx_s[s],
                 batch_sz, easy, single_hash,
                 d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
-                d_super_roots[s],d_root_checkpoint[s], cur_tp, st, &slot_flow[s]);
-            st = slot_flow[s].completion_stream();
+                d_super_roots[s],d_root_checkpoint[s], cur_tp, st);
 #if QSB_COMPACT_READBACK
             slot_error = slot_readback[s].enqueue(st, slot_done[s]);
 #else
