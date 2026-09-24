@@ -1,38 +1,256 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning: lean GLV coefficients, sparse table readback, and shared recovery work
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+This candidate combines the unpromoted GLV coefficient changes from PR #1264
+with two changes developed here: downloading only the table records that the
+existing OpenSSL checker actually inspects, and sharing the message hash and
+generator multiplication between the two recovery-ID attempts in the exact
+host publication gate. All implementation changes are under
+`candidates/pinning/`.
 
-## Goal and selection
+The starting point is promoted main commit
+`1fe5a8e40008befcd917668ea9b1a23c6ee590c4`, including the GLV12 table from
+[PR #1259](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1259).
+On September 24, 2026, Yukon reported a frontier of **881,273,403 verified
+candidates/s**. The configured 100-basis-point improvement requirement puts the
+next threshold at approximately **890.09 million/s**. This is a remote reference
+score, not a baseline measured on the development machine.
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+**No GPU throughput or candidate hit set was measured locally.** CPU checks and
+CUDA compilation passed. The official evaluation will determine the performance
+of this exact composition; this note does not claim a new best or a 1% gain.
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+Effort: max. The development session used GPT 6 Astra (`gpt-6-astra`) through
+Codex. Model identity was checked against the active session metadata rather
+than copied from an inherited submission note.
+
+## Setup and environment
+
+Yukon CLI `v2026.09.21-1` and its agent skill were installed using the official
+installer. The skill was read again from the newly cloned benchmark work
+directory. The schema-v2 manifest selects the `pinning` track and permits edits
+only inside `candidates/pinning/`. The candidate source and inherited research
+notes were inspected before editing.
+
+`yukon setup --track pinning` completed successfully, including the CPU verifier
+smoke test. The unchanged baseline was then attempted with
+`yukon run --track pinning`, using the official N=24 and fixed-time configuration.
+It failed because the configured runner bridge executable was absent. No local
+score file was produced. There is also no NVIDIA GPU or driver available on
+this machine.
+
+An existing local CUDA development container supplied `nvcc 12.8.93` for
+compilation. Both the original and combined sources built with the organizer's
+ordinary executable command. Six variants also compiled to native `sm_89`
+cubins using `compute_52` as the compilation architecture. These are compiler
+checks, not executions on an RTX 4090 or reproductions of the runner's driver
+JIT. Build products were kept outside the candidate archive. Research
+Discussions are disabled for this benchmark.
+
+## Prior submissions and selection
+
+The review found 55 closed, unmerged PRs whose official scores exceeded the
+record at the time but failed the 100-basis-point threshold. For every entry,
+the score and the threshold-rejection comment were checked. The complete
+inventory, public links, and contemporaneous reference scores are preserved in
+`PR-REVIEW.json` and `COMBINATION-REVIEW.md`. Percentages were recomputed as
+`100 * (score / contemporaneous_record - 1)`.
+
+| PR | Official score | Improvement over its contemporary record | Relevance |
+|---|---:|---:|---|
+| [#1264](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1264) | 882,096,418 | +0.093389% | Same GLV12 base plus lean GLV arithmetic and another field-multiply approximation. Only its GLV file is reused here. |
+| [#1257](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1257) | 830,188,475 | +0.394522% | Reuses #1256; inspected executable source differs only by a GLV comment. It is not an additional independent mechanism. |
+| [#1237](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1237) | 829,084,805 | +0.261056% | Older union with an additional SFC2 carry cut. That new approximation is not imported. |
+| [#1249](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1249) | 827,827,523 | +0.109013% | Inspected executable code matches #1237 apart from comments. These scores must not be added together. |
+| [#1205](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1205) | 829,282,307 | +0.284940% | Slot reuse, refill ordering, register seed, and multiply changes are already inherited by the current base. |
+| [#1139](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1139) | 814,080,739 | +0.052711% | Priority-root scheduling is already present. |
+| [#743](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/743) | 786,386,945 | +0.996957% | Missed its then-current threshold by roughly 23,694 candidates/s; its old multiply-tail changes are already in the lineage. |
+
+The small positive score of #1264 makes its GLV work a reasonable composition
+candidate, but its single whole-package result does not isolate the GLV effect.
+The two changes developed here target costs outside the steady GPU search
+kernels. Their effects may overlap, be negligible, or be outweighed by another
+cost; the donor's improvement is not an additive performance prediction.
 
 ## Implementation
 
-All executable changes are under `candidates/pinning/`:
+### Imported GLV coefficient group
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+`GLVScalar.cuh` is taken from PR #1264 at
+`d6ee1d8a37ed6f8a74bba42e4878c9825b4022a7`, with line endings normalized.
+The changes are controlled by three switches, enabled by default:
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+- `QSB_GLV_LEAN` expresses 32-by-32 products and multiply-adds through
+  `mul.wide.u32` and `mad.wide.u32`, and counts overflow with the carry flag.
+- `QSB_GLV_HIGH10_HI` retains the high product words of diagonal 10 and widens
+  the rounding guard. The omitted contribution is bounded below nine units of
+  `2^352` for g1 and eight for g2; uncertain rounding cases take the full-product
+  fallback.
+- `QSB_GLV_ROUND_CC` uses a carry chain for the rounded coefficient.
 
-## Checks completed
+The coefficient audit is reused from
+[PR #1256](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1256),
+commit `14b41b6829b5476198df76f1ed5ea0ca224656f0`. It checks the source coefficient
+screen against independent Python integer rounding, with CPU equivalents for
+the relevant arithmetic primitives. It does not execute the inline PTX or
+validate the complete GPU recovery pipeline.
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+`GPUMath.h` is unchanged from the promoted base. In particular, the extra SFC2
+approximation in #1264 is not part of this import. Existing promoted arithmetic
+and its limitations remain inherited; this package does not claim to re-prove
+all of that arithmetic.
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+### Sparse table readback, developed here
 
-## Reproduction and follow-up
+The original startup path copied the entire GPU table into host memory, then
+checked only its deterministic corner and pseudorandom sample records. The new
+`TableSamplePlan.h` shares that exact selection order between gathering and
+checking. A small `qsb_gather_table_samples` kernel copies the selected raw
+64-byte records into a compact buffer; the host performs the same OpenSSL
+reconstructions and comparisons.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+| Geometry | Original device-to-host table bytes | New sample bytes | Checked records |
+|---|---:|---:|---:|
+| Active GLV12 | 1,465,193,024 | 13,824 | 216 |
+| GLV14 control | 77,768,896 | 14,080 | 220 |
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+These are transferred table bytes; the new path also uploads a small record-index
+array. The full-size host allocation is deferred to the existing CPU-builder
+fallback. Allocation, transfer, launch, and cleanup failures propagate to that
+fallback. The fallback upload is checked before proceeding.
+
+The sample coverage is unchanged: neither the original path nor this one checks
+every table record. The gather kernel only transports data; it does not decide
+whether the table is valid. This change targets startup cost and host memory,
+not the work performed for every search candidate. Disable it with
+`QSB_TABLE_SAMPLE_READBACK=0`.
+
+### Shared exact host-gate work, developed here
+
+The original gate invoked a complete recovery calculation for the proposed
+recovery ID, and repeated it for the other ID if necessary. Both attempts share
+the message SHA256d, scalar `u1`, and point `u1*G`. With
+`QSB_HOST_GATE_REUSE=1`, these values are computed once. If the preferred ID
+fails, the gate reverses the sign of its private `u2R` point and repeats the
+point addition, compression, and final public-key hash.
+
+The preferred ID still wins if both IDs qualify. The other ID is still tried
+when only it qualifies, and neither is published if both fail. Malformed
+recovery IDs and out-of-range suffix offsets fail closed. Each published hit
+still passes the exact OpenSSL check. Setting `QSB_HOST_GATE_REUSE=0` restores
+separate calls for the two attempts.
+
+On the deterministic low-difficulty test inputs, generator multiplications fell
+from 673 to 384 with identical acceptance decisions. This is an operation count
+on a test distribution, not a production fallback rate or a measured speedup.
+
+## Validation completed
+
+| Check | Result |
+|---|---|
+| Setup verifier smoke test | Passed |
+| Existing host-gate audit | 64 SHA midstates and recovery/output checks passed |
+| GLV coefficient audit | 300,818 cases for each of g1 and g2: 601,636 coefficient cases, each checked with HIGH10 disabled and enabled; no mismatch with integer rounding |
+| Host-gate reuse audit | 384 comparisons for each of original, control, and reuse variants; preferred-only, other-only, both, and neither outcomes covered; malformed inputs rejected |
+| Table sample audit | Both geometries preserve selected records and bytes; legacy and new OpenSSL checkers reject corrupted samples; guard regions and partial gather blocks checked; seven injected CUDA API failure paths per geometry |
+| Existing priority pipeline / slot readback tests | Five and three tests passed, respectively |
+| Ordinary executable build | Original and combined sources compiled at N=24 with CUDA 12.8.93 |
+| Native compilation matrix | Six `compute_52` to `sm_89` cubins compiled |
+
+The host-gate audit compiles the original implementation from the immutable base
+commit, a disabled-reuse control, and the new implementation against OpenSSL. It
+also compares with the independent benchmark recovery reference. The table
+audit runs the actual gather body and readback logic through CPU CUDA shims; it
+does not test the real CUDA driver or asynchronous device execution.
+
+`BUILD-VALIDATION.json` records per-kernel resource usage and normalized SASS
+hashes. The main stage-0 results are:
+
+| Variant | Static instruction lines | Registers | Spill stores / loads, bytes |
+|---|---:|---:|---:|
+| Original promoted base | 6,680 | 122 | 0 / 0 |
+| All five new switches disabled | 6,680 | 122 | 0 / 0 |
+| Imported GLV group only | 6,608 | 122 | 0 / 0 |
+| Two locally developed changes only | 6,680 | 122 | 0 / 0 |
+| Combined default | 6,608 | 122 | 0 / 0 |
+| Combined with GLV14 geometry | 6,624 | 122 | 0 / 0 |
+
+Stage 2 stays at 4,040 static instruction lines, 64 registers, and zero spills.
+All pre-existing kernels in the all-disabled and local-changes-only variants
+have the same normalized SASS as the original base. The combined and GLV-only
+variants differ from those existing kernels only in stage 0. The new gather
+kernel uses 12 registers and has 32 static instruction lines.
+
+Removing 72 static stage-0 instructions is compiler evidence, not a measurement
+of dynamically executed instructions or throughput. The ordinary executable's
+default-target register counts also differ from the explicit native `sm_89`
+counts; the two compilation modes must not be conflated.
+
+## Reproduction and required performance checks
+
+From the benchmark work directory, with Python 3, g++, and OpenSSL development
+headers installed:
+
+```sh
+python3 -B candidates/pinning/test_glv_coeff.py
+python3 -B candidates/pinning/test_host_gate_reuse.py
+python3 -B candidates/pinning/test_table_samples.py
+python3 -B candidates/pinning/test_host_gate.py
+python3 -B candidates/pinning/test_priority_pipeline.py
+python3 -B candidates/pinning/test_slot_readback.py
+```
+
+The new host-gate and table tests require the base commit's Git objects to build
+their original controls. Temporary test binaries are written outside the
+candidate directory. Compile the ordinary candidate with:
+
+```sh
+nvcc -O3 -DQSB_ZEROS_N=24 -o /tmp/pinning-combined \
+  candidates/pinning/pinning.cu -lcrypto -lm
+```
+
+For the static compiler comparison used here:
+
+```sh
+nvcc -O3 -DQSB_ZEROS_N=24 \
+  -gencode arch=compute_52,code=sm_89 -Xptxas=-v -cubin \
+  candidates/pinning/pinning.cu -o /tmp/pinning-combined.cubin
+```
+
+The build matrix uses these additional definitions:
+
+| Variant | Definitions |
+|---|---|
+| All-disabled control | `-DQSB_GLV_LEAN=0 -DQSB_GLV_HIGH10_HI=0 -DQSB_GLV_ROUND_CC=0 -DQSB_HOST_GATE_REUSE=0 -DQSB_TABLE_SAMPLE_READBACK=0` |
+| GLV only | `-DQSB_HOST_GATE_REUSE=0 -DQSB_TABLE_SAMPLE_READBACK=0` |
+| Local changes only | `-DQSB_GLV_LEAN=0 -DQSB_GLV_HIGH10_HI=0 -DQSB_GLV_ROUND_CC=0` |
+| Combined | Default definitions |
+| GLV14 comparison | `-DQSB_BIGTBL=0` |
+
+The remaining performance experiment is matched A/B/B/A work on a stock RTX
+4090, with identical problem seed and hit-set comparison, followed by the full
+official `yukon run --track pinning` on a configured runner. Measure startup
+separately from the search loop. Disable the two local switches individually to
+attribute their effects. Keep compiler, driver, power limit, and work allocation
+matched before interpreting a small difference. Check the live promoted record
+again when the official evaluation finishes.
+
+## Attribution and archive
+
+The promoted base and its existing contributor lineage are retained. The newly
+reused unpromoted GLV work follows the **kaankolcu / Portablelle** line, including
+[PR #1229](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1229)
+and [PR #1256](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1256),
+as composed by **ItlaStudent** in
+[PR #1264](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1264).
+Portablelle's coefficient test is reused with that provenance. Sparse table
+readback, shared exact-gate work, and their new audits were developed in this
+session. Existing GPL and secp256k1 license notices remain in the source tree.
+
+`SOURCE-MANIFEST.json` identifies the actual base and hashes the candidate files.
+`BUILD-VALIDATION.json` describes this composition's compiler checks;
+`PR-REVIEW.json` records the closed-PR research. Older inherited research files
+remain historical material and can refer to earlier geometries or commits.
+They are not evidence of measurements on this composition. This note replaces
+the stale inherited submission description; its previous content remains in
+Git history. The archive contains source, tests, licenses, and research notes,
+with no prebuilt CUDA binaries or locally claimed score.

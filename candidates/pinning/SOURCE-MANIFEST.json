@@ -1,13 +1,23 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
+  "schema": "qsb.source-manifest.v1",
   "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
+  "base_commit": "1fe5a8e40008befcd917668ea9b1a23c6ee590c4",
+  "implementation_commit": null,
+  "implementation_state": "Working-tree candidate; source hashes identify the uploaded files.",
   "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
+    "candidates/pinning/SOURCE-MANIFEST.json"
   ],
   "files": [
+    {
+      "path": "candidates/pinning/BUILD-VALIDATION.json",
+      "bytes": 22506,
+      "sha256": "f3bba9e719568efd69c809aa2a5dbb51de474332efaf3dd74dbfbcda534baa8a"
+    },
+    {
+      "path": "candidates/pinning/COMBINATION-REVIEW.md",
+      "bytes": 11887,
+      "sha256": "c9af453a928f796edbcb8aa43b848a9fd55ecec33556fd05dc33cf119fd8ddb5"
+    },
     {
       "path": "candidates/pinning/COPYING",
       "bytes": 35149,
@@ -25,8 +35,8 @@
     },
     {
       "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+      "bytes": 26778,
+      "sha256": "5fc55d51352f2d35db5c54b6520f9c4f7bbfa703f8c4ff63af99bb8f32e2e452"
     },
     {
       "path": "candidates/pinning/GPUHash.h",
@@ -35,8 +45,8 @@
     },
     {
       "path": "candidates/pinning/GPUMath.h",
-      "bytes": 121679,
-      "sha256": "7f67eba59dd01125151f2ae257ad4782d37d98e2e2b37a196c4e7deb81229a2d"
+      "bytes": 121593,
+      "sha256": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda"
     },
     {
       "path": "candidates/pinning/LeafRecovery.cuh",
@@ -52,6 +62,11 @@
       "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
       "bytes": 2521,
       "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
+    },
+    {
+      "path": "candidates/pinning/PR-REVIEW.json",
+      "bytes": 34697,
+      "sha256": "bd22d15cfe3db948338ad52c2ea49650c121e2b13a43037d0c1f8db6e330cd01"
     },
     {
       "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
@@ -89,14 +104,19 @@
       "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
     },
     {
+      "path": "candidates/pinning/SUBMISSION.md",
+      "bytes": 14755,
+      "sha256": "7e958c481c93d4f58e475cde03d777b760c5236875e45643d82fce87a4b246e0"
+    },
+    {
       "path": "candidates/pinning/SlotReadback.h",
       "bytes": 1756,
       "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
     },
     {
-      "path": "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
-      "bytes": 20260,
-      "sha256": "6109f51ebf5321f27fc86211c2de122c372d20ffc495cfe30e36514b05b1fde9"
+      "path": "candidates/pinning/TableSamplePlan.h",
+      "bytes": 966,
+      "sha256": "ab25e1977caac859c9385a251d58236f69ad23c4e0442530763808d0c1c99d8c"
     },
     {
       "path": "candidates/pinning/cofactor_checkpoint.h",
@@ -110,8 +130,8 @@
     },
     {
       "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
+      "bytes": 175444,
+      "sha256": "1c66bad23808dae7c8511de1bd6138230051fd4685a617cd31b8c1e3f6928600"
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
@@ -129,9 +149,19 @@
       "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
     },
     {
+      "path": "candidates/pinning/test_glv_coeff.py",
+      "bytes": 5797,
+      "sha256": "cf695ec2e9a1d6878dd5ce3301be291780fdafe7b52d621b63486a8ccb9a70fc"
+    },
+    {
       "path": "candidates/pinning/test_host_gate.py",
       "bytes": 6491,
       "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
+    },
+    {
+      "path": "candidates/pinning/test_host_gate_reuse.py",
+      "bytes": 6719,
+      "sha256": "7100c6cc7d91800c56f3b02fc6b336f0354aadc195bc1209ceef5b8a4d835e13"
     },
     {
       "path": "candidates/pinning/test_priority_pipeline.py",
@@ -147,6 +177,11 @@
       "path": "candidates/pinning/test_slot_readback.py",
       "bytes": 11396,
       "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
+    },
+    {
+      "path": "candidates/pinning/test_table_samples.py",
+      "bytes": 8857,
+      "sha256": "6a9275c70cab7f7ff677d46ff7fd81e7ccc057bb414f0069c026770646fdf192"
     }
   ]
 }

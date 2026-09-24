@@ -20,9 +20,20 @@
 #include <sys/stat.h>
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
+#include "TableSamplePlan.h"
 
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
+#endif
+#ifndef QSB_HOST_GATE_REUSE
+#define QSB_HOST_GATE_REUSE 1 /* reuse SHA256d and u1*G for the alternate recid */
+#endif
+#ifndef QSB_TABLE_SAMPLE_READBACK
+#define QSB_TABLE_SAMPLE_READBACK 1 /* download only the existing OpenSSL samples */
+#endif
+#if (QSB_HOST_GATE_REUSE != 0 && QSB_HOST_GATE_REUSE != 1) || \
+    (QSB_TABLE_SAMPLE_READBACK != 0 && QSB_TABLE_SAMPLE_READBACK != 1)
+#error "host optimization switches must be 0 or 1"
 #endif
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
@@ -2711,7 +2722,8 @@ static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
  * and fall back, not discovered from the scorecard. */
 static int gt_spot_check(const uint8_t *gTable, int samples,
                          const uint8_t neg_r_inv[32],
-                         const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+                         const uint64_t alpha_le[4], const uint64_t beta_le[4],
+                         bool packed_samples = false) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *order = BN_new(),
@@ -2727,28 +2739,15 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv, 32, nri);
     for (int t = 0; t < samples && ok; t++) {
-        /* always include the corners of each chunk, then pseudo-random entries */
-        int ch, i;
-        if (t < GT_CHUNKS * 4) {
-            ch = t / 4;
-            const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
-            i = corner[t % 4];
-        } else {
-            seed = seed * 1664525u + 1013904223u;
-            ch = (int)(seed >> 28) % GT_CHUNKS;
-#if QSB_BIGTBL
-            /* Modulo samples the non-power-of-two top segment as well. */
-            seed = seed * 1664525u + 1013904223u;
-            i = (int)(seed % gt_entries(ch));
-#else
-            i  = (int)((seed >> 4) & (gt_entries(ch) - 1));
-#endif
-        }
+        const QsbTableSample sample = qsb_table_sample_position(
+            t, seed, GT_CHUNKS, gt_entries, QSB_BIGTBL != 0);
+        const int ch = sample.chunk;
+        const unsigned i = sample.index;
         gt_table_scalar(k,ch,(unsigned)i);
         BN_mod_mul(k,k,nri,order,ctx);
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,want);
-        size_t off = ((size_t)gt_offset(ch) + i) * 64;
+        size_t off = (packed_samples ? (size_t)t : (size_t)gt_offset(ch) + i) * 64;
         if (memcmp(gTable + off,      want,     32) != 0 ||
             memcmp(gTable + off + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
@@ -2760,6 +2759,55 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
     return ok;
 }
+
+#if QSB_TABLE_SAMPLE_READBACK
+/* Only transport changes: the same selected records still undergo the same
+ * OpenSSL reconstruction on the CPU. This kernel performs no validation. */
+__global__ void qsb_gather_table_samples(const uint64_t *table,
+                                       const uint32_t *records,
+                                       uint64_t *samples, int count) {
+    const unsigned word = blockIdx.x * blockDim.x + threadIdx.x;
+    if (word < (unsigned)count * 8u)
+        samples[word] = table[(size_t)records[word / 8u] * 8u + word % 8u];
+}
+
+static cudaError_t gt_readback_samples(const uint8_t *table, uint8_t *samples,
+                                      int count) {
+    const int capacity = GT_CHUNKS * 4 + 192;
+    if (count <= 0 || count > capacity) return cudaErrorInvalidValue;
+    uint32_t records[capacity];
+    unsigned seed = 0x9e3779b9u;
+    for (int t = 0; t < count; ++t) {
+        const QsbTableSample sample = qsb_table_sample_position(
+            t, seed, GT_CHUNKS, gt_entries, QSB_BIGTBL != 0);
+        records[t] = gt_offset(sample.chunk) + sample.index;
+    }
+    uint32_t *device_records = NULL;
+    uint64_t *device_samples = NULL;
+    cudaError_t err = cudaMalloc(&device_records, count * sizeof(uint32_t));
+    if (err == cudaSuccess) err = cudaMalloc(&device_samples, (size_t)count * 64u);
+    if (err == cudaSuccess)
+        err = cudaMemcpy(device_records, records, count * sizeof(uint32_t),
+                         cudaMemcpyHostToDevice);
+    if (err == cudaSuccess) {
+        qsb_gather_table_samples<<<(count * 8 + 127) / 128, 128>>>(
+            (const uint64_t*)table, device_records, device_samples, count);
+        err = cudaGetLastError();
+    }
+    if (err == cudaSuccess)
+        err = cudaMemcpy(samples, device_samples, (size_t)count * 64u,
+                         cudaMemcpyDeviceToHost);
+    if (device_samples) {
+        const cudaError_t cleanup = cudaFree(device_samples);
+        if (err == cudaSuccess) err = cleanup;
+    }
+    if (device_records) {
+        const cudaError_t cleanup = cudaFree(device_records);
+        if (err == cudaSuccess) err = cleanup;
+    }
+    return err;
+}
+#endif
 
 /* OpenSSL fallback builder, using the same biased-first and odd-segment
  * coefficients as the GPU builder. */
@@ -2908,13 +2956,16 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
+/* Return the accepted recid, or -1. The alternate recid changes only the
+ * sign of Ru2; the message hash and generator multiplication are identical. */
 static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
                               EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+                              const BIGNUM *nri, const EC_POINT *Ru2, bool try_other = false) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
-    if (sl > 119 || so + 3 >= sl || lo + 3 >= sl) return 0;
+    if (sl < 4 || sl > 119 || so > sl - 4 || lo > sl - 4 ||
+        recid < 0 || recid > 1) return -1;
 
     uint8_t buf[128];
     memset(buf, 0, sizeof(buf));
@@ -2954,14 +3005,18 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT *P = EC_POINT_new(grp);
     EC_POINT *Q = EC_POINT_new(grp);
     EC_POINT *R = EC_POINT_dup(Ru2, grp);
-    int ok = 0;
-    if (z && u1 && P && Q && R &&
+    BIGNUM *qx = BN_new(), *qy = BN_new();
+    int accepted = -1;
+    if (z && u1 && P && Q && R && qx && qy &&
         BN_mod_mul(u1, z, nri, order, ctx) &&
         EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
-        if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
-            BIGNUM *qx = BN_new(), *qy = BN_new();
-            if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
+        for (int pass = 0; pass < (try_other ? 2 : 1); ++pass) {
+            const int current_recid = recid ^ pass;
+            /* R is private to this call. Invert once to select recid 1,
+             * then once more, if needed, to try the other sign. */
+            if ((pass != 0 || recid != 0) && !EC_POINT_invert(grp, R, ctx)) break;
+            if (EC_POINT_add(grp, Q, P, R, ctx) &&
+                EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
                 uint8_t pub[33], xb[32];
                 memset(xb, 0, 32);
                 int nbytes = BN_num_bytes(qx);
@@ -2970,18 +3025,21 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
                 memcpy(pub + 1, xb, 32);
                 uint8_t hh[32];
                 SHA256(pub, 33, hh);
-                ok = qsb_host_zeros(hh) >= QSB_ZEROS_N;
+                if (qsb_host_zeros(hh) >= QSB_ZEROS_N) {
+                    accepted = current_recid;
+                    break;
+                }
             }
-            BN_free(qx);
-            BN_free(qy);
         }
     }
+    BN_free(qx);
+    BN_free(qy);
     BN_free(z);
     BN_free(u1);
     EC_POINT_free(P);
     EC_POINT_free(Q);
     EC_POINT_free(R);
-    return ok;
+    return accepted;
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
@@ -2990,9 +3048,14 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
-    if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
-    if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
-    return -1;
+    if (ri < 0 || ri > 1) return -1;
+#if QSB_HOST_GATE_REUSE
+    return qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2, true);
+#else
+    const int accepted = qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2);
+    if (accepted >= 0) return accepted;
+    return qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2);
+#endif
 }
 #endif
 
@@ -3080,19 +3143,21 @@ int main(int argc, char **argv) {
         cudaError_t gerr = cudaGetLastError();
 #endif
         cudaFree(dL); cudaFree(dH);
-        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
+        const int gt_samples = GT_CHUNKS * 4 + 192;
+        const size_t check_bytes = QSB_TABLE_SAMPLE_READBACK ? (size_t)gt_samples * 64u : gt_sz;
+        uint8_t *chk_table=(uint8_t*)malloc(check_bytes);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-#if QSB_BIGTBL
+#if QSB_TABLE_SAMPLE_READBACK
+            gerr=gt_readback_samples(d_gt,chk_table,gt_samples);
+#else
             gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+#endif
             gt_ok=(gerr==cudaSuccess);
             if(gt_ok)
-#else
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-#endif
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
-                                  iso.alpha,iso.beta);
+            gt_ok = gt_spot_check(chk_table,gt_samples,pp.neg_r_inv,
+                                  iso.alpha,iso.beta,QSB_TABLE_SAMPLE_READBACK != 0);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -3102,8 +3167,18 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+#if QSB_TABLE_SAMPLE_READBACK
+            free(chk_table);
+            chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: host gtable fallback\n"); return 1; }
+#endif
             compute_gtable(chk_table,pp.neg_r_inv,iso.alpha,iso.beta);
-            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            gerr=cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            if(gerr!=cudaSuccess) {
+                fprintf(stderr,"Host gtable upload failed: %s\n",cudaGetErrorString(gerr));
+                free(chk_table);
+                return 1;
+            }
         }
         fflush(stdout);
         free(chk_table);
