@@ -47,8 +47,11 @@
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
+#include "../../native_runtime.cuh"
 
+#if !QSB_HOST_CARRIER
 #include "../../GPUMath.h"
+#endif
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -57,6 +60,7 @@
 #define COUNT_COMBO_SYMBOLS 100
 #define IDX_CUDA_THREAD ((blockIdx.x * blockDim.x) + threadIdx.x)
 
+#if !QSB_HOST_CARRIER
 __device__ __constant__ int MULTI_EIGHT[65] = { 0,
     0+8,0+16,0+24,0+32,0+40,0+48,0+56,0+64,
     64+8,64+16,64+24,64+32,64+40,64+48,64+56,64+64,
@@ -87,6 +91,7 @@ __device__ __constant__ uint64_t QSB_U2R[8];
 __device__ __constant__ uint64_t QSB_U2R_C[4];
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
+#endif // device globals
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
     if(n<0 || n>151)return 1;
     uint4 words[151];
@@ -97,13 +102,13 @@ static int qsb_prepare_push_words(const uint8_t *bytes,int n){
         words[i].z=((uint32_t)r[8]<<8)|r[9];
         words[i].w=0;
     }
-    return cudaMemcpyToSymbol(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
+    return QSB_TO_SYMBOL(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
 }
 static uint32_t qsb_host_rotr(uint32_t x,int n){return (x>>n)|(x<<(32-n));}
 static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
  if(count!=69)return 1;
  uint32_t round_k[64],expanded[4][64];
- if(cudaMemcpyFromSymbol(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
+ if(QSB_FROM_SYMBOL(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
  for(int block=0;block<4;block++){
   uint32_t *w=expanded[block];memcpy(w,words+5+block*16,64);
   for(int i=16;i<64;i++){
@@ -114,8 +119,9 @@ static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
   }
   for(int i=0;i<64;i++)w[i]+=round_k[i];
  }
- return cudaMemcpyToSymbol(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
+ return QSB_TO_SYMBOL(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
 }
+#if !QSB_HOST_CARRIER
 template<int block> __device__ __forceinline__ void qsb_compress_constant(uint32_t *output){
  uint32_t a=output[0],b=output[1],c=output[2],d=output[3],e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
  S2Round(a, b, c, d, e, f, g, h, 0, QSB_CONST_SCHEDULE[block][0]);
@@ -247,6 +253,7 @@ __device__ uint64_t BINOM_C[151][10];
  * 2^17 for the rest (2,359,296 64-byte records = 144 MiB). One fewer table load
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
+#endif // device SHA helpers
 #ifndef ZLAB_T14
 #define ZLAB_T14 0
 #endif
@@ -256,13 +263,13 @@ __device__ uint64_t BINOM_C[151][10];
 #define GT_TOTAL_ENTRIES (GT_BIG * (1u << 18) + (GT_CHUNKS - GT_BIG) * (1u << 17))
 #define GT_LO 256
 #define GT_HI 2048
-__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
+QSB_ROLE_HD __forceinline__ unsigned gt_entries(int c) {
     return c < GT_BIG ? (1u << 18) : (1u << 17);
 }
-__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+QSB_ROLE_HD __forceinline__ unsigned gt_offset(int c) {
     return c <= GT_BIG ? (unsigned)c << 18 : ((unsigned)GT_BIG << 18) + ((unsigned)(c - GT_BIG) << 17);
 }
-__host__ __device__ __forceinline__ int gt_shift(int c) {
+QSB_ROLE_HD __forceinline__ int gt_shift(int c) {
     return c <= GT_BIG ? 19*c : 19*GT_BIG + 18*(c - GT_BIG);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL == 144ULL*1024*1024,
@@ -272,19 +279,35 @@ static_assert(GT_TOTAL_ENTRIES*64ULL == 144ULL*1024*1024,
 #define GT_TOTAL_ENTRIES (1u << 20)
 #define GT_LO 256
 #define GT_HI 1024
-__host__ __device__ __forceinline__ unsigned gt_entries(int c) {
+QSB_ROLE_HD __forceinline__ unsigned gt_entries(int c) {
     return c == 0 ? (1u << 17) : (1u << 16);
 }
-__host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+QSB_ROLE_HD __forceinline__ unsigned gt_offset(int c) {
     return c == 0 ? 0u : (unsigned)(c+1) << 16;
 }
-__host__ __device__ __forceinline__ int gt_shift(int c) {
+QSB_ROLE_HD __forceinline__ int gt_shift(int c) {
     return c == 0 ? 0 : 17*c+1;
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
               "mixed table must contain exactly 64 MiB");
 #endif
 
+#ifndef QSB_DIGIT_SHIFT
+#define QSB_DIGIT_SHIFT 1
+#endif
+
+#ifndef ZLAB_DIRDIG
+#define ZLAB_DIRDIG 1
+#endif
+#if ZLAB_DIRDIG
+/* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
+QSB_ROLE_HD __forceinline__ unsigned gt_width(int c) {
+    return c == GT_CHUNKS-1 ? (unsigned)(gt_shift(c) - gt_shift(c-1))
+                            : (unsigned)(gt_shift(c+1) - gt_shift(c));
+}
+#endif
+
+#if !QSB_HOST_CARRIER
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
     0xBFD25E8CD0364141ULL, 0xBAAEDCE6AF48A03BULL,
@@ -453,20 +476,12 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
  *   t = f >> (w-1):  digit = 2f+1-2^w,  |digit|/2 index = (f ^ (t-1)) & (2^(w-1)-1),
  *   negative iff t == 0, XOR the global recode sign. The last chunk is the
  *   positive remainder, index f & (entries-1). */
-#ifndef ZLAB_DIRDIG
-#define ZLAB_DIRDIG 1
-#endif
 #if ZLAB_DIRDIG
 __device__ __forceinline__ uint32_t gt_field_bits_v(const uint64_t m[4], unsigned pos) {
     unsigned li = pos >> 6, sh = pos & 63u;
     uint64_t lo = li == 0 ? m[0] : li == 1 ? m[1] : li == 2 ? m[2] : m[3];
     uint64_t hi = li == 0 ? m[1] : li == 1 ? m[2] : li == 2 ? m[3] : 0ULL;
     return (uint32_t)((lo >> sh) | ((hi << 1) << (63u - sh)));
-}
-/* width of chunk c in bits (chunk c consumes gt_shift(c+1)-gt_shift(c) bits) */
-__host__ __device__ __forceinline__ unsigned gt_width(int c) {
-    return c == GT_CHUNKS-1 ? (unsigned)(gt_shift(c) - gt_shift(c-1))
-                            : (unsigned)(gt_shift(c+1) - gt_shift(c));
 }
 __device__ __forceinline__ void gt_direct_digit(const uint64_t M[4], uint64_t sflag,
                                                 unsigned pos, unsigned w, bool last,
@@ -756,9 +771,6 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
-#ifndef QSB_DIGIT_SHIFT
-#define QSB_DIGIT_SHIFT 1
-#endif
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
@@ -1044,6 +1056,8 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
  * Combo = 9 indices identifying which dummy sigs to SKIP
  * ============================================================ */
 
+#endif // device field/chain helpers
+
 #define MAX_N 150
 #define MAX_T 16
 #define SIG_PUSH_SIZE 10
@@ -1098,26 +1112,23 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
  * prefix_remainder and every kept push below the cut; remW is the trailing
  * 8 bytes of that stream as two big-endian message words; early lists the
  * epoch's 6 skip indices (all < QSB_SE_CUT). */
-typedef struct {
-    uint32_t mid[8];
-    uint32_t remW[2];
-    uint8_t early[QSB_SE_EARLY];
-    uint8_t pad[64 - 8 * 4 - 2 * 4 - QSB_SE_EARLY];
-} epoch_desc_t;
-static_assert(sizeof(epoch_desc_t) == 64, "epoch_desc_t must stay 64 bytes");
+static_assert(QSB_SE_EARLY == 6, "native epoch ABI uses six early indices");
 
 /* QSB_SE_WINDOWS window omission sets out of C(13,3)=286, stored as actual push indices
  * (QSB_SE_CUT + 0..12). Filled by the host once per run. Sampling a subset is legitimate: the
  * benchmark scores verified throughput over distinct candidates, and the subset is chosen to
  * minimise the number of distinct FIRST-BLOCK schedules (54 at 256 windows, 8 at 128), which is
  * what kernel_build_first_flat has to build once per epoch. */
+#if !QSB_HOST_CARRIER
 __device__ __constant__ uint8_t WIN3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
+#endif
 #include "window_schedule_shared.cuh"
 
 /* Combinadic unranking: rank -> sorted skip[0..t-1] in lex order for C(n,t).
  * Uses BINOM_C table (C[n][k], capped at 2^63). Binary search per position
  * via hockey-stick prefix sums: sum_{c=lo}^{mid} C[n-c-1][k] =
  * C[n-lo][k+1] - C[n-mid-1][k+1]. O(t*log n) table lookups, low divergence. */
+#if !QSB_HOST_CARRIER
 __device__ __forceinline__ void unrank_combo(uint64_t rank, int n, int t, uint8_t *out) {
     int lo = 0;
     for (int i = 0; i < t; i++) {
@@ -1202,6 +1213,7 @@ __global__ void kernel_build_epochs(
     d->remW[1] = bswap32(curW[1]);
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
 }
+#endif // epoch producer
 #ifndef QSB_EPOCH_GROUPS
 #define QSB_EPOCH_GROUPS 1
 #endif
@@ -1209,6 +1221,7 @@ __global__ void kernel_build_epochs(
 #include "epoch_groups.cuh"
 #endif
 
+#if !QSB_HOST_CARRIER
 // Use the promoted 8x32 multiply schedule for the inverse product tree.
 // Preserve the final reduction carry and canonicalize before _ModInv.
 /* ZLAB: the asm body is shared by the canonical multiply (qsb_field_mul, tree
@@ -1518,7 +1531,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 }
 
 #include "tree_inverse.cuh"
+#endif
 #include "pair_shared.cuh"
+#if !QSB_HOST_CARRIER
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
@@ -2082,6 +2097,21 @@ __global__ void kernel_build_gtable(
  * Host code
  * ============================================================ */
 
+#endif // candidate device definitions
+
+// The immutable native payload implements exactly these host-visible defaults.
+// Reject incompatible carrier orchestration in both nvcc passes; regeneration
+// retains the original configurable full-source path.
+#if QSB_HOST_CARRIER
+#if ZLAB_T14 != 0 || QSB_SE_WINDOWS != 128 || QSB_DIGIT_SHIFT != 1 || ZLAB_DIRDIG != 1 || \
+    QSB_PAIR_SHARED != 1 || QSB_EPOCH_GROUPS != 1 || QSB_EPOCH_FAST != 1 || \
+    ZLAB_HITPATH != 1 || ZLAB_TRIM != 1 || ZLAB_PAIRSHA != 0 || ZLAB_DUAL_EPOCH_SHA != 1 || \
+    QSB_SE_BLOCK != 256 || QSB_SE_EARLY != 6 || QSB_SE_TWIN != 3 || QSB_SE_CUT != 137 || \
+    QSB_PREFIX_BLOCKS != 2 || ZLAB_LAUNCH_BLOCKS != 262144 || QSB_SHA_UNROLL_CONST != 1
+#error "Native carrier requires the immutable native-v1 host geometry and mapping defaults"
+#endif
+#endif
+
 extern "C" {
 #include <openssl/sha.h>
 #include <openssl/bn.h>
@@ -2446,8 +2476,11 @@ int main(int argc, char **argv) {
         }
     }
 
-    cudaSetDevice(gpu_index);
-    cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
+    qsb_native::environment();
+    qsb_native::check(cudaSetDevice(gpu_index), "set device");
+    cudaDeviceProp prop;
+    qsb_native::check(cudaGetDeviceProperties(&prop, gpu_index), "device properties");
+    qsb_native::select(prop);
     printf("QSB Digest Search [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 
@@ -2715,8 +2748,8 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
-        cudaDeviceSynchronize();
+        QSB_LAUNCH(kernel_build_gtable, (gt_total+255)/256,256, dL,dH,d_gt);
+        qsb_native::check(cudaDeviceSynchronize(), "table synchronization");
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
@@ -2818,7 +2851,7 @@ int main(int argc, char **argv) {
             }
             memcpy(h_win3[j],w,3);
         }
-        cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
+        QSB_TO_SYMBOL(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -2844,7 +2877,7 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
     uint64_t h_u2r[8];
     memcpy(h_u2r,dp.u2r_x,32);memcpy(h_u2r+4,dp.u2r_y,32);
-    if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
+    if(QSB_TO_SYMBOL(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
     /* QSB_U2R_C = 3*xR^2 * (2*yR)^-1 mod p (recovery finish constant). */
@@ -2865,7 +2898,7 @@ int main(int argc, char **argv) {
         BN_mod_mul(bc,bc,by,bp,ctx);                  /* 3*xR^2/(2*yR) */
         uint64_t h_c[4];
         if(BN_bn2lebinpad(bc,(uint8_t*)h_c,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_C encode failed\n");return 1;}
-        if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
+        if(QSB_TO_SYMBOL(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
             fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
         }
         BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
@@ -2948,7 +2981,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        cudaMemcpyToSymbol(BINOM_C, h_binom, sizeof(h_binom));
+        QSB_TO_SYMBOL(BINOM_C, h_binom, sizeof(h_binom));
     }
 
     /* ── DEBUG MODE ──
@@ -3105,19 +3138,19 @@ int main(int argc, char **argv) {
                 const uint32_t n_groups = (uint32_t)n_groups64;
                 if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
                     /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
-                    kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+                    QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                         epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                         d_mid, d_prem, (int)dp.prefix_remainder_len,
                         d_dsigs, d_epochs, zh_cnt);
                 } else {
-                kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
+                QSB_LAUNCH(kernel_epoch_groups, (n_groups + 255) / 256, 256,
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
                     d_dsigs, d_groups
 #if QSB_EPOCH_FAST
                     , d_epoch_group, epoch_base, epoch_base+(uint64_t)epochs_in_batch
 #endif
                     );
-                kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256>>>(
+                QSB_LAUNCH(kernel_build_epochs_inc, (epochs_in_batch + 255) / 256, 256,
                     epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                     d_dsigs, d_groups, r5a, d_epochs, zh_cnt
 #if QSB_EPOCH_FAST
@@ -3127,21 +3160,21 @@ int main(int argc, char **argv) {
                 }
             }
 #elif ZLAB_HITPATH
-            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+            QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
 #else
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+            QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
-              kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+              QSB_LAUNCH(kernel_build_first_flat, (nthr+255)/256,256, d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+            QSB_LAUNCH(kernel_digest, nblk, QSB_SE_BLOCK,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -3160,7 +3193,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
-            kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+            QSB_LAUNCH(kernel_verify_pair_hits, 1,64, d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -3328,9 +3361,9 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
 #if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
-                qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
+                QSB_LAUNCH(qsb_prepare_prefix_cache, (QSB_PREFIX_ENTRIES+255)/256,256, d_mid,window_start,t_win);
 #endif
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_LAUNCH(kernel_digest, grdsz, BLKSZ,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -3532,7 +3565,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_LAUNCH(kernel_digest, grdsz, BLKSZ,
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,

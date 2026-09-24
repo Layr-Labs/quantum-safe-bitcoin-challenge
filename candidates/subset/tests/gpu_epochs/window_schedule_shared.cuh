@@ -6,12 +6,14 @@
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
+#if !QSB_HOST_CARRIER
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
 __device__ __constant__ int QSB_FIRST_COUNT;
+#endif
 static int qsb_first_class_count=0;
 
 static uint32_t qsb_window_second_key(const uint8_t w[3]) {
@@ -35,7 +37,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     uint32_t first_classes[QSB_SE_PER_EPOCH], first_unique[QSB_SE_PER_EPOCH][14], transposed[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS]={};
     int first_distinct=0;
     int distinct=0;
-    if (cudaMemcpyFromSymbol(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
+    if (QSB_FROM_SYMBOL(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
     for (int lane=0; lane<QSB_SE_PER_EPOCH; lane++) {
         uint8_t bytes[128]={};
         int pos=8, sel=0;
@@ -74,12 +76,12 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if(first_distinct>QSB_FIRST_SLOTS)return 1;
     for(int slot=0;slot<first_distinct;slot++)
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
-    if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
-    if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
-    if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
-    return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
+    if (QSB_TO_SYMBOL(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
+    if (QSB_TO_SYMBOL(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
+    return QSB_TO_SYMBOL(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
 /* First-block states for every (epoch, class) of a launch, computed as its own
@@ -89,6 +91,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
  * waited; now each lane reads its class state (32 bytes). */
 /* Flat mapping: one thread per (epoch, class) over full 256-thread blocks, instead of one
  * 54-thread block per epoch (two warps, 10 idle lanes, and a block launch per epoch). */
+#if !QSB_HOST_CARRIER
 __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_t * __restrict__ d_epochs,
         uint32_t * __restrict__ d_first, unsigned n_epochs, unsigned classes) {
     const unsigned t = blockIdx.x * blockDim.x + threadIdx.x;
@@ -237,3 +240,5 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
 #undef QSB_PAIR_STATE_ADD
 }
 #endif
+
+#endif // candidate device definitions

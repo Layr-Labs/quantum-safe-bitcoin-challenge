@@ -29,12 +29,8 @@
 /* pos/acc/nb hold the partial block: `pos` is the byte position in the legacy path and the WORD
  * index in the fast path, `acc` the partial big-endian word and `nb` the bytes in it.
  * base/last/o[] carry what the per-epoch kernel used to recompute with unrank_combo. */
-struct __align__(16) qsb_group_t {
-    uint32_t st[8]; uint32_t w[16];
-    uint32_t pos; uint32_t acc; uint32_t nb; uint32_t last;
-    uint32_t base_lo; uint32_t base_hi; uint8_t o[8];
-};
-static_assert(sizeof(qsb_group_t)==128,"group record");
+#include "../../native_types.cuh"
+#if !QSB_HOST_CARRIER
 /* Lexicographic rank of sorted c[0..k-1] in C(n,k), inverse of unrank_combo (BINOM_C < 2^63 here). */
 __device__ __forceinline__ uint64_t qsb_rank_lex(const uint8_t *c, int k, int n) {
     uint64_t r = 0; int prev = -1;
@@ -234,3 +230,5 @@ __global__ void kernel_build_epochs_inc(
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
 #endif
 }
+
+#endif // candidate device definitions

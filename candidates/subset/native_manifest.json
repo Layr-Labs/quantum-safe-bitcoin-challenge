@@ -1,0 +1,365 @@
+{
+  "source_roles": {
+    "carrier": {
+      "defines": {
+        "QSB_NATIVE_MODULE": 1,
+        "QSB_HOST_CARRIER": 1
+      },
+      "local_dependencies": {
+        "subset.cu": "e894713db0461bbcff429ae2e63983f64f42d82eb98236fb2663a11511268e65",
+        "tests/gpu_epochs/tree.cu": "ff1ba712d6198718c4863fedc2c5c778b199b46dbaa0fa74925a0558d02ee91d",
+        "native_runtime.cuh": "fd6dc1952e03943525b5d188cf5a8d1e8b1c076f8f80d67b0ed9900590ad55b5",
+        "native_role.cuh": "1f82a90384a328f598ca92925e090a2932792e8a8be31b5962d2d44594c9ef6a",
+        "native_types.cuh": "8e6b29cd82a6d8eb3be5002d0d529f439d5f034155cd6e7b3efd33c3ce6d777c",
+        "native_abi.cuh": "23c40e6dd67418a68d5cafa38f655dbaa68fbdbab07b96b1894a3789d38cb0ae",
+        "native_manifest.cuh": "1e906f37c44913e3f9871db06401658f40a425fdde3a86e3136ce3e078872d70",
+        "tests/gpu_epochs/prefix_cache.cuh": "a65367f570bdc328a9f6e937fc0b9b35afe8e0c1e3d209a918f682c703f272d9",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "aa72157413fa95dcb878f35469039a42a7b53bfbf96d75b941a8777f12c7d136",
+        "tests/gpu_epochs/epoch_groups.cuh": "554e984c2cdb97e5c75405473ffe226c96a83aecb4148e1d63b00395c3ae5189",
+        "tests/gpu_epochs/pair_shared.cuh": "189cd0c3dbb504813f745d920d23540cd2509d3a9265153639b449d0cd672106"
+      }
+    },
+    "full_source": {
+      "defines": {
+        "QSB_NATIVE_MODULE": 0,
+        "QSB_HOST_CARRIER": 0
+      },
+      "local_dependencies": {
+        "subset.cu": "e894713db0461bbcff429ae2e63983f64f42d82eb98236fb2663a11511268e65",
+        "tests/gpu_epochs/tree.cu": "ff1ba712d6198718c4863fedc2c5c778b199b46dbaa0fa74925a0558d02ee91d",
+        "native_runtime.cuh": "fd6dc1952e03943525b5d188cf5a8d1e8b1c076f8f80d67b0ed9900590ad55b5",
+        "native_role.cuh": "1f82a90384a328f598ca92925e090a2932792e8a8be31b5962d2d44594c9ef6a",
+        "native_types.cuh": "8e6b29cd82a6d8eb3be5002d0d529f439d5f034155cd6e7b3efd33c3ce6d777c",
+        "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
+        "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+        "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+        "hit_filter_field.cuh": "1efd238ee80935f8a7c0559eafce15e7d1e5a813a04173efd54e0f87074e3a45",
+        "hit_filter_field_sc.cuh": "cde4221e38dfd4671255d96adc36cc34ecbdfa178ab4fd42645694a30cd192cb",
+        "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+        "tests/gpu_epochs/prefix_cache.cuh": "a65367f570bdc328a9f6e937fc0b9b35afe8e0c1e3d209a918f682c703f272d9",
+        "tests/gpu_epochs/window_schedule_shared.cuh": "aa72157413fa95dcb878f35469039a42a7b53bfbf96d75b941a8777f12c7d136",
+        "tests/gpu_epochs/epoch_groups.cuh": "554e984c2cdb97e5c75405473ffe226c96a83aecb4148e1d63b00395c3ae5189",
+        "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
+        "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+        "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+        "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+        "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+        "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
+        "tests/gpu_epochs/pair_shared.cuh": "189cd0c3dbb504813f745d920d23540cd2509d3a9265153639b449d0cd672106",
+        "tests/gpu_epochs/parity_window_subset.cuh": "e0d48dbdb45b639ad0220aa108e336bd2287daf166990f8e0dcde32a47d03737"
+      }
+    }
+  },
+  "toolchain": "CUDA 12.8.93",
+  "arch": "sm_89",
+  "zeros_n": 24,
+  "frontend": [
+    "nvcc",
+    "-O3",
+    "-DQSB_ZEROS_N=24",
+    "-DQSB_NATIVE_MODULE=0",
+    "--ptx",
+    "subset.cu"
+  ],
+  "assembler": [
+    "ptxas",
+    "-arch=sm_89",
+    "-O3"
+  ],
+  "cubin_bytes": 933536,
+  "cubin_sha256": "994014fb153b73eb4338b013d373734dc8350041378b2c39ed0199987cc38ae8",
+  "ptx_sha256": "8599b133fe9a27ffc33651db33e5dcdec4385955bc831907762a6430c7b674f5",
+  "entries": [
+    {
+      "name": "kernel_build_first_flat",
+      "symbol": "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4
+      ]
+    },
+    {
+      "name": "kernel_build_epochs",
+      "symbol": "_Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_tPj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_epoch_groups",
+      "symbol": "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+      "bytes": [
+        8,
+        4,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_build_epochs_inc",
+      "symbol": "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_verify_pair_hits",
+      "symbol": "_Z23kernel_verify_pair_hitsPKhPhPK12epoch_desc_tPKjS0_i",
+      "bytes": [
+        8,
+        8,
+        8,
+        8,
+        8,
+        4
+      ]
+    },
+    {
+      "name": "kernel_digest",
+      "symbol": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+      "bytes": [
+        8,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        4,
+        8,
+        4,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        4,
+        4,
+        4,
+        4,
+        4,
+        8,
+        4,
+        4,
+        8,
+        4,
+        8,
+        8,
+        8,
+        4
+      ]
+    },
+    {
+      "name": "kernel_build_gtable",
+      "symbol": "_Z19kernel_build_gtablePKmS0_Ph",
+      "bytes": [
+        8,
+        8,
+        8
+      ]
+    }
+  ],
+  "globals": [
+    {
+      "symbol": "MULTI_EIGHT",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 260
+    },
+    {
+      "symbol": "COMBO_SYMBOLS",
+      "space": "const",
+      "alignment": 1,
+      "bytes": 100
+    },
+    {
+      "symbol": "K",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 256
+    },
+    {
+      "symbol": "I",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 32
+    },
+    {
+      "symbol": "ripemd160_sizedesc_32",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 8
+    },
+    {
+      "symbol": "_KECCAKF_RNDC",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 192
+    },
+    {
+      "symbol": "QSB_CONST_SCHEDULE",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 1024
+    },
+    {
+      "symbol": "QSB_U2R",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 64
+    },
+    {
+      "symbol": "QSB_U2R_C",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_PUSH_WORDS",
+      "space": "global",
+      "alignment": 16,
+      "bytes": 2416
+    },
+    {
+      "symbol": "BINOM_C",
+      "space": "global",
+      "alignment": 8,
+      "bytes": 12080
+    },
+    {
+      "symbol": "GT_ORDER_N",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "WIN3",
+      "space": "const",
+      "alignment": 1,
+      "bytes": 384
+    },
+    {
+      "symbol": "QSB_WINDOW_FIRST",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 7168
+    },
+    {
+      "symbol": "QSB_WINDOW_SECOND",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 32768
+    },
+    {
+      "symbol": "QSB_WINDOW_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_FIRST_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_FIRST_UNIQUE",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 896
+    },
+    {
+      "symbol": "QSB_FIRST_COUNT",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "ZI_BY_LUT",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 6656
+    }
+  ],
+  "host_globals": [
+    "BINOM_C",
+    "K",
+    "QSB_CONST_SCHEDULE",
+    "QSB_FIRST_CLASS",
+    "QSB_FIRST_COUNT",
+    "QSB_FIRST_UNIQUE",
+    "QSB_PUSH_WORDS",
+    "QSB_U2R",
+    "QSB_U2R_C",
+    "QSB_WINDOW_CLASS",
+    "QSB_WINDOW_FIRST",
+    "QSB_WINDOW_SECOND",
+    "WIN3"
+  ],
+  "sources": {
+    "subset.cu": "e894713db0461bbcff429ae2e63983f64f42d82eb98236fb2663a11511268e65",
+    "tests/gpu_epochs/tree.cu": "ff1ba712d6198718c4863fedc2c5c778b199b46dbaa0fa74925a0558d02ee91d",
+    "native_runtime.cuh": "fd6dc1952e03943525b5d188cf5a8d1e8b1c076f8f80d67b0ed9900590ad55b5",
+    "native_role.cuh": "1f82a90384a328f598ca92925e090a2932792e8a8be31b5962d2d44594c9ef6a",
+    "native_types.cuh": "8e6b29cd82a6d8eb3be5002d0d529f439d5f034155cd6e7b3efd33c3ce6d777c",
+    "native_abi.cuh": "23c40e6dd67418a68d5cafa38f655dbaa68fbdbab07b96b1894a3789d38cb0ae",
+    "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+    "hit_filter_field.cuh": "1efd238ee80935f8a7c0559eafce15e7d1e5a813a04173efd54e0f87074e3a45",
+    "hit_filter_field_sc.cuh": "cde4221e38dfd4671255d96adc36cc34ecbdfa178ab4fd42645694a30cd192cb",
+    "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "tests/gpu_epochs/prefix_cache.cuh": "a65367f570bdc328a9f6e937fc0b9b35afe8e0c1e3d209a918f682c703f272d9",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "aa72157413fa95dcb878f35469039a42a7b53bfbf96d75b941a8777f12c7d136",
+    "tests/gpu_epochs/epoch_groups.cuh": "554e984c2cdb97e5c75405473ffe226c96a83aecb4148e1d63b00395c3ae5189",
+    "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+    "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
+    "tests/gpu_epochs/pair_shared.cuh": "189cd0c3dbb504813f745d920d23540cd2509d3a9265153639b449d0cd672106",
+    "tests/gpu_epochs/parity_window_subset.cuh": "e0d48dbdb45b639ad0220aa108e336bd2287daf166990f8e0dcde32a47d03737",
+    "regenerate_native.py": "24e3af3267dd720f9b83072b89641c3ab7892d9cd6f9f246c0d76481d64f23ba"
+  }
+}

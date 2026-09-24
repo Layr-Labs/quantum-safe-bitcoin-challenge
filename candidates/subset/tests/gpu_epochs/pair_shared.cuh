@@ -7,6 +7,7 @@
 #endif
 /* epochs consumed per digest block = (epochs per thread) x (epoch pairs per block) */
 #define QSB_PAIR_MUL ((QSB_PAIR_SHARED ? 2 : 1) * QSB_SE_HALVES)
+#if !QSB_HOST_CARRIER
 #if QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_k2s_pre(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
@@ -496,3 +497,5 @@ __device__ __noinline__ int qsb_pair_tail3_value(
 }
 #endif
 #endif
+
+#endif // candidate device definitions
