@@ -242,13 +242,13 @@ __device__ uint64_t BINOM_C[151][10];
  * record. Every digit is odd and nonzero; the reconstruction is 2*k modulo
  * the group order, as in the original regular recoder. First chunk has 2^17
  * entries, others 2^16: 2^20 points, 64 MiB total. */
-/* ZLAB_T14 (kill switch, default off): 14-term signed table, widths
+/* ZLAB_T14 (kill switch, default on): 14-term signed table, widths
  * [19,19,19,19,18 x 10] = 256 bits, 2^18 entries for the first four chunks and
  * 2^17 for the rest (2,359,296 64-byte records = 144 MiB). One fewer table load
  * and one fewer deferred XYZZ addition (7M+2S) per candidate, at the cost of a
  * table 2.25x larger than the promoted 64 MiB mixed table. */
 #ifndef ZLAB_T14
-#define ZLAB_T14 0
+#define ZLAB_T14 1
 #endif
 #if ZLAB_T14
 #define GT_CHUNKS 14

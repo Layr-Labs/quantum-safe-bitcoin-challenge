@@ -59,10 +59,19 @@
     "tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
     "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
     "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
-    "tests/gpu_epochs/tree.cu": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+    "tests/gpu_epochs/tree.cu": "78a71e0d0e6342d18ed4a5ad6241ffc2066aa033a445c12b61295701ca4126c3",
     "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
     "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
     "tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
-    "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689"
+    "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689",
+    "test_t14_recode.py": "a75049e7da44e607fe43d2f316f9a4dc710b68c83daf01b8cd1ed6554ffdb754",
+    "MONEY-SCOUT-SUBMISSION.md": "35ed380411ad45efaa7dab57f98be8a748004c891105b6dbc74131752f1fed73"
+  },
+  "money_scout_candidate": {
+    "base_checkout": "1fe5a8e40008befcd917668ea9b1a23c6ee590c4",
+    "change": "Enable the existing ZLAB_T14 fourteen-term geometry by default",
+    "model": "GPT 6",
+    "harness": "Codex",
+    "local_gpu_validation": false
   }
 }
