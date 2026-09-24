@@ -33,6 +33,12 @@
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
+/* Host-only cache hint for the fixed-base table.  The 64 MiB table is larger
+ * than the persisting slice on a 4090; the runtime clips the requested window
+ * to the device limits.  A failed hint leaves default caching unchanged. */
+#ifndef QSB_TABLE_L2_WINDOW
+#define QSB_TABLE_L2_WINDOW 1
+#endif
 /* ZLAB_PAIRSHA (kill switch, default off): hash both recovery public keys with
  * one interleaved pair of one-block SHA-256 compressions (idea: paired recovery
  * SHA from unpromoted 5605ad8 by @nullforest8200, isolated in 558d022 by
@@ -2411,6 +2417,52 @@ static void on_term_signal(int sig) {
     raise(sig);
 }
 
+#if QSB_TABLE_L2_WINDOW
+/* Keep the fixed-base GTable in the persisting portion of L2 where supported.
+ * The 4090 reports a persisting limit below the 64 MiB table, so ask for the
+ * largest legal window and let the driver clip it.  This is a cache policy hint
+ * only: every CUDA call is checked and a failed request is non-fatal. */
+static void qsb_table_l2_window(const uint8_t *d_gt, size_t gt_sz) {
+    int dev = 0, max_persist = 0, max_window = 0;
+    size_t limit = 0, want = 0;
+    cudaError_t e = cudaGetDevice(&dev);
+    if (e == cudaSuccess)
+        e = cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, dev);
+    if (e == cudaSuccess)
+        e = cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, dev);
+    if (e == cudaSuccess && max_persist > 0 && max_window > 0) {
+        e = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, (size_t)max_persist);
+        if (e == cudaSuccess) e = cudaDeviceGetLimit(&limit, cudaLimitPersistingL2CacheSize);
+        if (e == cudaSuccess) {
+            want = gt_sz;
+            if (want > limit) want = limit;
+            if (want > (size_t)max_window) want = (size_t)max_window;
+        }
+        if (e == cudaSuccess && want > 0) {
+            cudaStreamAttrValue av;
+            memset(&av, 0, sizeof(av));
+            av.accessPolicyWindow.base_ptr = (void *)d_gt;
+            av.accessPolicyWindow.num_bytes = want;
+            av.accessPolicyWindow.hitRatio = 1.0f;
+            av.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+            av.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+            e = cudaStreamSetAttribute(cudaStreamLegacy,
+                                       cudaStreamAttributeAccessPolicyWindow, &av);
+        }
+    }
+    if (e == cudaSuccess && want > 0) {
+        printf("  Table L2 window: %.1f of %.1f MiB persisting (limit %.1f MiB, max window %.1f MiB)\n",
+               (double)want / 1048576.0, (double)gt_sz / 1048576.0,
+               (double)limit / 1048576.0, (double)max_window / 1048576.0);
+    } else {
+        printf("  Table L2 window not applied (%s)\n",
+               e == cudaSuccess ? "no persisting L2 on this device" : cudaGetErrorString(e));
+    }
+    fflush(stdout);
+    (void)cudaGetLastError();
+}
+#endif
+
 
 int main(int argc, char **argv) {
     if (argc < 5) {
@@ -2740,6 +2792,9 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
     }
+#if QSB_TABLE_L2_WINDOW
+    qsb_table_l2_window(d_gt, gt_sz);
+#endif
 
     /* Upload params */
     uint32_t *d_mid; cudaMalloc(&d_mid,32);
