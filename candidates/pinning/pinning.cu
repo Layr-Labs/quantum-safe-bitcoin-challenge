@@ -672,6 +672,33 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #if QSB_GLV_SEED_REG != 0 && QSB_GLV_SEED_REG != 1
 #error "QSB_GLV_SEED_REG must be 0 or 1"
 #endif
+/* Recompute each GLV record code from the two scalar halves instead of
+ * reloading a volatile shared-memory plane. The 14 codes are a few shifts
+ * from values that already live in registers; the old plane was a dependent
+ * smem round-trip in front of every table load. */
+#ifndef QSB_GLV_LIVE_DIGIT
+#define QSB_GLV_LIVE_DIGIT 0
+#endif
+#if QSB_GLV_LIVE_DIGIT != 0 && QSB_GLV_LIVE_DIGIT != 1
+#error "QSB_GLV_LIVE_DIGIT must be 0 or 1"
+#endif
+/* Issue the next table load before the mixed add that consumes the current
+ * point, so the record fetch overlaps the addition instead of stalling the
+ * next iteration's first multiply. */
+#ifndef QSB_GLV_PREFETCH
+#define QSB_GLV_PREFETCH 0
+#endif
+#if QSB_GLV_PREFETCH != 0 && QSB_GLV_PREFETCH != 1
+#error "QSB_GLV_PREFETCH must be 0 or 1"
+#endif
+/* Hint the next 64-byte GLV record into L2 without holding the point in
+ * registers. Distinct from QSB_GLV_PREFETCH, which fully loads into xp/yp. */
+#ifndef QSB_GLV_L2HINT
+#define QSB_GLV_L2HINT 1
+#endif
+#if QSB_GLV_L2HINT != 0 && QSB_GLV_L2HINT != 1
+#error "QSB_GLV_L2HINT must be 0 or 1"
+#endif
 
 // First used as 14 per-lane GLV record-code planes (7 KiB); after the handoff,
 // the same 12 KiB holds the cofactor tree.
@@ -782,15 +809,82 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
                           ((uint64_t)m32<<32)|m32,x,y);
 }
 
+__device__ __forceinline__ void qsb_l2hint_term(const uint8_t *table, unsigned term) {
+#if QSB_GLV_L2HINT
+    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
+#if QSB_BIGTBL
+    const uint32_t mask=0x7fffffffu;
+#else
+    const uint32_t mask=0x1fffffu;
+#endif
+    const uint8_t *addr=table+((size_t)(code&mask))*64u;
+    asm volatile("prefetch.global.L2 [%0];" :: "l"(addr));
+#else
+    (void)table; (void)term;
+#endif
+}
+
+template<int SIDE>
+__device__ __forceinline__ uint32_t qsb_live_code(const uint64_t mag[2][2], unsigned sign, int c) {
+#if QSB_BIGTBL
+    return q9_bigtbl_code(mag[SIDE], sign, c);
+#else
+    const unsigned shift=(unsigned)gt_shift(c);
+    const unsigned bits=(c==1||c==6)?19u:18u;
+    uint32_t f=(uint32_t)qsb_glv_extract(mag[SIDE], shift);
+    uint32_t idx, neg_digit;
+    if(c==0) {
+        idx=f&((1u<<18)-1u); neg_digit=0;
+    } else if(c==6) {
+        int32_t d=(int32_t)(2u*f)-333125;
+        neg_digit=(uint32_t)d>>31;
+        uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
+        idx=(ad-1u)>>1;
+    } else {
+        f&=(1u<<bits)-1u;
+        neg_digit=1u-(f>>(bits-1u));
+        idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    }
+    return (gt_offset(c)+idx)|((neg_digit^sign)<<31);
+#endif
+}
+
+__device__ __forceinline__ uint32_t qsb_live_code_term(const uint64_t mag[2][2],
+                                                      const unsigned sign[2], int term) {
+    if(term<GT_CHUNKS) return qsb_live_code<1>(mag, sign[1], term);
+    return qsb_live_code<0>(mag, sign[0], term-GT_CHUNKS);
+}
+
+__device__ __forceinline__ void qsb_load_code(const uint8_t *table, uint32_t code,
+                                              uint64_t *x, uint64_t *y) {
+    uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_BIGTBL
+    gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
+#else
+    gt_load_signed_flat_m(table,0u,code&0x1fffffu,
+#endif
+                          ((uint64_t)m32<<32)|m32,x,y);
+}
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
     (void)unused;
+#if QSB_GLV_LIVE_DIGIT
+    uint64_t mag[2][2];
+    unsigned sign[2];
+    q9_glv_split(k,mag[0],mag[1],&sign[0],&sign[1]);
+    unsigned p_nonzero=(mag[0][0]|mag[0][1])!=0u;
+    unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0u;
+    unsigned nonzero=q_nonzero|(p_nonzero<<1);
+#else
 #if QSB_GLV_SEED_REG
     uint32_t seed0,seed1;
     unsigned nonzero=qsb_decode_glv(k,&seed0,&seed1);
 #else
     unsigned nonzero=qsb_decode_glv(k);
+#endif
 #endif
     if(!nonzero) {
         #pragma unroll
@@ -800,7 +894,10 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_CHUNKS;
     int last=GT_GLV_TERMS;
-#if QSB_GLV_SEED_REG
+#if QSB_GLV_LIVE_DIGIT
+    qsb_load_code(table,qsb_live_code_term(mag,sign,first),x0,y0);
+    qsb_load_code(table,qsb_live_code_term(mag,sign,first+1),x1,y1);
+#elif QSB_GLV_SEED_REG
     if(!(nonzero&1u)) {
         volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
         seed0=codes[(size_t)GT_CHUNKS*QSB_TREE_N+threadIdx.x];
@@ -824,7 +921,28 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first,x0,y0);
     qsb_load_glv(table,first+1,x1,y1);
 #endif
+#if QSB_GLV_L2HINT
+    if(first+2<last) qsb_l2hint_term(table,(unsigned)(first+2));
+#endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_GLV_PREFETCH && !QSB_GLV_LIVE_DIGIT
+    uint64_t xp[4],yp[4];
+    if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
+    #pragma unroll 1
+    for(int term=first+2;term<last;term++) {
+        if(term==GT_CHUNKS) {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        if(term+1<last) qsb_load_glv(table,term+1,xp,yp);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        if(term+1<last) { Load256(x1,xp); Load256(y1,yp); }
+    }
+#else
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -836,10 +954,18 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             };
             _ModMult(X,X,(uint64_t*)beta);
         }
+#if QSB_GLV_LIVE_DIGIT
+        qsb_load_code(table,qsb_live_code_term(mag,sign,term),x1,y1);
+#else
+#if QSB_GLV_L2HINT
+        if(term+1<last) qsb_l2hint_term(table,(unsigned)(term+1));
+#endif
         qsb_load_glv(table,term,x1,y1);
+#endif
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
+#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
