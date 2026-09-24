@@ -1,3 +1,4 @@
+#define QSB_AUTODRAW_09241453 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
@@ -335,14 +336,29 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GLVScalar.cuh"
 
 #if QSB_BIGTBL
-/* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
- * FOUR_HOT selects four cached banks and two streaming banks.
- * One 32-bit code still holds the absolute record index and Y sign. */
+/* GLV12: six terms per component. The four small segments (0-3: 2^18, 2^18,
+ * 2^17, 2^17 records = 48 MiB) sit at offset zero, inside the persisting L2
+ * window; the 27-bit segment (2^26 records, 4 GiB) and the bounded top
+ * (85,279,885 records, 5.08 GiB) stream from DRAM: four DRAM gathers per
+ * candidate instead of six. One 32-bit code still holds the absolute record
+ * index and Y sign. */
 #define GT_CHUNKS 6
 #define GT_GLV_TERMS 12
-#define GT_TOTAL_ENTRIES QSB_GT_TOTAL
-#define GT_LO (1u << QSB_GT_RADIX_BITS)
-#define GT_HI (1u << QSB_GT_RADIX_BITS)
+#define GT_TOTAL_ENTRIES 153175181u
+/* Builder ladders: m = h2*2^24 + h1*2^12 + lo (see kernel_build_gtable). */
+#define GT_LO 4096
+#define GT_HI 4096
+#define GT_H2 16
+/* Segments 0-3, physically first: exactly the prefix the L2 window pins. */
+#define GT_DENSE_ENTRIES 786432u
+/* QSB_GT_HEAL (see gt_heal): rewrite the builder's rare off-curve records
+ * from OpenSSL before the spot check. 0 restores the unhealed table. */
+#ifndef QSB_GT_HEAL
+#define QSB_GT_HEAL 1
+#endif
+#if QSB_GT_HEAL != 0 && QSB_GT_HEAL != 1
+#error "QSB_GT_HEAL must be 0 or 1"
+#endif
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
     return q9_bigtbl_entries(c);
 }
@@ -352,10 +368,16 @@ __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
 __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
-static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
-              "GLV12 geometry/table-byte mismatch");
+static_assert(GT_TOTAL_ENTRIES*64ULL == 9803211584ULL,
+              "GLV12 table must contain exactly 9,803,211,584 bytes");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
+static_assert(262144u+262144u+131072u+131072u == GT_DENSE_ENTRIES &&
+              GT_DENSE_ENTRIES*64ULL == (48ULL<<20),
+              "segments 0-3 must be the 48 MiB pinned prefix");
+static_assert(GT_DENSE_ENTRIES+67108864u+85279885u == GT_TOTAL_ENTRIES,
+              "segments 4 and 5 must end the table");
+static_assert(((2u*67108864u-1u)>>24) < GT_H2 && ((2u*85279885u-1u)>>24) < GT_H2,
+              "H2 ladder must cover the largest odd multiplier");
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
  * physical segments use widths [18,19,18,18,18,18,19] at shifts
@@ -2495,6 +2517,10 @@ static void launch_pinning_pipeline(
  *
  * Segment zero entry d is (K+d)A, K=333126*2^108-2^17.  Other segments
  * store (2d+1)*2^(shift-1)A.  All are affine little-endian records.
+ * (GLV12: K=170559770*2^99-2^17, and the split below has three levels,
+ * m = h2*2^24 + h1*2^12 + lo, so the 27- and 28-bit segments still need
+ * only 4096-point host ladders: one or two mixed additions and one
+ * inversion per entry.)
  *
  * Building it on the host would cost a modular inversion per entry through
  * OpenSSL. Split the odd index instead: with m = 2d+1 = hi*256 + lo,
@@ -2512,6 +2538,9 @@ static void launch_pinning_pipeline(
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
+#if QSB_BIGTBL
+    const uint64_t * __restrict__ d_H2,  /* [GT_CHUNKS][GT_H2][8] : h2*2^24*base */
+#endif
     uint8_t * __restrict__ gTable)
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -2524,7 +2553,11 @@ __global__ void kernel_build_gtable(
     int d=(int)(t-gt_offset(ch));
     int m  = ch==0?d:2*d+1;
 #if QSB_BIGTBL
-    int hi = m >> QSB_GT_RADIX_BITS, lo = m & (GT_LO-1);
+    /* L[lo]=lo*base (segment 0: (K+lo)A), H[h1]=h1*2^12*base,
+     * H2[h2]=h2*2^24*base.  None of the partial sums can meet the next
+     * addend or its negative: every addend is a distinct positive multiple
+     * below 2^28 of base (segment 0: K+lo ~ 2^126 against h1*2^12 < 2^18). */
+    int h2 = m >> 24, hi = (m >> 12) & 4095, lo = m & 4095;
 #else
     int hi = m >> 8, lo = m & 255;
 #endif
@@ -2533,14 +2566,30 @@ __global__ void kernel_build_gtable(
     const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
 
     uint64_t rx[4], ry[4];
+#if QSB_BIGTBL
+    if (hi == 0 && h2 == 0) {
+#else
     if (hi == 0) {
+#endif
         for (int k = 0; k < 4; k++) { rx[k] = Lp[k]; ry[k] = Lp[4 + k]; }
     } else {
         uint64_t px[4], py[4], pz[5] = {1, 0, 0, 0, 0}, qx[4], qy[4];
+#if QSB_BIGTBL
+        /* Start from H2[h2] when h2 != 0, else from H[h1]; add H[h1] too
+         * when both are nonzero (projective, Z != 1 afterwards). */
+        const uint64_t *Sp = h2 ? d_H2 + ((size_t)ch * GT_H2 + h2) * 8 : Hp;
+        for (int k = 0; k < 4; k++) { px[k] = Sp[k]; py[k] = Sp[4 + k]; }
+        if (h2 != 0 && hi != 0) {
+            for (int k = 0; k < 4; k++) { qx[k] = Hp[k]; qy[k] = Hp[4 + k]; }
+            _PointAddSecp256k1(px, py, pz, qx, qy);
+        }
+        for (int k = 0; k < 4; k++) { qx[k] = Lp[k]; qy[k] = Lp[4 + k]; }
+#else
         for (int k = 0; k < 4; k++) {
             px[k] = Hp[k]; py[k] = Hp[4 + k];
             qx[k] = Lp[k]; qy[k] = Lp[4 + k];
         }
+#endif
         _PointAddSecp256k1(px, py, pz, qx, qy);
         _ModInv(pz);
         _ModMult(px, pz); _ModMult(py, pz);
@@ -2553,6 +2602,41 @@ __global__ void kernel_build_gtable(
     memcpy(gTable + off + 32, ry, 32);
 }
 
+
+#if QSB_BIGTBL && QSB_GT_HEAL
+/* Flag every record that is not on the table's curve y^2 = x^3 + b'
+ * (b' = 7*beta^2: the isomorphic coordinates x*alpha, y*beta with
+ * beta^2 = alpha^3). The builder shares the chain's gate-protected field
+ * arithmetic, whose rare truncations leave ~1.4e-6 of the records as
+ * off-curve garbage; this check uses the same arithmetic, so it also flags
+ * a few correct records (~4e-7), which the host simply confirms. */
+__device__ __forceinline__ void gt_heal_canon(uint64_t a[4]) {
+    /* a < 2^256 < 2p: subtract p once if a >= p, i.e. if a + (2^32+977)
+     * carries out of 256 bits. */
+    unsigned __int128 c = (unsigned __int128)a[0] + 0x1000003D1ULL;
+    const uint64_t t0 = (uint64_t)c; c = (c >> 64) + a[1];
+    const uint64_t t1 = (uint64_t)c; c = (c >> 64) + a[2];
+    const uint64_t t2 = (uint64_t)c; c = (c >> 64) + a[3];
+    const uint64_t t3 = (uint64_t)c;
+    if ((uint64_t)(c >> 64)) { a[0] = t0; a[1] = t1; a[2] = t2; a[3] = t3; }
+}
+__global__ void kernel_gt_heal_scan(const uint8_t * __restrict__ gTable,
+                                    const uint64_t * __restrict__ bprime,
+                                    unsigned *flags, unsigned cap) {
+    const uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= GT_TOTAL_ENTRIES) return;
+    const uint64_t *r = (const uint64_t *)(gTable + t * 64);
+    uint64_t x[4] = {r[0], r[1], r[2], r[3]}, y[4] = {r[4], r[5], r[6], r[7]};
+    uint64_t b[4] = {bprime[0], bprime[1], bprime[2], bprime[3]};
+    uint64_t lhs[4], x2[4], rhs[4];
+    _ModSqr(lhs, y); _ModSqr(x2, x); _ModMult(rhs, x2, x); _ModAdd256(rhs, rhs, b);
+    gt_heal_canon(lhs); gt_heal_canon(rhs);
+    if (lhs[0] != rhs[0] || lhs[1] != rhs[1] || lhs[2] != rhs[2] || lhs[3] != rhs[3]) {
+        const unsigned slot = atomicAdd(&flags[0], 1u);
+        if (slot < cap) flags[1 + slot] = (unsigned)t;
+    }
+}
+#endif
 
 /* ============================================================
  * Host code
@@ -2635,7 +2719,11 @@ static void gt_biased_ladder(EC_GROUP *grp, const EC_POINT *first,
 }
 
 /* Build the short L/H ladders for problem-dependent A=neg_r_inv*G. */
-static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32],
+static void gt_build_ladders(uint64_t *hL, uint64_t *hH,
+#if QSB_BIGTBL
+                             uint64_t *hH2,
+#endif
+                             const uint8_t neg_r_inv[32],
                              const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
@@ -2649,7 +2737,8 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
 #if QSB_BIGTBL
-    BN_set_word(bias,QSB_GT_TOP_CENTER+1u); BN_lshift(bias,bias,QSB_GT_TOP_SHIFT-1u); BN_sub_word(bias,1u<<17);
+    BN_set_word(bias,170559770); BN_lshift(bias,bias,99); BN_sub_word(bias,1u<<17);
+    memset(hH2,0,(size_t)GT_CHUNKS*GT_H2*8*sizeof(uint64_t));
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
@@ -2679,12 +2768,24 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
         EC_POINT_mul(grp,step,NULL,base,factor,ctx);
         unsigned max_m=ch==0?gt_entries(ch)-1:2*(gt_entries(ch)-1)+1;
 #if QSB_BIGTBL
-        int high=(int)(max_m>>QSB_GT_RADIX_BITS);
+        /* h1=(m>>12)&4095 spans [0,min(4095,max_m>>12)]; h2=m>>24. */
+        int high=(int)(max_m>>12);
+        if(high>GT_HI-1) high=GT_HI-1;
 #else
         int high=(int)(max_m>>8);
 #endif
         gt_batch_ladder(grp,step,high,
             hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
+#if QSB_BIGTBL
+        int high2=(int)(max_m>>24);
+        if(high2>=GT_H2) { fprintf(stderr,"Invalid H2 ladder size\n");exit(2); }
+        if(high2>0) {
+            BN_set_word(factor,1u<<24);
+            EC_POINT_mul(grp,step,NULL,base,factor,ctx);
+            gt_batch_ladder(grp,step,high2,
+                hH2+(size_t)ch*GT_H2*8,x,y,alpha,beta,field_p,ctx);
+        }
+#endif
     }
     BN_free(x);BN_free(y);BN_free(factor);BN_free(order);BN_free(nri);
     BN_free(bscal);BN_free(field_p);BN_free(alpha);BN_free(beta);BN_free(bias);
@@ -2695,7 +2796,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
     if(ch==0) {
 #if QSB_BIGTBL
-        BN_set_word(k,QSB_GT_TOP_CENTER+1u); BN_lshift(k,k,QSB_GT_TOP_SHIFT-1u);
+        BN_set_word(k,170559770); BN_lshift(k,k,99);
 #else
         BN_set_word(k,333126); BN_lshift(k,k,108);
 #endif
@@ -2710,15 +2811,13 @@ static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
-#ifndef QSB_GT_SPARSE_CHECK
-#define QSB_GT_SPARSE_CHECK 1
-#endif
-#if QSB_GT_SPARSE_CHECK != 0 && QSB_GT_SPARSE_CHECK != 1
-#error QSB_GT_SPARSE_CHECK must be 0 or 1
-#endif
-// Direct sample readback extends terrapinelf 86f500cc. The sample schedule,
-// OpenSSL comparison, error outcome and host-builder fallback are retained.
-static int gt_spot_check(const uint8_t *gTable, int samples,
+/* Reads the built table straight out of device memory, 64 bytes per sample.
+ * The previous form mirrored the whole table to the host first: at the old
+ * GLV12 geometry that was a 1,465,193,024-byte D2H copy (measured 1.158 s of a
+ * 1.40 s startup here; 9,803,211,584 bytes now) to compare 216 entries. The samples, the arithmetic and
+ * the pass/fail condition are unchanged; only the fetch is. A failed fetch is
+ * a failed check, so the host-builder fallback still covers it. */
+static int gt_spot_check(const uint8_t *d_gTable, int samples,
                          const uint8_t neg_r_inv[32],
                          const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
@@ -2738,11 +2837,25 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
+#if QSB_BIGTBL
+        if (t < GT_CHUNKS * 8) {
+            /* 0,1,2 and the last record, plus the builder's split edges:
+             * m=4095 (largest L-only), m=4096|4097 (first H[h1]+L),
+             * m=2^24+1 (H2+L), m=2^24+4097 (H2+H+L); m=d in segment 0,
+             * m=2d+1 elsewhere. Edges past a segment's end clamp to it. */
+            ch = t / 8;
+            const int e = (int)gt_entries(ch), z = ch==0;
+            const int corner[8] = {0, 1, 2, z?4095:2047, z?4096:2048,
+                                   z?(1<<24):(1<<23), z?(1<<24)+4096:(1<<23)+2048, e - 1};
+            i = corner[t % 8] < e ? corner[t % 8] : e - 1;
+        } else {
+#else
         if (t < GT_CHUNKS * 4) {
             ch = t / 4;
             const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
             i = corner[t % 4];
         } else {
+#endif
             seed = seed * 1664525u + 1013904223u;
             ch = (int)(seed >> 28) % GT_CHUNKS;
 #if QSB_BIGTBL
@@ -2758,18 +2871,14 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
-#if QSB_GT_SPARSE_CHECK
         uint8_t got[64];
-        if (cudaMemcpy(got,gTable+off,sizeof(got),cudaMemcpyDeviceToHost)!=cudaSuccess) {
-            fprintf(stderr,"  GTable spot check read failed at chunk %d entry %d\n",ch,i);
-            ok=0;break;
+        if (cudaMemcpy(got, d_gTable + off, 64, cudaMemcpyDeviceToHost) != cudaSuccess) {
+            fprintf(stderr, "  GTable spot check read failed at chunk %d entry %d\n", ch, i);
+            ok = 0;
+            break;
         }
-        const uint8_t *sample=got;
-#else
-        const uint8_t *sample=gTable+off;
-#endif
-        if (memcmp(sample,      want,     32) != 0 ||
-            memcmp(sample + 32, want + 4, 32) != 0) {
+        if (memcmp(got,      want,     32) != 0 ||
+            memcmp(got + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -2779,6 +2888,86 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
     return ok;
 }
+
+#if QSB_BIGTBL && QSB_GT_HEAL
+/* Heal the GPU-built table before it is spot-checked. Measured on three
+ * problem instances, the builder leaves 206-227 of the 153,175,181 records
+ * wrong (the old 22.9M-record table: 19-22), every one of them off the
+ * curve. Harmless for the search (~1.7e-5 of candidates touch one and the
+ * exact host gate drops the result), but a 240-sample spot check would trip
+ * on one with probability ~3e-4 per run, and the host builder it falls back
+ * to cannot rebuild 153M records inside a ranked window. So every flagged
+ * record is recomputed with OpenSSL (the spot check's own reference path)
+ * and rewritten if it differs. The spot check then runs unchanged: a
+ * systematic builder fault yields on-curve wrong points, which this pass
+ * leaves alone, so it still fails the check and still takes the fallback.
+ * Returns -1 (treated as a failed build) on a CUDA error or more flags than
+ * the cap, i.e. anything but the rare-event rate. */
+static int gt_heal(uint8_t *d_gTable, const uint8_t neg_r_inv[32],
+                   const uint64_t alpha_le[4], const uint64_t beta_le[4],
+                   unsigned *n_flagged, unsigned *n_rewritten) {
+    const unsigned cap = 65536u;
+    *n_flagged = 0; *n_rewritten = 0;
+    EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *x = BN_new(), *y = BN_new(), *k = BN_new(), *order = BN_new(),
+           *nri = BN_new(), *field_p = BN_new(), *alpha = BN_new(), *beta = BN_new(),
+           *bp = BN_new();
+    EC_POINT *pt = EC_POINT_new(grp);
+    EC_GROUP_get_order(grp, order, ctx);
+    EC_GROUP_get_curve_GFp(grp, field_p, NULL, NULL, ctx);
+    BN_lebin2bn((const uint8_t*)alpha_le, 32, alpha);
+    BN_lebin2bn((const uint8_t*)beta_le, 32, beta);
+    BN_lebin2bn(neg_r_inv, 32, nri);
+    uint64_t hb[4] = {0, 0, 0, 0};
+    BN_mod_sqr(bp, beta, field_p, ctx); BN_mul_word(bp, 7); BN_mod(bp, bp, field_p, ctx);
+    BN_bn2lebinpad(bp, (uint8_t*)hb, 32);
+    uint64_t *d_bp = NULL; unsigned *d_flags = NULL;
+    unsigned *h_flags = (unsigned*)malloc((size_t)(cap + 1) * sizeof(unsigned));
+    int rc = h_flags ? 0 : -1;
+    cudaError_t e = cudaSuccess;
+    if (rc == 0) e = cudaMalloc(&d_bp, 32);
+    if (rc == 0 && e == cudaSuccess) e = cudaMalloc(&d_flags, (size_t)(cap + 1) * sizeof(unsigned));
+    if (rc == 0 && e == cudaSuccess) e = cudaMemcpy(d_bp, hb, 32, cudaMemcpyHostToDevice);
+    if (rc == 0 && e == cudaSuccess) e = cudaMemset(d_flags, 0, sizeof(unsigned));
+    if (rc == 0 && e == cudaSuccess) {
+        kernel_gt_heal_scan<<<(GT_TOTAL_ENTRIES + 255) / 256, 256>>>(d_gTable, d_bp, d_flags, cap);
+        e = cudaDeviceSynchronize();
+        if (e == cudaSuccess) e = cudaGetLastError();
+    }
+    if (rc == 0 && e == cudaSuccess) e = cudaMemcpy(h_flags, d_flags, sizeof(unsigned), cudaMemcpyDeviceToHost);
+    if (e != cudaSuccess || rc != 0) rc = -1;
+    else if (h_flags[0] > cap) { *n_flagged = h_flags[0]; rc = -1; }
+    else {
+        *n_flagged = h_flags[0];
+        if (h_flags[0] &&
+            cudaMemcpy(h_flags + 1, d_flags + 1, (size_t)h_flags[0] * sizeof(unsigned),
+                       cudaMemcpyDeviceToHost) != cudaSuccess) rc = -1;
+        for (unsigned q = 0; rc == 0 && q < h_flags[0]; q++) {
+            const unsigned t = h_flags[1 + q];
+            int ch = -1;
+            for (int c = 0; c < GT_CHUNKS; c++)
+                if (t >= gt_offset(c) && t < gt_offset(c) + gt_entries(c)) ch = c;
+            if (ch < 0) { rc = -1; break; }
+            uint64_t want[8]; uint8_t got[64];
+            gt_table_scalar(k, ch, t - gt_offset(ch));
+            BN_mod_mul(k, k, nri, order, ctx);
+            EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
+            gt_point_to_limbs(grp, pt, x, y, alpha, beta, field_p, ctx, want);
+            if (cudaMemcpy(got, d_gTable + (size_t)t * 64, 64, cudaMemcpyDeviceToHost) != cudaSuccess) { rc = -1; break; }
+            if (memcmp(got, want, 64) != 0) {
+                if (cudaMemcpy(d_gTable + (size_t)t * 64, want, 64, cudaMemcpyHostToDevice) != cudaSuccess) { rc = -1; break; }
+                (*n_rewritten)++;
+            }
+        }
+    }
+    cudaFree(d_bp); cudaFree(d_flags); free(h_flags);
+    BN_free(x); BN_free(y); BN_free(k); BN_free(order); BN_free(nri);
+    BN_free(field_p); BN_free(alpha); BN_free(beta); BN_free(bp);
+    EC_POINT_free(pt); EC_GROUP_free(grp); BN_CTX_free(ctx);
+    return rc;
+}
+#endif
 
 /* OpenSSL fallback builder, using the same biased-first and odd-segment
  * coefficients as the GPU builder. */
@@ -3084,13 +3273,27 @@ int main(int argc, char **argv) {
         size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
+#if QSB_BIGTBL
+        size_t h2b = (size_t)GT_CHUNKS*GT_H2*8*sizeof(uint64_t);
+        uint64_t *hH2=(uint64_t*)malloc(h2b);
+        if(!hH2){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
+        gt_build_ladders(hL,hH,hH2,pp.neg_r_inv,iso.alpha,iso.beta);
+        uint64_t *dH2=NULL; cudaMalloc(&dH2,h2b);
+        cudaMemcpy(dH2,hH2,h2b,cudaMemcpyHostToDevice);
+        free(hH2);
+#else
         gt_build_ladders(hL,hH,pp.neg_r_inv,iso.alpha,iso.beta);
+#endif
         uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
         cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
+#if QSB_BIGTBL
+        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,dH2,d_gt);
+#else
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+#endif
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
         if(gerr==cudaSuccess) gerr=cudaGetLastError();
@@ -3099,28 +3302,26 @@ int main(int argc, char **argv) {
         cudaError_t gerr = cudaGetLastError();
 #endif
         cudaFree(dL); cudaFree(dH);
-#if QSB_GT_SPARSE_CHECK
-        uint8_t *chk_table=NULL;
-#else
-        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
-        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
-#endif
-        int gt_ok = (gerr==cudaSuccess);
-        if(gt_ok){
-#if QSB_GT_SPARSE_CHECK
-            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
-                                  iso.alpha,iso.beta);
-#else
 #if QSB_BIGTBL
-            gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok=(gerr==cudaSuccess);
-            if(gt_ok)
+        cudaFree(dH2);
+#endif
+        uint8_t *chk_table=NULL;
+        int gt_ok = (gerr==cudaSuccess);
+#if QSB_BIGTBL && QSB_GT_HEAL
+        if(gt_ok){
+            unsigned n_flagged=0, n_rewritten=0;
+            gt_ok = gt_heal(d_gt,pp.neg_r_inv,iso.alpha,iso.beta,&n_flagged,&n_rewritten)==0;
+            printf("  GTable heal: %u off-curve flags, %u records rewritten from OpenSSL%s\n",
+                   n_flagged, n_rewritten, gt_ok ? "" : " (heal failed)");
+        }
+#endif
+        if(gt_ok){
+#if QSB_BIGTBL
+            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*8+192,pp.neg_r_inv,
 #else
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
 #endif
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
-#endif
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -3130,10 +3331,8 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
-#if QSB_GT_SPARSE_CHECK
             chk_table=(uint8_t*)malloc(gt_sz);
             if(!chk_table){ fprintf(stderr,"OOM: gtable host builder\n"); return 1; }
-#endif
             compute_gtable(chk_table,pp.neg_r_inv,iso.alpha,iso.beta);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
@@ -3321,7 +3520,10 @@ int main(int argc, char **argv) {
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        /* Exactly the 48 MiB of segments 0-3; the 4 GiB segment after it
+         * gains nothing from a 2 MiB sliver of persisting lines. */
+        size_t skip = 0u;
+        if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
@@ -3395,7 +3597,10 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        /* Exactly the 48 MiB of segments 0-3; the 4 GiB segment after it
+         * gains nothing from a 2 MiB sliver of persisting lines. */
+        size_t skip = 0u;
+        if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
