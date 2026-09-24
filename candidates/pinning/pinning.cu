@@ -336,13 +336,13 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 
 #if QSB_BIGTBL
 /* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
- * The two remaining ordinary segments and the bounded top stream from DRAM.
+ * FOUR_HOT selects four cached banks and two streaming banks.
  * One 32-bit code still holds the absolute record index and Y sign. */
 #define GT_CHUNKS 6
 #define GT_GLV_TERMS 12
-#define GT_TOTAL_ENTRIES 22893641u
-#define GT_LO 4096
-#define GT_HI 4096
+#define GT_TOTAL_ENTRIES QSB_GT_TOTAL
+#define GT_LO (1u << QSB_GT_RADIX_BITS)
+#define GT_HI (1u << QSB_GT_RADIX_BITS)
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
     return q9_bigtbl_entries(c);
 }
@@ -352,8 +352,9 @@ __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
 __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
-static_assert(GT_TOTAL_ENTRIES*64ULL == 1465193024ULL,
-              "GLV12 table must contain exactly 1,465,193,024 bytes");
+static_assert(GT_TOTAL_ENTRIES*64ULL ==
+              (QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              "GLV12 geometry/table-byte mismatch");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
@@ -782,6 +783,53 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
                           ((uint64_t)m32<<32)|m32,x,y);
 }
 
+// Warm only the two streaming records of each GLV component. The normal
+// load still supplies every arithmetic operand. NVIDIA PTX prefetch.L2 is
+// legal on the organizer's compute_52 path; it is a performance hint only.
+#ifndef QSB_COLD_PREFETCH
+#define QSB_COLD_PREFETCH 2
+#endif
+#if QSB_COLD_PREFETCH < 0 || QSB_COLD_PREFETCH > 2
+#error QSB_COLD_PREFETCH must be 0, 1 or 2 (addresses hinted per record)
+#endif
+#ifndef QSB_COLD_PREFETCH_LEAD
+#define QSB_COLD_PREFETCH_LEAD 2
+#endif
+#if QSB_COLD_PREFETCH_LEAD < 1 || QSB_COLD_PREFETCH_LEAD > 2
+#error QSB_COLD_PREFETCH_LEAD must be 1 or 2
+#endif
+#ifndef QSB_COLD_PREFETCH_EARLY
+#define QSB_COLD_PREFETCH_EARLY 1
+#endif
+#if QSB_COLD_PREFETCH_EARLY != 0 && QSB_COLD_PREFETCH_EARLY != 1
+#error QSB_COLD_PREFETCH_EARLY must be 0 or 1
+#endif
+#ifndef QSB_COLD_PREFETCH_TUNE
+#define QSB_COLD_PREFETCH_TUNE 1
+#endif
+#if QSB_COLD_PREFETCH_TUNE != 0 && QSB_COLD_PREFETCH_TUNE != 1
+#error QSB_COLD_PREFETCH_TUNE must be 0 or 1
+#endif
+#if QSB_COLD_PREFETCH && QSB_COLD_PREFETCH_TUNE
+__device__ __constant__ int pin_cold_prefetch_enabled=1;
+#endif
+__device__ __forceinline__ void qsb_prefetch_glv_cold(const uint8_t *table,unsigned term) {
+#if QSB_BIGTBL && QSB_FOUR_HOT && QSB_COLD_PREFETCH
+    const unsigned future=term+QSB_COLD_PREFETCH_LEAD;
+    if(future==4u || future==5u || future==10u || future==11u) {
+        const volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+        const uint32_t code=codes[(size_t)future*QSB_TREE_N+threadIdx.x];
+        const uint8_t *record=table+(size_t)(code&0x7fffffffu)*64u;
+        asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; prefetch.global.L2 [g]; }" :: "l"(record) : "memory");
+#if QSB_COLD_PREFETCH == 2
+        asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; prefetch.global.L2 [g]; }" :: "l"(record+32) : "memory");
+#endif
+    }
+#else
+    (void)table;(void)term;
+#endif
+}
+
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
@@ -797,6 +845,20 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         for(int i=0;i<4;i++) X[i]=Y[i]=U[i]=V[i]=0;
         return;
     }
+    // BEGIN QSB_COLD_PREFETCH_EARLY_CALLS
+#if QSB_COLD_PREFETCH_EARLY
+#if QSB_COLD_PREFETCH && QSB_COLD_PREFETCH_TUNE
+    if(pin_cold_prefetch_enabled) {
+#endif
+    qsb_prefetch_glv_cold(table,4u-QSB_COLD_PREFETCH_LEAD);
+    qsb_prefetch_glv_cold(table,5u-QSB_COLD_PREFETCH_LEAD);
+    qsb_prefetch_glv_cold(table,10u-QSB_COLD_PREFETCH_LEAD);
+    qsb_prefetch_glv_cold(table,11u-QSB_COLD_PREFETCH_LEAD);
+#if QSB_COLD_PREFETCH && QSB_COLD_PREFETCH_TUNE
+    }
+#endif
+#endif
+    // END QSB_COLD_PREFETCH_EARLY_CALLS
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_CHUNKS;
     int last=GT_GLV_TERMS;
@@ -827,6 +889,14 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
+        // BEGIN QSB_COLD_PREFETCH_LOOP_CALL
+#if !QSB_COLD_PREFETCH_EARLY
+#if QSB_COLD_PREFETCH && QSB_COLD_PREFETCH_TUNE
+        if(pin_cold_prefetch_enabled)
+#endif
+        qsb_prefetch_glv_cold(table,(unsigned)term);
+#endif
+        // END QSB_COLD_PREFETCH_LOOP_CALL
         if(term==GT_CHUNKS) {
             /* phi(X/ZZ,Y/ZZZ)=(beta*X/ZZ,Y/ZZZ).  The isomorphic X scale,
              * Y offset and deferred negative-Y anchor are all unchanged. */
@@ -2396,6 +2466,10 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_COLD_PREFETCH && QSB_COLD_PREFETCH_TUNE
+#include "ColdPrefetchTune.h"
+#endif
+
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -2411,12 +2485,28 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
-    kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
-        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-        saved,roots,tree,tp);
-    cudaError_t err=cudaGetLastError();
+    auto prepare_once=[&]()->cudaError_t {
+        kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+            saved,roots,tree,tp);
+        return cudaGetLastError();
+    };
+#if QSB_COLD_PREFETCH && QSB_COLD_PREFETCH_TUNE && QSB_BIGTBL && QSB_FOUR_HOT && QSB_SLOTPIPE
+    // Only the first invocation calibrates, before any slot becomes busy.
+    // The regular prepare below overwrites all calibration state/roots.
+    static bool prefetch_tuned=false;
+    if(!prefetch_tuned) {
+        cudaError_t tuning_error=qsb_tune_cold_prefetch(st,prepare_once);
+        if(tuning_error!=cudaSuccess) {
+            fprintf(stderr,"Cold prefetch calibration failed: %s\n",cudaGetErrorString(tuning_error));
+            exit(2);
+        }
+        prefetch_tuned=true;
+    }
+#endif
+    cudaError_t err=prepare_once();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
@@ -2523,7 +2613,7 @@ __global__ void kernel_build_gtable(
     int d=(int)(t-gt_offset(ch));
     int m  = ch==0?d:2*d+1;
 #if QSB_BIGTBL
-    int hi = m >> 12, lo = m & 4095;
+    int hi = m >> QSB_GT_RADIX_BITS, lo = m & (GT_LO-1);
 #else
     int hi = m >> 8, lo = m & 255;
 #endif
@@ -2648,7 +2738,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
 #if QSB_BIGTBL
-    BN_set_word(bias,10659986); BN_lshift(bias,bias,103); BN_sub_word(bias,1u<<17);
+    BN_set_word(bias,QSB_GT_TOP_CENTER+1u); BN_lshift(bias,bias,QSB_GT_TOP_SHIFT-1u); BN_sub_word(bias,1u<<17);
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
@@ -2678,7 +2768,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
         EC_POINT_mul(grp,step,NULL,base,factor,ctx);
         unsigned max_m=ch==0?gt_entries(ch)-1:2*(gt_entries(ch)-1)+1;
 #if QSB_BIGTBL
-        int high=(int)(max_m>>12);
+        int high=(int)(max_m>>QSB_GT_RADIX_BITS);
 #else
         int high=(int)(max_m>>8);
 #endif
@@ -2694,7 +2784,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
     if(ch==0) {
 #if QSB_BIGTBL
-        BN_set_word(k,10659986); BN_lshift(k,k,103);
+        BN_set_word(k,QSB_GT_TOP_CENTER+1u); BN_lshift(k,k,QSB_GT_TOP_SHIFT-1u);
 #else
         BN_set_word(k,333126); BN_lshift(k,k,108);
 #endif
@@ -2709,6 +2799,14 @@ static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
+#ifndef QSB_GT_SPARSE_CHECK
+#define QSB_GT_SPARSE_CHECK 1
+#endif
+#if QSB_GT_SPARSE_CHECK != 0 && QSB_GT_SPARSE_CHECK != 1
+#error QSB_GT_SPARSE_CHECK must be 0 or 1
+#endif
+// Direct sample readback extends terrapinelf 86f500cc. The sample schedule,
+// OpenSSL comparison, error outcome and host-builder fallback are retained.
 static int gt_spot_check(const uint8_t *gTable, int samples,
                          const uint8_t neg_r_inv[32],
                          const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
@@ -2749,8 +2847,18 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        if (memcmp(gTable + off,      want,     32) != 0 ||
-            memcmp(gTable + off + 32, want + 4, 32) != 0) {
+#if QSB_GT_SPARSE_CHECK
+        uint8_t got[64];
+        if (cudaMemcpy(got,gTable+off,sizeof(got),cudaMemcpyDeviceToHost)!=cudaSuccess) {
+            fprintf(stderr,"  GTable spot check read failed at chunk %d entry %d\n",ch,i);
+            ok=0;break;
+        }
+        const uint8_t *sample=got;
+#else
+        const uint8_t *sample=gTable+off;
+#endif
+        if (memcmp(sample,      want,     32) != 0 ||
+            memcmp(sample + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -3080,10 +3188,18 @@ int main(int argc, char **argv) {
         cudaError_t gerr = cudaGetLastError();
 #endif
         cudaFree(dL); cudaFree(dH);
+#if QSB_GT_SPARSE_CHECK
+        uint8_t *chk_table=NULL;
+#else
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+#endif
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
+#if QSB_GT_SPARSE_CHECK
+            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
+                                  iso.alpha,iso.beta);
+#else
 #if QSB_BIGTBL
             gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
             gt_ok=(gerr==cudaSuccess);
@@ -3093,6 +3209,7 @@ int main(int argc, char **argv) {
 #endif
             gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
+#endif
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -3102,6 +3219,10 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+#if QSB_GT_SPARSE_CHECK
+            chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: gtable host builder\n"); return 1; }
+#endif
             compute_gtable(chk_table,pp.neg_r_inv,iso.alpha,iso.beta);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
