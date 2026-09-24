@@ -2075,9 +2075,20 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
+#ifndef QSB_S0_MAXNREG
+#define QSB_S0_MAXNREG 104
+#endif
+/* 104 leaves a 64-register finish block beside four 128-thread stage-0 blocks.
+   __maxnreg__ cannot share a declaration with __launch_bounds__. */
 template<bool FAST_TAIL, int STAGE>
-__global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
-                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
+__global__ void
+#if QSB_S0_MAXNREG > 0
+__maxnreg__(QSB_S0_MAXNREG)
+#else
+__launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
+                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS)
+#endif
+kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
