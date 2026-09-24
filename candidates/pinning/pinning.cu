@@ -177,6 +177,12 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_L2_SKIP
 #define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
 #endif
+#ifndef QSB_L2_DENSE48
+#define QSB_L2_DENSE48 1      /* 1: BIGTBL persists only the 48 MiB dense prefix; 0: legacy full-window behavior */
+#endif
+#if QSB_L2_DENSE48 != 0 && QSB_L2_DENSE48 != 1
+#error "QSB_L2_DENSE48 must be 0 or 1"
+#endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
 #endif
@@ -343,6 +349,9 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #define GT_TOTAL_ENTRIES 22893641u
 #define GT_LO 4096
 #define GT_HI 4096
+#define QSB_L2_DENSE_PREFIX_BYTES (3ULL * 262144ULL * 64ULL)
+static_assert(QSB_L2_DENSE_PREFIX_BYTES == 48ULL * 1024ULL * 1024ULL,
+              "BIGTBL dense L2 prefix must be exactly 48 MiB");
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
     return q9_bigtbl_entries(c);
 }
@@ -395,6 +404,15 @@ static_assert(GT_TOTAL_ENTRIES*64ULL == 77768896ULL,
               "GLV14 table must contain exactly 77,768,896 bytes");
 
 #endif
+
+static inline size_t qsb_l2_persist_want(size_t gt_sz, int max_persist) {
+    size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+#if QSB_BIGTBL && QSB_L2_DENSE48
+    const size_t dense = (size_t)QSB_L2_DENSE_PREFIX_BYTES;
+    if (want > dense) want = dense;
+#endif
+    return want;
+}
 
 /* n = secp256k1 group order, little-endian limbs */
 __device__ __constant__ uint64_t GT_ORDER_N[4] = {
@@ -3284,12 +3302,12 @@ int main(int argc, char **argv) {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
-        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        size_t want = qsb_l2_persist_want(gt_sz, max_persist);
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        size_t skip = 0u; // Dense48 mode caps persistence to the first three 16 MiB segments.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
@@ -3361,9 +3379,9 @@ int main(int argc, char **argv) {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
-        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+        size_t want = qsb_l2_persist_want(gt_sz, max_persist);
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        size_t skip = 0u; // Dense48 mode caps persistence to the first three 16 MiB segments.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
