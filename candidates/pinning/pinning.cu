@@ -1,3 +1,4 @@
+// Re-draw of promoted package 871963fd; this comment is the only change (no compiled difference).
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
