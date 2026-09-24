@@ -192,7 +192,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_SYM_FINISH
 #define QSB_SYM_FINISH 1      /* delta E (xlib 0c6f4c8): symmetric recovery, 6 state planes, K=3xR^2 constant */
 #endif
+#ifndef QSB_COFACTOR_OFFLOAD
+#define QSB_COFACTOR_OFFLOAD 0 /* 1: run the 128-lane cofactor tree outside the 124-reg prepare kernel */
+#endif
+#if QSB_COFACTOR_OFFLOAD
+#define QSB_STATE_PLANES 12u /* 0-3 finish planes; 4-11 leaf scratch (U,Y,V,W) */
+#else
 #define QSB_STATE_PLANES 4u
+#endif
 #ifndef QSB_PROBE_MASK
 #define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
 #endif
@@ -474,6 +481,23 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
+#ifndef QSB_GLV_LDCS_OP
+#define QSB_GLV_LDCS_OP 1
+#endif
+__device__ __forceinline__ ulonglong2 qsb_glv_load128(const ulonglong2 *p) {
+#if QSB_GLV_LDCS
+    ulonglong2 v;
+#if QSB_GLV_LDCS_OP == 2
+    asm volatile("ld.global.cs.v2.u64 {%0,%1}, [%2];" : "=l"(v.x), "=l"(v.y) : "l"(p));
+#else
+    asm volatile("ld.global.L1::no_allocate.L2::evict_first.v2.u64 {%0,%1}, [%2];"
+                 : "=l"(v.x), "=l"(v.y) : "l"(p));
+#endif
+    return v;
+#else
+    return __ldg(p);
+#endif
+}
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
@@ -482,7 +506,7 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0=qsb_glv_load128(tx),x1=qsb_glv_load128(tx+1),y0=qsb_glv_load128(ty),y1=qsb_glv_load128(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -672,6 +696,73 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #if QSB_GLV_SEED_REG != 0 && QSB_GLV_SEED_REG != 1
 #error "QSB_GLV_SEED_REG must be 0 or 1"
 #endif
+/* Recompute each GLV record code from the two scalar halves instead of
+ * reloading a volatile shared-memory plane. The 14 codes are a few shifts
+ * from values that already live in registers; the old plane was a dependent
+ * smem round-trip in front of every table load. */
+#ifndef QSB_GLV_LIVE_DIGIT
+#define QSB_GLV_LIVE_DIGIT 0
+#endif
+#if QSB_GLV_LIVE_DIGIT != 0 && QSB_GLV_LIVE_DIGIT != 1
+#error "QSB_GLV_LIVE_DIGIT must be 0 or 1"
+#endif
+/* Issue the next table load before the mixed add that consumes the current
+ * point, so the record fetch overlaps the addition instead of stalling the
+ * next iteration's first multiply. */
+#ifndef QSB_GLV_PREFETCH
+#define QSB_GLV_PREFETCH 0
+#endif
+/* Issue the next GLV gather after X2/Y2 die, reusing those registers, so the
+ * 64-byte miss overlaps the remaining mixed-add multiplies. Unlike
+ * QSB_GLV_PREFETCH this does not keep both points live across the whole add. */
+#ifndef QSB_GLV_PIPELOAD
+#define QSB_GLV_PIPELOAD 1
+#endif
+#if QSB_GLV_PIPELOAD && QSB_GLV_PREFETCH
+#error "QSB_GLV_PIPELOAD and QSB_GLV_PREFETCH are mutually exclusive"
+#endif
+#if QSB_GLV_PREFETCH != 0 && QSB_GLV_PREFETCH != 1
+#error "QSB_GLV_PREFETCH must be 0 or 1"
+#endif
+/* Hint the next 64-byte GLV record into L2 without holding the point in
+ * registers. Distinct from QSB_GLV_PREFETCH, which fully loads into xp/yp. */
+#ifndef QSB_GLV_L2HINT
+#define QSB_GLV_L2HINT 0
+#endif
+#ifndef QSB_GLV_LDCS
+#define QSB_GLV_LDCS 0
+#endif
+#ifndef QSB_STOP_AFTER_SEQ
+#define QSB_STOP_AFTER_SEQ 0
+#endif
+/* Stage-0 cycle split. Default off so the scored path is unchanged. */
+#ifndef QSB_CLOCK_SPLIT
+#define QSB_CLOCK_SPLIT 0
+#endif
+/* Diagnostic: every GLV record load hits table entry 0 so the EC cycle
+ * counter can be compared against the real random gather. Default off. */
+#ifndef QSB_GLV_HOTLOAD
+#define QSB_GLV_HOTLOAD 0
+#endif
+/* Diagnostic: drop the deferred-Y slope multiply to price one field mul.
+ * Incorrect. Default off. */
+#ifndef QSB_SKIP_SLOPE
+#define QSB_SKIP_SLOPE 0
+#endif
+/* Diagnostic: skip the last digit of each GLV half (two deferred adds on the
+ * common both-halves path). Prices a 5-term window. Incorrect. Default off. */
+#ifndef QSB_DROP_HALFTERM
+#define QSB_DROP_HALFTERM 0
+#endif
+#if QSB_CLOCK_SPLIT
+__device__ unsigned long long qsb_clk_sha, qsb_clk_ec, qsb_clk_rec, qsb_clk_n;
+#endif
+#ifndef QSB_GLV_L2AHEAD
+#define QSB_GLV_L2AHEAD 1
+#endif
+#if QSB_GLV_L2AHEAD < 1 || QSB_GLV_L2AHEAD > 3
+#error "QSB_GLV_L2AHEAD must be 1, 2, or 3"
+#endif
 
 // First used as 14 per-lane GLV record-code planes (7 KiB); after the handoff,
 // the same 12 KiB holds the cofactor tree.
@@ -773,6 +864,67 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
                                              uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
+#if QSB_GLV_HOTLOAD
+    code=0;
+#endif
+    uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_BIGTBL
+    gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
+#else
+    gt_load_signed_flat_m(table,0u,code&0x1fffffu,
+#endif
+                          ((uint64_t)m32<<32)|m32,x,y);
+}
+
+__device__ __forceinline__ void qsb_l2hint_term(const uint8_t *table, unsigned term) {
+#if QSB_GLV_L2HINT
+    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
+#if QSB_BIGTBL
+    const uint32_t mask=0x7fffffffu;
+#else
+    const uint32_t mask=0x1fffffu;
+#endif
+    const uint8_t *addr=table+((size_t)(code&mask))*64u;
+    asm volatile("prefetch.global.L2 [%0];" :: "l"(addr));
+#else
+    (void)table; (void)term;
+#endif
+}
+
+template<int SIDE>
+__device__ __forceinline__ uint32_t qsb_live_code(const uint64_t mag[2][2], unsigned sign, int c) {
+#if QSB_BIGTBL
+    return q9_bigtbl_code(mag[SIDE], sign, c);
+#else
+    const unsigned shift=(unsigned)gt_shift(c);
+    const unsigned bits=(c==1||c==6)?19u:18u;
+    uint32_t f=(uint32_t)qsb_glv_extract(mag[SIDE], shift);
+    uint32_t idx, neg_digit;
+    if(c==0) {
+        idx=f&((1u<<18)-1u); neg_digit=0;
+    } else if(c==6) {
+        int32_t d=(int32_t)(2u*f)-333125;
+        neg_digit=(uint32_t)d>>31;
+        uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
+        idx=(ad-1u)>>1;
+    } else {
+        f&=(1u<<bits)-1u;
+        neg_digit=1u-(f>>(bits-1u));
+        idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    }
+    return (gt_offset(c)+idx)|((neg_digit^sign)<<31);
+#endif
+}
+
+__device__ __forceinline__ uint32_t qsb_live_code_term(const uint64_t mag[2][2],
+                                                      const unsigned sign[2], int term) {
+    if(term<GT_CHUNKS) return qsb_live_code<1>(mag, sign[1], term);
+    return qsb_live_code<0>(mag, sign[0], term-GT_CHUNKS);
+}
+
+__device__ __forceinline__ void qsb_load_code(const uint8_t *table, uint32_t code,
+                                              uint64_t *x, uint64_t *y) {
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
     gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
@@ -786,11 +938,20 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
     (void)unused;
+#if QSB_GLV_LIVE_DIGIT
+    uint64_t mag[2][2];
+    unsigned sign[2];
+    q9_glv_split(k,mag[0],mag[1],&sign[0],&sign[1]);
+    unsigned p_nonzero=(mag[0][0]|mag[0][1])!=0u;
+    unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0u;
+    unsigned nonzero=q_nonzero|(p_nonzero<<1);
+#else
 #if QSB_GLV_SEED_REG
     uint32_t seed0,seed1;
     unsigned nonzero=qsb_decode_glv(k,&seed0,&seed1);
 #else
     unsigned nonzero=qsb_decode_glv(k);
+#endif
 #endif
     if(!nonzero) {
         #pragma unroll
@@ -800,7 +961,10 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_CHUNKS;
     int last=GT_GLV_TERMS;
-#if QSB_GLV_SEED_REG
+#if QSB_GLV_LIVE_DIGIT
+    qsb_load_code(table,qsb_live_code_term(mag,sign,first),x0,y0);
+    qsb_load_code(table,qsb_live_code_term(mag,sign,first+1),x1,y1);
+#elif QSB_GLV_SEED_REG
     if(!(nonzero&1u)) {
         volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
         seed0=codes[(size_t)GT_CHUNKS*QSB_TREE_N+threadIdx.x];
@@ -824,7 +988,52 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first,x0,y0);
     qsb_load_glv(table,first+1,x1,y1);
 #endif
+#if QSB_GLV_L2HINT
+    for(int ahead=1; ahead<=QSB_GLV_L2AHEAD; ++ahead) {
+        if(first+1+ahead<last) qsb_l2hint_term(table,(unsigned)(first+1+ahead));
+    }
+#endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_GLV_PIPELOAD && !QSB_GLV_LIVE_DIGIT
+      if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
+      #pragma unroll 1
+      for(int term=first+2;term<last;term++) {
+          if(term==GT_CHUNKS) {
+              const uint64_t beta[4]={
+                  0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                  0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+              };
+              _ModMult(X,X,(uint64_t*)beta);
+          }
+          uint64_t pipe_u2[4], pipe_r[4];
+          qsb_xyzz_pipe_head(pipe_r,pipe_u2,Y,V,U,x1,y1,y0);
+          Load256(y0,y1);
+#if QSB_GLV_L2HINT
+          if(term+1+QSB_GLV_L2AHEAD<last)
+              qsb_l2hint_term(table,(unsigned)(term+1+QSB_GLV_L2AHEAD));
+#endif
+          if(term+1<last) qsb_load_glv(table,term+1,x1,y1);
+          asm volatile("" ::: "memory");
+          qsb_xyzz_pipe_tail(X,Y,U,V,pipe_u2,pipe_r);
+      }
+#elif QSB_GLV_PREFETCH && !QSB_GLV_LIVE_DIGIT
+    uint64_t xp[4],yp[4];
+    if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
+    #pragma unroll 1
+    for(int term=first+2;term<last;term++) {
+        if(term==GT_CHUNKS) {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        if(term+1<last) qsb_load_glv(table,term+1,xp,yp);
+        _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+        Load256(y0,y1);
+        if(term+1<last) { Load256(x1,xp); Load256(y1,yp); }
+    }
+#else
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -836,10 +1045,21 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             };
             _ModMult(X,X,(uint64_t*)beta);
         }
+#if QSB_DROP_HALFTERM
+        if(term==GT_CHUNKS-1 || term==last-1) continue;
+#endif
+#if QSB_GLV_LIVE_DIGIT
+        qsb_load_code(table,qsb_live_code_term(mag,sign,term),x1,y1);
+#else
+#if QSB_GLV_L2HINT
+        if(term+QSB_GLV_L2AHEAD<last) qsb_l2hint_term(table,(unsigned)(term+QSB_GLV_L2AHEAD));
+#endif
         qsb_load_glv(table,term,x1,y1);
+#endif
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
+#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
@@ -2101,6 +2321,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 
     uint64_t qx[4], qy[4], qzz[4], qzzz[4], prod[5];
     if (STAGE==0) {
+#if QSB_CLOCK_SPLIT
+    unsigned long long qsb_c0 = 0, qsb_c1 = 0, qsb_c2 = 0, qsb_c3 = 0;
+    if (threadIdx.x == 0) qsb_c0 = clock64();
+#endif
     uint32_t state[8];
     if (FAST_TAIL) {
         // This specialization is selected only for single_hash, normal mode.
@@ -2202,6 +2426,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
 #endif
 
+#if QSB_CLOCK_SPLIT
+    if (threadIdx.x == 0) qsb_c1 = clock64();
+#endif
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
     uint64_t z[4];
     z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
@@ -2213,6 +2440,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
+#if QSB_CLOCK_SPLIT
+    if (threadIdx.x == 0) qsb_c2 = clock64();
+#endif
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2222,9 +2452,35 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                              pin_u2rx_words[2],pin_u2rx_words[3]};
         qsb_recovery_denominator(qx,qzz,qy,qzzz,prep_xR,prod);
     }
+#if QSB_COFACTOR_OFFLOAD
+    /* Raw denominator plus U,Y,V for the dense cofactor kernel. The usable
+     * mask is reapplied there so singular lanes match the inline path. */
+    {
+        size_t i=(size_t)blockIdx.x*(size_t)blockDim.x+threadIdx.x;
+        size_t s=(size_t)batch_size;
+        qsb_st_v2(&saved[4*s+i],qzz[0],qzz[1]);
+        qsb_st_v2(&saved[5*s+i],qzz[2],qzz[3]);
+        qsb_st_v2(&saved[6*s+i],qy[0],qy[1]);
+        qsb_st_v2(&saved[7*s+i],qy[2],qy[3]);
+        qsb_st_v2(&saved[8*s+i],qzzz[0],qzzz[1]);
+        qsb_st_v2(&saved[9*s+i],qzzz[2],qzzz[3]);
+        qsb_st_v2(&saved[10*s+i],prod[0],prod[1]);
+        qsb_st_v2(&saved[11*s+i],prod[2],prod[3]);
+    }
+#else
     bool usable = active && ((prod[0] | prod[1] | prod[2] | prod[3]) != 0);
     if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
     qsb_packed_prepare(prod,qzz,qy,qzzz,usable,active,batch_size,saved,roots);
+#endif
+#if QSB_CLOCK_SPLIT
+    if (threadIdx.x == 0) {
+        qsb_c3 = clock64();
+        atomicAdd(&qsb_clk_sha, qsb_c1 - qsb_c0);
+        atomicAdd(&qsb_clk_ec, qsb_c2 - qsb_c1);
+        atomicAdd(&qsb_clk_rec, qsb_c3 - qsb_c2);
+        atomicAdd(&qsb_clk_n, 1ull);
+    }
+#endif
     (void)tree;
     return;
     } else {
@@ -2396,6 +2652,32 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_COFACTOR_OFFLOAD
+/* Same 128-lane cofactor math as qsb_packed_prepare, but not inside the
+ * 124-register prepare kernel. launch_bounds asks for 5 resident blocks so
+ * the shrinking tree waves are not stuck at the prepare kernel's 4-block cap. */
+__global__ void
+qsb_cofactor_offload(ulonglong2 *saved, int batch_size, uint64_t *roots) {
+    if(blockIdx.x*blockDim.x>=batch_size) return;
+    size_t i=(size_t)blockIdx.x*(size_t)blockDim.x+threadIdx.x;
+    size_t s=(size_t)batch_size;
+    int active=i<(size_t)batch_size;
+    ulonglong2 a,b;
+    uint64_t U[4],Y[4],V[4],prod[5];
+    a=qsb_ld_v2(&saved[4*s+i]); b=qsb_ld_v2(&saved[5*s+i]);
+    U[0]=a.x; U[1]=a.y; U[2]=b.x; U[3]=b.y;
+    a=qsb_ld_v2(&saved[6*s+i]); b=qsb_ld_v2(&saved[7*s+i]);
+    Y[0]=a.x; Y[1]=a.y; Y[2]=b.x; Y[3]=b.y;
+    a=qsb_ld_v2(&saved[8*s+i]); b=qsb_ld_v2(&saved[9*s+i]);
+    V[0]=a.x; V[1]=a.y; V[2]=b.x; V[3]=b.y;
+    a=qsb_ld_v2(&saved[10*s+i]); b=qsb_ld_v2(&saved[11*s+i]);
+    prod[0]=a.x; prod[1]=a.y; prod[2]=b.x; prod[3]=b.y; prod[4]=0;
+    bool usable=active && ((prod[0]|prod[1]|prod[2]|prod[3])!=0);
+    if(!usable){prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;}
+    qsb_packed_prepare(prod,U,Y,V,usable,active,batch_size,saved,roots);
+}
+#endif
+
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -2421,6 +2703,14 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
+#if QSB_COFACTOR_OFFLOAD
+    qsb_cofactor_offload<<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(saved,batch_size,roots);
+    err=cudaGetLastError();
+    if(err!=cudaSuccess){
+        fprintf(stderr,"Cofactor offload launch failed: %s\n",cudaGetErrorString(err));
+        exit(2);
+    }
+#endif
 #if QSB_TREE_OFFLOAD
     qsb_leaf_tree_prepare<<<blocks,256 QSB_STREAM_ARG>>>(saved,batch_size,roots,tree);
     err=cudaGetLastError();
@@ -3029,6 +3319,8 @@ int main(int argc, char **argv) {
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
+    printf("  GLV load: %s; L2 hint: %d; hotload: %d; drop_halfterm: %d; pipeload: %d\n",
+           QSB_GLV_LDCS ? "L1::no_allocate.L2::evict_first" : "ldg", QSB_GLV_L2HINT, QSB_GLV_HOTLOAD, QSB_DROP_HALFTERM, QSB_GLV_PIPELOAD);
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
@@ -3248,6 +3540,8 @@ int main(int argc, char **argv) {
     printf("  X3 h*h correction cut: %s\n", QSB_X3_TAIL ? "on" : "off");
     printf("  Host publication gate: %s; C31 approx: %s\n",
            QSB_HOST_GATE ? "on" : "off", QSB_C31 ? "on" : "off");
+    printf("  Cofactor offload: %s (%u state planes)\n",
+           QSB_COFACTOR_OFFLOAD ? "on" : "off", QSB_STATE_PLANES);
 
     /* The ranked problem geometry is fixed by harness/gen_problem.py
      * (PIN_SUFFIX_LEN=75, PIN_SEQ_OFFSET=31, 155 midstate blocks -> 9995 B),
@@ -3781,6 +4075,10 @@ int main(int argc, char **argv) {
             double rate = total_searched / elapsed;
             printf("  [GPU %d] seq #%u (0x%08X), %luM total, %.1fM/s, %.0fs\n",
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
+            fflush(stdout);
+#if QSB_STOP_AFTER_SEQ > 0
+            if (seqs_done >= (uint32_t)QSB_STOP_AFTER_SEQ) break;
+#endif
         }
     }
 #else
@@ -3915,6 +4213,23 @@ int main(int argc, char **argv) {
     double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
     printf("\n  Done: %luM in %.0fs (%.1fM/s), found=%d\n",
            total_searched/1000000, elapsed, total_searched/elapsed/1e6, found);
+#if QSB_CLOCK_SPLIT
+    {
+        unsigned long long hsha=0, hec=0, hrec=0, hn=0;
+        cudaMemcpyFromSymbol(&hsha, qsb_clk_sha, sizeof(hsha));
+        cudaMemcpyFromSymbol(&hec, qsb_clk_ec, sizeof(hec));
+        cudaMemcpyFromSymbol(&hrec, qsb_clk_rec, sizeof(hrec));
+        cudaMemcpyFromSymbol(&hn, qsb_clk_n, sizeof(hn));
+        double tot = (double)(hsha + hec + hrec);
+        printf("CLOCK_SPLIT n=%llu sha=%.1f%% ec=%.1f%% rec=%.1f%% cycles/block sha=%llu ec=%llu rec=%llu\n",
+               hn,
+               tot ? 100.0 * (double)hsha / tot : 0.0,
+               tot ? 100.0 * (double)hec / tot : 0.0,
+               tot ? 100.0 * (double)hrec / tot : 0.0,
+               hn ? hsha / hn : 0ull, hn ? hec / hn : 0ull, hn ? hrec / hn : 0ull);
+        fflush(stdout);
+    }
+#endif
 
     return 0;
 }
