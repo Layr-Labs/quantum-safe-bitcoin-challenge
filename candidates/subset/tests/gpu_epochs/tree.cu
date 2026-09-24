@@ -38,7 +38,7 @@
  * SHA from unpromoted 5605ad8 by @nullforest8200, isolated in 558d022 by
  * @DPZZxlz; this is an independent implementation). 0 = sequential loop. */
 #ifndef ZLAB_PAIRSHA
-#define ZLAB_PAIRSHA 0
+#define ZLAB_PAIRSHA 1
 #endif
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
