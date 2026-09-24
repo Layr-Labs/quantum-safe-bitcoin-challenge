@@ -2151,7 +2151,13 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
-static int gt_spot_check(const uint8_t *gTable, int samples,
+/* Reads the built table straight out of device memory, 64 bytes per sample. The
+ * previous form mirrored the whole table to the host first, i.e. a 67,108,864-byte
+ * D2H copy plus a host allocation of the same size, to compare 216 entries
+ * (13,824 bytes). Same samples, same OpenSSL derivation, same pass/fail, and a
+ * failed device read counts as a failed check so the host-builder fallback still
+ * covers every way the GPU build can go wrong. */
+static int gt_spot_check(const uint8_t *d_gTable, int samples,
                          const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
@@ -2185,8 +2191,14 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, ctx, want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        if (memcmp(gTable + off,      want,     32) != 0 ||
-            memcmp(gTable + off + 32, want + 4, 32) != 0) {
+        uint8_t got[64];
+        if (cudaMemcpy(got, d_gTable + off, 64, cudaMemcpyDeviceToHost) != cudaSuccess) {
+            fprintf(stderr, "  GTable spot check read failed at chunk %d entry %d\n", ch, i);
+            ok = 0;
+            break;
+        }
+        if (memcmp(got,      want,     32) != 0 ||
+            memcmp(got + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -2719,12 +2731,10 @@ int main(int argc, char **argv) {
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
-        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
-        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+        uint8_t *chk_table=NULL;
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,dp.neg_r_inv);
+            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,dp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -2734,6 +2744,8 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+            chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: gtable host builder\n"); return 1; }
             compute_gtable(chk_table,dp.neg_r_inv);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
