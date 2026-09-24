@@ -762,6 +762,11 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#if QSB_CHAIN_PREFETCH_L1
+/* Runtime zero for the chain's next-entry loads.  Nothing writes it, so every use below
+ * masks to 0, but ptxas cannot fold a constant-bank load. */
+__constant__ uint32_t QSB_PF_ZERO = 0u;
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -857,8 +862,15 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         }
         w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
         w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+#if QSB_CHAIN_PREFETCH_L1
+        /* bad&QSB_PF_ZERO is 0; it only orders this load after the previous step's
+         * next-entry loads.  w0 already holds the next digit; the asm loads its record. */
+        gt_load_signed_flat_f(gTable,table_base+(bad&QSB_PF_ZERO),idx,neg,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad, 1u,w0,table_base,gTable,QSB_PF_ZERO);
+#else
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+#endif
 #if !QSB_CHAIN_ANCHOR_UPDATE
         Load256(y0, cy);                /* current affine y anchors next madd */
 #endif

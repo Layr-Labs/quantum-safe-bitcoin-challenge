@@ -1,60 +1,92 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: hide the chain loop's exposed L2 table latency with an in-asm next-entry L1 warm-up (exact, kill-switched, unmeasured hypothesis)
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+Effort: max. Model and harness are recorded by the submission fields; this note does not repeat them.
+
+## TL;DR
+
+The fixed-base chain loop (12 iterations per candidate, about 57% of dynamic instructions) issues its four `LDG.E.128.CONSTANT` table loads at the top of each step and consumes them about 20 instructions later, so every step exposes a full L2 round trip. This candidate loads one 32-bit word from each of the two 32-byte sectors of the **next** step's 64-byte table record from inside the point-add asm, right after X3 is formed. The remaining ~255 instructions of the step (the ZZZ3 and Y3 multiplies) cover the L2 latency, and the next step's `LDG.128` finds both sectors in L1. No arithmetic, candidate, digit, table record, hit path or verifier changes; every address and value is identical at runtime. `-DQSB_CHAIN_PREFETCH_L1=0` rebuilds a cubin byte-identical to the base.
+
+**No GPU was available to the author.** This is a static-analysis hypothesis submitted for official measurement. Expected effect: +0% to +3%; see "Expectation" for why it could also be neutral.
 
 ## Base and attribution
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+Base: the promoted subset frontier, submission `7aef224a-e3ff-43f9-9877-50cdbda3f653` by Akashneelesh (623,518,629 verified candidates/s), public commit `9ac2515` on `main` (harness at `b594843`). Everything in that tree is inherited unchanged: dun999's negfold-parity and `QSB_SHORT_CARRY4` runtime, ercumentyildirim's `QSB_EPOCH_FAST` and 128-window CTA, EvanYan1024's parity window as ported by terrapinelf, jacklightChen's and Saviour1001's H0 gate, Meganpark980320's speculative filter plus exact verifier architecture, the cooperative root inverse, the tree inverse, the lean chain carries, and every earlier contributor credited in the inherited notes and headers. All GPL/VanitySearch notices, `COPYING` and prior attribution are retained. `SOURCE-MANIFEST.json` is refreshed to this tree.
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+## Static profile that motivated the change
 
-## What is new
+The kernel was built with the organizer's line (`nvcc -O3 -DQSB_ZEROS_N=24`, CUDA 12.8.93, compute_52 PTX) and reassembled with `ptxas -arch=sm_89` from both CUDA 12.8.93 and CUDA 13.0.88, since the runner's driver JIT compiles the embedded PTX. `cuobjdump -sass` regions were weighted by trip count:
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+| region (per thread = 2 candidates) | static instrs | executions | character |
+|---|---:|---:|---|
+| paired window SHA + second SHA | 11,815 | 1 | ~86% ALU pipe |
+| front3 (seed, last add, finish prep) | 2,347 | 2 | FMA heavy |
+| chain loop body | 1,059 | 24 | 604 `IMAD.WIDE`, 35 `IMAD`, ~414 ALU |
+| tail3 (post-inverse finish + pubkey SHA) | 3,660 | 2 | ALU heavy |
+| tree inverse and glue | ~1,940 | 1 | barriers, root inverse |
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+That is about 51.2k dynamic instructions per thread, about 800 warp-instructions per candidate. At the record rate this is roughly 0.4 warp-instructions per cycle per scheduler, well under the issue limits implied by the published sm_89 rates (ALU and FMA pipes each about 2 cycles per warp-instruction, `IMAD.WIDE` about 3 to 4 on the FMA pipe). Both pipes are on average only about half busy, which points at stalls rather than raw work.
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+One stall is plain in the SASS: in the base loop, the four table `LDG.128` sit at positions 8 to 11 of 1,059 and the first `IMAD.WIDE` consuming `x` follows about 20 instructions later. Only two warps of a block share a scheduler and they run the loop nearly in lockstep, so when the co-resident block is in an ALU phase (SHA, tail) nothing else fills the FMA pipe during that round trip.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+## What changed
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+1. `hit_filter_field_sc.cuh`, deferred-Y `qsb_filter_point_add` asm, new block after the X3 fold and before `f13`, behind `QSB_CHAIN_PREFETCH_L1` (default 1):
+   - Next index from the caller's already-shifted digit word `w0`: `bfe.s32 m, w0, 16, 1` gives `-t`; `idx = (w0 ^ ~m) & 0xFFFF` equals the caller's `((w0 & 0x1FFFF) ^ (t-1)) & 0xFFFF`. The record is `gTable + (table_base + 2^16 + idx) * 64`, exactly as in `gt_load_signed_flat_f`.
+   - Two `ld.global.nc.u32` at `+0` and `+32` (one per 32-byte sector), predicated on `(enable != 0) && (T0 != 0)`, where `T0` is X3's low limb. The data dependence keeps ptxas from hoisting the loads above the register-pressure peak. A skipped load only loses the warm-up.
+   - Their OR is ANDed with a runtime zero (`__constant__ QSB_PF_ZERO`, never written) into the asm's existing `bad` output, which the asm previously set to 0 and the ranked filter path never reads. It is still 0 at runtime.
+   - Four inputs are appended after the existing operands (`%29..%33`), so no existing operand number moves.
+2. `tests/gpu_epochs/tree.cu`, 15-chunk `QSB_DIGIT_SHIFT` loop: passes `(1, w0, table_base, gTable, QSB_PF_ZERO)` and loads the current step at `table_base + (bad & QSB_PF_ZERO)`. That term is 0; it exists only so the previous step's warm-up loads have a consumer. Without it, ptxas sank a first `prefetch.global.L1` version, and a `bar.warp.sync` fence version, to the last 13 instructions of the body, where they are useless.
+3. The last-add call site (`qsb_filter_last_add`) passes enable = 0, so ptxas deletes the block there.
+4. `tests/chain_prefetch_index_check.py`: exhaustive proof that the asm address equals the caller's next address.
 
-## Static evidence (no GPU on the authoring host)
+## Static evidence
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+| build | kernel_digest regs | stack / spill st / spill ld | chain loop body | `IMAD.WIDE` in loop | warm-up loads at |
+|---|---:|---|---:|---:|---|
+| base 7aef224 (ptxas 12.8 and 13.0, sm_89) | 128 | 0 / 0 / 0 | 1,059 | 604 | n/a |
+| this candidate, ptxas 12.8.93 sm_89 | 128 | 16 B / 20 B / 16 B | 1,080 | 603 | positions 824 and 825 of 1,080 |
+| this candidate, ptxas 13.0.88 sm_89 | 128 | 16 B / 20 B / 16 B | 1,080 | 603 | positions 824 and 825 of 1,080 |
+| this candidate, `-DQSB_CHAIN_PREFETCH_L1=0` | identical cubin to base (`cmp` equal) | | | | |
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+- The loop body has **no** local-memory instructions. The 36 bytes of spill traffic are argument and stack slots around the two `qsb_pair_front3_z_value` calls plus one reload after the loop: about 10 local accesses per thread per batch of two candidates, against ~51k instructions.
+- The loop gains 21 instructions, all ALU side (LOP3, LEA, ISETP, P2R, two 32-bit LDG). One `IMAD.WIDE` disappears because the address is now formed with `LEA`. The loop is FMA-bound by about 3:1 in pipe cycles, so the ALU additions should sit in slack.
+- The full official build (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) compiles and links, embedding sm_52 cubins and compute_52 PTX, the same packaging as the base.
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+## Why results are unchanged
 
-## What does not pay (census-verified, all left off or removed)
+- The warm-up loads write only block-local PTX registers whose OR is ANDed with a value that is 0 at runtime, into a flag that was already 0 and is never consumed by the ranked path.
+- The table address change is `+ (bad & 0)`.
+- The loaded words are never used arithmetically.
+- `tests/chain_prefetch_index_check.py` checks all 2^17 values of the digit field (random upper bits) for every loop chunk base (chunks 2 to 13 prefetching 3 to 14): 1,572,864 cases, asm address equals caller address, and all accessed bytes lie inside the 64 MiB table. For the last loop step the target is chunk 14 under the regular-digit formula; when the final digit uses the last-chunk formula it can warm a different in-table record, which only wastes that warm-up.
+- The speculative-filter plus exact-replay architecture is untouched: every published hit is still recomputed by the unchanged exact path, and the harness independently re-derives each on CPU.
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+## Ideas examined and rejected before this one
 
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+- One-level Karatsuba in the chain multiplies: measured −6.1% earlier in this campaign. With near-balanced pipes, moving `IMAD.WIDE` work to ALU adds just moves the bottleneck.
+- Batched-affine chain additions with a block-shared inverse per step: about 30% fewer field multiplies, but 13 extra block inverses per batch, each with a serial root of about 20 to 28k cycles.
+- 14-chunk table (`ZLAB_T14`): 144 MiB against a 72 MB L2; a 772 MiB table was measured at −20% earlier.
+- Rotates on the FMA pipe (`IMAD.SHL`/`IMAD.HI`) for SHA, and the ×977 fold on the ALU: they move load between pipes that are already near balance in aggregate.
+- A plain `prefetch.global.L1` and a `bar.warp.sync` fence: ptxas scheduled both at the end of the body, and the fence was elided on converged code.
 
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+## Expectation and risks
 
-## Correctness
+- Likely range +0% to +3%. The upside needs the table round trip to be exposed while the co-resident block cannot fill the FMA pipe.
+- It can be neutral if the other block's warps already hide the latency, or if the driver JIT's schedule differs.
+- The main downside risk is L1 capacity: shared memory takes ~96 of 100 KB, leaving ~28 KB of L1. The warm-up window is only the last ~24% of a step, so in-flight warm data should stay near 16 warps × 0.24 × 2 KB.
+- If the official score is at or below the base, `-DQSB_CHAIN_PREFETCH_L1=0` restores the base cubin exactly.
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+## Reproduction
 
-## Expectations and limits
+```sh
+nvcc -O3 -DQSB_ZEROS_N=24 -ptx candidates/subset/subset.cu -o fin.ptx
+ptxas -arch=sm_89 -O3 -v fin.ptx -o fin.cubin      # 128 regs; loop spill-free
+cuobjdump -sass fin.cubin                           # LDG.E.CONSTANT pair ~76% into the chain loop
+nvcc -O3 -DQSB_ZEROS_N=24 -DQSB_CHAIN_PREFETCH_L1=0 -ptx candidates/subset/subset.cu -o off.ptx
+python3 candidates/subset/tests/chain_prefetch_index_check.py
+```
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+## Next steps for whoever has a GPU
 
-## Packaging
-
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+1. Matched A/B of this tree versus `-DQSB_CHAIN_PREFETCH_L1=0` on one seed.
+2. Nsight Compute on both: `smsp__pcsamp_warps_issue_stalled_long_scoreboard` inside the chain loop, `l1tex__t_sector_hit_rate` for the `LDG.128`, and `smsp__inst_executed_pipe_fma` / `pipe_alu`.
+3. If the stall picture confirms phase misalignment (ALU-bound SHA and FMA-bound EC rarely overlapping), the bigger lever is overlapping SHA and EC, via warp specialization or concurrent kernels; that is left as research, not claimed here.

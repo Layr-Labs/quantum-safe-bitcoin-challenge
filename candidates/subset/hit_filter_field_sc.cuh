@@ -33,6 +33,21 @@
 #define QSB_CHAIN_MUL_LEAN 1
 #endif
 
+/* Next-step table prefetch into L1.  The chain loop's four LDG.128 of a 64-byte table
+ * entry are consumed ~20 instructions after issue, so every step exposes a full L2
+ * round trip.  Once X3 is formed, the remaining two multiplies (ZZZ3, Y3) do not touch
+ * the table: load one word from each 32-byte sector of the next step's entry there, so
+ * the next LDG.128 finds both sectors in L1.  The next index comes from the caller's
+ * already shifted digit word.  The two loads are predicated on X3's low limb (so ptxas
+ * cannot hoist them above the register peak), and their OR is ANDed with a runtime zero
+ * into `bad` (0 before and after, never read by the filter path); the caller masks
+ * `bad` with the same zero into the next table address, which keeps ptxas from sinking
+ * the loads to the end of the body.  Every address and value is unchanged at runtime.
+ * 0 = the previous text byte for byte. */
+#ifndef QSB_CHAIN_PREFETCH_L1
+#define QSB_CHAIN_PREFETCH_L1 1
+#endif
+
 __device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t *b, uint32_t &bad){
 #ifdef __CUDA_ARCH__
 
@@ -225,7 +240,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
     uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
     uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
     const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
-    uint64_t *__restrict__ Yoff, uint32_t &bad)
+    uint64_t *__restrict__ Yoff, uint32_t &bad,
+    uint32_t pf_en=0u, uint32_t pf_w0=0u, uint32_t pf_base=0u,
+    const uint8_t *pf_table=nullptr, uint32_t pf_zero=0u)
 {
 #ifdef __CUDA_ARCH__
   if(DEFER_Y){
@@ -2270,6 +2287,31 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #endif
         "\n"
         "\t\n"
+#if QSB_CHAIN_PREFETCH_L1
+        /* %29 enable, %30 next digit word w0, %31 current chunk base, %32 table,
+         * %33 runtime zero.  The caller's next index is ((w0&0x1FFFF)^(t-1))&0xFFFF
+         * with t=bit 16 of w0; bfe.s32 gives -t, so this is (w0^~(-t))&0xFFFF.
+         * The record is (base+2^16+idx)*64, as in gt_load_signed_flat_f. */
+        ".reg .u32 pf_or;\n"
+        "{ .reg .u32 pf_m,pf_i,pf_v0,pf_v1; .reg .u64 pf_o,pf_a; .reg .pred pf_live,pf_p;\n"
+        "\tmov.u32 pf_v0, 0;\n"
+        "\tmov.u32 pf_v1, 0;\n"
+        "\tsetp.ne.u64 pf_live, T0, 0;\n"
+        "\tsetp.ne.and.u32 pf_p, %29, 0, pf_live;\n"
+        "\tbfe.s32 pf_m, %30, 16, 1;\n"
+        "\tnot.b32 pf_m, pf_m;\n"
+        "\txor.b32 pf_i, %30, pf_m;\n"
+        "\tand.b32 pf_i, pf_i, 0xFFFF;\n"
+        "\tadd.u32 pf_i, pf_i, %31;\n"
+        "\tadd.u32 pf_i, pf_i, 0x10000;\n"
+        "\tcvt.u64.u32 pf_o, pf_i;\n"
+        "\tshl.b64 pf_o, pf_o, 6;\n"
+        "\tadd.u64 pf_a, %32, pf_o;\n"
+        "\t@pf_p ld.global.nc.u32 pf_v0, [pf_a];\n"
+        "\t@pf_p ld.global.nc.u32 pf_v1, [pf_a+32];\n"
+        "\tor.b32 pf_or, pf_v0, pf_v1;\n"
+        "}\n"
+#endif
         ".reg .u32 f13_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
@@ -2893,7 +2935,11 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "mov.u64 %13,ZZZ1;\n"
         "mov.u64 %14,ZZZ2;\n"
         "mov.u64 %15,ZZZ3;\n"
+#if QSB_CHAIN_PREFETCH_L1
+        "and.b32 %16, pf_or, %33;\n"
+#else
         "mov.u32 %16,0;\n"
+#endif
 #if QSB_CHAIN_ANCHOR_UPDATE
         "mov.u64 %17,AY0;\n"
         "mov.u64 %18,AY1;\n"
@@ -2903,10 +2949,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "}\n"
 #if QSB_CHAIN_ANCHOR_UPDATE
         : "+l"(X1[0]), "+l"(X1[1]), "+l"(X1[2]), "+l"(X1[3]), "+l"(Y1[0]), "+l"(Y1[1]), "+l"(Y1[2]), "+l"(Y1[3]), "+l"(ZZ1[0]), "+l"(ZZ1[1]), "+l"(ZZ1[2]), "+l"(ZZ1[3]), "+l"(ZZZ1[0]), "+l"(ZZZ1[1]), "+l"(ZZZ1[2]), "+l"(ZZZ1[3]), "+r"(bad), "+l"(Yoff[0]), "+l"(Yoff[1]), "+l"(Yoff[2]), "+l"(Yoff[3])
-        : "l"(X2[0]), "l"(X2[1]), "l"(X2[2]), "l"(X2[3]), "l"(Y2[0]), "l"(Y2[1]), "l"(Y2[2]), "l"(Y2[3]));
+        : "l"(X2[0]), "l"(X2[1]), "l"(X2[2]), "l"(X2[3]), "l"(Y2[0]), "l"(Y2[1]), "l"(Y2[2]), "l"(Y2[3])
+#if QSB_CHAIN_PREFETCH_L1
+        , "r"(pf_en), "r"(pf_w0), "r"(pf_base), "l"(pf_table), "r"(pf_zero)
+#endif
+        );
 #else
         : "+l"(X1[0]), "+l"(X1[1]), "+l"(X1[2]), "+l"(X1[3]), "+l"(Y1[0]), "+l"(Y1[1]), "+l"(Y1[2]), "+l"(Y1[3]), "+l"(ZZ1[0]), "+l"(ZZ1[1]), "+l"(ZZ1[2]), "+l"(ZZ1[3]), "+l"(ZZZ1[0]), "+l"(ZZZ1[1]), "+l"(ZZZ1[2]), "+l"(ZZZ1[3]), "+r"(bad)
-        : "l"(X2[0]), "l"(X2[1]), "l"(X2[2]), "l"(X2[3]), "l"(Y2[0]), "l"(Y2[1]), "l"(Y2[2]), "l"(Y2[3]), "l"(Yoff[0]), "l"(Yoff[1]), "l"(Yoff[2]), "l"(Yoff[3]));
+        : "l"(X2[0]), "l"(X2[1]), "l"(X2[2]), "l"(X2[3]), "l"(Y2[0]), "l"(Y2[1]), "l"(Y2[2]), "l"(Y2[3]), "l"(Yoff[0]), "l"(Yoff[1]), "l"(Yoff[2]), "l"(Yoff[3])
+#if QSB_CHAIN_PREFETCH_L1
+        , "r"(pf_en), "r"(pf_w0), "r"(pf_base), "l"(pf_table), "r"(pf_zero)
+#endif
+        );
 #endif
     return;
   }
