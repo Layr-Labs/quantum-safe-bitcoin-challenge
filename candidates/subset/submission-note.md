@@ -1,60 +1,105 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+Model: GPT-5
+Harness: Codex
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+# Subset: PR1128 plus base-A, early-Z2, host verification, K32 corrections, and signed fused X3
 
-## Base and attribution
+## Direct base and successor delta
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+This source starts from local immutable commit
+`e8c37c483a0a3cfbbff4c9487edb89be9afcd783`, whose exact subset subtree was
+submitted publicly as PR1134 commit
+`f465b4dffeddff7982f2bf180b19edf93418c997`. It adds only the two runtime
+mechanisms published in subset PR1137 commit
+`d5d2283e47fdb0108ff36b3e6acc5d16c115d8ad`:
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+1. `QSB_K32=1` rewrites the small `K = 2^32 + 977` limb-0 correction as two
+   32-bit halves. It is exact modulo `2^64` relative to the inherited
+   `QSB_SHORT_CARRY6` path and follows fkiene's public PR1002 pinning form.
+   The active offset-Y and negative-Y preprocessors remove two of PR1137's
+   four donor sites, leaving only `sub3` and `sub14` in this binary.
+2. Signed `QSB_FUSE_X3=1` injects `PPP - 2Q` into the first fold of `R^2` and
+   performs one second fold. It is a subset adaptation of the promoted pinning
+   fused square-add-subtract idea. `QSB_FX3_SIGNED=1` avoids the older 3p bias.
+   This remains speculative: under `QSB_SHORT_CARRY2`, sign extension ends
+   after `z3`, leaving a rare documented carry boundary. Exact host publication
+   rejects false nominations but cannot recover a missed candidate.
 
-## What is new
+Setting `-DQSB_K32=0 -DQSB_FUSE_X3=0` restores the direct base mechanism text.
+All inherited switches keep their existing defaults. No PR1137 host path, table
+geometry, harness code, or older-lineage runtime mechanism is imported.
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+### Current-base static and equal-work evidence
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+Organizer-default sm52 and native sm89 builds use 128 registers and 49,152 B
+shared. sm52 remains at zero frame and zero spills. On native sm89 the direct
+base uses an 8-byte frame with 4-byte spill stores and 4-byte spill loads; this
+successor keeps the 8-byte frame and 4-byte spill loads but raises spill stores
+to 12 bytes. Addressed digest SASS records change 50,040 to 49,992 on sm52 and
+remain 21,368 on sm89, where the schedule hash changes.
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+A scratch-only official-seed-896 fixed64 A/B/B/A run compared the direct base
+(A) with both new switches enabled (B). Every arm searched exactly
+8,589,934,592 candidates and emitted the same 1,009-hit set, SHA-256
+`ef7989de2fe4403af5ddcb3e04007a00c21aee03ca79a53682a3a160cfd4a60a`; all
+4,036 records independently CPU-verified. Search seconds were
+`11.395182760 / 11.386513126 / 11.415418560 / 11.445071165` in A/B/B/A order.
+The pooled equal-work gain is **+0.1680657566%**, with adjacent gains
+`+0.076139%` and `+0.259759%`. This was below the `+0.3%` threshold for
+cancelling PR1134, so this package is retained only as a source-distinct
+successor after that ticket becomes terminal.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+Applying the measured factor to the direct base's calibrated center of
+623,105,900 gives a heuristic center of **624,153,128 candidates/s** (about
+**624.153M/s**). This is a planning estimate, not an official score or promotion
+claim; runner variance and the native spill-store increase can dominate such a
+small local delta.
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+## Inherited base composition and provenance
 
-## Static evidence (no GPU on the authoring host)
+This source-only candidate starts at public PR1128 commit `ef525a623441ee993bdf8dd70aa2fd914a14e57e`. That base is the PR977 lineage (`ae0ade77bfdd71e5a2dc1a3e2bab780af8c7bb46`) and has two active speculative mechanisms: Saviour1001's negative-ordinate point-chain MAC from public commit `50fda34b2819c350fdda8939c10c648a76c5dc1c`, and kayu052's offset-ordinate filter from public PR1099 commit `7ae0542ad3e33f80cfff2c76d4b0e1181aa7c094`. PR1128's previous note described only the former; this note records both.
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+Three public mechanisms are added:
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+1. `QSB_RECODE_BASE_A=1`, isolated from Akashneelesh's public PR1027 commit `2469420ddffc41afb5d80303546ee6341bfd6bd6`. It builds the table on `A` and recodes `k`, replacing the equivalent `(2k)*(A/2)` construction. The GPU ladder, OpenSSL spot check, host fallback and exact path use the same representation. Setting the switch to zero restores the PR1128 construction.
+2. `QSB_DROP_Z2_EARLY=1`, isolated from dun999's public PR1093 commit `afb1ab6f40a5a38754055ca787643df60565fbbb`. It removes nine carry propagations in the speculative filter only. The removed carry is bounded by the donor's filter-event analysis. It can very rarely lose a nomination; it cannot publish an invalid hit. Setting the switch to zero restores all nine instructions.
+3. `QSB_HOST_VERIFY=1`, adapted from mitchuski's public PR918 commit `91f36300890c3a3b1e644029cb041c54dcc7fc32`. The exact GPU replay kernel is omitted and tentative records are copied through PR1128's two-slot pipeline. The host reconstructs each candidate from epoch rank and lane, computes SHA-256d from the supplied problem, performs secp256k1 recovery with OpenSSL, checks the N-bit predicate, and publishes only exact hits. It checks the GPU recid first and the other recid second. Setting the switch to zero restores PR1128's GPU verifier and its original 64-record copy path.
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+The inherited negative-Y, offset-Y and early-Z2 paths remain speculative. Exact host publication prevents false positives but cannot recover a candidate that a speculative filter never nominates. The measured equal-work hit-set comparison below is therefore a necessary finite recall check, not a proof of perfect recall over the full domain.
 
-## What does not pay (census-verified, all left off or removed)
+Inherited credits and notices remain intact, including Akashneelesh, Saviour1001, terrapinelf, dun999, ercumentyildirim, EvanYan1024, jacklightChen, fkiene, DPZZxlz, owizdom, Meganpark980320, kayu052 and mitchuski. `COPYING` is retained.
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+## Semantic and static validation
 
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+The base-A integer model passed 1,000,000 random scalars plus 12 boundary scalars, both signs of the all-zero/all-one digit extrema, and all 1,048,576 table entries. In every table case the new entry equals twice the old entry modulo the group order, proving `k*A == (2k)*(A/2)` for the modeled construction.
 
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+Both organizer-default sm52/PTX and native sm89 builds completed with CUDA 12.8.93 using the normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` command. For `kernel_digest`:
 
-## Correctness
+| build | registers | shared | stack | spill store/load |
+|---|---:|---:|---:|---:|
+| PR1128 control, sm52/PTX | 128 | 49,152 B | 0 B | 0 / 0 B |
+| candidate, sm52/PTX | 128 | 49,152 B | 0 B | 0 / 0 B |
+| PR1128 control, native sm89 | 128 | 49,152 B | 16 B | 16 / 12 B |
+| candidate, native sm89 | 128 | 49,152 B | 8 B | 4 / 4 B |
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+A clean archive of PR1128 was compiled independently. Building this source with `-DQSB_RECODE_BASE_A=0 -DQSB_DROP_Z2_EARLY=0 -DQSB_HOST_VERIFY=0` produced byte-identical full `cuobjdump --dump-sass` output to that clean archive on both targets: sm52 SHA-256 `0ef51219757bab878ac0cc465b182f0c7e22e7f64b26b75a3ec3c30c248b8a85`, sm89 `a821017c6b567565fe76bc3a603fca66324d91e19174aaeba2f18239a41de143`. This checks that the three kill switches restore the base device program.
 
-## Expectations and limits
+## Equal-work RTX 4090 measurement
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+A scratch-only diagnostic capped both variants after 64 complete ranked launches on the official PR896 problem (generator seed `1331736675`, `subset.bin` SHA-256 `cf224c71a1e636b29ef910790a5b38990bc88a2db024a863796bc7dad20187e9`). Each arm completed exactly 8,589,934,592 candidates. Runs used fresh CUDA cache directories in A/B/B/A order under exclusive GPU locks; the diagnostic cap and timing lines are absent from this production tree.
 
-## Packaging
+| arm | search seconds | full process seconds | independently verified hits |
+|---|---:|---:|---:|
+| PR1128 control | 11.457039729 | 23.536337 | 1,009 / 1,009 |
+| candidate | 11.409431668 | 18.466050 | 1,009 / 1,009 |
+| candidate | 11.418384836 | 18.172282 | 1,009 / 1,009 |
+| PR1128 control | 11.482237279 | 23.483881 | 1,009 / 1,009 |
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+The pooled equal-work search gain is `+0.488266%`; both adjacent comparisons are positive (`+0.4173%`, `+0.5592%`). All four normalized hit sets are identical, SHA-256 `ef7989de2fe4403af5ddcb3e04007a00c21aee03ca79a53682a3a160cfd4a60a`, with zero missing or extra hits. The unchanged independent CPU harness verifier re-derived every hit. Fresh-cache full-process time is about 5.19 seconds lower because the large exact GPU verifier no longer participates in driver JIT; this startup observation is environment-specific and is not added to the warm percentage.
+
+The same base-A plus early-Z2 pair was previously measured on the e199 runtime on two problems: `+0.358984%` on seed896 and `+0.290819%` on seed897, with positive adjacent pairs and identical CPU-verified hit sets. Those results support the direction of this port but are not measurements of PR1128 or of its host verifier.
+
+## Scope and limits
+
+Only `candidates/subset/` changes. No harness, verifier, problem, scorer, setup, benchmark, workflow, sibling track or runner configuration is modified. The production source has no fixed-work stop, seed branch, device branch, expected-score lookup or timing-dependent behavior. The normal build and launch interface are unchanged.
+
+The `+0.488266%` result is one current-source seed and is small enough for clock, JIT and remote-driver variation to matter. PR1128's inherited filter paths and early-Z2 have documented vanishingly rare false-negative conditions. Equal hit sets over 8.59 billion candidates bound the observed finite sample but do not prove zero loss over the entire search space. The official fixed-time verified score is authoritative; no promotion or score is claimed in advance.
