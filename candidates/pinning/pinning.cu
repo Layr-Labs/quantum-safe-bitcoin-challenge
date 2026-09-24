@@ -871,6 +871,9 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 
 /* gpu_is_on_curve and gpu_der_r_on_curve: removed -- dead with the diagnostic kernel. */
 
+#ifndef QSB_SMEM_RESERVE
+#define QSB_SMEM_RESERVE 16384 /* stage-0 smem pad: 12288+16384=28672, 3 blocks/SM, room for finish */
+#endif
 #ifndef QSB_ZEROS_N
 #define QSB_ZEROS_N 24
 #endif
@@ -2094,6 +2097,10 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
 ) {
+    if constexpr (STAGE == 0 && QSB_SMEM_RESERVE > 0) {
+        __shared__ volatile unsigned char qsb_smem_reserve[QSB_SMEM_RESERVE];
+        if ((int)threadIdx.x < QSB_SMEM_RESERVE) qsb_smem_reserve[threadIdx.x] = 0;
+    }
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (blockIdx.x * blockDim.x >= batch_size) return;
     int active = idx < batch_size;
@@ -3029,6 +3036,21 @@ int main(int argc, char **argv) {
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
+    {
+        cudaFuncAttributes a0, a2;
+        int occ0 = -1, occ2 = -1;
+        cudaFuncGetAttributes(&a0, kernel_pinning_pipeline<true, 0>);
+        cudaFuncGetAttributes(&a2, kernel_pinning_pipeline<true, 2>);
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &occ0, kernel_pinning_pipeline<true, 0>, QSB_S0_THREADS, 0);
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &occ2, kernel_pinning_pipeline<true, 2>, QSB_S2_THREADS, 0);
+        printf("  occupancy: smem_reserve=%d stage-0 regs=%d smem=%zu blocks/SM=%d; stage-2 regs=%d smem=%zu blocks/SM=%d; devSmemPerSM=%zu\n",
+               QSB_SMEM_RESERVE,
+               a0.numRegs, a0.sharedSizeBytes, occ0,
+               a2.numRegs, a2.sharedSizeBytes, occ2,
+               prop.sharedMemPerMultiprocessor);
+    }
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
