@@ -185,7 +185,7 @@ __device__ __forceinline__ void qsb_replay_mul(uint64_t*r,const uint64_t*a,uint3
 }
 
 template<bool DEFER_Y>
-__device__ __forceinline__ void qsb_replay_point_add(
+__device__ __noinline__ void qsb_replay_point_add(
     uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
     uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
     const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,

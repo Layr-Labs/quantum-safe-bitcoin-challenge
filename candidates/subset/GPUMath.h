@@ -1295,7 +1295,7 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // __restrict__ matches the pinning XYZZ hot-path; arithmetic is unchanged from
 // the prior bool form (no lazy/fused-X3 riders).
 template<bool DEFER_Y>
-__device__ __forceinline__ void _PointAddXYZZ_def(
+__device__ __noinline__ void _PointAddXYZZ_def(
     uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
     uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
     const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
@@ -1339,7 +1339,7 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
 }
 
 // Runtime-bool dispatcher for any remaining non-specialized call sites.
-__device__ __forceinline__ void _PointAddXYZZ_def(
+__device__ __noinline__ void _PointAddXYZZ_def(
     uint64_t *__restrict__ X1, uint64_t *__restrict__ Y1,
     uint64_t *__restrict__ ZZ1, uint64_t *__restrict__ ZZZ1,
     const uint64_t *__restrict__ X2, const uint64_t *__restrict__ Y2,
@@ -1410,3 +1410,5 @@ __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint
   _ModSub256(Y3, Q, R);                            // Y3 = R*(Q - X3) - Y1*PPP
   Load256(X3, T);                                  // X3
 }
+
+// QSB_JIT_VOLUME_REDRAW_20260924_0105
