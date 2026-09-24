@@ -1,0 +1,67 @@
+{
+  "status": "NOT_SELECTED",
+  "reason": "Compiled ranked kernels grow and introduce spills despite reduced raw products; no evidence for expected substantial improvement. This is a codegen screen, not a GPU slowdown measurement.",
+  "control_native_report": "../wide_windows/production-native-results.json",
+  "control_report_sha256": "c503928f54e2099ddaee9889ac51e8fb95dbff937d57e6be9c5a45f23d3bb3b6",
+  "source_equivalence": "All control include hashes match preserved submitted source. Experiment differs only in GPUMath.h device multiply body.",
+  "ranked_kernels": [
+    {
+      "kernel": "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_S3_PjS6_iiijP10ulonglong2PmS9_",
+      "control": {
+        "registers": 78,
+        "shared_bytes": 24576,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 4598
+      },
+      "karatsuba": {
+        "registers": 80,
+        "shared_bytes": 24576,
+        "stack_bytes": 40,
+        "spill_store_bytes": 44,
+        "spill_load_bytes": 48,
+        "non_nop": 5059
+      }
+    },
+    {
+      "kernel": "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_S3_PjS6_iiijP10ulonglong2PmS9_",
+      "control": {
+        "registers": 122,
+        "shared_bytes": 16384,
+        "stack_bytes": 0,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 7817
+      },
+      "karatsuba": {
+        "registers": 128,
+        "shared_bytes": 16384,
+        "stack_bytes": 8,
+        "spill_store_bytes": 4,
+        "spill_load_bytes": 8,
+        "non_nop": 9221
+      }
+    },
+    {
+      "kernel": "_Z20kernel_pinning_fusedILb1EEvPKjPKhiiiijjPKmS5_S5_S5_S5_S3_PjS6_iiijP10ulonglong2PmS9_",
+      "control": {
+        "registers": 126,
+        "shared_bytes": 24576,
+        "stack_bytes": 120,
+        "spill_store_bytes": 0,
+        "spill_load_bytes": 0,
+        "non_nop": 13607
+      },
+      "karatsuba": {
+        "registers": 128,
+        "shared_bytes": 24576,
+        "stack_bytes": 128,
+        "spill_store_bytes": 12,
+        "spill_load_bytes": 12,
+        "non_nop": 15415
+      }
+    }
+  ],
+  "gpu_executed": false
+}

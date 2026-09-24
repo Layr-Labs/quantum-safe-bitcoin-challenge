@@ -1,152 +1,54 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
-  "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
-  "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
-  ],
-  "files": [
-    {
-      "path": "candidates/pinning/COPYING",
-      "bytes": 35149,
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    },
-    {
-      "path": "candidates/pinning/COPYING-secp256k1",
-      "bytes": 1057,
-      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
-    },
-    {
-      "path": "candidates/pinning/DEAD-ENDS.md",
-      "bytes": 2477,
-      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
-    },
-    {
-      "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
-    },
-    {
-      "path": "candidates/pinning/GPUHash.h",
-      "bytes": 35133,
-      "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
-    },
-    {
-      "path": "candidates/pinning/GPUMath.h",
-      "bytes": 121679,
-      "sha256": "7f67eba59dd01125151f2ae257ad4782d37d98e2e2b37a196c4e7deb81229a2d"
-    },
-    {
-      "path": "candidates/pinning/LeafRecovery.cuh",
-      "bytes": 6880,
-      "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
-    },
-    {
-      "path": "candidates/pinning/NARROW-PARITY.md",
-      "bytes": 11898,
-      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
-    },
-    {
-      "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
-      "bytes": 2521,
-      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
-      "bytes": 26615,
-      "sha256": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-VALIDATION.json",
-      "bytes": 1146,
-      "sha256": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8"
-    },
-    {
-      "path": "candidates/pinning/PackedRecovery.cuh",
-      "bytes": 7733,
-      "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
-    },
-    {
-      "path": "candidates/pinning/ParityWindow.cuh",
-      "bytes": 6292,
-      "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
-    },
-    {
-      "path": "candidates/pinning/PriorityPipeline.h",
-      "bytes": 2435,
-      "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
-    },
-    {
-      "path": "candidates/pinning/RESEARCH.md",
-      "bytes": 23810,
-      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
-    },
-    {
-      "path": "candidates/pinning/RecoveryConstant.h",
-      "bytes": 1091,
-      "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
-    },
-    {
-      "path": "candidates/pinning/SlotReadback.h",
-      "bytes": 1756,
-      "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
-    },
-    {
-      "path": "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
-      "bytes": 20260,
-      "sha256": "6109f51ebf5321f27fc86211c2de122c372d20ffc495cfe30e36514b05b1fde9"
-    },
-    {
-      "path": "candidates/pinning/cofactor_checkpoint.h",
-      "bytes": 9186,
-      "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
-    },
-    {
-      "path": "candidates/pinning/negative_y_mac.cuh",
-      "bytes": 8451,
-      "sha256": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335"
-    },
-    {
-      "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
-    },
-    {
-      "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
-    },
-    {
-      "path": "candidates/pinning/sha_schedule_interleaved.cuh",
-      "bytes": 1597,
-      "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
-    },
-    {
-      "path": "candidates/pinning/test_carry62.py",
-      "bytes": 13593,
-      "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
-    },
-    {
-      "path": "candidates/pinning/test_host_gate.py",
-      "bytes": 6491,
-      "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
-    },
-    {
-      "path": "candidates/pinning/test_priority_pipeline.py",
-      "bytes": 16765,
-      "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
-    },
-    {
-      "path": "candidates/pinning/test_sha_interleave.py",
-      "bytes": 4040,
-      "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
-    },
-    {
-      "path": "candidates/pinning/test_slot_readback.py",
-      "bytes": 11396,
-      "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
-    }
-  ]
+  "comparison_baseline_commit": "1f81cfcc2e8b67f1cd045e3a8fdf00111ccf9662",
+  "comparison_baseline_submission": "promoted anamdongparkjinhyeong 2c7a195e = commit 1fe5a8e4 (GLV12 QSB_BIGTBL), official 881273403 -> floor 890086137; our v20 4fe6a084 measured 882096418 rejected (+823K over frontier, -8.0M under floor)",
+  "compiler": "nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm (CUDA 12.8.93)",
+  "harness": "Devin CLI",
+  "model": "SWE-2 Max",
+  "note": "v22c = v22b + restored qsb_table_offset_y launch (the v22 two-phase gtable restructure dropped the ordinate-offset pass: raw Y verified fine by the spot check but every consumer-side XOR decode was wrong -> ~0 verified hits -> ok=false after the full window, both runs). Offset now runs once at the end of phase 2 covering GPU build, cubin-rejected relaunch, and host fallback. All v22b exit hardening retained; device code and cubin unchanged.",
+  "production_source_bytes": 975854,
+  "production_source_sha256": {
+    "COPYING": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+    "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
+    "DEAD-ENDS.md": "faa883c650a1c69a552a4045339fd38efd1942ed08a8608d48a0d443fd530af1",
+    "GLVScalar.cuh": "44974cb4fb23c82fc1c5d44691e2fa19ef213ea563fe27a8ec354bcd44ee90c3",
+    "GPUHash.h": "f8107cfd6909733aefc497eb0437048aa8025404c04101a46d25c3c8238b7f49",
+    "GPUMath.h": "d182dcf9d878ddfa2a9367d023c7a5356a98235c60303a7e252cf40190d7907e",
+    "ITERATIONS.md": "9ce62eeabae67217c8038cb67b649907e5e8feb2af5c4c1206e6cf1ead62b442",
+    "LeafRecovery.cuh": "b4a0b5ba514cae84f3a5d5b6e375394cd2e0e783d457aa83be4cadb94dd61a01",
+    "NARROW-PARITY.md": "b8ce343d29d7cec9cce46be75fb86370eeacf054e741921fb399815d0fab656b",
+    "NEXT-OPTIMIZATIONS.md": "440a182131303c8b47dbaf8b8302c28540ddea74bafa12995f2eaeb80b7b20c8",
+    "PRIORITY-SUBMISSION.md": "26e4562bfd8fdefc5f0bb03141c538fed60d35f110ab4e5326d8fbb451aefb13",
+    "PRIORITY-VALIDATION.json": "81e601dc4bfa5cce2cd0ca0c3395205dba0e60e95cab668a272004c7ebe1d2b4",
+    "PackedRecovery.cuh": "2949d06eebd345724a6cca394e4713a440354aacc77d7b1a5765d5b3f4788b92",
+    "ParityWindow.cuh": "2402adfa1e75633a569e24051862f318ae4111d282d341ee28628d5ef83b674e",
+    "PriorityPipeline.h": "a90f591d1e5b080dd7cbf2e4a299992b09622ccbe0f0e4edfe1d2d9974db8529",
+    "RESEARCH.md": "8422e97ecb875063ddc19bfddc990e6b8a98a73a41408028030655f7be84438a",
+    "RecoveryConstant.h": "3af62499aa292f6ba30066327ca3e0c1f984301def265d21f27a7a0134e77cf9",
+    "SUBMISSION-v14.md": "c9ee219a93da5b746559a88006dc79cd1d0ce36ace5d9eb4f15a80e9da425312",
+    "SUBMISSION-v14b.md": "b105483ac22b81a83c42147a7a8e780938ee01ad95b7301319dd671d4d98fd95",
+    "SUBMISSION-v14c.md": "f7a0b2e6faca86844b356dae5bf9d72c8dc41f78799c6d8b25f5f65d935aeecb",
+    "SUBMISSION-v15.md": "ef08fe44d4ac511a89323da48e19fb3093955f1eb1b338f649a50a28b9865cc5",
+    "SUBMISSION-v16.md": "aadee8d9995a7aee95b425ca039a29bf2ec17a133bdf9ced1bbab1bd8f68f07c",
+    "SUBMISSION-v17.md": "8a310254a390cbbf86fc837dfade44062a4e3d8e5767b4b375e3ac1e2e9cdd8d",
+    "SUBMISSION-v18.md": "cdfc137f917b969be9bcc2ea1d75d4694508641efd4cef5846e36f720b6a5c6a",
+    "SUBMISSION-v19.md": "68b63fcf1c647256843c394a25fbc72f6c26dc6cffadffb8a636961891d93720",
+    "SUBMISSION-v19b.md": "37aeefcd3c4b38be8ac204e21499403ab66b343f1c77b522bfcd79fe644321db",
+    "SUBMISSION-v19c.md": "49c9c7c05010fe3220738b9624e1ef08fe8760bd121e8f3f0687b96f11303a40",
+    "SUBMISSION-v19d.md": "38a2b07eaeed24c4eb8c0ef145a15542bd7aec1f70cf78153987029fe4181e4d",
+    "SUBMISSION-v20.md": "c59524804361a9904a67ac05e1ed507ebcf6ea467bff0f215c1b5a628fa7d494",
+    "SUBMISSION-v20b.md": "161f2ad220515fe0932ffa4043efbeebe2fe92323531c149e2d8ff92ef2fea45",
+    "SUBMISSION-v21.md": "e8f93cfdcce65dc1ff2fc83f2998b4b1609fb87aec0b46ec87bdee7344e06f80",
+    "SUBMISSION-v22.md": "4c03d2645a24167f63c1da37ed995b35725b6c742391ae16d1e232b80f893fe9",
+    "SUBMISSION-v22b.md": "80783feaf200606763a485c53dfde3f3af1fc6c0dc86e80e8cfc8b88b47d1383",
+    "SUBMISSION-v23.md": "79122e0e5aac1293e3b97d2d016524de0944379d9bfbeecb864ac2252a7c7ed3",
+    "SUBMISSION.md": "353023eeb580bc5ce659e506ecd30b8ac104c78e0cd82de28f6c1da9383c1eaf",
+    "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "cofactor_checkpoint.h": "b1f00b27df4ed29bfb46f1e0a05752967bae7d01d80a1aece041da65f29e38bd",
+    "negative_y_mac.cuh": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335",
+    "pinning.cu": "cdf50ac9f95abc73613a11ef5f73af925d5a720d1d70500e2f6744cd77258d19",
+    "sha_pinsha.cuh": "5df63c5fbf8c4127180ed35961dd7ed87a6fe87fc9bef02f5527c42ee0ed90e8",
+    "sha_schedule_interleaved.cuh": "45182529cf459d47953adbe2ea3a447dc00310d85363b1083ed47484b778fa40",
+    "work_tmp_v22.cu": "ad65c20470d0e04301381110e8154b17cfa4d5a508d6c743c4773072313e0db6",
+    "SUBMISSION-v22c.md": "edbaea61097980aa97836c388d96cd3721953cc1501333a802869f34b2d65e4c"
+  }
 }
