@@ -1,6 +1,9 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
+#ifndef QSB_L2_FETCH64
+#define QSB_L2_FETCH64 1 /* host-only: cap the L2 max fetch granularity at one 64-byte table record */
+#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -3044,6 +3047,23 @@ int main(int argc, char **argv) {
 
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+#if QSB_L2_FETCH64
+    /* Every fixed-base table record is 64 bytes (X||Y, 64-byte aligned) and the
+     * two streaming GLV banks are read at random, so an L2 fill wider than one
+     * record moves DRAM bytes no candidate uses. Cap the fill at one record.
+     * A hint only: a refusal is cleared so it cannot surface at a later launch
+     * check, and the run is then the parent tree. */
+    {
+        size_t g0 = 0, g1 = 0;
+        cudaError_t gq = cudaDeviceGetLimit(&g0, cudaLimitMaxL2FetchGranularity);
+        cudaError_t gs = cudaDeviceSetLimit(cudaLimitMaxL2FetchGranularity, 64);
+        cudaError_t gr = cudaDeviceGetLimit(&g1, cudaLimitMaxL2FetchGranularity);
+        (void)cudaGetLastError();
+        printf("  L2 max fetch granularity: %ld -> %ld B (%s)\n",
+               gq == cudaSuccess ? (long)g0 : -1L, gr == cudaSuccess ? (long)g1 : -1L,
+               gs == cudaSuccess ? "ok" : cudaGetErrorString(gs));
+    }
+#endif
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
