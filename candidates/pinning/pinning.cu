@@ -667,7 +667,7 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 
 /* Production scalar-entry form for the exact 14-term GLV chain. */
 #ifndef QSB_GLV_SEED_REG
-#define QSB_GLV_SEED_REG 1
+#define QSB_GLV_SEED_REG 0 /* shared-memory seed-code staging experiment */
 #endif
 #if QSB_GLV_SEED_REG != 0 && QSB_GLV_SEED_REG != 1
 #error "QSB_GLV_SEED_REG must be 0 or 1"
