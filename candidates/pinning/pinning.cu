@@ -24,6 +24,12 @@
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
 #endif
+#ifndef QSB_GATE_PREALLOC
+#define QSB_GATE_PREALLOC 1 /* reuse exact host-gate OpenSSL/BIGNUM scratch across hits */
+#endif
+#if QSB_GATE_PREALLOC != 0 && QSB_GATE_PREALLOC != 1
+#error "QSB_GATE_PREALLOC must be 0 or 1"
+#endif
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
@@ -2908,6 +2914,143 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
+#if QSB_GATE_PREALLOC
+typedef struct {
+    EC_GROUP *grp;
+    BN_CTX *ctx;
+    BIGNUM *order;
+    BIGNUM *nri;
+    BIGNUM *z;
+    BIGNUM *u1;
+    BIGNUM *qx;
+    BIGNUM *qy;
+    EC_POINT *ru2[2];
+    EC_POINT *P;
+    EC_POINT *Q;
+} qsb_gate_ctx_t;
+
+static void qsb_gate_ctx_free(qsb_gate_ctx_t *g) {
+    if (!g) return;
+    EC_POINT_free(g->Q);
+    EC_POINT_free(g->P);
+    EC_POINT_free(g->ru2[1]);
+    EC_POINT_free(g->ru2[0]);
+    BN_free(g->qy);
+    BN_free(g->qx);
+    BN_free(g->u1);
+    BN_free(g->z);
+    BN_free(g->nri);
+    BN_free(g->order);
+    BN_CTX_free(g->ctx);
+    EC_GROUP_free(g->grp);
+    memset(g, 0, sizeof(*g));
+}
+
+static int qsb_gate_ctx_init(qsb_gate_ctx_t *g, const pinning2_params_t *pp) {
+    BIGNUM *rx = NULL, *ry = NULL;
+    int ok = 0;
+    memset(g, 0, sizeof(*g));
+    g->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    g->ctx = BN_CTX_new();
+    g->order = BN_new();
+    g->nri = BN_new();
+    g->z = BN_new();
+    g->u1 = BN_new();
+    g->qx = BN_new();
+    g->qy = BN_new();
+    if (!g->grp || !g->ctx || !g->order || !g->nri || !g->z || !g->u1 || !g->qx || !g->qy)
+        goto fail;
+    g->ru2[0] = EC_POINT_new(g->grp);
+    g->ru2[1] = EC_POINT_new(g->grp);
+    g->P = EC_POINT_new(g->grp);
+    g->Q = EC_POINT_new(g->grp);
+    if (!g->ru2[0] || !g->ru2[1] || !g->P || !g->Q) goto fail;
+
+    rx = BN_new();
+    ry = BN_new();
+    ok = rx && ry &&
+        EC_GROUP_get_order(g->grp, g->order, g->ctx) &&
+        BN_lebin2bn(pp->neg_r_inv, 32, g->nri) &&
+        BN_lebin2bn(pp->u2r_x, 32, rx) &&
+        BN_lebin2bn(pp->u2r_y, 32, ry) &&
+        EC_POINT_set_affine_coordinates_GFp(g->grp, g->ru2[0], rx, ry, g->ctx) &&
+        EC_POINT_copy(g->ru2[1], g->ru2[0]) &&
+        EC_POINT_invert(g->grp, g->ru2[1], g->ctx);
+    BN_free(rx); BN_free(ry);
+    if (!ok) goto fail;
+    return 0;
+fail:
+    qsb_gate_ctx_free(g);
+    return -1;
+}
+
+static int qsb_host_exact_hit_prealloc(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                                       qsb_gate_ctx_t *g) {
+    uint32_t sl = pp->suffix_len;
+    uint32_t so = pp->seq_offset;
+    uint32_t lo = pp->lt_offset;
+    if (sl > 119 || so + 3 >= sl || lo + 3 >= sl || (recid != 0 && recid != 1)) return 0;
+
+    uint8_t buf[128];
+    memset(buf, 0, sizeof(buf));
+    memcpy(buf, pp->suffix, sl);
+    buf[so]     = (uint8_t)seq;
+    buf[so + 1] = (uint8_t)(seq >> 8);
+    buf[so + 2] = (uint8_t)(seq >> 16);
+    buf[so + 3] = (uint8_t)(seq >> 24);
+    buf[lo]     = (uint8_t)lt;
+    buf[lo + 1] = (uint8_t)(lt >> 8);
+    buf[lo + 2] = (uint8_t)(lt >> 16);
+    buf[lo + 3] = (uint8_t)(lt >> 24);
+    buf[sl] = 0x80;
+    int nblk = (sl < 56) ? 1 : 2;
+    uint64_t bits = (uint64_t)pp->total_preimage_len * 8;
+    int lenoff = nblk * 64 - 8;
+    for (int i = 0; i < 8; i++) buf[lenoff + 7 - i] = (uint8_t)(bits >> (8 * i));
+
+    SHA256_CTX sc;
+    SHA256_Init(&sc);
+    for (int i = 0; i < 8; i++) sc.h[i] = pp->midstate[i];
+    SHA256_Transform(&sc, buf);
+    if (nblk == 2) SHA256_Transform(&sc, buf + 64);
+
+    uint8_t d1[32];
+    for (int i = 0; i < 8; i++) {
+        d1[i * 4]     = (uint8_t)(sc.h[i] >> 24);
+        d1[i * 4 + 1] = (uint8_t)(sc.h[i] >> 16);
+        d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
+        d1[i * 4 + 3] = (uint8_t)sc.h[i];
+    }
+    uint8_t d2[32];
+    SHA256(d1, 32, d2);
+
+    int ok = BN_bin2bn(d2, 32, g->z) &&
+        BN_mod_mul(g->u1, g->z, g->nri, g->order, g->ctx) &&
+        EC_POINT_mul(g->grp, g->P, g->u1, NULL, NULL, g->ctx) &&
+        EC_POINT_add(g->grp, g->Q, g->P, g->ru2[recid], g->ctx) &&
+        EC_POINT_get_affine_coordinates_GFp(g->grp, g->Q, g->qx, g->qy, g->ctx);
+    if (ok) {
+        uint8_t pub[33], xb[32];
+        memset(xb, 0, 32);
+        int nbytes = BN_num_bytes(g->qx);
+        if (nbytes <= 0 || nbytes > 32) return 0;
+        BN_bn2bin(g->qx, xb + (32 - nbytes));
+        pub[0] = (uint8_t)(0x02 + (BN_is_odd(g->qy) ? 1 : 0));
+        memcpy(pub + 1, xb, 32);
+        uint8_t hh[32];
+        SHA256(pub, 33, hh);
+        ok = qsb_host_zeros(hh) >= QSB_ZEROS_N;
+    }
+    return ok;
+}
+
+static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
+                           qsb_gate_ctx_t *g) {
+    if (qsb_host_exact_hit_prealloc(pp, seq, lt, ri, g)) return ri;
+    if (qsb_host_exact_hit_prealloc(pp, seq, lt, 1 - ri, g)) return 1 - ri;
+    return -1;
+}
+#else
 static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
                               EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                               const BIGNUM *nri, const EC_POINT *Ru2) {
@@ -2984,9 +3127,6 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     return ok;
 }
 
-/* Return the recid to publish, or -1 if neither recid is an exact hit.
- * The GPU returns after the first tentative recid, so a false recid-0
- * nomination must not hide a real recid-1 hit. */
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
@@ -2994,6 +3134,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
     return -1;
 }
+#endif
 #endif
 
 
@@ -3530,6 +3671,13 @@ int main(int argc, char **argv) {
      * The loop no longer stops at the first hit; hits are appended per batch.
      */
 #if QSB_HOST_GATE
+#if QSB_GATE_PREALLOC
+    qsb_gate_ctx_t gate_ctx;
+    if (qsb_gate_ctx_init(&gate_ctx, &pp) < 0) {
+        fprintf(stderr, "Failed to set up the exact host publication gate\n");
+        return 1;
+    }
+#else
     EC_GROUP *gate_grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *gate_ctx = BN_CTX_new();
     BIGNUM *gate_order = BN_new(), *gate_nri = BN_new(), *gate_rx = BN_new(), *gate_ry = BN_new();
@@ -3543,6 +3691,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
         return 1;
     }
+#endif
 #endif
 #if QSB_SLOTPIPE
     /* Slotted batch loop.  Nothing here changes what the device computes: the
@@ -3607,11 +3756,19 @@ int main(int argc, char **argv) {
                     (void)hc;
 #if QSB_HOST_GATE
 #if QSB_REFILL_BEFORE_GATE
+                    #if QSB_GATE_PREALLOC
+                    ri = qsb_gate_accept(&pp, hit_seq, lt, ri, &gate_ctx);
+#else
                     ri = qsb_gate_accept(&pp, hit_seq, lt, ri,
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#endif
+#else
+                    #if QSB_GATE_PREALLOC
+                    ri = qsb_gate_accept(&pp, slot_seq[s], lt, ri, &gate_ctx);
 #else
                     ri = qsb_gate_accept(&pp, slot_seq[s], lt, ri,
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#endif
 #endif
                     if (ri < 0) continue;
 #endif
@@ -3872,8 +4029,12 @@ int main(int argc, char **argv) {
                         int hc = (raw >> 31) & 1;
 #if QSB_HOST_GATE
                         (void)hc;
+                        #if QSB_GATE_PREALLOC
+                        ri = qsb_gate_accept(&pp, seq, lt, ri, &gate_ctx);
+#else
                         ri = qsb_gate_accept(&pp, seq, lt, ri,
                                              gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+#endif
                         if (ri < 0) continue;
                         fprintf(f, "sequence=%u locktime=%u recid=%d\n", seq, lt, ri);
 #else
