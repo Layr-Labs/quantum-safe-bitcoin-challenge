@@ -2396,6 +2396,7 @@ static volatile uint64_t g_hit_counter = 0;
 static volatile uint64_t g_total_searched = 0;
 
 static void on_term_signal(int sig) {
+#if !QSB_NO_SUMMARY
     if (g_summary_f) {
         time_t now_epoch = time(NULL);
         fprintf((FILE*)g_summary_f,
@@ -2406,6 +2407,9 @@ static void on_term_signal(int sig) {
         fflush((FILE*)g_summary_f);
         fsync(fileno((FILE*)g_summary_f));
     }
+#else
+    (void)sig;
+#endif
     /* Re-raise to default handler so process actually exits. */
     signal(sig, SIG_DFL);
     raise(sig);
@@ -2989,6 +2993,7 @@ int main(int argc, char **argv) {
     snprintf(summary_path, sizeof(summary_path),
              "results/digest_summary_gpu%d.txt", gpu_index);
     /* "w" = truncate any prior summary so each run starts fresh and unambiguous. */
+#if !QSB_NO_SUMMARY
     FILE *summary_f = fopen(summary_path, "w");
     if (summary_f) {
         time_t now_epoch = time(NULL);
@@ -3002,12 +3007,17 @@ int main(int argc, char **argv) {
     } else {
         fprintf(stderr, "WARN: cannot open summary file %s\n", summary_path);
     }
+#else
+    FILE *summary_f = NULL; (void)summary_path;
+#endif
     uint64_t hit_counter = 0;
 
     /* Install signal handler so STATUS=KILLED is written if the process is
      * terminated externally. Wire summary_f to the global pointer the handler
      * uses. */
+#if !QSB_NO_SUMMARY
     g_summary_f = summary_f;
+#endif
     signal(SIGTERM, on_term_signal);
     signal(SIGINT, on_term_signal);
     signal(SIGHUP, on_term_signal);
@@ -3235,7 +3245,8 @@ int main(int argc, char **argv) {
                         printf(" hc=%d recid=%d\n", hc, ri);
                         hit_counter++;
                         g_hit_counter = hit_counter;
-                        if (summary_f) {
+                        #if !QSB_NO_SUMMARY
+    if (summary_f) {
                             time_t now_epoch = time(NULL);
                             fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
                             for (int j = 0; j < t_sel; j++)
@@ -3245,6 +3256,7 @@ int main(int argc, char **argv) {
                             fflush(summary_f);
                             /* Preserve visibility without a disk barrier per hit. */
                         }
+#endif
                     }
                     fclose(ff);
                 }
@@ -3264,13 +3276,15 @@ int main(int argc, char **argv) {
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
                 fflush(stdout);
-                if (summary_f) {
+                #if !QSB_NO_SUMMARY
+    if (summary_f) {
                     time_t now_epoch = time(NULL);
                     fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
                             (long)now_epoch, (unsigned long long)total_searched,
                             rate/1e6, elapsed_total, (unsigned long long)hit_counter);
                     fflush(summary_f);
                 }
+#endif
                 t_last_se = t_now;
             }
             if (epoch_base >= n_epochs) break;
@@ -3280,14 +3294,20 @@ int main(int argc, char **argv) {
         printf("\n  [GPU %d] Done short-epoch: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
                (unsigned long long)(total_searched/1000000), elapsed,
                total_searched/elapsed/1e6);
-        if (summary_f) {
+        #if !QSB_NO_SUMMARY
+    if (summary_f) {
             time_t now_epoch = time(NULL);
             fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
                     (long)now_epoch, (unsigned long long)total_searched,
                     elapsed, (unsigned long long)hit_counter);
-            fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+#if !QSB_NO_SUMMARY
+    #if !QSB_NO_SUMMARY
+        fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+#endif
+#endif
             g_summary_f = NULL;
         }
+#endif
         free(h_combos);
         return 0;
     }
@@ -3384,7 +3404,8 @@ int main(int argc, char **argv) {
                         printf(" hc=%d recid=%d\n", hc, ri);
                         hit_counter++;
                         g_hit_counter = hit_counter;
-                        if (summary_f) {
+                        #if !QSB_NO_SUMMARY
+    if (summary_f) {
                             time_t now_epoch = time(NULL);
                             fprintf(summary_f, "HIT %ld combo=", (long)now_epoch);
                             for (int j = 0; j < t_sel; j++)
@@ -3394,6 +3415,7 @@ int main(int argc, char **argv) {
                             fflush(summary_f);
                             /* Preserve visibility without a disk barrier per hit. */
                         }
+#endif
                     }
                     fclose(ff);
                 }
@@ -3412,13 +3434,15 @@ int main(int argc, char **argv) {
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
                 fflush(stdout);
-                if (summary_f) {
+                #if !QSB_NO_SUMMARY
+    if (summary_f) {
                     time_t now_epoch = time(NULL);
                     fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
                             (long)now_epoch, (unsigned long long)total_searched,
                             rate/1e6, elapsed_total, (unsigned long long)hit_counter);
                     fflush(summary_f);
                 }
+#endif
                 t_last_enum = t_now;
             }
             if (enum_base >= span) {
@@ -3461,14 +3485,20 @@ int main(int argc, char **argv) {
         printf("\n  [GPU %d] Done enum: %lluM in %.0fs (%.1fM/s)\n", gpu_index,
                (unsigned long long)(total_searched/1000000), elapsed,
                total_searched/elapsed/1e6);
-        if (summary_f) {
+        #if !QSB_NO_SUMMARY
+    if (summary_f) {
             time_t now_epoch = time(NULL);
             fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
                     (long)now_epoch, (unsigned long long)total_searched,
                     elapsed, (unsigned long long)hit_counter);
-            fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+#if !QSB_NO_SUMMARY
+    #if !QSB_NO_SUMMARY
+        fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+#endif
+#endif
             g_summary_f = NULL;
         }
+#endif
         free(h_combos);
         return 0;
     }
@@ -3602,7 +3632,8 @@ int main(int argc, char **argv) {
                      * is the primary record; the summary is the always-exists
                      * proof-of-life record. Fields match so downstream tools
                      * can rely on either. */
-                    if (summary_f) {
+                    #if !QSB_NO_SUMMARY
+    if (summary_f) {
                         time_t now_epoch = time(NULL);
                         for (int h = 0; h < nh; h++) {
                             uint32_t raw = hits[h];
@@ -3622,6 +3653,7 @@ int main(int argc, char **argv) {
                         fflush(summary_f);
                         fsync(fileno(summary_f));   /* immediate, on every hit */
                     }
+#endif
                 }
             }
 
@@ -3660,7 +3692,8 @@ int main(int argc, char **argv) {
                            (unsigned long long)(my_slice_total/1000000),
                            rate/1e6, elapsed_total, eta_h, eta_m);
                     fflush(stdout);
-                    if (summary_f) {
+                    #if !QSB_NO_SUMMARY
+    if (summary_f) {
                         time_t now_epoch = time(NULL);
                         fprintf(summary_f,
                                 "PROGRESS %ld first=%d attempts=%llu pct=%.4f rate_M_per_s=%.1f elapsed_s=%.0f eta=%dh%02dm hits_so_far=%llu\n",
@@ -3677,6 +3710,7 @@ int main(int argc, char **argv) {
                             last_fsync = elapsed_total;
                         }
                     }
+#endif
                     t_last_report = t_now;
                 }
             }
@@ -3712,6 +3746,7 @@ int main(int argc, char **argv) {
     /* Write final STATUS line to summary so any later check unambiguously sees
      * "FOUND" vs "EXHAUSTED". hit_counter > 0 means we wrote at least one HIT
      * line earlier. */
+    #if !QSB_NO_SUMMARY
     if (summary_f) {
         time_t now_epoch = time(NULL);
         const char *status = found ? "FOUND" : "EXHAUSTED";
@@ -3725,6 +3760,7 @@ int main(int argc, char **argv) {
         fsync(fileno(summary_f));
         fclose(summary_f);
     }
+#endif
 
     free(h_combos);
     return 0;
