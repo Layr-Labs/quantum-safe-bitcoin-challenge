@@ -1,3 +1,7 @@
+#ifndef QSB_REMEASURE_TAG_0924P1
+#define QSB_REMEASURE_TAG_0924P1 1 /* no-op: exact-source re-draw identity */
+#endif
+#define QSB_AUTODRAW_09232212 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
