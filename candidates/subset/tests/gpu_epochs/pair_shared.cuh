@@ -58,6 +58,9 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #ifndef ZLAB_K2S3M
 #define ZLAB_K2S3M 1
 #endif
+#if QSB_GLV10 && (!ZLAB_K2S3M || !QSB_PAIR_SHARED)
+#error "GLV10 requires the paired 3M front for exceptional nominations"
+#endif
 #if ZLAB_K2S3M
 #ifndef QSB_SPEC_PREPARE_PAIR
 #define QSB_SPEC_PREPARE_PAIR 1
@@ -147,6 +150,19 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     return parities;
 }
 #endif
+// A zero or raw-p leaf is never admitted to the inverse tree. Exceptional
+// GLV fronts nominate exact replay using n.ZZ=0 and the identity denominator.
+__device__ __forceinline__ bool qsb_glv_exception(uint64_t *prod,uint64_t *n) {
+    const bool zero=!(prod[0]|prod[1]|prod[2]|prod[3]);
+    const bool rawp=prod[0]==0xfffffffefffffc2fULL && prod[1]==~0ULL && prod[2]==~0ULL && prod[3]==~0ULL;
+    if(zero||rawp) {
+        prod[0]=1;prod[1]=prod[2]=prod[3]=prod[4]=0;
+        #pragma unroll
+        for(int j=0;j<12;j++)n[j]=0;
+        return true;
+    }
+    return false;
+}
 __device__ __forceinline__ int qsb_k2s_front(
     const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
     uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
@@ -206,6 +222,9 @@ __device__ __forceinline__ int qsb_k2s_front3(
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
     qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#if QSB_GLV10
+    qsb_glv_exception(prod,n);
+#endif
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
@@ -244,6 +263,9 @@ __device__ __forceinline__ int qsb_k2s_front3_z(
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
     qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);   /* same finish as qsb_k2s_front3 */
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#if QSB_GLV10
+    qsb_glv_exception(prod,n);
+#endif
     return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
 }
 #endif
@@ -271,7 +293,17 @@ __device__ __forceinline__ int qsb_k2s_front_exact(
     z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
     z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    const bool scalar_zero=!(z[0]|z[1]|z[2]|z[3]) ||
+        (z[0]==0xBFD25E8CD0364141ULL && z[1]==0xBAAEDCE6AF48A03BULL &&
+         z[2]==0xFFFFFFFFFFFFFFFEULL && z[3]==0xFFFFFFFFFFFFFFFFULL);
+    if(scalar_zero)return 2; // Both recovered keys are the fixed +C and -C.
     _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+    // Complete the two exceptional finish cases before inverting a denominator.
+    uint64_t dx[4];_ModMult(dx,u2rx,qzz);_ModSub256(dx,dx,qx);qsb_field_normalize(dx);
+    if(!(dx[0]|dx[1]|dx[2]|dx[3])) {
+        uint64_t dy[4];_ModMult(dy,u2ry,qzzz);_ModSub256(dy,dy,qy);qsb_field_normalize(dy);
+        return (dy[0]|dy[1]|dy[2]|dy[3])?4:3;
+    }
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
@@ -439,7 +471,22 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
     uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
-    if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
+    const int front=qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2);
+    if(!front)return 0;
+    if(front==2) {
+        int recid=0;const unsigned p=(unsigned)(ry[0]&1);
+        return qsb_k2s_gate(rx,rx,p|((p^1)<<1),&recid)?recid+1:0;
+    }
+    if(front>=3) {
+        // P=+C yields +2C only (recid 0); P=-C yields -2C only (recid 1).
+        // The other branch is infinity and has no compressed public key.
+        uint64_t slope[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]},y[4],twox[4];
+        _ModSqr(x1,slope);_ModAdd256(twox,rx,rx);_ModSub256(x1,x1,twox);
+        _ModSub256(y,rx,x1);_ModMult(y,slope);_ModSub256(y,y,ry);
+        qsb_field_normalize(x1);qsb_field_normalize(y);
+        const unsigned parity=(unsigned)(y[0]&1)^(front==4);int ignored=0;
+        return qsb_k2s_gate(x1,x1,parity|(parity<<1),&ignored)?front-2:0;
+    }
     _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
     uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
     int recid=0;
@@ -487,6 +534,9 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t inv[4]={v0,v1,v2,v3};
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t q1x[4],q2x[4];int recid=0;
+#if QSB_GLV10
+    if(!(n[8]|n[9]|n[10]|n[11]))return 1; // Exceptional nomination, independently replayed.
+#endif
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
     return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
