@@ -8,60 +8,29 @@
 #error QSB_BIGTBL must be 0 or 1
 #endif
 
-// Four-bank cache geometry from 0xCramJam c13f3832 / 90f89008.
-// Keep the promoted GLV12 geometry as an independently compilable control.
-#ifndef QSB_FOUR_HOT
-#define QSB_FOUR_HOT 1
-#endif
-#if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
-#error QSB_FOUR_HOT must be 0 or 1
-#endif
-#if QSB_BIGTBL && QSB_FOUR_HOT
-#define QSB_GT_TOTAL 153175181u
-#define QSB_GT_RADIX_BITS 14
-#define QSB_GT_TOP_CENTER 170559769u
-#define QSB_GT_TOP_SHIFT 100u
-#else
-#define QSB_GT_TOTAL 22893641u
-#define QSB_GT_RADIX_BITS 12
-#define QSB_GT_TOP_CENTER 10659985u
-#define QSB_GT_TOP_SHIFT 104u
-#endif
-
 #if QSB_BIGTBL
 // BEGIN QSB_BIGTBL_HOST_EXACT
 /* Six terms per signed GLV component. The split below is unchanged. Its
- * rounded reciprocal error gives |r_i| <=
- * 0xa2a8918ca85bafe22016d0b917e4dd77. At shift 104 the largest top
- * field is 10659985, an odd number. Thus d_top=2*f-10659985 is odd,
- * nonzero and in [-10659985,10659985]. No residual truncation is used.
- * QSB_FOUR_HOT=0: physical order 0,1,2,5,3,4, three cached banks.
- * QSB_FOUR_HOT=1: physical order 0..5, first four banks total 48 MiB;
- * widths [18,19,18,18,27], top shift 100, centered at 170559769.
- * Both exactly reconstruct the same bounded signed GLV component.
+ * rounded reciprocal error gives |r_i| <
+ * 0xa2a8918ca85bafe22016d0b917e4dd77 (libsecp256k1's (a1+a2+1)/2).
+ * Shifts 0,18,37,55,73,100; widths 18 unsigned, 19, 18, 18, 27 signed.
+ * At shift 100 the largest top field is 170559768, so T=170559769 (the
+ * smallest odd T >= it) makes d_top=2*f-T odd, nonzero and in [-T,T]
+ * for every f <= T: magnitudes up to (T+1)*2^100-1 decode, 1.2*2^100 above
+ * the bound. No residual truncation is used. The segment-0 bias is
+ * K=(T+1)*2^99-2^17=170559770*2^99-2^17: the middle and top biases
+ * telescope, so the six digits sum exactly to the magnitude.
+ * Physical order 0,1,2,3,4,5 keeps the four small segments (48 MiB) first.
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
-#if QSB_FOUR_HOT
-    return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
-#else
-    return c<3 ? 262144u : (c<5 ? 8388608u : 5329993u);
-#endif
+    return c<2 ? 262144u : (c<4 ? 131072u : (c==4 ? 67108864u : 85279885u));
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
-#if QSB_FOUR_HOT
-    return c==0?0u:c==1?262144u:c==2?524288u:
-           c==3?655360u:c==4?786432u:67895296u;
-#else
-    return c==0?0u:c==1?262144u:c==2?524288u:c==3?6116425u:
-           c==4?14505033u:786432u;
-#endif
+    return c==0?0u:c==1?262144u:c==2?524288u:c==3?655360u:
+           c==4?786432u:67895296u;
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
-#if QSB_FOUR_HOT
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
-#else
-    return c==0?0u:c==1?18u:c==2?37u:c==3?56u:c==4?80u:104u;
-#endif
 }
 __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     const uint64_t mag[2],unsigned sign,int c) {
@@ -75,16 +44,12 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     if(c==0) {
         idx=f&((1u<<18)-1u);neg_digit=0;
     } else if(c==5) {
-        const int32_t d=(int32_t)(2u*f)-(int32_t)QSB_GT_TOP_CENTER;
+        const int32_t d=(int32_t)(2u*f)-170559769;
         neg_digit=(uint32_t)d>>31;
         const uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
         idx=(ad-1u)>>1;
     } else {
-#if QSB_FOUR_HOT
-        const unsigned bits=c==1?19u:c<4?18u:27u;
-#else
-        const unsigned bits=c<3?19u:24u;
-#endif
+        const unsigned bits=c==1?19u:(c==4?27u:18u);
         f&=(1u<<bits)-1u;
         neg_digit=1u-(f>>(bits-1u));
         idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
