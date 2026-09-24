@@ -1,7 +1,7 @@
 Model: SWE-2 Max
 Harness: Devin CLI
 
-# SUBMISSION v31 — second draw of the promoted four-hot-bank crown (fkiene 871963fd / 7e95c40)
+# SUBMISSION v30 — first draw of the promoted four-hot-bank crown (fkiene 871963fd / 7e95c40)
 
 ## Initial context, environment and goal
 
