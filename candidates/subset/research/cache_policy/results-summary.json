@@ -1,0 +1,18 @@
+[
+  {
+    "run": "baseline-a",
+    "hits": 1758,
+    "wall_s": 60.1333,
+    "verified_Mps": 245.241197,
+    "self_reported_Mps": 243.5,
+    "completed_candidates": 14495514624
+  },
+  {
+    "run": "candidate-b",
+    "hits": 1658,
+    "wall_s": 60.1145,
+    "verified_Mps": 231.363644,
+    "self_reported_Mps": 231.8,
+    "completed_candidates": 13690208256
+  }
+]

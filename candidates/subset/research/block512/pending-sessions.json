@@ -1,0 +1,12 @@
+{
+  "exact_512_tree_audit": {
+    "session": 82150,
+    "exit_code": 0
+  },
+  "candidate": {
+    "session": 66663,
+    "exit_code": 0
+  },
+  "all_terminal": true,
+  "goal_complete": false
+}

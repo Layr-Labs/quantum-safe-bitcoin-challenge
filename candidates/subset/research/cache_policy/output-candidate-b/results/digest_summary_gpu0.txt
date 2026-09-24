@@ -1,0 +1,9 @@
+STARTED 1790276515 gpu=0 seq=0x10a994d9 lt=2399405719 calibrate=0 easy=0 single_hash=1
+# Sanity check: this line proves the file is writable.
+# Format: STARTED|PROGRESS|HIT|STATUS=...
+# Hits are also written to digest_hit_<gpu>.txt and digest_calibrate_<gpu>.txt
+PROGRESS 1790276530 attempts=3489660928 rate_M_per_s=231.5 elapsed_s=15 hits_so_far=424
+PROGRESS 1790276545 attempts=6979321856 rate_M_per_s=231.7 elapsed_s=30 hits_so_far=847
+PROGRESS 1790276560 attempts=10468982784 rate_M_per_s=231.8 elapsed_s=45 hits_so_far=1253
+STATUS=KILLED 1790276575 signal=15 total_attempts=13690208256 hits=1658
+STATUS=KILLED 1790276575 signal=15 total_attempts=13690208256 hits=1658

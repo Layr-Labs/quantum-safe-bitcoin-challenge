@@ -1,0 +1,124 @@
+diff --git a/candidates/subset/tests/gpu_epochs/tree.cu b/candidates/subset/tests/gpu_epochs/tree.cu
+index 2492229..672e82e 100644
+--- a/candidates/subset/tests/gpu_epochs/tree.cu
++++ b/candidates/subset/tests/gpu_epochs/tree.cu
+@@ -1084,8 +1084,15 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
+ #ifndef QSB_SE_WINDOWS
+ #define QSB_SE_WINDOWS 128
+ #endif
++#ifndef QSB_SE_BLOCK
+ #define QSB_SE_BLOCK   256
++#endif
++#if QSB_SE_BLOCK != 128 && QSB_SE_BLOCK != 256 && QSB_SE_BLOCK != 512
++#error "QSB_SE_BLOCK must be 128, 256 or 512"
++#endif
++static_assert(QSB_SE_BLOCK >= QSB_SE_WINDOWS, "windows must fit a block");
+ #define QSB_SE_HALVES  (QSB_SE_BLOCK / QSB_SE_WINDOWS)
++#define QSB_DIGEST_DYNAMIC_BYTES (QSB_SE_BLOCK>256 ? 24*QSB_SE_BLOCK*sizeof(uint64_t) : 0)
+ #define QSB_SE_PER_EPOCH QSB_SE_WINDOWS
+ /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
+ #ifndef ZLAB_LAUNCH_BLOCKS
+@@ -1551,7 +1558,7 @@ __global__ void kernel_verify_pair_hits(
+ }
+ 
+ 
+-__global__ void __launch_bounds__(256, 2) kernel_digest(
++__global__ void __launch_bounds__(QSB_SE_BLOCK, 512/QSB_SE_BLOCK) kernel_digest(
+     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
+     int n_pool, int t_sel,
+     const uint32_t * __restrict__ d_midstate,
+@@ -1587,10 +1594,13 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
+     const unsigned eA = (unsigned)QSB_PAIR_MUL*blockIdx.x + 2u*(unsigned)half;
+     const bool hasA = eA < (unsigned)epochs_in_batch;
+     const bool active = idx<batch_size && hasA;
+-#if ZLAB_K2S3M
+-    __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
++#if QSB_SE_BLOCK > 256
++    extern __shared__ uint64_t qsb_digest_shared[];
++    uint64_t (*parkA)[QSB_SE_BLOCK]=(uint64_t (*)[QSB_SE_BLOCK])qsb_digest_shared;
++#elif ZLAB_K2S3M
++    __shared__ uint64_t parkA[12][QSB_SE_BLOCK];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
+ #else
+-    __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
++    __shared__ uint64_t parkA[8][QSB_SE_BLOCK];        /* m1,m2 of the first candidate */
+ #endif
+     const unsigned eA0 = hasA ? eA : 0u;
+     const epoch_desc_t *e0 = d_epochs + eA0;
+@@ -2900,6 +2910,13 @@ int main(int argc, char **argv) {
+         EC_GROUP_free(grp);BN_CTX_free(ctx);
+     }
+ 
++#if QSB_SE_BLOCK > 256
++    // The 512-thread consumer needs 96 KiB: 48 KiB parked point state,
++    // 32 KiB immutable products, and 16 KiB downward inverses.
++    cudaError_t shared_error=cudaFuncSetAttribute(kernel_digest,
++        cudaFuncAttributeMaxDynamicSharedMemorySize,QSB_DIGEST_DYNAMIC_BYTES);
++    if(shared_error!=cudaSuccess){fprintf(stderr,"Digest shared-memory opt-in failed: %s\n",cudaGetErrorString(shared_error));return 1;}
++#endif
+     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+     uint32_t *d_hit_cnt, *d_hit_idx;
+     uint8_t *d_hit_combos, *d_hit_sighash;
+@@ -3141,7 +3158,7 @@ int main(int argc, char **argv) {
+             // One producer block for each valid epoch, including an odd tail.
+             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
+               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
++            kernel_digest<<<nblk, QSB_SE_BLOCK, QSB_DIGEST_DYNAMIC_BYTES>>>(
+                 (const uint8_t*)NULL, n_pool, t_sel,
+                 d_mid,
+                 d_prem, 0,
+diff --git a/candidates/subset/tests/gpu_epochs/tree_inverse.cuh b/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
+index bf235fa..98afc7b 100644
+--- a/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
++++ b/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
+@@ -28,7 +28,7 @@
+ #endif
+ #if ZLAB_TREE == 0
+ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+-    __shared__ uint64_t tree[4][512];
++    __shared__ uint64_t tree[4][2*QSB_SE_BLOCK];
+     const int tid=threadIdx.x,n=blockDim.x;
+     #pragma unroll
+     for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
+@@ -79,7 +79,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+ }
+ #elif ZLAB_TREE == 1
+ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+-    __shared__ uint64_t tree[4][512];
++    __shared__ uint64_t tree[4][2*QSB_SE_BLOCK];
+     const int tid=threadIdx.x,n=blockDim.x;
+     #pragma unroll
+     for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
+@@ -153,8 +153,14 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+ }
+ #else
+ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+-    __shared__ uint64_t products[4][512];
+-    __shared__ uint64_t inverses[4][256];
++#if QSB_SE_BLOCK > 256
++    extern __shared__ uint64_t qsb_digest_shared[];
++    uint64_t (*products)[2*QSB_SE_BLOCK]=(uint64_t (*)[2*QSB_SE_BLOCK])(qsb_digest_shared+12*QSB_SE_BLOCK);
++    uint64_t (*inverses)[QSB_SE_BLOCK]=(uint64_t (*)[QSB_SE_BLOCK])(qsb_digest_shared+20*QSB_SE_BLOCK);
++#else
++    __shared__ uint64_t products[4][2*QSB_SE_BLOCK];
++    __shared__ uint64_t inverses[4][QSB_SE_BLOCK];
++#endif
+     const int tid=threadIdx.x,n=blockDim.x;
+     #pragma unroll
+     for(int k=0;k<4;k++)products[k][tid]=value[k];
+diff --git a/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh b/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh
+index ede1f99..a3753cf 100644
+--- a/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh
++++ b/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh
+@@ -2,7 +2,11 @@
+ // Only the first block depends on the epoch remainder. The second block's
+ // expanded schedule is shared by every epoch with the same window choice.
+ #pragma once
++// The 128-window selection uses eight first-block classes. Preserve the
++// 256-window capacity and a diagnostic override for an identical-work A/B.
++#ifndef QSB_FIRST_SLOTS
+ #define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
++#endif
+ #ifndef QSB_SHA_UNROLL_CONST
+ #define QSB_SHA_UNROLL_CONST 1
+ #endif   /* first-block classes per epoch in d_first */

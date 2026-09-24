@@ -1,0 +1,7 @@
+{
+  "candidate_hits": 1673,
+  "baseline_hits": 1758,
+  "candidate_completed_epochs": 108003328,
+  "baseline_hits_in_candidate_range": 1673,
+  "exact_set_match_within_completed_range": true
+}

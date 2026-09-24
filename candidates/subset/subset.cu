@@ -1,4 +1,4 @@
-#ifndef QSB_REMEASURE_TAG_0921R1
-#define QSB_REMEASURE_TAG_0921R1 1 /* no-op: exact-source remeasurement re-roll */
-#endif
+// Split paired consumer; preserve the promoted arithmetic and exact replay.
+#define QSB_SPLIT_PIPELINE 1
+#define ZLAB_LAUNCH_BLOCKS 131072
 #include "tests/gpu_epochs/tree.cu"

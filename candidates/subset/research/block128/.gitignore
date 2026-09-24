@@ -1,0 +1,8 @@
+baseline
+candidate
+.*.build
+output-*/
+__pycache__/
+tree_audit
+tree_audit_baseline
+tree_audit_exact

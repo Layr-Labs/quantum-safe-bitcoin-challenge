@@ -1,0 +1,10 @@
+{
+  "verified_hits": 1569,
+  "elapsed_s": 60.1565,
+  "throughput_Mps": 218.791459,
+  "self_reported": {
+    "elapsed_s": 60.075,
+    "throughput_Mps": 233.1
+  },
+  "completed_candidates": 13019119616
+}

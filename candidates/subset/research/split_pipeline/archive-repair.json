@@ -1,0 +1,152 @@
+[
+  {
+    "path": "candidates/subset/subset",
+    "bytes": 3045704,
+    "sha256": "64aeb80b599784571e0f63b2c1d83a7ea7abd9500015eaa742891b2c6a41bf2d",
+    "action": "removed rebuildable executable"
+  },
+  {
+    "path": "candidates/subset/research/batch_trial/output-baseline/run.json",
+    "bytes": 109980,
+    "sha256": "3eee02ba3561104e09bfb7ce0424fad66129bc6fa07801d7d2235d1ff60aed67",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/batch_trial/output-baseline/run.json.gz",
+    "compressedBytes": 6574
+  },
+  {
+    "path": "candidates/subset/research/batch_trial/output-candidate/run.json",
+    "bytes": 106755,
+    "sha256": "70c4dc5f2db92338398ebdb6bf360817ddadda77476a39d23bc4e301218b826c",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/batch_trial/output-candidate/run.json.gz",
+    "compressedBytes": 6398
+  },
+  {
+    "path": "candidates/subset/research/block128/output-baseline-b/run.json",
+    "bytes": 333017,
+    "sha256": "55fc2eda4637dad31e15fec22578ee28ffa9be9ab762a6b2dbe1318c300d6438",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/block128/output-baseline-b/run.json.gz",
+    "compressedBytes": 18456
+  },
+  {
+    "path": "candidates/subset/research/block128/output-candidate-a/run.json",
+    "bytes": 316879,
+    "sha256": "89f84bf78a19507ab9c47b6aff3fbd2552a8e8da80c262c02de1dc8777bea65c",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/block128/output-candidate-a/run.json.gz",
+    "compressedBytes": 17589
+  },
+  {
+    "path": "candidates/subset/research/block128/output-candidate-c/run.json",
+    "bytes": 326559,
+    "sha256": "e4a7101086fc912b41dbdf278a1cd780f70a9f36291416bd7cb05fed7762fa3f",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/block128/output-candidate-c/run.json.gz",
+    "compressedBytes": 18099
+  },
+  {
+    "path": "candidates/subset/research/block512/output-candidate-a/run.json",
+    "bytes": 297172,
+    "sha256": "fa2e78ecd96937b30f9f69f784981db3c19bb01d1553657b1c2e07b28ef0be32",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/block512/output-candidate-a/run.json.gz",
+    "compressedBytes": 16566
+  },
+  {
+    "path": "candidates/subset/research/cache_policy/output-baseline-a/run.json",
+    "bytes": 333021,
+    "sha256": "888ae984a87fb692fb05e7059575959a8089b9af68e290bd925ffd667f326c06",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/cache_policy/output-baseline-a/run.json.gz",
+    "compressedBytes": 18464
+  },
+  {
+    "path": "candidates/subset/research/cache_policy/output-candidate-b/run.json",
+    "bytes": 314028,
+    "sha256": "eb051f4a2fcd8562e95c56f50c3d7c8e099872c1e63f6fc0622535647764e5b0",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/cache_policy/output-candidate-b/run.json.gz",
+    "compressedBytes": 17436
+  },
+  {
+    "path": "candidates/subset/research/compact_first/output-baseline-a/run.json",
+    "bytes": 216221,
+    "sha256": "ed552e22e4dd2dc47a1fb2383af4506b2650ebe61bac5f17936b2a8e0e728503",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/compact_first/output-baseline-a/run.json.gz",
+    "compressedBytes": 12257
+  },
+  {
+    "path": "candidates/subset/research/compact_first/output-baseline-d/run.json",
+    "bytes": 219813,
+    "sha256": "f2927cf4368ccf4707f817f097d9ed865a16cd4f40070ae5d61f13f8104f8f1b",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/compact_first/output-baseline-d/run.json.gz",
+    "compressedBytes": 12448
+  },
+  {
+    "path": "candidates/subset/research/compact_first/output-candidate-b/run.json",
+    "bytes": 195610,
+    "sha256": "7a2a3d8ee713defc77b06f07f1a58486104599b71f21323c27763d86520068c5",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/compact_first/output-candidate-b/run.json.gz",
+    "compressedBytes": 11164
+  },
+  {
+    "path": "candidates/subset/research/compact_first/output-candidate-c/run.json",
+    "bytes": 216220,
+    "sha256": "aeedb8921c477865b5d7b9d9dd0750aeb38eb6eee92b42c198ed03bfc1cfb392",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/compact_first/output-candidate-c/run.json.gz",
+    "compressedBytes": 12249
+  },
+  {
+    "path": "candidates/subset/research/digest_profile/output/run.json",
+    "bytes": 46637,
+    "sha256": "1e3c85d100eae90770d54c2ea093b2c0a70bfa7a34f965f397d9e2586b5b67f1",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/digest_profile/output/run.json.gz",
+    "compressedBytes": 3159
+  },
+  {
+    "path": "candidates/subset/research/split_pipeline/output-baseline-b/run.json",
+    "bytes": 329220,
+    "sha256": "0347840281206496e2f68ba6448962eeb12348705bea97be14d25257d6033901",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/split_pipeline/output-baseline-b/run.json.gz",
+    "compressedBytes": 18255
+  },
+  {
+    "path": "candidates/subset/research/split_pipeline/output-candidate-a/run.json",
+    "bytes": 312327,
+    "sha256": "b4927b0fb67544eeb30d6819c16a79cd149ddb52d23b3758758ef3e35531b16a",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/split_pipeline/output-candidate-a/run.json.gz",
+    "compressedBytes": 17351
+  },
+  {
+    "path": "candidates/subset/research/split_pipeline/output-candidate_large-c/run.json",
+    "bytes": 318786,
+    "sha256": "829081280e43e1173af0cc098d04792988ce29d7b16b67b73695aaf3f7e7ce23",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/split_pipeline/output-candidate_large-c/run.json.gz",
+    "compressedBytes": 17703
+  },
+  {
+    "path": "candidates/subset/research/split_pipeline/output-candidate_large-d/run.json",
+    "bytes": 335694,
+    "sha256": "22e03332a3ef0e89155964cd2b583376ef862fc3715d1a7e3c40ca5ce7cd1945",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/split_pipeline/output-candidate_large-d/run.json.gz",
+    "compressedBytes": 18599
+  },
+  {
+    "path": "candidates/subset/research/stage_profile/output/run.json",
+    "bytes": 131500,
+    "sha256": "5e1b27ab2d07cc0e4a0ce3dcddd45b107b62522f54b6242d2213038c51f48cb0",
+    "action": "losslessly compressed",
+    "compressedPath": "candidates/subset/research/stage_profile/output/run.json.gz",
+    "compressedBytes": 7723
+  }
+]

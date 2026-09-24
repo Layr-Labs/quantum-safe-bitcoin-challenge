@@ -1,0 +1,3 @@
+gpu=NVIDIA GeForce RTX 3090 l2=6291456 max_persist=4325376 max_window=134213632
+set_limit=no error
+actual_reserve=4325376 ratio=0.064453 set_policy=no error

@@ -1,0 +1,101 @@
+Mechanically audit these PUBLIC GitHub excerpts. Hypothetical optimization: change QSB_FIRST_SLOTS from 16 to 8 for 128 windows, keeping 64 for 256 windows. Count selected triples and distinct first-six-kept-index sequences. Check provided strides and state any limitations. No tools or algorithm design. The source files were retrieved without authentication from https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/7e95c40c99e57bded233ce57c7f453fbde9fd21c/candidates/subset/tests/gpu_epochs/ and hash-match the checkout.
+
+#endif
+    uint32_t *d_first = NULL;
+    if (se_mode) {
+        uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
+        int cnt = 0;
+        for (int a = 0; a < 13; a++)
+            for (int b = a + 1; b < 13; b++)
+                for (int c = b + 1; c < 13; c++) {
+#if QSB_SE_WINDOWS == 256
+                    /* Drop 30 low-reuse triples so the retained 256 need only
+                     * 54 distinct first-block schedules instead of 84. */
+                    if(a>=1 && c<=7 && !(a==1 && b==2))continue;
+#elif QSB_SE_WINDOWS == 128
+                    /* The first-block schedule is fixed by the first six KEPT pushes, so all
+                     * triples with the same "which of the low positions are skipped" pattern share
+                     * one schedule. The C(13,3) pool splits into groups of 35 / 15x6 / 5x21 / 1x56.
+                     * Take the 35-group (no skip below position 6), all six 15-groups (exactly one
+                     * skip below 7) and three members of one 5-group: 35 + 90 + 3 = 128 windows
+                     * using 1 + 6 + 1 = 8 first-block schedules. */
+                    if(!((a>=6) || (a<=5 && b>=7) || (a==0 && b==1 && c>=8 && c<=10)))continue;
+#else
+#error "QSB_SE_WINDOWS must be 128 or 256"
+#endif
+                    h_win3[cnt][0] = (uint8_t)(QSB_SE_CUT + a);
+                    h_win3[cnt][1] = (uint8_t)(QSB_SE_CUT + b);
+                    h_win3[cnt][2] = (uint8_t)(QSB_SE_CUT + c);
+
+// Derived from odinfree's GPU-epoch consumer in submission 0db6e203.
+// Only the first block depends on the epoch remainder. The second block's
+// expanded schedule is shared by every epoch with the same window choice.
+#pragma once
+#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+#ifndef QSB_SHA_UNROLL_CONST
+#define QSB_SHA_UNROLL_CONST 1
+#endif   /* first-block classes per epoch in d_first */
+__device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
+__device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
+__device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
+__device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
+__device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
+__device__ __constant__ int QSB_FIRST_COUNT;
+static int qsb_first_class_count=0;
+
+static uint32_t qsb_window_second_key(const uint8_t w[3]) {
+
+        for (int j=0; j<16; j++) expanded[j]=words[j+16];
+        for (int j=16; j<64; j++) {
+            uint32_t x=expanded[j-15], y=expanded[j-2];
+            uint32_t a=qsb_host_rotr(x,7)^qsb_host_rotr(x,18)^(x>>3);
+            uint32_t b=qsb_host_rotr(y,17)^qsb_host_rotr(y,19)^(y>>10);
+            expanded[j]=expanded[j-16]+a+expanded[j-7]+b;
+        }
+        for (int j=0; j<64; j++) second[j][slot]=expanded[j]+round_k[j];
+    }
+    printf("Window schedule classes: first=%d second=%d of %d\n",first_distinct,distinct,QSB_SE_PER_EPOCH);
+    qsb_first_class_count=first_distinct;
+    if(first_distinct>QSB_FIRST_SLOTS)return 1;
+    for(int slot=0;slot<first_distinct;slot++)
+        for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
+    if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
+    if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
+    if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
+    if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
+    if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
+    return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
+}
+
+/* First-block states for every (epoch, class) of a launch, computed as its own
+ * producer stage: one block per epoch, one thread per first-block class. The
+ * consumer used to spend a thread barrier plus one compression of block time
+ * per epoch while 54 leader lanes built these states and the other lanes
+ * waited; now each lane reads its class state (32 bytes). */
+/* Flat mapping: one thread per (epoch, class) over full 256-thread blocks, instead of one
+ * 54-thread block per epoch (two warps, 10 idle lanes, and a block launch per epoch). */
+__global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_t * __restrict__ d_epochs,
+        uint32_t * __restrict__ d_first, unsigned n_epochs, unsigned classes) {
+    const unsigned t = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned e = t / classes, c = t - e * classes;
+    if (e >= n_epochs) return;
+    const epoch_desc_t *ep = d_epochs + e;
+    uint32_t st[8], W[16];
+    #pragma unroll
+    for(int j=0;j<8;j++)st[j]=ep->mid[j];
+    W[0]=ep->remW[0];W[1]=ep->remW[1];
+    #pragma unroll
+    for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
+    _SHA256Transform(st,W);
+    const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+    #pragma unroll
+    for(int j=0;j<8;j++)d_first[base+j]=st[j];
+}
+#if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
+
+            epochs+ep,first+(size_t)ep*QSB_FIRST_SLOTS*8,lane,gtable);
+    const uint32_t *f0=d_first+(size_t)eA0*QSB_FIRST_SLOTS*8;
+    const uint32_t *f1=hasB?f0+QSB_FIRST_SLOTS*8:f0;
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x, d_first+(size_t)blockIdx.x*QSB_FIRST_SLOTS*8);
+    qsb_scheduled_window_hash(state, se_desc, threadIdx.x, d_first+(size_t)blockIdx.x*QSB_FIRST_SLOTS*8);
+        cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));

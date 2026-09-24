@@ -1,0 +1,26 @@
+[
+  {
+    "run": "candidate-a",
+    "hits": 1673,
+    "wall_s": 60.1491,
+    "verified_Mps": 233.322393,
+    "self_reported_Mps": 250.0,
+    "completed_candidates": 13824425984
+  },
+  {
+    "run": "baseline-b",
+    "hits": 1758,
+    "wall_s": 60.1263,
+    "verified_Mps": 245.269842,
+    "self_reported_Mps": 243.8,
+    "completed_candidates": 14495514624
+  },
+  {
+    "run": "candidate-c",
+    "hits": 1724,
+    "wall_s": 60.1253,
+    "verified_Mps": 240.53033,
+    "self_reported_Mps": 240.4,
+    "completed_candidates": 14227079168
+  }
+]

@@ -1,0 +1,27 @@
+Canonical multiplication: 98304/98304 exact matches (three alias modes)
+Block inverse (32 threads, count=8191): 7872/8191 exact, 19 congruent non-canonical, 300 wrong
+Block inverse (32 threads, count=1): 1/1 exact, 0 congruent non-canonical, 0 wrong
+Block inverse (32 threads, count=127): 76/127 exact, 19 congruent non-canonical, 32 wrong
+Block inverse (32 threads, count=128): 77/128 exact, 19 congruent non-canonical, 32 wrong
+Block inverse (32 threads, count=129): 78/129 exact, 19 congruent non-canonical, 32 wrong
+Block inverse (32 threads, count=255): 204/255 exact, 19 congruent non-canonical, 32 wrong
+Block inverse (32 threads, count=256): 205/256 exact, 19 congruent non-canonical, 32 wrong
+Block inverse (32 threads, count=257): 206/257 exact, 19 congruent non-canonical, 32 wrong
+Block inverse (64 threads, count=8191): 7890/8191 exact, 3 congruent non-canonical, 298 wrong
+Block inverse (64 threads, count=1): 1/1 exact, 0 congruent non-canonical, 0 wrong
+Block inverse (64 threads, count=127): 60/127 exact, 3 congruent non-canonical, 64 wrong
+Block inverse (64 threads, count=128): 61/128 exact, 3 congruent non-canonical, 64 wrong
+Block inverse (64 threads, count=129): 62/129 exact, 3 congruent non-canonical, 64 wrong
+Block inverse (64 threads, count=255): 188/255 exact, 3 congruent non-canonical, 64 wrong
+Block inverse (64 threads, count=256): 189/256 exact, 3 congruent non-canonical, 64 wrong
+Block inverse (64 threads, count=257): 190/257 exact, 3 congruent non-canonical, 64 wrong
+Block inverse (128 threads, count=8191): 7935/8191 exact, 0 congruent non-canonical, 256 wrong
+Block inverse (128 threads, count=1): 1/1 exact, 0 congruent non-canonical, 0 wrong
+Block inverse (128 threads, count=127): 0/127 exact, 0 congruent non-canonical, 127 wrong
+Block inverse (128 threads, count=128): 0/128 exact, 0 congruent non-canonical, 128 wrong
+Block inverse (128 threads, count=129): 1/129 exact, 0 congruent non-canonical, 128 wrong
+Block inverse (128 threads, count=255): 127/255 exact, 0 congruent non-canonical, 128 wrong
+Block inverse (128 threads, count=256): 128/256 exact, 0 congruent non-canonical, 128 wrong
+Block inverse (128 threads, count=257): 129/257 exact, 0 congruent non-canonical, 128 wrong
+Distributed root (zero plus nonzero inputs, all lane outputs): 8192/8192 exact, 0 wrong
+Bounded helper cap=32: 0 lane declines, 0 status/output errors; wrapper fallback values checked above

@@ -1,0 +1,34 @@
+    // Optional cache experiment: retain a bounded fraction of the repeatedly
+    // accessed point table while epoch/first-state buffers stream through L2.
+    // These runtime hints never change the table or the arithmetic.
+#ifndef QSB_GTABLE_PERSIST
+#define QSB_GTABLE_PERSIST 0
+#endif
+#if QSB_GTABLE_PERSIST
+    if (prop.persistingL2CacheMaxSize > 0 &&
+        (size_t)prop.accessPolicyMaxWindowSize >= gt_sz) {
+        size_t reserve = (size_t)prop.persistingL2CacheMaxSize;
+        if (reserve > gt_sz) reserve = gt_sz;
+        cudaError_t cache_error = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, reserve);
+        size_t actual = 0;
+        if (cache_error == cudaSuccess)
+            cache_error = cudaDeviceGetLimit(&actual, cudaLimitPersistingL2CacheSize);
+        if (cache_error == cudaSuccess && actual > 0) {
+            cudaStreamAttrValue policy = {};
+            policy.accessPolicyWindow.base_ptr = d_gt;
+            policy.accessPolicyWindow.num_bytes = gt_sz;
+            policy.accessPolicyWindow.hitRatio = (float)(actual < gt_sz ? actual : gt_sz) / (float)gt_sz;
+            policy.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+            policy.accessPolicyWindow.missProp = cudaAccessPropertyNormal;
+            cache_error = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &policy);
+            if (cache_error == cudaSuccess)
+                printf("  GTable L2 policy: reserve=%zu bytes ratio=%.5f\n", actual, policy.accessPolicyWindow.hitRatio);
+        }
+        if (cache_error != cudaSuccess) {
+            fprintf(stderr, "GTable L2 policy unavailable: %s; normal caching\n", cudaGetErrorString(cache_error));
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, 0);
+            cudaGetLastError();
+        }
+    }
+#endif
+

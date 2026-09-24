@@ -1,0 +1,9 @@
+{
+  "status": "timeout",
+  "seconds": 100,
+  "result_received": false,
+  "public_source_commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "window_sha256": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
+  "tree_sha256": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+  "primary_review": "independent Astra enumeration and OpenSSL GPU audit"
+}

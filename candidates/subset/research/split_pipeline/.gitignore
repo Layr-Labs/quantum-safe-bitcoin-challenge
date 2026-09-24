@@ -1,0 +1,9 @@
+baseline
+candidate
+.*.build
+output-*/
+__pycache__/
+candidate_large
+production
+*.ptx
+submission_binary

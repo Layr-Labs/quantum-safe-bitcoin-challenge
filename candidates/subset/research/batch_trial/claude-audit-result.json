@@ -1,0 +1,30 @@
+{
+  "status": "error_max_budget_usd",
+  "source": "Claude Code result JSON, selected nonsecret fields",
+  "authorization": "User explicitly approved selected public candidate source and Claude user-directory session logs; secrets and other private files excluded.",
+  "allowed_source_files": [
+    "candidates/subset/tests/gpu_epochs/tree.cu",
+    "candidates/subset/tests/gpu_epochs/pair_shared.cuh",
+    "candidates/subset/tests/gpu_epochs/epoch_groups.cuh",
+    "candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh"
+  ],
+  "model": "deepseek-v4.1-flash[1m]",
+  "session_id": "fd41fd03-4e7b-4d96-a879-e81f4aa7abc4",
+  "requested_max_budget_usd": 0.25,
+  "reported_total_cost_usd": 0.25578,
+  "duration_ms": 24092,
+  "duration_api_ms": 16797,
+  "num_turns": 12,
+  "permission_denials": [],
+  "web_search_requests": 0,
+  "model_usage": {
+    "input_tokens": 27187,
+    "output_tokens": 2413,
+    "cache_read_input_tokens": 119040,
+    "cache_creation_input_tokens": 0,
+    "context_window": 1000000
+  },
+  "audit_text_returned": false,
+  "plan_changed": false,
+  "additional_gpu_runs": 0
+}

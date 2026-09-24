@@ -1,0 +1,5 @@
+/baseline
+/candidate
+/.*.build
+/output-*/
+__pycache__/

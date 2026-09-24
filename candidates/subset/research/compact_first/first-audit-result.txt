@@ -1,0 +1,1 @@
+{"compression_states":2546,"active_word_checks":20368,"padding_word_checks":13936,"errors":0}

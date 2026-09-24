@@ -1,0 +1,152 @@
+[
+  {
+    "path": "research/batch_trial/baseline",
+    "bytes": 3045704,
+    "sha256": "4ab6ed54482fa12bb1f5c06d3afbad0f3a5333ff5ebd6491f99923eb976d8d2b",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/batch_trial/candidate",
+    "bytes": 3045704,
+    "sha256": "ae124abafd21cf6a9171b0c2345df968b50aab7293aad8e8ac894c3226c1bd17",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block128/baseline",
+    "bytes": 3045704,
+    "sha256": "1773d45996fe7c6d9e3fb95a5254aca9e9fb2a5978cee871386d0877c1a8c788",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block128/candidate",
+    "bytes": 3045704,
+    "sha256": "e5d063266cd1030e90833e3aa8412f435fb8b4c843223aab932a671564c2b41a",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block128/tree_audit",
+    "bytes": 3235816,
+    "sha256": "31cbc7228e20464e046f98950feeb3d47a418cd1667a44c9f54d405f8eb80906",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block128/tree_audit_baseline",
+    "bytes": 3235824,
+    "sha256": "b7e7e366d35b47fd0443e43d8fdbb7fcd6cc110a3c6cb05759b9c359bff760dc",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block128/tree_audit_exact",
+    "bytes": 3244008,
+    "sha256": "cba8eb61b6b5897af3db5b2f15a6b5f05bd7895d0c1f8fdf7aa180a33aa5a1dc",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block512/baseline",
+    "bytes": 3045704,
+    "sha256": "1773d45996fe7c6d9e3fb95a5254aca9e9fb2a5978cee871386d0877c1a8c788",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block512/candidate",
+    "bytes": 3045744,
+    "sha256": "cd3c300e2ed738f065cc0862db772f59e5451707c823e18779d8688612bec72a",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/block512/tree_audit_exact",
+    "bytes": 3244016,
+    "sha256": "c6e6de1a2466b6cca4026c51c380826f21fdce1c5caef6feeda15143c0ebac4b",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/cache_policy/baseline",
+    "bytes": 3045704,
+    "sha256": "1773d45996fe7c6d9e3fb95a5254aca9e9fb2a5978cee871386d0877c1a8c788",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/cache_policy/cache_probe",
+    "bytes": 1002176,
+    "sha256": "0681a17aba8b71d2ff8e1e85cbe52852b4cf671cb89dd23a03e672a97bca61ab",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/cache_policy/candidate",
+    "bytes": 3045704,
+    "sha256": "b3a95d184fb919fdd44667054c73054bfe2cdd242dfe02fe7859829edff10d48",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/compact_first/baseline",
+    "bytes": 3045704,
+    "sha256": "1773d45996fe7c6d9e3fb95a5254aca9e9fb2a5978cee871386d0877c1a8c788",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/compact_first/candidate",
+    "bytes": 3045704,
+    "sha256": "6afb4b859e367acd091648edc3a4184bbcdbfdba34b17def8c4302ba24b9e891",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/compact_first/first_audit",
+    "bytes": 3062712,
+    "sha256": "6007277bc04cc18b318498e952fa8f543fee71b7aaa06f8d59ca6a782cef1e0b",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/digest_profile/profile",
+    "bytes": 3045800,
+    "sha256": "28a916d8e15b58fe210ead8d5d88d2f910f1a057e86b5e2235dde3fd13fc5376",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/baseline",
+    "bytes": 3045704,
+    "sha256": "0471d39a607b066bfbba86e4c18b574ded47af840202759027c2148ed326af87",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/candidate",
+    "bytes": 3738376,
+    "sha256": "aefd2d78cabc02b09b6bcb0e34b4ede0d9813ceb0f4bf7971c9cedf5ece902e9",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/candidate_large",
+    "bytes": 3049904,
+    "sha256": "b9d2b6f21875202ac18f1f78bf1100f3d6408f3d4b8dd07853b2819f2af6d800",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/candidate_large.ptx",
+    "bytes": 3084115,
+    "sha256": "2db8716504680fea00b37000c4b1a5c6ae7d62f97db13311db82895e58220d52",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/production",
+    "bytes": 3049904,
+    "sha256": "6965fa49fef94ca77b3bb76a63a978c0fe4b94f5ec2a9645aa51e3a4f70920e8",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/production.ptx",
+    "bytes": 3084115,
+    "sha256": "2db8716504680fea00b37000c4b1a5c6ae7d62f97db13311db82895e58220d52",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/split_pipeline/submission_binary",
+    "bytes": 3049896,
+    "sha256": "924c35ffd26d9ee50dfdd97838bbc30c5ddb539b41ff2fcdcb7771cf781b18d0",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  },
+  {
+    "path": "research/stage_profile/profile",
+    "bytes": 3045704,
+    "sha256": "311c14dc7e0b3875553aedc24cc52ee4a3c4a4b5792c04579fe96e8e0bd9a266",
+    "reason": "rebuildable ELF or duplicate PTX; source, build logs and validation retained"
+  }
+]

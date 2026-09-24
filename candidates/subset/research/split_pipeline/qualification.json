@@ -1,0 +1,11 @@
+{
+  "baseline_verified_Mps": 242.367982,
+  "candidate_verified_Mps": 246.977743,
+  "gain_percent": 1.9019678102530913,
+  "baseline_completed": 14361296896,
+  "candidate_completed": 14629732352,
+  "completed_gain_percent": 1.869158878504673,
+  "shared_prefix_hits": 1738,
+  "shared_prefix_exact": true,
+  "official_prior_frontier": 623518629
+}
