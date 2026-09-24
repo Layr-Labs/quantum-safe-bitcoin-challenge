@@ -32,6 +32,24 @@
 #ifndef QSB_CHAIN_MUL_LEAN
 #define QSB_CHAIN_MUL_LEAN 1
 #endif
+/* Fused X3: T = R^2 + PPP - 2Q with ONE second fold.  -2Q and +PPP enter the f9 square's
+ * 288-bit first-fold value (z0..z8); the signed top word (x3_hi:x3_lo) in [-2, 2^32] is
+ * folded once as an exact 65-bit x*K product.  Deletes f9's second fold and the separate
+ * signed h*K correction.  Bit-identical to the previous text except for the old f9 z2
+ * carry stop (2^-33/add), which is gone.  Active only with the non-lean f9
+ * (QSB_CHAIN_MUL_LEAN < 2) and QSB_SHORT_CARRY2; 0 = previous PTX text byte for byte.
+ * NOTE: the ranked build line is `nvcc -O3 -DQSB_ZEROS_N=24` with no other -D, so the
+ * default here must be 1 for the change to be in the submitted module. */
+#ifndef QSB_FUSE_X3
+#define QSB_FUSE_X3 0          /* validation phase: 0.  Flip to 1 before submission. */
+#endif
+#if QSB_FUSE_X3 != 0 && QSB_FUSE_X3 != 1
+#error QSB_FUSE_X3 must be 0 or 1
+#endif
+#define QSB_FX3_ON (QSB_FUSE_X3 && QSB_CHAIN_MUL_LEAN < 2 && QSB_SHORT_CARRY2)
+#ifndef QSB_FX3_FULLCARRY
+#define QSB_FX3_FULLCARRY 0
+#endif
 
 __device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t *b, uint32_t &bad){
 #ifdef __CUDA_ARCH__
@@ -2221,6 +2239,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tadd.cc.u32 f9_z1, f9_z1, f9_w0; addc.cc.u32 f9_z2, f9_z2, f9_w1; addc.cc.u32 f9_z3, f9_z3, f9_w2;\n"
         "\taddc.cc.u32 f9_z4, f9_z4, f9_w3; addc.cc.u32 f9_z5, f9_z5, f9_w4; addc.cc.u32 f9_z6, f9_z6, f9_w5;\n"
         "\taddc.cc.u32 f9_z7, f9_z7, f9_w6; addc.u32 f9_z8, f9_f8, f9_w7;\n"
+#if !QSB_FX3_ON
         "\t{ .reg .u64 f9_sfz,f9_sft; .reg .u32 f9_sfl;\n\tmov.b64 f9_sfz, {f9_z0, f9_z8};\n\tmul.wide.u32 f9_sft, f9_z8, 977; add.cc.u64 f9_sft, f9_sft, f9_sfz;\n\taddc.u32 f9_m2, 0, 0;\n\tmov.b64 {f9_z0, f9_sfl}, f9_sft;\n\tadd.cc.u32 f9_z1, f9_z1, f9_sfl; }\n\t "
 #if QSB_SHORT_CARRY2
         "addc.u32 f9_z2, f9_z2, f9_m2;"
@@ -2232,9 +2251,11 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.cc.u32 f9_z3, f9_z3, 0; addc.u32 f9_z4, f9_z4, 0;"
 #endif
         "\n"
+#endif /* !QSB_FX3_ON */
         "\tmov.b64 T0, {f9_z0,f9_z1}; mov.b64 T1, {f9_z2,f9_z3}; mov.b64 T2, {f9_z4,f9_z5}; mov.b64 T3, {f9_z6,f9_z7};\n"
 #endif
         "\t\n"
+#if !QSB_FX3_ON
         ".reg .u64 x3_high;\n"
         "\n"
         "\t.reg .u64 x3_h,x3_t,x3_ext;\n"
@@ -2269,6 +2290,60 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u64 x3_high,x3_ext,0;"
 #endif
         "\n"
+#else
+        /* QSB_FUSE_X3: T0..T3 hold the first-fold low words of R^2, f9_z8 its bit-256 word.
+         * Accumulate -Q -Q +PPP into the 9-limb value, top word signed in (x3_hi:x3_lo),
+         * then fold the top word once: T += (x3_hi:x3_lo) * K as an exact 65-bit product.
+         * Q is subtracted before PPP is added (the order that kept the rival's layout at
+         * zero spills); the PPP carry is captured into x3_hi, so the top word is exact
+         * even when f9_z8 == 0xFFFFFFFF. */
+        "\t.reg .u32 x3_lo,x3_hi,x3_q,x3_c,x3_e,x3_s,x3_t0l,x3_t0h,x3_t1l,x3_t1h;\n"
+        "\t.reg .u64 x3_t,x3_z;\n"
+        "\tmov.u32 x3_lo,f9_z8;\n"
+        "\tsub.cc.u64 T0,T0,Q0;\n"
+        "\tsubc.cc.u64 T1,T1,Q1;\n"
+        "\tsubc.cc.u64 T2,T2,Q2;\n"
+        "\tsubc.cc.u64 T3,T3,Q3;\n"
+        "\tsubc.cc.u32 x3_lo,x3_lo,0;\n"
+        "\tsubc.u32 x3_hi,0,0;\n"
+        "\tsub.cc.u64 T0,T0,Q0;\n"
+        "\tsubc.cc.u64 T1,T1,Q1;\n"
+        "\tsubc.cc.u64 T2,T2,Q2;\n"
+        "\tsubc.cc.u64 T3,T3,Q3;\n"
+        "\tsubc.cc.u32 x3_lo,x3_lo,0;\n"
+        "\tsubc.u32 x3_hi,x3_hi,0;\n"
+        "\tadd.cc.u64 T0,T0,PPP0;\n"
+        "\taddc.cc.u64 T1,T1,PPP1;\n"
+        "\taddc.cc.u64 T2,T2,PPP2;\n"
+        "\taddc.cc.u64 T3,T3,PPP3;\n"
+        "\taddc.cc.u32 x3_lo,x3_lo,0;\n"
+        "\taddc.u32 x3_hi,x3_hi,0;\n"
+        "\tmov.b64 {x3_t0l,x3_t0h}, T0; mov.b64 {x3_t1l,x3_t1h}, T1;\n"
+        "\tmad.lo.u32 x3_q, x3_hi, 977, x3_lo;\n"
+        "\tmov.b64 x3_z, {x3_t0l, x3_q};\n"
+        "\tmul.wide.u32 x3_t, x3_lo, 977; add.cc.u64 x3_t, x3_t, x3_z;\n"
+        "\taddc.u32 x3_c, x3_hi, 0;\n"
+        "\tshr.s32 x3_e, x3_c, 31;\n"
+        "\tmov.b64 {x3_t0l, x3_s}, x3_t;\n"
+        "\tadd.cc.u32 x3_t0h, x3_t0h, x3_s;\n"
+        "\taddc.cc.u32 x3_t1l, x3_t1l, x3_c;\n"
+#if QSB_FX3_FULLCARRY
+        /* +4 SASS: sign-extended propagation of the fold carry through T2 and T3.  Removes the
+         * fused bit-128 stop (~2^-65/add on random inputs).  Not recommended: it costs most of
+         * the fusion's saving, and the ~2^-191 bit-256 wrap class remains (needs a further K fold). */
+        "\t.reg .u64 x3_e64;\n"
+        "\tmov.b64 x3_e64, {x3_e, x3_e};\n"
+        "\taddc.cc.u32 x3_t1h, x3_t1h, x3_e;\n"
+        "\taddc.cc.u64 T2, T2, x3_e64;\n"
+        "\taddc.u64 T3, T3, x3_e64;\n"
+#else
+        "\taddc.u32 x3_t1h, x3_t1h, x3_e;\n"          /* carry out of bit 128 dropped: same stop as line 2261 */
+#endif
+        "\tmov.b64 T0, {x3_t0l,x3_t0h}; mov.b64 T1, {x3_t1l,x3_t1h};\n"
+#if QSB_SHORT_CARRY2_SENTINEL
+        "\txor.b64 T0,T0,0xC0DE000C;\n"
+#endif
+#endif /* QSB_FX3_ON */
         "\t\n"
         ".reg .u32 f13_outcarry;\n"
         "\n"

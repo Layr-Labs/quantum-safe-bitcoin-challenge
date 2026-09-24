@@ -43,6 +43,17 @@
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
 #endif
+/* QSB_ISO_SUBSET (kill switch, default off): run the fixed-base chain on the
+ * isomorphic curve (x,y) -> (u^2 x, u^3 y), u chosen per problem so that the
+ * recovery abscissa u^2*xR is exactly +1 or -1 (p = 3 mod 4: exactly one of
+ * +/-1/xR is a square). The filter's recovery denominator d = xR*ZZ - X then
+ * needs no multiply, and one multiply of each block-tree root inverse by u^-1
+ * returns original-curve slopes, so the post-inverse finish is untouched.
+ * 0 = promoted code, byte-identical PTX. The shape follows our pinning
+ * track's QSB_ISO_XR. */
+#ifndef QSB_ISO_SUBSET
+#define QSB_ISO_SUBSET 1
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -85,6 +96,17 @@ __device__ __constant__ uint64_t QSB_U2R[8];
  * finish derive both x-coordinates from the two slopes alone (see
  * qsb_xyzz_finish_precomputed). Uploaded next to QSB_U2R. */
 __device__ __constant__ uint64_t QSB_U2R_C[4];
+#if QSB_ISO_SUBSET
+/* Transformed recovery point R' = (u^2 xR, u^3 yR) = (+/-1, beta*yR); the
+ * front (pre-inverse) side works on the isomorphic curve, the finish on the
+ * original one (QSB_U2R, QSB_U2R_C). */
+__device__ __constant__ uint64_t QSB_ISO_U2R[8];
+/* w = u^-1: scales the filter's block-tree root inverse (once per block) and
+ * the exact verifier's own scalar inverse. */
+__device__ __constant__ uint64_t QSB_ISO_INVU[4];
+/* Filter sign select for d = xR'*ZZ - X: mask = 0 (xR' = +1) or ~0 (xR' = -1). */
+__device__ __constant__ uint64_t QSB_ISO_XMASK;
+#endif
 // Global memory supports the different row indices selected by adjacent lanes.
 __device__ uint4 QSB_PUSH_WORDS[151];
 static int qsb_prepare_push_words(const uint8_t *bytes,int n){
@@ -1519,6 +1541,9 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
 
 #include "tree_inverse.cuh"
 #include "pair_shared.cuh"
+#if QSB_ISO_SUBSET && !(QSB_PAIR_SHARED && ZLAB_K2S3M && ZLAB_DUAL_EPOCH_SHA && ZLAB_TREE==2 && HM43_WARP_ROOT)
+#error "QSB_ISO_SUBSET is implemented for the live configuration only (paired 3M finish, dual-epoch SHA, level-packed tree with the warp root inverse)"
+#endif
 
 // A separate kernel keeps exact recovery out of the speculative kernel's
 // register allocation. No tentative record is read by the host output path.
@@ -1617,7 +1642,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     {
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
+#if QSB_ISO_SUBSET
+        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt);
+#else
         QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
 #else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -1648,7 +1677,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
+#if QSB_ISO_SUBSET
+    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt);
+#else
     QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
 #else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -2089,12 +2122,66 @@ extern "C" {
 #include <openssl/obj_mac.h>
 }
 
+#if QSB_ISO_SUBSET
+/* Per-problem isomorphism (x,y) -> (alpha*x, beta*y), alpha = u^2, beta = u^3,
+ * with alpha*xR = +/-1. Since p = 3 (mod 4), exactly one of +/-1/xR is a
+ * square; u is its (p+1)/4-th power root. The table builders read alpha/beta
+ * from here, so every table point lands on the isomorphic curve. */
+typedef struct {
+    uint64_t u2r_iso[8];        /* (xR', yR') = (+/-1, beta*yR), LE limbs */
+    uint64_t invu[4];           /* w = u^-1 (tree root scale, exact verifier) */
+    uint64_t xmask;             /* filter sign select: 0 or ~0 */
+    int xneg;
+    BIGNUM *alpha, *beta, *p;   /* kept alive for the table builders */
+} qsb_iso_params_t;
+static qsb_iso_params_t qsb_iso;
+static int qsb_make_iso_params(const uint8_t u2r_x[32], const uint8_t u2r_y[32], qsb_iso_params_t *o) {
+    static const uint8_t p_be[32]={
+        0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+        0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFE,0xFF,0xFF,0xFC,0x2F};
+    BN_CTX *ctx=BN_CTX_new();
+    BIGNUM *p=BN_new(),*x=BN_new(),*y=BN_new(),*alpha=BN_new(),*u=BN_new(),*e=BN_new(),
+           *chk=BN_new(),*beta=BN_new(),*invu=BN_new(),*xt=BN_new(),*yt=BN_new();
+    int ok=ctx&&p&&x&&y&&alpha&&u&&e&&chk&&beta&&invu&&xt&&yt;
+    if(ok)ok=BN_bin2bn(p_be,32,p)!=NULL && BN_lebin2bn(u2r_x,32,x)!=NULL && BN_lebin2bn(u2r_y,32,y)!=NULL;
+    if(ok)ok=BN_mod_inverse(alpha,x,p,ctx)!=NULL;                 /* alpha = 1/xR */
+    if(ok){
+        BN_copy(e,p);BN_add_word(e,1);BN_rshift(e,e,2);              /* (p+1)/4 */
+        BN_mod_exp(u,alpha,e,p,ctx);BN_mod_sqr(chk,u,p,ctx);
+        o->xneg=(BN_cmp(chk,alpha)!=0);
+        if(o->xneg){BN_mod_sub(alpha,p,alpha,p,ctx);BN_mod_exp(u,alpha,e,p,ctx);}   /* alpha = -1/xR */
+        BN_mod_sqr(chk,u,p,ctx);ok=BN_cmp(chk,alpha)==0;              /* u^2 == alpha */
+    }
+    if(ok){BN_mod_mul(beta,alpha,u,p,ctx);ok=BN_mod_inverse(invu,u,p,ctx)!=NULL;}   /* beta = u^3 */
+    if(ok){
+        BN_one(xt);if(o->xneg)BN_sub(xt,p,xt);                     /* xR' = +/-1 */
+        BN_mod_mul(yt,beta,y,p,ctx);                                /* yR' = beta*yR */
+        ok=BN_bn2lebinpad(xt,(uint8_t*)o->u2r_iso,32)==32
+         && BN_bn2lebinpad(yt,(uint8_t*)(o->u2r_iso+4),32)==32
+         && BN_bn2lebinpad(invu,(uint8_t*)o->invu,32)==32;
+        o->xmask=o->xneg?~0ULL:0ULL;
+        o->alpha=alpha;o->beta=beta;o->p=p;
+    }
+    BN_free(x);BN_free(y);BN_free(u);BN_free(e);BN_free(chk);BN_free(invu);BN_free(xt);BN_free(yt);
+    if(!ok){BN_free(alpha);BN_free(beta);BN_free(p);fprintf(stderr,"ERROR: isomorphic coordinate setup failed\n");}
+    BN_CTX_free(ctx);
+    return ok?0:-1;
+}
+/* Map an affine point of the original curve onto the isomorphic one, in place. */
+static void qsb_iso_scale_xy(BIGNUM *x, BIGNUM *y, BN_CTX *ctx) {
+    BN_mod_mul(x,x,qsb_iso.alpha,qsb_iso.p,ctx);
+    BN_mod_mul(y,y,qsb_iso.beta,qsb_iso.p,ctx);
+}
+#endif
 /* Affine (x,y) of a point, as the 4+4 little-endian limbs the table uses. */
 static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
                               BN_CTX *ctx, uint64_t out[8]) {
     uint8_t xb[32], yb[32];
     memset(xb, 0, 32); memset(yb, 0, 32);
     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+#if QSB_ISO_SUBSET
+    qsb_iso_scale_xy(x, y, ctx);   /* ladders and the spot check both come through here */
+#endif
     BN_bn2bin(x, xb + (32 - BN_num_bytes(x)));
     BN_bn2bin(y, yb + (32 - BN_num_bytes(y)));
     for (int j = 0; j < 16; j++) { uint8_t t = xb[j]; xb[j] = xb[31-j]; xb[31-j] = t; }
@@ -2151,7 +2238,13 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
-static int gt_spot_check(const uint8_t *gTable, int samples,
+/* Reads the built table straight out of device memory, 64 bytes per sample. The
+ * previous form mirrored the whole table to the host first, i.e. a 67,108,864-byte
+ * D2H copy plus a host allocation of the same size, to compare 216 entries
+ * (13,824 bytes). Same samples, same OpenSSL derivation, same pass/fail, and a
+ * failed device read counts as a failed check so the host-builder fallback still
+ * covers every way the GPU build can go wrong. */
+static int gt_spot_check(const uint8_t *d_gTable, int samples,
                          const uint8_t neg_r_inv[32]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
@@ -2185,8 +2278,14 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, ctx, want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        if (memcmp(gTable + off,      want,     32) != 0 ||
-            memcmp(gTable + off + 32, want + 4, 32) != 0) {
+        uint8_t got[64];
+        if (cudaMemcpy(got, d_gTable + off, 64, cudaMemcpyDeviceToHost) != cudaSuccess) {
+            fprintf(stderr, "  GTable spot check read failed at chunk %d entry %d\n", ch, i);
+            ok = 0;
+            break;
+        }
+        if (memcmp(got,      want,     32) != 0 ||
+            memcmp(got + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -2219,6 +2318,9 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32]) {
         EC_POINT_copy(pt, base);                                                     /* (2*0+1)*base_c */
         for (unsigned d = 0; d < gt_entries(ch); d++) {
             EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+#if QSB_ISO_SUBSET
+            qsb_iso_scale_xy(x, y, ctx);
+#endif
             uint8_t xb[32], yb[32]; memset(xb,0,32); memset(yb,0,32);
             BN_bn2bin(x, xb+(32-BN_num_bytes(x)));
             BN_bn2bin(y, yb+(32-BN_num_bytes(y)));
@@ -2698,6 +2800,11 @@ int main(int argc, char **argv) {
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
     uint8_t *d_gt;
     cudaMalloc(&d_gt,gt_sz);
+#if QSB_ISO_SUBSET
+    /* Before any table point is serialized: the builders scale through qsb_iso. */
+    if(qsb_make_iso_params(dp.u2r_x,dp.u2r_y,&qsb_iso)<0)return 1;
+    printf("  Isomorphic recovery coordinates: xR'=%s1\n",qsb_iso.xneg?"-":"+");
+#endif
     {
         /* Build the fixed-base table on the GPU (mixed 15-chunk geometry, one
          * interleaved X||Y record per entry). The host only produces the two
@@ -2719,12 +2826,10 @@ int main(int argc, char **argv) {
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
-        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
-        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+        uint8_t *chk_table=NULL;
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,dp.neg_r_inv);
+            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,dp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
@@ -2734,6 +2839,8 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+            chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: gtable host builder\n"); return 1; }
             compute_gtable(chk_table,dp.neg_r_inv);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
@@ -2870,6 +2977,13 @@ int main(int argc, char **argv) {
         }
         BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
     }
+#if QSB_ISO_SUBSET
+    if(cudaMemcpyToSymbol(QSB_ISO_U2R,qsb_iso.u2r_iso,sizeof(qsb_iso.u2r_iso))!=cudaSuccess ||
+       cudaMemcpyToSymbol(QSB_ISO_INVU,qsb_iso.invu,sizeof(qsb_iso.invu))!=cudaSuccess ||
+       cudaMemcpyToSymbol(QSB_ISO_XMASK,&qsb_iso.xmask,sizeof(qsb_iso.xmask))!=cudaSuccess){
+        fprintf(stderr,"ERROR: QSB_ISO constant upload failed\n");return 1;
+    }
+#endif
 
     /* Compute neg_2u2R */
     {

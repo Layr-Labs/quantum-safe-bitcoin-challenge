@@ -26,6 +26,9 @@
 #ifndef ZLAB_TREE
 #define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
 #endif
+#ifndef QSB_ISO_SUBSET
+#define QSB_ISO_SUBSET 0   /* see tree.cu */
+#endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t tree[4][512];
@@ -185,6 +188,20 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
         a[4]=b[4]=0;__syncwarp(0x0000000f);QSB_TREE_MUL(root,a,b);qsb_field_normalize(root);
         root[4]=0;zi_inverse_quad(root,tid);
+#if QSB_ISO_SUBSET
+        {   /* One multiply per block: scale the root inverse by u^-1. The
+             * down-sweep is linear in it, so every leaf inverse 1/(WA*WB) and
+             * hence every 1/WA carries the factor that turns the isomorphic
+             * slopes back into original-curve ones (all four root lanes hold
+             * the same canonical inverse here). */
+            uint64_t sc[5]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3],0};
+            uint64_t scaled[5];
+            QSB_TREE_MUL(scaled,root,sc);
+            #pragma unroll
+            for(int k=0;k<4;k++)root[k]=scaled[k];
+            root[4]=0;
+        }
+#endif
         if(tid<2){
             uint64_t child[5];
             #pragma unroll

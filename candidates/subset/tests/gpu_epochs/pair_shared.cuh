@@ -5,6 +5,9 @@
 #ifndef QSB_PAIR_SHARED
 #define QSB_PAIR_SHARED 1
 #endif
+#ifndef QSB_ISO_SUBSET
+#define QSB_ISO_SUBSET 0   /* see tree.cu */
+#endif
 /* epochs consumed per digest block = (epochs per thread) x (epoch pairs per block) */
 #define QSB_PAIR_MUL ((QSB_PAIR_SHARED ? 2 : 1) * QSB_SE_HALVES)
 #if QSB_PAIR_SHARED
@@ -85,8 +88,22 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
+#if QSB_ISO_SUBSET
+    /* xR' = +/-1, so d = xR'*ZZ - X needs no multiply: select ZZ or p - ZZ
+     * with four limbs (mask = 0 or ~0; ~ZZ + (p+1) = p - ZZ mod 2^256, exact
+     * for the canonical ZZ the chain returns; a raw ZZ in [p,2^256) would be
+     * off by K, probability ~2^-224, filter-only). Same shape as our pinning
+     * track's qsb_recovery_denominator. */
+    (void)xR;
+    {   const uint64_t m = QSB_ISO_XMASK;
+        t[0] = ZZ[0] ^ m; t[1] = ZZ[1] ^ m; t[2] = ZZ[2] ^ m; t[3] = ZZ[3] ^ m;
+        const uint64_t c0 = 0xFFFFFFFEFFFFFC30ULL & m;
+        UADDO1(t[0], c0); UADDC1(t[1], m); UADDC1(t[2], m); UADD1(t[3], m); }
+    QSB_PRE_FSUB(t, t, X_D);
+#else
     QSB_PRE_FMUL(t, xR, ZZ);
     QSB_PRE_FSUB(t, t, X_D);
+#endif
     Load256(X_D, t);             /* X_D becomes d */
     QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
@@ -204,8 +221,15 @@ __device__ __forceinline__ int qsb_k2s_front3(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+#if QSB_ISO_SUBSET
+    (void)u2rx;(void)u2ry;
+    qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,NULL,prod);
+    uint64_t ry_iso[4]={QSB_ISO_U2R[4],QSB_ISO_U2R[5],QSB_ISO_U2R[6],QSB_ISO_U2R[7]};
+    qsb_k2s_pre3(qy,qzz,qzzz,ry_iso,n);
+#else
     qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#endif
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
@@ -236,6 +260,20 @@ __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     qsb_pair_second_sha_z(stateB,out.b);
     return out;
 }
+#if QSB_ISO_SUBSET
+/* The reference point enters from constant memory at its single use, so no
+ * reference-point word is live across the chain. */
+__device__ __forceinline__ int qsb_k2s_front3_z(
+    const uint64_t*z,const uint8_t*d_gt,uint64_t*prod,uint64_t*n){
+    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+    uint32_t unused_flag=0;
+    qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+    qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,NULL,prod);   /* d = +/-ZZ - X (sign select) */
+    uint64_t ry_iso[4]={QSB_ISO_U2R[4],QSB_ISO_U2R[5],QSB_ISO_U2R[6],QSB_ISO_U2R[7]};
+    qsb_k2s_pre3(qy,qzz,qzzz,ry_iso,n);                 /* yR' = beta*yR */
+    return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
+}
+#else
 __device__ __forceinline__ int qsb_k2s_front3_z(
     const uint64_t*z,const uint8_t*d_gt,uint64_t*u2rx,uint64_t*u2ry,
     uint64_t*prod,uint64_t*n){
@@ -246,6 +284,7 @@ __device__ __forceinline__ int qsb_k2s_front3_z(
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
     return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
 }
+#endif
 #endif
 __device__ __forceinline__ int qsb_k2s_front_exact(
     const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
@@ -439,8 +478,24 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
     uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
     uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
+#if QSB_ISO_SUBSET
+    /* The table holds the isomorphic curve, so the exact chain yields
+     * P' = (alpha*xP, beta*yP). Recover against R' = (+/-1, beta*yR) with the
+     * unchanged exact arithmetic (xR' enters the multiply as a field element),
+     * then scale the scalar inverse by u^-1: m1 = u^-1*(yR'-yP')/(xR'-xP') is
+     * the original-curve slope, and the finish continues on the original R. */
+    uint64_t rxi[4]={QSB_ISO_U2R[0],QSB_ISO_U2R[1],QSB_ISO_U2R[2],QSB_ISO_U2R[3]};
+    uint64_t ryi[4]={QSB_ISO_U2R[4],QSB_ISO_U2R[5],QSB_ISO_U2R[6],QSB_ISO_U2R[7]};
+    if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rxi,ryi,inv,m1,m2))return 0;
+    _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
+    {
+        uint64_t wu[4]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3]};
+        _ModMult(inv,wu);
+    }
+#else
     if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
     _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
+#endif
     uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
     int recid=0;
     return qsb_k2s_gate(x1,x2,par,&recid)?recid+1:0;
@@ -449,6 +504,13 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 
 struct QsbPairFront3 {uint64_t words[16];int ok;};
 #if ZLAB_DUAL_EPOCH_SHA
+#if QSB_ISO_SUBSET
+__device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
+    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt){
+    uint64_t z[4]={z0,z1,z2,z3};
+    uint64_t prod[5],n[12];QsbPairFront3 out;
+    out.ok=qsb_k2s_front3_z(z,d_gt,prod,n);
+#else
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
     uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
     uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
@@ -457,6 +519,7 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t prod[5],n[12];QsbPairFront3 out;
     out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+#endif
     Load256(out.words,prod);
     #pragma unroll
     for(int k=0;k<12;k++)out.words[4+k]=n[k];
