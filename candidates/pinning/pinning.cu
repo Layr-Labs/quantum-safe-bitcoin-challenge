@@ -21,6 +21,30 @@
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
 
+/* 0: original loads; 1: fixed streaming cold loads; 2: productive full-pipeline
+ * ABBA/BAAB selection using ordinary productive search sequences.
+ * Cold-bank streaming prior art: newjordan, public submission 8422241e.
+ * Dispatch specializations and the productive full-pipeline trial are new. */
+#ifndef QSB_COLD_STREAM
+#define QSB_COLD_STREAM 2
+#endif
+#if QSB_COLD_STREAM < 0 || QSB_COLD_STREAM > 2
+#error "QSB_COLD_STREAM must be 0, 1 or 2"
+#endif
+#if QSB_COLD_STREAM
+#define QSB_LOAD_TEMPLATE template<bool COLD_STREAM>
+#define QSB_LOAD_SPECIALIZE <COLD_STREAM>
+#define QSB_PIPE_POLICY , bool COLD_STREAM = false
+static bool qsb_cold_stream_selected = QSB_COLD_STREAM == 1;
+#else
+#define QSB_LOAD_TEMPLATE
+#define QSB_LOAD_SPECIALIZE
+#define QSB_PIPE_POLICY
+#endif
+#if QSB_COLD_STREAM == 2
+#include "ColdStreamTrial.h"
+#endif
+
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
 #endif
@@ -475,6 +499,22 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
+#if QSB_COLD_STREAM
+#if !QSB_BIGTBL || !QSB_FOUR_HOT
+#error "Cold streaming is defined only for the six-term four-hot geometry"
+#endif
+#if QSB_COLD_STREAM == 2 && !QSB_SLOTPIPE
+#error "The productive cold-stream trial requires the slotted pipeline"
+#endif
+__device__ __forceinline__ ulonglong2 qsb_cold_ld_v2(const ulonglong2 *p) {
+    uint64_t a, b;
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.v2.u64 {%0,%1}, [g]; }"
+                 : "=l"(a), "=l"(b) : "l"(p) : "memory");
+    return make_ulonglong2(a, b);
+}
+#endif
+
+QSB_LOAD_TEMPLATE
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
@@ -483,7 +523,19 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+#if QSB_COLD_STREAM
+    ulonglong2 x0, x1, y0, y1;
+    if (COLD_STREAM && base + idx >= q9_bigtbl_offset(4)) {
+        // .cs allocates with evict-first priority in L1 and L2. Four 16-byte
+        // demand loads cover the original 64-byte record; no prefetch traffic.
+        x0=qsb_cold_ld_v2(tx); x1=qsb_cold_ld_v2(tx+1);
+        y0=qsb_cold_ld_v2(ty); y1=qsb_cold_ld_v2(ty+1);
+    } else {
+        x0=__ldg(tx); x1=__ldg(tx+1); y0=__ldg(ty); y1=__ldg(ty+1);
+    }
+#else
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+#endif
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -770,19 +822,21 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
 }
+QSB_LOAD_TEMPLATE
 __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
                                              uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
+    gt_load_signed_flat_m QSB_LOAD_SPECIALIZE(table,0u,code&0x7fffffffu,
 #else
-    gt_load_signed_flat_m(table,0u,code&0x1fffffu,
+    gt_load_signed_flat_m QSB_LOAD_SPECIALIZE(table,0u,code&0x1fffffu,
 #endif
                           ((uint64_t)m32<<32)|m32,x,y);
 }
 
+QSB_LOAD_TEMPLATE
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
@@ -809,21 +863,21 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     }
     uint32_t m0=(uint32_t)((int32_t)seed0>>31);
 #if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,seed0&0x7fffffffu,
+    gt_load_signed_flat_m QSB_LOAD_SPECIALIZE(table,0u,seed0&0x7fffffffu,
 #else
-    gt_load_signed_flat_m(table,0u,seed0&0x1fffffu,
+    gt_load_signed_flat_m QSB_LOAD_SPECIALIZE(table,0u,seed0&0x1fffffu,
 #endif
                          ((uint64_t)m0<<32)|m0,x0,y0);
     uint32_t m1=(uint32_t)((int32_t)seed1>>31);
 #if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,seed1&0x7fffffffu,
+    gt_load_signed_flat_m QSB_LOAD_SPECIALIZE(table,0u,seed1&0x7fffffffu,
 #else
-    gt_load_signed_flat_m(table,0u,seed1&0x1fffffu,
+    gt_load_signed_flat_m QSB_LOAD_SPECIALIZE(table,0u,seed1&0x1fffffu,
 #endif
                          ((uint64_t)m1<<32)|m1,x1,y1);
 #else
-    qsb_load_glv(table,first,x0,y0);
-    qsb_load_glv(table,first+1,x1,y1);
+    qsb_load_glv QSB_LOAD_SPECIALIZE(table,first,x0,y0);
+    qsb_load_glv QSB_LOAD_SPECIALIZE(table,first+1,x1,y1);
 #endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
     #pragma unroll 1
@@ -837,7 +891,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             };
             _ModMult(X,X,(uint64_t*)beta);
         }
-        qsb_load_glv(table,term,x1,y1);
+        qsb_load_glv QSB_LOAD_SPECIALIZE(table,term,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
@@ -2076,7 +2130,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_symmetric(
     return parities;
 }
 
-template<bool FAST_TAIL, int STAGE>
+template<bool FAST_TAIL, int STAGE QSB_PIPE_POLICY>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
@@ -2213,7 +2267,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
     /* u1*G as raw XYZZ via the signed 64 MiB A-table. */
-    _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
+    _FixedBaseSignedXYZZScalar QSB_LOAD_SPECIALIZE(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch());
 
     /* Recover P+R and P-R together with one shared denominator inverse. The
      * prepare-only xR copy dies before the collective; reload R afterward so
@@ -2412,11 +2466,22 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
+#if QSB_COLD_STREAM
+    if (qsb_cold_stream_selected) {
+    kernel_pinning_pipeline<FAST_TAIL,0,true><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+        saved,roots,tree,tp);
+    } else
+#endif
+    {
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree,tp);
+    }
     cudaError_t err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
@@ -3690,6 +3755,9 @@ int main(int argc, char **argv) {
         return publish_hits(slot_seq[s], slot_lt[s], count, hits);
     };
 #endif
+#if QSB_COLD_STREAM == 2
+    qsb::ColdStreamTrial cold_trial;
+#endif
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
         if (fast_tail) {
             uint8_t block[64];
@@ -3798,11 +3866,50 @@ int main(int argc, char **argv) {
          * event is synchronized on reuse. cur_tp is passed to the kernel by
          * value; the optional uploaded midstate is also private to each slot.
          * Only pin_tail_tab is shared across sequences and needs this drain. */
+#if QSB_COLD_STREAM == 2
+        // Complete all work under the old policy before timing or dispatching
+        // another specialization. Ordinary overlap remains within each arm.
+        if (cold_trial.drain_next()
+#if !QSB_OVERLAP_SEQUENCES || QSB_TAIL_TAB
+            || true
+#endif
+        ) {
+            for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+        }
+        if (cold_trial.active()) {
+            struct timespec cold_now;
+            if (clock_gettime(CLOCK_MONOTONIC, &cold_now) != 0) {
+                fprintf(stderr, "Cold-stream trial clock failed\n");
+                return 1;
+            }
+            const double now = (double)cold_now.tv_sec + cold_now.tv_nsec * 1e-9;
+            const unsigned old_arm = cold_trial.arm();
+            const int event = cold_trial.complete_sequence(now, lt_range);
+            if (event == qsb::ColdStreamTrial::Invalid) {
+                fprintf(stderr, "Invalid cold-stream full-pipeline trial\n");
+                return 1;
+            }
+            if (event == qsb::ColdStreamTrial::Sample ||
+                event == qsb::ColdStreamTrial::Selected) {
+                printf("QSB cold-stream arm=%u policy=%u seconds=%.9f sequences=%u\n",
+                       old_arm, (unsigned)qsb_cold_stream_selected,
+                       cold_trial.seconds(old_arm), qsb::ColdStreamTrial::kMeasured);
+                fflush(stdout);
+            }
+            qsb_cold_stream_selected = cold_trial.streaming();
+            if (event == qsb::ColdStreamTrial::Selected) {
+                printf("QSB cold-stream selected=%u measured-gain=%.6f\n",
+                       (unsigned)qsb_cold_stream_selected, cold_trial.gain());
+                fflush(stdout);
+            }
+        }
+#else
 #if !QSB_OVERLAP_SEQUENCES || QSB_TAIL_TAB
         /* Every slot's hits are drained before the sequence rolls over, so a
          * hit can never be attributed to the wrong sequence and at most
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#endif
 #endif
 
         /* Progress every 10 sequences */
