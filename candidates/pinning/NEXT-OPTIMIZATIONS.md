@@ -60,3 +60,34 @@ floor.
 Independent 1% race: port H0-only pubkey SHA, port `QSB_YOFF`, then
 Nsight before anything clever. Do not port C31 onto subset's filter
 without its existing exact replay still in front.
+
+## v11 additions (2026-09-22) — what remains open after this session
+
+**Shipped in v11** (`d1ce6f2b`): `QSB_CHAIN_PIPE` (depth-1 gather pipeline,
+dead-register prefetch, 3-buffer rotation), `QSB_DEC_REP`, `QSB_SUM_2U`,
+`QSB_PREP_MASK`, `QSB_TREE_FLAT` — all on base `0ace23d4` (809.95M).
+
+**Newly dead:** RAW_DIFF — see DEAD-ENDS.md (off-by-K per borrow; fkiene
+bundle confirmed failed).
+
+**Still open, ordered by leverage:**
+
+1. **Duplicate/invalid candidate counting** (from v9 verdict): kernel-side
+   dedup counter to split the self-rep vs verified gap
+   (0.9734 -> 0.932 across our runs). The yield gap is the biggest
+   unexplained lever; if it is verifier-side rejection of duplicates,
+   dedup + re-search could recover several %.
+2. **CHAIN_PIPE depth-2**: prefetch chunk c+2 as well. Register pressure
+   is the constraint — the current pipe is already at 124/126 regs in the
+   hot kernel; depth-2 needs another 8 dead registers per stage or a
+   second rotating pair. Try only if v11 shows the depth-1 gain held.
+3. **Sustained-rate levers** (v8/v9 finding): the yield gap tracks
+   sustained-vs-peak decay (power/thermal droop over 20 min). Lower-power
+   inner loops (fewer dual-issue conflicts, narrower voltage path) may
+   out-score nominally-faster code. No concrete mechanism identified.
+4. **The pending field queue**: fkiene resubmitted post-failure
+   (1d72e1b) — if it promotes, rebase again and re-port the pipe; the
+   rotation pattern is base-agnostic.
+5. **sm_89-specific scheduling**: no cuobjdump/nvdisasm in the local
+   toolkit (apt subset has nvcc+ptxas only). SASS-level reordering review
+   of the pipelined loop is unverified — worth one pass if tools appear.
