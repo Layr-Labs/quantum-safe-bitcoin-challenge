@@ -1,6 +1,15 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
+#ifndef QSB_RESUB_0924V30
+#define QSB_RESUB_0924V30 1 /* v30: re-draw of the promoted four-hot-bank tree (fkiene 871963fd / 7e95c40, official 904,971,814); identical build, fresh ranked draw */
+#endif
+#ifndef QSB_RESUB_0924V31
+#define QSB_RESUB_0924V31 1 /* v31: second draw of the promoted four-hot-bank tree; v30 drew 864.29M (yield 0.946) */
+#endif
+#ifndef QSB_RESUB_0924V32
+#define QSB_RESUB_0924V32 1 /* v32: third draw of the promoted four-hot-bank tree; v31 drew 861.96M (yield 0.941) */
+#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -337,9 +346,12 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #if QSB_BIGTBL
 /* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
  * FOUR_HOT selects four cached banks and two streaming banks.
- * One 32-bit code still holds the absolute record index and Y sign. */
-#define GT_CHUNKS 6
-#define GT_GLV_TERMS 12
+ * FIVE_HOT selects seven terms per component: five small banks plus a
+ * sixth bank inside the same persisting window (32.25 MiB prefix), only
+ * the bounded top segment streams. One 32-bit code still holds the
+ * absolute record index and Y sign. */
+#define GT_CHUNKS (QSB_FIVE_HOT?7:6)
+#define GT_GLV_TERMS (QSB_FIVE_HOT?14:12)
 #define GT_TOTAL_ENTRIES QSB_GT_TOTAL
 #define GT_LO (1u << QSB_GT_RADIX_BITS)
 #define GT_HI (1u << QSB_GT_RADIX_BITS)
@@ -353,9 +365,12 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              (QSB_FIVE_HOT?5491729216ULL:
+               QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
               "GLV12 geometry/table-byte mismatch");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
+static_assert(GT_GLV_TERMS <= 24,
+              "per-lane code planes must fit the shared digit arena");
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
  * physical segments use widths [18,19,18,18,18,18,19] at shifts
@@ -2649,7 +2664,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
 #if QSB_BIGTBL
-    BN_set_word(bias,QSB_GT_TOP_CENTER+1u); BN_lshift(bias,bias,QSB_GT_TOP_SHIFT-1u); BN_sub_word(bias,1u<<17);
+    BN_set_word(bias,QSB_GT_TOP_CENTER+1u); BN_lshift(bias,bias,QSB_GT_TOP_SHIFT-1u); BN_sub_word(bias,1u<<(gt_shift(1)-1));
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
@@ -2683,8 +2698,14 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 #else
         int high=(int)(max_m>>8);
 #endif
-        gt_batch_ladder(grp,step,high,
-            hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
+        /* Segments whose largest odd magnitude stays under GT_LO have no
+         * ladder rows at all (FIVE_HOT's 13-bit chunk).  The gtable kernel
+         * takes the hi==0 fast path for every record there, so H[ch][*] is
+         * never read; skip the empty ladder instead of tripping the
+         * count<1 guard. */
+        if(high>0)
+            gt_batch_ladder(grp,step,high,
+                hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
     }
     BN_free(x);BN_free(y);BN_free(factor);BN_free(order);BN_free(nri);
     BN_free(bscal);BN_free(field_p);BN_free(alpha);BN_free(beta);BN_free(bias);
@@ -2699,7 +2720,7 @@ static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
 #else
         BN_set_word(k,333126); BN_lshift(k,k,108);
 #endif
-        BN_sub_word(k,1u<<17); BN_add_word(k,index);
+        BN_sub_word(k,1u<<(gt_shift(1)-1)); BN_add_word(k,index);
     } else {
         BN_one(k); BN_lshift(k,k,gt_shift(ch)-1);
         BN_mul_word(k,(BN_ULONG)(2*index+1));
@@ -3321,7 +3342,7 @@ int main(int argc, char **argv) {
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        size_t skip = 0u; // dense bank prefix first, then the bounded top segment.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
@@ -3395,7 +3416,7 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        size_t skip = 0u; // dense bank prefix first, then the bounded top segment.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);

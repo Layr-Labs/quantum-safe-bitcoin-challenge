@@ -16,16 +16,37 @@
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
-#if QSB_BIGTBL && QSB_FOUR_HOT
+// Seven-term geometry: five small banks plus a sixth bank inside the same
+// persisting window (32.25 MiB prefix < the proven 48 MiB cap), leaving only
+// the bounded top segment streaming. One extra point-add per component buys
+// back two cold DRAM records per candidate. Takes precedence over FOUR_HOT.
+#ifndef QSB_FIVE_HOT
+#define QSB_FIVE_HOT 1 /* v33: seven-term geometry — six L2-resident banks, cold reads 4->2 */
+#endif
+#if QSB_FIVE_HOT != 0 && QSB_FIVE_HOT != 1
+#error QSB_FIVE_HOT must be 0 or 1
+#endif
+#if QSB_FIVE_HOT && !QSB_BIGTBL
+#error QSB_FIVE_HOT is a BIGTBL geometry and requires QSB_BIGTBL=1
+#endif
+#if QSB_BIGTBL && QSB_FIVE_HOT
+#define QSB_GT_TOTAL 85808269u
+#define QSB_GT_RADIX_BITS 14
+#define QSB_GT_TOP_CENTER 170559769u
+#define QSB_GT_TOP_SHIFT 100u
+#define QSB_GT_TOP_CHUNK 6
+#elif QSB_BIGTBL && QSB_FOUR_HOT
 #define QSB_GT_TOTAL 153175181u
 #define QSB_GT_RADIX_BITS 14
 #define QSB_GT_TOP_CENTER 170559769u
 #define QSB_GT_TOP_SHIFT 100u
+#define QSB_GT_TOP_CHUNK 5
 #else
 #define QSB_GT_TOTAL 22893641u
 #define QSB_GT_RADIX_BITS 12
 #define QSB_GT_TOP_CENTER 10659985u
 #define QSB_GT_TOP_SHIFT 104u
+#define QSB_GT_TOP_CHUNK 5
 #endif
 
 #if QSB_BIGTBL
@@ -38,17 +59,25 @@
  * QSB_FOUR_HOT=0: physical order 0,1,2,5,3,4, three cached banks.
  * QSB_FOUR_HOT=1: physical order 0..5, first four banks total 48 MiB;
  * widths [18,19,18,18,27], top shift 100, centered at 170559769.
- * Both exactly reconstruct the same bounded signed GLV component.
+ * QSB_FIVE_HOT=1: physical order 0..6, widths [17,18,17,17,13,18],
+ * top shift 100, same center; six-bank prefix is 32.25 MiB so every
+ * non-top segment sits inside the same persisting window.
+ * All exactly reconstruct the same bounded signed GLV component.
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
-#if QSB_FOUR_HOT
+#if QSB_FIVE_HOT
+    return c<2?131072u:c<4?65536u:c==4?4096u:c==5?131072u:85279885u;
+#elif QSB_FOUR_HOT
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
 #else
     return c<3 ? 262144u : (c<5 ? 8388608u : 5329993u);
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
-#if QSB_FOUR_HOT
+#if QSB_FIVE_HOT
+    return c==0?0u:c==1?131072u:c==2?262144u:
+           c==3?327680u:c==4?393216u:c==5?397312u:528384u;
+#elif QSB_FOUR_HOT
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
 #else
@@ -57,7 +86,9 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
-#if QSB_FOUR_HOT
+#if QSB_FIVE_HOT
+    return c==0?0u:c==1?17u:c==2?35u:c==3?52u:c==4?69u:c==5?82u:100u;
+#elif QSB_FOUR_HOT
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
 #else
     return c==0?0u:c==1?18u:c==2?37u:c==3?56u:c==4?80u:104u;
@@ -73,14 +104,16 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     } else wide=mag[1]>>(shift-64u);
     uint32_t f=(uint32_t)wide,idx,neg_digit;
     if(c==0) {
-        idx=f&((1u<<18)-1u);neg_digit=0;
-    } else if(c==5) {
+        idx=f&((1u<<(QSB_FIVE_HOT?17u:18u))-1u);neg_digit=0;
+    } else if(c==QSB_GT_TOP_CHUNK) {
         const int32_t d=(int32_t)(2u*f)-(int32_t)QSB_GT_TOP_CENTER;
         neg_digit=(uint32_t)d>>31;
         const uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
         idx=(ad-1u)>>1;
     } else {
-#if QSB_FOUR_HOT
+#if QSB_FIVE_HOT
+        const unsigned bits=c==1?18u:c<4?17u:c==4?13u:18u;
+#elif QSB_FOUR_HOT
         const unsigned bits=c==1?19u:c<4?18u:27u;
 #else
         const unsigned bits=c<3?19u:24u;

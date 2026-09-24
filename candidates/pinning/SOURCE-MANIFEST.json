@@ -1,152 +1,307 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
-  "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
-  "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
-  ],
-  "files": [
-    {
-      "path": "candidates/pinning/COPYING",
-      "bytes": 35149,
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    },
-    {
-      "path": "candidates/pinning/COPYING-secp256k1",
-      "bytes": 1057,
-      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
-    },
-    {
-      "path": "candidates/pinning/DEAD-ENDS.md",
-      "bytes": 2477,
-      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
-    },
-    {
-      "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
-    },
-    {
-      "path": "candidates/pinning/GPUHash.h",
-      "bytes": 35133,
-      "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
-    },
-    {
-      "path": "candidates/pinning/GPUMath.h",
-      "bytes": 121679,
-      "sha256": "7f67eba59dd01125151f2ae257ad4782d37d98e2e2b37a196c4e7deb81229a2d"
-    },
-    {
-      "path": "candidates/pinning/LeafRecovery.cuh",
-      "bytes": 6880,
-      "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
-    },
-    {
-      "path": "candidates/pinning/NARROW-PARITY.md",
-      "bytes": 11898,
-      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
-    },
-    {
-      "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
-      "bytes": 2521,
-      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
-      "bytes": 26615,
-      "sha256": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-VALIDATION.json",
-      "bytes": 1146,
-      "sha256": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8"
-    },
-    {
-      "path": "candidates/pinning/PackedRecovery.cuh",
-      "bytes": 7733,
-      "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
-    },
-    {
-      "path": "candidates/pinning/ParityWindow.cuh",
-      "bytes": 6292,
-      "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
-    },
-    {
-      "path": "candidates/pinning/PriorityPipeline.h",
-      "bytes": 2435,
-      "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
-    },
-    {
-      "path": "candidates/pinning/RESEARCH.md",
-      "bytes": 23810,
-      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
-    },
-    {
-      "path": "candidates/pinning/RecoveryConstant.h",
-      "bytes": 1091,
-      "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
-    },
-    {
-      "path": "candidates/pinning/SlotReadback.h",
-      "bytes": 1756,
-      "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
-    },
-    {
-      "path": "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
-      "bytes": 20260,
-      "sha256": "6109f51ebf5321f27fc86211c2de122c372d20ffc495cfe30e36514b05b1fde9"
-    },
-    {
-      "path": "candidates/pinning/cofactor_checkpoint.h",
-      "bytes": 9186,
-      "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
-    },
-    {
-      "path": "candidates/pinning/negative_y_mac.cuh",
-      "bytes": 8451,
-      "sha256": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335"
-    },
-    {
-      "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
-    },
-    {
-      "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
-    },
-    {
-      "path": "candidates/pinning/sha_schedule_interleaved.cuh",
-      "bytes": 1597,
-      "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
-    },
-    {
-      "path": "candidates/pinning/test_carry62.py",
-      "bytes": 13593,
-      "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
-    },
-    {
-      "path": "candidates/pinning/test_host_gate.py",
-      "bytes": 6491,
-      "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
-    },
-    {
-      "path": "candidates/pinning/test_priority_pipeline.py",
-      "bytes": 16765,
-      "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
-    },
-    {
-      "path": "candidates/pinning/test_sha_interleave.py",
-      "bytes": 4040,
-      "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
-    },
-    {
-      "path": "candidates/pinning/test_slot_readback.py",
-      "bytes": 11396,
-      "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
-    }
-  ]
+ "schema": "zarar1337.source-manifest.v1",
+ "track": "pinning",
+ "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
+ "implementation_commit": "d7fc048",
+ "metadata_excluded": [
+  "candidates/pinning/SOURCE-MANIFEST.json",
+  "candidates/pinning/SUBMISSION.md"
+ ],
+ "files": [
+  {
+   "path": "candidates/pinning/COPYING",
+   "bytes": 35823,
+   "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+   "path": "candidates/pinning/COPYING-secp256k1",
+   "bytes": 1057,
+   "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
+  },
+  {
+   "path": "candidates/pinning/DEAD-ENDS.md",
+   "bytes": 2508,
+   "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
+  },
+  {
+   "path": "candidates/pinning/GLVScalar.cuh",
+   "bytes": 25631,
+   "sha256": "2f9a453a9f08221fc4f65acb7f072f95611a5c519ac1888330b43dd97be269e0"
+  },
+  {
+   "path": "candidates/pinning/GPUHash.h",
+   "bytes": 36300,
+   "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
+  },
+  {
+   "path": "candidates/pinning/GPUMath.h",
+   "bytes": 123837,
+   "sha256": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda"
+  },
+  {
+   "path": "candidates/pinning/ITERATIONS.md",
+   "bytes": 3387,
+   "sha256": "a053d3d45e84eeb9fa22e7c94047e78182778a8617d10cafef97bd871aa4788a"
+  },
+  {
+   "path": "candidates/pinning/LeafRecovery.cuh",
+   "bytes": 7057,
+   "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
+  },
+  {
+   "path": "candidates/pinning/NARROW-PARITY.md",
+   "bytes": 12115,
+   "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
+  },
+  {
+   "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
+   "bytes": 2583,
+   "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
+  },
+  {
+   "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
+   "bytes": 27019,
+   "sha256": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717"
+  },
+  {
+   "path": "candidates/pinning/PRIORITY-VALIDATION.json",
+   "bytes": 1178,
+   "sha256": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8"
+  },
+  {
+   "path": "candidates/pinning/PackedRecovery.cuh",
+   "bytes": 7912,
+   "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
+  },
+  {
+   "path": "candidates/pinning/ParityWindow.cuh",
+   "bytes": 6464,
+   "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
+  },
+  {
+   "path": "candidates/pinning/PriorityPipeline.h",
+   "bytes": 2502,
+   "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
+  },
+  {
+   "path": "candidates/pinning/RESEARCH.md",
+   "bytes": 24219,
+   "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
+  },
+  {
+   "path": "candidates/pinning/RecoveryConstant.h",
+   "bytes": 1119,
+   "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v14.md",
+   "bytes": 5964,
+   "sha256": "c9ee219a93da5b746559a88006dc79cd1d0ce36ace5d9eb4f15a80e9da425312"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v14b.md",
+   "bytes": 6661,
+   "sha256": "b105483ac22b81a83c42147a7a8e780938ee01ad95b7301319dd671d4d98fd95"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v14c.md",
+   "bytes": 5658,
+   "sha256": "f7a0b2e6faca86844b356dae5bf9d72c8dc41f78799c6d8b25f5f65d935aeecb"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v15.md",
+   "bytes": 5709,
+   "sha256": "ef08fe44d4ac511a89323da48e19fb3093955f1eb1b338f649a50a28b9865cc5"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v16.md",
+   "bytes": 5207,
+   "sha256": "aadee8d9995a7aee95b425ca039a29bf2ec17a133bdf9ced1bbab1bd8f68f07c"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v17.md",
+   "bytes": 5152,
+   "sha256": "8a310254a390cbbf86fc837dfade44062a4e3d8e5767b4b375e3ac1e2e9cdd8d"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v18.md",
+   "bytes": 5972,
+   "sha256": "cdfc137f917b969be9bcc2ea1d75d4694508641efd4cef5846e36f720b6a5c6a"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v19.md",
+   "bytes": 5182,
+   "sha256": "68b63fcf1c647256843c394a25fbc72f6c26dc6cffadffb8a636961891d93720"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v19b.md",
+   "bytes": 6842,
+   "sha256": "37aeefcd3c4b38be8ac204e21499403ab66b343f1c77b522bfcd79fe644321db"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v19c.md",
+   "bytes": 7651,
+   "sha256": "49c9c7c05010fe3220738b9624e1ef08fe8760bd121e8f3f0687b96f11303a40"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v19d.md",
+   "bytes": 8497,
+   "sha256": "38a2b07eaeed24c4eb8c0ef145a15542bd7aec1f70cf78153987029fe4181e4d"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v20.md",
+   "bytes": 7073,
+   "sha256": "c59524804361a9904a67ac05e1ed507ebcf6ea467bff0f215c1b5a628fa7d494"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v20b.md",
+   "bytes": 8194,
+   "sha256": "cd722724764e5d810dd6f940657127370559a0f6c730a368d6cdd32670dfa6ef"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v21.md",
+   "bytes": 5635,
+   "sha256": "5515993a76d0ee7f7df2cf3976a03a42889254e7975b156a8277d17b1d46d868"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v22.md",
+   "bytes": 7471,
+   "sha256": "4c03d2645a24167f63c1da37ed995b35725b6c742391ae16d1e232b80f893fe9"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v22b.md",
+   "bytes": 5232,
+   "sha256": "80783feaf200606763a485c53dfde3f3af1fc6c0dc86e80e8cfc8b88b47d1383"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v22c.md",
+   "bytes": 5473,
+   "sha256": "edbaea61097980aa97836c388d96cd3721953cc1501333a802869f34b2d65e4c"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v23.md",
+   "bytes": 5224,
+   "sha256": "02499ee55d6c556df1224d3b57b0f3b8b373b012615d0351dedf77d2bbdfd96f"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v24.md",
+   "bytes": 6064,
+   "sha256": "1e102028382dbf190e67c2e29a100de1aa879e60a63a62d94732569705c15bbf"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v25.md",
+   "bytes": 6523,
+   "sha256": "6b30e1871417f82794e2cb1e48a095b66c927fbb92188668c79b31496ac79878"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v26.md",
+   "bytes": 6659,
+   "sha256": "74f1b2860f778053dd4174cb8d0e146e27e49125e35a4092035b648dff46d2a1"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v27.md",
+   "bytes": 6929,
+   "sha256": "01a0219bce4c8a2aa80f41dce1a1f7ea1cf23dfa69def8d7faa6304a72d06592"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v28.md",
+   "bytes": 7068,
+   "sha256": "fd81e7b1be2c3fb5b9585b29abdfa07511edb053215994619e9b4dbc50065bdc"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v29.md",
+   "bytes": 7187,
+   "sha256": "5bbb668ce4207cd2157bb41007b55158974c57f9c2c7e3aa947182bd2dddc06a"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v30.md",
+   "bytes": 5506,
+   "sha256": "5f1eda620bb7c0063b304b53a23ee00daf9632348b0e91885f1606a8ddc6f401"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v31.md",
+   "bytes": 5507,
+   "sha256": "c9f9e9a5348f89f88b7d0dc712f26b5c73361a4b3f7c7f4abfe9a8487aa1570f"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v32.md",
+   "bytes": 5506,
+   "sha256": "055735cfbd1106f4e9429a108c28951587cd950e65ad2abfad5be2b2e8be7974"
+  },
+  {
+   "path": "candidates/pinning/SUBMISSION-v33.md",
+   "bytes": 6923,
+   "sha256": "9701bb63b36433c57acfb21a06ef911631decaca0d0287a1ad21dca450ade0f9"
+  },
+  {
+   "path": "candidates/pinning/SlotReadback.h",
+   "bytes": 1756,
+   "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
+  },
+  {
+   "path": "candidates/pinning/cofactor_checkpoint.h",
+   "bytes": 9400,
+   "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
+  },
+  {
+   "path": "candidates/pinning/negative_y_mac.cuh",
+   "bytes": 8451,
+   "sha256": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335"
+  },
+  {
+   "path": "candidates/pinning/pinning.cu",
+   "bytes": 174257,
+   "sha256": "6898c3f639256c6289e1fea6a18b298fd1559abb06a19be039e19c3e3e6f2b20"
+  },
+  {
+   "path": "candidates/pinning/pinning_sm89.cubin",
+   "bytes": 296928,
+   "sha256": "88087d73e209576a91dab98fd856563ee749fa4306099b63034fa39d7fa0c823"
+  },
+  {
+   "path": "candidates/pinning/sha_pinsha.cuh",
+   "bytes": 18554,
+   "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
+  },
+  {
+   "path": "candidates/pinning/sha_schedule_interleaved.cuh",
+   "bytes": 1631,
+   "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  {
+   "path": "candidates/pinning/test_carry62.py",
+   "bytes": 13976,
+   "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
+  },
+  {
+   "path": "candidates/pinning/test_glv_coeff.py",
+   "bytes": 5797,
+   "sha256": "cf695ec2e9a1d6878dd5ce3301be291780fdafe7b52d621b63486a8ccb9a70fc"
+  },
+  {
+   "path": "candidates/pinning/test_host_gate.py",
+   "bytes": 6673,
+   "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
+  },
+  {
+   "path": "candidates/pinning/test_priority_pipeline.py",
+   "bytes": 17155,
+   "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
+  },
+  {
+   "path": "candidates/pinning/test_sha_interleave.py",
+   "bytes": 4129,
+   "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
+  },
+  {
+   "path": "candidates/pinning/test_slot_readback.py",
+   "bytes": 11396,
+   "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
+  },
+  {
+   "path": "candidates/pinning/work_tmp_merge32.txt",
+   "bytes": 1776,
+   "sha256": "e28357ffca4658171c4019a75ee4956da3867487cf8bde34cfeb1c67a7ca7078"
+  }
+ ]
 }
