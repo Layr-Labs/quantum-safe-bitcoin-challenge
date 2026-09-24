@@ -172,7 +172,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
 #endif
 #ifndef QSB_PK_UNROLL
-#define QSB_PK_UNROLL 1       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
+#define QSB_PK_UNROLL 0       /* 1: unroll the two-recid pubkey SHA loop so both chains interleave */
 #endif
 #ifndef QSB_L2_SKIP
 #define QSB_L2_SKIP 1         /* 1: start the persisting-L2 window after chunk 0 (half the access density) */
@@ -2709,7 +2709,13 @@ static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
-static int gt_spot_check(const uint8_t *gTable, int samples,
+/* Reads the built table straight out of device memory, 64 bytes per sample.
+ * The previous form mirrored the whole table to the host first: at GLV12 that
+ * is a 1,465,193,024-byte D2H copy (measured 1.158 s of a 1.40 s startup here)
+ * to compare 216 entries, i.e. 13,824 bytes. The samples, the arithmetic and
+ * the pass/fail condition are unchanged; only the fetch is. A failed fetch is
+ * a failed check, so the host-builder fallback still covers it. */
+static int gt_spot_check(const uint8_t *d_gTable, int samples,
                          const uint8_t neg_r_inv[32],
                          const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
@@ -2749,8 +2755,14 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,want);
         size_t off = ((size_t)gt_offset(ch) + i) * 64;
-        if (memcmp(gTable + off,      want,     32) != 0 ||
-            memcmp(gTable + off + 32, want + 4, 32) != 0) {
+        uint8_t got[64];
+        if (cudaMemcpy(got, d_gTable + off, 64, cudaMemcpyDeviceToHost) != cudaSuccess) {
+            fprintf(stderr, "  GTable spot check read failed at chunk %d entry %d\n", ch, i);
+            ok = 0;
+            break;
+        }
+        if (memcmp(got,      want,     32) != 0 ||
+            memcmp(got + 32, want + 4, 32) != 0) {
             fprintf(stderr, "  GTable spot check FAILED at chunk %d entry %d\n", ch, i);
             ok = 0;
         }
@@ -3080,18 +3092,10 @@ int main(int argc, char **argv) {
         cudaError_t gerr = cudaGetLastError();
 #endif
         cudaFree(dL); cudaFree(dH);
-        uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
-        if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
+        uint8_t *chk_table=NULL;
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-#if QSB_BIGTBL
-            gerr=cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-            gt_ok=(gerr==cudaSuccess);
-            if(gt_ok)
-#else
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
-#endif
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
+            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
@@ -3102,6 +3106,8 @@ int main(int argc, char **argv) {
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
+            chk_table=(uint8_t*)malloc(gt_sz);
+            if(!chk_table){ fprintf(stderr,"OOM: gtable host builder\n"); return 1; }
             compute_gtable(chk_table,pp.neg_r_inv,iso.alpha,iso.beta);
             cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
         }
