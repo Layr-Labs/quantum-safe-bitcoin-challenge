@@ -474,7 +474,31 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
-__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
+#ifndef QSB_GLV_TAIL_L1_NA
+#define QSB_GLV_TAIL_L1_NA 1  /* L1::no_allocate for physical GLV tail records only */
+#endif
+#if QSB_GLV_TAIL_L1_NA != 0 && QSB_GLV_TAIL_L1_NA != 1
+#error "QSB_GLV_TAIL_L1_NA must be 0 or 1"
+#endif
+/* The ranked setup command compiles a default pre-sm_70 PTX target. Keep
+ * the no-allocate instruction out of that pass; it is enabled only for an
+ * explicitly compiled sm_70+ device pass. */
+#if QSB_BIGTBL && QSB_GLV_TAIL_L1_NA && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+__device__ __forceinline__ ulonglong2
+qsb_gt_ld_l1_no_allocate(const ulonglong2 *p) {
+    uint64_t a,b;
+    asm volatile(
+        "{ .reg .u64 g;"
+        "  cvta.to.global.u64 g, %2;"
+        "  ld.global.nc.L1::no_allocate.v2.u64 {%0,%1}, [g]; }"
+        : "=l"(a), "=l"(b) : "l"(p) : "memory");
+    return make_ulonglong2(a,b);
+}
+#endif
+
+template<bool L1_NO_ALLOCATE = false>
+__device__ __forceinline__ void gt_load_signed_flat_m(
+                                                      const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
                                                       uint64_t *__restrict__ gx,
@@ -482,7 +506,19 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0,x1,y0,y1;
+#if QSB_BIGTBL && QSB_GLV_TAIL_L1_NA && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    if(L1_NO_ALLOCATE) {
+        x0=qsb_gt_ld_l1_no_allocate(tx);
+        x1=qsb_gt_ld_l1_no_allocate(tx+1);
+        y0=qsb_gt_ld_l1_no_allocate(ty);
+        y1=qsb_gt_ld_l1_no_allocate(ty+1);
+    } else
+#endif
+    {
+        x0=__ldg(tx); x1=__ldg(tx+1);
+        y0=__ldg(ty); y1=__ldg(ty+1);
+    }
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -775,11 +811,22 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
     uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
+#if QSB_GLV_TAIL_L1_NA
+    const uint32_t record=code&0x7fffffffu;
+    if(record < q9_bigtbl_offset(5))
+        gt_load_signed_flat_m<false>(table,0u,record,
+            ((uint64_t)m32<<32)|m32,x,y);
+    else
+        gt_load_signed_flat_m<true>(table,0u,record,
+            ((uint64_t)m32<<32)|m32,x,y);
+#else
     gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
+        ((uint64_t)m32<<32)|m32,x,y);
+#endif
 #else
     gt_load_signed_flat_m(table,0u,code&0x1fffffu,
+        ((uint64_t)m32<<32)|m32,x,y);
 #endif
-                          ((uint64_t)m32<<32)|m32,x,y);
 }
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
@@ -1782,39 +1829,50 @@ template<int N>
 __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     uint64_t *value, const uint64_t *roots, const uint64_t *checkpoint
 ) {
-    __shared__ uint64_t products[4][2*N];
+    __shared__ uint64_t leaves[4][N];
     __shared__ uint64_t inverses[4][N];
     int tid=threadIdx.x;
     size_t block_base=(size_t)blockIdx.x*4u*N;
 
-    /* Each lane supplies its saved W leaf and all but the last two lanes
-     * restore one internal node. Lane zero also publishes the external root inverse.
-     * One barrier makes both immutable inputs visible to the downward pass. */
+    /* Each lane supplies its saved W leaf, and lane zero publishes the external
+     * root inverse. One barrier makes both inputs visible to the descent. */
     #pragma unroll
     for(int k=0;k<4;k++){
-        products[k][tid]=value[k];
-        if(tid<N-2)
-            products[k][N+tid]=qsb_ld_u64(&checkpoint[block_base+(size_t)k*N+tid]);
+        leaves[k][tid]=value[k];
         if(tid==0)inverses[k][N-2]=roots[(size_t)blockIdx.x*4u+k];
     }
     __syncthreads();
+    /* Checkpoint lane tid owns internal node N+tid. The seven count levels use
+     * disjoint owner ranges [(252,254), (248,252), (240,248), (224,240),
+     * (192,224), (128,192), (0,128)] for N=256, covering all 254 nodes.
+     * The owner ranges are consumed once each in the descent. */
 
     int offset=2*N-4;
     #pragma unroll 1
     for(int count=2;count<N;count<<=1){
         int half=count>>1;
-        if(tid<count){
-            int local_parent=tid&(half-1);
+        int owner_lo=N-(count<<1);
+        int owner_hi=N-count;
+        if(tid>=owner_lo && tid<owner_hi){
+            int owner_child=tid-owner_lo;
+            int out_child=owner_child^half;
+            uint64_t owner0=qsb_ld_u64(&checkpoint[block_base+tid]);
+            uint64_t owner1=qsb_ld_u64(&checkpoint[block_base+N+tid]);
+            uint64_t owner2=qsb_ld_u64(&checkpoint[block_base+2*N+tid]);
+            uint64_t owner3=qsb_ld_u64(&checkpoint[block_base+3*N+tid]);
             uint64_t parent_inv[5],sibling[5],child_inv[5];
             #pragma unroll
             for(int k=0;k<4;k++){
-                parent_inv[k]=inverses[k][offset+count-N+local_parent];
-                sibling[k]=products[k][offset+(tid^half)];
+                parent_inv[k]=inverses[k][offset+count-N+(owner_child&(half-1))];
+                if(k==0)sibling[k]=owner0;
+                else if(k==1)sibling[k]=owner1;
+                else if(k==2)sibling[k]=owner2;
+                else sibling[k]=owner3;
             }
             parent_inv[4]=sibling[4]=0;
             qsb_field_mul(child_inv,parent_inv,sibling);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
+            for(int k=0;k<4;k++)inverses[k][offset-N+out_child]=child_inv[k];
         }
         offset-=count<<1;
         __syncthreads();
@@ -1824,7 +1882,7 @@ __device__ __forceinline__ void qsb_block_inverse_checkpoint(
     #pragma unroll
     for(int k=0;k<4;k++){
         parent_inv[k]=inverses[k][tid&(N/2-1)];
-        sibling[k]=products[k][tid^(N/2)];
+        sibling[k]=leaves[k][tid^(N/2)];
     }
     parent_inv[4]=sibling[4]=0;
     qsb_field_mul(value,parent_inv,sibling);
