@@ -60,6 +60,7 @@
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
+#include "RootCounterReset.cuh"
 /* Keep independent slots live across sequence boundaries. */
 #ifndef QSB_OVERLAP_SEQUENCES
 #define QSB_OVERLAP_SEQUENCES 1
@@ -1851,9 +1852,10 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_prepare(
 /* One 256-lane CTA per 256 group roots; each CTA runs its own _ModInv, so
  * batches with more than 65,536 candidate trees need no third tree level. */
 __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
-    uint64_t *super_roots, int count
+    uint64_t *super_roots, int count, uint32_t *d_hit_cnt
 ) {
     int tid=(int)(blockIdx.x*256u+threadIdx.x);
+    qsb_reset_hit_count_in_root(d_hit_cnt, (unsigned)tid);
     bool active=tid<count;
     uint64_t r[5]={active?super_roots[(size_t)tid*4u]:1ULL,
                    active?super_roots[(size_t)tid*4u+1]:0ULL,
@@ -2446,7 +2448,7 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
+    qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups,d_hit_cnt);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
@@ -3708,8 +3710,10 @@ int main(int argc, char **argv) {
 #else
             cudaError_t slot_error = cudaSuccess;
 #endif
+#if !QSB_ROOT_COUNTER_RESET
             if (slot_error == cudaSuccess)
                 slot_error = cudaMemsetAsync(d_hit_cnt_s[s], 0, sizeof(uint32_t), st);
+#endif
             if (slot_error != cudaSuccess) {
                 fprintf(stderr, "Slot input enqueue failed: %s\n", cudaGetErrorString(slot_error));
                 return 1;
@@ -3819,7 +3823,9 @@ int main(int argc, char **argv) {
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
 
             uint32_t h_hit = 0;
+#if !QSB_ROOT_COUNTER_RESET
             cudaMemset(d_hit_cnt, 0, 4);
+#endif
 
             launch_pinning_pipeline<true>(
                 d_mid, d_suffix, gpu_suffix_len,
