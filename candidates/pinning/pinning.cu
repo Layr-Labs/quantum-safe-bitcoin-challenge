@@ -473,6 +473,18 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
 
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
+#ifndef QSB_COLD_CS
+#define QSB_COLD_CS 1
+#endif
+/* Cold GLV banks are multi-gigabyte and never reused. ld.global.cs marks those
+ * lines evict-first so they do not knock the 48 MiB four-hot prefix out of L2.
+ * Hot-bank loads stay on __ldg, the promoted path. */
+__device__ __forceinline__ ulonglong2 qsb_ld_cs_v2(const ulonglong2 *p) {
+    uint64_t a, b;
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.v2.u64 {%0,%1}, [g]; }"
+                 : "=l"(a), "=l"(b) : "l"(p) : "memory");
+    return make_ulonglong2(a, b);
+}
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
@@ -483,7 +495,18 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+#if QSB_COLD_CS && QSB_BIGTBL && QSB_FOUR_HOT
+    const int cold = idx >= q9_bigtbl_offset(4);
+    ulonglong2 x0, x1, y0, y1;
+    if (cold) {
+        x0=qsb_ld_cs_v2(tx); x1=qsb_ld_cs_v2(tx+1);
+        y0=qsb_ld_cs_v2(ty); y1=qsb_ld_cs_v2(ty+1);
+    } else {
+        x0=__ldg(tx); x1=__ldg(tx+1); y0=__ldg(ty); y1=__ldg(ty+1);
+    }
+#else
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+#endif
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -3316,13 +3339,17 @@ int main(int argc, char **argv) {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+        /* FOUR_HOT reusable set is the 48 MiB prefix, not the 9.8 GB table.
+         * A window of max_persist admits cold-bank lines into evict-last. */
+#if QSB_BIGTBL && QSB_FOUR_HOT
+        size_t skip = 0u;
+        size_t hot = (size_t)q9_bigtbl_offset(4) * 64ull;
+        size_t want = hot < (size_t)max_persist ? hot : (size_t)max_persist;
+#elif QSB_BIGTBL
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-        /* Chunk 0 holds 2^17 entries for one access per candidate, the other
-         * chunks 2^16 each: pinning the dense chunks first captures more of the
-         * 15 random reads. The window stays inside the table. */
-#if QSB_BIGTBL
         size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
 #else
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
 #endif
@@ -3393,10 +3420,15 @@ int main(int argc, char **argv) {
         int max_persist = 0, max_window = 0;
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+#if QSB_BIGTBL && QSB_FOUR_HOT
+        size_t skip = 0u;
+        size_t hot = (size_t)q9_bigtbl_offset(4) * 64ull;
+        size_t want = hot < (size_t)max_persist ? hot : (size_t)max_persist;
+#elif QSB_BIGTBL
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
-#if QSB_BIGTBL
         size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
 #else
+        size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
 #endif
