@@ -1,3 +1,6 @@
+#ifndef QSB_NATIVE_MODULE
+#define QSB_NATIVE_MODULE 1
+#endif
 #ifndef QSB_REMEASURE_TAG_0921R1
 #define QSB_REMEASURE_TAG_0921R1 1 /* no-op: exact-source remeasurement re-roll */
 #endif
