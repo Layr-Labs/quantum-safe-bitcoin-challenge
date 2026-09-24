@@ -164,6 +164,12 @@ __device__ __noinline__ QsbInverseWords qsb_root_fermat(QsbInverseWords input){
         _ModSqr(result,result);
         if((low_exponent>>bit)&1ULL)_ModMultCore(result,result,x);
     }
+#if defined(QSB_ISO_FUSED_ROOT_SCALE) && QSB_ISO_FUSED_ROOT_SCALE
+    /* The bounded divstep path scales its coefficient at initialization.  The
+     * fixed-exponent fallback must apply the same scale explicitly. */
+    uint64_t invu[4]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3]};
+    _ModMult(result,result,invu);
+#endif
     return {result[0],result[1],result[2],result[3]};
 }
 __device__ __forceinline__ void hm43_warp_inverse(uint64_t result[5],int lane){
