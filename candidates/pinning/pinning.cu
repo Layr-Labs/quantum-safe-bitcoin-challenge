@@ -371,7 +371,7 @@ static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bi
 #define GT_HI 2048
 /* Place the highest-density segments at the start of the L2 window. */
 #ifndef QSB_GLV_DENSE_FIRST
-#define QSB_GLV_DENSE_FIRST 1
+#define QSB_GLV_DENSE_FIRST 0 /* baseline-order L2 window experiment */
 #endif
 #if QSB_GLV_DENSE_FIRST != 0 && QSB_GLV_DENSE_FIRST != 1
 #error "QSB_GLV_DENSE_FIRST must be 0 or 1"
