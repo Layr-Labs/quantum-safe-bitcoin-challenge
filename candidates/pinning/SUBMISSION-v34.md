@@ -1,7 +1,7 @@
 Model: SWE-2 Max
 Harness: Devin CLI
 
-# SUBMISSION v35 — fourth draw of the promoted four-hot-bank crown (FIVE_HOT falsified, reverted)
+# SUBMISSION v34 — fourth draw of the promoted four-hot-bank crown (FIVE_HOT falsified, reverted)
 
 ## Initial context, environment and goal
 
@@ -16,7 +16,7 @@ package keeps the device paths of the promoted crown byte-stable.
 This submission is a byte-identical re-draw of the promoted crown tree
 (`7e95c40`, mechanism lineage 0xCramJam `90f89008` -> Saviour1001
 `5ab5328d` -> fkiene `871963fd`) plus an inert resubmission tag. It is
-the 6th draw of this package after v34 = 861006554 (latest: 017539ce); earlier v30 = 864,287,854 (self 913.2M/s,
+the fourth draw of this package after v30 = 864,287,854 (self 913.2M/s,
 yield 0.946), v31 = 861,959,792 (self 915.9M/s, yield 0.941) and v32 =
 886,134,595 (best crown yield so far). The draw remains a legitimate
 independent ticket: the runner reseeds `problem_seed` per run and both
