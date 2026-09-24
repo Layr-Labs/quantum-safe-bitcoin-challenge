@@ -1,38 +1,193 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Four cached GLV banks with full-table huge-page readback
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+## Summary and origin
 
-## Goal and selection
+This pinning candidate combines a twelve-term GLV table geometry with four small
+banks in the existing persistent L2 prefix and a best-effort Linux huge-page
+allocation for the complete host table-check buffer. It does not replace or
+shorten the table check. All 9,803,211,584 table bytes are still copied back,
+the same sample selection and OpenSSL check run, and the same CPU table builder
+is retained as the fallback. Kernel hit publication, the benchmark clock, the
+scoring harness, and the independent verifier are unchanged.
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+The production arithmetic lineage is the promoted fkiene implementation at
+b59484345df5208f5caffc82c25a4a3b50cbe523. The cache-prefix GLV12 approach was
+subsequently published by odinfree in promoted submission d71d3b7, commit
+1ec687fa51b136882a72e1ba70f17958e90f4932. We independently implemented and tested
+the cache-aware geometry on the earlier arithmetic base, then changed the bank
+sizes to place four banks in the cache prefix. We did not import donor changes
+to host hit processing or publication. All inherited GPLv3 and secp256k1 notices
+are retained, including the accompanying license files.
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+At final preparation the public record was 881,273,403/s, submission 2c7a195,
+commit 1fe5a8e40008befcd917668ea9b1a23c6ee590c4. Comparison of that commit and
+its parent showed only removal of the first ordinary comment in GPUMath.h.
+The production files contain no line-sensitive macros affected by that edit.
+Our reference executable uses the executable-equivalent 1ec687f source. Its
+local measured score is reported below rather than substituting the public
+runner's score for a local control.
 
-## Implementation
+## Mechanism and tradeoff
 
-All executable changes are under `candidates/pinning/`:
+The twelve-term decomposition uses six table banks for each signed GLV
+component. It still needs eleven mixed point additions in the combined chain.
+The first four physical banks occupy 48 MiB, inside the existing 50 MiB
+persistent window. Compared with the three-bank prefix, the intended benefit
+is reducing expected uncached table gathers from six to four per candidate.
+This is a memory-access tradeoff, not a claim that adding table capacity is
+universally beneficial. A larger table needs more host and device memory and
+makes address translation and construction more expensive.
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+The lower chunk widths are [18,19,18,18,27]. Shifts are
+[0,18,37,55,73,100], with top center 170559769. Logical and physical bank order
+are both [0,1,2,3,4,5]. Entry counts are
+[262144,262144,131072,131072,67108864,85279885], with offsets
+[0,262144,524288,655360,786432,67895296]. The total is 153175181 affine records,
+64 bytes each, or 9803211584 bytes. The signed-component bias is
+170559770 * 2^99 - 2^17. The record index uses 28 bits, while the Y sign remains
+in bit 31. The builder radix and high-ladder capacity are 16384; the maximum
+high index is 10410. Table loads and the Y-offset pass retain 64-bit byte
+addressing, which matters because the table is larger than 4 GiB.
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+The geometry alone produced a small verified improvement, but its startup
+cost diluted the gain in fixed-duration measurements. Rather than remove the
+readback or change the checks, we profiled the complete setup. An unscored
+CUPTI capture recorded the GPU builder at 305.239 ms and the full table DtoH
+transfer at 5361.990 ms. This identified host allocation/page handling as a
+more promising target than further reducing builder arithmetic.
 
-## Checks completed
+## Host allocation change
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+On Linux the check buffer uses posix_memalign with 2 MiB alignment and an
+allocation size rounded up to that boundary. A best-effort madvise call with
+MADV_HUGEPAGE requests transparent huge pages. If aligned allocation fails,
+the code falls back to the original malloc allocation. If the advice is
+unavailable or ineffective, the allocated buffer is still valid ordinary
+memory. On other platforms the original malloc path is used. The buffer is
+released with free in either case.
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+Only allocation capacity is rounded up; the actual CUDA transfer length
+remains exactly gt_sz. Neither the number nor identity of table samples is
+changed. The original allocation failure, GPU-error decision, table-check
+failure, and CPU fallback control flow remain intact. No pinned allocation,
+page-lock privilege, system setting, memory overcommit setting, or power-limit
+change is required. Performance depends on whether the runner's kernel and
+memory policy provide huge pages, so this is not a guaranteed portable speedup.
 
-## Reproduction and follow-up
+A standalone diagnostic allocated the same full-size buffer and copied a
+deterministic GPU-generated pattern. Every 64-bit word was checked. Alternating
+normal/huge/huge/normal order gave copy times of 5.248310, 1.283339, 1.282183,
+and 5.313579 seconds, with zero bad words in every arm. Huge-page arms reported
+9574400 KiB of AnonHugePages; normal arms reported zero. Allocation calls took
+under 36 microseconds. Free plus smaps inspection took about 1.00-1.06 seconds
+for normal memory and 0.046 seconds for huge-page-advised memory. These are
+standalone diagnostic measurements, not benchmark scores.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+## Correctness and code-generation checks
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+The production decoder, compiled on the CPU, reconstructed 200170 signed
+component cases exactly. Independent rational arithmetic checked the GLV
+component bound, and 100000 independently calculated splits stayed within it.
+The table geometry passed an N20 integration run with 18084 verified hits.
+The full native table spot check also passed before each timed run.
+
+The organizer build command was used without an additional architecture flag:
+
+    nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm
+
+The measurements used CUDA 12.8.93 and one RTX 4090 at its 450 W limit.
+Preparation uses 124 registers and 12 KiB shared memory; finish uses 64
+registers, with no spills in either. The huge-page allocator change produced
+a byte-identical sm_89 device cubin to its geometry-only parent. Thus that
+last change affects the host allocation, not GPU arithmetic or scheduling.
+All sixteen shipped production/license files were checked against the exact
+source manifest used for the verified binary. No prebuilt binary is shipped.
+
+## Matched quick and ranked-length results
+
+All results below use the unchanged harness and independent verifier, N24,
+fixed-duration scoring from verified hits, and a separate equal 15-second
+warmup. GPU jobs were serialized. No profiler was loaded for a scored run.
+The reference and candidate used the same seed within each pair; the ranked
+pair used a different seed from the quick pair.
+
+| Run | Seconds | Verified hits | Verified candidates/s |
+| --- | ---: | ---: | ---: |
+| Quick reference | 300.3637 | 30505 | 851948858 |
+| Quick candidate | 300.3524 | 31327 | 874938566 |
+| Ranked reference | 1200.8903 | 121956 | 851902211 |
+| Ranked candidate | 1200.9153 | 125298 | 875228938 |
+
+The quick matched improvement is 2.6984845%; the ranked matched improvement
+is 2.7381930%. Quick seed was 1921063479 and ranked seed was 1921063487.
+An earlier quick reference measured 853379113/s; the candidate was also
+2.52636% above that reference. This second control helps bound local drift.
+The geometry-only candidate had measured 861970722/s before the allocator
+change. Its warmup table setup was 6.75 s, versus 2.82 s for the final candidate.
+These setup observations come from separate warmup logs, not replacements
+for the harness-owned elapsed time.
+
+Loaded telemetry excludes the first 60 seconds and samples below 95% GPU
+utilization. In the ranked pair the candidate averaged 449.2589 W at
+2227.3487 MHz and 68.8237 C; the reference averaged 450.0044 W at
+2189.1509 MHz and 69.6652 C. Software power capping was active in 99.9561%
+and 100% of those samples respectively. The result therefore occurred under
+the same nominal power cap, without raising power or locking clocks.
+
+The final candidate binary SHA256 used for both test lengths was
+048d4fe1b96f2e4ca45e5f9bb789d3f127dd0ed75650dc7d6076b833ed19d83f.
+The reference binary SHA256 was
+04d6fec5fd00436eb3909d9837e1a1dab2ec0101985d29d83f1643e447277d3b.
+The source manifest shipped with this submission allows source identity to
+be checked independently of binary identity or local toolchain paths.
+
+## Hit-set comparison and interpretation
+
+All emitted hits passed the independent CPU verifier. The allocator-only
+candidate versus its geometry parent had 30861 identical hits in their shared
+quick search prefix, with no differences and no duplicates. In the ranked
+candidate/reference prefix there were 121950 common hits and five valid hits
+unique to each implementation, with no duplicates. Those implementations also
+differ in table geometry and inherited arithmetic paths; exact hit-set identity
+against the public reference is not claimed. Net shared-prefix hit count was
+equal. Individual unique hits were included in the unchanged full verification.
+
+These are local measurements, not an official record, a prediction of the
+organizer's exact score, or a guarantee of promotion. The official record was
+higher than this pod's absolute candidate score, but the same record executable
+was slower on this pod too. The relevant local evidence is the paired margin.
+Runner assignment, clocks, thermal conditions, huge-page availability, and
+hit-count variation can all change the official outcome.
+
+## Failed approaches that informed this candidate
+
+A geometry minimizing total table size but leaving every bank outside the
+small cache prefix lost heavily; capacity alone was the wrong objective.
+A block-batched table-builder inversion experiment passed native arithmetic
+and full verification but barely changed setup time or throughput. The later
+transfer profile explained why: the full host copy dominated the builder.
+A nine-block finish experiment with explicit shared-memory recovery staging
+also passed native and end-to-end checks but lost throughput despite improving
+occupancy capacity and avoiding spills. It is not included here. None of
+these unsuccessful changes is silently composed into the submitted binary.
+
+## Scope, reproducibility, and attribution
+
+Compile the supplied pinning.cu with the command above and run it through the
+challenge's standard pinning interface. For a local paired reproduction, use
+the unchanged run_benchmark.py with --bench pinning --N 24 --mode fixed_time,
+--seconds 300 or 1200, and the paired seeds above. Use identical warmup policy,
+verify every emitted hit, and compare both score and power/clock telemetry.
+The package contains only production headers/source, the inherited licenses,
+this note, and a production source manifest. Test artifacts, toolchains,
+telemetry files, generated problems and binaries are excluded.
+
+Credit for the cache-prefix GLV12 direction belongs to odinfree's promoted
+work; the source baseline and subsequent record are linked by their commits
+above. Existing credits to the field, recovery, hashing, checkpoint and host
+pipeline contributors remain in the shipped source and licenses. The new
+four-bank geometry and huge-page buffer were developed and tested separately,
+then evaluated together as this final candidate. The submission uses GPT 6
+Astra through Codex; no claim is made that the inherited arithmetic was newly
+authored in this experiment. The single authorized official evaluation will
+establish whether the local improvement transfers to the organizer's runner.
