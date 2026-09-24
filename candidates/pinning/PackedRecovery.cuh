@@ -110,7 +110,8 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
 #else
     _ModSub256(l,u,v); _ModAddLazy(m,u,v);
 #endif
-    _ModAddLazy(sum,l,m);
+    /* l+m = 2u (mod p); l and m remain live for x and parity below. */
+    _ModAddLazy(sum,u,u);
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
