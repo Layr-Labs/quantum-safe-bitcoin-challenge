@@ -1,59 +1,5 @@
 #pragma once
 #include <stdint.h>
-
-#ifndef QSB_BIGTBL
-#define QSB_BIGTBL 1
-#endif
-#if QSB_BIGTBL != 0 && QSB_BIGTBL != 1
-#error QSB_BIGTBL must be 0 or 1
-#endif
-
-#if QSB_BIGTBL
-// BEGIN QSB_BIGTBL_HOST_EXACT
-/* Six terms per signed GLV component. The split below is unchanged. Its
- * rounded reciprocal error gives |r_i| <=
- * 0xa2a8918ca85bafe22016d0b917e4dd77. At shift 104 the largest top
- * field is 10659985, an odd number. Thus d_top=2*f-10659985 is odd,
- * nonzero and in [-10659985,10659985]. No residual truncation is used.
- * Physical order 0,1,2,5,3,4 keeps the three 16 MiB segments first.
- * These portable helpers are also compiled verbatim by check_bigtable.py. */
-__host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
-    return c<3 ? 262144u : (c<5 ? 8388608u : 5329993u);
-}
-__host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
-    return c==0?0u:c==1?262144u:c==2?524288u:c==3?6116425u:
-           c==4?14505033u:786432u;
-}
-__host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
-    return c==0?0u:c==1?18u:c==2?37u:c==3?56u:c==4?80u:104u;
-}
-__host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
-    const uint64_t mag[2],unsigned sign,int c) {
-    const unsigned shift=q9_bigtbl_shift(c);
-    uint64_t wide;
-    if(shift<64u) {
-        wide=mag[0]>>shift;
-        if(shift) wide|=mag[1]<<(64u-shift);
-    } else wide=mag[1]>>(shift-64u);
-    uint32_t f=(uint32_t)wide,idx,neg_digit;
-    if(c==0) {
-        idx=f&((1u<<18)-1u);neg_digit=0;
-    } else if(c==5) {
-        const int32_t d=(int32_t)(2u*f)-10659985;
-        neg_digit=(uint32_t)d>>31;
-        const uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
-        idx=(ad-1u)>>1;
-    } else {
-        const unsigned bits=c<3?19u:24u;
-        f&=(1u<<bits)-1u;
-        neg_digit=1u-(f>>(bits-1u));
-        idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
-    }
-    return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
-}
-// END QSB_BIGTBL_HOST_EXACT
-#endif
-
 // QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction.
 __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],const uint64_t b[4]){
     uint64_t r0,r1,r2,r3,r4,r5,r6,r7;
