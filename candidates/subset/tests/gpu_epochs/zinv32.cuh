@@ -40,6 +40,9 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 #define ZI_B 30
 #define ZI_MM32 0xD2253531u            /* -p^-1 mod 2^32 */
 #define ZI_MASK30 0x3FFFFFFFu
+#ifndef QSB_ZI_STREAM_PEER_A2
+#define QSB_ZI_STREAM_PEER_A2 1
+#endif
 
 /* Table-driven Bernstein-Yang mechanism from ercumentyildirim's
  * public PR296, commit b3a7a64733349f722bb4b1ce969d430f3e2835bd.
@@ -267,6 +270,36 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     // R/S may have grown to 32*p at the cap; pre-shift rows need >288 bits.
     X[8]=(uint32_t)(acc>>ZI_B);
 }
+#if QSB_ZI_STREAM_PEER_A2
+/* Stream lane^1's pre-update row without materializing Q[9]. peer0 was already
+ * fetched uniformly for the divstep decision, so this helper consumes it and
+ * shuffles only limbs 1..8: exactly nine peer-limb exchanges per batch total. */
+ZI_DEV void zi_row_ip_peer_a2(uint32_t *X,int lane,uint32_t peer0,int32_t a,int32_t b,uint32_t modp){
+    const int peer=lane^1;
+    int64_t acc=(int64_t)a*(int64_t)X[0]+(int64_t)b*(int64_t)peer0;
+    uint32_t m=((uint32_t)acc*ZI_MM32)&ZI_MASK30&(0u-modp);
+    acc-=(int64_t)977*(int64_t)m;
+    X[0]=(uint32_t)acc; acc>>=32;
+
+    uint32_t y=zi_x(X[1],peer);
+    acc+=(int64_t)a*(int64_t)X[1]+(int64_t)b*(int64_t)y-(int64_t)m;
+    X[1]=(uint32_t)acc; acc>>=32;
+
+    #pragma unroll
+    for(int i=2;i<8;i++){
+        y=zi_x(X[i],peer);
+        acc+=(int64_t)a*(int64_t)X[i]+(int64_t)b*(int64_t)y;
+        X[i]=(uint32_t)acc; acc>>=32;
+    }
+
+    y=zi_x(X[8],peer);
+    acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)y+(int64_t)m;
+    X[8]=(uint32_t)acc;
+    #pragma unroll
+    for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
+    X[8]=(uint32_t)(acc>>ZI_B);
+}
+#endif
 ZI_DEV void zi_condneg(uint32_t *X,uint32_t neg){
     const uint32_t msk=0u-neg; uint64_t c=neg;
     for(int i=0;i<9;i++){c+=(uint64_t)(X[i]^msk);X[i]=(uint32_t)c;c>>=32;}
@@ -293,35 +326,55 @@ ZI_DEV void zi_canon(uint32_t *X){
  * (0 for root 0: v starts at 0, one batch gives r=0, canon(0)=0 -- no gcd test needed since p is prime). */
 ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     const uint32_t ZI_PL[9]=ZI_PL_INIT;
+#if QSB_ZI_STREAM_PEER_A2
+    uint32_t P[9];
+#else
     uint32_t P[9],Q[9];
+#endif
     const uint32_t odd=(uint32_t)(lane&1),rs=(uint32_t)((lane>>1)&1);
     #pragma unroll
     for(int i=0;i<9;i++){
         const uint32_t xl=i<8?(uint32_t)(R[i>>1]>>(32*(i&1))):0u;
-        const uint32_t own=rs?(uint32_t)(i==0):xl;        /* s=1 / x */
-        const uint32_t oth=rs?0u:ZI_PL[i];                 /* r=0 / p */
-        P[i]=odd?own:oth; Q[i]=odd?oth:own;
+        const uint32_t own=rs?(uint32_t)(i==0):xl;
+        const uint32_t oth=rs?0u:ZI_PL[i];
+        P[i]=odd?own:oth;
+#if !QSB_ZI_STREAM_PEER_A2
+        Q[i]=odd?oth:own;
+#endif
     }
     unsigned batches=0;
     int32_t delta=1;
     while(true){
-        // Uniform across all four lanes; original R is still unchanged.
         if(batches==ZI_ROOT_MAX_BATCHES)return false;
         ++batches;
         int32_t a=0,b=0,c=0,d=0;
+#if QSB_ZI_STREAM_PEER_A2
+        const uint32_t peer0=zi_x(P[0],lane^1);
+        if(lane<2){
+            const uint32_t f0=odd?peer0:P[0],g0=odd?P[0]:peer0;
+            delta=zi_divstep30_by(delta,f0,g0,&a,&b,&c,&d);
+        }
+#else
         if(lane<2){
             const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
             delta=zi_divstep30_by(delta,f0,g0,&a,&b,&c,&d);
         }
+#endif
         int32_t ka=odd?d:a,kb=odd?c:b;
         ka=(int32_t)zi_x((uint32_t)ka,lane&1);
         kb=(int32_t)zi_x((uint32_t)kb,lane&1);
+#if QSB_ZI_STREAM_PEER_A2
+        zi_row_ip_peer_a2(P,lane,peer0,ka,kb,rs);
+#else
         zi_row_ip(P,Q,ka,kb,rs);
+#endif
         uint32_t nz=0;
         for(int i=0;i<9;i++)nz|=P[i];
         nz=zi_x(nz,1);
         if(nz==0)break;
+#if !QSB_ZI_STREAM_PEER_A2
         for(int i=0;i<9;i++)Q[i]=zi_x(P[i],lane^1);
+#endif
     }
     uint32_t fneg=(uint32_t)((int32_t)P[8]<0);
     fneg=zi_x(fneg,0);
