@@ -47,8 +47,14 @@
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
+#include "../../native_runtime.cuh"
 
 #include "../../GPUMath.h"
+#ifndef QSB_GLV10
+#define QSB_GLV10 1
+#endif
+#include "../../glv10_geometry.h"
+#include "../../GLVScalar.cuh"
 
 #define MAX_LEN_WORD_PRIME 20
 #define MAX_LEN_WORD_AFFIX 4
@@ -97,13 +103,13 @@ static int qsb_prepare_push_words(const uint8_t *bytes,int n){
         words[i].z=((uint32_t)r[8]<<8)|r[9];
         words[i].w=0;
     }
-    return cudaMemcpyToSymbol(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
+    return QSB_TO_SYMBOL(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
 }
 static uint32_t qsb_host_rotr(uint32_t x,int n){return (x>>n)|(x<<(32-n));}
 static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
  if(count!=69)return 1;
  uint32_t round_k[64],expanded[4][64];
- if(cudaMemcpyFromSymbol(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
+ if(QSB_FROM_SYMBOL(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
  for(int block=0;block<4;block++){
   uint32_t *w=expanded[block];memcpy(w,words+5+block*16,64);
   for(int i=16;i<64;i++){
@@ -114,7 +120,7 @@ static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
   }
   for(int i=0;i<64;i++)w[i]+=round_k[i];
  }
- return cudaMemcpyToSymbol(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
+ return QSB_TO_SYMBOL(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
 }
 template<int block> __device__ __forceinline__ void qsb_compress_constant(uint32_t *output){
  uint32_t a=output[0],b=output[1],c=output[2],d=output[3],e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
@@ -762,6 +768,9 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #ifndef QSB_CHAIN_UNROLL
 #define QSB_CHAIN_UNROLL 1
 #endif
+#if QSB_GLV10
+#include "../../glv10_chain.cuh"
+#else
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t M[4]; int sign;
@@ -911,6 +920,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #endif
 #endif
 }
+#endif
 __device__ void _FixedBaseSignedXYZZStream(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                            const uint64_t k[4], const uint8_t *gTable) {
     // The original scalar survives even if an output aliases the input k.
@@ -1685,7 +1695,12 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=(eA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
+                // Re-read launch coordinates only for a hit; no epoch ID needs to
+                // survive both long arithmetic calls merely to publish this tag.
+                unsigned publish_block,publish_thread;
+                asm volatile("mov.u32 %0, %%ctaid.x; mov.u32 %1, %%tid.x;":"=r"(publish_block),"=r"(publish_thread));
+                const unsigned publish_epoch=QSB_PAIR_MUL*publish_block+2u*(publish_thread/QSB_SE_WINDOWS);
+                d_hit_idx[pslot*4]=(publish_epoch*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e0->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
             }
@@ -1706,7 +1721,10 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         if(encoded){
             uint32_t pslot=atomicAdd(d_hit_cnt,1);
             if(pslot<1024){
-                d_hit_idx[pslot*4]=((eA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
+                unsigned publish_block,publish_thread;
+                asm volatile("mov.u32 %0, %%ctaid.x; mov.u32 %1, %%tid.x;":"=r"(publish_block),"=r"(publish_thread));
+                const unsigned publish_epoch=QSB_PAIR_MUL*publish_block+2u*(publish_thread/QSB_SE_WINDOWS)+1u;
+                d_hit_idx[pslot*4]=(publish_epoch*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
                 for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=e1->early[i];
                 for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
             }
@@ -2103,6 +2121,8 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
     memcpy(out + 4, yb, 32);
 }
 
+#include "../../glv10_build.cuh"
+
 /* The two ladders the GPU builder needs: L[ch][lo] = lo * 2^(16ch) * G and
  * H[ch][hi] = hi * 256 * 2^(16ch) * G. Index 0 of each is the identity and is
  * left zeroed; the kernel treats it as such. 8176 real points, against the
@@ -2446,8 +2466,14 @@ int main(int argc, char **argv) {
         }
     }
 
-    cudaSetDevice(gpu_index);
-    cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
+    const double module_start=glv10_seconds();
+    qsb_native::environment();
+    qsb_native::check(cudaSetDevice(gpu_index), "set device");
+    cudaDeviceProp prop;
+    qsb_native::check(cudaGetDeviceProperties(&prop, gpu_index), "device properties");
+    qsb_native::select(prop);
+    fprintf(stderr,"QSB stage=module-setup elapsed=%.6f\n",glv10_seconds()-module_start);
+    glv10_memory("after-module");
     printf("QSB Digest Search [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 
@@ -2695,9 +2721,10 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+    glv10_memory("before-exact-table");
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
-    uint8_t *d_gt;
-    cudaMalloc(&d_gt,gt_sz);
+    uint8_t *d_gt_exact;
+    qsb_native::check(cudaMalloc(&d_gt_exact,gt_sz),"allocation");
     {
         /* Build the fixed-base table on the GPU (mixed 15-chunk geometry, one
          * interleaved X||Y record per entry). The host only produces the two
@@ -2710,20 +2737,20 @@ int main(int argc, char **argv) {
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
         gt_build_ladders(hL,hH,dp.neg_r_inv);
-        uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
-        cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
-        cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
+        uint64_t *dL=NULL,*dH=NULL; qsb_native::check(cudaMalloc(&dL,lb),"allocation"); qsb_native::check(cudaMalloc(&dH,hb),"allocation");
+        qsb_native::check(cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice),"cudaMemcpy");
+        qsb_native::check(cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice),"cudaMemcpy");
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
-        cudaDeviceSynchronize();
+        QSB_LAUNCH(kernel_build_gtable, (gt_total+255)/256,256, dL,dH,d_gt_exact);
+        qsb_native::check(cudaDeviceSynchronize(), "table synchronization");
         cudaError_t gerr = cudaGetLastError();
-        cudaFree(dL); cudaFree(dH);
+        qsb_native::check(cudaFree(dL),"cudaFree"); qsb_native::check(cudaFree(dH),"cudaFree");
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
         if(!chk_table){ fprintf(stderr,"OOM: gtable check\n"); return 1; }
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
-            cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
+            qsb_native::check(cudaMemcpy(chk_table,d_gt_exact,gt_sz,cudaMemcpyDeviceToHost),"cudaMemcpy");
             gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,dp.neg_r_inv);
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
@@ -2735,37 +2762,44 @@ int main(int argc, char **argv) {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
                    gerr!=cudaSuccess ? cudaGetErrorString(gerr) : "spot check failed");
             compute_gtable(chk_table,dp.neg_r_inv);
-            cudaMemcpy(d_gt,chk_table,gt_sz,cudaMemcpyHostToDevice);
+            qsb_native::check(cudaMemcpy(d_gt_exact,chk_table,gt_sz,cudaMemcpyHostToDevice),"cudaMemcpy");
         }
         fflush(stdout);
         free(chk_table);
     }
 
+    glv10_memory("after-exact-table");
+#if QSB_GLV10
+    uint8_t *d_glv10=glv10_build(dp.neg_r_inv);
+#else
+    uint8_t *d_glv10=d_gt_exact;
+#endif
+
     /* Upload params */
-    uint32_t *d_mid; cudaMalloc(&d_mid,32);
-    cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice);
+    uint32_t *d_mid; qsb_native::check(cudaMalloc(&d_mid,32),"allocation");
+    qsb_native::check(cudaMemcpy(d_mid, dp.midstate, 32, cudaMemcpyHostToDevice),"cudaMemcpy");
     /* In epoch mode both of these are refreshed once per epoch. Allocate a full
      * block for the remainder so any split length fits. */
     uint8_t *d_prem = NULL;
     if (epoch_mode || dp.prefix_remainder_len > 0) {
-        cudaMalloc(&d_prem, 64);
+        qsb_native::check(cudaMalloc(&d_prem, 64),"allocation");
         if (dp.prefix_remainder_len > 0)
-            cudaMemcpy(d_prem, dp.prefix_remainder, dp.prefix_remainder_len, cudaMemcpyHostToDevice);
+            qsb_native::check(cudaMemcpy(d_prem, dp.prefix_remainder, dp.prefix_remainder_len, cudaMemcpyHostToDevice),"cudaMemcpy");
     }
     uint8_t *d_early = NULL;
-    cudaMalloc(&d_early, MAX_T);
-    cudaMemset(d_early, 0, MAX_T);
+    qsb_native::check(cudaMalloc(&d_early, MAX_T),"allocation");
+    qsb_native::check(cudaMemset(d_early, 0, MAX_T),"cudaMemset");
     uint32_t *d_const_words = NULL;
-    cudaMalloc(&d_const_words, (n_const_words ? n_const_words : 1) * sizeof(uint32_t));
+    qsb_native::check(cudaMalloc(&d_const_words, (n_const_words ? n_const_words : 1) * sizeof(uint32_t)),"allocation");
     if (n_const_words)
-        cudaMemcpy(d_const_words, h_const_words, n_const_words * sizeof(uint32_t),
-                   cudaMemcpyHostToDevice);
-    uint8_t *d_dsigs; cudaMalloc(&d_dsigs, n_pool*SIG_PUSH_SIZE);
-    cudaMemcpy(d_dsigs, dp.dummy_sigs, n_pool*SIG_PUSH_SIZE, cudaMemcpyHostToDevice);
-    uint8_t *d_tail; cudaMalloc(&d_tail, dp.tail_section_len);
-    cudaMemcpy(d_tail, dp.tail_section, dp.tail_section_len, cudaMemcpyHostToDevice);
-    uint8_t *d_suf; cudaMalloc(&d_suf, dp.tx_suffix_len);
-    cudaMemcpy(d_suf, dp.tx_suffix, dp.tx_suffix_len, cudaMemcpyHostToDevice);
+        qsb_native::check(cudaMemcpy(d_const_words, h_const_words, n_const_words * sizeof(uint32_t),
+                   cudaMemcpyHostToDevice),"cudaMemcpy");
+    uint8_t *d_dsigs; qsb_native::check(cudaMalloc(&d_dsigs, n_pool*SIG_PUSH_SIZE),"allocation");
+    qsb_native::check(cudaMemcpy(d_dsigs, dp.dummy_sigs, n_pool*SIG_PUSH_SIZE, cudaMemcpyHostToDevice),"cudaMemcpy");
+    uint8_t *d_tail; qsb_native::check(cudaMalloc(&d_tail, dp.tail_section_len),"allocation");
+    qsb_native::check(cudaMemcpy(d_tail, dp.tail_section, dp.tail_section_len, cudaMemcpyHostToDevice),"cudaMemcpy");
+    uint8_t *d_suf; qsb_native::check(cudaMalloc(&d_suf, dp.tx_suffix_len),"allocation");
+    qsb_native::check(cudaMemcpy(d_suf, dp.tx_suffix, dp.tx_suffix_len, cudaMemcpyHostToDevice),"cudaMemcpy");
 
     /* Short-epoch tables: the first 256 lex 3-from-13 window combos (as actual
      * push indices 137..149) and the per-launch epoch descriptor buffer.
@@ -2780,54 +2814,24 @@ int main(int argc, char **argv) {
     #endif
 #endif
     uint32_t *d_first = NULL;
+    int se_family = 0;
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
-        int cnt = 0;
-        for (int a = 0; a < 13; a++)
-            for (int b = a + 1; b < 13; b++)
-                for (int c = b + 1; c < 13; c++) {
-#if QSB_SE_WINDOWS == 256
-                    /* Drop 30 low-reuse triples so the retained 256 need only
-                     * 54 distinct first-block schedules instead of 84. */
-                    if(a>=1 && c<=7 && !(a==1 && b==2))continue;
-#elif QSB_SE_WINDOWS == 128
-                    /* The first-block schedule is fixed by the first six KEPT pushes, so all
-                     * triples with the same "which of the low positions are skipped" pattern share
-                     * one schedule. The C(13,3) pool splits into groups of 35 / 15x6 / 5x21 / 1x56.
-                     * Take the 35-group (no skip below position 6), all six 15-groups (exactly one
-                     * skip below 7) and three members of one 5-group: 35 + 90 + 3 = 128 windows
-                     * using 1 + 6 + 1 = 8 first-block schedules. */
-                    if(!((a>=6) || (a<=5 && b>=7) || (a==0 && b==1 && c>=8 && c<=10)))continue;
-#else
-#error "QSB_SE_WINDOWS must be 128 or 256"
-#endif
-                    h_win3[cnt][0] = (uint8_t)(QSB_SE_CUT + a);
-                    h_win3[cnt][1] = (uint8_t)(QSB_SE_CUT + b);
-                    h_win3[cnt][2] = (uint8_t)(QSB_SE_CUT + c);
-                    cnt++;
-                }
-        if(cnt!=QSB_SE_PER_EPOCH)return 1;
-        /* Keep the same 256 candidates, but group lanes whose second message
-         * block is identical so warp loads from QSB_WINDOW_SECOND coalesce. */
-        for(int i=1;i<QSB_SE_PER_EPOCH;i++){
-            uint8_t w[3];memcpy(w,h_win3[i],3);
-            uint32_t second=qsb_window_second_key(w),first=qsb_window_first_key(w);int j=i;
-            while(j>0 && (qsb_window_second_key(h_win3[j-1])>second ||
-                  (qsb_window_second_key(h_win3[j-1])==second && qsb_window_first_key(h_win3[j-1])>first))){
-                memcpy(h_win3[j],h_win3[j-1],3);j--;
-            }
-            memcpy(h_win3[j],w,3);
+        if(qsb_select_window_family(h_win3,QSB_SE_PER_EPOCH,se_family)) {
+            fprintf(stderr,"ERROR: window family selection failed\n"); return 1;
         }
-        cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
+        if(QSB_TO_SYMBOL(WIN3,h_win3,sizeof(h_win3))!=cudaSuccess) {
+            fprintf(stderr,"ERROR: window family upload failed\n"); return 1;
+        }
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
-        cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
+        qsb_native::check(cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t)),"allocation");
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
 #if QSB_EPOCH_GROUPS
         /* A launch spans at most 2 group ranks per epoch (+ends): one non-empty group can be
          * followed by one empty (o5 = cut-1) group in rank order. */
-        cudaMalloc(&d_groups, ((size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) * sizeof(qsb_group_t));
+        qsb_native::check(cudaMalloc(&d_groups, ((size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) * sizeof(qsb_group_t)),"allocation");
 #if QSB_EPOCH_GROUPS && QSB_EPOCH_FAST
-        cudaMalloc(&d_epoch_group, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(uint32_t));
+        qsb_native::check(cudaMalloc(&d_epoch_group, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(uint32_t)),"allocation");
         if(!d_epoch_group){fprintf(stderr,"OOM: epoch-group map\n");return 1;}
 #endif
         if (!d_groups) { fprintf(stderr, "OOM: epoch groups\n"); return 1; }
@@ -2837,14 +2841,14 @@ int main(int argc, char **argv) {
     }
 
     uint64_t *d_nri,*d_u2rx,*d_u2ry,*d_neg2u2rx,*d_neg2u2ry;
-    cudaMalloc(&d_nri,32);cudaMalloc(&d_u2rx,32);cudaMalloc(&d_u2ry,32);
-    cudaMalloc(&d_neg2u2rx,32);cudaMalloc(&d_neg2u2ry,32);
-    cudaMemcpy(d_nri,dp.neg_r_inv,32,cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2rx,dp.u2r_x,32,cudaMemcpyHostToDevice);
-    cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
+    qsb_native::check(cudaMalloc(&d_nri,32),"allocation");qsb_native::check(cudaMalloc(&d_u2rx,32),"allocation");qsb_native::check(cudaMalloc(&d_u2ry,32),"allocation");
+    qsb_native::check(cudaMalloc(&d_neg2u2rx,32),"allocation");qsb_native::check(cudaMalloc(&d_neg2u2ry,32),"allocation");
+    qsb_native::check(cudaMemcpy(d_nri,dp.neg_r_inv,32,cudaMemcpyHostToDevice),"cudaMemcpy");
+    qsb_native::check(cudaMemcpy(d_u2rx,dp.u2r_x,32,cudaMemcpyHostToDevice),"cudaMemcpy");
+    qsb_native::check(cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice),"cudaMemcpy");
     uint64_t h_u2r[8];
     memcpy(h_u2r,dp.u2r_x,32);memcpy(h_u2r+4,dp.u2r_y,32);
-    if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
+    if(QSB_TO_SYMBOL(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
     /* QSB_U2R_C = 3*xR^2 * (2*yR)^-1 mod p (recovery finish constant). */
@@ -2865,7 +2869,7 @@ int main(int argc, char **argv) {
         BN_mod_mul(bc,bc,by,bp,ctx);                  /* 3*xR^2/(2*yR) */
         uint64_t h_c[4];
         if(BN_bn2lebinpad(bc,(uint8_t*)h_c,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_C encode failed\n");return 1;}
-        if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
+        if(QSB_TO_SYMBOL(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
             fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
         }
         BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
@@ -2893,24 +2897,29 @@ int main(int argc, char **argv) {
         for(int i=0;i<4;i++){n2x[i]=0;n2y[i]=0;
             for(int b=0;b<8;b++){n2x[i]|=(uint64_t)dxb[31-i*8-b]<<(b*8);
                 n2y[i]|=(uint64_t)dyb[31-i*8-b]<<(b*8);}}
-        cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice);
-        cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice);
+        qsb_native::check(cudaMemcpy(d_neg2u2rx,n2x,32,cudaMemcpyHostToDevice),"cudaMemcpy");
+        qsb_native::check(cudaMemcpy(d_neg2u2ry,n2y,32,cudaMemcpyHostToDevice),"cudaMemcpy");
         BN_free(bx);BN_free(by);BN_free(dx);BN_free(dy);
         EC_POINT_free(pt);EC_POINT_free(dbl);
         EC_GROUP_free(grp);BN_CTX_free(ctx);
     }
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    glv10_memory("before-stack");
+    qsb_native::check(cudaDeviceSetLimit(cudaLimitStackSize,32768),"stack limit");
+    size_t stack_bytes=0;
+    qsb_native::check(cudaDeviceGetLimit(&stack_bytes,cudaLimitStackSize),"stack limit readback");
+    fprintf(stderr,"QSB stack_requested=32768 stack_actual=%zu\n",stack_bytes);
+    glv10_memory("after-stack");
     uint32_t *d_hit_cnt, *d_hit_idx;
     uint8_t *d_hit_combos, *d_hit_sighash;
     uint8_t *d_hit_keynonce, *d_hit_pubhash, *d_hit_qx, *d_hit_qy;
-    cudaMalloc(&d_hit_cnt,4);cudaMalloc(&d_hit_idx,1024*4);
-    cudaMalloc(&d_hit_combos, 1024 * MAX_T);
-    cudaMalloc(&d_hit_sighash, 1024 * 32);
-    cudaMalloc(&d_hit_keynonce, 1024 * 33);
-    cudaMalloc(&d_hit_pubhash, 1024 * 32);
-    cudaMalloc(&d_hit_qx, 1024 * 32);
-    cudaMalloc(&d_hit_qy, 1024 * 32);
+    qsb_native::check(cudaMalloc(&d_hit_cnt,4),"allocation");qsb_native::check(cudaMalloc(&d_hit_idx,1024*4),"allocation");
+    qsb_native::check(cudaMalloc(&d_hit_combos, 1024 * MAX_T),"allocation");
+    qsb_native::check(cudaMalloc(&d_hit_sighash, 1024 * 32),"allocation");
+    qsb_native::check(cudaMalloc(&d_hit_keynonce, 1024 * 33),"allocation");
+    qsb_native::check(cudaMalloc(&d_hit_pubhash, 1024 * 32),"allocation");
+    qsb_native::check(cudaMalloc(&d_hit_qx, 1024 * 32),"allocation");
+    qsb_native::check(cudaMalloc(&d_hit_qy, 1024 * 32),"allocation");
 
     int BATCH = 8388608;  /* 8M: launch/sync overhead under 1%; enum mode has no host fill cost */
     int BLKSZ = 256;
@@ -2928,7 +2937,7 @@ int main(int argc, char **argv) {
     printf("  Batch: %d combos per kernel launch\n", BATCH);
 
     uint8_t *h_combos = (uint8_t*)malloc(BATCH * t_sel);
-    uint8_t *d_combos; cudaMalloc(&d_combos, BATCH * t_sel);
+    uint8_t *d_combos; qsb_native::check(cudaMalloc(&d_combos, BATCH * t_sel),"allocation");
 
     /* Init combinadic table for GPU enum fast path: C[n][k] capped at 2^63. */
     {
@@ -2948,7 +2957,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        cudaMemcpyToSymbol(BINOM_C, h_binom, sizeof(h_binom));
+        QSB_TO_SYMBOL(BINOM_C, h_binom, sizeof(h_binom));
     }
 
     /* ── DEBUG MODE ──
@@ -3058,7 +3067,7 @@ int main(int argc, char **argv) {
     if (se_mode) {
         printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
                QSB_SE_LAUNCH_BLOCKS);
-#if QSB_DIGIT_SHIFT && !ZLAB_T14
+#if QSB_DIGIT_SHIFT && !ZLAB_T14 && !QSB_GLV10
         if (gt_shift(2)+1 != 36 || gt_width(2) != 17 || gt_width(13) != 17) {
             fprintf(stderr, "ERROR: digit-shift geometry mismatch\n"); return 1;
         }
@@ -3070,10 +3079,10 @@ int main(int argc, char **argv) {
         /* One device buffer: [u32 count][record 0 ...], record p = u32 tag at
          * 4+16p and 9 combo bytes at 8+16p. */
         uint8_t *d_hitbuf = NULL;
-        cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC);
+        qsb_native::check(cudaMalloc(&d_hitbuf, 4 + (size_t)1024 * ZLAB_HIT_REC),"allocation");
         if (!d_hitbuf) { fprintf(stderr, "OOM: hit buffer\n"); return 1; }
         uint8_t *d_verified_hitbuf=NULL;
-        cudaMalloc(&d_verified_hitbuf,4+(size_t)1024*ZLAB_HIT_REC);
+        qsb_native::check(cudaMalloc(&d_verified_hitbuf,4+(size_t)1024*ZLAB_HIT_REC),"allocation");
         if(!d_verified_hitbuf){fprintf(stderr,"OOM: verified hit buffer\n");return 1;}
 
         uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
@@ -3105,19 +3114,19 @@ int main(int argc, char **argv) {
                 const uint32_t n_groups = (uint32_t)n_groups64;
                 if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
                     /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
-                    kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+                    QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                         epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                         d_mid, d_prem, (int)dp.prefix_remainder_len,
                         d_dsigs, d_epochs, zh_cnt);
                 } else {
-                kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
+                QSB_LAUNCH(kernel_epoch_groups, (n_groups + 255) / 256, 256,
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
                     d_dsigs, d_groups
 #if QSB_EPOCH_FAST
                     , d_epoch_group, epoch_base, epoch_base+(uint64_t)epochs_in_batch
 #endif
                     );
-                kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256>>>(
+                QSB_LAUNCH(kernel_build_epochs_inc, (epochs_in_batch + 255) / 256, 256,
                     epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                     d_dsigs, d_groups, r5a, d_epochs, zh_cnt
 #if QSB_EPOCH_FAST
@@ -3127,28 +3136,28 @@ int main(int argc, char **argv) {
                 }
             }
 #elif ZLAB_HITPATH
-            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+            QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
 #else
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+            qsb_native::check(cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice),"cudaMemcpy");
+            QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
-              kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+              QSB_LAUNCH(kernel_build_first_flat, (nthr+255)/256,256, d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+            QSB_LAUNCH(kernel_digest, nblk, QSB_SE_BLOCK,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
+                d_glv10,
 #if ZLAB_HITPATH
                 zh_cnt, zh_idx,
                 zh_combos, d_hit_sighash,
@@ -3160,7 +3169,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
-            kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+            QSB_LAUNCH(kernel_verify_pair_hits, 1,64, d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt_exact,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -3175,9 +3184,9 @@ int main(int argc, char **argv) {
             if (h_hit > 0) {
                 int nh = (h_hit > 64) ? 64 : (int)h_hit;
                 if (nh > ZLAB_HIT_FIRST)
-                    cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
+                    qsb_native::check(cudaMemcpy(zh_host + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
                                d_verified_hitbuf + 4 + ZLAB_HIT_FIRST * ZLAB_HIT_REC,
-                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost);
+                               (size_t)(nh - ZLAB_HIT_FIRST) * ZLAB_HIT_REC, cudaMemcpyDeviceToHost),"cudaMemcpy");
                 /* Complete records only; one write() per launch. */
                 char wb[64 * 96];
                 int wl = 0;
@@ -3201,13 +3210,13 @@ int main(int argc, char **argv) {
             }
             if (0) {
 #else
-            cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost);
+            qsb_native::check(cudaMemcpy(&h_hit, d_hit_cnt, 4, cudaMemcpyDeviceToHost),"cudaMemcpy");
             g_total_searched = total_searched;
             if (h_hit > 0) {
 #endif
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
+                qsb_native::check(cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost),"cudaMemcpy");
                 printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
                 char fname[256];
@@ -3216,7 +3225,7 @@ int main(int argc, char **argv) {
                 FILE *ff = fopen(fname, "a");
                 if (ff) {
                     uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
+                    qsb_native::check(cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost),"cudaMemcpy");
                     for (int h = 0; h < nh; h++) {
                         uint32_t raw = hits[h];
                         int combo_idx = raw & 0x3FFFFFFF;
@@ -3273,7 +3282,34 @@ int main(int argc, char **argv) {
                 }
                 t_last_se = t_now;
             }
-            if (epoch_base >= n_epochs) break;
+            if (epoch_base >= n_epochs) {
+#if QSB_DISJOINT_FAMILIES && QSB_SE_WINDOWS == 128
+                if(se_family==0) {
+                    /* This point follows exact replay, synchronization, D2H,
+                     * and publication of the last old-family batch. A device
+                     * drain makes the global schedule replacement explicit. */
+                    if(cudaDeviceSynchronize()!=cudaSuccess) {
+                        fprintf(stderr,"ERROR: family transition drain failed\n"); return 1;
+                    }
+                    uint8_t next_windows[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
+                    if(qsb_select_window_family(next_windows,QSB_SE_PER_EPOCH,1) ||
+                       QSB_TO_SYMBOL(WIN3,next_windows,sizeof(next_windows))!=cudaSuccess ||
+                       qsb_prepare_window_schedule(dp.dummy_sigs,next_windows,h_const_words)) {
+                        fprintf(stderr,"ERROR: second window family setup failed\n"); return 1;
+                    }
+                    se_family=1;
+                    epoch_base=0;
+                    global_total+=(uint64_t)QSB_SE_PER_EPOCH*n_epochs;
+                    fprintf(stderr,"Window family B: %llu fresh candidates, %d first classes\n",
+                            (unsigned long long)((uint64_t)QSB_SE_PER_EPOCH*n_epochs),qsb_first_class_count);
+                    /* The next loop rebuilds epochs and every used first state.
+                     * Per-batch tentative and verified counters reset in their
+                     * existing producer and replay kernels. Totals stay live. */
+                    continue;
+                }
+#endif
+                break;
+            }
         }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
@@ -3288,6 +3324,7 @@ int main(int argc, char **argv) {
             fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
             g_summary_f = NULL;
         }
+        fprintf(stderr,"QSB stage=process-complete elapsed=%.6f grind=%.6f\n",glv10_seconds()-module_start,elapsed);
         free(h_combos);
         return 0;
     }
@@ -3315,29 +3352,29 @@ int main(int argc, char **argv) {
                 unrank_combo_host(epoch, window_start, s_early, epoch_skip);
                 build_epoch_prefix(&dp, window_start, s_early, epoch_skip, epoch_prefix,
                                    epoch_mid, epoch_rem, &epoch_rem_len);
-                cudaMemcpy(d_mid, epoch_mid, 32, cudaMemcpyHostToDevice);
+                qsb_native::check(cudaMemcpy(d_mid, epoch_mid, 32, cudaMemcpyHostToDevice),"cudaMemcpy");
                 if (epoch_rem_len > 0)
-                    cudaMemcpy(d_prem, epoch_rem, epoch_rem_len, cudaMemcpyHostToDevice);
-                cudaMemcpy(d_early, epoch_skip, s_early, cudaMemcpyHostToDevice);
+                    qsb_native::check(cudaMemcpy(d_prem, epoch_rem, epoch_rem_len, cudaMemcpyHostToDevice),"cudaMemcpy");
+                qsb_native::check(cudaMemcpy(d_early, epoch_skip, s_early, cudaMemcpyHostToDevice),"cudaMemcpy");
                 prem_len_now = epoch_rem_len;
                 need_epoch = 0;
             }
             int batch_pos = (int)((span - enum_base < (uint64_t)BATCH) ? span - enum_base : BATCH);
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            qsb_native::check(cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice),"cudaMemcpy");
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
 #if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
-                qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
+                QSB_LAUNCH(qsb_prepare_prefix_cache, (QSB_PREFIX_ENTRIES+255)/256,256, d_mid,window_start,t_win);
 #endif
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_LAUNCH(kernel_digest, grdsz, BLKSZ,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
+                d_glv10,
                 d_hit_cnt, d_hit_idx,
                 d_hit_combos, d_hit_sighash,
                 d_hit_keynonce, d_hit_pubhash,
@@ -3356,7 +3393,7 @@ int main(int argc, char **argv) {
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
+                qsb_native::check(cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost),"cudaMemcpy");
                 printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
                 char fname[256];
@@ -3365,7 +3402,7 @@ int main(int argc, char **argv) {
                 FILE *ff = fopen(fname, "a");
                 if (ff) {
                     uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
+                    qsb_native::check(cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost),"cudaMemcpy");
                     for (int h = 0; h < nh; h++) {
                         uint32_t raw = hits[h];
                         int combo_idx = raw & 0x3FFFFFFF;
@@ -3527,19 +3564,19 @@ int main(int argc, char **argv) {
             if (batch_pos == 0) break;
 
             /* Upload and run */
-            cudaMemcpy(d_combos, h_combos, batch_pos * t_sel, cudaMemcpyHostToDevice);
+            qsb_native::check(cudaMemcpy(d_combos, h_combos, batch_pos * t_sel, cudaMemcpyHostToDevice),"cudaMemcpy");
             uint32_t h_hit = 0;
-            cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
+            qsb_native::check(cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice),"cudaMemcpy");
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_LAUNCH(kernel_digest, grdsz, BLKSZ,
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_tail, dp.tail_section_len,
                 d_suf, dp.tx_suffix_len, dp.total_preimage_len,
                 d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
-                d_gt,
+                d_glv10,
                 d_hit_cnt, d_hit_idx,
                 d_hit_combos, d_hit_sighash,
                 d_hit_keynonce, d_hit_pubhash,
@@ -3560,7 +3597,7 @@ int main(int argc, char **argv) {
             if (h_hit > 0) {
                 uint32_t hits[64];
                 int nh = (h_hit > 64) ? 64 : h_hit;
-                cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost);
+                qsb_native::check(cudaMemcpy(hits, d_hit_idx, nh*4, cudaMemcpyDeviceToHost),"cudaMemcpy");
 
                 printf("\n  *** DIGEST HIT! ***\n");
                 mkdir("results", 0755);
@@ -3576,7 +3613,7 @@ int main(int argc, char **argv) {
                 FILE *ff = fopen(fname, "a");
                 if (ff) {
                     uint8_t all_combos[1024 * MAX_T];
-                    cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost);
+                    qsb_native::check(cudaMemcpy(all_combos, d_hit_combos, nh * MAX_T, cudaMemcpyDeviceToHost),"cudaMemcpy");
 
                     for (int h = 0; h < nh; h++) {
                         uint32_t raw = hits[h];
