@@ -1,5 +1,5 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
+#ifndef QSB_RESUB_0924HN1
+#define QSB_RESUB_0924HN1 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
