@@ -2,7 +2,11 @@
 #include <stdint.h>
 
 #ifndef QSB_BIGTBL
-#define QSB_BIGTBL 1
+/* 74 MiB 14-term table. The 1.4 GiB GLV12 table (QSB_BIGTBL=1) is +0 on a
+ * 4090-class bandwidth argument but measured slower on sm_89: 461 M/s vs
+ * 517 M/s on an RTX 4080, fixed geometry, same flags otherwise. The smaller
+ * table keeps the hot segments inside the persisting L2 window. */
+#define QSB_BIGTBL 0
 #endif
 #if QSB_BIGTBL != 0 && QSB_BIGTBL != 1
 #error QSB_BIGTBL must be 0 or 1
