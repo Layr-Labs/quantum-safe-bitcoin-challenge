@@ -5,16 +5,6 @@
 #ifndef QSB_SEED_MUL_CUT
 #define QSB_SEED_MUL_CUT 1
 #endif
-#ifndef QSB_MAC_HALF_SEED
-// The official trial did not establish a speedup; use the promoted product row.
-#define QSB_MAC_HALF_SEED 0
-#endif
-#if QSB_MAC_HALF_SEED != 0 && QSB_MAC_HALF_SEED != 1
-#error QSB_MAC_HALF_SEED must be 0 or 1
-#endif
-// Seed each 32-bit product column separately. For B=2^32,
-// (B-1)^2+(B-1)=B^2-B, so these eight MADs cannot overflow.
-// The existing full product and reduction schedules are otherwise unchanged.
 __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,const uint64_t *b,const uint64_t *c){
 #ifdef __CUDA_ARCH__
  uint64_t r0,r1,r2,r3;
@@ -34,38 +24,6 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\tmov.b64 {b4,b5}, %10;\n"
   "\tmov.b64 {b6,b7}, %11;\n"
   "\t.reg .u64 bias,bias_carry; .reg .u64 odd_t,odd_lc; .reg .u32 odd_cy;\n"
-#if QSB_MAC_HALF_SEED
-  ".reg .u32 c0,c1,c2,c3,c4,c5,c6,c7;\n"
-  ".reg .u32 seeded_lo,seeded_hi;\n"
-  "mov.b64 {c0,c1}, %12;\n"
-  "mov.b64 {c2,c3}, %13;\n"
-  "mov.b64 {c4,c5}, %14;\n"
-  "mov.b64 {c6,c7}, %15;\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b0, c0;\n"
-  "madc.hi.u32 seeded_hi, a0, b0, 0;\n"
-  "mov.b64 e0, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b1, c1;\n"
-  "madc.hi.u32 seeded_hi, a0, b1, 0;\n"
-  "mov.b64 o0, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b2, c2;\n"
-  "madc.hi.u32 seeded_hi, a0, b2, 0;\n"
-  "mov.b64 e1, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b3, c3;\n"
-  "madc.hi.u32 seeded_hi, a0, b3, 0;\n"
-  "mov.b64 o1, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b4, c4;\n"
-  "madc.hi.u32 seeded_hi, a0, b4, 0;\n"
-  "mov.b64 e2, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b5, c5;\n"
-  "madc.hi.u32 seeded_hi, a0, b5, 0;\n"
-  "mov.b64 o2, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b6, c6;\n"
-  "madc.hi.u32 seeded_hi, a0, b6, 0;\n"
-  "mov.b64 e3, {seeded_lo,seeded_hi};\n"
-  "mad.lo.cc.u32 seeded_lo, a0, b7, c7;\n"
-  "madc.hi.u32 seeded_hi, a0, b7, 0;\n"
-  "mov.b64 o3, {seeded_lo,seeded_hi};\n"
-#else
   "mul.wide.u32 e0, a0, b0;\n"
   "mov.u64 bias, %12;\n"
   "add.cc.u64 e0, e0, bias;\n"
@@ -83,7 +41,6 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "addc.cc.u64 e3, e3, bias;\n"
   "addc.u64 bias_carry, 0, 0;\n"
   "mul.wide.u32 o3, a0, b7;\n"
-#endif
   "mul.wide.u32 t, a1, b1;\n"
   "mul.wide.u32 odd_t, a1, b0;\n"
   "add.cc.u64 e1, e1, t;\n"
@@ -92,11 +49,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "mul.wide.u32 t, a1, b5;\n"
   "addc.cc.u64 e3, e3, t;\n"
   "mul.wide.u32 t, a1, b7;\n"
-#if QSB_MAC_HALF_SEED
-  "addc.u64 e4, t, 0;\n"
-#else
   "addc.u64 e4, t, bias_carry;\n"
-#endif
   "add.cc.u64 o0, o0, odd_t;\n"
   "mul.wide.u32 odd_t, a1, b2;\n"
   "addc.cc.u64 o1, o1, odd_t;\n"

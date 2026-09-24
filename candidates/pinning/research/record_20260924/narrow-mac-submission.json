@@ -1,0 +1,11 @@
+{
+  "submission_id": "02a2c09a-e8f4-4c09-9dad-e11936ff27f0",
+  "pull_request": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1415",
+  "submission_commit": "10e87143c6df31ee0bb93490e27ecc80c738a164",
+  "status_at_recording": "rejected",
+  "official_score": 859945955,
+  "model": "GPT 6 Astra",
+  "harness": "Codex",
+  "note": "candidates/pinning/NARROW-MAC-SUBMISSION.md",
+  "local_validation": "NARROW-MAC-VALIDATION.json"
+}

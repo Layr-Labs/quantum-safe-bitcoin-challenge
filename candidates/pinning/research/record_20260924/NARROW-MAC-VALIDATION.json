@@ -1,0 +1,50 @@
+{
+  "experiment": "Independent narrow half-word MAC seeds",
+  "date": "2026-09-24",
+  "base_commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "sources": {
+    "pinning.cu": "d2be305dcc57cd24d7355c2d6d628b0899cfd44583652f7394683d283c5dafbe",
+    "negative_y_mac.cuh": "702782b0d2cf51e11f02fd474880955451e599184f508defc5cc97fa18e1e51e",
+    "GLVScalar.cuh": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1",
+    "GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda"
+  },
+  "defaults": {
+    "QSB_MAC_HALF_SEED": 1,
+    "QSB_GLV_COLD_SEED": 0
+  },
+  "cuda_setup": {
+    "passed": true,
+    "compiler": "12.8.93",
+    "zeros_n": 24,
+    "target": "unchanged default",
+    "cpu_verifier_smoke_passed": true
+  },
+  "cpu_checks": {
+    "production_mac_random_triples_per_mode": 100000,
+    "production_mac_directed_triples_per_mode": 888,
+    "ubsan": true,
+    "python_ptx_cases_per_mode": 512,
+    "host_gate_hash_samples": 64,
+    "slot_readback_tests": 3,
+    "priority_pipeline_tests": 5
+  },
+  "local_ranked_run": {
+    "exit_code": 1,
+    "reason": "Ranked execution bridge unavailable",
+    "gpu_executed": false,
+    "score": null
+  },
+  "official_comparison": {
+    "frontier": 904971814,
+    "promotion_threshold": 914021533,
+    "previous_cold_seed_score": 904694952,
+    "new_candidate_score": null
+  },
+  "evidence": [
+    "retry_mac/production-oracle-results.json",
+    "retry_mac/compiler_narrow_summary.json"
+  ],
+  "public_note_secret_screen": "passed",
+  "git_diff_check": "passed",
+  "scope": "All edited and untracked paths are under candidates/pinning; generated build binary and stamp removed."
+}

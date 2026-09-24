@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "fully_expanded_mac_cases": 1216,
+  "reduction_tail_equal": true,
+  "first_reduction_cc_op": "add.cc.u64 f0",
+  "gpu_executed": false,
+  "production_default_is_overridden": true,
+  "source_hashes": {
+    "GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "negative_y_mac.cuh": "1342368c46fa2d8523f9b03c8ce9ae83c78438072866ca76d00696c6742175d3"
+  }
+}

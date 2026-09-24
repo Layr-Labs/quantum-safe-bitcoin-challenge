@@ -674,29 +674,6 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #error "QSB_GLV_SEED_REG must be 0 or 1"
 #endif
 
-#ifndef QSB_GLV_COLD_SEED
-// The official cold-seed trial did not establish a gain; keep the promoted order.
-#define QSB_GLV_COLD_SEED 0
-#endif
-#if QSB_GLV_COLD_SEED != 0 && QSB_GLV_COLD_SEED != 1
-#error "QSB_GLV_COLD_SEED must be 0 or 1"
-#endif
-#if QSB_GLV_COLD_SEED && !(QSB_BIGTBL && QSB_FOUR_HOT)
-#error "QSB_GLV_COLD_SEED requires the four-hot six-bank geometry"
-#endif
-
-// Optional cold-seed experiment: consume each component in order [4,5,3,2,1,0]. The first two
-// independent seed loads then fetch the two DRAM records together; the
-// following four records use the existing cached prefix. No extra loads,
-// prefetches, point additions, or live point buffers are introduced.
-__host__ __device__ __forceinline__ unsigned qsb_glv_chain_position(unsigned bank) {
-#if QSB_GLV_COLD_SEED
-    return bank < 4u ? 5u - bank : bank - 4u;
-#else
-    return bank;
-#endif
-}
-
 // First used as 14 per-lane GLV record-code planes (7 KiB); after the handoff,
 // the same 12 KiB holds the cofactor tree.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
@@ -712,9 +689,9 @@ __device__ __forceinline__ uint64_t qsb_glv_extract(const uint64_t m[2],
     return m[1]>>(shift-64u);
 }
 
-/* Decode one component into its consumption order. SIDE=1 is Q=s2 in the
- * first GT_CHUNKS slots; SIDE=0 is P=s1 in the second group. Record indices
- * and the bit31 table-Y sign retain their original representation. */
+/* Decode one compile-time-selected component. SIDE=0 is P=s1 in slots7..13;
+ * SIDE=1 is Q=s2 in slots0..6. Codes contain an absolute21-bit record index
+ * and bit31 as the table-Y negation. */
 template<int SIDE>
 __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsigned sign,
                                                      volatile uint32_t *codes
@@ -725,12 +702,11 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
 #if QSB_BIGTBL
-        const unsigned position=qsb_glv_chain_position((unsigned)c);
-        const unsigned slot=SIDE?position:GT_CHUNKS+position;
+        const unsigned slot=SIDE?c:GT_CHUNKS+c;
         const uint32_t code=q9_bigtbl_code(mag,sign,c);
 #if QSB_GLV_SEED_REG
-        if(SIDE==1 && position==0)*seed0=code;
-        else if(SIDE==1 && position==1)*seed1=code;
+        if(SIDE==1 && c==0)*seed0=code;
+        else if(SIDE==1 && c==1)*seed1=code;
         else
 #endif
         codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
@@ -2421,17 +2397,6 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
-#ifndef QSB_GT_SPARSE_CHECK
-#define QSB_GT_SPARSE_CHECK 1
-#endif
-#include "NativeModule.h"
-static_assert(sizeof(qsb_tail_pre)==76 && alignof(qsb_tail_pre)==4,"native tail parameter ABI");
-#if QSB_SLOTPIPE
-#define QSB_NATIVE_STREAM st
-#else
-#define QSB_NATIVE_STREAM nullptr
-#endif
-
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -2447,20 +2412,12 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
-    cudaError_t err;
-    if(qsb_native::active) err=qsb_native::launch_args(qsb_native::Prepare,blocks0,QSB_S0_THREADS,QSB_NATIVE_STREAM,
-        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-        saved,roots,tree,tp);
-    else {
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree,tp);
-        err=cudaGetLastError();
-    }
+    cudaError_t err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
@@ -2483,33 +2440,22 @@ static void launch_pinning_pipeline(
     }
 #endif
     int root_groups=(blocks+255)/256;
-    if(qsb_native::active) err=qsb_native::launch_args(qsb_native::RootPrepare,root_groups,256,QSB_NATIVE_STREAM,
-        roots,blocks,super_roots,root_checkpoint);
-    else {
     qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
-        err=cudaGetLastError();
-    }
+    err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    if(qsb_native::active) err=qsb_native::launch_args(qsb_native::RootInvert,(root_groups+255)/256,256,QSB_NATIVE_STREAM,super_roots,root_groups);
-    else {
     qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
-        err=cudaGetLastError();
-    }
+    err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    if(qsb_native::active) err=qsb_native::launch_args(qsb_native::RootFinish,root_groups,256,QSB_NATIVE_STREAM,
-        roots,blocks,super_roots,root_checkpoint);
-    else {
     qsb_root_group_finish<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
-        err=cudaGetLastError();
-    }
+    err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Root-group finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
@@ -2532,19 +2478,12 @@ static void launch_pinning_pipeline(
     }
 #endif
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
-    if(qsb_native::active) err=qsb_native::launch_args(qsb_native::Finish,blocks2,QSB_S2_THREADS,QSB_NATIVE_STREAM,
-        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-        saved,roots,tree,tp);
-    else {
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
         saved,roots,tree,tp);
-        err=cudaGetLastError();
-    }
+    err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline finish launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
@@ -2771,7 +2710,9 @@ static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
  * code has never executed on, so a silent wrong table -- which would simply
  * produce zero verifiable hits and burn the whole run -- must be caught here
  * and fall back, not discovered from the scorecard. */
-
+#ifndef QSB_GT_SPARSE_CHECK
+#define QSB_GT_SPARSE_CHECK 1
+#endif
 #if QSB_GT_SPARSE_CHECK != 0 && QSB_GT_SPARSE_CHECK != 1
 #error QSB_GT_SPARSE_CHECK must be 0 or 1
 #endif
@@ -3101,23 +3042,15 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Select lazy module loading before the first CUDA initialization. */
-    qsb_native::begin();
-    cudaError_t device_status=cudaSetDevice(gpu_index);
-    if(device_status!=cudaSuccess){fprintf(stderr,"CUDA device initialization failed: %s\n",cudaGetErrorString(device_status));return 1;}
+    /* Use the specified GPU */
+    cudaSetDevice(gpu_index);
 
-    cudaDeviceProp prop;
-    device_status=cudaGetDeviceProperties(&prop,gpu_index);
-    if(device_status!=cudaSuccess){fprintf(stderr,"CUDA device properties failed: %s\n",cudaGetErrorString(device_status));return 1;}
+    cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
-    const bool native_geometry=single_hash && !easy && pp.suffix_len==75 &&
-        pp.seq_offset==31 && pp.lt_offset==67 && pp.total_preimage_len==9995;
-    if(native_geometry) qsb_native::initialize(prop.major,prop.minor,argv[0]);
-    else qsb_native::fallback("problem geometry has no native specialization");
     qsb_iso_params_t iso={};
 #if QSB_ISO_XR
     if(qsb_make_iso_params(&pp,&iso)<0)return 1;
@@ -3157,10 +3090,7 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
-        cudaError_t table_launch;
-        if(qsb_native::active) table_launch=qsb_native::launch_args(qsb_native::BuildTable,(gt_total+255)/256,256,nullptr,dL,dH,d_gt);
-        else { kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt); table_launch=cudaGetLastError(); }
-        if(table_launch!=cudaSuccess){fprintf(stderr,"Table kernel launch failed: %s\n",cudaGetErrorString(table_launch));return 1;}
+        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
         if(gerr==cudaSuccess) gerr=cudaGetLastError();
@@ -3194,9 +3124,6 @@ int main(int argc, char **argv) {
         }
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
-        if(!gt_ok && qsb_native::active){
-            fprintf(stderr,"Native table build or verification failed; refusing late backend fallback\n");return 1;
-        }
         if(gt_ok){
             printf("  GTable built on GPU in %.2fs (%d points, %.0f MiB total, spot check passed)\n",
                    gt_secs, gt_total, (double)gt_sz/(1024*1024));
@@ -3213,10 +3140,7 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
 #if QSB_YOFF
-        cudaError_t offset_launch;
-        if(qsb_native::active) offset_launch=qsb_native::launch_args(qsb_native::OffsetY,(GT_TOTAL_ENTRIES+255)/256,256,nullptr,d_gt);
-        else { qsb_table_offset_y<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt); offset_launch=cudaGetLastError(); }
-        if(offset_launch!=cudaSuccess){fprintf(stderr,"Table offset launch failed: %s\n",cudaGetErrorString(offset_launch));return 1;}
+        qsb_table_offset_y<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt);
         cudaError_t yerr = cudaDeviceSynchronize();
         if (yerr == cudaSuccess) yerr = cudaGetLastError();
         if (yerr != cudaSuccess) { fprintf(stderr, "Table offset pass failed: %s\n", cudaGetErrorString(yerr)); return 1; }
@@ -3255,14 +3179,12 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
-    if(QSB_COPY_CONSTANT(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x))!=cudaSuccess ||
-       QSB_COPY_CONSTANT(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y))!=cudaSuccess){
-        fprintf(stderr,"Failed to upload recovery coordinates\n");return 1;
-    }
+    cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
+    cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
 #if QSB_ISO_XR
-    if(QSB_COPY_CONSTANT(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
-       QSB_COPY_CONSTANT(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
-       QSB_COPY_CONSTANT(pin_iso_xneg,&iso.xneg,sizeof(iso.xneg))!=cudaSuccess){
+    if(cudaMemcpyToSymbol(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
+       cudaMemcpyToSymbol(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
+       cudaMemcpyToSymbol(pin_iso_xneg,&iso.xneg,sizeof(iso.xneg))!=cudaSuccess){
         fprintf(stderr,"Failed to upload isomorphic recovery constants\n");
         return 1;
     }
@@ -3270,7 +3192,7 @@ int main(int argc, char **argv) {
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
         uint64_t recovery_c[4];
         if(!qsb_make_recovery_constant(recovery_c,pp.u2r_x,pp.u2r_y) ||
-           QSB_COPY_CONSTANT(pin_recovery_c,recovery_c,sizeof(recovery_c))!=cudaSuccess){
+           cudaMemcpyToSymbol(pin_recovery_c,recovery_c,sizeof(recovery_c))!=cudaSuccess){
             fprintf(stderr,"Failed to prepare the squaring-free recovery constant\n");
             return 1;
         }
@@ -3297,7 +3219,7 @@ int main(int argc, char **argv) {
             uint64_t kw[4]={0,0,0,0};
             for(int i=0;i<4;i++)for(int b=0;b<8;b++)
                 kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
-            cudaError_t kerr=QSB_COPY_CONSTANT(pin_u2rk_words,kw,sizeof(kw));
+            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
             if(kerr!=cudaSuccess){
                 fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
                 return 1;
@@ -3340,14 +3262,14 @@ int main(int argc, char **argv) {
 #if QSB_SHA_FMA_ADD
         {
             uint32_t one = 1u;
-            cudaError_t oerr = QSB_COPY_CONSTANT(pin_one_mul, &one, sizeof(one));
+            cudaError_t oerr = cudaMemcpyToSymbol(pin_one_mul, &one, sizeof(one));
             if (oerr != cudaSuccess) {
                 fprintf(stderr, "Failed to upload FMA-add multiplier: %s\n", cudaGetErrorString(oerr));
                 return 1;
             }
         }
 #endif
-        cudaError_t copy_err = QSB_COPY_CONSTANT(pin_tail_words, words, sizeof(words));
+        cudaError_t copy_err = cudaMemcpyToSymbol(pin_tail_words, words, sizeof(words));
         if (copy_err != cudaSuccess) {
             fprintf(stderr, "Failed to upload fixed SHA tail: %s\n",
                     cudaGetErrorString(copy_err));
@@ -3612,7 +3534,6 @@ int main(int argc, char **argv) {
     printf("\n  === Search: lt=[%u,%u] (%u), seq=[0x%08X+], GPU %d (global %d of %d) ===\n",
            LT_MIN, LT_MAX, lt_range, SEQ_MIN, gpu_index, effective_id, effective_total);
 
-    qsb_native::report_startup();
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     uint64_t total_searched = 0;
@@ -3788,7 +3709,7 @@ int main(int argc, char **argv) {
          * still be reading the table when it is replaced. */
         {
             qsb_tail_tab_t h_tab[256]; qsb_make_tail_tab(h_tab, cur_tp, tail_w0);
-            cudaError_t terr = QSB_COPY_CONSTANT(pin_tail_tab, h_tab, sizeof(h_tab));
+            cudaError_t terr = cudaMemcpyToSymbol(pin_tail_tab, h_tab, sizeof(h_tab));
             if (terr != cudaSuccess) {
                 fprintf(stderr, "Failed to upload tail table: %s\n", cudaGetErrorString(terr));
                 return 1;
@@ -3909,7 +3830,7 @@ int main(int argc, char **argv) {
 #if QSB_TAIL_TAB
             {
                 qsb_tail_tab_t h_tab[256]; qsb_make_tail_tab(h_tab, cur_tp, tail_w0);
-                cudaError_t terr = QSB_COPY_CONSTANT(pin_tail_tab, h_tab, sizeof(h_tab));
+                cudaError_t terr = cudaMemcpyToSymbol(pin_tail_tab, h_tab, sizeof(h_tab));
                 if (terr != cudaSuccess) {
                     fprintf(stderr, "Failed to upload tail table: %s\n", cudaGetErrorString(terr));
                     return 1;

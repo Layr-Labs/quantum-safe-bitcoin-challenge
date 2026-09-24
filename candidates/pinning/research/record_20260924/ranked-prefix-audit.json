@@ -1,0 +1,60 @@
+{
+  "interpretation": "Both hit densities are compatible with expected density. The inferred/extrapolated count ratio is not measured arithmetic recall.",
+  "timing_limit": "Elapsed minus prefix/max-rate includes startup and any steady-state time below the maximum rate; it does not isolate JIT time. The last hit is a lower bound, not the exact final candidate.",
+  "geometry": {
+    "locktime_min": 500000000,
+    "locktime_max_exclusive": 1744600000,
+    "sequence_min": 2147483648,
+    "single_gpu_stride": 1
+  },
+  "source_evidence": [
+    "harness/gpu_wrap.py:candidate_count",
+    "candidates/pinning/pinning.cu:main search loops"
+  ],
+  "trials": [
+    {
+      "label": "cold_seed",
+      "submission_id": "d8481039-4eb4-415e-ae36-d9ff284a402c",
+      "artifact_id": 10820417826,
+      "submission_commit": "09fd2e244ca6c5dbe9161319b97a90d2ad1f894e",
+      "verified_hits": 129595,
+      "last_hit": {
+        "sequence": 2147484520,
+        "locktime": 1389050257,
+        "recid": 1
+      },
+      "searched_prefix_lower_bound": 1086180250258,
+      "expected_hits_from_prefix": 129482.77595734596,
+      "hit_density_ratio": 1.000866710200058,
+      "poisson_relative_standard_error": 0.00277783136300455,
+      "extrapolated_count": 1114900084853,
+      "prefix_over_extrapolated_count": 0.9742399924574526,
+      "printed_max_rate_mps": 929.0,
+      "elapsed_seconds": 1201.6444,
+      "prefix_seconds_at_max_rate": 1169.1929496856835,
+      "elapsed_minus_prefix_seconds_at_max_rate": 32.45145031431639
+    },
+    {
+      "label": "narrow_mac",
+      "submission_id": "02a2c09a-e8f4-4c09-9dad-e11936ff27f0",
+      "artifact_id": 10825895234,
+      "submission_commit": "10e87143c6df31ee0bb93490e27ecc80c738a164",
+      "verified_hits": 123117,
+      "last_hit": {
+        "sequence": 2147484479,
+        "locktime": 1477526249,
+        "recid": 1
+      },
+      "searched_prefix_lower_bound": 1035240126250,
+      "expected_hits_from_prefix": 123410.23996472359,
+      "hit_density_ratio": 0.9976238603473471,
+      "poisson_relative_standard_error": 0.0028499745890273554,
+      "extrapolated_count": 1091393662641,
+      "prefix_over_extrapolated_count": 0.9485487791315214,
+      "printed_max_rate_mps": 909.4,
+      "elapsed_seconds": 1200.9827,
+      "prefix_seconds_at_max_rate": 1138.3770906641741,
+      "elapsed_minus_prefix_seconds_at_max_rate": 62.605609335825875
+    }
+  ]
+}

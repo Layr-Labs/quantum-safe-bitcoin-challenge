@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "test_command": "python3 -B candidates/pinning/test_native_module.py",
+  "test_groups": 8,
+  "mock_driver_scenarios": 60,
+  "actual_manifest_configurations": 10,
+  "production_kernel_routes": 7,
+  "runtime_uploaded_globals": 10,
+  "pipeline_arguments": 23,
+  "tail_argument_bytes": 76,
+  "sanitizer": "undefined-behavior",
+  "gpu_executed": false,
+  "native_startup_measured": false,
+  "native_throughput_measured": false,
+  "source_closure_hashes_match": true,
+  "cubin_hash_matches": true,
+  "build_stamp": "15a415ee4f85dae7ee1016a1584b8bb236274484254bf5ad375341309c4fa7a7",
+  "source_hashes": {
+    "NativeModule.h": "fa675fd57572dc5f95e1b344f14fddb046e52dc6ed640566875337b54ca2c984",
+    "NativeManifest.h": "68b81249b454cd8756887fa175490d495f2a86598d63f1e73ba249d3efdeceef",
+    "pinning.cu": "3ce5ef7b5dc0fcfbe86db246226302379f2cd8ffa6e17097be5a22c1e9d2c838",
+    "test_native_module.py": "7317f240b63137cf1f34f0e3fa86fc5b4aa01f907c97ef30f0ab33edf8be3f6f",
+    "pinning_sm89.cubin": "91a6048ad42f8492d1334ac8e93a9e6a7304d4f56827571e9f5e78e002c84883"
+  },
+  "limitations": [
+    "CUDA driver/runtime behavior is mocked.",
+    "Event handoff order is checked in source; existing PriorityPipeline tests cover dependency semantics.",
+    "No GPU performance or record claim."
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "date": "2026-09-24",
+  "experiment": "Complete native CUDA module execution",
+  "baseline_commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "build_stamp": "15a415ee4f85dae7ee1016a1584b8bb236274484254bf5ad375341309c4fa7a7",
+  "cubin_sha256": "91a6048ad42f8492d1334ac8e93a9e6a7304d4f56827571e9f5e78e002c84883",
+  "cubin_bytes": 282208,
+  "source_closure_files": 15,
+  "defaults": {
+    "QSB_NATIVE_MODULE": 1,
+    "QSB_GLV_COLD_SEED": 0,
+    "QSB_MAC_HALF_SEED": 0
+  },
+  "official_setup": {
+    "passed": true,
+    "compiler": "CUDA12.8.93",
+    "zeros_n": 24,
+    "harness_flags_unchanged": true,
+    "verifier_smoke_passed": true
+  },
+  "tests": {
+    "native_test_groups": 8,
+    "mock_driver_scenarios": 60,
+    "native_compile_configurations": 10,
+    "host_gate_hash_samples": 64,
+    "slot_readback_tests": 3,
+    "priority_pipeline_tests": 5,
+    "all_passed": true
+  },
+  "gpu_code": {
+    "all_seven_kernels_instruction_identical_to_promoted_source": true,
+    "zero_spills": true
+  },
+  "local_ranked_run": {
+    "exit_code": 1,
+    "reason": "Ranked execution bridge is unavailable",
+    "gpu_executed": false,
+    "score": null
+  },
+  "frontier": 904971814,
+  "promotion_threshold": 914021533,
+  "validation_files": [
+    "research/native_module_build.json",
+    "research/native_module_validation.json",
+    "research/native_module_audit.json"
+  ],
+  "public_note_secret_screen": "passed",
+  "git_diff_check": "passed",
+  "edit_scope": "candidates/pinning only"
+}

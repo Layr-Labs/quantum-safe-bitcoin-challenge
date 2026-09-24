@@ -1,0 +1,161 @@
+{
+  "scope": "Host configuration evaluation from actual nvcc-preprocessed production source; native device comparison against QSB_NATIVE_MODULE=0; no GPU execution",
+  "configuration_cases": {
+    "default": {
+      "configuration_matches": true,
+      "expected": true,
+      "PASS": true
+    },
+    "ablation": {
+      "configuration_matches": true,
+      "expected": true,
+      "PASS": true
+    },
+    "different_slots": {
+      "configuration_matches": false,
+      "expected": false,
+      "PASS": true
+    },
+    "different_zeros": {
+      "configuration_matches": false,
+      "expected": false,
+      "PASS": true
+    },
+    "per_thread_stream": {
+      "configuration_matches": false,
+      "expected": false,
+      "PASS": true
+    }
+  },
+  "kernel_comparison": {
+    "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+      "instructions": 4040,
+      "identical": true
+    },
+    "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+      "instructions": 6688,
+      "identical": true
+    },
+    "_Z19kernel_build_gtablePKmS0_Ph": {
+      "instructions": 3096,
+      "identical": true
+    },
+    "_Z21qsb_root_group_finishPmiPKmS1_": {
+      "instructions": 512,
+      "identical": true
+    },
+    "_Z22qsb_invert_super_rootsPmi": {
+      "instructions": 1904,
+      "identical": true
+    },
+    "_Z22qsb_root_group_preparePKmiPmS1_": {
+      "instructions": 224,
+      "identical": true
+    },
+    "_Z18qsb_table_offset_yPh": {
+      "instructions": 40,
+      "identical": true
+    }
+  },
+  "entire_cubin_identical_including_parameter_metadata": true,
+  "cubin_sha256": "91a6048ad42f8492d1334ac8e93a9e6a7304d4f56827571e9f5e78e002c84883",
+  "source_sha256": "3ce5ef7b5dc0fcfbe86db246226302379f2cd8ffa6e17097be5a22c1e9d2c838",
+  "promoted_source_control": {
+    "commit": "7e95c40",
+    "source_sha256": {
+      "pinning.cu": "11bd015c5e4ae21a7ecec0640a7cbf6e1d32f2aa02ba2a379ec7cc9e145dc604",
+      "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+      "GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+      "negative_y_mac.cuh": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335",
+      "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+      "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+      "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+      "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+      "GLVScalar.cuh": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1",
+      "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+      "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+      "cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+      "PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+      "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
+    },
+    "flags": [
+      "-O3",
+      "-DQSB_ZEROS_N=24",
+      "-arch=sm_89",
+      "--cubin"
+    ],
+    "kernels": {
+      "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+        "old_instructions": 4040,
+        "new_instructions": 4040,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 64,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      },
+      "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+        "old_instructions": 6688,
+        "new_instructions": 6688,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 122,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      },
+      "_Z19kernel_build_gtablePKmS0_Ph": {
+        "old_instructions": 3096,
+        "new_instructions": 3096,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 128,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      },
+      "_Z21qsb_root_group_finishPmiPKmS1_": {
+        "old_instructions": 512,
+        "new_instructions": 512,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 44,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      },
+      "_Z22qsb_invert_super_rootsPmi": {
+        "old_instructions": 1904,
+        "new_instructions": 1904,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 114,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      },
+      "_Z22qsb_root_group_preparePKmiPmS1_": {
+        "old_instructions": 224,
+        "new_instructions": 224,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 42,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      },
+      "_Z18qsb_table_offset_yPh": {
+        "old_instructions": 40,
+        "new_instructions": 40,
+        "identical_instruction_text": true,
+        "changed_positions": 0,
+        "first_changes": [],
+        "promoted_registers": 14,
+        "promoted_spill_stores": 0,
+        "promoted_spill_loads": 0
+      }
+    },
+    "all_kernel_instruction_text_identical": true
+  }
+}

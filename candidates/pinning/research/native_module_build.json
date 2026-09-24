@@ -1,0 +1,325 @@
+{
+  "source_sha256": {
+    "GLVScalar.cuh": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "NativeModule.h": "fa675fd57572dc5f95e1b344f14fddb046e52dc6ed640566875337b54ca2c984",
+    "PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "negative_y_mac.cuh": "1342368c46fa2d8523f9b03c8ce9ae83c78438072866ca76d00696c6742175d3",
+    "pinning.cu": "3ce5ef7b5dc0fcfbe86db246226302379f2cd8ffa6e17097be5a22c1e9d2c838",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "flags": [
+    "-O3",
+    "-DQSB_ZEROS_N=24",
+    "-arch=sm_89",
+    "--cubin"
+  ],
+  "compiler": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:23:50_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+  "build_sha256": "15a415ee4f85dae7ee1016a1584b8bb236274484254bf5ad375341309c4fa7a7",
+  "cubin_sha256": "91a6048ad42f8492d1334ac8e93a9e6a7304d4f56827571e9f5e78e002c84883",
+  "cubin_bytes": 282208,
+  "required_symbols": [
+    "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre",
+    "_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre",
+    "_Z22qsb_root_group_preparePKmiPmS1_",
+    "_Z22qsb_invert_super_rootsPmi",
+    "_Z21qsb_root_group_finishPmiPKmS1_",
+    "_Z19kernel_build_gtablePKmS0_Ph",
+    "_Z18qsb_table_offset_yPh",
+    "pin_u2rx_words",
+    "pin_u2ry_words",
+    "pin_iso_invu_words",
+    "pin_iso_u2ry_words",
+    "pin_iso_xneg",
+    "pin_recovery_c",
+    "pin_u2rk_words",
+    "pin_one_mul",
+    "pin_tail_words",
+    "pin_tail_tab",
+    "qsb_native_source_stamp"
+  ],
+  "configuration": {
+    "GT_CHUNKS": "(6)",
+    "GT_GLV_TERMS": "(12)",
+    "GT_HI": "((1u << 14))",
+    "GT_LO": "((1u << 14))",
+    "GT_ORDER_N": null,
+    "GT_TOTAL_ENTRIES": "(153175181u)",
+    "QSB_BATCH": "(8388608)",
+    "QSB_BIGTBL": "(1)",
+    "QSB_BIGTBL_HOST_EXACT": null,
+    "QSB_C31": "(1)",
+    "QSB_CAND_STRIDE": "((128))",
+    "QSB_CARRY62": "(1)",
+    "QSB_CHECKPOINT_NODES": "(254)",
+    "QSB_CHECKPOINT_STRIDE": "(256)",
+    "QSB_COMPACT_READBACK": "(1)",
+    "QSB_COMPLETION_MODE": "(1)",
+    "QSB_DIRECT_DIGITS": "(1)",
+    "QSB_EARLY_LOAD": "(0)",
+    "QSB_FIELD_SC": "(1)",
+    "QSB_FINAL_TEMPLATE": "(1)",
+    "QSB_FIN_RAWS": "(1)",
+    "QSB_FOUR_HOT": "(1)",
+    "QSB_FUSE_SQRADDSUB2": "(1)",
+    "QSB_GLV_COEFF_BOUNDS": "(1)",
+    "QSB_GLV_COLD_SEED": "(0)",
+    "QSB_GLV_DENSE_FIRST": null,
+    "QSB_GLV_HIGH15": "(1)",
+    "QSB_GLV_RESIDUAL129": "(1)",
+    "QSB_GLV_RESIDUAL3": "(1)",
+    "QSB_GLV_SEED_REG": "(1)",
+    "QSB_GT_RADIX_BITS": "(14)",
+    "QSB_GT_SPARSE_CHECK": "(1)",
+    "QSB_GT_TOP_CENTER": "(170559769u)",
+    "QSB_GT_TOP_SHIFT": "(100u)",
+    "QSB_GT_TOTAL": "(153175181u)",
+    "QSB_HOST_GATE": "(1)",
+    "QSB_HOST_READBACK": "(0)",
+    "QSB_ISO_XR": "(1)",
+    "QSB_IV0": "(0x6a09e667u)",
+    "QSB_IV1": "(0xbb67ae85u)",
+    "QSB_IV2": "(0x3c6ef372u)",
+    "QSB_IV3": "(0xa54ff53au)",
+    "QSB_IV4": "(0x510e527fu)",
+    "QSB_IV5": "(0x9b05688cu)",
+    "QSB_IV6": "(0x1f83d9abu)",
+    "QSB_IV7": "(0x5be0cd19u)",
+    "QSB_K32_": null,
+    "QSB_K32_ADD": "(1)",
+    "QSB_K32_OFF": "(1)",
+    "QSB_K32_SUB": "(1)",
+    "QSB_L2_SKIP": "(1)",
+    "QSB_LAZY": "(1)",
+    "QSB_LAZY_REC": "(1)",
+    "QSB_MAC_HALF_SEED": "(0)",
+    "QSB_MUL_FOLD8_CUT": "(1)",
+    "QSB_MUL_SFZ_PACK": "(1)",
+    "QSB_MW": null,
+    "QSB_NEG_Y_MAC": "(1)",
+    "QSB_OVERLAP_SEQUENCES": "(1)",
+    "QSB_PARITY_SUM": "(1)",
+    "QSB_PARITY_WINDOW": "(1)",
+    "QSB_PARITY_WINDOW_NARROW": "(1)",
+    "QSB_PK_UNROLL": "(1)",
+    "QSB_PREFETCH": "(0)",
+    "QSB_PROBE_MASK": "(0)",
+    "QSB_RAW_DEN": "(1)",
+    "QSB_RAW_X": "(0)",
+    "QSB_RECOVERY_N": "(128)",
+    "QSB_REFILL_BEFORE_GATE": "(1)",
+    "QSB_RESTORE_SQR_F8": "(1)",
+    "QSB_RESUB_0920120629": "(1)",
+    "QSB_ROOT_V2": "(1)",
+    "QSB_RP_SQR": null,
+    "QSB_S0_BLOCKS": "((512/128))",
+    "QSB_S0_SHM": "(0)",
+    "QSB_S0_THREADS": "(128)",
+    "QSB_S2_BLOCKS": "(7)",
+    "QSB_S2_THREADS": "(128)",
+    "QSB_SAS_FRMOV": "(1)",
+    "QSB_SAS_SPLIT3P": "(1)",
+    "QSB_SAS_Z9SUB_ALL": "(1)",
+    "QSB_SEED_MUL_CUT": "(1)",
+    "QSB_SHA_ALU_ADD": "(0)",
+    "QSB_SHA_FMA_ADD": "(1)",
+    "QSB_SHA_FMA_ROT": "(0)",
+    "QSB_SHA_OPT": "(1)",
+    "QSB_SHA_SMEM_W1": "(0)",
+    "QSB_SHA_UNIF": "(1)",
+    "QSB_SHORT_CARRY": "(1)",
+    "QSB_SKIP_UNUSED_MIDSTATE": "(1)",
+    "QSB_SLOTPIPE": "(1)",
+    "QSB_SLOTS": "(2)",
+    "QSB_SPARSE_D": "(1)",
+    "QSB_SPARSE_TAIL": "(1)",
+    "QSB_SQR_FOLD8_CUT": "(1)",
+    "QSB_SQR_ROW": "(1)",
+    "QSB_STATE_PLANES": "(4u)",
+    "QSB_STREAM": "(1)",
+    "QSB_STREAM2": "(1)",
+    "QSB_SYM_FINISH": "(1)",
+    "QSB_TAIL_PRE": "(1)",
+    "QSB_TAIL_TAB": "(0)",
+    "QSB_TOP16": "(1)",
+    "QSB_TOP16_SC": "(1)",
+    "QSB_TREE_BLOCKS": "(4)",
+    "QSB_TREE_N": "(128)",
+    "QSB_TREE_OFFLOAD": "(0)",
+    "QSB_TREE_OFFLOAD2": "(0)",
+    "QSB_TREE_TOP2": "(1)",
+    "QSB_UNROLL": "(1)",
+    "QSB_X3_TAIL": "(1)",
+    "QSB_XY_DIRECT": "(1)",
+    "QSB_YOFF": "(1)",
+    "QSB_Z": "(0u)",
+    "QSB_ZEROS_N": "(24)"
+  },
+  "nonnumeric_macros": [
+    {
+      "name": "QSB_COPY_CONSTANT",
+      "expansion": "(QSB_COPY_CONSTANT)"
+    },
+    {
+      "name": "QSB_INTERLEAVED15L",
+      "expansion": "(QSB_INTERLEAVED15L)"
+    },
+    {
+      "name": "QSB_INTERLEAVED15L_F",
+      "expansion": "(QSB_INTERLEAVED15L_F)"
+    },
+    {
+      "name": "QSB_INTERLEAVED16L",
+      "expansion": "(QSB_INTERLEAVED16L)"
+    },
+    {
+      "name": "QSB_INTERLEAVED16L_F",
+      "expansion": "(QSB_INTERLEAVED16L_F)"
+    },
+    {
+      "name": "QSB_IV_ROUNDS01",
+      "expansion": "(QSB_IV_ROUNDS01)"
+    },
+    {
+      "name": "QSB_MUL_F8_CAP",
+      "expansion": "(\"\")"
+    },
+    {
+      "name": "QSB_MUL_SF_HEAD",
+      "expansion": "(\"mov.b64 sfz, {z0, z8};\\n\")"
+    },
+    {
+      "name": "QSB_MUL_Z8",
+      "expansion": "(\"\\taddc.u32 z8, 0, w7;\\n\")"
+    },
+    {
+      "name": "QSB_R63_FF04",
+      "expansion": "(QSB_R63_FF04)"
+    },
+    {
+      "name": "QSB_RL",
+      "expansion": "(QSB_RL)"
+    },
+    {
+      "name": "QSB_RL_F",
+      "expansion": "(QSB_RL_F)"
+    },
+    {
+      "name": "QSB_RND15L",
+      "expansion": "(QSB_RND15L)"
+    },
+    {
+      "name": "QSB_RND15L_F",
+      "expansion": "(QSB_RND15L_F)"
+    },
+    {
+      "name": "QSB_RND16L",
+      "expansion": "(QSB_RND16L)"
+    },
+    {
+      "name": "QSB_RND16L_F",
+      "expansion": "(QSB_RND16L_F)"
+    },
+    {
+      "name": "QSB_S0M",
+      "expansion": "(QSB_S0M)"
+    },
+    {
+      "name": "QSB_S1M",
+      "expansion": "(QSB_S1M)"
+    },
+    {
+      "name": "QSB_SAS_G8_TAIL",
+      "expansion": "(\"\")"
+    },
+    {
+      "name": "QSB_SAS_SFC",
+      "expansion": "(\"addc.u32 sfc, 0, 0;\")"
+    },
+    {
+      "name": "QSB_SAS_SFQ",
+      "expansion": "(\"mov.u32 sfq, z8;\")"
+    },
+    {
+      "name": "QSB_SAS_SUB_TAIL",
+      "expansion": "(\"\")"
+    },
+    {
+      "name": "QSB_SAS_Z9ADD_TAIL",
+      "expansion": "(\"\")"
+    },
+    {
+      "name": "QSB_SAS_Z9INIT",
+      "expansion": "(\"\")"
+    },
+    {
+      "name": "QSB_SECOND_FOLD_TAIL",
+      "expansion": "(\"\")"
+    },
+    {
+      "name": "QSB_SHA_INTERLEAVED_16",
+      "expansion": "(QSB_SHA_INTERLEAVED_16)"
+    },
+    {
+      "name": "QSB_SHA_PINSHA_CUH",
+      "expansion": "()"
+    },
+    {
+      "name": "QSB_SHA_SCHEDULE_INTERLEAVED_CUH",
+      "expansion": "()"
+    },
+    {
+      "name": "QSB_SHA_SCHEDULE_STEP",
+      "expansion": "(QSB_SHA_SCHEDULE_STEP)"
+    },
+    {
+      "name": "QSB_SQR_F8SRC",
+      "expansion": "(\"f8\")"
+    },
+    {
+      "name": "QSB_SQR_F8_CAP",
+      "expansion": "(\"\\taddc.u32 f8, 0, 0;\\n\")"
+    },
+    {
+      "name": "QSB_SQR_FOLD_LOW",
+      "expansion": "(\"\\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\\n\\t.reg .u64 f0,f1,f2,f3,g0,g1,g2,g3;\\n\\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\\n\\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, d0, t;\\n\\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, d1, t;\\n\\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, d2, t;\\n\\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, d3, t;\\n\" \"\\taddc.u32 f8, 0, 0;\\n\" \"\\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, d4, t;\\n\\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, d5, t;\\n\\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, d6, t;\\n\\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, d7, t;\\n\")"
+    },
+    {
+      "name": "QSB_STEPL",
+      "expansion": "(QSB_STEPL)"
+    },
+    {
+      "name": "QSB_STEPL_F",
+      "expansion": "(QSB_STEPL_F)"
+    },
+    {
+      "name": "QSB_STREAM_ARG",
+      "expansion": "(,0,st)"
+    },
+    {
+      "name": "QSB_STREAM_PARM",
+      "expansion": "(, cudaStream_t st, qsb::CompletionLane *flow = nullptr)"
+    },
+    {
+      "name": "QSB_TOP16_MUL",
+      "expansion": "(qsb_field_mul_sc)"
+    },
+    {
+      "name": "QSB_WMIX_Z",
+      "expansion": "(QSB_WMIX_Z)"
+    },
+    {
+      "name": "QSB_X3_FOLD",
+      "expansion": "(\"add.u64 t0,t0,k;\")"
+    }
+  ],
+  "generated_manifest_excluded_from_source_closure": true
+}

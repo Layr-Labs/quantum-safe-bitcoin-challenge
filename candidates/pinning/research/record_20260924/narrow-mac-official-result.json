@@ -1,0 +1,29 @@
+{
+  "id": "02a2c09a-e8f4-4c09-9dad-e11936ff27f0",
+  "status": "rejected",
+  "officialScore": 859945955,
+  "officialMetrics": {
+    "gpu": "RTX_4090",
+    "mode": "fixed_time",
+    "unit": "verified candidates per second",
+    "bench": "pinning",
+    "verified": true,
+    "direction": "higher is better",
+    "elapsed_s": 1200.9827,
+    "candidates": 1032780251136,
+    "hits_per_s": 102.51355,
+    "problem_seed": 336189582,
+    "verified_hits": 123117,
+    "throughput_Mps": 859.945955,
+    "leading_zero_bits": 24,
+    "hit_relative_variance": 0.00285,
+    "candidates_self_reported": 1091393662641
+  },
+  "rejectionReason": "score did not improve current best",
+  "submissionCommitSha": "10e87143c6df31ee0bb93490e27ecc80c738a164",
+  "updatedAt": "2026-09-24T18:04:24.414Z",
+  "pull_request": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1415",
+  "reference_score": 904971814,
+  "relative_percent": -4.9753879958961855,
+  "interpretation": "No demonstrated gain. MAC default disabled. Hit density against recovered searched prefix is normal; inferred/extrapolated count ratio is not arithmetic recall."
+}

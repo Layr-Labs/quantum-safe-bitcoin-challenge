@@ -1,0 +1,16 @@
+{
+  "submission_id": "d8481039-4eb4-415e-ae36-d9ff284a402c",
+  "pull_request": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/pull/1402",
+  "status": "rejected",
+  "reason": "score did not improve current best",
+  "official_score": 904694952,
+  "reference_score": 904971814,
+  "relative_percent": -0.030593439012893686,
+  "promotion_threshold": 914021533,
+  "verified": true,
+  "verified_hits": 129595,
+  "elapsed_seconds": 1201.6444,
+  "candidate_counter_total": 1114900084853,
+  "problem_seed": 273818413,
+  "interpretation": "No demonstrated throughput improvement; observed difference is much smaller than hit sampling uncertainty. Do not re-submit unchanged."
+}
