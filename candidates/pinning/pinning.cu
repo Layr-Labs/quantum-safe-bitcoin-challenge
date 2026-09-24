@@ -1,6 +1,9 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
+#ifndef QSB_CODEX_DRAW_20260924_A
+#define QSB_CODEX_DRAW_20260924_A 1 /* no runtime effect; identifies this independent ranked draw */
+#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
