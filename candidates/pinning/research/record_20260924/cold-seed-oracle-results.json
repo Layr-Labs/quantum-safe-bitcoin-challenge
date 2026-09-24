@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "modes": {
+    "0": {
+      "full_chains": 791,
+      "signed_recodes": 4084
+    },
+    "1": {
+      "full_chains": 791,
+      "signed_recodes": 4084
+    }
+  },
+  "source_sha256": {
+    "pinning.cu": "b440c5449aceadd0639a22ba31a85f38bf91b1106a019a75bdab5960611fc717",
+    "GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "GLVScalar.cuh": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1"
+  },
+  "negative_control": "Known ascending-hot incomplete-add doubling correctly rejected",
+  "gpu_executed": false,
+  "scope": "Actual CPU-extracted mapping/decoder/fullchain/point formulas; OpenSSL field and sparse table; independent integer split and EC_POINT_mul oracle",
+  "limits": "Does not test CUDA PTX arithmetic, rare-carry behavior, GPU memory scheduling, or performance"
+}

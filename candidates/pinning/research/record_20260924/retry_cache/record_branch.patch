@@ -1,0 +1,49 @@
+--- a/candidates/pinning/pinning.cu
++++ b/candidates/pinning/pinning.cu
+@@ -475,6 +475,12 @@
+  * Branchless: y is selected between y and p-y by a mask. */
+ /* Mask-taking variant used by the direct-digit path: the caller already has
+  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
++__device__ __forceinline__ ulonglong2 qsb_cache_review_cs(const ulonglong2 *ptr) {
++    ulonglong2 v;
++    asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.v2.u64 {%0,%1}, [g]; }"
++        : "=l"(v.x), "=l"(v.y) : "l"(ptr));
++    return v;
++}
+ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
+                                                       uint32_t base, uint32_t idx,
+                                                       uint64_t m,
+@@ -483,7 +489,12 @@
+     size_t off = ((size_t)base + idx) * 64;
+     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
+     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
++    ulonglong2 x0,x1,y0,y1;
++#if QSB_BIGTBL && QSB_FOUR_HOT
++    if(base+idx >= 786432u) { x0=qsb_cache_review_cs(tx);x1=qsb_cache_review_cs(tx+1);y0=qsb_cache_review_cs(ty);y1=qsb_cache_review_cs(ty+1); }
++    else
++#endif
++    { x0=__ldg(tx);x1=__ldg(tx+1);y0=__ldg(ty);y1=__ldg(ty+1); }
+     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
+ #if !QSB_YOFF
+@@ -3340,6 +3351,9 @@
+         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
++#if QSB_BIGTBL && QSB_FOUR_HOT
++        if(want > 48u*1024u*1024u) want=48u*1024u*1024u;
++#endif
+         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
+          * chunks 2^16 each: pinning the dense chunks first captures more of the
+          * 15 random reads. The window stays inside the table. */
+@@ -3417,6 +3431,9 @@
+         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
+         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
+         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
++#if QSB_BIGTBL && QSB_FOUR_HOT
++        if(want > 48u*1024u*1024u) want=48u*1024u*1024u;
++#endif
+ #if QSB_BIGTBL
+         size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+ #else

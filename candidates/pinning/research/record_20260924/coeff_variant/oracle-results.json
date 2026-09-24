@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "coefficient_cases": [
+    300818,
+    300818
+  ],
+  "fallback_calls_off_on": [
+    [
+      95976,
+      93060
+    ],
+    [
+      110925,
+      107982
+    ]
+  ],
+  "error_bound_units_2pow352": [
+    9,
+    8
+  ],
+  "gpu_executed": false,
+  "sanitizer": "undefined-behavior",
+  "source_sha256": "72299c09eeda30238c486ce84afa274a0af6870e24420ba359f74732f8e47b2d"
+}

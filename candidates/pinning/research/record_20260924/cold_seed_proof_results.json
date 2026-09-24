@@ -1,0 +1,33 @@
+{
+  "passed": true,
+  "corrected_order": [
+    4,
+    5,
+    3,
+    2,
+    1,
+    0
+  ],
+  "production_glv_sha256": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1",
+  "production_entry_sha256": "b440c5449aceadd0639a22ba31a85f38bf91b1106a019a75bdab5960611fc717",
+  "derived_p_bound": "0xa2a8918ca85bafe22016d0b917e4dd76",
+  "derived_q_bound": "0x8a65287bd47179fb2be08846cea267ec",
+  "geometry_magnitude_bound": "0xa2a8918ca85bafe22016d0b917e4dd77",
+  "bias": "0x515448cffffffffffffffffffffe0000",
+  "twice_bias_minus_bound": "0x1357a4501ddfe92f46e8172289",
+  "inverse_basis_i_numerator": "86520595219025739325090939434824017688206183936307790166851948286170019927400",
+  "inverse_basis_j_numerator": "46746847911883715649507539886415714890146591360739817091125884770456697333699",
+  "inverse_basis_denominator": "115792089237316195423570985008687907852837564279074904382605163141518161494337",
+  "positive_endpoint_coefficients": [
+    0,
+    1
+  ],
+  "negative_endpoint_coefficients": [
+    "64502973549206556628585045361533709077",
+    "303414439467246543595250775667605759170"
+  ],
+  "rejected_ascending_witness": "0x1ffff80000000000000",
+  "standalone_directed_vectors": 384,
+  "gpu_executed": false,
+  "scope": "Exact GLV/group identities; inherited field approximations unchanged."
+}
