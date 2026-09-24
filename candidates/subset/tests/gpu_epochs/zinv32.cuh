@@ -40,6 +40,9 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 #define ZI_B 30
 #define ZI_MM32 0xD2253531u            /* -p^-1 mod 2^32 */
 #define ZI_MASK30 0x3FFFFFFFu
+#ifndef QSB_ZI_CANON_INPLACE
+#define QSB_ZI_CANON_INPLACE 1
+#endif
 
 /* Table-driven Bernstein-Yang mechanism from ercumentyildirim's
  * public PR296, commit b3a7a64733349f722bb4b1ce969d430f3e2835bd.
@@ -280,14 +283,33 @@ ZI_DEV void zi_canon(uint32_t *X){
     acc+=(int64_t)X[1]+(int64_t)hi;
     X[1]=(uint32_t)acc; acc>>=32;
     for(int i=2;i<8;i++){acc+=(int64_t)X[i];X[i]=(uint32_t)acc;acc>>=32;}
-    X[8]=(uint32_t)acc;                               /* -1, 0 or 1 */
+    X[8]=(uint32_t)acc;
     const uint32_t mneg=(uint32_t)((int32_t)X[8]>>31);
     uint64_t c=0;
     for(int i=0;i<9;i++){c+=(uint64_t)X[i]+(uint64_t)(ZI_PL[i]&mneg);X[i]=(uint32_t)c;c>>=32;}
+#if QSB_ZI_CANON_INPLACE
+    /* p is only 2^32+977 below 2^256. After the negative correction above,
+     * X>=p iff limb8 is nonzero, or limbs7..2 are all ones and the low 64 bits
+     * are >= 0xFFFFFFFEFFFFFC2F. Decide that cheaply, then subtract p in place.
+     * This removes T[9] plus the final eight-word blend. */
+    const uint32_t hi6=X[2]&X[3]&X[4]&X[5]&X[6]&X[7];
+    const uint32_t low_ge=(uint32_t)(X[1]==0xFFFFFFFFu) |
+        ((uint32_t)(X[1]==0xFFFFFFFEu)&(uint32_t)(X[0]>=0xFFFFFC2Fu));
+    const uint32_t ge=(uint32_t)(X[8]!=0u) |
+        ((uint32_t)(hi6==0xFFFFFFFFu)&low_ge);
+    const uint32_t smask=0u-ge;
+    c=(uint64_t)ge;
+    #pragma unroll
+    for(int i=0;i<9;i++){
+        c+=(uint64_t)X[i]+(uint64_t)(((uint32_t)~ZI_PL[i])&smask);
+        X[i]=(uint32_t)c;c>>=32;
+    }
+#else
     uint32_t T[9]; c=1;
     for(int i=0;i<9;i++){c+=(uint64_t)X[i]+(uint64_t)(uint32_t)~ZI_PL[i];T[i]=(uint32_t)c;c>>=32;}
     const uint32_t keep=(uint32_t)((int32_t)T[8]>>31);
     for(int i=0;i<8;i++)X[i]=(X[i]&keep)|(T[i]&~keep);
+#endif
 }
 /* All four lanes pass the same canonical root in R[0..3]; all return the canonical inverse
  * (0 for root 0: v starts at 0, one batch gives r=0, canon(0)=0 -- no gcd test needed since p is prime). */
