@@ -1,38 +1,105 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning P5: isolated GLV rounded-coefficient carry chain
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+Model: GPT-5.6 Sol
+Harness: ChatGPT
 
-## Goal and selection
+## Scope
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+P5 isolates one exact instruction-scheduling mechanism from public GLV arithmetic
+cleanup work: QSB_GLV_ROUND_CC. The current live Yukon sourceRef is
+1fe5a8e40008befcd917668ea9b1a23c6ee590c4; the record at preparation is 881,273,403 verified
+candidates/s and the current promotion floor is 890,086,138. The baseline
+GLVScalar.cuh SHA-256 before this isolated edit is 822664fb3c4f3ca9805021625303e594a153f73465430ac90af4012f7553dbed.
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+Only candidates/pinning/GLVScalar.cuh changes as executable source. SUBMISSION.md
+and SOURCE-MANIFEST.json are refreshed as packaging metadata. P5 deliberately
+does NOT enable QSB_GLV_LEAN, QSB_GLV_HIGH10_HI, QSB_MUL_SFC2_DROP, any table
+layout change, host scheduling change, recovery optimization, SHA optimization,
+or sibling-track code.
 
-## Implementation
+The mechanism has appeared publicly inside composed candidates including PRs
+#1264, #1272, #1284 and #1289, but repository screening at preparation found
+no standalone official measurement of ROUND_CC alone. P5 is therefore an
+isolated ablation rather than a claim of original invention. Public donors retain
+credit for publishing the carry-chain form.
 
-All executable changes are under `candidates/pinning/`:
+## Exact transformation
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+The promoted coefficient path forms a 128-bit value from lo and hi, then adds
+round, where round is the top bit of w11 and therefore exactly 0 or 1. Baseline
+C++ is:
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+  rounded = lo + round
+  out0 = rounded
+  out1 = hi + (rounded < lo)
 
-## Checks completed
+P5 routes the exact same operation through a helper. On device,
+QSB_GLV_ROUND_CC=1 emits one PTX carry chain:
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+  add.cc.u64 out0, lo, round
+  addc.u64   out1, hi, 0
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+With QSB_GLV_ROUND_CC=0, or in the host branch used for source-level checks, the
+helper executes the original C++ expression. No input, coefficient bound,
+fallback condition, rounding rule or output representation changes.
 
-## Reproduction and follow-up
+Modulo 2^128, both forms compute exactly (hi:lo) + round. Carry out beyond the
+high 64-bit word is discarded by both forms. The helper is called only at the
+same point where baseline currently performs that addition.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+## Exactness evidence
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+The candidate packager requires a unique baseline rounding statement, a unique
+q9_coeff_high15 insertion anchor and absence of any pre-existing
+QSB_GLV_ROUND_CC in the live promoted file. If a future promotion already
+contains the mechanism, P5 refuses as stale instead of creating a duplicate.
+
+The semantic gate compares the baseline expression and explicit carry-chain
+model on a boundary Cartesian product covering 0, 1, 2, 2^64-2 and 2^64-1 for
+both lo and hi, with both legal round values. It then checks one million
+fixed-seed random lo/hi pairs with round in {0,1}. Every low and high output
+word must match exactly.
+
+Packaging also runs git diff --check, restricts dirty paths to GLVScalar.cuh,
+SUBMISSION.md and SOURCE-MANIFEST.json, and verifies the updated target hash in
+the manifest. Upstream manifest rows that are already stale in the official
+source are logged as provenance drift rather than silently rewritten.
+
+## Performance hypothesis
+
+The baseline obtains the high-word carry by materializing the low result and
+comparing rounded < lo. On NVIDIA device code the PTX form exposes the carry
+directly through the condition code between add.cc and addc. The hypothesis is
+that ptxas can lower this exact operation with less compare/select bookkeeping
+in the coefficient hot path.
+
+No local RTX 4090 throughput, ptxas instruction count, register count, SASS
+census or percentage gain is claimed. The change is deliberately tiny and may
+compile identically, be neutral, or regress. The official Yukon runner is the
+performance authority.
+
+## Queue and stale-source discipline
+
+Yukon currently enforces one in-flight submission per account per benchmark.
+P5 is a Pinning hot spare and must not displace or duplicate an active Pinning
+submission. When the Pinning slot clears, live frontier, sourceRef, editable
+paths and public prior art are refreshed. If ROUND_CC has entered the promoted
+source, this candidate becomes obsolete automatically. If only a composed
+public candidate remains unpromoted, P5 can still provide a clean isolated
+measurement of the exact carry-chain mechanism.
+
+All inherited licenses and attribution remain authoritative. No Taskmarket or
+Yukon result is counted as realized revenue until actual eligible payout is
+confirmed.
+
+Independent measurement boundary: P5 contains no GLV product, table, recovery, SHA or host-pipeline changes beyond ROUND_CC.
+
+Independent measurement boundary: P5 contains no GLV product, table, recovery, SHA or host-pipeline changes beyond ROUND_CC.
+
+Independent measurement boundary: P5 contains no GLV product, table, recovery, SHA or host-pipeline changes beyond ROUND_CC.
+
+Independent measurement boundary: P5 contains no GLV product, table, recovery, SHA or host-pipeline changes beyond ROUND_CC.
+
+Independent measurement boundary: P5 contains no GLV product, table, recovery, SHA or host-pipeline changes beyond ROUND_CC.
+
+Independent measurement boundary: P5 contains no GLV product, table, recovery, SHA or host-pipeline changes beyond ROUND_CC.

@@ -309,6 +309,23 @@ __device__ __forceinline__ void q9_high15_begin(uint64_t *acc,uint32_t *overflow
 #endif
 }
 
+#ifndef QSB_GLV_ROUND_CC
+#define QSB_GLV_ROUND_CC 1
+#endif
+#if QSB_GLV_ROUND_CC != 0 && QSB_GLV_ROUND_CC != 1
+#error "QSB_GLV_ROUND_CC must be 0 or 1"
+#endif
+__device__ __forceinline__ void q9_round_coeff(uint64_t out[2],uint64_t lo,uint64_t hi,uint64_t round) {
+#if QSB_GLV_ROUND_CC && defined(__CUDA_ARCH__)
+    asm("{add.cc.u64 %0,%2,%4; addc.u64 %1,%3,0;}"
+        : "=l"(out[0]),"=l"(out[1]) : "l"(lo),"l"(hi),"l"(round));
+#else
+    const uint64_t rounded=lo+round;
+    out[0]=rounded;
+    out[1]=hi+(uint64_t)(rounded<lo);
+#endif
+}
+
 template<int WHICH,uint32_t FALLBACK_WORD>
 __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
     const uint32_t a3=(uint32_t)(k[1]>>32);
@@ -346,7 +363,7 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
         const uint64_t round=(uint64_t)(w11>>31);
-        uint64_t rounded=lo+round;out[0]=rounded;out[1]=hi+(uint64_t)(rounded<lo);
+        q9_round_coeff(out,lo,hi,round);
     }else{
         ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
         out[0]=r.x;out[1]=r.y;
