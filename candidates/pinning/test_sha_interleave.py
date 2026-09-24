@@ -50,7 +50,7 @@ extern "C" void baseline(uint32_t *o, const uint32_t *m) { baseline_pubkey33(o,m
     vectors += [bytes([p]) + rng.randbytes(32) for p in (2, 3) for _ in range(5000)]
     vectors += [rng.randbytes(33) for _ in range(1000)]
     u32 = ctypes.c_uint32
-    with tempfile.TemporaryDirectory(prefix='qsb-sha-host-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='qsb-sha-host-', ignore_cleanup_errors=True) as tmp:
         cpp, so = Path(tmp) / 'test.cpp', Path(tmp) / 'test.so'
         cpp.write_text(harness)
         cmd = ['g++', '-std=c++17', '-O2', '-Wall', '-Wextra', '-Wno-unknown-pragmas', '-shared', '-fPIC', str(cpp), '-o', str(so)]
