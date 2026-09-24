@@ -1,60 +1,201 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: native Ada module loading with promoted arithmetic and fresh runtime data
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+Effort: high. Research, implementation and independent validation use Codex
+GPT-6 Astra at high effort, coordinated through separate Herdr panes.
 
-## Base and attribution
+## Problem and hypothesis
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+The subset benchmark builds its CUDA source using a fixed command without an
+architecture flag. With the CUDA 12.8 toolchain this produces a device image that
+includes compute_52 PTX. An RTX 4090 cannot execute the sm_52 machine image and
+normally needs the driver to compile the PTX for its own architecture. That
+compilation happens when the candidate process initializes or first uses the
+module. The benchmark's root-owned clock includes candidate startup.
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+This experiment packages a native sm_89 device image generated from the promoted
+subset implementation and routes the host through CUDA 12.8's public library
+loading API. The intended benefit is more time spent evaluating fresh candidates
+inside the fixed wall-clock window. There is no intended change to field
+arithmetic, SHA-256, candidate enumeration, point-table geometry, or the exact
+tentative-hit replay.
 
-## What is new
+This is a startup experiment, with an unmeasured ranked effect. The existence of
+PTX JIT is established by NVIDIA documentation; the amount of the current
+benchmark's score deficit caused by it is not established. We do not claim that
+the entire difference between a reported peak rate and hit-derived score is JIT.
+It could also include changing GPU rate, initialization, or other pauses.
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+## Base and provenance
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+The source base is subset promotion `9ac2515450446dbadbe061e98ebfc317c36d4999`,
+submission `7aef224a-e3ff-43f9-9877-50cdbda3f653`, with an official score of
+623,518,629 verified candidates/s. That promotion is the starting point, not a
+gain produced by this experiment. All inherited notices and GPLv3 source remain
+included. The sibling pinning track and the benchmark harness are outside the
+change surface.
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+The immediate motivation includes terrapinelf's public submission note
+`a75cf15a`, which reports local cold-start measurements for a compact PTX variant.
+That note's proposed 14–18x local-to-ranked JIT multiplier is an inference from
+aggregate score data. We treat it as a hypothesis and credit that research; no
+compact SHA or cold-helper patch from that submission is copied into this
+experiment. The native-loading approach gives a different test of the underlying
+startup hypothesis. Another pending compact-source experiment, `1e6215d2`, is
+also recorded in the research ledger to avoid presenting that approach as new.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+## Reproducible device image
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+The first baseline image was generated with CUDA 12.8.93 as follows:
 
-## Static evidence (no GPU on the authoring host)
+```sh
+nvcc -O3 -DQSB_ZEROS_N=24 --ptx -o base.ptx candidates/subset/subset.cu
+ptxas -arch=sm_89 -O3 -v -o base.cubin base.ptx
+```
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+The native assembly step uses the same compute_52 PTX frontend output as the
+ordinary benchmark build. It does not silently change architecture-conditional
+source by asking the frontend to compile for compute_89. The offline assembler's
+schedule can still differ from the installed driver's JIT schedule, so identical
+CUDA/PTX arithmetic is not evidence of identical runtime performance.
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+The initial baseline PTX is 3,515,568 bytes with SHA-256
+`8599b133fe9a27ffc33651db33e5dcdec4385955bc831907762a6430c7b674f5`.
+Its sm_89 image is 933,536 bytes with SHA-256
+`994014fb153b73eb4338b013d373734dc8350041378b2c39ed0199987cc38ae8`.
+Regeneration from the integrated source produced the same PTX and cubin hashes
+byte for byte. The JSON manifest records the current recursive source hashes.
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+Seven kernel entries are present: the table builder, direct epoch producer,
+group producer, incremental epoch producer, first-state producer, main digest
+consumer, and exact tentative-hit verifier. The independent ABI extraction finds
+40 parameters in the digest consumer and 20 named device global/constant symbols.
+Main digest resource usage is 128 registers/thread, 49,152 bytes shared memory
+per block, and no stack frame. These are static compiler facts, not throughput.
 
-## What does not pay (census-verified, all left off or removed)
+## Host integration requirements
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+The implementation uses the public CUDA 12.8 runtime library interface rather
+than generated registration internals. An early experiment trying to recompile
+`nvcc --cuda` generated host output as a CUDA source failed duplicate CUDA vector
+type declarations. That approach was abandoned before production integration.
 
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+Native and source modes are selected for the entire invocation before any
+problem-dependent device symbol is initialized. Once a mode is chosen, all
+kernel launches and all symbol reads and writes belong to that module. Switching
+one kernel to the original module after native initialization would use separate,
+uninitialized constants and is therefore invalid.
 
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+Each launch retains its declared parameter types, order, grid and block
+dimensions and the promoted zero-shared-memory/default-stream configuration. This matters because a raw generic
+argument pack can deduce an integer for a literal null argument where the kernel
+ABI expects an eight-byte pointer. The independent review checks the wrapper
+against the compiled PTX entry declarations, including this case.
 
-## Correctness
+Symbol routing includes both directions. The SHA schedule preparation reads the
+round constants K with `cudaMemcpyFromSymbol` in two host helpers; redirecting
+only symbol writes would leave an access that can initialize and JIT the original
+module. Native global pointers are obtained with `cudaLibraryGetGlobal`,
+checked against the declared size, and passed to ordinary memory-copy APIs.
+They are not valid CUDA Symbol API arguments.
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+The image is generic program code. The fresh benchmark instance still supplies
+every preimage, scalar, recovery coordinate, constant schedule, and folded-base
+table at runtime. No hit, problem seed, or instance-specific point table is
+embedded. The existing text output and exact GPU replay remain the source of
+candidate nominations consumed by the independent host verifier.
 
-## Expectations and limits
+## Validation and measurement limits
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+Authoring is on a CPU-only macOS machine using an x86_64 CUDA 12.8.93 container
+for compilation and static inspection. There is no local NVIDIA device. Neither
+the loader nor its synchronization nor its throughput has been executed on a GPU
+here. The ranked runner is required to establish real device behavior and a
+verified score. No local claimed score is attached.
 
-## Packaging
+The independent CPU contract work checks 5,810 exhaustive small combinadics,
+10,004 full-domain rank/unrank cases, 274,560 candidate/launch mappings, and 36
+folded recovery boundary comparisons. It reconstructs 120 full preimages across
+three fresh seeds and passes 34 low-difficulty hits through the unchanged
+independent verifier with zero failures. It also checks duplicate
+canonicalization, invalid indices and recids, seed binding, and zero/infinity
+oracle cases. These tests establish the host mathematical contract; they do not
+claim to execute the native kernel or its loader.
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+The separate structure model checks 9,728 complete SHA256d messages and proves
+that the current 128-window candidate family has 1,051,964,508,672 unique skip
+sets. At a sustained target near 997.63M/s it would exhaust before 1200 seconds.
+The present native experiment preserves that family to isolate startup effects;
+any future variant capable of that rate needs a separately validated disjoint
+extension. A proposed second family requires 47 first-state classes, whereas the
+promoted 128-window build provides only 16 slots. Changing that later requires
+matching constants, allocation and strides, plus a full pipeline drain between
+families. A larger domain is not itself a throughput gain.
+
+## Interpretation and next experiments
+
+The user-defined campaign target is an additional 60% over the starting record,
+or 997,629,806.4 verified candidates/s. That is a research target, not a projected
+result of this package. Even treating the entire gap to the crown's roughly
+718.8M/s peak as removable startup gives only about 15.3% improvement and leaves
+another 38.8% steady-rate gain to find. Improvements from initialization,
+arithmetic and occupancy cannot be multiplied without a matched measurement.
+
+The arithmetic audit also analyzes GLV12 and larger fixed-base tables. GLV12
+removes three mixed additions but adds scalar splitting, an endomorphism multiply,
+and a roughly 1.365 GiB table with more DRAM traffic. Its benefit on another
+track does not establish its benefit here. Tensor-core convolution has exact
+integer models but significant packing and reduction cost; it is not part of
+this package. These remain separate follow-up experiments.
+
+## Sources
+
+- Repository `spec/PROBLEM.md`, `spec/SCORING.md`, `benchmark.json`, and
+  `harness/gpu_wrap.py` define the instance, editable surface, fixed build,
+  output interface and verified-hit score.
+- [CUDA 12.8 runtime library API](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-runtime-api/group__CUDART__LIBRARY.html)
+  documents native image loading, kernel lookup and global lookup.
+- [NVIDIA dynamic runtime loading examples](https://developer.nvidia.com/blog/dynamic-loading-in-the-cuda-runtime/)
+  show loading and launching with the runtime alone.
+- [NVIDIA CUDA compiler documentation](https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html)
+  documents PTX, cubin and the compilation phases.
+- [CUDA 12.8 programming guide](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-c-programming-guide/index.html)
+  documents lazy module/data loading and CUDA cache controls.
+
+## Integration checks
+
+The fixed-command N=24 build, N=3 source fallback build, and explicit
+`-DQSB_NATIVE_MODULE=0` N=24 source build all compiled with CUDA 12.8.93.
+The independent 12-case mocked-CUDA suite invokes all seven real kernel signatures in
+14 launches and checks every argument byte, grid and block, including null
+pointer conversion and the 40-parameter digest signature. It exercises native
+selection, unsupported-architecture and missing-payload source selection, and
+expected process failure for ABI, bounds, declared-size, launch, load, hash and
+selection-state errors. These are host integration checks, not GPU execution.
+
+The runtime preflights the 13 globals actually read or written by host code. The
+full 20-symbol inventory remains in the provenance manifest and the native
+image. This avoids making unused library globals a prerequisite for execution.
+All 14 host symbol transfers are routed, including both reads of K.
+
+The integrated package reproduces the baseline PTX and cubin exactly, and all
+35 ELF sections compare equal. The 21 recursive source hashes in
+`native_manifest.json` match the packaged inputs. The payload remains 933,536
+bytes. The source directory, including the native payload and tests, is checked
+against the 8,388,608-byte limit before upload.
+
+Reproduce the packaged host-routing checks without a GPU:
+
+```sh
+python3 candidates/subset/tests/native_runtime/check.py
+# Or with the existing CUDA container and repository mounted at /work:
+python3 candidates/subset/tests/native_runtime/check.py --docker qsb-cuda
+```
+
+This suite includes distinct bad-length and equal-length bad-hash cases, plus
+round-trip copies through all 13 host-accessed native globals. It produces no
+claimed candidate throughput. Temporary test files are removed after execution.
+
+Independent scratch regeneration also reproduced the entire generated JSON and
+header exactly, with all 21 source hashes verified. Independent review found
+no standards or specification correctness defects; device lookup behavior and
+ranked performance still require the official GPU evaluation.
