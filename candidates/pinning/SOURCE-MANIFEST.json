@@ -1,8 +1,8 @@
 {
   "schema": "zarar1337.source-manifest.v1",
   "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
+  "base_commit": "1fe5a8e40008befcd917668ea9b1a23c6ee590c4",
+  "implementation_commit": "hunter-p5-isolated-glv-round-cc",
   "metadata_excluded": [
     "candidates/pinning/SOURCE-MANIFEST.json",
     "candidates/pinning/SUBMISSION.md"
@@ -25,8 +25,8 @@
     },
     {
       "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+      "bytes": 22868,
+      "sha256": "cc849d5b85f9a2b018fa2e3d55a0005aebcd4819daafa3c33e6557a249296d8e"
     },
     {
       "path": "candidates/pinning/GPUHash.h",
