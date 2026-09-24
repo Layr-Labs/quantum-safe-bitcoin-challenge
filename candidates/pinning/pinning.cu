@@ -335,7 +335,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GLVScalar.cuh"
 
 #if QSB_BIGTBL
-/* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
+/* GLV12: six terms per component; a dense prefix starts at offset zero.
  * FOUR_HOT selects four cached banks and two streaming banks.
  * One 32-bit code still holds the absolute record index and Y sign. */
 #define GT_CHUNKS 6
@@ -353,7 +353,7 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              (QSB_FOUR_HOT?(QSB_HOT64?4943548864ULL:9803211584ULL):1465193024ULL),
               "GLV12 geometry/table-byte mismatch");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
 #else
@@ -2509,6 +2509,15 @@ static void launch_pinning_pipeline(
  * m=2d+1.  H[hi]=hi*256*base in both cases.
  * ============================================================ */
 
+#ifndef QSB_BATCH_GTABLE
+#define QSB_BATCH_GTABLE 1
+#endif
+#if QSB_BATCH_GTABLE != 0 && QSB_BATCH_GTABLE != 1
+#error QSB_BATCH_GTABLE must be 0 or 1
+#endif
+#if QSB_BATCH_GTABLE
+#include "BatchGTable.cuh"
+#else
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
@@ -2552,6 +2561,7 @@ __global__ void kernel_build_gtable(
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
 }
+#endif
 
 
 /* ============================================================
@@ -3321,7 +3331,7 @@ int main(int argc, char **argv) {
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        size_t skip = 0u; // Dense FOUR_HOT prefix: 48 MiB, or 64 MiB with HOT64.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
@@ -3395,7 +3405,7 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
 #if QSB_BIGTBL
-        size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
+        size_t skip = 0u; // Dense FOUR_HOT prefix: 48 MiB, or 64 MiB with HOT64.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);

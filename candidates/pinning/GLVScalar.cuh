@@ -16,11 +16,26 @@
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
+// HOT64 shifts one bit from each cold region into the four hot banks.
+// It retains twelve signed terms, with 64 MiB hot and a 4.60 GiB total table.
+// QSB_HOT64=0 restores the promoted FOUR_HOT geometry exactly.
+#ifndef QSB_HOT64
+#define QSB_HOT64 1
+#endif
+#if QSB_HOT64 != 0 && QSB_HOT64 != 1
+#error QSB_HOT64 must be 0 or 1
+#endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
-#define QSB_GT_TOTAL 153175181u
 #define QSB_GT_RADIX_BITS 14
+#if QSB_HOT64
+#define QSB_GT_TOTAL 77242951u
+#define QSB_GT_TOP_CENTER 85279885u
+#define QSB_GT_TOP_SHIFT 101u
+#else
+#define QSB_GT_TOTAL 153175181u
 #define QSB_GT_TOP_CENTER 170559769u
 #define QSB_GT_TOP_SHIFT 100u
+#endif
 #else
 #define QSB_GT_TOTAL 22893641u
 #define QSB_GT_RADIX_BITS 12
@@ -38,19 +53,30 @@
  * QSB_FOUR_HOT=0: physical order 0,1,2,5,3,4, three cached banks.
  * QSB_FOUR_HOT=1: physical order 0..5, first four banks total 48 MiB;
  * widths [18,19,18,18,27], top shift 100, centered at 170559769.
- * Both exactly reconstruct the same bounded signed GLV component.
+ * QSB_HOT64=1: widths [18,19,19,19,26], top shift 101, center 85279885.
+ * Four equal 16 MiB hot banks; cold banks 2 GiB and 2.54 GiB.
+ * All variants exactly reconstruct the same bounded signed GLV component.
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 #if QSB_FOUR_HOT
+    #if QSB_HOT64
+    return c<4?262144u:c==4?33554432u:42639943u;
+#else
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
+#endif
 #else
     return c<3 ? 262144u : (c<5 ? 8388608u : 5329993u);
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #if QSB_FOUR_HOT
+    #if QSB_HOT64
+    return c==0?0u:c==1?262144u:c==2?524288u:
+           c==3?786432u:c==4?1048576u:34603008u;
+#else
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
+#endif
 #else
     return c==0?0u:c==1?262144u:c==2?524288u:c==3?6116425u:
            c==4?14505033u:786432u;
@@ -58,7 +84,11 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
 #if QSB_FOUR_HOT
+    #if QSB_HOT64
+    return c==0?0u:c==1?18u:c==2?37u:c==3?56u:c==4?75u:101u;
+#else
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
+#endif
 #else
     return c==0?0u:c==1?18u:c==2?37u:c==3?56u:c==4?80u:104u;
 #endif
@@ -81,7 +111,11 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
         idx=(ad-1u)>>1;
     } else {
 #if QSB_FOUR_HOT
-        const unsigned bits=c==1?19u:c<4?18u:27u;
+        #if QSB_HOT64
+    const unsigned bits=c<4?19u:26u;
+#else
+    const unsigned bits=c==1?19u:c<4?18u:27u;
+#endif
 #else
         const unsigned bits=c<3?19u:24u;
 #endif
