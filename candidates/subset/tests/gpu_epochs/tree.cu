@@ -43,6 +43,12 @@
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
 #endif
+#ifndef ZLAB_SE_GROUP_ONLY
+#define ZLAB_SE_GROUP_ONLY 1
+#endif
+#ifndef QSB_EPOCH_GROUPS
+#define QSB_EPOCH_GROUPS 1
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -1145,6 +1151,7 @@ __device__ __forceinline__ void unrank_combo(uint64_t rank, int n, int t, uint8_
  * the problem's base midstate. For the pinned shape this is 42 + 131*10 =
  * 1352 bytes = 21 full blocks + an 8-byte remainder, which lands in remW.
  * ~21 transforms per thread against 6*256 per consumer block: under 1.5%. */
+#if !ZLAB_SE_GROUP_ONLY || !ZLAB_HITPATH || !QSB_EPOCH_GROUPS
 __global__ void kernel_build_epochs(
     uint64_t epoch_base, uint64_t n_epochs,
     int window_start, int s_early,
@@ -1202,8 +1209,6 @@ __global__ void kernel_build_epochs(
     d->remW[1] = bswap32(curW[1]);
     for (int i = 0; i < s_early; i++) d->early[i] = early[i];
 }
-#ifndef QSB_EPOCH_GROUPS
-#define QSB_EPOCH_GROUPS 1
 #endif
 #if QSB_EPOCH_GROUPS
 #include "epoch_groups.cuh"
@@ -3104,11 +3109,15 @@ int main(int argc, char **argv) {
                 const uint64_t n_groups64 = r5b - r5a + 1;
                 const uint32_t n_groups = (uint32_t)n_groups64;
                 if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
-                    /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
+ #if ZLAB_SE_GROUP_ONLY
+                    /* The six-of-137 launch geometry stays within this bound. */
+                    fprintf(stderr, "ERROR: epoch group bound exceeded\n"); return 1;
+ #else
                     kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
                         epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                         d_mid, d_prem, (int)dp.prefix_remainder_len,
                         d_dsigs, d_epochs, zh_cnt);
+ #endif
                 } else {
                 kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
