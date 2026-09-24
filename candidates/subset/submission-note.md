@@ -1,60 +1,117 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: the a329eeee composite plus the PR965 narrow parity window, as a self-contained build, with a measured census on a dedicated RTX 4090
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+Effort: max. Prepared with Claude Opus 5.5 in Claude Code on a dedicated RTX 4090 (driver 595.71, CUDA 12.8.93 toolchain; ranked build line unchanged).
+
+## Summary
+
+This submission packages the strongest exact composite we could measure locally. It started from a head-to-head measurement of the public trees, all against the promoted crown bytes.
+
+- **Base:** our earlier public composite `a329eeee`. That is PR1134 (the `36c05f97` source) plus K32 and signed fused X3.
+- **Added:** the PR965 narrow parity window.
+- **Self-contained build:** the SHA helper header, which the base included from the sibling pinning track, now lives inside `candidates/subset/`.
+
+On a fixed seed, in paired ABBA order, the package measures **+1.85% ± 0.09 throughput and −1.92% energy per candidate versus the promoted crown bytes**. A 180 s run of the unmodified harness verified 15,827 of 15,827 hits.
 
 ## Base and attribution
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+Direct base: `a329eeee` (terrapinelf; subset commit `43b2fb8f`), which is the `36c05f97` source plus two runtime mechanisms. The mechanisms it carries, with their origins:
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+- **Base-A scalar recoding** (`QSB_RECODE_BASE_A`): Akashneelesh PR1027.
+- **Bounded early-Z2 filter carry** (`QSB_DROP_Z2_EARLY`): dun999 PR1093.
+- **Exact host (OpenSSL) publication gate** (`QSB_HOST_VERIFY`): mitchuski PR918.
+- **Two-slot non-blocking host pipe** (`QSB_HOST_PIPE`).
+- **Negative-ordinate point-chain MAC** (`QSB_SUBSET_NEG_Y_MAC`): Saviour1001.
+- **Offset-ordinate filter table** (`QSB_YOFF_FILTER`): kayu052 PR1099.
+- **Isomorphic recovery** (`QSB_ISO_*`).
+- **K32 half-limb corrections** (`QSB_K32`): fkiene's PR1002 form, via hybridnoise PR1137.
+- **Signed fused X3** (`QSB_FUSE_X3`): hybridnoise PR1137.
+- **The promoted crown `7aef224a`** (Akashneelesh) and its lineage, which supply the negfold parity, SHORT_CARRY4, EPOCH_FAST with 128 windows, and the parity window. Credits for those are retained in the inherited notes.
 
-## What is new
+The narrow parity window is Portablelle's public PR965, taken from hybridnoise's `f9738952` tree.
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+All inherited notices (`COPYING`, VanitySearch headers, `COPYING-secp256k1`) and attributions are retained.
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+## What changed relative to a329eeee
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+1. **`tests/gpu_epochs/parity_window_subset.cuh`: PR965 narrow window** (`QSB_K2S_PARITY_NARROW=1`).
+   - The recovery y-parity product window drops from 27 to 18 partial products.
+   - A guard falls back to the original 27-product decision, and so to its speculative fallback, whenever the narrowed accumulators could differ. The emitted parity is therefore identical to the base on every input.
+   - The file is byte-identical to the one in `f9738952`. The base file equals that file minus exactly this addition.
+2. **`sha_pinsha.cuh` vendored into `candidates/subset/`.**
+   - The base's `tree.cu` included `../../../pinning/sha_pinsha.cuh`, which made the subset build depend on whatever the pinning track currently holds.
+   - The header is now a local copy, and the include path is `../../sha_pinsha.cuh`.
+   - The generated PTX is identical to building against the current pinning header: sha256 prefix `a5ebce1dcc30` for both.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+Everything else is the base byte for byte: table geometry (15 chunks, 64 MiB), launch shape (256 threads, 2 CTA/SM, 128 registers, 49,152 B shared), enumeration, filter and exact gate. Setting `-DQSB_K2S_PARITY_NARROW=0` restores the base PTX.
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+## Measurement method
 
-## Static evidence (no GPU on the authoring host)
+- **Hardware and state:** one dedicated RTX 4090 at the default 450 W limit. `sw_power_cap` is active throughout, so the card runs power-bound at 2,520–2,560 MHz and 63–76 °C.
+- **Problem:** a fixed generated problem (seed 424242).
+- **Arms:** each arm is one 62 s process launch of the prebuilt binary with the ranked argv. Arms are ordered ABBA across rounds, so linear thermal drift cancels.
+- **Rate:** measured between the first and last progress lines. This excludes startup, as the ranked peak rate does.
+- **Energy per candidate:** mean board power, sampled at 1 Hz by `nvidia-smi` over the same window, divided by rate.
+- **Checks:** every variant's PTX is hashed before it is timed, so inert flags cannot masquerade as neutral results. Hit yield is also checked against the candidate count on every arm.
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+Because the card is power-bound, throughput here is effectively candidates per joule. Our reading of the corpus is that energy per candidate is also what the ranked subset runner rewards: its rate decays about 15% from peak.
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+## Results (paired against the promoted crown bytes)
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+| tree | Δ throughput | Δ energy/cand | notes |
+|---|---:|---:|---|
+| **this submission** | **+1.853% ± 0.085** | **−1.92%** | 3 rounds |
+| a329eeee (base) | +1.761% ± 0.064 | −1.80% | narrow parity window worth +0.09% |
+| f9738952 (hybridnoise) | +1.931% ± 0.359 | −1.87% | carries `QSB_SHA_FMA_ADD=1`; its ~20 public redraws average ≈617.5 officially |
+| 36c05f97 | +1.482% ± 0.244 | −1.42% | |
+| e63e42ec | +0.724% ± 0.721 | −0.68% | |
+| 35c4db43 | +0.569% ± 0.545 | −0.52% | |
+| 5744a581 | +0.220% ± 0.316 | −0.16% | |
 
-## What does not pay (census-verified, all left off or removed)
+**Full-harness validation.** `QSB_GRINDER='cmd:python3 harness/gpu_wrap.py --src …' QSB_SECONDS=180 ./benchmark.sh subset` on a fresh random seed:
+- verified hits 15,827 of 15,827;
+- grinder self rate 753.1 M/s;
+- `RESULT: PASS`.
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+(That local harness clock also included a recompile, because the build stamp had been removed. The ranked path builds in setup.)
 
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+## Negative or neutral results on this base (not shipped)
 
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+| change | Δ throughput |
+|---|---:|
+| Rolled constant-SHA loops (`QSB_PAIR_SHA_UNROLL_CONST=0`) | −0.43% ± 0.12 |
+| PR950 packed lane classes (`QSB_950_PACK`) with the unrolled schedule | −0.15% |
+| `QSB_SE_WINDOWS=256` | −0.64% ± 0.12 |
+| `-DQSB_SHA_FMA_ADD=1` | inert: hard-defined 0 in the base; PTX identical |
 
-## Correctness
+## Research findings for other solvers
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+1. **The chain dominates.** A wrong-math probe that removes 3 of the 12 interior mixed additions runs +15.26% ± 0.01 faster and uses −13.3% energy per candidate. One XYZZ madd is therefore about 4.4–5% of a candidate's energy.
+2. **One 512-candidate block inverse costs about 3.6%.** A wrong-math probe that skips the recovery tree measured +3.68% ± 0.09.
+3. **Per-launch timeline:**
+   - digest kernel 98.95% (178.2 ms);
+   - producers 0.95%;
+   - verify 0.06%;
+   - host 0.03%.
 
-## Expectations and limits
+   Host and pipeline work therefore has a ~1% ceiling.
+4. **GLV12 four-hot on subset is DRAM-latency-bound.** We ported the pinning FOUR_HOT geometry: 9.8 GB table, 48 MiB persisting window, 11 additions.
+   - With all loads forced into the hot banks it runs +13% over the crown (834 vs 739 M/s). The arithmetic side works.
+   - With the real table's 4 random DRAM gathers per candidate it falls to 557 M/s at only 403 W, and energy per candidate rises 19%.
+   - Without the persisting window it is worse (457 M/s). A `prefetch.global.L2` of the cold records is also worse (516 M/s).
+   - Shrinking the cold region to 256 MiB or 2 GiB barely helps (569 and 551 M/s). This is DRAM latency, not TLB.
+   - This agrees with the ranked 933abead and 1f78c9f4 results.
+5. **Affine pair level is correct but blocked by registers and shared memory.** We implemented summing T0..T13 in 7 affine pairs, using Montgomery's trick over the 7 pair denominators and one extra shared block inverse, followed by a 7-addition deferred-Y XYZZ chain.
+   - It is exact. Hits verify at the normal yield.
+   - The 6 per-candidate prefix products do not fit beside the chain in 128 registers and 49 KB of shared memory. Local-memory traffic made it 2× slower (367 M/s).
+   - The arithmetic ledger (−63 mul-eq per candidate for the 7 saved madds, +39 for the affine sums and Montgomery, plus one ~3.6% collective) says roughly +4% is available to a layout that can store them.
+6. **Cold driver JIT** for this kernel family is about 12 s on this host (`CUDA_CACHE_DISABLE=1`).
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+## Expected ranked effect and limits
+
+Two official draws of this exact lineage exist: 36c05f97 at 623.05 and a329eeee at 621.98. Two repackages drew 616.6 and 614.9. Together they suggest the local gain transfers at about 0.8–0.9. We expect about 620 ± 4 officially.
+
+This is a composite of exact, independently switchable mechanisms, not a new algorithm. The single-run noise of the ranked subset runner (σ ≈ 0.6–1%) is comparable to the gain.
 
 ## Packaging
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are all untouched. No binary or build stamp is included. The ranked build line and argv are unchanged.
