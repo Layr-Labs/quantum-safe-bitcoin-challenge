@@ -47,6 +47,7 @@
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
 #include <openssl/sha.h>
+#include "../../native_runtime.cuh"
 
 #include "../../GPUMath.h"
 
@@ -97,13 +98,13 @@ static int qsb_prepare_push_words(const uint8_t *bytes,int n){
         words[i].z=((uint32_t)r[8]<<8)|r[9];
         words[i].w=0;
     }
-    return cudaMemcpyToSymbol(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
+    return QSB_TO_SYMBOL(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
 }
 static uint32_t qsb_host_rotr(uint32_t x,int n){return (x>>n)|(x<<(32-n));}
 static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
  if(count!=69)return 1;
  uint32_t round_k[64],expanded[4][64];
- if(cudaMemcpyFromSymbol(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
+ if(QSB_FROM_SYMBOL(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
  for(int block=0;block<4;block++){
   uint32_t *w=expanded[block];memcpy(w,words+5+block*16,64);
   for(int i=16;i<64;i++){
@@ -114,7 +115,7 @@ static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
   }
   for(int i=0;i<64;i++)w[i]+=round_k[i];
  }
- return cudaMemcpyToSymbol(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
+ return QSB_TO_SYMBOL(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
 }
 template<int block> __device__ __forceinline__ void qsb_compress_constant(uint32_t *output){
  uint32_t a=output[0],b=output[1],c=output[2],d=output[3],e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
@@ -2446,8 +2447,11 @@ int main(int argc, char **argv) {
         }
     }
 
-    cudaSetDevice(gpu_index);
-    cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
+    qsb_native::environment();
+    qsb_native::check(cudaSetDevice(gpu_index), "set device");
+    cudaDeviceProp prop;
+    qsb_native::check(cudaGetDeviceProperties(&prop, gpu_index), "device properties");
+    qsb_native::select(prop);
     printf("QSB Digest Search [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 
@@ -2715,8 +2719,8 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
-        cudaDeviceSynchronize();
+        QSB_LAUNCH(kernel_build_gtable, (gt_total+255)/256,256, dL,dH,d_gt);
+        qsb_native::check(cudaDeviceSynchronize(), "table synchronization");
         cudaError_t gerr = cudaGetLastError();
         cudaFree(dL); cudaFree(dH);
         uint8_t *chk_table=(uint8_t*)malloc(gt_sz);
@@ -2818,7 +2822,7 @@ int main(int argc, char **argv) {
             }
             memcpy(h_win3[j],w,3);
         }
-        cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
+        QSB_TO_SYMBOL(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -2844,7 +2848,7 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
     uint64_t h_u2r[8];
     memcpy(h_u2r,dp.u2r_x,32);memcpy(h_u2r+4,dp.u2r_y,32);
-    if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
+    if(QSB_TO_SYMBOL(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
     /* QSB_U2R_C = 3*xR^2 * (2*yR)^-1 mod p (recovery finish constant). */
@@ -2865,7 +2869,7 @@ int main(int argc, char **argv) {
         BN_mod_mul(bc,bc,by,bp,ctx);                  /* 3*xR^2/(2*yR) */
         uint64_t h_c[4];
         if(BN_bn2lebinpad(bc,(uint8_t*)h_c,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_C encode failed\n");return 1;}
-        if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
+        if(QSB_TO_SYMBOL(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
             fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
         }
         BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
@@ -2948,7 +2952,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        cudaMemcpyToSymbol(BINOM_C, h_binom, sizeof(h_binom));
+        QSB_TO_SYMBOL(BINOM_C, h_binom, sizeof(h_binom));
     }
 
     /* ── DEBUG MODE ──
@@ -3105,19 +3109,19 @@ int main(int argc, char **argv) {
                 const uint32_t n_groups = (uint32_t)n_groups64;
                 if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
                     /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
-                    kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+                    QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                         epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                         d_mid, d_prem, (int)dp.prefix_remainder_len,
                         d_dsigs, d_epochs, zh_cnt);
                 } else {
-                kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
+                QSB_LAUNCH(kernel_epoch_groups, (n_groups + 255) / 256, 256,
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
                     d_dsigs, d_groups
 #if QSB_EPOCH_FAST
                     , d_epoch_group, epoch_base, epoch_base+(uint64_t)epochs_in_batch
 #endif
                     );
-                kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256>>>(
+                QSB_LAUNCH(kernel_build_epochs_inc, (epochs_in_batch + 255) / 256, 256,
                     epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                     d_dsigs, d_groups, r5a, d_epochs, zh_cnt
 #if QSB_EPOCH_FAST
@@ -3127,21 +3131,21 @@ int main(int argc, char **argv) {
                 }
             }
 #elif ZLAB_HITPATH
-            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+            QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs, zh_cnt);
 #else
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
-            kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
+            QSB_LAUNCH(kernel_build_epochs, (epochs_in_batch + 255) / 256, 256,
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
                 d_dsigs, d_epochs);
 #endif
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
-              kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+              QSB_LAUNCH(kernel_build_first_flat, (nthr+255)/256,256, d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+            QSB_LAUNCH(kernel_digest, nblk, QSB_SE_BLOCK,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -3160,7 +3164,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
-            kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+            QSB_LAUNCH(kernel_verify_pair_hits, 1,64, d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -3328,9 +3332,9 @@ int main(int argc, char **argv) {
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
 #if defined(QSB_PAIR_SHARED) && !QSB_PAIR_SHARED
             if(qsb_prefix_eligible(n_pool,window_start,t_win,fast_inc,prem_len_now))
-                qsb_prepare_prefix_cache<<<(QSB_PREFIX_ENTRIES+255)/256,256>>>(d_mid,window_start,t_win);
+                QSB_LAUNCH(qsb_prepare_prefix_cache, (QSB_PREFIX_ENTRIES+255)/256,256, d_mid,window_start,t_win);
 #endif
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_LAUNCH(kernel_digest, grdsz, BLKSZ,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, prem_len_now,
@@ -3532,7 +3536,7 @@ int main(int argc, char **argv) {
             cudaMemcpy(d_hit_cnt, &h_hit, 4, cudaMemcpyHostToDevice);
 
             int grdsz = (batch_pos + BLKSZ - 1) / BLKSZ;
-            kernel_digest<<<grdsz, BLKSZ>>>(
+            QSB_LAUNCH(kernel_digest, grdsz, BLKSZ,
                 d_combos, n_pool, t_sel,
                 d_mid,
                 d_prem, (int)dp.prefix_remainder_len,
