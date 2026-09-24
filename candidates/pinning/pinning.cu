@@ -1,5 +1,11 @@
+#ifndef QSB_REMEASURE_TAG_09242025157
+#define QSB_REMEASURE_TAG_09242025157 1 /* no-op: exact-source re-draw identity */
+#endif
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
+#endif
+#ifndef QSB_CODEX_DRAW_20260924_B
+#define QSB_CODEX_DRAW_20260924_B 1 /* no runtime effect; identifies this ranked chain-pipe draw */
 #endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
@@ -179,6 +185,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#endif
+#ifndef QSB_CHAIN_PIPE
+#define QSB_CHAIN_PIPE 1      /* overlap next GLV table gather with current XYZZ add using dead point buffers */
 #endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
@@ -770,10 +779,12 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
 }
-__device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
-                                             uint64_t *x,uint64_t *y) {
+__device__ __forceinline__ uint32_t qsb_glv_code(unsigned term) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
+    return codes[(size_t)term*QSB_TREE_N+threadIdx.x];
+}
+__device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t code,
+                                                  uint64_t *x,uint64_t *y) {
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
     gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
@@ -782,6 +793,53 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
 #endif
                           ((uint64_t)m32<<32)|m32,x,y);
 }
+__device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
+                                             uint64_t *x,uint64_t *y) {
+    qsb_load_glv_code(table,qsb_glv_code(term),x,y);
+}
+#if QSB_CHAIN_PIPE
+#if !QSB_BIGTBL || !QSB_YOFF || !QSB_NEG_Y_MAC || !QSB_FUSE_SQRADDSUB2 || !QSB_XY_DIRECT
+#error "QSB_CHAIN_PIPE requires the current BIGTBL/YOFF/NEG_Y_MAC/FUSE_SQRADDSUB2/XY_DIRECT path"
+#endif
+__device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_t code,
+                                                     uint64_t *y) {
+    const uint32_t idx=code&0x7fffffffu;
+    const uint64_t m32=(uint32_t)((int32_t)code>>31);
+    const uint64_t m=(m32<<32)|m32;
+    const ulonglong2 *ty=(const ulonglong2 *)(table+(size_t)idx*64+32);
+    ulonglong2 y0=__ldg(ty),y1=__ldg(ty+1);
+    y[0]=y0.x^m; y[1]=y0.y^m; y[2]=y1.x^m; y[3]=y1.y^m;
+}
+__device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
+                                                     uint64_t *x) {
+    const uint32_t idx=code&0x7fffffffu;
+    const ulonglong2 *tx=(const ulonglong2 *)(table+(size_t)idx*64);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1);
+    x[0]=x0.x; x[1]=x0.y; x[2]=x1.x; x[3]=x1.y;
+}
+
+/* Next Y/X gather uses point buffers after their current values are consumed. */
+__device__ __forceinline__ void qsb_pointadd_chain_pipe(
+    uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
+    uint64_t *X2,uint64_t *Y2,uint64_t *Yoff,
+    const uint8_t *table,uint32_t next_code) {
+    uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4];
+    _ModAddLazyOff(S2,Y2,Yoff);
+    qsb_muladd_seed(R,S2,ZZZ1,Y1);
+    qsb_load_glv_y_code(table,next_code,Yoff);
+    _ModMult(U2,X2,ZZ1);
+    qsb_load_glv_x_code(table,next_code,X2);
+    _ModSub256(P,U2,X1);
+    _ModSqr(PP,P);
+    _ModMult(PPP,PP,P);
+    _ModMult(Q,U2,PP);
+    _ModSqrAddSub2(X1,R,PPP,Q);
+    _ModMult(ZZZ1,PPP);
+    _ModMult(ZZ1,PP);
+    _ModSub256(Q,X1,Q);
+    _ModMult(Y1,Q,R);
+}
+#endif
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
@@ -826,6 +884,28 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first+1,x1,y1);
 #endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_CHAIN_PIPE
+    if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
+    #pragma unroll 1
+    for(int term=first+2;term<last;term++) {
+        if(term==GT_CHUNKS) {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        if(term+1<last) {
+            const uint32_t next_code=qsb_glv_code(term+1);
+            qsb_pointadd_chain_pipe(X,Y,U,V,x1,y1,y0,table,next_code);
+            #pragma unroll
+            for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
+        } else {
+            _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+            Load256(y0,y1);
+        }
+    }
+#else
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -841,6 +921,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
+#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
