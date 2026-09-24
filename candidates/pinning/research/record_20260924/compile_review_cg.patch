@@ -1,0 +1,32 @@
+--- a/candidates/pinning/pinning.cu
++++ b/candidates/pinning/pinning.cu
+@@ -475,6 +475,11 @@
+  * Branchless: y is selected between y and p-y by a mask. */
+ /* Mask-taking variant used by the direct-digit path: the caller already has
+  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
++__device__ __forceinline__ ulonglong2 compile_review_load(const ulonglong2 *ptr) {
++    ulonglong2 v;
++    asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cg.v2.u64 {%0,%1}, [g]; }" : "=l"(v.x), "=l"(v.y) : "l"(ptr));
++    return v;
++}
+ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
+                                                       uint32_t base, uint32_t idx,
+                                                       uint64_t m,
+@@ -483,7 +488,7 @@
+     size_t off = ((size_t)base + idx) * 64;
+     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
+     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
++    ulonglong2 x0=compile_review_load(tx),x1=compile_review_load(tx+1),y0=compile_review_load(ty),y1=compile_review_load(ty+1);
+     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
+ #if !QSB_YOFF
+@@ -501,7 +506,7 @@
+     size_t off = ((size_t)base + idx) * 64;
+     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
+     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
++    ulonglong2 x0=compile_review_load(tx),x1=compile_review_load(tx+1),y0=compile_review_load(ty),y1=compile_review_load(ty+1);
+     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+     uint64_t m=0ULL-neg;
+     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;

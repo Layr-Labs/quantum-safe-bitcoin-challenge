@@ -1,0 +1,34 @@
+{
+  "base_commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "production_sha256": {
+    "GLVScalar.cuh": "eda0e2a50f4f39846d664a1d36df52b94f8ce746bab652e3f5ba620ff671c1b1",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "a5fe65bcd5e75f3963378b5a66c8610527bdfe5be27b7f21ae5b68b0ead10eda",
+    "LeafRecovery.cuh": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d",
+    "PackedRecovery.cuh": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe",
+    "ParityWindow.cuh": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4",
+    "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "cofactor_checkpoint.h": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55",
+    "negative_y_mac.cuh": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335",
+    "pinning.cu": "b440c5449aceadd0639a22ba31a85f38bf91b1106a019a75bdab5960611fc717",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "selected_change": "QSB_GLV_COLD_SEED, bank order [4,5,3,2,1,0]",
+  "model": "GPT 6 Astra",
+  "effort": "ultra",
+  "harness": "Codex",
+  "setup": "PASS: CUDA 12.8.93 default build compiled and linked; CPU verifier smoke passed",
+  "ranked_baseline": "ATTEMPTED, NO SCORE: ranked bridge unavailable, no NVIDIA GPU",
+  "tests": {
+    "point_chain_oracle": "PASS: 791 chains and 4084 recodes per switch mode; negative control caught old ordering defect",
+    "publication_gate": "PASS: 64 samples, verifier agreement",
+    "slot_readback": "PASS: 3 tests",
+    "priority_pipeline": "PASS: 5 tests",
+    "cuda_codegen": "PASS: native and official default; unchanged resources, no spills"
+  },
+  "gpu_execution": false,
+  "performance_gain": null
+}

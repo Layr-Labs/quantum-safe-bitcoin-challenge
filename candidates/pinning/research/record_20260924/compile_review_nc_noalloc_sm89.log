@@ -1,0 +1,89 @@
+nvcc -O3 -DQSB_ZEROS_N=24 -arch=sm_89 --cubin --ptxas-options=-v -I candidates/pinning -o candidates/pinning/research/record_20260924/compile_review_nc_noalloc_sm89.cubin candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu
+candidates/pinning/sha_pinsha.cuh(366): warning #177-D: variable "one" was declared but never referenced
+          const uint32_t one = pin_one_mul;
+                         ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(3559): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(3638): warning #550-D: variable "hc" was set but never used
+                      int hc = (raw >> 31) & 1;
+                          ^
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(3026): warning #550-D: variable "tail_w0" was set but never used
+      uint32_t tail_w0 = 0;
+               ^
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(3447): warning #550-D: variable "BLKSZ" was set but never used
+      int BLKSZ = 256;
+          ^
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(3692): warning #177-D: variable "drain_slot" was declared but never referenced
+      auto drain_slot = [&](int s) -> int {
+           ^
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(2331): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, qsb_tail_pre) [with FAST_TAIL=true, STAGE=0]" at line 2424
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, const qsb_tail_pre &, cudaStream_t, qsb::CompletionLane *) [with FAST_TAIL=true]" at line 3755
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(2331): warning #128-D: loop is not reachable
+          for(int i=0;i<8;i++){h[i*4]=(hs[i]>>24)&0xFF;h[i*4+1]=(hs[i]>>16)&0xFF;
+          ^
+          detected during:
+            instantiation of "void kernel_pinning_pipeline<FAST_TAIL,STAGE>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, qsb_tail_pre) [with FAST_TAIL=true, STAGE=2]" at line 2490
+            instantiation of "void launch_pinning_pipeline<FAST_TAIL>(const uint32_t *, const uint8_t *, int, int, int, int, uint32_t, uint32_t, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, const uint64_t *, uint8_t *, uint32_t *, uint32_t *, int, int, int, ulonglong2 *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, const qsb_tail_pre &, cudaStream_t, qsb::CompletionLane *) [with FAST_TAIL=true]" at line 3755
+
+candidates/pinning/research/record_20260924/compile_review_nc_noalloc.cu(1119): warning #177-D: function "qsb_make_tail_tab" was declared but never referenced
+  static void qsb_make_tail_tab(qsb_tail_tab_t *tab, const qsb_tail_pre &tp, uint32_t tail0) {
+              ^
+
+ptxas info    : 4096 bytes gmem, 1232 bytes cmem[3], 8 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre' for 'sm_89'
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 64 registers, used 0 barriers, 572 bytes cmem[0]
+ptxas info    : Compile time = 177.188 ms
+ptxas info    : Compiling entry function '_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre' for 'sm_89'
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 122 registers, used 1 barriers, 12288 bytes smem, 572 bytes cmem[0]
+ptxas info    : Compile time = 468.935 ms
+ptxas info    : Function properties for _Z17q9_coeff_fallbackILi1EE10ulonglong2mmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z17q9_coeff_fallbackILi2EE10ulonglong2mmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z19kernel_build_gtablePKmS0_Ph' for 'sm_89'
+ptxas info    : Function properties for _Z19kernel_build_gtablePKmS0_Ph
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 0 barriers, 120 bytes cumulative stack size, 376 bytes cmem[0]
+ptxas info    : Compile time = 157.952 ms
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z21qsb_root_group_finishPmiPKmS1_' for 'sm_89'
+ptxas info    : Function properties for _Z21qsb_root_group_finishPmiPKmS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 44 registers, used 1 barriers, 24576 bytes smem, 384 bytes cmem[0]
+ptxas info    : Compile time = 19.001 ms
+ptxas info    : Compiling entry function '_Z22qsb_invert_super_rootsPmi' for 'sm_89'
+ptxas info    : Function properties for _Z22qsb_invert_super_rootsPmi
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 114 registers, used 1 barriers, 120 bytes cumulative stack size, 24576 bytes smem, 364 bytes cmem[0]
+ptxas info    : Compile time = 83.819 ms
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z22qsb_root_group_preparePKmiPmS1_' for 'sm_89'
+ptxas info    : Function properties for _Z22qsb_root_group_preparePKmiPmS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 42 registers, used 1 barriers, 16384 bytes smem, 384 bytes cmem[0]
+ptxas info    : Compile time = 9.900 ms
+ptxas info    : Compiling entry function '_Z18qsb_table_offset_yPh' for 'sm_89'
+ptxas info    : Function properties for _Z18qsb_table_offset_yPh
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 14 registers, used 0 barriers, 360 bytes cmem[0]
+ptxas info    : Compile time = 1.635 ms

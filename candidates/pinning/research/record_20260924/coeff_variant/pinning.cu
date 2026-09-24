@@ -674,28 +674,6 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #error "QSB_GLV_SEED_REG must be 0 or 1"
 #endif
 
-#ifndef QSB_GLV_COLD_SEED
-#define QSB_GLV_COLD_SEED (QSB_BIGTBL && QSB_FOUR_HOT)
-#endif
-#if QSB_GLV_COLD_SEED != 0 && QSB_GLV_COLD_SEED != 1
-#error "QSB_GLV_COLD_SEED must be 0 or 1"
-#endif
-#if QSB_GLV_COLD_SEED && !(QSB_BIGTBL && QSB_FOUR_HOT)
-#error "QSB_GLV_COLD_SEED requires the four-hot six-bank geometry"
-#endif
-
-// Consume each component in bank order [4,5,3,2,1,0]. The first two
-// independent seed loads then fetch the two DRAM records together; the
-// following four records use the existing cached prefix. No extra loads,
-// prefetches, point additions, or live point buffers are introduced.
-__host__ __device__ __forceinline__ unsigned qsb_glv_chain_position(unsigned bank) {
-#if QSB_GLV_COLD_SEED
-    return bank < 4u ? 5u - bank : bank - 4u;
-#else
-    return bank;
-#endif
-}
-
 // First used as 14 per-lane GLV record-code planes (7 KiB); after the handoff,
 // the same 12 KiB holds the cofactor tree.
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
@@ -711,9 +689,9 @@ __device__ __forceinline__ uint64_t qsb_glv_extract(const uint64_t m[2],
     return m[1]>>(shift-64u);
 }
 
-/* Decode one component into its consumption order. SIDE=1 is Q=s2 in the
- * first GT_CHUNKS slots; SIDE=0 is P=s1 in the second group. Record indices
- * and the bit31 table-Y sign retain their original representation. */
+/* Decode one compile-time-selected component. SIDE=0 is P=s1 in slots7..13;
+ * SIDE=1 is Q=s2 in slots0..6. Codes contain an absolute21-bit record index
+ * and bit31 as the table-Y negation. */
 template<int SIDE>
 __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsigned sign,
                                                      volatile uint32_t *codes
@@ -724,12 +702,11 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
     #pragma unroll
     for(int c=0;c<GT_CHUNKS;c++) {
 #if QSB_BIGTBL
-        const unsigned position=qsb_glv_chain_position((unsigned)c);
-        const unsigned slot=SIDE?position:GT_CHUNKS+position;
+        const unsigned slot=SIDE?c:GT_CHUNKS+c;
         const uint32_t code=q9_bigtbl_code(mag,sign,c);
 #if QSB_GLV_SEED_REG
-        if(SIDE==1 && position==0)*seed0=code;
-        else if(SIDE==1 && position==1)*seed1=code;
+        if(SIDE==1 && c==0)*seed0=code;
+        else if(SIDE==1 && c==1)*seed1=code;
         else
 #endif
         codes[(size_t)slot*QSB_TREE_N+threadIdx.x]=code;
