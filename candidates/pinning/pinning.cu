@@ -334,6 +334,14 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
+/* Host-only cache policy experiment. Disable to restore the promoted policy. */
+#ifndef QSB_L2_HOT_PREFIX
+#define QSB_L2_HOT_PREFIX 1
+#endif
+#if QSB_L2_HOT_PREFIX != 0 && QSB_L2_HOT_PREFIX != 1
+#error "QSB_L2_HOT_PREFIX must be 0 or 1"
+#endif
+
 #if QSB_BIGTBL
 /* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
  * FOUR_HOT selects four cached banks and two streaming banks.
@@ -3317,6 +3325,12 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+#if QSB_BIGTBL && QSB_FOUR_HOT && QSB_L2_HOT_PREFIX
+        /* Banks 0..3 are the complete dense prefix. Do not reserve persisting
+         * cache for the beginning of the large streaming bank 4. */
+        const size_t hot_bytes = (size_t)gt_offset(4) * 64u;
+        if (want > hot_bytes) want = hot_bytes;
+#endif
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
@@ -3394,6 +3408,12 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+#if QSB_BIGTBL && QSB_FOUR_HOT && QSB_L2_HOT_PREFIX
+        /* Banks 0..3 are the complete dense prefix. Do not reserve persisting
+         * cache for the beginning of the large streaming bank 4. */
+        const size_t hot_bytes = (size_t)gt_offset(4) * 64u;
+        if (want > hot_bytes) want = hot_bytes;
+#endif
 #if QSB_BIGTBL
         size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
 #else
