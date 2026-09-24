@@ -1,6 +1,15 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
+#ifndef QSB_RESUB_0924V30
+#define QSB_RESUB_0924V30 1 /* v30: re-draw of the promoted four-hot-bank tree (fkiene 871963fd / 7e95c40, official 904,971,814); identical build, fresh ranked draw */
+#endif
+#ifndef QSB_RESUB_0924V31
+#define QSB_RESUB_0924V31 1 /* v31: second draw of the promoted four-hot-bank tree; v30 drew 864.29M (yield 0.946) */
+#endif
+#ifndef QSB_RESUB_0924V32
+#define QSB_RESUB_0924V32 1 /* v32: third draw of the promoted four-hot-bank tree; v31 drew 861.96M (yield 0.941) */
+#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
