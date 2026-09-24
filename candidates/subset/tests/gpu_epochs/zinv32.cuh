@@ -298,7 +298,16 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     #pragma unroll
     for(int i=0;i<9;i++){
         const uint32_t xl=i<8?(uint32_t)(R[i>>1]>>(32*(i&1))):0u;
+#if defined(QSB_ISO_FUSED_ROOT_SCALE) && QSB_ISO_FUSED_ROOT_SCALE
+        /* Coefficients are linear in their initial values (runner-up source
+         * 5744a581).  Initialize s to inv(u), rather than one, so the root
+         * result is inv(u)/x without a separate field multiplication after
+         * the cooperative inverse. */
+        const uint32_t scaled=i<8?(uint32_t)(QSB_ISO_INVU[i>>1]>>(32*(i&1))):0u;
+        const uint32_t own=rs?scaled:xl;                   /* s=inv(u) / x */
+#else
         const uint32_t own=rs?(uint32_t)(i==0):xl;        /* s=1 / x */
+#endif
         const uint32_t oth=rs?0u:ZI_PL[i];                 /* r=0 / p */
         P[i]=odd?own:oth; Q[i]=odd?oth:own;
     }
