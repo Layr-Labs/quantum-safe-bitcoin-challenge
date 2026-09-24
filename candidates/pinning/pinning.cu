@@ -1,3 +1,5 @@
+#define QSB_AUTODRAW_09242129 1   /* inert re-measurement tag; unreferenced */
+#define QSB_SHA_SFE_SHIP_09241915 1
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
