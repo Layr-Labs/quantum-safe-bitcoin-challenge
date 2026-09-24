@@ -1,6 +1,18 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
+#ifndef QSB_RESUB_0924092430
+#define QSB_RESUB_0924092430 1 /* v24: third draw of the v20 GLV12+lean package; GLV10 falsified (-55.7% self), reverting to best measured bytes */
+#endif
+#ifndef QSB_RESUB_0924V27
+#define QSB_RESUB_0924V27 1 /* v27: re-draw of the v20 GLV12+lean package, identical build */
+#endif
+#ifndef QSB_RESUB_0924V26
+#define QSB_RESUB_0924V26 1 /* v26: re-draw of the v20 GLV12+lean package, identical build */
+#endif
+#ifndef QSB_RESUB_0924V25
+#define QSB_RESUB_0924V25 1 /* v25: re-draw of the v20 GLV12+lean package, identical build */
+#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -57,6 +69,21 @@
 #ifndef QSB_ROOT_V2
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
+// v19: Saviour1001's 5a37cad9 tree (pr1205, self-rate 851.2M measured on the
+// ranked verifier) + QSB_MUL_SFC2_DROP restored from dun999's 64d7262a (pr1201).
+// Union of the two strongest public stacks. Provenance comment only.
+// v19b: byte-identical re-draw. v19 (d27f252e) officially scored 829,084,805
+// (self 849.3M, ratio 0.976) — above frontier 826,926,066 but below the x1.01
+// promotion floor 835,195,327. This ticket re-measures the same bytes.
+// v19c: second re-draw. v19b (ad10074d) drew poorly: 791,023,360 (self 840.8M,
+// ratio 0.940). Same bytes, third independent sample of the verifier draw.
+// v19d: third re-draw. v19c (3cfd54c5) hit the fast worker: self 851.0M
+// (ties field-best) but ratio 0.973 -> 827,827,523. Fourth sample.
+// v20: structural — QSB_BIGTBL GLV12 dense-table (pr1258/1259, promoted at
+// 881.27M official) ported flag-gated onto the union stack; GLVScalar.cuh
+// carries the q9_bigtbl_* helpers + GLV_LEAN layer; every BIGTBL code path
+// is byte-identical to the promoted implementation. -DQSB_BIGTBL=0 restores
+// the GLV14 geometry verbatim (diff vs v19d is purely additive).
 #include "GPUMath.h"
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
@@ -334,6 +361,14 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
+/* Exact 14-term GLV table shared by the two signed components.  The seven
+ * physical segments use widths [18,19,18,18,18,18,19] at shifts
+ * [0,18,37,55,73,91,109].  Segment zero is the biased unsigned first term;
+ * segments 1..5 hold ordinary positive odd magnitudes; segment 6 holds the
+ * bounded top odd magnitudes.  The two components select the same records and
+ * differ only in the sign applied to Y.  Donor split and initial grouped-table
+ * architecture: public GLV40 commit 4b77964f (Pieter Wuille/secp256k1 split).
+ */
 #if QSB_BIGTBL
 /* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
  * The two remaining ordinary segments and the bounded top stream from DRAM.
@@ -356,14 +391,6 @@ static_assert(GT_TOTAL_ENTRIES*64ULL == 1465193024ULL,
               "GLV12 table must contain exactly 1,465,193,024 bytes");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
 #else
-/* Exact 14-term GLV table shared by the two signed components.  The seven
- * physical segments use widths [18,19,18,18,18,18,19] at shifts
- * [0,18,37,55,73,91,109].  Segment zero is the biased unsigned first term;
- * segments 1..5 hold ordinary positive odd magnitudes; segment 6 holds the
- * bounded top odd magnitudes.  The two components select the same records and
- * differ only in the sign applied to Y.  Donor split and initial grouped-table
- * architecture: public GLV40 commit 4b77964f (Pieter Wuille/secp256k1 split).
- */
 #define GT_CHUNKS 7
 #define GT_GLV_TERMS 14
 #define GT_TOTAL_ENTRIES 1215139u
@@ -393,7 +420,6 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL == 77768896ULL,
               "GLV14 table must contain exactly 77,768,896 bytes");
-
 #endif
 
 /* n = secp256k1 group order, little-endian limbs */
