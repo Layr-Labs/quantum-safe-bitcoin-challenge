@@ -43,7 +43,7 @@ __device__ __forceinline__ void qsb_recovery_denominator(
     uint64_t raw[5];qsb_field_mul_sc(raw,const_cast<uint64_t*>(a),U);
     Load256(d,raw);
 #endif
-    QSB_SUB_P(d,d,X);
+    _ModSub256(d,X);
 #if QSB_RAW_DEN
     { uint64_t rw[5]; qsb_field_mul_sc(rw,V,d); Load256(W,rw); }   // P8: raw leaf, W = V*(a*U-X)
 #else

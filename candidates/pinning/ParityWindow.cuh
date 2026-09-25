@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Original 27-product window: CUDA/RTX 4090 validated; see SUBMISSION.md.
-// Narrow 18-product window: CPU PTX-semantic audit; see NARROW-PARITY.md.
+// CUDA/RTX 4090 differential-validated against the full packed product; see SUBMISSION.md.
 // Include after qsb_packed_raw_mul and qsb_sum_parity in PackedRecovery.cuh.
 #pragma once
 #if !QSB_C31 || !QSB_SHORT_CARRY || !QSB_FIELD_SC || !QSB_PARITY_SUM
@@ -8,22 +7,6 @@
 #endif
 #if defined(QSB_RP_SQR) && QSB_RP_SQR
 #error "RP_SQR changes the multiplication contract; re-audit ParityWindow first"
-#endif
-#ifndef QSB_PARITY_WINDOW_NARROW
-#define QSB_PARITY_WINDOW_NARROW 1
-#endif
-/* QSB_FIN_BAL2 bit 1: the narrow window's two carry accumulators start from the constant-bank
- * zero pin_zero_add instead of the literal 0. top = 0 + carry is the same value, but ptxas then
- * emits the first capture as IMAD.X (multiply pipe) instead of SEL. */
-#if QSB_FIN_BAL2 & 1
-#define QSB_PW_TOP0 "ld.const.u32 top,[pin_zero_add];\n"
-/* Bit 1 also adds a0*b0 into mid1 (bit 0 of a0*b0 is a0 & b0 & 1, and bit 0 of a sum is the XOR
- * of the addends' bit 0) and leaves mid1 unmasked: the only reader of mid >> 32 is the fast-path
- * return in qsb_parity_product_window, which keeps bit 0 alone. */
-#define QSB_PW_MID1_TAIL "mad.lo.u32 mid1,a0,b0,mid1;\n"
-#else
-#define QSB_PW_TOP0 "mov.u32 top,0;\n"
-#define QSB_PW_MID1_TAIL "and.b32 mid1,mid1,1;\n"
 #endif
 
 __device__ __forceinline__ void qsb_parity_window_words(
@@ -41,10 +24,6 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mov.b64 {b2,b3}, %7;\n"
         "mov.b64 {b4,b5}, %8;\n"
         "mov.b64 {b6,b7}, %9;\n"
-#if QSB_PARITY_WINDOW_NARROW
-        "mul.wide.u32 acc,a0,b6;\n"
-        QSB_PW_TOP0
-#else
         "mul.wide.u32 acc,a0,b5;\n"
         "mov.u32 pcarry,0;\n"
         "mul.wide.u32 t,a1,b4;\n"
@@ -68,7 +47,6 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a0,b6;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
-#endif
         "mul.wide.u32 t,a1,b5;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
@@ -106,19 +84,6 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a7,b0;\n"
         "add.u64 mid,mid,t;\n"
         "mov.b64 {mid0,mid1},mid;\n"
-#if QSB_FIN_CAP_IMAD
-        /* QSB_FIN_CAP_IMAD: only bit 0 of mid1 survives the final mask, and bit 0 of a sum is
-         * the XOR of the addends' bit 0 (no carry reaches bit 0), while bit 0 of a_i*b_j is
-         * a_i & b_j & 1. So mid1 + sum(a_i*b_j) has the same bit 0 as the XOR chain below,
-         * and the seven steps run as IMAD on the multiply pipe instead of LOP3. */
-        "mad.lo.u32 mid1,a1,b7,mid1;\n"
-        "mad.lo.u32 mid1,a2,b6,mid1;\n"
-        "mad.lo.u32 mid1,a3,b5,mid1;\n"
-        "mad.lo.u32 mid1,a4,b4,mid1;\n"
-        "mad.lo.u32 mid1,a5,b3,mid1;\n"
-        "mad.lo.u32 mid1,a6,b2,mid1;\n"
-        "mad.lo.u32 mid1,a7,b1,mid1;\n"
-#else
         "and.b32 bit,a1,b7;\n"
         "xor.b32 mid1,mid1,bit;\n"
         "and.b32 bit,a2,b6;\n"
@@ -133,13 +98,8 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "xor.b32 mid1,mid1,bit;\n"
         "and.b32 bit,a7,b1;\n"
         "xor.b32 mid1,mid1,bit;\n"
-#endif
-        QSB_PW_MID1_TAIL
+        "and.b32 mid1,mid1,1;\n"
         "mov.b64 %0,{mid0,mid1};\n"
-#if QSB_PARITY_WINDOW_NARROW
-        "mul.wide.u32 acc,a6,b7;\n"
-        QSB_PW_TOP0
-#else
         "mul.wide.u32 acc,a5,b7;\n"
         "mov.u32 pcarry,0;\n"
         "mul.wide.u32 t,a6,b6;\n"
@@ -154,7 +114,6 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a6,b7;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
-#endif
         "mul.wide.u32 t,a7,b6;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
@@ -176,28 +135,10 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     const uint32_t x7=(uint32_t)mid;
     // Only bit 32 and bits 0..31 of q are used. u64 overflow is harmless.
     const uint64_t q=top+977ULL*(top>>32)+x7+(beta[3]>>32);
-#if QSB_PARITY_WINDOW_NARROW
-    // B=2^32 and Dk=sum(a_i*b_j, i+j=k). Omitting D5 changes
-    // floor((D6+floor(D5/B))/B) by at most 6; omitting D12 changes
-    // floor((D13+floor(D12/B))/B) by at most 3. The old top word is
-    // below B^2, so the old q exceeds this q by at most 6+3+977=986
-    // (the 977 term covers a carry into top's high limb). Keep x7 away
-    // from its last seven values and q from its last 1959+986 values.
-    // Then the inherited window would also accept, with identical bit-32
-    // values of mid and q. All remaining cases keep the full-product path.
-    if(x7<0xfffffff9u && (uint32_t)q<0xfffff47fu) {
-#else
     // Unknown carries change q by at most 1958. Exclude the final all-one
     // limb too, so the baseline sum-parity exceptional correction cannot fire.
     if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u) {
-#endif
-#if QSB_FIN_BAL2 & 1
-        /* QSB_FIN_BAL2 bit 1: mid >> 32 already holds a0*b0 + mid1, whose bit 0 is a0&b0 ^ mid1,
-         * so the a[0]&b[0] term is gone and two LOP3 (XOR3, then mask) finish the same bit 0. */
-        return ((uint32_t)(mid>>32)^(uint32_t)beta[0]^(uint32_t)(q>>32)^neg)&1u;
-#else
         return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(q>>32)^neg)&1u);
-#endif
     }
     uint64_t raw[4];
     qsb_packed_raw_mul(raw,a,b);
