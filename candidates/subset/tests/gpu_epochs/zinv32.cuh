@@ -57,6 +57,13 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 // Six-step extension of the PR296 table-driven divstep mechanism.
 // Odd rescaling preserves the decision sequence: index by g/f modulo64.
 // For odd f, f*(2-f*f) is its inverse modulo64. Five exact groups give30 steps.
+#if QSB_L1_LDS_LUT
+/* L1' (QSB_L1_LDS_LUT): global copy of the divstep LUT, staged once per block into the dead
+ * `inverses` shared array so the serial root inverse reads it via LDS instead of register-indexed
+ * LDC.64. Declared unconditionally (host pass needs it for cudaMemcpyToSymbol); __align__(16)
+ * required because staging reads it as uint4/LDG.128. +6.6 KiB global; bit-identical. */
+__device__ __align__(16) uint64_t ZI_BY_LUT_G[832];
+#endif
 ZI_CONST uint64_t ZI_BY_LUT[832]={
     0x0000000601000040ULL,0x00000006013F0040ULL,0x00000006013E0040ULL,0x00000006013D0040ULL,0x00000006013C0040ULL,0x00000006013B0040ULL,
     0x00000006013A0040ULL,0x0000000601390040ULL,0x0000000601380040ULL,0x0000000601370040ULL,0x0000000601360040ULL,0x0000000601350040ULL,
@@ -211,14 +218,23 @@ template<int BYTE> ZI_DEV int32_t zi_by_signed_byte(uint32_t value){
 #endif
 }
 
+#if QSB_L1_LDS_LUT
+ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
+                               int32_t *ra,int32_t *rb,int32_t *rc,int32_t *rd,const uint64_t *lut=ZI_BY_LUT){
+#else
 ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
                                int32_t *ra,int32_t *rb,int32_t *rc,int32_t *rd){
+#endif
     int32_t u=1,v=0,q=0,r=1;
     #pragma unroll
     for(int k=0;k<5;k++){
         const int32_t dc=delta<-6?-6:(delta>6?6:delta);
         const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
+#if QSB_L1_LDS_LUT
+        const uint64_t packed=lut[((uint32_t)(dc+6)<<6)|ratio];
+#else
         const uint64_t packed=ZI_BY_LUT[((uint32_t)(dc+6)<<6)|ratio];
+#endif
         const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
         const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
         const int32_t c=zi_by_signed_byte<2>(e),d=zi_by_signed_byte<3>(e);
@@ -291,7 +307,11 @@ ZI_DEV void zi_canon(uint32_t *X){
 }
 /* All four lanes pass the same canonical root in R[0..3]; all return the canonical inverse
  * (0 for root 0: v starts at 0, one batch gives r=0, canon(0)=0 -- no gcd test needed since p is prime). */
+#if QSB_L1_LDS_LUT
+ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane,const uint64_t *lut=ZI_BY_LUT){
+#else
 ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
+#endif
     const uint32_t ZI_PL[9]=ZI_PL_INIT;
     uint32_t P[9],Q[9];
     const uint32_t odd=(uint32_t)(lane&1),rs=(uint32_t)((lane>>1)&1);
@@ -311,7 +331,11 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
         int32_t a=0,b=0,c=0,d=0;
         if(lane<2){
             const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
+#if QSB_L1_LDS_LUT
+            delta=zi_divstep30_by(delta,f0,g0,&a,&b,&c,&d,lut);
+#else
             delta=zi_divstep30_by(delta,f0,g0,&a,&b,&c,&d);
+#endif
         }
         int32_t ka=odd?d:a,kb=odd?c:b;
         ka=(int32_t)zi_x((uint32_t)ka,lane&1);
@@ -333,8 +357,13 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     return true;
 }
 // The independent fixed-exponent fallback uses the repaired field primitives.
+#if QSB_L1_LDS_LUT
+__device__ __forceinline__ void zi_inverse_quad(uint64_t *R,int lane,const uint64_t *lut=ZI_BY_LUT){
+    if(zi_inverse_quad_bounded(R,lane,lut))return;
+#else
 __device__ __forceinline__ void zi_inverse_quad(uint64_t *R,int lane){
     if(zi_inverse_quad_bounded(R,lane))return;
+#endif
     if(lane==0){
         QsbInverseWords out=qsb_root_fermat({R[0],R[1],R[2],R[3]});
         R[0]=out.a;R[1]=out.b;R[2]=out.c;R[3]=out.d;R[4]=0;
