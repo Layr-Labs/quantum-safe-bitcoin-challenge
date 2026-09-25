@@ -32,6 +32,12 @@ ZI_DEV uint32_t zi_clz32(uint32_t x){
     asm("{\n\t clz.b32 %0, %1;\n\t}" : "=r"(n) : "r"(x));
     return n;
 }
+#elif defined(__clang__) && defined(__CUDA__)
+/* clang's CUDA host pass type-checks __device__ bodies, so the host-side stubs
+ * must be callable from device code; nvcc never reaches this branch. */
+#define ZI_DEV __host__ __device__ static inline
+ZI_DEV uint32_t zi_ctz32(uint32_t x){return (uint32_t)__builtin_ctz(x);}
+ZI_DEV uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):32u;}
 #else
 #define ZI_DEV static inline
 static inline uint32_t zi_ctz32(uint32_t x){return (uint32_t)__builtin_ctz(x);}
@@ -241,6 +247,8 @@ ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
  * Collectives per batch: 2 coefficients + 1 sign + 1 zero flag + 9 partner limbs. */
 #ifdef __CUDA_ARCH__
 ZI_DEV uint32_t zi_x(uint32_t v,int src){return (uint32_t)__shfl_sync(0xFu,(unsigned int)v,src);}
+#elif defined(__clang__) && defined(__CUDA__)
+__host__ __device__ uint32_t zi_x(uint32_t v,int src);
 #else
 uint32_t zi_x(uint32_t v,int src);
 #endif
