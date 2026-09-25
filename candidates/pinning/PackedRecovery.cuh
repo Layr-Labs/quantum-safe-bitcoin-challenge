@@ -94,6 +94,9 @@ __device__ __forceinline__ uint32_t qsb_fin_prefix_bytes(uint32_t pu, uint32_t p
 #ifndef QSB_PARITY_WINDOW
 #define QSB_PARITY_WINDOW 1
 #endif
+#ifndef QSB_FIN_XLAZY
+#define QSB_FIN_XLAZY 1   /* 1: x_i = s + a via the lazy add (int2 lane) */
+#endif
 #if QSB_PARITY_WINDOW
 #include "ParityWindow.cuh"
 #endif
@@ -232,14 +235,22 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
+#if QSB_FIN_XLAZY
+    QSB_FIN_ADDL(x1,s,a);
+#else
     qsb_add_boundary(s,a); QSB_FIN_ADD(x1,s,a);
+#endif
     QSB_FIN_SUB(t,m,c); QSB_FIN_RAW_MUL(s,sum,t);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
 #endif
+#if QSB_FIN_XLAZY
+    QSB_FIN_ADDL(x2,s,a);
+#else
     qsb_add_boundary(s,a); QSB_FIN_ADD(x2,s,a);
+#endif
 #else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
