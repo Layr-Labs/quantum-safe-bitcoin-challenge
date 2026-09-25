@@ -1,0 +1,1166 @@
+/* cpu_cogrind.h -- host-CPU co-grinding for the subset short-epoch search.
+ *
+ * While the GPU grinds its QSB_SE_PER_EPOCH window triples of every epoch, idle host
+ * cores grind the OTHER C(13,3) - QSB_SE_PER_EPOCH window triples of the same epochs
+ * (the triples the GPU never touches), so the two candidate sets are disjoint by
+ * construction and every CPU hit is a new, distinct candidate. Each CPU-nominated
+ * hit is re-derived by the unchanged exact OpenSSL gate (qsb_hv_check) before it is
+ * appended to results/digest_hit_cpu.txt in the seed's `indices=... recid=` format.
+ *
+ * Per candidate the CPU hashes the 6 message blocks after the epoch midstate (the
+ * 1352-byte epoch prefix is compressed once per epoch and the first block once per
+ * distinct first-block content), SHA256s the digest, and recovers
+ *     Q = z * B +- A,   B = neg_r_inv * G,  A = u2 * R
+ * with a fixed-window table of B multiples (QSB_CG_W bits per window: 13 windows of 2^20
+ * affine points, 772 MiB, at the default W = 20; e5b67ed2 used 16 windows x 65535, 64 MiB; built
+ * at startup from B) and affine additions whose inversions are batched
+ * over the 1106 candidates (7 epochs) of a batch (Montgomery's trick). Both recids share the
+ * denominator of the last addition. The elliptic-curve stage runs 8 (AVX-512F) or 4
+ * (AVX2) candidates per vector in libsecp256k1's 10x26 field (cpu_cogrind_vec.h), the
+ * faster of the two as timed at startup, else libsecp256k1's scalar 5x52 field (both
+ * MIT, Pieter Wuille; notice in COPYING-secp256k1).
+ *
+ * Contention safety. The workers run SCHED_IDLE (fallback nice 19), so any runnable
+ * normal thread -- the GPU host loop -- preempts them. The worker count is
+ * min(affinity CPUs, cgroup CPU quota) minus a reserve, and a runtime check lowers it
+ * if the workers receive less CPU time than they ask for (hidden quota or foreign
+ * load). The GPU loop reports every drained batch to qcg::tick(); once a minute the
+ * controller pauses the workers for two 1 s windows and compares the GPU batch interval
+ * with and without them, and sheds a quarter of the workers if two consecutive checks
+ * show a GPU loss above 1.5% that exceeds what the CPU adds. QSB_COGRIND=0 at compile
+ * time removes all of it.
+ *
+ * Port to the GLV10 async host loop (212237f4): the loop's sp_drain() reports each drained slot
+ * to tick(), so the A/B interval is the GPU's own batch completion interval with 4 batches in
+ * flight. Stop order at SIGTERM: the loop drains every launched GPU batch, then stop_and_report()
+ * stops the workers (each checks the stop flag between epochs and between EC windows, so an
+ * in-flight batch is abandoned in well under a millisecond) and waits, bounded, until every
+ * worker thread has returned; only then is the GPU verify thread joined. Workers and builders
+ * run with SIGTERM/SIGINT/SIGHUP blocked, so the stop signal always lands on the launch thread's
+ * handler. Each CPU hit record is one complete line written with an EINTR-safe loop.
+ */
+#ifndef QSB_CPU_COGRIND_H
+#define QSB_CPU_COGRIND_H
+#include <pthread.h>
+#include <sched.h>
+#include <sys/resource.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <atomic>
+#include <x86intrin.h>
+
+namespace qcg {
+
+/* ---------------- field: libsecp256k1 5x52 (MIT) ---------------- */
+typedef unsigned __int128 u128;
+struct fe { uint64_t n[5]; };
+
+static inline void fe_mul_inner(uint64_t *r, const uint64_t *a, const uint64_t * __restrict__ b) {
+    u128 c, d;
+    uint64_t t3, t4, tx, u0;
+    uint64_t a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3], a4 = a[4];
+    const uint64_t M = 0xFFFFFFFFFFFFFULL, R = 0x1000003D10ULL;
+    d  = (u128)a0 * b[3] + (u128)a1 * b[2] + (u128)a2 * b[1] + (u128)a3 * b[0];
+    c  = (u128)a4 * b[4];
+    d += (c & M) * R; c >>= 52;
+    t3 = (uint64_t)d & M; d >>= 52;
+    d += (u128)a0 * b[4] + (u128)a1 * b[3] + (u128)a2 * b[2] + (u128)a3 * b[1] + (u128)a4 * b[0];
+    d += c * R;
+    t4 = (uint64_t)d & M; d >>= 52;
+    tx = (t4 >> 48); t4 &= (M >> 4);
+    c  = (u128)a0 * b[0];
+    d += (u128)a1 * b[4] + (u128)a2 * b[3] + (u128)a3 * b[2] + (u128)a4 * b[1];
+    u0 = (uint64_t)d & M; d >>= 52;
+    u0 = (u0 << 4) | tx;
+    c += (u128)u0 * (R >> 4);
+    r[0] = (uint64_t)c & M; c >>= 52;
+    c += (u128)a0 * b[1] + (u128)a1 * b[0];
+    d += (u128)a2 * b[4] + (u128)a3 * b[3] + (u128)a4 * b[2];
+    c += (d & M) * R; d >>= 52;
+    r[1] = (uint64_t)c & M; c >>= 52;
+    c += (u128)a0 * b[2] + (u128)a1 * b[1] + (u128)a2 * b[0];
+    d += (u128)a3 * b[4] + (u128)a4 * b[3];
+    c += (d & M) * R; d >>= 52;
+    r[2] = (uint64_t)c & M; c >>= 52;
+    c += d * R + t3;
+    r[3] = (uint64_t)c & M; c >>= 52;
+    c += t4;
+    r[4] = (uint64_t)c;
+}
+
+static inline void fe_sqr_inner(uint64_t *r, const uint64_t *a) {
+    u128 c, d;
+    uint64_t a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3], a4 = a[4];
+    int64_t t3, t4, tx, u0;
+    const uint64_t M = 0xFFFFFFFFFFFFFULL, R = 0x1000003D10ULL;
+    d  = (u128)(a0*2) * a3 + (u128)(a1*2) * a2;
+    c  = (u128)a4 * a4;
+    d += (c & M) * R; c >>= 52;
+    t3 = (uint64_t)d & M; d >>= 52;
+    a4 *= 2;
+    d += (u128)a0 * a4 + (u128)(a1*2) * a3 + (u128)a2 * a2;
+    d += c * R;
+    t4 = (uint64_t)d & M; d >>= 52;
+    tx = (t4 >> 48); t4 &= (M >> 4);
+    c  = (u128)a0 * a0;
+    d += (u128)a1 * a4 + (u128)(a2*2) * a3;
+    u0 = (uint64_t)d & M; d >>= 52;
+    u0 = (u0 << 4) | tx;
+    c += (u128)u0 * (R >> 4);
+    r[0] = (uint64_t)c & M; c >>= 52;
+    a0 *= 2;
+    c += (u128)a0 * a1;
+    d += (u128)a2 * a4 + (u128)a3 * a3;
+    c += (d & M) * R; d >>= 52;
+    r[1] = (uint64_t)c & M; c >>= 52;
+    c += (u128)a0 * a2 + (u128)a1 * a1;
+    d += (u128)a3 * a4;
+    c += (d & M) * R; d >>= 52;
+    r[2] = (uint64_t)c & M; c >>= 52;
+    c += d * R + t3;
+    r[3] = (uint64_t)c & M; c >>= 52;
+    c += t4;
+    r[4] = (uint64_t)c;
+}
+
+/* inputs: magnitude <= 8; output magnitude 1 */
+static inline void fe_mul(fe *r, const fe *a, const fe *b) {
+    if (r == b) { fe t = *b; fe_mul_inner(r->n, a->n, t.n); }
+    else fe_mul_inner(r->n, a->n, b->n);
+}
+static inline void fe_sqr(fe *r, const fe *a) { fe_sqr_inner(r->n, a->n); }
+static inline void fe_add(fe *r, const fe *a) { for (int i = 0; i < 5; i++) r->n[i] += a->n[i]; }
+/* r = -a, a of magnitude <= m; result magnitude m+1 */
+static inline void fe_neg(fe *r, const fe *a, int m) {
+    r->n[0] = 0xFFFFEFFFFFC2FULL * 2 * (m + 1) - a->n[0];
+    r->n[1] = 0xFFFFFFFFFFFFFULL * 2 * (m + 1) - a->n[1];
+    r->n[2] = 0xFFFFFFFFFFFFFULL * 2 * (m + 1) - a->n[2];
+    r->n[3] = 0xFFFFFFFFFFFFFULL * 2 * (m + 1) - a->n[3];
+    r->n[4] = 0x0FFFFFFFFFFFFULL * 2 * (m + 1) - a->n[4];
+}
+static inline void fe_normalize_weak(fe *r) {
+    uint64_t t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4];
+    uint64_t x = t4 >> 48; t4 &= 0x0FFFFFFFFFFFFULL;
+    t0 += x * 0x1000003D1ULL;
+    t1 += (t0 >> 52); t0 &= 0xFFFFFFFFFFFFFULL;
+    t2 += (t1 >> 52); t1 &= 0xFFFFFFFFFFFFFULL;
+    t3 += (t2 >> 52); t2 &= 0xFFFFFFFFFFFFFULL;
+    t4 += (t3 >> 52); t3 &= 0xFFFFFFFFFFFFFULL;
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+}
+static inline void fe_normalize(fe *r) {
+    uint64_t t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4];
+    uint64_t m;
+    uint64_t x = t4 >> 48; t4 &= 0x0FFFFFFFFFFFFULL;
+    t0 += x * 0x1000003D1ULL;
+    t1 += (t0 >> 52); t0 &= 0xFFFFFFFFFFFFFULL;
+    t2 += (t1 >> 52); t1 &= 0xFFFFFFFFFFFFFULL; m = t1;
+    t3 += (t2 >> 52); t2 &= 0xFFFFFFFFFFFFFULL; m &= t2;
+    t4 += (t3 >> 52); t3 &= 0xFFFFFFFFFFFFFULL; m &= t3;
+    x = (t4 >> 48) | ((t4 == 0x0FFFFFFFFFFFFULL) & (m == 0xFFFFFFFFFFFFFULL) & (t0 >= 0xFFFFEFFFFFC2FULL));
+    t0 += x * 0x1000003D1ULL;
+    t1 += (t0 >> 52); t0 &= 0xFFFFFFFFFFFFFULL;
+    t2 += (t1 >> 52); t1 &= 0xFFFFFFFFFFFFFULL;
+    t3 += (t2 >> 52); t2 &= 0xFFFFFFFFFFFFFULL;
+    t4 += (t3 >> 52); t3 &= 0xFFFFFFFFFFFFFULL;
+    t4 &= 0x0FFFFFFFFFFFFULL;
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+}
+static inline int fe_is_zero_norm(const fe *a) { return (a->n[0] | a->n[1] | a->n[2] | a->n[3] | a->n[4]) == 0; }
+/* 4x64 little-endian words -> 5x52 */
+static inline void fe_from_w(fe *r, const uint64_t *w) {
+    const uint64_t M = 0xFFFFFFFFFFFFFULL;
+    r->n[0] = w[0] & M;
+    r->n[1] = ((w[0] >> 52) | (w[1] << 12)) & M;
+    r->n[2] = ((w[1] >> 40) | (w[2] << 24)) & M;
+    r->n[3] = ((w[2] >> 28) | (w[3] << 36)) & M;
+    r->n[4] = w[3] >> 16;
+}
+/* normalized 5x52 -> 4x64 little-endian words */
+static inline void fe_to_w(uint64_t *w, const fe *a) {
+    w[0] = a->n[0] | (a->n[1] << 52);
+    w[1] = (a->n[1] >> 12) | (a->n[2] << 40);
+    w[2] = (a->n[2] >> 24) | (a->n[3] << 28);
+    w[3] = (a->n[3] >> 36) | (a->n[4] << 16);
+}
+/* a^(p-2): libsecp256k1's addition chain */
+static void fe_inv(fe *r, const fe *a) {
+    fe x2, x3, x6, x9, x11, x22, x44, x88, x176, x220, x223, t1;
+    int j;
+    fe_sqr(&x2, a); fe_mul(&x2, &x2, a);
+    fe_sqr(&x3, &x2); fe_mul(&x3, &x3, a);
+    x6 = x3; for (j = 0; j < 3; j++) fe_sqr(&x6, &x6); fe_mul(&x6, &x6, &x3);
+    x9 = x6; for (j = 0; j < 3; j++) fe_sqr(&x9, &x9); fe_mul(&x9, &x9, &x3);
+    x11 = x9; for (j = 0; j < 2; j++) fe_sqr(&x11, &x11); fe_mul(&x11, &x11, &x2);
+    x22 = x11; for (j = 0; j < 11; j++) fe_sqr(&x22, &x22); fe_mul(&x22, &x22, &x11);
+    x44 = x22; for (j = 0; j < 22; j++) fe_sqr(&x44, &x44); fe_mul(&x44, &x44, &x22);
+    x88 = x44; for (j = 0; j < 44; j++) fe_sqr(&x88, &x88); fe_mul(&x88, &x88, &x44);
+    x176 = x88; for (j = 0; j < 88; j++) fe_sqr(&x176, &x176); fe_mul(&x176, &x176, &x88);
+    x220 = x176; for (j = 0; j < 44; j++) fe_sqr(&x220, &x220); fe_mul(&x220, &x220, &x44);
+    x223 = x220; for (j = 0; j < 3; j++) fe_sqr(&x223, &x223); fe_mul(&x223, &x223, &x3);
+    t1 = x223; for (j = 0; j < 23; j++) fe_sqr(&t1, &t1); fe_mul(&t1, &t1, &x22);
+    for (j = 0; j < 5; j++) fe_sqr(&t1, &t1); fe_mul(&t1, &t1, a);
+    for (j = 0; j < 3; j++) fe_sqr(&t1, &t1); fe_mul(&t1, &t1, &x2);
+    for (j = 0; j < 2; j++) fe_sqr(&t1, &t1); fe_mul(r, a, &t1);
+}
+
+/* ---------------- configuration ---------------- */
+#ifndef QSB_CG_W
+#define QSB_CG_W 20                       /* fixed-window width (bits); e5b67ed2 used 16 */
+#endif
+/* W = 20: 13 windows (12 affine additions + the final P +- A) instead of 16 (15 + final) at
+ * W = 16, i.e. ~18% less elliptic-curve work per candidate, for a 772 MiB table instead of 64 MiB
+ * (12 full windows of 2^20 x 64 B + a 2^16-entry top window). The table does not fit in L3 at
+ * either size, so each candidate costs one DRAM line per window either way (prefetched a whole
+ * window pass ahead); fewer windows means fewer lines, not more. */
+#define QSB_CG_NWIN ((256 + QSB_CG_W - 1) / QSB_CG_W)
+#define QSB_CG_TSIZE (1u << QSB_CG_W)     /* entries per window, index 0 unused */
+#ifndef QSB_CG_BATCH_MIN
+#define QSB_CG_BATCH_MIN 1024             /* candidates per inversion batch (lower bound) */
+#endif
+#ifndef QSB_CG_MAXB
+#define QSB_CG_MAXB 2048
+#endif
+#define QSB_CG_MAXW 256                   /* max worker threads */
+#ifndef QSB_CG_MIN_WORKERS
+#define QSB_CG_MIN_WORKERS 4              /* fewer allowed workers than this: run none */
+#endif
+
+struct tentry { uint64_t x[4], y[4]; };   /* 64 B, one cache line */
+
+/* affine P = P + Q for distinct x; used only at table build */
+static void aff_add1(fe *x1, fe *y1, const fe *x2, const fe *y2) {
+    fe dx, dy, t, l, l2, x3, y3;
+    fe_neg(&t, x1, 1); dx = *x2; fe_add(&dx, &t);
+    fe_neg(&t, y1, 1); dy = *y2; fe_add(&dy, &t);
+    fe_normalize(&dx); fe_inv(&t, &dx); fe_mul(&l, &dy, &t);
+    fe_sqr(&l2, &l);
+    fe_neg(&t, x1, 1); x3 = l2; fe_add(&x3, &t); fe_neg(&t, x2, 1); fe_add(&x3, &t);
+    fe_normalize_weak(&x3);
+    fe_neg(&t, &x3, 1); fe t2 = *x1; fe_add(&t2, &t); fe_mul(&y3, &l, &t2);
+    fe_neg(&t, y1, 1); fe_add(&y3, &t); fe_normalize_weak(&y3);
+    *x1 = x3; *y1 = y3;
+}
+/* affine doubling */
+static void aff_dbl1(fe *x1, fe *y1) {
+    fe t, l, x2, y2, num, den;
+    fe_sqr(&num, x1); t = num; fe_add(&num, &t); fe_add(&num, &t);        /* 3x^2 (mag 3) */
+    den = *y1; fe_add(&den, y1); fe_normalize(&den); fe_inv(&t, &den);  /* 1/(2y) */
+    fe_mul(&l, &num, &t);
+    fe_sqr(&x2, &l); fe_neg(&t, x1, 1); fe_add(&x2, &t); fe_add(&x2, &t); fe_normalize_weak(&x2);
+    fe_neg(&t, &x2, 1); fe t2 = *x1; fe_add(&t2, &t); fe_mul(&y2, &l, &t2);
+    fe_neg(&t, y1, 1); fe_add(&y2, &t); fe_normalize_weak(&y2);
+    *x1 = x2; *y1 = y2;
+}
+static void tentry_set(tentry *e, fe x, fe y) { fe_normalize(&x); fe_normalize(&y); fe_to_w(e->x, &x); fe_to_w(e->y, &y); }
+
+/* Window j of the table: e[d] = d * Bj, d = 1..2^W-1, Bj = 2^(W j) * B.
+ * Row 0 (d = 1..256) sequentially, then row r = row r-1 + 256*Bj with one batched
+ * inversion per row. The single doubling in that chain (d = 512 = 256 + 256) is done
+ * separately. */
+static inline unsigned window_entries(int j) {   /* digits of window j are < this */
+    const int bits = 256 - QSB_CG_W * j < QSB_CG_W ? 256 - QSB_CG_W * j : QSB_CG_W;
+    return 1u << bits;
+}
+static void build_window(tentry *e, const fe *bx, const fe *by, unsigned lim) {
+    fe rx[256], ry[256], c[256], inv, t, mx, my;
+    fe px = *bx, py = *by;
+    rx[0] = px; ry[0] = py;
+    for (int k = 1; k < 256; k++) {
+        if (k == 1) aff_dbl1(&px, &py); else aff_add1(&px, &py, bx, by);
+        rx[k] = px; ry[k] = py;
+    }
+    for (int k = 0; k < 256; k++) if (k + 1 < (int)QSB_CG_TSIZE) tentry_set(&e[k + 1], rx[k], ry[k]);   /* d = 1..256 */
+    mx = rx[255]; my = ry[255];                                            /* 256 * Bj */
+    const unsigned rows = lim / 256;              /* the top window only needs 2^(256 - W j) entries */
+    for (unsigned r = 1; r < rows; r++) {
+        /* new d = 256 r + k + 1 for k = 0..255; skip d >= 2^W */
+        int n = 256;
+        fe dx[256];
+        for (int k = 0; k < n; k++) {
+            if (r == 1 && k == 255) { dx[k].n[0] = 1; dx[k].n[1] = dx[k].n[2] = dx[k].n[3] = dx[k].n[4] = 0; continue; }
+            fe_neg(&t, &rx[k], 1); dx[k] = mx; fe_add(&dx[k], &t);
+        }
+        c[0] = dx[0];
+        for (int k = 1; k < n; k++) fe_mul(&c[k], &c[k - 1], &dx[k]);
+        fe_normalize(&c[n - 1]); fe_inv(&inv, &c[n - 1]);
+        for (int k = n - 1; k >= 0; k--) {
+            fe ik;
+            if (k > 0) { fe_mul(&ik, &inv, &c[k - 1]); fe_mul(&inv, &inv, &dx[k]); } else ik = inv;
+            if (r == 1 && k == 255) { fe x = mx, y = my; aff_dbl1(&x, &y); rx[k] = x; ry[k] = y; continue; }
+            fe dy, l, l2, x3, y3;
+            fe_neg(&t, &ry[k], 1); dy = my; fe_add(&dy, &t);
+            fe_mul(&l, &dy, &ik); fe_sqr(&l2, &l);
+            fe_neg(&t, &rx[k], 1); x3 = l2; fe_add(&x3, &t); fe_neg(&t, &mx, 1); fe_add(&x3, &t); fe_normalize_weak(&x3);
+            fe_neg(&t, &x3, 1); fe t2 = rx[k]; fe_add(&t2, &t); fe_mul(&y3, &l, &t2);
+            fe_neg(&t, &ry[k], 1); fe_add(&y3, &t); fe_normalize_weak(&y3);
+            rx[k] = x3; ry[k] = y3;
+        }
+        for (int k = 0; k < n; k++) {
+            unsigned d = 256 * r + (unsigned)k + 1;
+            if (d < QSB_CG_TSIZE) tentry_set(&e[d], rx[k], ry[k]);
+        }
+    }
+}
+
+/* ---------------- shared state ---------------- */
+struct shared_t {
+    const digest_params_t *dp;
+    int window_start, s_early, ntrip;
+    uint8_t trip[286][3];                 /* CPU window triples (absolute push indices) */
+    uint8_t winbytes[286][100];           /* the 10 kept window pushes of each triple */
+    int first_group[286];                 /* index of first-block class */
+    int first_rep[286];                   /* a triple of each class (its window bytes define the class) */
+    int nfirst;
+    uint64_t n_epochs;
+    tentry *table;                        /* QSB_CG_NWIN * QSB_CG_TSIZE */
+    fe ax, ay;                            /* A = u2 R (recid 0) */
+    int hit_fd;
+    std::atomic<uint64_t> next_epoch;
+    std::atomic<uint64_t> cand_done;
+    std::atomic<uint64_t> hits;
+    std::atomic<uint64_t> tentative;
+    std::atomic<int> allowed;             /* workers with id < allowed may run */
+    std::atomic<int> stop;
+    std::atomic<int> running;             /* workers currently inside a batch */
+    std::atomic<int> ready;               /* table built */
+    std::atomic<int> failed;
+    std::atomic<int> live;                /* worker threads that have not returned yet */
+    double t_enabled;                     /* when the workers were first allowed to run */
+    int nworkers;
+    int simd_ok;                          /* bit 4: AVX2 usable, bit 8: AVX-512F usable */
+    int simd_env;                         /* QSB_COGRIND_SIMD override (0/4/8), else -1 */
+    std::atomic<int> simd;                /* path in use: 8, 4 or 0 (scalar) */
+    std::atomic<int> picked;              /* worker 0 has timed the paths */
+    std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];   /* per-worker thread CPU time */
+    std::atomic<uint64_t> sha_cyc, ec_cyc;
+};
+static shared_t *g_cg = NULL;
+static int g_ctl_verbose = 0;
+
+static inline uint64_t thread_cpu_ns() {
+    struct timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+static inline double mono_s() {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+static inline void be_store32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
+
+static inline int lz_ok(const uint32_t *h) {
+    for (int i = 0; i < QSB_ZEROS_N / 32; i++) if (h[i]) return 0;
+#if (QSB_ZEROS_N % 32) != 0
+    if (h[QSB_ZEROS_N / 32] >> (32 - (QSB_ZEROS_N % 32))) return 0;
+#endif
+    return 1;
+}
+
+struct worker_t {
+    int id;
+    int pausable;                               /* 0 while worker 0 times the EC paths */
+    /* batch state */
+    int n;
+    uint64_t epoch[QSB_CG_MAXB];
+    uint8_t early[QSB_CG_MAXB / 16 + 64][8];   /* per epoch slot in batch */
+    int eslot[QSB_CG_MAXB];
+    int tidx[QSB_CG_MAXB];
+    uint64_t z[QSB_CG_MAXB][4];                 /* little-endian 64-bit words */
+    fe x[QSB_CG_MAXB], y[QSB_CG_MAXB], c[QSB_CG_MAXB], dx[QSB_CG_MAXB];
+    uint8_t inf[QSB_CG_MAXB];
+    const tentry *te[QSB_CG_MAXB];
+    int lst[QSB_CG_MAXB];
+    uint8_t msg[448], msg2[448];                /* two messages for the paired SHA-NI path */
+    qsb_hv_t hv;
+};
+
+static const uint32_t SHA_IV[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
+
+static inline void sha_blocks(uint32_t st[8], const uint8_t *p, size_t nblk) {
+    SHA256_CTX c; memcpy(c.h, st, 32);
+    for (size_t i = 0; i < nblk; i++) SHA256_Transform(&c, p + 64 * i);
+    memcpy(st, c.h, 32);
+}
+} /* namespace qcg */
+#include "cpu_cogrind_sha.h"   /* qcg_sha2x: two messages interleaved on SHA-NI */
+namespace qcg {
+/* compressed-pubkey block (33 bytes + padding) of affine x (4x64 LE words) and y parity */
+static inline void pubkey_block(uint8_t blk[64], const uint64_t xw[4], unsigned yodd) {
+    blk[0] = (uint8_t)(0x02 | (yodd & 1));
+    for (int k = 0; k < 4; k++) { const uint64_t v = xw[3 - k]; for (int bb = 0; bb < 8; bb++) blk[1 + 8 * k + bb] = (uint8_t)(v >> (56 - 8 * bb)); }
+    blk[33] = 0x80; memset(blk + 34, 0, 30); blk[62] = 0x01; blk[63] = 0x08;   /* 264 bits */
+}
+
+/* digit j (bits W j .. W j + W - 1) of the 256-bit little-endian word array */
+static inline unsigned digit(const uint64_t *z, int j) {
+    const unsigned b = (unsigned)(QSB_CG_W * j);
+    const unsigned w = b >> 6, s = b & 63;
+    uint64_t v = z[w] >> s;
+    if (s + QSB_CG_W > 64 && w < 3) v |= z[w + 1] << (64 - s);
+    return (unsigned)(v & (QSB_CG_TSIZE - 1));
+}
+
+/* Pause/stop point, called between epochs (SHA stage) and between EC windows: a worker the
+ * controller has switched off stops within ~0.1 ms of CPU time and keeps its batch state (the
+ * original checked only between whole batches, ~1-2.5 s of CPU each, so an A/B "off" window of
+ * 1 s never switched the workers off and a shed took seconds). Returns 1 at stop: abandon the batch. */
+static inline int pause_point(worker_t *w) {
+    shared_t *S = g_cg;
+    if (w->pausable)
+        while (w->id >= S->allowed.load(std::memory_order_relaxed)) {
+            if (S->stop.load(std::memory_order_relaxed)) return 1;
+            usleep(1000);
+        }
+    return S->stop.load(std::memory_order_relaxed);
+}
+
+/* A tentative CPU hit: rebuild the candidate from (epoch, triple), re-derive it with the exact
+ * OpenSSL gate, append it to the CPU hit file only if it passes. */
+static void publish(worker_t *w, int i, int recid) {
+    shared_t *S = g_cg;
+    S->tentative.fetch_add(1, std::memory_order_relaxed);
+    uint8_t skip[9];
+    memcpy(skip, w->early[w->eslot[i]], 6);
+    memcpy(skip + 6, S->trip[w->tidx[i]], 3);
+    if (qsb_hv_check(&w->hv, skip, recid)) {
+        char line[96];
+        int wl = snprintf(line, sizeof line, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
+                          skip[0], skip[1], skip[2], skip[3], skip[4], skip[5], skip[6], skip[7], skip[8], recid);
+        const char *wp = line; int left = wl, ok = wl > 0;
+        while (ok && left > 0) {
+            const ssize_t k = write(S->hit_fd, wp, (size_t)left);
+            if (k < 0) { if (errno == EINTR) continue; ok = 0; break; }
+            wp += k; left -= (int)k;
+        }
+        if (ok) S->hits.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+/* Montgomery batch inversion over QSB_CG_G interleaved chains (element i is in chain i % G),
+ * so the prefix-product and back-substitution multiplies of neighbouring elements are
+ * independent and overlap in the pipeline (a 5x52 multiply's latency is ~3.5x its issue
+ * cost). acc[g]: product of chain g's active denominators; on return inv[g] = 1/acc[g]. */
+#ifndef QSB_CG_G
+#define QSB_CG_G 4
+#endif
+static inline void fe_one(fe *r) { r->n[0] = 1; r->n[1] = r->n[2] = r->n[3] = r->n[4] = 0; }
+static void chain_invert(fe inv[QSB_CG_G], const fe acc[QSB_CG_G]) {
+    fe pre[QSB_CG_G], tot, it;
+    pre[0] = acc[0];
+    for (int g = 1; g < QSB_CG_G; g++) fe_mul(&pre[g], &pre[g - 1], &acc[g]);
+    tot = pre[QSB_CG_G - 1]; fe_normalize(&tot);
+    fe_inv(&it, &tot);
+    for (int g = QSB_CG_G - 1; g > 0; g--) { fe_mul(&inv[g], &it, &pre[g - 1]); fe_mul(&it, &it, &acc[g]); }
+    inv[0] = it;
+}
+
+/* Batch EC: P_i = z_i * B, then Q_i = P_i +- A, then pubkey hash gate. Hits -> exact gate -> file.
+ * The active elements of each step are compacted into a list; list position k belongs to chain
+ * k % G, and the back-substitution runs G consecutive positions (G distinct chains) in lockstep so
+ * their serial multiply chains interleave. */
+static void ec_batch(worker_t *w) {
+    shared_t *S = g_cg;
+    const int n = w->n;
+    const int G = QSB_CG_G;
+    const tentry *T = S->table;
+    fe t, acc[QSB_CG_G], inv[QSB_CG_G];
+    int *L = w->lst;
+    for (int i = 0; i < n; i++) {
+        unsigned d = digit(w->z[i], 0);
+        if (d) { fe_from_w(&w->x[i], T[d].x); fe_from_w(&w->y[i], T[d].y); w->inf[i] = 0; }
+        else w->inf[i] = 1;
+        __builtin_prefetch(&T[(size_t)QSB_CG_TSIZE + digit(w->z[i], 1)]);
+    }
+    for (int j = 1; j < QSB_CG_NWIN; j++) {
+        if (pause_point(w)) return;                                 /* abandon the batch at stop */
+        const tentry *Tj = T + (size_t)j * QSB_CG_TSIZE;
+        for (int g = 0; g < G; g++) fe_one(&acc[g]);
+        /* pass 1: denominators + per-chain prefix products over the active list */
+        int m = 0;
+        for (int i = 0; i < n; i++) {
+            unsigned d = digit(w->z[i], j);
+            if (j + 1 < QSB_CG_NWIN) __builtin_prefetch(&T[(size_t)(j + 1) * QSB_CG_TSIZE + digit(w->z[i], j + 1)]);
+            if (!d) continue;
+            const tentry *e = &Tj[d];
+            if (w->inf[i]) { fe_from_w(&w->x[i], e->x); fe_from_w(&w->y[i], e->y); w->inf[i] = 0; continue; }
+            const int g = m % G;
+            L[m] = i; w->te[m] = e;
+            fe ex; fe_from_w(&ex, e->x);
+            fe_neg(&t, &w->x[i], 1); w->dx[m] = ex; fe_add(&w->dx[m], &t);      /* mag 3 */
+            fe_mul(&acc[g], &acc[g], &w->dx[m]);
+            w->c[m] = acc[g];
+            m++;
+        }
+        chain_invert(inv, acc);
+        /* pass 2: backwards in blocks of G positions (distinct chains) */
+        for (int k0 = m - 1; k0 >= 0; k0 -= G) {
+            const int nb = k0 + 1 < G ? k0 + 1 : G;
+            fe ik[QSB_CG_G], l[QSB_CG_G], l2[QSB_CG_G], x3[QSB_CG_G], y3[QSB_CG_G], dy[QSB_CG_G], t2[QSB_CG_G];
+            for (int u = 0; u < nb; u++) {
+                const int k = k0 - u, g = k % G;
+                if (k >= G) fe_mul(&ik[u], &inv[g], &w->c[k - G]); else ik[u] = inv[g];
+            }
+            for (int u = 0; u < nb; u++) { const int k = k0 - u, g = k % G; fe_mul(&inv[g], &inv[g], &w->dx[k]); }
+            for (int u = 0; u < nb; u++) {
+                const int i = L[k0 - u]; fe ey; fe_from_w(&ey, w->te[k0 - u]->y);
+                fe_neg(&t, &w->y[i], 1); dy[u] = ey; fe_add(&dy[u], &t);
+            }
+            for (int u = 0; u < nb; u++) fe_mul(&l[u], &dy[u], &ik[u]);
+            for (int u = 0; u < nb; u++) fe_sqr(&l2[u], &l[u]);
+            for (int u = 0; u < nb; u++) {
+                const int i = L[k0 - u]; fe ex; fe_from_w(&ex, w->te[k0 - u]->x);
+                fe_neg(&t, &w->x[i], 1); x3[u] = l2[u]; fe_add(&x3[u], &t); fe_neg(&t, &ex, 1); fe_add(&x3[u], &t); fe_normalize_weak(&x3[u]);
+                fe_neg(&t, &x3[u], 1); t2[u] = w->x[i]; fe_add(&t2[u], &t);
+            }
+            for (int u = 0; u < nb; u++) fe_mul(&y3[u], &l[u], &t2[u]);
+            for (int u = 0; u < nb; u++) {
+                const int i = L[k0 - u];
+                fe_neg(&t, &w->y[i], 1); fe_add(&y3[u], &t); fe_normalize_weak(&y3[u]);
+                w->x[i] = x3[u]; w->y[i] = y3[u];
+            }
+        }
+    }
+    /* final: Q0 = P + A, Q1 = P - A; shared denominator ax - px */
+    if (pause_point(w)) return;
+    {
+        for (int g = 0; g < G; g++) fe_one(&acc[g]);
+        int m = 0;
+        for (int i = 0; i < n; i++) {
+            if (w->inf[i]) continue;
+            const int g = m % G;
+            L[m] = i;
+            fe_neg(&t, &w->x[i], 1); w->dx[m] = S->ax; fe_add(&w->dx[m], &t);
+            fe_mul(&acc[g], &acc[g], &w->dx[m]);
+            w->c[m] = acc[g];
+            m++;
+        }
+        chain_invert(inv, acc);
+        fe ikv[QSB_CG_MAXB];
+        for (int k0 = m - 1; k0 >= 0; k0 -= G) {
+            const int nb = k0 + 1 < G ? k0 + 1 : G;
+            for (int u = 0; u < nb; u++) {
+                const int k = k0 - u, g = k % G;
+                if (k >= G) fe_mul(&ikv[k], &inv[g], &w->c[k - G]); else ikv[k] = inv[g];
+            }
+            for (int u = 0; u < nb; u++) { const int k = k0 - u, g = k % G; fe_mul(&inv[g], &inv[g], &w->dx[k]); }
+        }
+        /* both recids of G candidates in lockstep */
+        for (int k0 = 0; k0 < m; k0 += G) {
+            const int nb = m - k0 < G ? m - k0 : G;
+            fe l[2 * QSB_CG_G], l2[2 * QSB_CG_G], qx[2 * QSB_CG_G], qy[2 * QSB_CG_G], t2[2 * QSB_CG_G], dy[2 * QSB_CG_G], ny[QSB_CG_G], sx[QSB_CG_G];
+            for (int u = 0; u < nb; u++) {
+                const int i = L[k0 + u];
+                fe na; fe_neg(&ny[u], &w->y[i], 1);
+                fe_neg(&sx[u], &w->x[i], 1); fe_neg(&na, &S->ax, 1); fe_add(&sx[u], &na);      /* -(px + ax), mag 4 */
+                dy[2 * u] = S->ay; fe_add(&dy[2 * u], &ny[u]);                                 /* ay - py */
+                fe_neg(&dy[2 * u + 1], &S->ay, 1); fe_add(&dy[2 * u + 1], &ny[u]);             /* -ay - py */
+            }
+            for (int v = 0; v < 2 * nb; v++) fe_mul(&l[v], &dy[v], &ikv[k0 + v / 2]);
+            for (int v = 0; v < 2 * nb; v++) fe_sqr(&l2[v], &l[v]);
+            for (int v = 0; v < 2 * nb; v++) {
+                const int i = L[k0 + v / 2];
+                qx[v] = l2[v]; fe_add(&qx[v], &sx[v / 2]); fe_normalize(&qx[v]);
+                fe_neg(&t, &qx[v], 1); t2[v] = w->x[i]; fe_add(&t2[v], &t);
+            }
+            for (int v = 0; v < 2 * nb; v++) fe_mul(&qy[v], &l[v], &t2[v]);
+            for (int v = 0; v < 2 * nb; v += 2) {          /* recid 0 and 1 of one candidate, paired */
+                const int i = L[k0 + v / 2];
+                uint8_t blk[2][64]; uint32_t h[2][8];
+                for (int r = 0; r < 2; r++) {
+                    fe_add(&qy[v + r], &ny[v / 2]); fe_normalize(&qy[v + r]);
+                    uint64_t xw[4]; fe_to_w(xw, &qx[v + r]);
+                    pubkey_block(blk[r], xw, (unsigned)(qy[v + r].n[0] & 1));
+                    memcpy(h[r], SHA_IV, 32);
+                }
+                qcg_sha2x(h[0], blk[0], h[1], blk[1], 1);
+                for (int r = 0; r < 2; r++) if (lz_ok(h[r])) publish(w, i, r);
+            }
+        }
+    }
+}
+
+/* SIMD elliptic-curve stage: 4 lanes (AVX2) and 8 lanes (AVX-512F), chosen at runtime. */
+#if defined(__x86_64__) && !defined(QSB_CG_NO_SIMD)
+#include <immintrin.h>
+#define QCG_NS v4
+#define QCG_VW 4
+#define QCG_TARGET "avx2"
+#include "cpu_cogrind_vec.h"
+#undef QCG_NS
+#undef QCG_VW
+#undef QCG_TARGET
+#define QCG_NS v8
+#define QCG_VW 8
+#define QCG_TARGET "avx512f"
+#include "cpu_cogrind_vec.h"
+#undef QCG_NS
+#undef QCG_VW
+#undef QCG_TARGET
+#define QSB_CG_HAVE_SIMD 1
+#else
+#define QSB_CG_HAVE_SIMD 0
+#endif
+
+/* Fill the batch with whole epochs: SHA256d for each (epoch, CPU triple). */
+static int fill_batch(worker_t *w, uint8_t *scratch) {
+    shared_t *S = g_cg;
+    const digest_params_t *dp = S->dp;
+    const int per = S->ntrip;
+    int ne = (QSB_CG_BATCH_MIN + per - 1) / per;
+    if (ne * per > QSB_CG_MAXB) ne = QSB_CG_MAXB / per;
+    uint64_t e0 = S->next_epoch.fetch_add((uint64_t)ne, std::memory_order_relaxed);
+    if (e0 >= S->n_epochs) return 0;
+    if (e0 + (uint64_t)ne > S->n_epochs) ne = (int)(S->n_epochs - e0);
+    const uint64_t bits = (uint64_t)dp->total_preimage_len * 8;
+    int n = 0;
+    for (int k = 0; k < ne; k++) {
+        if (pause_point(w)) { w->n = 0; return 0; }                /* abandon at stop */
+        const uint64_t e = e0 + (uint64_t)k;
+        uint8_t early[MAX_T];
+        qsb_host_unrank(e, S->window_start, S->s_early, early);
+        memcpy(w->early[k], early, 6);
+        uint32_t mid[8]; uint8_t rem[64]; int rem_len = 0;
+        build_epoch_prefix(dp, S->window_start, S->s_early, early, scratch, mid, rem, &rem_len);
+        /* message after the midstate: rem || 100 window bytes || tail || suffix || padding */
+        uint8_t *m = w->msg;
+        size_t len = (size_t)rem_len;
+        memcpy(m, rem, (size_t)rem_len);
+        const size_t woff = len; len += 100;
+        memcpy(m + len, dp->tail_section, dp->tail_section_len); len += dp->tail_section_len;
+        memcpy(m + len, dp->tx_suffix, dp->tx_suffix_len); len += dp->tx_suffix_len;
+        m[len++] = 0x80;
+        while (len % 64 != 56) m[len++] = 0;
+        for (int b = 0; b < 8; b++) m[len++] = (uint8_t)(bits >> (56 - 8 * b));
+        const size_t nblk = len / 64;
+        /* the first block depends on rem and window bytes [0, 64-rem_len): once per class, two
+         * classes per paired compression */
+        uint8_t *m2 = w->msg2;
+        memcpy(m2, m, len);
+        uint32_t first_mid[286][8];
+        for (int g = 0; g < S->nfirst; g += 2) {
+            const int g1 = g + 1 < S->nfirst ? g + 1 : g;
+            memcpy(m + woff, S->winbytes[S->first_rep[g]], 100);
+            memcpy(m2 + woff, S->winbytes[S->first_rep[g1]], 100);
+            memcpy(first_mid[g], mid, 32);
+            uint32_t t1[8]; memcpy(t1, mid, 32);
+            qcg_sha2x(first_mid[g], m, t1, m2, 1);
+            if (g1 != g) memcpy(first_mid[g1], t1, 32);
+        }
+        /* candidates in pairs of triples: blocks 2..nblk of both messages, then SHA256 of both digests */
+        for (int ti = 0; ti < per; ti += 2) {
+            const int t1i = ti + 1 < per ? ti + 1 : ti;
+            memcpy(m + woff, S->winbytes[ti], 100);
+            memcpy(m2 + woff, S->winbytes[t1i], 100);
+            uint32_t st[2][8];
+            memcpy(st[0], first_mid[S->first_group[ti]], 32);
+            memcpy(st[1], first_mid[S->first_group[t1i]], 32);
+            qcg_sha2x(st[0], m + 64, st[1], m2 + 64, nblk - 1);
+            uint8_t d1[2][64];
+            for (int u = 0; u < 2; u++) {
+                for (int b = 0; b < 8; b++) be_store32(d1[u] + 4 * b, st[u][b]);
+                d1[u][32] = 0x80; memset(d1[u] + 33, 0, 29); d1[u][62] = 0x01; d1[u][63] = 0x00;   /* 256 bits */
+            }
+            uint32_t h2[2][8]; memcpy(h2[0], SHA_IV, 32); memcpy(h2[1], SHA_IV, 32);
+            qcg_sha2x(h2[0], d1[0], h2[1], d1[1], 1);
+            for (int u = 0; u < (t1i != ti ? 2 : 1); u++) {
+                /* z big-endian = h2[0] .. h2[7]; little-endian 64-bit words */
+                w->z[n][0] = ((uint64_t)h2[u][6] << 32) | h2[u][7];
+                w->z[n][1] = ((uint64_t)h2[u][4] << 32) | h2[u][5];
+                w->z[n][2] = ((uint64_t)h2[u][2] << 32) | h2[u][3];
+                w->z[n][3] = ((uint64_t)h2[u][0] << 32) | h2[u][1];
+                w->eslot[n] = k; w->tidx[n] = ti + u; w->epoch[n] = e;
+                n++;
+            }
+        }
+    }
+    w->n = n;
+    return n;
+}
+
+static void set_idle_priority() {
+    struct sched_param sp; memset(&sp, 0, sizeof sp);
+    if (pthread_setschedparam(pthread_self(), SCHED_IDLE, &sp) != 0)
+        setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 19);
+}
+
+static void *worker_body(shared_t *S, int id);
+static void *worker_main(void *arg) {
+    shared_t *S = g_cg;
+    void *r = worker_body(S, (int)(intptr_t)arg);
+    S->live.fetch_sub(1);
+    return r;
+}
+static void *worker_body(shared_t *S, int id) {
+    set_idle_priority();
+    worker_t *w = (worker_t *)aligned_alloc(64, (sizeof(worker_t) + 63) & ~(size_t)63);
+    uint8_t *scratch = (uint8_t *)malloc(S->dp->prefix_remainder_len + (size_t)S->window_start * SIG_PUSH_SIZE + 64);
+    if (!w || !scratch) return NULL;
+    w->id = id; w->pausable = 0;
+    if (!qsb_hv_init(&w->hv, S->dp, g_hv_win3, S->window_start, S->s_early)) { S->failed.store(1); return NULL; }
+#if QSB_CG_HAVE_SIMD
+    v4::vstate *vs4 = NULL; v8::vstate *vs8 = NULL;
+    if (S->simd_ok & 4) vs4 = (v4::vstate *)aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
+    if (S->simd_ok & 8) vs8 = (v8::vstate *)aligned_alloc(64, (sizeof(v8::vstate) + 63) & ~(size_t)63);
+#endif
+    while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load()) return NULL; usleep(2000); }
+#if QSB_CG_HAVE_SIMD
+    /* Worker 0 picks the fastest EC path on this CPU (a warm-up and a timed batch per path, every
+     * path including the scalar 5x52 one; the candidates are real work and are counted). The
+     * other workers do not wait for the choice: they start on the widest SIMD path and switch
+     * at their next batch once worker 0 publishes the pick. */
+    if (id == 0 && S->simd_env < 0) {
+        int best = S->simd_ok & 8 ? 8 : S->simd_ok & 4 ? 4 : 0; double bt = 1e30;
+        const int cand[3] = {8, 4, 0};
+        for (int c = 0; c < 3; c++) {
+            const int m = cand[c];
+            if (m && !(S->simd_ok & m)) continue;
+            double t = 0;
+            for (int rep = 0; rep < 2; rep++) {
+                if (S->stop.load()) return NULL;
+                const int n = fill_batch(w, scratch);
+                if (!n) break;
+                const uint64_t r0 = __rdtsc();
+                if (m == 8) v8::ec_batch_vec(w, vs8); else if (m == 4) v4::ec_batch_vec(w, vs4); else ec_batch(w);
+                const double dt = (double)(__rdtsc() - r0) / n;
+                if (rep > 0) t += dt;                                 /* first batch warms caches */
+                S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
+            }
+            if (t > 0 && t < bt) { bt = t; best = m; }
+        }
+        S->simd = best;
+        S->picked.store(1);
+        if (g_ctl_verbose) printf("  [CPU] EC path: %s\n", best == 8 ? "avx512f x8" : best == 4 ? "avx2 x4" : "scalar");
+    }
+#endif
+    w->pausable = 1;
+    while (!S->stop.load(std::memory_order_relaxed)) {
+        if (id >= S->allowed.load(std::memory_order_relaxed)) { usleep(5000); continue; }
+        S->running.fetch_add(1);
+        const uint64_t c0 = thread_cpu_ns();
+        const uint64_t r0 = __rdtsc();
+        int n = fill_batch(w, scratch);
+        const uint64_t r1 = __rdtsc();
+#if QSB_CG_HAVE_SIMD
+        if (n && S->simd == 8) v8::ec_batch_vec(w, vs8); else
+        if (n && S->simd == 4) v4::ec_batch_vec(w, vs4); else
+#endif
+        if (n) ec_batch(w);
+        const uint64_t r2 = __rdtsc();
+        S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
+        S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
+        S->running.fetch_sub(1);
+        if (!n || S->stop.load(std::memory_order_relaxed)) break;   /* a batch cut by stop is not counted */
+        S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
+    }
+    return NULL;
+}
+
+/* table-builder thread: windows are split across builders */
+struct build_arg { int j0, j1; fe bx[QSB_CG_NWIN], by[QSB_CG_NWIN]; };
+static void *builder_main(void *arg) {
+    build_arg *a = (build_arg *)arg;
+    set_idle_priority();
+    for (int j = a->j0; j < a->j1; j++) build_window(g_cg->table + (size_t)j * QSB_CG_TSIZE, &a->bx[j], &a->by[j], window_entries(j));
+    return NULL;
+}
+
+/* ---------------- CPU budget ---------------- */
+/* cgroup v2: this process's cgroup directory (from /proc/self/cgroup "0::/path") and each ancestor
+ * up to /sys/fs/cgroup, deepest first; a limit anywhere on the path applies. Returns the count. */
+static int cgroup_v2_dirs(char dirs[][512], int maxd) {
+    char path[400] = {0};
+    FILE *f = fopen("/proc/self/cgroup", "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof line, f)) if (!strncmp(line, "0::", 3)) { sscanf(line + 3, "%399s", path); break; }
+        fclose(f);
+    }
+    int n = 0;
+    char cur[400]; snprintf(cur, sizeof cur, "%s", path);
+    while (n < maxd) {
+        snprintf(dirs[n++], 512, "/sys/fs/cgroup%s", (cur[0] == '/' && cur[1]) ? cur : "");
+        char *sl = strrchr(cur, '/');
+        if (!sl || sl == cur || !cur[1]) break;
+        *sl = 0;
+    }
+    return n;
+}
+static double cgroup_quota_cpus() {
+    char dirs[32][512]; const int nd = cgroup_v2_dirs(dirs, 32);
+    double best = -1.0; int seen_v2 = 0;
+    for (int d = 0; d < nd; d++) {
+        char fn[600]; snprintf(fn, sizeof fn, "%s/cpu.max", dirs[d]);
+        FILE *f = fopen(fn, "r");
+        if (!f) continue;
+        char q[64] = {0}; long long per = 0;
+        int ok = fscanf(f, "%63s %lld", q, &per); fclose(f);
+        if (ok >= 1) seen_v2 = 1;
+        if (ok == 2 && strcmp(q, "max") != 0 && per > 0) {
+            const double v = (double)atoll(q) / (double)per;
+            if (best < 0 || v < best) best = v;
+        }
+    }
+    if (seen_v2) return best;
+    FILE *f;
+    f = fopen("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "r");
+    if (!f) f = fopen("/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us", "r");
+    if (f) {
+        long long q = -1; int ok = fscanf(f, "%lld", &q); fclose(f);
+        FILE *g = fopen("/sys/fs/cgroup/cpu/cpu.cfs_period_us", "r");
+        if (!g) g = fopen("/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us", "r");
+        long long p = 100000; if (g) { if (fscanf(g, "%lld", &p) != 1) p = 100000; fclose(g); }
+        if (ok == 1 && q > 0 && p > 0) return (double)q / (double)p;
+    }
+    return -1.0;
+}
+
+/* ---------------- memory budget ---------------- */
+static long long read_ll_file(const char *path) {   /* first integer in the file; -1 if absent, -2 for "max" */
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    char b[64] = {0};
+    const int ok = fscanf(f, "%63s", b) == 1; fclose(f);
+    if (!ok) return -1;
+    if (!strcmp(b, "max")) return -2;
+    return atoll(b);
+}
+/* Bytes this process may still allocate: MemAvailable, capped by the cgroup's memory limit minus
+ * its current usage (v2 memory.max/memory.current, else v1 limit_in_bytes/usage_in_bytes). The
+ * cgroup usage includes reclaimable page cache, so this errs low. -1 if nothing is readable. */
+static double mem_headroom_bytes() {
+    double head = -1;
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (f) {
+        char line[256]; long long kb;
+        while (fgets(line, sizeof line, f)) if (sscanf(line, "MemAvailable: %lld kB", &kb) == 1) { head = (double)kb * 1024.0; break; }
+        fclose(f);
+    }
+    char dirs[32][512]; const int nd = cgroup_v2_dirs(dirs, 32);
+    int seen_v2 = 0;
+    for (int d = 0; d < nd; d++) {   /* every limited level on the path: its limit minus its usage */
+        char fl[600], fc[600];
+        snprintf(fl, sizeof fl, "%s/memory.max", dirs[d]); snprintf(fc, sizeof fc, "%s/memory.current", dirs[d]);
+        const long long lim = read_ll_file(fl), cur = read_ll_file(fc);
+        if (lim != -1) seen_v2 = 1;
+        if (lim > 0 && lim < (1LL << 60) && cur >= 0) {
+            const double cg = (double)(lim - cur);
+            if (head < 0 || cg < head) head = cg;
+        }
+    }
+    if (!seen_v2) {
+        const long long lim = read_ll_file("/sys/fs/cgroup/memory/memory.limit_in_bytes"), cur = read_ll_file("/sys/fs/cgroup/memory/memory.usage_in_bytes");
+        if (lim > 0 && lim < (1LL << 60) && cur >= 0) {
+            const double cg = (double)(lim - cur);
+            if (head < 0 || cg < head) head = cg;
+        }
+    }
+    return head;
+}
+
+/* ---------------- controller (called from the GPU host loop) ---------------- */
+struct ctl_t {
+    int wmax, cur;
+    int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
+    double t_phase;
+    double last_done;       /* time of the last GPU batch completion */
+    /* A/B measurement */
+    int ab_left;
+    double ab_on_sum; int ab_on_n;
+    double ab_off_sum; int ab_off_n;
+    double next_ab;
+    uint64_t busy0; double busy_t0;
+    uint64_t cand0; double cand_t0;
+    double win_t0; int win_n, win_skip, strikes;
+    int verbose;
+    uint64_t lag_late, lag_empty, lag_empty_on;   /* drains: oldest slot already done / every slot done (GPU idle) */
+};
+static ctl_t g_ctl;
+
+static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].load(std::memory_order_relaxed); return s; }
+/* CPU time of the whole process (every thread), continuously updated by the kernel. busy_ns only
+ * advances when a worker finishes a batch (1-2.5 s of CPU on this CPU path), so a 2 s share check
+ * on busy_ns reads ~0 on a slower core and sheds every worker; the process clock does not. */
+static uint64_t proc_cpu_ns() {
+    struct timespec ts; clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+/* Start: build the table in the background and spawn the (paused) workers. */
+static int start(const digest_params_t *dp, int window_start, int s_early, uint64_t n_epochs,
+                 const uint8_t gpu_win3[][3], int gpu_nwin) {
+#ifndef QSB_COGRIND
+#define QSB_COGRIND 1
+#endif
+    if (!QSB_COGRIND) return 0;
+    const char *env = getenv("QSB_COGRIND_THREADS");
+    int ncpu = 0;
+    { cpu_set_t cs; CPU_ZERO(&cs); if (sched_getaffinity(0, sizeof cs, &cs) == 0) ncpu = CPU_COUNT(&cs); }
+    if (ncpu <= 0) ncpu = (int)sysconf(_SC_NPROCESSORS_ONLN);
+    double quota = cgroup_quota_cpus();
+    /* Without a CPU quota, SCHED_IDLE workers yield every CPU the GPU host thread wants, so all
+     * CPUs but one (that thread's) are used: measured GPU loss within noise (<0.2%). Under a
+     * cgroup quota SCHED_IDLE does not help -- throttling stops the GPU thread too -- so the
+     * workers leave ~1.5 CPUs of the quota free (workers = ceil(quota) - 2): at workers = quota
+     * the GPU lost ~1.6%, at ceil(quota) - 2 nothing measurable. */
+    /* Conservative port: under a quota the workers leave >= 2 CPUs of it free (floor(quota - 2)),
+     * and a budget below QSB_CG_MIN_WORKERS runs no workers at all -- the async launch thread
+     * never competes for a small quota, and a handful of workers is worth < 0.3% anyway. */
+    int nw;
+    if (quota > 0 && quota < ncpu) nw = (int)floor(quota - 2.0);
+    else nw = ncpu - 1;
+    if (nw < QSB_CG_MIN_WORKERS) nw = 0;
+    if (env) nw = atoi(env);
+    if (nw > QSB_CG_MAXW) nw = QSB_CG_MAXW;
+    g_sha_ni = sha_ni_available();
+    if (getenv("QSB_COGRIND_SHANI") && atoi(getenv("QSB_COGRIND_SHANI")) == 0) g_sha_ni = 0;
+    printf("  CPU co-grind: %d CPUs in affinity, cgroup quota %s%.2f, %d workers%s%s\n",
+           ncpu, quota > 0 ? "" : "none ", quota > 0 ? quota : 0.0, nw > 0 ? nw : 0,
+           __builtin_cpu_supports("avx512f") ? ", avx512f" : __builtin_cpu_supports("avx2") ? ", avx2" : "",
+           g_sha_ni > 0 ? ", sha-ni x2" : "");
+    if (nw <= 0) return 0;
+    if (dp->prefix_remainder_len + (uint32_t)(window_start - s_early) * SIG_PUSH_SIZE == 0) return 0;
+    {   /* the table (772 MiB touched at W = 20) + worker state must fit with >= 1.5 GiB to spare */
+        double need = 1.5 * 1073741824.0 + (double)nw * 4.0 * 1048576.0;
+        for (int j = 0; j < QSB_CG_NWIN; j++) need += (double)window_entries(j) * sizeof(tentry);
+        const double head = mem_headroom_bytes();
+        if (head >= 0 && head < need) {
+            printf("  CPU co-grind: off (memory headroom %.2f GiB < %.2f GiB needed)\n", head / 1073741824.0, need / 1073741824.0);
+            return 0;
+        }
+    }
+
+    shared_t *S = new shared_t();
+    g_cg = S;
+    S->dp = dp; S->window_start = window_start; S->s_early = s_early; S->n_epochs = n_epochs;
+    /* CPU triples: every C(13,3) triple of the window the GPU does not use */
+    const int K = dp->n - window_start;
+    if (K != 13 || s_early != 6) { g_cg = NULL; return 0; }
+    int nt = 0;
+    for (int a = 0; a < K; a++) for (int b = a + 1; b < K; b++) for (int c = b + 1; c < K; c++) {
+        uint8_t tr[3] = {(uint8_t)(window_start + a), (uint8_t)(window_start + b), (uint8_t)(window_start + c)};
+        int used = 0;
+        for (int i = 0; i < gpu_nwin; i++) if (!memcmp(gpu_win3[i], tr, 3)) { used = 1; break; }
+        if (used) continue;
+        memcpy(S->trip[nt], tr, 3);
+        int pos = 0, sel = 0;
+        for (int i = window_start; i < (int)dp->n; i++) {
+            if (sel < 3 && tr[sel] == i) { sel++; continue; }
+            memcpy(S->winbytes[nt] + pos, dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pos += SIG_PUSH_SIZE;
+        }
+        nt++;
+    }
+    S->ntrip = nt;
+    if (nt == 0 || nt + gpu_nwin != 286) { printf("  CPU co-grind: off (window split %d + %d)\n", gpu_nwin, nt); g_cg = NULL; return 0; }
+    /* first-block classes: the first 64 - rem bytes of the window area; rem = (42 + 131*10) % 64 = 8 */
+    const int pre_bytes = (int)dp->prefix_remainder_len + (window_start - s_early) * SIG_PUSH_SIZE;
+    const int rem = pre_bytes % 64;
+    const int fb = 64 - rem < 100 ? 64 - rem : 100;
+    S->nfirst = 0;
+    for (int i = 0; i < nt; i++) {
+        int g = -1;
+        for (int k = 0; k < i; k++) if (!memcmp(S->winbytes[k], S->winbytes[i], (size_t)fb)) { g = S->first_group[k]; break; }
+        if (g < 0) { S->first_rep[S->nfirst] = i; g = S->nfirst++; }
+        S->first_group[i] = g;
+    }
+    S->simd.store(0); S->simd_ok = 0; S->simd_env = -1;
+#if QSB_CG_HAVE_SIMD
+    S->simd_ok = (__builtin_cpu_supports("avx2") ? 4 : 0) | (__builtin_cpu_supports("avx512f") ? 8 : 0);
+    if (getenv("QSB_COGRIND_SIMD")) { S->simd_env = atoi(getenv("QSB_COGRIND_SIMD")); if (S->simd_env != 0 && !(S->simd_ok & S->simd_env)) S->simd_env = 0; }
+    S->simd.store(S->simd_env >= 0 ? S->simd_env : (S->simd_ok & 8) ? 8 : (S->simd_ok & 4) ? 4 : 0);   /* until worker 0's pick */
+#endif
+    S->hit_fd = open("results/digest_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (S->hit_fd < 0) { g_cg = NULL; return 0; }
+    S->table = (tentry *)aligned_alloc(2u << 20, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry));
+    if (!S->table) { g_cg = NULL; return 0; }
+    madvise(S->table, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry), MADV_HUGEPAGE);
+    for (int j = 0; j < QSB_CG_NWIN; j++) memset(&S->table[(size_t)j * QSB_CG_TSIZE], 0, sizeof(tentry));
+    /* window bases Bj = 2^(W j) * neg_r_inv * G and A = u2 R, via OpenSSL */
+    static build_arg ba[QSB_CG_NWIN];
+    {
+        EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+        BN_CTX *ctx = BN_CTX_new();
+        BIGNUM *order = BN_new(), *k = BN_new(), *x = BN_new(), *y = BN_new();
+        EC_POINT *P = EC_POINT_new(grp);
+        EC_GROUP_get_order(grp, order, ctx);
+        BN_lebin2bn(dp->neg_r_inv, 32, k);
+        fe bx[QSB_CG_NWIN], by[QSB_CG_NWIN];
+        for (int j = 0; j < QSB_CG_NWIN; j++) {
+            EC_POINT_mul(grp, P, k, NULL, NULL, ctx);
+            EC_POINT_get_affine_coordinates(grp, P, x, y, ctx);
+            uint8_t xb[32], yb[32];
+            BN_bn2lebinpad(x, xb, 32); BN_bn2lebinpad(y, yb, 32);
+            uint64_t xw[4], yw[4]; memcpy(xw, xb, 32); memcpy(yw, yb, 32);
+            fe_from_w(&bx[j], xw); fe_from_w(&by[j], yw);
+            for (int s = 0; s < QSB_CG_W; s++) BN_mod_lshift1(k, k, order, ctx);
+        }
+        uint64_t aw[4], bw[4]; memcpy(aw, dp->u2r_x, 32); memcpy(bw, dp->u2r_y, 32);
+        fe_from_w(&S->ax, aw); fe_from_w(&S->ay, bw);
+        BN_free(order); BN_free(k); BN_free(x); BN_free(y); EC_POINT_free(P); BN_CTX_free(ctx); EC_GROUP_free(grp);
+        int nb = nw < QSB_CG_NWIN ? nw : QSB_CG_NWIN; if (nb < 1) nb = 1;   /* one builder per window */
+        pthread_t bt[QSB_CG_NWIN];
+        for (int b = 0; b < nb; b++) {
+            ba[b].j0 = QSB_CG_NWIN * b / nb; ba[b].j1 = QSB_CG_NWIN * (b + 1) / nb;
+            memcpy(ba[b].bx, bx, sizeof bx); memcpy(ba[b].by, by, sizeof by);
+        }
+        /* builders run detached-by-join in a helper so start() returns at once */
+        struct helper_arg { int nb; build_arg *ba; };
+        static helper_arg ha; ha.nb = nb; ha.ba = ba;
+        pthread_t ht;
+        auto helper = [](void *p) -> void * {
+            helper_arg *h = (helper_arg *)p;
+            pthread_t t[QSB_CG_NWIN];
+            for (int b = 0; b < h->nb; b++) pthread_create(&t[b], NULL, builder_main, &h->ba[b]);
+            for (int b = 0; b < h->nb; b++) pthread_join(t[b], NULL);
+            g_cg->ready.store(1, std::memory_order_release);
+            return NULL;
+        };
+        (void)bt;
+        sigset_t ms, old; sigemptyset(&ms); sigaddset(&ms, SIGTERM); sigaddset(&ms, SIGINT); sigaddset(&ms, SIGHUP);
+        pthread_sigmask(SIG_BLOCK, &ms, &old);   /* builders and workers never take the stop signal */
+        const int hrc = pthread_create(&ht, NULL, helper, &ha);
+        pthread_sigmask(SIG_SETMASK, &old, NULL);
+        if (hrc != 0) { g_cg = NULL; return 0; }
+        pthread_detach(ht);
+    }
+    S->allowed.store(0);
+    S->nworkers = nw;
+    S->live.store(nw);
+    {
+        sigset_t ms, old; sigemptyset(&ms); sigaddset(&ms, SIGTERM); sigaddset(&ms, SIGINT); sigaddset(&ms, SIGHUP);
+        pthread_sigmask(SIG_BLOCK, &ms, &old);
+        for (int i = 0; i < nw; i++) {
+            pthread_t t;
+            if (pthread_create(&t, NULL, worker_main, (void *)(intptr_t)i) != 0) { S->live.fetch_sub(nw - i); S->nworkers = i; break; }
+            pthread_detach(t);
+        }
+        pthread_sigmask(SIG_SETMASK, &old, NULL);
+    }
+    memset(&g_ctl, 0, sizeof g_ctl);
+    g_ctl.wmax = S->nworkers; g_ctl.cur = 0;
+    g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
+    return S->nworkers;
+}
+
+/* Exactness self-test: recompute a few CPU candidates with the OpenSSL gate's recovery and
+ * compare pubkey hashes. Runs once in the first worker-free moment (called by the host loop). */
+
+static void set_allowed(int n) { if (g_cg) g_cg->allowed.store(n, std::memory_order_relaxed); g_ctl.cur = n; }
+static void tick(double now, double gpu_batch, int late = 0, int empty = 0);
+
+/* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates. late: the
+ * drained slot's batch had already finished when the launch thread arrived; empty: every launched
+ * batch had finished, i.e. the GPU sat idle waiting for the host. With 4 batches (~0.6 s) queued
+ * an empty queue means the launch thread was starved for several batch times; if that happens
+ * while workers run, the workers go to 0 for the rest of the run (they are never worth a GPU stall). */
+static void tick(double now, double gpu_batch, int late, int empty) {
+    shared_t *S = g_cg;
+    if (!S) return;
+    ctl_t &C = g_ctl;
+    C.lag_late += (uint64_t)late; C.lag_empty += (uint64_t)empty;
+    if (empty && (C.cur > 0 || S->running.load(std::memory_order_relaxed) > 0)) {
+        C.lag_empty_on++;
+        if (C.wmax > 0) printf("  CPU co-grind: GPU queue ran dry with workers on; using 0\n");
+        C.wmax = 0; set_allowed(0);
+        if (C.phase == 3) C.phase = 2;
+    }
+    const double dt = C.last_done > 0 ? now - C.last_done : 0;
+    C.last_done = now;
+    if (!S->ready.load(std::memory_order_acquire) || S->failed.load()) return;
+    if (S->tentative.load() >= 8 && S->hits.load() == 0) {   /* CPU path disagrees with the exact gate */
+        if (C.cur) printf("  CPU co-grind: off (%llu tentative hits, none exact)\n", (unsigned long long)S->tentative.load());
+        C.wmax = 0; set_allowed(0); return;
+    }
+    if (C.phase == 0) {                        /* table ready: enable all workers */
+        set_allowed(C.wmax);
+        S->t_enabled = now;
+        C.phase = 1; C.t_phase = now;
+        C.busy0 = proc_cpu_ns(); C.busy_t0 = now;
+        C.cand0 = S->cand_done.load(); C.cand_t0 = now;
+        C.next_ab = now + 20.0;
+        return;
+    }
+    if (C.phase == 1 && now - C.t_phase >= 2.0) {
+        /* CPU share check: do the workers get the CPU time they ask for? */
+        const double got = (double)(proc_cpu_ns() - C.busy0) * 1e-9 / (now - C.busy_t0);   /* incl. launch + verify threads */
+        if (C.verbose) printf("  [CPU] share check: %d workers received %.2f CPUs\n", C.cur, got);
+        if (got < 0.8 * C.cur) {   /* conservative: a failed share check means someone else wants the CPUs */
+            C.wmax = 0; set_allowed(0);
+            printf("  CPU co-grind: workers received %.1f CPUs of %d; using 0\n", got, C.cur);
+        }
+        C.phase = 2; C.t_phase = now;
+        return;
+    }
+    if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
+        /* A/B: four windows on,off,on,off; each lasts >= 1 s and >= 3 GPU batches, and the
+         * first batch after each switch (it straddles both settings) is not measured */
+        C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
+        return;
+    }
+    if (C.phase == 3) {
+        /* windows: >= 1 s and >= 3 GPU batches each */
+        const int on = (C.ab_left & 1) == 0;       /* 4: on, 3: off, 2: on, 1: off */
+        if (C.win_skip) C.win_skip = 0;
+        else { if (on) { C.ab_on_sum += dt; C.ab_on_n++; } else { C.ab_off_sum += dt; C.ab_off_n++; } C.win_n++; }
+        if (C.win_n < 3 || now - C.win_t0 < 1.0) return;
+        C.ab_left--;
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
+        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.wmax : 0); return; }
+        set_allowed(C.wmax);
+        const double on_t = C.ab_on_sum / (C.ab_on_n ? C.ab_on_n : 1);
+        const double off_t = C.ab_off_sum / (C.ab_off_n ? C.ab_off_n : 1);
+        const double loss = on_t / off_t - 1.0;     /* GPU slowdown with the workers on */
+        const uint64_t cd = S->cand_done.load();
+        const double cpu_rate = C.cand_t0 > 0 && now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
+        C.cand0 = cd; C.cand_t0 = now;
+        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
+                              on_t, off_t, 100 * loss, cpu_rate, C.wmax,
+                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
+        /* The comparison guards against real contention (a hidden CPU quota, a shared core),
+         * not against noise: one window's noise is up to ~1% on short GPU batches. Shed a quarter
+         * of the workers only after two consecutive windows each show a GPU loss above 1.5% that
+         * also exceeds what the workers add. */
+        const double cpu_frac = on_t > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
+        const int bad = loss > 0.015 && loss > cpu_frac;
+        if (bad && C.strikes >= 1) {
+            int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
+            C.wmax = nw; set_allowed(nw); C.strikes = 0;
+            printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
+            C.next_ab = now + 5.0;
+        } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
+        else { C.strikes = 0; C.next_ab = now + 60.0; }
+        C.phase = 2;
+        return;
+    }
+}
+
+/* Stop the workers and wait (bounded) for in-flight batches so no worker is inside
+ * OpenSSL or the hit file when the process exits. */
+static void stop_and_report() {
+    shared_t *S = g_cg;
+    if (!S) return;
+    const double t_stop = mono_s();
+    S->stop.store(1);
+    /* Every worker checks the stop flag between epochs (SHA stage) and between EC windows, so a
+     * worker returns within ~0.2 ms of CPU time; wait (bounded, 1 s) until all have returned so
+     * none is inside OpenSSL or the hit file when the process exits. */
+    int waited = 0;
+    for (; waited < 1000 && S->live.load() > 0; waited++) usleep(1000);
+    if (g_ctl.verbose && S->cand_done.load())
+        printf("  [CPU] tsc/cand: sha %.0f ec %.0f (first-block classes %d of %d triples)\n",
+               (double)S->sha_cyc.load() / S->cand_done.load(), (double)S->ec_cyc.load() / S->cand_done.load(), S->nfirst, S->ntrip);
+    const double act = S->t_enabled > 0 ? t_stop - S->t_enabled : 0;
+    printf("  CPU co-grind: %llu candidates, %llu tentative, %llu verified hits written; %d workers (%s), "
+           "%.0f cand/s over %.1f s enabled; stop took %d ms, %d workers still running\n",
+           (unsigned long long)S->cand_done.load(), (unsigned long long)S->tentative.load(),
+           (unsigned long long)S->hits.load(), g_ctl.wmax,
+           S->simd.load() == 8 ? "avx512f x8" : S->simd.load() == 4 ? "avx2 x4" : "scalar",
+           act > 0 ? (double)S->cand_done.load() / act : 0.0, act, waited, S->live.load());
+    printf("  CPU co-grind: host lag at drain: %llu late, %llu GPU-idle (%llu with workers on)\n",
+           (unsigned long long)g_ctl.lag_late, (unsigned long long)g_ctl.lag_empty, (unsigned long long)g_ctl.lag_empty_on);
+    fflush(stdout);
+}
+
+} /* namespace qcg */
+#endif /* QSB_CPU_COGRIND_H */
