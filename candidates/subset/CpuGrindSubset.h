@@ -45,6 +45,12 @@
 #define QCPU_SHANI 0
 #endif
 
+#ifndef QSB_CPU_PER_CORE
+#define QSB_CPU_PER_CORE 1         /* one worker per physical core, pinned (never on the host thread's core) */
+#endif
+#ifndef QSB_CPU_HOST_CORE
+#define QSB_CPU_HOST_CORE 1        /* keep one whole core (all SMT siblings) for the GPU's host thread */
+#endif
 #ifndef QSB_CPU_RESERVE
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
@@ -549,6 +555,7 @@ struct Ctx {
     int nthreads = 0;
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
+    std::vector<int> pin;           /* per-worker logical CPU (one per physical core), empty = unpinned */
 };
 
 /* Build T[i][j] = (j+1) * 2^(W i) * A, threads split by window. */
@@ -641,6 +648,9 @@ Q8T static void vec_batch(const Ctx *c, const uint16_t *dig, int B, VecBuf &v) {
 #endif
 
 static void worker(Ctx *c, int tid) {
+#ifdef CPU_SET
+    if (tid < (int)c->pin.size()) { cpu_set_t cs; CPU_ZERO(&cs); CPU_SET(c->pin[tid], &cs); sched_setaffinity(0, sizeof cs, &cs); }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -846,9 +856,60 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #else
     int nth = (int)ncpu - QSB_CPU_RESERVE;
 #endif
+    /* The GPU's host thread (this thread) spins on stream synchronization and publishes the GPU's hits; a
+     * co-grinder worker on its SMT sibling slows it. Give it the first core of the affinity mask, both
+     * siblings, and run the co-grinder (table build and workers) on the other logical CPUs only. */
+    cpu_set_t host_cs, work_cs; bool split_ok = false;
+#if QSB_CPU_HOST_CORE && defined(CPU_ISSET)
+    {
+        cpu_set_t cs; CPU_ZERO(&cs); CPU_ZERO(&host_cs); CPU_ZERO(&work_cs);
+        if (sched_getaffinity(0, sizeof cs, &cs) == 0 && CPU_COUNT(&cs) >= 4) {
+            int first = -1; for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) if (CPU_ISSET(cpu, &cs)) { first = cpu; break; }
+            char path[96]; snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", first);
+            if (FILE *f = fopen(path, "r")) {
+                char buf[64] = {0}; const bool ok = fgets(buf, sizeof buf, f) != nullptr; fclose(f);
+                if (ok) {
+                    for (char *q = buf; *q; ) {
+                        char *e2; long a = strtol(q, &e2, 10); if (e2 == q) break;
+                        long b = a; if (*e2 == '-') { q = e2 + 1; b = strtol(q, &e2, 10); }
+                        for (long v = a; v <= b; v++) if (v < CPU_SETSIZE && CPU_ISSET((int)v, &cs)) CPU_SET((int)v, &host_cs);
+                        q = e2; while (*q == ',' || *q == '\n' || *q == ' ') q++;
+                    }
+                    for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) if (CPU_ISSET(cpu, &cs) && !CPU_ISSET(cpu, &host_cs)) CPU_SET(cpu, &work_cs);
+                    split_ok = CPU_COUNT(&host_cs) >= 1 && CPU_COUNT(&work_cs) >= 2;
+                }
+            }
+        }
+        if (split_ok && CPU_COUNT(&work_cs) < nth) nth = CPU_COUNT(&work_cs);
+    }
+#endif
+    /* One worker per physical core of the worker set: SMT siblings share the IFMA and SHA units, so a
+     * second worker per core adds little work but adds power and heat. */
+    std::vector<int> percore;
+#if QSB_CPU_PER_CORE && defined(CPU_ISSET)
+    if (split_ok) {
+        for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+            if (!CPU_ISSET(cpu, &work_cs)) continue;
+            char path[96]; snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+            FILE *f = fopen(path, "r"); if (!f) { percore.clear(); break; }
+            char buf[64] = {0}; const bool ok = fgets(buf, sizeof buf, f) != nullptr; fclose(f);
+            if (!ok) { percore.clear(); break; }
+            int first = -1;                                   /* lowest sibling that is in the worker set */
+            for (char *q = buf; *q; ) {
+                char *e2; long a = strtol(q, &e2, 10); if (e2 == q) break;
+                long b = a; if (*e2 == '-') { q = e2 + 1; b = strtol(q, &e2, 10); }
+                for (long v = a; v <= b; v++) if (v < CPU_SETSIZE && CPU_ISSET((int)v, &work_cs)) { if (first < 0 || v < first) first = (int)v; }
+                q = e2; while (*q == ',' || *q == '\n' || *q == ' ') q++;
+            }
+            if (first == cpu) percore.push_back(cpu);
+        }
+        if ((int)percore.size() >= 1 && (int)percore.size() < nth) nth = (int)percore.size();
+    }
+#endif
     if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
     Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early;
+    if (!percore.empty() && (int)percore.size() >= nth) c->pin.assign(percore.begin(), percore.begin() + nth);
 #if QCPU_VEC
     __builtin_cpu_init();
     c->vec = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma") && !getenv("QSB_CPU_NOVEC");
@@ -879,7 +940,9 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     fe fax, fay; fe_from_bn(fax, ax); fe_from_bn(fay, ay);
     fe_from_le32(c->cx, dp->u2r_x); fe_from_le32(c->cy, dp->u2r_y);
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
-    std::thread([c, fax, fay, nth]() {
+    if (split_ok) sched_setaffinity(0, sizeof host_cs, &host_cs);        /* this (host) thread: its own core */
+    std::thread([c, fax, fay, nth, split_ok, work_cs]() {
+        if (split_ok) sched_setaffinity(0, sizeof work_cs, &work_cs);   /* table build + workers: the rest */
 #ifdef SCHED_IDLE
         struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -887,8 +950,10 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
     }).detach();
     g_ctx = c;
-    printf("  CPU co-grind: %d threads (of %ld CPUs), %s, %s, %d window patterns per epoch disjoint from the GPU's %d\n",
-           nth, ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin);
+    printf("  CPU co-grind: %d threads (of %ld CPUs; %s), %s, %s, %d window patterns per epoch disjoint from the GPU's %d\n",
+           nth, ncpu, split_ok ? (c->pin.empty() ? "host thread keeps its own core" : "host thread keeps its own core, one worker per other core")
+                               : "shared cores", c->vec ? "8-lane IFMA" : "scalar",
+           c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin);
     fflush(stdout);
 }
 static uint64_t candidates() { return g_ctx ? g_ctx->cand.load() : 0; }

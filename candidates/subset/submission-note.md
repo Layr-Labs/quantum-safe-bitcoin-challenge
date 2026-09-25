@@ -1,10 +1,10 @@
-# Subset: 40c989e2 plus fkiene's exact half-width scalar walk on the GPU (+0.14% locally) and a much faster host-CPU co-grinder (8-lane AVX-512 IFMA elliptic-curve path, 4-lane SHA-NI; ~4.4x its scalar rate here, bit-exact)
+# Subset: GLV12xl with the host co-grinder on one worker per physical core (pinned), leaving the GPU's host thread a whole core — fkiene's half-width walk on the GPU, 8-lane AVX-512 IFMA + 4-lane SHA-NI co-grinder
 
 Effort: max. Prepared with Claude Opus 5.5 in Claude Code on an RTX 4090 host (driver 595.71, CUDA 12.8.93 toolchain). The ranked build line and argv are unchanged.
 
 ## What this is
 
-The parent is our `40c989e2` ("GLV12xc"). It combines:
+The direct parent is our `de5739c9` ("GLV12xl"), whose own parent is `40c989e2` ("GLV12xc"). The changes against `de5739c9` are the co-grinder's worker policy (next section) and the warp-uniform root inverse on the GPU; everything below describes the full package. `40c989e2` combines:
 - newjordan's `d1ddefca` GLV12 native-carrier tree;
 - our no-JIT startup, the warp root inverse and `QSB_SHA_FMA_ADD=1`;
 - i34-9's lean GLV split;
@@ -12,12 +12,21 @@ The parent is our `40c989e2` ("GLV12xc"). It combines:
 - host-CPU co-grinding on a disjoint candidate set (`CpuGrindSubset.h`, after Ryun1's pinning `CpuGrind.h`).
 
 **Changes against `40c989e2`:**
-1. **GPU (`tests/gpu_epochs/tree.cu`):** fkiene's `QSB_S3_HALF_WALK` (from `73224391`), ported to the GLV12 tree. It is exact and adds no memory traffic. The native image was regenerated (cubin sha256 `29739128a257ba62…`, default-build PTX prefix `c2008e587f47`).
+1. **GPU (`tests/gpu_epochs/tree.cu`):** fkiene's `QSB_S3_HALF_WALK` (from `73224391`), ported to the GLV12 tree. It is exact and adds no memory traffic. The native image was regenerated (cubin sha256 `4e1b6d4c8fc9f8ed…`, default-build PTX prefix `c19c9c840e1c`).
 2. **Host (`CpuGrindSubset.h`):** an 8-lane AVX-512 IFMA path for the co-grinder's elliptic-curve work, selected at run time.
 3. **Host:** a 4-lane SHA-256 path using the x86 SHA extensions for the co-grinder's three hashes per candidate, selected at run time.
 4. **Host:** a 64 B-aligned host table.
 
 The co-grinder's scalar path, candidate space, gate and scheduling are unchanged.
+
+## Worker policy: one per physical core
+
+`de5739c9` ran the co-grinder on the CPU quota minus two logical CPUs (30 workers on the ranked host's 32). This package runs **one worker per physical core**, pinned, and leaves the first core of the affinity mask (both SMT siblings) to the GPU's host thread and the harness:
+- The first core of the affinity mask, with all its SMT siblings, is reserved: `qcpu::start` runs on the GPU's host thread and pins that thread to the reserved core, and the table builder and every worker are restricted to the other logical CPUs. The cores come from `/sys/devices/system/cpu/cpuN/topology/thread_siblings_list`; each worker is pinned to the lowest sibling of its own core with `sched_setaffinity`. On the ranked host (32 logical CPUs) that is 15 workers on 15 cores, and the GPU's host thread has the 16th core to itself.
+- Why: the 8-lane IFMA field arithmetic is throughput-bound (a dependent chain of 8-lane multiplications runs 26.5 ns per multiplication, four interleaved chains 24.0 ns), so a second worker on the same core's sibling adds little work but adds power and heat, and it shares the core with whatever the GPU's host thread needs. On the thermally limited ranked card, CPU heat and host-thread delays cost GPU rate, which is worth far more per unit than the co-grinder's hits.
+- On our (shared) development host we also measured whether a busy co-grinder slows the GPU through its host thread: GPU rate over 65 s runs, alternating, with no co-grinder 824.4 M/s (3 runs), 22 unpinned workers 823.95 (2), 22 workers with the host thread on its own core 824.15 (2) — all within 0.1%, so host-thread contention is small here; on the ranked host the core reservation is insurance, and the fewer workers mainly cut the co-grinder's power.
+- Fails soft: without readable topology files, or with fewer than four logical CPUs, no thread is pinned and the previous policy is used. The start line prints `host thread keeps its own core, one worker per other core` or `shared cores`. `QSB_CPU_HOST_CORE=0` and `QSB_CPU_PER_CORE=0` at build time restore `de5739c9`'s policy.
+- Exactness is unaffected (same code, same candidates per thread): `QSB_ZEROS_N=16`, 60 s: 11,074 CPU hits, all 11,074 verified by the harness's `verify_artifact`.
 
 ## GPU: the half-width scalar walk (fkiene's `QSB_S3_HALF_WALK`)
 
@@ -31,6 +40,19 @@ The digest kernel extracts each candidate's GLV table digits by walking a 256-bi
 | `kernel_digest` | 0 bytes stack, 0 spill; 2 `LTC64B` cold-record loads, as before |
 
 Instruction cuts like this one showed up in the ranked self rate about 1:1 in this lineage, so we expect roughly +0.13% on the runner.
+
+## GPU: warp-uniform root inverse (`QSB_ROOT_UNIFORM_WARP`)
+
+The batch-inversion tree's root (two field elements, `tree_inverse.cuh`) runs on warp 0 only, behind `if (tid < 32)`. ptxas cannot prove that branch warp-uniform, so every `shfl`/`ballot` inside it was compiled into a per-operation WARPSYNC wrapper subroutine (CALL/RET plus argument moves; 56 static CALLs). The guard is now `if (__all_sync(0xffffffffu, tid < 32))`: the same threads take the same path (the vote is true exactly for warp 0), but a warp vote is uniform by construction, so ptxas drops the wrappers (static CALLs 56 → 14, −440 SASS instructions; ~13 CALLs per candidate dynamically).
+
+| check (local RTX 4090, paired ABBA, warm rounds) | result |
+|---|---|
+| steady rate vs the same tree without it | **+0.061% ± 0.021** (7 of 8 rounds positive) |
+| energy per candidate | −0.04 to −0.10% |
+| fixed problem | all 2,816 reference hits reproduced; start-up self-check and GTable spot check pass |
+| `kernel_digest` | 0 bytes stack, 0 spill |
+
+It is small, exact and free, so it rides along. (Method note: the first round of our A/B script runs on a colder card, about +0.35% for whichever arm goes first, so rounds are pooled from the second one on.)
 
 ## Why the CPU side
 
@@ -154,10 +176,10 @@ All inherited source, GPLv3 notices (`COPYING`, `COPYING-secp256k1`, VanitySearc
 
 ## Packaging
 
-Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are untouched, and no binary or build stamp is included. There are no includes outside `candidates/subset/`. The native image was regenerated with `build_carrier.sh` and CUDA 12.8.93: cubin sha256 `29739128a257ba62…` (476,704 B), 0 spills in every function; default-build PTX sha256 prefix `c2008e587f47`. At start-up the run prints `Native sm_89 carrier: on` and the GTable spot check passes.
+Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are untouched, and no binary or build stamp is included. There are no includes outside `candidates/subset/`. The native image was regenerated with `build_carrier.sh` and CUDA 12.8.93: cubin sha256 `4e1b6d4c8fc9f8ed…` (476,704 B), 0 spills in every function; default-build PTX sha256 prefix `c19c9c840e1c`. At start-up the run prints `Native sm_89 carrier: on` and the GTable spot check passes.
 
-**Validation of this exact package:** the unmodified harness (`benchmark.sh subset`, 90 s, fresh problem seed) verified 8,976 of 8,976 hits, 32 of them from the CPU file: `RESULT: PASS`. The same package without the half-width walk also passed a full-length 1,200 s run of the unmodified harness: 118,027 of 118,027 hits verified, 327 from the CPU file, GPU at 449 W / 73 °C, steady throughout. (The CPU share of a local run is small because our shared development host gives the `SCHED_IDLE` workers little time.)
+**Validation of this exact package:** the unmodified harness (`benchmark.sh subset`, 90 s, fresh problem seed) verified 8,889 of 8,889 hits, 36 of them from the CPU file: `RESULT: PASS`. The same package without the half-width walk also passed a full-length 1,200 s run of the unmodified harness: 118,027 of 118,027 hits verified, 327 from the CPU file, GPU at 449 W / 73 °C, steady throughout. (The CPU share of a local run is small because our shared development host gives the `SCHED_IDLE` workers little time.)
 
-## Ranked result of the parent `40c989e2`
+## Ranked evidence behind this package
 
-`40c989e2` scored **617.04** (status rejected; peak self rate 796.3, ratio 0.7749).
+Our previous ticket `de5739c9` scored **634.72**. Its public hit list splits into GPU 608.51 M/s and CPU 26.20 M/s (self 797.7, GPU-only score/self 0.7629). The GPU-only GLV12-lineage draws scored just before it (`d4c1abc4` 0.7855, `5c324621` 0.7849, `5c2ab83e` 0.7849, `68f1fc1c` 0.7770) give an anchor ratio of 0.7849, so the co-grinder's net effect was +8.63 M/s (CPU hits minus the GPU rate lost against the anchor). Decision rule we fixed before the result: net >= +10 M/s keeps the all-threads co-grinder; 0..+10 (or no clean GPU-only anchor) moves to one worker per physical core, which cuts the co-grinder's power and its contention with the GPU host thread at a small loss of CPU hits; negative turns the co-grinder off. This package is the middle case.
