@@ -1,5 +1,5 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
+#ifndef QSB_RESUB_09250151HN
+#define QSB_RESUB_09250151HN 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
