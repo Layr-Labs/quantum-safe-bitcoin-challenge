@@ -54,7 +54,7 @@
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
-#define QSB_GT_TOTAL 153175181u
+#define QSB_GT_TOTAL (QSB_GLV11 ? 354501773u : 153175181u)
 #define QSB_GT_RADIX_BITS 14
 #define QSB_GT_TOP_CENTER 170559769u
 #define QSB_GT_TOP_SHIFT 100u
@@ -78,6 +78,9 @@
  * Both exactly reconstruct the same bounded signed GLV component.
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?67108864u:134217728u;
+#endif
 #if QSB_FOUR_HOT
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
 #else
@@ -85,6 +88,9 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?153175181u:220284045u;
+#endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
@@ -94,6 +100,9 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?18u:45u;
+#endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
 #else
@@ -128,6 +137,31 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     }
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
+#if QSB_GLV11
+/* GLV11 (ported from fkiene's GLV11 tree): P reads five terms via segments 0,6,7,4,5.
+ * shifts 0,18,45,73,100 keep the signed chain contiguous so the five digits sum to the
+ * magnitude exactly (same K bias as GLV12). Segments 6,7 are plain signed 27/28-bit fields. */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
+    const uint64_t mag[2],unsigned sign,int t) {
+    if(t==0) return q9_bigtbl_code(mag,sign,0);
+    if(t>=3) return q9_bigtbl_code(mag,sign,t+1);
+    const int c=t+5;
+    const unsigned shift=q9_bigtbl_shift(c),bits=t==1?27u:28u;
+    const uint64_t wide=(mag[0]>>shift)|(mag[1]<<(64u-shift));
+    const uint32_t f=(uint32_t)wide&((1u<<bits)-1u);
+    const uint32_t neg_digit=1u-(f>>(bits-1u));
+    const uint32_t idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
+}
+/* ZDEC form: kshitij's proof gives q9_bigtbl_code_z(w,top,m32,c)==q9_bigtbl_code(w^M,top&1,c)
+ * with M=-s per word (m32=-s). Reconstruct mag and reuse the exact q11 above (no new bit math). */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_z(
+    const uint64_t w[2],uint32_t top,uint32_t m32,int t) {
+    const uint64_t Mw=(uint64_t)m32|((uint64_t)m32<<32);
+    const uint64_t mag[2]={w[0]^Mw,w[1]^Mw};
+    return q11_bigtbl_code(mag,(unsigned)(top&1u),t);
+}
+#endif
 // END QSB_BIGTBL_HOST_EXACT
 
 #if QSB_DIGIT_LEAN
