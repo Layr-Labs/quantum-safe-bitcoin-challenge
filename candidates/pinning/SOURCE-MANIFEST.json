@@ -1,152 +1,21 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
-  "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
-  "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
-  ],
-  "files": [
-    {
-      "path": "candidates/pinning/COPYING",
-      "bytes": 35149,
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    },
-    {
-      "path": "candidates/pinning/COPYING-secp256k1",
-      "bytes": 1057,
-      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
-    },
-    {
-      "path": "candidates/pinning/DEAD-ENDS.md",
-      "bytes": 2477,
-      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
-    },
-    {
-      "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
-    },
-    {
-      "path": "candidates/pinning/GPUHash.h",
-      "bytes": 35133,
-      "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
-    },
-    {
-      "path": "candidates/pinning/GPUMath.h",
-      "bytes": 121679,
-      "sha256": "7f67eba59dd01125151f2ae257ad4782d37d98e2e2b37a196c4e7deb81229a2d"
-    },
-    {
-      "path": "candidates/pinning/LeafRecovery.cuh",
-      "bytes": 6880,
-      "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
-    },
-    {
-      "path": "candidates/pinning/NARROW-PARITY.md",
-      "bytes": 11898,
-      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
-    },
-    {
-      "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
-      "bytes": 2521,
-      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
-      "bytes": 26615,
-      "sha256": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-VALIDATION.json",
-      "bytes": 1146,
-      "sha256": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8"
-    },
-    {
-      "path": "candidates/pinning/PackedRecovery.cuh",
-      "bytes": 7733,
-      "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
-    },
-    {
-      "path": "candidates/pinning/ParityWindow.cuh",
-      "bytes": 6292,
-      "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
-    },
-    {
-      "path": "candidates/pinning/PriorityPipeline.h",
-      "bytes": 2435,
-      "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
-    },
-    {
-      "path": "candidates/pinning/RESEARCH.md",
-      "bytes": 23810,
-      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
-    },
-    {
-      "path": "candidates/pinning/RecoveryConstant.h",
-      "bytes": 1091,
-      "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
-    },
-    {
-      "path": "candidates/pinning/SlotReadback.h",
-      "bytes": 1756,
-      "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
-    },
-    {
-      "path": "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
-      "bytes": 20260,
-      "sha256": "6109f51ebf5321f27fc86211c2de122c372d20ffc495cfe30e36514b05b1fde9"
-    },
-    {
-      "path": "candidates/pinning/cofactor_checkpoint.h",
-      "bytes": 9186,
-      "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
-    },
-    {
-      "path": "candidates/pinning/negative_y_mac.cuh",
-      "bytes": 8451,
-      "sha256": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335"
-    },
-    {
-      "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
-    },
-    {
-      "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
-    },
-    {
-      "path": "candidates/pinning/sha_schedule_interleaved.cuh",
-      "bytes": 1597,
-      "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
-    },
-    {
-      "path": "candidates/pinning/test_carry62.py",
-      "bytes": 13593,
-      "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
-    },
-    {
-      "path": "candidates/pinning/test_host_gate.py",
-      "bytes": 6491,
-      "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
-    },
-    {
-      "path": "candidates/pinning/test_priority_pipeline.py",
-      "bytes": 16765,
-      "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
-    },
-    {
-      "path": "candidates/pinning/test_sha_interleave.py",
-      "bytes": 4040,
-      "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
-    },
-    {
-      "path": "candidates/pinning/test_slot_readback.py",
-      "bytes": 11396,
-      "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
-    }
-  ]
+  "production_source_sha256": {
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "7e3b01343748769b8db631d868b1f69ca4753bb9adf5d973a63b1eb10935bd99",
+    "LeafRecovery.cuh": "b09d39fe723810215c916bffcb9ba01f57375d8d9ed059da66900a45ad00f1c3",
+    "PackedRecovery.cuh": "4321141abe136d7626557bc8fd5aa62b97e9bfd2052956007984df977302ee0f",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "cofactor_checkpoint.h": "2c551a75fce84d0e10a780b2689f48eb19b609cf6bab31450c165a8806223ed6",
+    "pinning.cu": "43b31b84dc4de0e57ae20ee1ec6130be104bffcabd08b028f7106a62a88bc0fa",
+    "sha_pinsha.cuh": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462",
+    "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
+  },
+  "comparison_baseline_submission": "208bbcb6-e235-47a1-b8c5-1d03874ac237 (promoted frontier 766,671,138)",
+  "comparison_baseline_promoted_commit": "03e399c",
+  "compiler": "CUDA 12.8.93; nvcc -O3 -DQSB_ZEROS_N=24 -o pinning pinning.cu -lcrypto -lm",
+  "model": "Claude Opus 5",
+  "harness": "Claude Code",
+  "production_source_bytes": 361613,
+  "note": "Baseline 208bbcb6. Ten arithmetic/layout changes (see RESEARCH.md and the submission note) plus three SHA-256 changes: literal round constants with IV-round and feed-forward folding, block-uniform message construction for the locktime tail block, and the stage-2 pubkey-hash adds emitted as multiply-adds by a constant 1 so they execute on the FMA-heavy pipe (bit-identical results). Each has a compile-time switch."
 }
