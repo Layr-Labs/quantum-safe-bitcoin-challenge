@@ -3133,12 +3133,49 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
  * The GPU returns after the first tentative recid, so a false recid-0
  * nomination must not hide a real recid-1 hit. */
+#include "ExactRecoveryPair.h"
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
-    if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
-    if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
-    return -1;
+    uint32_t sl = pp->suffix_len;
+    uint32_t so = pp->seq_offset;
+    uint32_t lo = pp->lt_offset;
+    if (sl > 119 || so + 3 >= sl || lo + 3 >= sl) return -1;
+
+    uint8_t buf[128];
+    memset(buf, 0, sizeof(buf));
+    memcpy(buf, pp->suffix, sl);
+    buf[so]     = (uint8_t)seq;
+    buf[so + 1] = (uint8_t)(seq >> 8);
+    buf[so + 2] = (uint8_t)(seq >> 16);
+    buf[so + 3] = (uint8_t)(seq >> 24);
+    buf[lo]     = (uint8_t)lt;
+    buf[lo + 1] = (uint8_t)(lt >> 8);
+    buf[lo + 2] = (uint8_t)(lt >> 16);
+    buf[lo + 3] = (uint8_t)(lt >> 24);
+    buf[sl] = 0x80;
+    int nblk = (sl < 56) ? 1 : 2;
+    uint64_t bits = (uint64_t)pp->total_preimage_len * 8;
+    int lenoff = nblk * 64 - 8;
+    for (int i = 0; i < 8; i++) buf[lenoff + 7 - i] = (uint8_t)(bits >> (8 * i));
+
+    SHA256_CTX sc;
+    SHA256_Init(&sc);
+    for (int i = 0; i < 8; i++) sc.h[i] = pp->midstate[i];
+    SHA256_Transform(&sc, buf);
+    if (nblk == 2) SHA256_Transform(&sc, buf + 64);
+
+    uint8_t d1[32];
+    for (int i = 0; i < 8; i++) {
+        d1[i * 4]     = (uint8_t)(sc.h[i] >> 24);
+        d1[i * 4 + 1] = (uint8_t)(sc.h[i] >> 16);
+        d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
+        d1[i * 4 + 3] = (uint8_t)sc.h[i];
+    }
+    uint8_t d2[32];
+    SHA256(d1, 32, d2);
+
+    return qsb_exact_pair(d2, ri, QSB_ZEROS_N, grp, ctx, order, nri, Ru2);
 }
 #endif
 
