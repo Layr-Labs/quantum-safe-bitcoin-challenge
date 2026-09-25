@@ -411,6 +411,41 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
 #endif
 }
 
+/* QSB_DIGIT_LEAN (kill switch, default 1; 0 = the crown's chain-loop text byte for byte):
+ * lean signed-digit decode for the 12 middle chunks of the filter chain.  The table loader takes a
+ * ready record pointer and a 32-bit sign mask m32 (0 or ~0) instead of (base, idx, neg):
+ * gy = (y ^ m) + (K' & m) with m = {m32,m32}, exactly gt_load_signed_flat_f's dropped-borrow form;
+ * the limb-0 high word is xh + m32 + m32 + carry == xh + (m32 & 0xFFFFFFFE) + carry (mod 2^32) for
+ * both mask values.  The digit step forms the mask with one LOP3 from the sign bit and a hoisted
+ * -sflag, and keeps the record offset pre-scaled (tb = table_base*64, +4 MiB per chunk).  Same
+ * digits, same mask, same bytes; 0 mismatches in a 359k-case model (scratchpad/model/digitmodel2.py).
+ * The last-add block keeps the crown's loader (with the compile-time end offset): a lean loader
+ * there recolours the callee into 117 registers and makes kernel_digest spill 16 B. */
+#ifndef QSB_DIGIT_LEAN
+#define QSB_DIGIT_LEAN 1
+#endif
+#if QSB_DIGIT_LEAN
+__device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ rec,
+                                                       uint64_t m,
+                                                       uint64_t *__restrict__ gx,
+                                                       uint64_t *__restrict__ gy) {
+    const ulonglong2 *tx=(const ulonglong2 *)(rec);
+    const ulonglong2 *ty=(const ulonglong2 *)(rec+32);
+    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+    {
+        const uint32_t m32=(uint32_t)m;
+        uint32_t l,h;
+        asm("{\n\t.reg .u32 xl,xh,kl;\n\t"
+            "xor.b32 xl,%2,%4;\n\txor.b32 xh,%3,%4;\n\tand.b32 kl,%4,0xFFFFFC30;\n\t"
+            "add.cc.u32 %0,xl,kl;\n\taddc.u32 %1,xh,%4;\n\tadd.u32 %1,%1,%4;\n\t}"
+            : "=r"(l),"=r"(h) : "r"((uint32_t)y0.x),"r"((uint32_t)(y0.x>>32)),"r"(m32));
+        gy[0]=((uint64_t)h<<32)|(uint64_t)l;
+    }
+    gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
+}
+#endif
+
 /* Branchless windowed fixed-base multiply in homogeneous projective coords.
  * 16 signed digits -> 1 seed load + 15 mixed adds; the next chunk's load is
  * issued one iteration ahead. Returns (qx,qy,qz) WITHOUT affine conversion so
@@ -514,6 +549,21 @@ __device__ __forceinline__ void qsb_complete_last_add(
     _ModMult(ZZZ1,PPP);_ModSub256(Q,Q,T);_ModMult(Q,R);
     _ModMult(S2,(uint64_t*)Y2,ZZZ1);_ModSub256(Y1,Q,S2);Load256(X1,T);
 }
+/* QSB_MUL_LEAN2 (kill switch, default 1): stack the filter chain's lean second square (f9,
+ * QSB_CHAIN_MUL_LEAN=2: the odd partial products are doubled with an add chain instead of 15
+ * funnel shifts and the carries are consumed by the next add instead of captured).  The tree
+ * documents it as bit-identical and it was shipped at level 1 only because level 2 spilled 4 B on
+ * the crown; on the QSB_DIGIT_LEAN colouring the combination is 0-spill on both the sm_89 and the
+ * compute_52->sm_89 JIT path (callee 113 registers).  Re-verified here by a PTX-interpreter
+ * equivalence of both f9 instantiations (scratchpad/ptxsim: 281,472 cases, 0 mismatches, identical
+ * R0..R3 -> T0..T3 interface).  Only meaningful stacked on QSB_DIGIT_LEAN (alone it spills 16 B),
+ * so QSB_DIGIT_LEAN=0 reproduces the crown text regardless of this switch. */
+#ifndef QSB_MUL_LEAN2
+#define QSB_MUL_LEAN2 1
+#endif
+#if QSB_DIGIT_LEAN && QSB_MUL_LEAN2 && !defined(QSB_CHAIN_MUL_LEAN)
+#define QSB_CHAIN_MUL_LEAN 2
+#endif
 // Delayed dispatch only: either the original path is identical, or its exact chain is replayed.
 #include "../../chain_replay_field.cuh"
 #include "../../hit_filter_field.cuh"
@@ -848,6 +898,39 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         w4=(uint32_t)S2; w5=(uint32_t)(S2>>32); w6=(uint32_t)S3;
     }
     constexpr int kChainUnroll=QSB_CHAIN_UNROLL;
+#if QSB_DIGIT_LEAN
+    /* Digit step in mask form.  With t = bit 16 of w0 (the digit's sign bit) and tm = -t:
+     *   (t-1) == ~tm, so idx = (f ^ (t-1)) & 0xFFFF == ~(w0 ^ tm) & 0xFFFF   (one LOP3, LUT 0x82);
+     *   neg = t^1^sflag is 1 iff t == sflag, so -neg == ~(tm ^ sm) with sm = -sflag (one LOP3).
+     * The record offset is kept pre-scaled (tb = table_base*64, +4 MiB per chunk). */
+    const uint32_t sm=0u-(uint32_t)sflag;
+    uint32_t tb=table_base<<6;
+    #pragma unroll (kChainUnroll)
+    for (int c=2;c<GT_CHUNKS-1;c++){
+        const uint32_t tm=(uint32_t)(((int32_t)(w0<<15))>>31);
+        uint32_t i;
+        asm("lop3.b32 %0,%1,%2,0xFFFF,0x82;" : "=r"(i) : "r"(w0),"r"(tm));
+        const uint32_t m32=~(tm^sm);
+        const uint64_t m=((uint64_t)m32<<32)|(uint64_t)m32;
+        uint32_t off;
+        asm("{\n\t.reg .u32 t;\n\tshl.b32 t,%1,6;\n\tadd.u32 %0,t,%2;\n\t}" : "=r"(off) : "r"(i),"r"(tb));
+        const uint8_t *rec=gTable+off;
+        w0=__funnelshift_r(w0,w1,W2); w1=__funnelshift_r(w1,w2,W2); w2=__funnelshift_r(w2,w3,W2);
+        w3=__funnelshift_r(w3,w4,W2); w4=__funnelshift_r(w4,w5,W2); w5=__funnelshift_r(w5,w6,W2); w6>>=W2;
+        gt_load_signed_flat_m(rec,m,cx,cy);
+        qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+        Load256(y0, cy);                /* current affine y anchors next madd */
+#endif
+        tb += 1u << 22;
+    }
+    {
+        idx=w0&((1u<<(W2-1u))-1u);
+        /* crown loader, compile-time base: the loop leaves table_base == gt_offset(GT_CHUNKS-1) */
+        gt_load_signed_flat_f(gTable,gt_offset(GT_CHUNKS-1),idx,sflag,cx,cy);
+        qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
+    }
+#else
     #pragma unroll (kChainUnroll)
     for (int c=2;c<GT_CHUNKS-1;c++){
         {
@@ -870,6 +953,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_last_add(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
     }
+#endif
 #else
     unsigned pos=(unsigned)gt_shift(2)+1u;
     #pragma unroll 1
