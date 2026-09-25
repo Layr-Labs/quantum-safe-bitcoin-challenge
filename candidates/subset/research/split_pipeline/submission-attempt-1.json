@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "stage": "local archive construction",
+  "error": "submission archive must be at most 25 MiB (30.9 MiB produced)",
+  "submission_id": null
+}

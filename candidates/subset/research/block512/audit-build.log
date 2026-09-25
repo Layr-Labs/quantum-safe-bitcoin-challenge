@@ -1,0 +1,103 @@
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+candidates/subset/research/block512/../../tests/gpu_epochs/../../chain_replay_field.cuh(11): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3;uint32_t carry;
+                                    ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../chain_replay_field.cuh(42): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../chain_replay_field.cuh(58): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../chain_replay_field.cuh(1694): warning #550-D: variable "high" was set but never used
+      uint64_t r0,r1,r2,r3,high;
+                           ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../hit_filter_field_sc.cuh(39): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3;uint32_t carry;
+                                    ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../hit_filter_field_sc.cuh(70): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../hit_filter_field_sc.cuh(95): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/../../hit_filter_field_sc.cuh(2959): warning #550-D: variable "high" was set but never used
+      uint64_t r0,r1,r2,r3,high;
+                           ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(2979): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(3048): warning #177-D: variable "f" was declared but never referenced
+              int f = (int)tile_first[t];
+                  ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(2626): warning #177-D: variable "epoch_mid" was declared but never referenced
+      uint32_t epoch_mid[8];
+               ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(2627): warning #177-D: variable "epoch_rem_len" was declared but never referenced
+      int epoch_rem_len = 0;
+          ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(2933): warning #177-D: variable "BLKSZ" was declared but never referenced
+      int BLKSZ = 256;
+          ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(2987): warning #550-D: variable "t_last_report" was set but never used
+      struct timespec t0, t1, t_last_report;
+                              ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu(3068): warning #177-D: variable "found" was declared but never referenced
+      int found = 0;
+          ^
+
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu: In function ‘void gt_point_to_limbs(EC_GROUP*, EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*, uint64_t*)’:
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu:2107:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2107 |     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:659:52: note: declared here
+  659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu: In function ‘void compute_gtable(uint8_t*, const uint8_t*)’:
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu:2231:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2231 |             EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:659:52: note: declared here
+  659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu: In function ‘void build_epoch_prefix(const digest_params_t*, int, int, const uint8_t*, uint8_t*, uint32_t*, uint8_t*, int*)’:
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu:2383:12: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2383 |     SHA256_Init(&ctx);
+      |     ~~~~~~~^~~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu:2386:57: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2386 |     for (size_t i = 0; i < blocks; ++i) SHA256_Transform(&ctx, scratch + i * 64);
+      |                                         ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu: In function ‘int qsb_grinder_main(int, char**)’:
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu:2893:36: warning: ‘int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2893 |         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:646:52: note: declared here
+  646 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         
+candidates/subset/research/block512/../../tests/gpu_epochs/tree.cu:2898:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2898 |         EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:659:52: note: declared here
+  659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+      |                                                    ^~~~~~~~~~                         

@@ -1,0 +1,1 @@
+Independently verified sum 545.35581791 ms, all five stage percentages to displayed four decimals, and 192 bytes/thread for both configurations. Helper input was only sanitized local numeric logs; no source.

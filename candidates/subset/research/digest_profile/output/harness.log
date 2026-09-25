@@ -1,0 +1,21 @@
+  pinning: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/output/problems/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/output/problems/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=2026092501 — no real coin material)
+▶ grinder: python3 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/stage_profile/capture.py --src /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/profile.cu --no-build --bench subset --zeros 24 --mode fixed_time --out /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/output/run.json --seconds 12.0 --hits 200
+  compile: reusing /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/profile (already built for N=24)
+  run: stdbuf -oL timeout 12 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/profile /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/output/problems/subset.bin 0 279549145 2399405719 1 0 single_hash
+  → /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/digest_profile/output/run.json: 0.0M/s, 0 candidates, 244 hits
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 0  in 12.1s (harness clock)
+  candidates (from N verified hits): 2,046,820,352
+  grinder self-reported: 12.1s, 0.0 M/s (not scored)
+  verified hits: 244 / 244
+  hit rel. variance: 0.064018
+--------------------------------------------------------
+  SCORE (throughput) : 168.7896 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 20.121222 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================

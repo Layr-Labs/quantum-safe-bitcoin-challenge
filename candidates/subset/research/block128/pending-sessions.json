@@ -1,0 +1,20 @@
+{
+  "warm_candidate_repeat": {
+    "session": 53857,
+    "exit_code": 0
+  },
+  "production_128_tree_audit": {
+    "session": 22977,
+    "exit_code": 1
+  },
+  "production_256_tree_audit": {
+    "session": 9344,
+    "exit_code": 1
+  },
+  "exact_128_tree_audit": {
+    "session": 9112,
+    "exit_code": 0
+  },
+  "all_terminal": true,
+  "goal_complete": false
+}

@@ -43,6 +43,9 @@
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
 #endif
+#ifndef QSB_SPLIT_PIPELINE
+#define QSB_SPLIT_PIPELINE 0
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #include <cuda_runtime.h>
@@ -1551,6 +1554,7 @@ __global__ void kernel_verify_pair_hits(
 }
 
 
+#if !QSB_SPLIT_PIPELINE || !ZLAB_TRIM
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -2010,6 +2014,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
 }
 
+#endif // monolithic consumer
+
 /* ============================================================
  * Fixed-base table construction on the GPU (signed-digit table)
  *
@@ -2082,6 +2088,12 @@ __global__ void kernel_build_gtable(
  * Host code
  * ============================================================ */
 
+#if QSB_SPLIT_PIPELINE
+#if !QSB_PAIR_SHARED || !ZLAB_DUAL_EPOCH_SHA || !ZLAB_K2S3M
+#error "Split pipeline requires the promoted paired SHA and three-factor finish"
+#endif
+#include "split_pipeline.cuh"
+#endif
 extern "C" {
 #include <openssl/sha.h>
 #include <openssl/bn.h>
@@ -2780,6 +2792,10 @@ int main(int argc, char **argv) {
     #endif
 #endif
     uint32_t *d_first = NULL;
+#if QSB_SPLIT_PIPELINE
+    uint64_t *d_split_work=NULL;
+    uint8_t *d_split_valid=NULL;
+#endif
     if (se_mode) {
         uint8_t h_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
         int cnt = 0;
@@ -2831,6 +2847,12 @@ int main(int argc, char **argv) {
         if(!d_epoch_group){fprintf(stderr,"OOM: epoch-group map\n");return 1;}
 #endif
         if (!d_groups) { fprintf(stderr, "OOM: epoch groups\n"); return 1; }
+#endif
+#if QSB_SPLIT_PIPELINE
+        const size_t split_capacity=(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_SE_WINDOWS;
+        cudaError_t split_error=cudaMalloc(&d_split_work,split_capacity*16*sizeof(uint64_t));
+        if(split_error==cudaSuccess)split_error=cudaMalloc(&d_split_valid,split_capacity);
+        if(split_error!=cudaSuccess){fprintf(stderr,"Split workspace allocation failed: %s\n",cudaGetErrorString(split_error));return 1;}
 #endif
         cudaError_t first_error=cudaMalloc(&d_first,(size_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*sizeof(uint32_t));
         if(first_error!=cudaSuccess){fprintf(stderr,"OOM: first states: %s\n",cudaGetErrorString(first_error));return 1;}
@@ -3141,6 +3163,12 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+#if QSB_SPLIT_PIPELINE
+            const unsigned split_count=(unsigned)epochs_in_batch*QSB_SE_WINDOWS;
+            kernel_split_front<<<nblk,QSB_SE_BLOCK>>>(d_first,d_gt,d_split_work,d_split_valid,epochs_in_batch,split_count);
+            kernel_split_inverse<<<nblk,QSB_SE_BLOCK>>>(d_split_work,epochs_in_batch,split_count);
+            kernel_split_tail<<<(split_count+255)/256,256>>>(d_split_work,d_split_valid,split_count,d_epochs,d_hitbuf);
+#else
             kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -3160,6 +3188,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+#endif
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();

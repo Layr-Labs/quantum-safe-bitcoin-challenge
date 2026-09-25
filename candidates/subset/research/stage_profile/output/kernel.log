@@ -1,0 +1,38 @@
+QSB Digest Search [GPU 0]
+  GPU: NVIDIA GeForce RTX 3090 (82 SMs)
+  Loaded: n=150, t=9, preimage=9906, tail=218, suffix=44, prefix_rem=42
+  Patched tx_suffix: seq=0x10A994D9 (off=0) lt=2399405719 (off=36) tx_suffix_len=44
+  Short-epoch split: cut=137, 6 early omissions x 8218472724 epochs, 3 window omissions x 128 per epoch (1.052e+12 candidates)
+  Register-resident assembly: 10 kept pushes (108 message bytes) + 69 constant words, 6 SHA-256 blocks per candidate
+  GTable built on GPU in 0.16s (1048576 points, 64 MiB total, spot check passed)
+Window schedule classes: first=8 second=53 of 128
+  Mode: REAL, GPU 0 (global 0 of 1)
+  Batch: 8388608 combos per kernel launch
+  Search space (GLOBAL): C(150,9) = 1051964508672 combos
+  Search space (this GPU's slice): 82947113349100 combos (7884.973% of global)
+  Using short-epoch producer/consumer path (262144 epochs per launch)
+PROFILE batch=1 groups=0.256000 epochs=2.400256 first=1.117184 digest=529.203186 replay=0.236544 ms
+PROFILE batch=2 groups=0.331104 epochs=3.272704 first=1.166336 digest=535.226379 replay=0.150528 ms
+PROFILE batch=3 groups=0.270880 epochs=2.549760 first=1.247232 digest=539.790344 replay=0.146432 ms
+PROFILE batch=4 groups=0.245824 epochs=2.848768 first=1.650688 digest=539.614197 replay=0.148480 ms
+PROFILE batch=5 groups=0.450912 epochs=2.925568 first=1.249280 digest=537.216003 replay=0.148480 ms
+PROFILE batch=6 groups=0.471840 epochs=2.864128 first=1.659904 digest=538.123291 replay=0.147456 ms
+PROFILE batch=7 groups=0.418944 epochs=2.830336 first=1.260544 digest=538.717163 replay=0.150528 ms
+PROFILE batch=8 groups=0.268864 epochs=2.321408 first=1.260544 digest=540.991516 replay=0.149504 ms
+PROFILE batch=9 groups=0.258496 epochs=2.662400 first=1.259520 digest=538.713074 replay=0.150528 ms
+PROFILE batch=10 groups=0.277216 epochs=2.185216 first=1.260544 digest=538.953735 replay=0.146432 ms
+PROFILE batch=11 groups=0.274816 epochs=2.069504 first=1.259520 digest=543.028198 replay=0.461824 ms
+PROFILE batch=12 groups=0.356608 epochs=2.332672 first=1.270784 digest=540.236816 replay=0.149504 ms
+PROFILE batch=13 groups=0.348352 epochs=2.072576 first=1.260544 digest=541.515747 replay=0.150528 ms
+PROFILE batch=14 groups=0.279392 epochs=3.120128 first=1.704960 digest=540.837891 replay=0.150528 ms
+PROFILE batch=15 groups=0.376512 epochs=2.567168 first=1.259520 digest=540.883972 replay=0.149504 ms
+PROFILE batch=16 groups=0.300064 epochs=3.843072 first=1.260544 digest=543.630310 replay=0.150528 ms
+PROFILE batch=17 groups=0.258464 epochs=2.520064 first=1.690624 digest=539.393005 replay=0.149504 ms
+PROFILE batch=18 groups=0.252096 epochs=2.916352 first=2.083840 digest=542.434326 replay=0.150528 ms
+PROFILE batch=19 groups=0.253248 epochs=2.434048 first=1.269760 digest=542.690308 replay=0.463872 ms
+PROFILE batch=20 groups=0.247872 epochs=2.822144 first=1.271808 digest=543.954956 replay=0.149504 ms
+PROFILE batch=21 groups=0.260320 epochs=2.579456 first=1.260544 digest=542.863342 replay=0.148480 ms
+PROFILE batch=22 groups=0.369504 epochs=2.203648 first=1.259520 digest=542.992371 replay=0.152576 ms
+PROFILE batch=23 groups=0.258400 epochs=2.121728 first=1.721344 digest=542.290955 replay=0.148480 ms
+PROFILE batch=24 groups=0.451872 epochs=1.969152 first=1.270784 digest=545.537048 replay=0.462848 ms
+  [GPU 0] epoch=29360128/8218472724 (3758M/1051964M)  244.0M/s  elapsed=15s

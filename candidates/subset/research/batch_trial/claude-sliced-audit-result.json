@@ -1,0 +1,27 @@
+{
+  "status": "success",
+  "model": "deepseek-v4.1-flash[1m]",
+  "session_id": "dc5ac2d2-d15b-4ec7-935a-c164ee1a6a39",
+  "tools": [],
+  "input_scope": "55 preselected lines from the same four authorized public candidate source files",
+  "requested_max_budget_usd": 0.10,
+  "reported_total_cost_usd": 0.039198,
+  "duration_ms": 6442,
+  "duration_api_ms": 6383,
+  "num_turns": 1,
+  "input_tokens": 1383,
+  "output_tokens": 1235,
+  "cache_read_input_tokens": 2816,
+  "permission_denials": [],
+  "web_search_requests": 0,
+  "result": "设 W=128、BLOCK=256 ⇒ HALVES=2；PAIR_SHARED=1 ⇒ PAIR_MUL=4；FIRST_SLOTS=16（W≠256）。令 N = B×4。\n\n- d_epochs = N×64B：B=262144→64 MiB；32768→8 MiB\n- d_groups = (2N+4)×128B：256 MiB+512B；32 MiB+512B\n- d_epoch_group = 4N（仅 EPOCH_FAST）：4 MiB；0.5 MiB\n- d_first = N×16×8×4B = N×512B：512 MiB；64 MiB\n\n合计：836 MiB+512B；104.5 MiB+512B。\n\n不确定项：EPOCH_GROUPS/EPOCH_FAST 未给默认值，关闭则省后两项；PAIR_SHARED 若为 0，PAIR_MUL=2，各项减半；ZLAB_LAUNCH_BLOCKS 可被外部覆盖；FIRST_SLOTS 随 W=256 变 64。以上为分配容量，非活跃缓存工作集。",
+  "astra_review": {
+    "default_formulas_and_sizes": "All four allocation sizes and both totals are correct.",
+    "corrections": [
+      "Disabling EPOCH_GROUPS removes d_groups and d_epoch_group; disabling only EPOCH_FAST removes only d_epoch_group. Neither disables d_first. The phrase '省后两项' is inaccurate/ambiguous.",
+      "Halving PAIR_MUL halves the linear terms, but d_groups retains its fixed 512-byte addition."
+    ],
+    "plan_changed": false,
+    "additional_gpu_runs": 0
+  }
+}

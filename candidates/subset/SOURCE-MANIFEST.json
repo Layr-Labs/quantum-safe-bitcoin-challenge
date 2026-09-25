@@ -1,22 +1,25 @@
 {
   "track": "subset",
   "source_only": true,
-  "base_public_commit": "d111a8c6c817247221991a3f940b6732a4e725d6",
-  "base_submission_id": "252f6acb-c072-4307-a7a6-cf3a650bfca3",
-  "base_submission_author": "terrapinelf",
-  "model": "Claude Fable 5.1",
-  "harness": "Claude Code",
-  "collaborator": "GPT 5.6 Sol via Codex (anchor and final-carry deletions, census); Claude Fable 5.1 verifier agent (lean multiply/square rewrite, PTX-interpreter equivalence)",
+  "base_public_commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "base_promoted_submission_id": "7aef224a-e3ff-43f9-9877-50cdbda3f653",
+  "base_submission_author": "Akashneelesh",
+  "prior_official_frontier": 623518629,
+  "model": "GPT-6 Astra",
+  "effort": "high",
+  "harness": "Codex",
+  "mechanical_assistance": "DeepSeek V4.1 Flash [1m] via Claude Code, sanitized timing arithmetic only; independently verified",
   "runtime_delta_from_base": [
-    "hit_filter_field_sc.cuh",
-    "tests/gpu_epochs/tree.cu"
+    "subset.cu",
+    "tests/gpu_epochs/tree.cu",
+    "tests/gpu_epochs/split_pipeline.cuh"
   ],
-  "kill_switches_added": {
-    "QSB_CHAIN_MUL_LEAN": 1,
-    "QSB_CHAIN_ANCHOR_UPDATE": 1,
-    "QSB_FINAL_CARRY": 1
+  "settings": {
+    "QSB_SPLIT_PIPELINE": 1,
+    "ZLAB_LAUNCH_BLOCKS": 131072
   },
-  "production_source_bytes": 961234,
+  "normalized_final_ptx_sha256": "31140b45f9c7045542e6f8ad51353a15ff77f5255d883a9028d3cf848820354c",
+  "production_source_bytes": 967078,
   "production_source_sha256": {
     "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
     "BY_NORMALIZED6.md": "c3ba57bdf16ea0275b68e7bcd912f402b7acb6c9919aa6ae1336f3efaf5c8384",
@@ -38,8 +41,8 @@
     "hit_filter_field.cuh": "1efd238ee80935f8a7c0559eafce15e7d1e5a813a04173efd54e0f87074e3a45",
     "hit_filter_field_sc.cuh": "cde4221e38dfd4671255d96adc36cc34ecbdfa178ab4fd42645694a30cd192cb",
     "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
-    "submission-note.md": "9159a51a6d279160ea69cc6786d06c34a66b15421f4de2c265bda3f3790d9ad0",
-    "subset.cu": "103101573be38d528994aa8c35c35a06ae1a23b0d2d856dcfd5bc606392976a9",
+    "submission-note.md": "24d1e46c5211cb62d140cb323230cc94f061c80adde218485c21381b744c2ce3",
+    "subset.cu": "c35c2d25235f9e8f613d177979fa6190c858d9f5b6649485bdf96f088afec554",
     "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
     "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
     "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
@@ -59,7 +62,8 @@
     "tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
     "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
     "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
-    "tests/gpu_epochs/tree.cu": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+    "tests/gpu_epochs/split_pipeline.cuh": "0e79fb1aa981dbd0c4ce860b56b0dd34b2cf3b9994623edad9ecbeaef695a650",
+    "tests/gpu_epochs/tree.cu": "f675ed7b4bd5f0499c9441a50d4c21287befee91ac2ba0889dbe1a163ac01ced",
     "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
     "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
     "tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",

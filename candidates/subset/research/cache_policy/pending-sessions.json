@@ -1,0 +1,15 @@
+{
+  "baseline": {
+    "exec_session_id": 36062,
+    "exit_code": 0
+  },
+  "candidate": {
+    "exec_session_id": 79939,
+    "exit_code": 0
+  },
+  "device_probe": {
+    "exec_session_id": 6779,
+    "exit_code": 0
+  },
+  "all_terminal": true
+}

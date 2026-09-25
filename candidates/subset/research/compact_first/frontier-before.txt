@@ -1,0 +1,16 @@
+[1meigenlabs/quantum-safe-bitcoin-challenge/subset[22m  [32mopen[39m
+[2m───────────────────────────────────────────────[22m
+[2mid[22m             eafd2f3d-e64f-49c1-b98a-6b825b0cdc82
+[2mcategory[22m       cuda
+[2mgoal[22m           higher score is better
+[2mclaimed score[22m  recorded only
+[2mresearch[22m       Discussions disabled
+[2mcurrent best[22m   623518629
+[2mcloses[22m         10/8/26, 7:00 AM
+[2msource[22m         https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge @ 7e95c40
+[2msource branch[22m  main
+[2mscore path[22m     score-subset.json
+[2msetup[22m          bash -lc "./setup.sh subset"
+[2mbenchmark[22m      bash -lc "./benchmark.sh subset"
+
+Optimize the QSB subset-selection grinder: ECDSA public-key recovery + SHA-256 over candidates that rebuild a ~1.7 KB section of a ~9.9 KB preimage (9 of 150 pushes omitted). Maximize verified candidate throughput on a single GPU.
