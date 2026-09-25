@@ -1,22 +1,19 @@
 {
-  "track": "subset",
-  "source_only": true,
-  "base_public_commit": "d111a8c6c817247221991a3f940b6732a4e725d6",
-  "base_submission_id": "252f6acb-c072-4307-a7a6-cf3a650bfca3",
-  "base_submission_author": "terrapinelf",
-  "model": "Claude Fable 5.1",
-  "harness": "Claude Code",
-  "collaborator": "GPT 5.6 Sol via Codex (anchor and final-carry deletions, census); Claude Fable 5.1 verifier agent (lean multiply/square rewrite, PTX-interpreter equivalence)",
-  "runtime_delta_from_base": [
-    "hit_filter_field_sc.cuh",
-    "tests/gpu_epochs/tree.cu"
-  ],
+  "base_lineage_commit": "ae0ade77bfdd71e5a2dc1a3e2bab780af8c7bb46",
+  "base_public_commit": "ef525a623441ee993bdf8dd70aa2fd914a14e57e",
+  "direct_base_local_commit": "e8c37c483a0a3cfbbff4c9487edb89be9afcd783",
+  "direct_base_public_commit": "f465b4dffeddff7982f2bf180b19edf93418c997",
+  "harness": "Codex",
   "kill_switches_added": {
-    "QSB_CHAIN_MUL_LEAN": 1,
-    "QSB_CHAIN_ANCHOR_UPDATE": 1,
-    "QSB_FINAL_CARRY": 1
+    "QSB_DROP_Z2_EARLY": 1,
+    "QSB_FUSE_X3": 1,
+    "QSB_FX3_SIGNED": 1,
+    "QSB_HOST_VERIFY": 1,
+    "QSB_K32": 1,
+    "QSB_RECODE_BASE_A": 1
   },
-  "production_source_bytes": 961234,
+  "model": "GPT-5",
+  "production_source_bytes": 1013762,
   "production_source_sha256": {
     "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
     "BY_NORMALIZED6.md": "c3ba57bdf16ea0275b68e7bcd912f402b7acb6c9919aa6ae1336f3efaf5c8384",
@@ -36,10 +33,11 @@
     "TREE_INVERSE.md": "0b1798a37a17d8e882604784a375068bc1bc1bd5b4ae98da8f903d876961cdab",
     "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
     "hit_filter_field.cuh": "1efd238ee80935f8a7c0559eafce15e7d1e5a813a04173efd54e0f87074e3a45",
-    "hit_filter_field_sc.cuh": "cde4221e38dfd4671255d96adc36cc34ecbdfa178ab4fd42645694a30cd192cb",
+    "hit_filter_field_sc.cuh": "aa82d251d6fb885e582400f3dd440f2d991370016611e90baad5854688d778f6",
     "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
-    "submission-note.md": "9159a51a6d279160ea69cc6786d06c34a66b15421f4de2c265bda3f3790d9ad0",
-    "subset.cu": "103101573be38d528994aa8c35c35a06ae1a23b0d2d856dcfd5bc606392976a9",
+    "submission-note.md": "0faecbb982f8679b88483a7f423c7017ee6f335acfe06fb7aa4ed65d7a63949a",
+    "subset.cu": "6fc367423126da2125fc5afb8c32680f1e7e8c3fea102675c654d1b0bfaaae20",
+    "test_leader_composite.py": "5b498531bb83c83e9faa4ca233364a3bf736632ec47e6611b1c6585645f77eab",
     "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
     "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
     "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
@@ -50,19 +48,130 @@
     "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
     "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
     "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
-    "tests/gpu_epochs/hm43_warp_inverse.cuh": "dd932513b003b115546a4edb5e159643d8768c32d1e13e377058a929eb3ceb3d",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
     "tests/gpu_epochs/pair_finish_audit.cu": "ce76d53a0ae76bfaaca1bbd12ff87d7f268ca7dea187c1f733da14cebb9b261a",
-    "tests/gpu_epochs/pair_shared.cuh": "bebdd754b5219eaf99b4afc38755999b3eb65b24bd9155df9409069f73d0cc67",
+    "tests/gpu_epochs/pair_shared.cuh": "dd21dd449799659a2d08120427c40a15ad29f2bf223325a971bd141f59195146",
     "tests/gpu_epochs/parity_window_subset.cuh": "e0d48dbdb45b639ad0220aa108e336bd2287daf166990f8e0dcde32a47d03737",
     "tests/gpu_epochs/point_audit.cu": "abc998ea5fc4f2180fc4690b209fc6ecb27a1189a8f884ead4607f06e82b315e",
     "tests/gpu_epochs/point_predicate_audit.cu": "b8427c62a23c55070839548f28ce89c8309a47a6dc38d33ba594d3a120cc5c63",
     "tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
+    "tests/gpu_epochs/qsb_host_verify.h": "4c19a9ed933fab4296cc913aa59ff73ec3e3f4afce8957b2ad554db8d8b9e74f",
     "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
     "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
-    "tests/gpu_epochs/tree.cu": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+    "tests/gpu_epochs/tree.cu": "72995d66e55f6aed3ea31cb2d7581798a6e1068959034a4de68b3006c054a861",
     "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
-    "tests/gpu_epochs/tree_inverse.cuh": "474a9e5eb4bfe457cf8019462f0223f71062c20b868375421893fb6e09ce4dde",
+    "tests/gpu_epochs/tree_inverse.cuh": "9e178ed45bde47e7d460ed74695e77b394b08fd34926834bd7f10daedc55b2ab",
     "tests/gpu_epochs/window_schedule_shared.cuh": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
-    "tests/gpu_epochs/zinv32.cuh": "12303e74b178d2cfc45951ddc0c6c31b634646bacc55ea5a43097997bdd51689"
+    "tests/gpu_epochs/zinv32.cuh": "7e9c1ef26df306b7158c6db9edb4a1444e7f2e3bbb43a9c0cf58c96f4775c163"
+  },
+  "public_donors": {
+    "QSB_DROP_Z2_EARLY": "afb1ab6f40a5a38754055ca787643df60565fbbb",
+    "QSB_FUSE_X3_signed_subset_port": "d5d2283e47fdb0108ff36b3e6acc5d16c115d8ad",
+    "QSB_HOST_VERIFY": "91f36300890c3a3b1e644029cb041c54dcc7fc32",
+    "QSB_K32_subset_port": "d5d2283e47fdb0108ff36b3e6acc5d16c115d8ad",
+    "QSB_K32_technique": "fkiene public pinning PR1002",
+    "QSB_RECODE_BASE_A": "2469420ddffc41afb5d80303546ee6341bfd6bd6",
+    "inherited_QSB_SUBSET_NEG_Y_MAC": "50fda34b2819c350fdda8939c10c648a76c5dc1c",
+    "inherited_QSB_YOFF_FILTER": "7ae0542ad3e33f80cfff2c76d4b0e1181aa7c094"
+  },
+  "public_note_file": "submission-note.md",
+  "runtime_delta_from_base": [
+    "hit_filter_field_sc.cuh",
+    "subset.cu",
+    "tests/gpu_epochs/qsb_host_verify.h",
+    "tests/gpu_epochs/tree.cu"
+  ],
+  "runtime_delta_from_direct_base": [
+    "hit_filter_field_sc.cuh"
+  ],
+  "source_only": true,
+  "successor_public_donor_commit": "d5d2283e47fdb0108ff36b3e6acc5d16c115d8ad",
+  "track": "subset",
+  "validation": {
+    "abba_search_seconds": [
+      11.457039729,
+      11.409431668,
+      11.418384836,
+      11.482237279
+    ],
+    "base_a_boundary_scalars": 12,
+    "base_a_random_scalars": 1000000,
+    "base_a_table_entries": 1048576,
+    "direct_base_calibrated_center": 623105900,
+    "fixed_work_candidates_per_arm": 8589934592,
+    "kill_switch_sass_sha256": {
+      "sm52": "0ef51219757bab878ac0cc465b182f0c7e22e7f64b26b75a3ec3c30c248b8a85",
+      "sm89": "a821017c6b567565fe76bc3a603fca66324d91e19174aaeba2f18239a41de143"
+    },
+    "normalized_hit_sha256": "ef7989de2fe4403af5ddcb3e04007a00c21aee03ca79a53682a3a160cfd4a60a",
+    "pooled_speed_gain_pct": 0.4882661641356201,
+    "problem_fixture": "official PR896",
+    "problem_seed": 1331736675,
+    "successor_abba_order": [
+      "base",
+      "successor",
+      "successor",
+      "base"
+    ],
+    "successor_abba_search_seconds": [
+      11.39518276,
+      11.386513126,
+      11.41541856,
+      11.445071165
+    ],
+    "successor_adjacent_speed_gain_pct": [
+      0.07613949858102931,
+      0.25975924443017995
+    ],
+    "successor_default_full_sass_sha256": {
+      "sm52": "3ef30df24a64395bc5a5eb103901ed33edc0ff493fcc83c4602eee019d639b60",
+      "sm89": "0cd03b5947e38eab7f2df37f9fe57ec76ab35edec65c0bcb9b173a297b507f26"
+    },
+    "successor_fixed_work_candidates_per_arm": 8589934592,
+    "successor_kill_switch_full_sass_sha256": {
+      "sm52": "6b5f916a6f30a08f576260ebe89141d52b9565d34b15d196495ff600c6aa2cbd",
+      "sm89": "8df077b1bd15613b0aed2f0fabeba2cf0f8e099128e37b9594e5d94efa4c11ac"
+    },
+    "successor_normalized_hit_sha256": "ef7989de2fe4403af5ddcb3e04007a00c21aee03ca79a53682a3a160cfd4a60a",
+    "successor_pooled_speed_gain_pct": 0.1680657565671373,
+    "successor_problem_fixture": "official PR896 / seed 896 fixture",
+    "successor_problem_sha256": "cf224c71a1e636b29ef910790a5b38990bc88a2db024a863796bc7dad20187e9",
+    "successor_projected_center": 624153128,
+    "successor_resources": {
+      "direct_base_sm52": {
+        "digest_sass_instructions": 50040,
+        "registers": 128,
+        "shared_bytes": 49152,
+        "spill_load_bytes": 0,
+        "spill_store_bytes": 0,
+        "stack_bytes": 0
+      },
+      "direct_base_sm89": {
+        "digest_sass_instructions": 21368,
+        "registers": 128,
+        "shared_bytes": 49152,
+        "spill_load_bytes": 4,
+        "spill_store_bytes": 4,
+        "stack_bytes": 8
+      },
+      "sm52": {
+        "digest_sass_instructions": 49992,
+        "registers": 128,
+        "shared_bytes": 49152,
+        "spill_load_bytes": 0,
+        "spill_store_bytes": 0,
+        "stack_bytes": 0
+      },
+      "sm89": {
+        "digest_sass_instructions": 21368,
+        "registers": 128,
+        "shared_bytes": 49152,
+        "spill_load_bytes": 4,
+        "spill_store_bytes": 12,
+        "stack_bytes": 8
+      }
+    },
+    "successor_verified_hits_per_arm": 1009,
+    "verified_hits_per_arm": 1009
   }
 }
