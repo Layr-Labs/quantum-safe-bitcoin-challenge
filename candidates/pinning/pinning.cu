@@ -218,7 +218,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  *   0: untouched (base). 1: print the driver default only.
  *   32, 64, 128: print the default, request this value, print what the driver kept. */
 #ifndef QSB_L2_FETCH
-#define QSB_L2_FETCH 0
+#define QSB_L2_FETCH 64
 #endif
 #if QSB_L2_FETCH != 0 && QSB_L2_FETCH != 1 && QSB_L2_FETCH != 32 && QSB_L2_FETCH != 64 && QSB_L2_FETCH != 128
 #error "QSB_L2_FETCH must be 0, 1, 32, 64 or 128"
@@ -255,8 +255,17 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_REC_MASK32
 #define QSB_REC_MASK32 1      /* 1: record index masked in an opaque 32-bit AND so the gather address is a plain LEA */
 #endif
+/* Default follows the prepare residency (QSB_S0_SM_THREADS, below): at the 96-register budget of
+ * five blocks the two-add trip spills 332 B per lane (56 STL / 70 LDL in the chain loop) while the
+ * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free. */
 #ifndef QSB_CHAIN_ROLES
-#define QSB_CHAIN_ROLES 1     /* 1: pair-ordinate chain runs two additions per trip with the y buffers' roles alternating (no swap) */
+#define QSB_CHAIN_ROLES 0
+#endif
+#ifndef QSB_CHAIN_PEEL
+#define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
+#endif
+#ifndef QSB_CHAIN_UNROLL
+#define QSB_CHAIN_UNROLL 0    /* 1: the GLV11 role-alternating chain trips written out (phi and code slots compile-time) */
 #endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
@@ -357,11 +366,17 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #define QSB_STREAM_PARM
 #define QSB_STREAM_ARG
 #endif
+/* QSB_S0_SM_THREADS: prepare-kernel threads resident per SM, the launch-bounds register
+ * budget (512 = 4 x 128 blocks at <= 128 registers; 640 = 5 x 128 at <= 102). Same source
+ * and the same values; only the register allocation and residency move. */
+#ifndef QSB_S0_SM_THREADS
+#define QSB_S0_SM_THREADS 512
+#endif
 #if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
 #undef QSB_S0_THREADS
 #define QSB_S0_THREADS QSB_TREE_N
 #undef QSB_S0_BLOCKS
-#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */
+#define QSB_S0_BLOCKS (QSB_S0_SM_THREADS/QSB_TREE_N)
 #endif
 #if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD
 #error "prepare block size must equal the tree width unless the tree is offloaded"
@@ -1344,6 +1359,29 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
      * scale) is even and so always opens a trip. */
     static_assert((GT_GLV_TERMS&1)==1 && (GT_CHUNKS&1)==0,
                   "QSB_CHAIN_ROLES needs an odd term count and an even Q/P boundary");
+#if QSB_CHAIN_UNROLL
+    /* The same trips in the same order as the rolled loop below, written out. first is 0 or
+     * GT_CHUNKS: from 0 the loop runs terms 2, 4, 6 (phi first), 8; from GT_CHUNKS only 8. */
+    static_assert(GT_CHUNKS==6 && GT_GLV_TERMS==11,
+                  "QSB_CHAIN_UNROLL is written for the GLV11 chain (Q terms 0-5, P terms 6-10)");
+#define QSB_CHAIN_TRIP(T) \
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code((T)+1)); \
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code((T)+2));
+    if(first==0) {
+        QSB_CHAIN_TRIP(2)
+        QSB_CHAIN_TRIP(4)
+        {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        QSB_CHAIN_TRIP(6)
+    }
+    QSB_CHAIN_TRIP(8)
+#undef QSB_CHAIN_TRIP
+#else
     #pragma unroll 1
     for(int term=first+2;term<last-1;term+=2) {
         if(term==GT_CHUNKS) {
@@ -1356,7 +1394,40 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(term+1));
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code(term+2));
     }
+#endif
     qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
+    Load256(y0,y1);
+#else
+#if QSB_CHAIN_PEEL
+    /* The loop's last trip (term == last-1, the only one taking the unpiped branch) peeled
+     * out: every other trip is the piped add and the swap, in the same order; the peeled
+     * trip is the else branch. It can never be the phi trip (static_assert), so the
+     * statement sequence, and every value, is the rolled loop's for every input. The loop
+     * body holds one addition instead of two. */
+    static_assert(GT_CHUNKS < GT_GLV_TERMS-1, "QSB_CHAIN_PEEL: phi must precede the last trip");
+    #pragma unroll 1
+    for(int term=first+2;term<last-1;term++) {
+        if(term==GT_CHUNKS) {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        const uint32_t next_code=qsb_glv_code(term+1);
+#if QSB_PAIR_ORD
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,next_code);
+#else
+        qsb_pointadd_chain_pipe(X,Y,U,V,x1,y1,y0,table,next_code);
+#endif
+        #pragma unroll
+        for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
+    }
+#if QSB_PAIR_ORD
+    qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
+#else
+    _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#endif
     Load256(y0,y1);
 #else
     #pragma unroll 1
@@ -1386,6 +1457,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             Load256(y0,y1);
         }
     }
+#endif
 #endif
 #elif QSB_CHAIN_PP
     #pragma unroll 1
