@@ -3215,11 +3215,83 @@ static void launch_pinning_pipeline(
  * m=2d+1.  H[hi]=hi*256*base in both cases.
  * ============================================================ */
 
+__device__ size_t gt_build_projective_offset(uint64_t t) {
+    int ch=-1;
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    int d=(int)(t-gt_offset(ch));
+    return ((size_t)gt_offset(ch) + d) * 64;
+}
+
+__device__ size_t gt_build_projective(uint64_t t,
+    const uint64_t * __restrict__ d_L,
+    const uint64_t * __restrict__ d_H,
+    uint64_t px[4], uint64_t py[4], uint64_t pz[5]) {
+    int ch=-1;
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    int d=(int)(t-gt_offset(ch));
+    int m  = ch==0?d:2*d+1;
+#if QSB_BIGTBL
+    int hi = m >> QSB_GT_RADIX_BITS, lo = m & (GT_LO-1);
+#else
+    int hi = m >> 8, lo = m & 255;
+#endif
+    const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
+    const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
+    pz[0]=1; pz[1]=pz[2]=pz[3]=pz[4]=0;
+    if (hi == 0) {
+        for (int k = 0; k < 4; k++) { px[k] = Lp[k]; py[k] = Lp[4 + k]; }
+    } else {
+        uint64_t qx[4], qy[4];
+        for (int k = 0; k < 4; k++) {
+            px[k] = Hp[k]; py[k] = Hp[4 + k];
+            qx[k] = Lp[k]; qy[k] = Lp[4 + k];
+        }
+        _PointAddSecp256k1(px, py, pz, qx, qy);
+    }
+    return ((size_t)gt_offset(ch) + d) * 64;
+}
+
+#ifndef QSB_GT_BATCH
+#define QSB_GT_BATCH 16
+#endif
+
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
     uint8_t * __restrict__ gTable)
 {
+#if QSB_GT_BATCH > 1
+    const uint64_t t0 = ((uint64_t)blockIdx.x * blockDim.x + threadIdx.x) * QSB_GT_BATCH;
+    if (t0 >= GT_TOTAL_ENTRIES) return;
+    const int n = (GT_TOTAL_ENTRIES - t0) < (uint64_t)QSB_GT_BATCH ?
+                  (int)(GT_TOTAL_ENTRIES - t0) : QSB_GT_BATCH;
+    uint64_t zs[QSB_GT_BATCH][4], pref[QSB_GT_BATCH][4];
+    uint64_t acc[5] = {1, 0, 0, 0, 0};
+    for (int j = 0; j < n; j++) {
+        uint64_t px[4], py[4], pz[5];
+        size_t off = gt_build_projective(t0 + j, d_L, d_H, px, py, pz);
+        uint64_t *rec = (uint64_t *)(gTable + off);
+        for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
+        for (int k = 0; k < 4; k++) { zs[j][k] = pz[k]; pref[j][k] = acc[k]; }
+        if (j == 0) { for (int k = 0; k < 4; k++) acc[k] = pz[k]; }
+        else _ModMult(acc, pz);
+    }
+    _ModInv(acc);                 /* acc = 1/(z0*...*z_{n-1}) */
+    for (int j = n - 1; j >= 0; j--) {
+        uint64_t zinv[4], px[4], py[4];
+        if (j > 0) _ModMult(zinv, acc, pref[j]);      /* 1/z_j */
+        else { for (int k = 0; k < 4; k++) zinv[k] = acc[k]; }
+        if (j > 0) _ModMult(acc, zs[j]);              /* 1/(z0*...*z_{j-1}) */
+        uint64_t *rec = (uint64_t *)(gTable + gt_build_projective_offset(t0 + j));
+        for (int k = 0; k < 4; k++) { px[k] = rec[k]; py[k] = rec[4 + k]; }
+        _ModMult(px, zinv); _ModMult(py, zinv);
+        for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
+    }
+#else
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
     int ch=-1;
@@ -3257,6 +3329,7 @@ __global__ void kernel_build_gtable(
     size_t off = ((size_t)gt_offset(ch) + d) * 64;
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
+#endif
 }
 
 
@@ -4027,7 +4100,11 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
+#if QSB_GT_BATCH > 1
+        kernel_build_gtable<<<(gt_total/QSB_GT_BATCH+255)/256,256>>>(dL,dH,d_gt);
+#else
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+#endif
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
         if(gerr==cudaSuccess) gerr=cudaGetLastError();
