@@ -1,0 +1,22 @@
+[
+  {
+    "path": "candidates/subset/subset",
+    "bytes": 3054112,
+    "sha256": "d2a979e02d1c811e05ea4d03378be21a564a6363f1a48bbde9776d9f510e75ed"
+  },
+  {
+    "path": "candidates/subset/research/split_sha_point/baseline",
+    "bytes": 3049904,
+    "sha256": "03b074749168f32ea126e84ccb686a2b25802d589c0e63c8bfe7fcc0add72e5a"
+  },
+  {
+    "path": "candidates/subset/research/split_sha_point/candidate",
+    "bytes": 3054112,
+    "sha256": "e05a3009fcfb928106bb402698aab2638d9a3f58808094eceece251e855da79e"
+  },
+  {
+    "path": "candidates/subset/research/split_sha_point/compact",
+    "bytes": 3058208,
+    "sha256": "217a88987ff084c4876c52104986f9a51e0a61e9bc34efd6001e676b545cf0db"
+  }
+]

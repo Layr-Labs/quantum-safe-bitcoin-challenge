@@ -1,0 +1,42 @@
+QSB Digest Search [GPU 0]
+  GPU: NVIDIA GeForce RTX 3090 (82 SMs)
+  Loaded: n=150, t=9, preimage=9906, tail=218, suffix=44, prefix_rem=42
+  Patched tx_suffix: seq=0x10A994D9 (off=0) lt=2399405719 (off=36) tx_suffix_len=44
+  Short-epoch split: cut=137, 6 early omissions x 8218472724 epochs, 3 window omissions x 128 per epoch (1.052e+12 candidates)
+  Register-resident assembly: 10 kept pushes (108 message bytes) + 69 constant words, 6 SHA-256 blocks per candidate
+  GTable built on GPU in 0.17s (1048576 points, 64 MiB total, spot check passed)
+Window schedule classes: first=8 second=53 of 128
+  Mode: REAL, GPU 0 (global 0 of 1)
+  Batch: 8388608 combos per kernel launch
+  Search space (GLOBAL): C(150,9) = 1051964508672 combos
+  Search space (this GPU's slice): 82947113349100 combos (7884.973% of global)
+  Using short-epoch producer/consumer path (131072 epochs per launch)
+PROFILE_DEVICE name=NVIDIA GeForce RTX 3090 cc=8.6 sms=82 l2_bytes=6291456
+PROFILE_ATTR kernel=sha registers=123 local_bytes=0 shared_bytes=0 active_blocks=2
+PROFILE_ATTR kernel=point registers=128 local_bytes=0 shared_bytes=0 active_blocks=2
+PROFILE_ATTR kernel=inverse registers=126 local_bytes=0 shared_bytes=24576 active_blocks=2
+PROFILE_ATTR kernel=tail registers=127 local_bytes=0 shared_bytes=0 active_blocks=2
+PROFILE batch=1 producer=2.110336 first=0.628736 sha=37.420033 point=167.380997 inverse=11.839488 tail=28.888063 replay=0.307200 ms
+PROFILE batch=2 producer=1.596640 first=0.646144 sha=42.200066 point=167.933945 inverse=12.440576 tail=28.855295 replay=0.149504 ms
+PROFILE batch=3 producer=1.659968 first=0.647168 sha=41.563137 point=168.069122 inverse=11.241472 tail=28.450815 replay=0.148480 ms
+PROFILE batch=4 producer=1.670144 first=0.634880 sha=39.752705 point=169.225220 inverse=11.572224 tail=28.684288 replay=0.149504 ms
+PROFILE batch=5 producer=1.501696 first=0.635904 sha=42.155006 point=166.616058 inverse=11.772928 tail=28.742657 replay=0.147456 ms
+PROFILE batch=6 producer=1.657504 first=0.634880 sha=41.457664 point=165.943298 inverse=10.945536 tail=29.667328 replay=0.148480 ms
+PROFILE batch=7 producer=1.516608 first=0.640000 sha=41.216000 point=168.254471 inverse=12.019712 tail=28.070911 replay=0.148480 ms
+PROFILE batch=8 producer=1.583776 first=0.641024 sha=42.301441 point=168.510468 inverse=11.242496 tail=29.516800 replay=0.145408 ms
+PROFILE batch=9 producer=1.469664 first=0.634880 sha=41.093121 point=169.547775 inverse=11.672576 tail=27.817984 replay=0.149504 ms
+PROFILE batch=10 producer=1.574592 first=0.641024 sha=42.435585 point=166.412292 inverse=11.327488 tail=28.772352 replay=0.146432 ms
+PROFILE batch=11 producer=1.439456 first=0.640000 sha=40.631294 point=168.240128 inverse=11.348992 tail=28.588032 replay=0.148480 ms
+PROFILE batch=12 producer=1.452512 first=0.641024 sha=42.805248 point=165.935104 inverse=11.773952 tail=29.262848 replay=0.146432 ms
+PROFILE batch=13 producer=1.452256 first=0.641024 sha=41.115646 point=168.455170 inverse=10.947584 tail=28.673023 replay=0.148480 ms
+PROFILE batch=14 producer=1.465280 first=0.641024 sha=42.357761 point=166.850555 inverse=12.233728 tail=28.863487 replay=0.149504 ms
+PROFILE batch=15 producer=1.454624 first=0.637952 sha=41.670654 point=168.047623 inverse=10.919936 tail=28.617727 replay=0.152576 ms
+PROFILE batch=16 producer=1.392256 first=0.641024 sha=41.662464 point=167.219193 inverse=11.877376 tail=28.964865 replay=0.148480 ms
+PROFILE batch=17 producer=1.359488 first=0.641024 sha=41.991169 point=168.406021 inverse=10.850304 tail=28.849152 replay=0.149504 ms
+PROFILE batch=18 producer=1.354016 first=0.634880 sha=41.503742 point=167.733246 inverse=12.902400 tail=28.275711 replay=0.149504 ms
+PROFILE batch=19 producer=1.416736 first=0.641024 sha=42.099712 point=167.668732 inverse=11.859968 tail=28.751871 replay=0.147456 ms
+PROFILE batch=20 producer=1.310240 first=0.646144 sha=41.555969 point=167.618561 inverse=12.107776 tail=28.100609 replay=0.455680 ms
+PROFILE batch=21 producer=1.268256 first=0.641024 sha=41.962498 point=167.642105 inverse=11.309056 tail=28.541952 replay=0.146432 ms
+PROFILE batch=22 producer=1.246080 first=0.641024 sha=41.293823 point=169.100281 inverse=11.752448 tail=28.334080 replay=0.148480 ms
+PROFILE batch=23 producer=1.210560 first=0.647168 sha=42.806271 point=169.310211 inverse=12.070912 tail=29.417473 replay=0.147456 ms
+PROFILE batch=24 producer=1.228512 first=0.640000 sha=41.194496 point=168.036346 inverse=12.181504 tail=28.685312 replay=0.149504 ms

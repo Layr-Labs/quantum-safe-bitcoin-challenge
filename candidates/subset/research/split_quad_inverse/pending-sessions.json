@@ -1,0 +1,10 @@
+{
+  "initialSession": 64025,
+  "initialState": "terminal exit1; raw equality oracle error, preserved",
+  "qualifiedPairSession": 17144,
+  "qualifiedPairState": "terminal exit0; exact modular audit and both runs passed",
+  "warmSession": 13080,
+  "warmState": "terminal exit0; 1826 hits verified",
+  "productionCompileSession": 51925,
+  "productionCompileState": "terminal exit0; PTX matches tested candidate"
+}

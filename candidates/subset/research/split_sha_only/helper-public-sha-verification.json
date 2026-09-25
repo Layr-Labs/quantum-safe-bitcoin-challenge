@@ -1,0 +1,12 @@
+{
+  "checkedAt": "2026-09-24T22:04:06.073122+00:00",
+  "helper_scope": "Only publicly committed tree.cu and window_schedule_shared.cuh snippets, extracted with git show HEAD and checked against unauthenticated public raw URLs.",
+  "claims_independently_checked": [
+    "Both variants load the same eight first-state words for a given lane.",
+    "Eight-rotation SHA round sequences and feed-forward match.",
+    "Four constant blocks are processed in order 0,1,2,3.",
+    "S2Round uses uint32 arithmetic and only its passed working state plus t1/t2 temporaries."
+  ],
+  "correction": "The helper unnecessarily required firstA and firstB to be nonaliasing. These inputs are read-only; they may alias for an odd final epoch. The two output state arrays are distinct local arrays.",
+  "limits": "This verifies a local SHA equivalence argument, not whole-grinder correctness or a GPU performance gain. A GPU miter and independent CPU/OpenSSL oracle are prepared."
+}

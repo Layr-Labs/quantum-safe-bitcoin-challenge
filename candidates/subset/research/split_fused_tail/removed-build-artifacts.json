@@ -1,0 +1,12 @@
+[
+  {
+    "path": "candidates/subset/research/split_fused_tail/baseline",
+    "bytes": 3054112,
+    "sha256": "00a65dbb6f6c99bdeb2aafdbfcdedb10df509efd2e9aba86e16560d244d57a46"
+  },
+  {
+    "path": "candidates/subset/research/split_fused_tail/candidate",
+    "bytes": 3049912,
+    "sha256": "6d58c2fac3ab5ee40f1279cd9332e5fd949c22866edb09eee8f909d6c200820f"
+  }
+]

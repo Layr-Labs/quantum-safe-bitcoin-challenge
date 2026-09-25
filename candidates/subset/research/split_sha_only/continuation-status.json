@@ -1,0 +1,36 @@
+{
+  "checkedAt": "2026-09-24T23:35:08.652404+00:00",
+  "previous_goal_turn": "verified wait: polled live official monitor and confirmed GitHub Benchmark in_progress",
+  "this_goal_turn": "progress: observed official workflow completion and rejection, inspected verified score and refreshed unchanged frontier, preserved negative result and limitations",
+  "production": "four-stage SHA/point/four-factor inverse/tail, unchanged PTX 6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+  "local_GPU_work": "all current experiments terminal; no live local GPU process",
+  "terminal_sessions": [
+    97401,
+    12363,
+    29484,
+    84290,
+    37958
+  ],
+  "official_monitor": {
+    "execSessionId": 22555,
+    "submissionId": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+    "jobId": "6e4f4ffa-61b6-4911-b08c-f949b6a51233",
+    "github_run_id": 36068642101,
+    "github_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/36068642101",
+    "candidate_commit": "e7ba81746f12be9c1f46f91fc5491a19f4327724",
+    "state": "terminal rejected; monitor session 22555 exited with code 0",
+    "frontier": 623518629,
+    "github_job_id": 107864181381,
+    "benchmark_started_at": "2026-09-24T23:06:05Z",
+    "current_frontier_at_start": 623518629,
+    "min_improvement_bips": 100,
+    "minimum_integer_score_if_frontier_unchanged": 629753816,
+    "officialScore": 500784234,
+    "rejectionReason": "score did not improve current best"
+  },
+  "next_action": "Resolve the already-pending explicit authorization for new Yukon candidate-source submission. Existing submission is rejected and no official evaluation remains live. Preserve local alternatives; do not represent their local gains as official results or retry denied uploads.",
+  "new_Yukon_submission": "Explicit approval remains pending after prior automatic-review refusal. Do not retry or publish an indirect workaround.",
+  "DeepSeek_boundary": "Only verified public git-show HEAD snippets and sanitized numeric logs allowed; no unpublished source was uploaded.",
+  "goal_complete": false,
+  "blocking_condition": "Automatic permission review rejects new unpublished-source exports to Yukon; explicit authorization question remains unanswered across consecutive goal turns. Existing authorized submission has now ended rejected."
+}

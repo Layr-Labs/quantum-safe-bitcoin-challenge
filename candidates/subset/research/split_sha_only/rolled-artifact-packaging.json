@@ -1,0 +1,12 @@
+[
+  {
+    "removed_rebuildable_binary": "candidate_rolled",
+    "sha256": "f46f68f6bf3a5628a8db5789183ebc98e9e542ab69e24e10ef106b80c37ff43e",
+    "state": "compiled only; no running process uses it"
+  },
+  {
+    "removed_rebuildable_binary": "audit_rolled",
+    "sha256": "097529253bde4657fb3f9488b2bc312432ba7400881c1a85b86ad74159a40d48",
+    "state": "compiled only; no running process uses it"
+  }
+]

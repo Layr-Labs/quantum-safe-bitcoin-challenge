@@ -1,0 +1,22 @@
+[
+  {
+    "path": "candidates/subset/subset",
+    "bytes": 3103264,
+    "sha256": "4ed6a4f7256c020cd826e0827637c8e9ddabcfd14b3e953afeaa542502bfea3a"
+  },
+  {
+    "path": "candidates/subset/research/split_quad_inverse/audit",
+    "bytes": 3239232,
+    "sha256": "e4f1ed61370a1e96de7af4a7b84426561948604dab57ca1bbef09087e492b718"
+  },
+  {
+    "path": "candidates/subset/research/split_quad_inverse/baseline",
+    "bytes": 3054112,
+    "sha256": "00a65dbb6f6c99bdeb2aafdbfcdedb10df509efd2e9aba86e16560d244d57a46"
+  },
+  {
+    "path": "candidates/subset/research/split_quad_inverse/candidate",
+    "bytes": 3103272,
+    "sha256": "2f68bbefa6d8393e3f2021d96c3811bc738ba7a137c1e126008c67b2e64c5f6f"
+  }
+]

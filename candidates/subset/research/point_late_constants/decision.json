@@ -1,0 +1,35 @@
+{
+  "decision": "reject at compile gate; no GPU run",
+  "reason": "Late constants still use 128 point registers. Three-block variant has 280-byte cumulative stack and substantial spills in the helper. Intended register-pressure improvement not achieved.",
+  "production_header_restored": true,
+  "rejected_source_overlay": "rejected-source-overlay.tar.xz",
+  "overlay_members": [
+    {
+      "member": "tests/gpu_epochs/split_pipeline.cuh",
+      "sha256": "556b09a75a95bd13099c79019c70ceebf7d59df883e11a1413e2c7a13bdffd5a"
+    },
+    {
+      "member": "research/point_late_constants/late.cu",
+      "sha256": "c9dcd8664c68a85083cc638071b2259b129ffa2367d82eaf3a4a672efa1b5ecb"
+    },
+    {
+      "member": "research/point_late_constants/late3.cu",
+      "sha256": "d6ed2f1f8522dfcc0661e6074408d78a120a1a99fb1fcec6f953f5e6a8f83c08"
+    }
+  ],
+  "reproduction": "Extract overlay into an isolated copy of candidates/subset containing the prepared quad production sources. Do not run late wrappers without the archived header.",
+  "removed_rebuildable_binaries": [
+    {
+      "name": "baseline",
+      "sha256": "f61497c0addded620799c8aa2a61797125549f407821b80268437363a835327a"
+    },
+    {
+      "name": "late",
+      "sha256": "cc714c9dd18ae9e93964fbbef24a8a12daf037ec163d156c3515da9ff2eefb97"
+    },
+    {
+      "name": "late3",
+      "sha256": "7559ebe7214b8148f4f6c1e120d16f2c1b16951be4f7dca37f1845013aa904b3"
+    }
+  ]
+}

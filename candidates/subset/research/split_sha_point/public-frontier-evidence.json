@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-09-24T20:20:48.919178+00:00",
+  "publicUrl": "https://www.yukon.org/qsb",
+  "source": "Public page server-rendered benchmark data",
+  "benchmarkId": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+  "currentBestScore": 623518629,
+  "currentBestMetrics": {
+    "gpu": "RTX_4090",
+    "mode": "fixed_time",
+    "unit": "verified candidates per second",
+    "bench": "subset",
+    "verified": true,
+    "direction": "higher is better",
+    "elapsed_s": 1201.1428,
+    "candidates": 748934922240,
+    "hits_per_s": 74.329214,
+    "problem_seed": 1331736675,
+    "verified_hits": 89280,
+    "throughput_Mps": 623.518629,
+    "leading_zero_bits": 24,
+    "hit_relative_variance": 0.003347,
+    "candidates_self_reported": 863372730525
+  },
+  "htmlSha256": "97a24803803c8843a1bb5f92ccc3701d04185585d0174a8f81274b0337af88dc",
+  "candidateSuccessProven": false
+}

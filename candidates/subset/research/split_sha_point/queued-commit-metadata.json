@@ -1,0 +1,35 @@
+{
+  "sha": "e09ee4c0d48718d3dc571d9fb4e1bbfffeb59e13",
+  "node_id": "C_kwDOUXQ0adoAKGUwOWVlNGMwZDQ4NzE4ZDNkYzU3MWQ5ZmI0ZTFiYmZmZmViNTllMTM",
+  "url": "https://api.github.com/repos/Layr-Labs/quantum-safe-bitcoin-challenge/git/commits/e09ee4c0d48718d3dc571d9fb4e1bbfffeb59e13",
+  "html_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/commit/e09ee4c0d48718d3dc571d9fb4e1bbfffeb59e13",
+  "author": {
+    "name": "yukon-autoresearch[bot]",
+    "email": "300570855+yukon-autoresearch[bot]@users.noreply.github.com",
+    "date": "2026-09-24T18:26:30Z"
+  },
+  "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-09-24T18:26:30Z"
+  },
+  "tree": {
+    "sha": "0224e5f2646997e83cbcc7277b809de5f52dd61d",
+    "url": "https://api.github.com/repos/Layr-Labs/quantum-safe-bitcoin-challenge/git/trees/0224e5f2646997e83cbcc7277b809de5f52dd61d"
+  },
+  "message": "Validate submission 668a3a1b-af72-4415-b31a-51986ec89cd5\n\nCo-authored-by: carlosdelafi <266640164+carlosdelafi@users.noreply.github.com>",
+  "parents": [
+    {
+      "sha": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+      "url": "https://api.github.com/repos/Layr-Labs/quantum-safe-bitcoin-challenge/git/commits/7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+      "html_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/commit/7e95c40c99e57bded233ce57c7f453fbde9fd21c"
+    }
+  ],
+  "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqtWtWCRC1aQ7uu5UhlAAAspMQAB6h7ZWjoWtpecinXhFGtuiS\nXvVfPZ3+V6Nc/t+MXt9xPMrZAu7s74FRpS6sTEVatEH4PtXyJ9z8xLq8KUjeHcBD\nOZWMGWJmWYmHWnTWg26wEM9bD7QrZg2hbpfk5dgKB5ZUZv7/pR+r7Kv1xpzWvBfp\ndRA44eRkkKcvvXvoZ45hFYEu9XYBlsDUP3MuebIOw/khY3jYivqdO55ToBTuJ7Hf\nCI6qDB6sS2CfAfAir1XOd7Vud/dxVlzIlGsy+8I/Vkk3SQnL1nzCfYB0QBLChp/w\nrrOoEFPlM5MrXWuj3HfdDk0kXGx18Mv13Q/yb/ZATS2OlPA3ZLe4f+3Jzl8qTgRX\nVSwdL6rNoNQDrx8H50RMYrcHGMiTKWmyhJxfm/zdif8qNdDS5DdexpXVVnCcjQuw\n7PiHgx/1N3k/XrYmqKArEbN+sg0L45xjif3UksAc4bpyZlthqJMmbnQ/ApkYq5WP\nZ5tyYsHuMMqxD5zGOHTyf+ICaJHhgfBHSNrdoimQq7IhdzALdLkCgo7jIfZSmPmY\nOu6Ku7FPNczYLHjA8agFp+SgrImYjkARRvxjQk3BzYyfjVv1CfWEIjjDINsRNzOB\nxJABoivsv5oGJKUDKNoWe7VTRmQ1ZNdGsexbmcfZE4aapySioYmR9IRw7VdF5mwp\n8uvBR6XxzO41W61YjTdn\n=Y+wR\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 0224e5f2646997e83cbcc7277b809de5f52dd61d\nparent 7e95c40c99e57bded233ce57c7f453fbde9fd21c\nauthor yukon-autoresearch[bot] <300570855+yukon-autoresearch[bot]@users.noreply.github.com> 1790274390 +0000\ncommitter GitHub <noreply@github.com> 1790274390 +0000\n\nValidate submission 668a3a1b-af72-4415-b31a-51986ec89cd5\n\nCo-authored-by: carlosdelafi <266640164+carlosdelafi@users.noreply.github.com>",
+    "verified_at": "2026-09-24T18:26:30Z"
+  }
+}

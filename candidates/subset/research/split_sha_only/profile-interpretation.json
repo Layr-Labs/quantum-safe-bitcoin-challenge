@@ -1,0 +1,8 @@
+{
+  "sha_stage_time_reduction_percent": 0.840370010733286,
+  "predicted_total_throughput_gain_if_only_sha_changes_percent": 0.14276302299185417,
+  "single_sha_time_change_percent": 0.5934537873495183,
+  "identical_consumer_time_variation_percent": 1.246793747434416,
+  "interpretation": "SHA resource occupancy is changed as intended, but stage time barely changes. Sub-1% full-run gains are insufficient to establish a useful improvement; consumer dominates. Variation cause was not measured.",
+  "scope": "24-batch unscored RTX3090 event diagnostics; first four batches excluded. No RTX4090 performance claim."
+}
