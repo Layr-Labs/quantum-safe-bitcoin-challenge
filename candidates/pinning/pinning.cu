@@ -1,3 +1,6 @@
+#ifndef QSB_REMEASURE_TAG_0925185515336
+#define QSB_REMEASURE_TAG_0925185515336 1 /* no-op: exact-source re-draw identity */
+#endif
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
