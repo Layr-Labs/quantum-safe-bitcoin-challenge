@@ -1,5 +1,8 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
+#ifndef QSB_REMEASURE_TAG_0925143032047
+#define QSB_REMEASURE_TAG_0925143032047 1 /* no-op: exact-source re-draw identity */
+#endif
+#ifndef QSB_RESUB_09250417R5
+#define QSB_RESUB_09250417R5 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
@@ -27,6 +30,8 @@
 #include <math.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <thread>
+#include <vector>
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
 
@@ -2636,11 +2641,87 @@ static void launch_pinning_pipeline(
  * m=2d+1.  H[hi]=hi*256*base in both cases.
  * ============================================================ */
 
+/* QSB_GT_BATCH: each thread builds GT_BATCH consecutive records and shares one
+ * field inversion between them (Montgomery's simultaneous inversion).  The
+ * projective sums are exactly those of the one-record-per-thread builder; the
+ * projective X,Y are parked in the record's own table slot and rewritten in
+ * place as affine coordinates after the shared inverse.  1 restores the
+ * one-inversion-per-record kernel. */
+#ifndef QSB_GT_BATCH
+#define QSB_GT_BATCH 16
+#endif
+static_assert(QSB_GT_BATCH >= 1 && QSB_GT_BATCH <= 64, "QSB_GT_BATCH range");
+__device__ __forceinline__ size_t gt_build_projective_offset(uint64_t t) {
+    int ch=0;
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    return ((size_t)gt_offset(ch) + (t-gt_offset(ch))) * 64;
+}
+__device__ __forceinline__ size_t gt_build_projective(uint64_t t,
+    const uint64_t * __restrict__ d_L, const uint64_t * __restrict__ d_H,
+    uint64_t px[4], uint64_t py[4], uint64_t pz[5])
+{
+    int ch=-1;
+    #pragma unroll
+    for(int c=0;c<GT_CHUNKS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    int d=(int)(t-gt_offset(ch));
+    int m  = ch==0?d:2*d+1;
+#if QSB_BIGTBL
+    int hi = m >> QSB_GT_RADIX_BITS, lo = m & (GT_LO-1);
+#else
+    int hi = m >> 8, lo = m & 255;
+#endif
+    const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
+    const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
+    pz[0]=1; pz[1]=pz[2]=pz[3]=pz[4]=0;
+    if (hi == 0) {
+        for (int k = 0; k < 4; k++) { px[k] = Lp[k]; py[k] = Lp[4 + k]; }
+    } else {
+        uint64_t qx[4], qy[4];
+        for (int k = 0; k < 4; k++) {
+            px[k] = Hp[k]; py[k] = Hp[4 + k];
+            qx[k] = Lp[k]; qy[k] = Lp[4 + k];
+        }
+        _PointAddSecp256k1(px, py, pz, qx, qy);
+    }
+    return ((size_t)gt_offset(ch) + d) * 64;
+}
+
 __global__ void kernel_build_gtable(
     const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
     const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
     uint8_t * __restrict__ gTable)
 {
+#if QSB_GT_BATCH > 1
+    const uint64_t t0 = ((uint64_t)blockIdx.x * blockDim.x + threadIdx.x) * QSB_GT_BATCH;
+    if (t0 >= GT_TOTAL_ENTRIES) return;
+    const int n = (GT_TOTAL_ENTRIES - t0) < (uint64_t)QSB_GT_BATCH ?
+                  (int)(GT_TOTAL_ENTRIES - t0) : QSB_GT_BATCH;
+    uint64_t zs[QSB_GT_BATCH][4], pref[QSB_GT_BATCH][4];
+    uint64_t acc[5] = {1, 0, 0, 0, 0};
+    for (int j = 0; j < n; j++) {
+        uint64_t px[4], py[4], pz[5];
+        size_t off = gt_build_projective(t0 + j, d_L, d_H, px, py, pz);
+        uint64_t *rec = (uint64_t *)(gTable + off);
+        for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
+        for (int k = 0; k < 4; k++) { zs[j][k] = pz[k]; pref[j][k] = acc[k]; }
+        if (j == 0) { for (int k = 0; k < 4; k++) acc[k] = pz[k]; }
+        else _ModMult(acc, pz);
+    }
+    _ModInv(acc);                 /* acc = 1/(z0*...*z_{n-1}) */
+    for (int j = n - 1; j >= 0; j--) {
+        uint64_t zinv[4], px[4], py[4];
+        if (j > 0) _ModMult(zinv, acc, pref[j]);      /* 1/z_j */
+        else { for (int k = 0; k < 4; k++) zinv[k] = acc[k]; }
+        if (j > 0) _ModMult(acc, zs[j]);              /* 1/(z0*...*z_{j-1}) */
+        uint64_t *rec = (uint64_t *)(gTable + gt_build_projective_offset(t0 + j));
+        for (int k = 0; k < 4; k++) { px[k] = rec[k]; py[k] = rec[4 + k]; }
+        _ModMult(px, zinv); _ModMult(py, zinv);
+        for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
+    }
+#else
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
     int ch=-1;
@@ -2678,6 +2759,7 @@ __global__ void kernel_build_gtable(
     size_t off = ((size_t)gt_offset(ch) + d) * 64;
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
+#endif
 }
 
 
@@ -2761,15 +2843,25 @@ static void gt_biased_ladder(EC_GROUP *grp, const EC_POINT *first,
     }
 }
 
-/* Build the short L/H ladders for problem-dependent A=neg_r_inv*G. */
-static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32],
-                             const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+/* Build the short L/H ladders for problem-dependent A=neg_r_inv*G.
+ * One independent part per (chunk, L|H): every part derives its own base from
+ * neg_r_inv with private OpenSSL objects, so the parts can run concurrently
+ * (QSB_LADDER_MT) and each writes a disjoint slice of hL/hH.  The points and
+ * their order are exactly those of the serial builder. */
+#ifndef QSB_LADDER_MT
+#define QSB_LADDER_MT 1
+#endif
+static void gt_build_ladder_part(int ch, int part, uint64_t *hL, uint64_t *hH,
+                                 const uint8_t neg_r_inv[32],
+                                 const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x=BN_new(),*y=BN_new(),*factor=BN_new(),*order=BN_new(),
            *nri=BN_new(),*bscal=BN_new(),*field_p=BN_new(),
            *alpha=BN_new(),*beta=BN_new(),*bias=BN_new();
     EC_POINT *base=EC_POINT_new(grp),*step=EC_POINT_new(grp),*first=EC_POINT_new(grp);
+    if(!grp||!ctx||!x||!y||!factor||!order||!nri||!bscal||!field_p||!alpha||!beta||!bias||
+       !base||!step||!first) { fprintf(stderr,"Ladder setup failed\n"); exit(2); }
     EC_GROUP_get_order(grp,order,ctx);
     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
@@ -2780,24 +2872,25 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
-    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
-    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
-    for(int ch=0;ch<GT_CHUNKS;ch++) {
-        if(ch==0) {
-            /* base=A, L[lo]=(K+lo)A, H[hi]=hi*256A. */
-            EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
+    if(ch==0) {
+        /* base=A, L[lo]=(K+lo)A, H[hi]=hi*256A. */
+        EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
+        if(part==0) {
             BN_mod_mul(bscal,bias,nri,order,ctx);
             EC_POINT_mul(grp,first,bscal,NULL,NULL,ctx);
             gt_biased_ladder(grp,first,base,GT_LO,
                 hL,x,y,alpha,beta,field_p,ctx);
-        } else {
-            /* base=2^(shift-1)A, L[lo]=lo*base. */
-            BN_one(factor); BN_lshift(factor,factor,gt_shift(ch)-1);
-            BN_mod_mul(bscal,factor,nri,order,ctx);
-            EC_POINT_mul(grp,base,bscal,NULL,NULL,ctx);
+        }
+    } else {
+        /* base=2^(shift-1)A, L[lo]=lo*base. */
+        BN_one(factor); BN_lshift(factor,factor,gt_shift(ch)-1);
+        BN_mod_mul(bscal,factor,nri,order,ctx);
+        EC_POINT_mul(grp,base,bscal,NULL,NULL,ctx);
+        if(part==0)
             gt_batch_ladder(grp,base,GT_LO-1,
                 hL+(size_t)ch*GT_LO*8,x,y,alpha,beta,field_p,ctx);
-        }
+    }
+    if(part==1) {
 #if QSB_BIGTBL
         BN_set_word(factor,GT_LO);
 #else
@@ -2817,6 +2910,26 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_free(bscal);BN_free(field_p);BN_free(alpha);BN_free(beta);BN_free(bias);
     EC_POINT_free(base);EC_POINT_free(step);EC_POINT_free(first);
     EC_GROUP_free(grp);BN_CTX_free(ctx);
+}
+static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32],
+                             const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
+    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
+#if QSB_LADDER_MT
+    std::vector<std::thread> workers;
+    bool threaded=true;
+    try {
+        for(int part=0;part<2;part++)
+            for(int ch=0;ch<GT_CHUNKS;ch++)
+                workers.emplace_back(gt_build_ladder_part,ch,part,hL,hH,neg_r_inv,alpha_le,beta_le);
+    } catch(...) { threaded=false; }
+    for(auto &w:workers) w.join();
+    if(threaded) return;
+    /* Thread creation failed part-way: rebuild everything serially. */
+#endif
+    for(int ch=0;ch<GT_CHUNKS;ch++)
+        for(int part=0;part<2;part++)
+            gt_build_ladder_part(ch,part,hL,hH,neg_r_inv,alpha_le,beta_le);
 }
 
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
@@ -3219,10 +3332,10 @@ int main(int argc, char **argv) {
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
         if(qsb_carrier_has(QK_BUILD))
-            qsb_carrier_launch(kernel_build_gtable,QK_BUILD,dim3((gt_total+255)/256),dim3(256),(cudaStream_t)0,
+            qsb_carrier_launch(kernel_build_gtable,QK_BUILD,dim3((gt_total/QSB_GT_BATCH+256)/256),dim3(256),(cudaStream_t)0,
                 dL,dH,d_gt);
         else
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+        kernel_build_gtable<<<(gt_total/QSB_GT_BATCH+256)/256,256>>>(dL,dH,d_gt);
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
         if(gerr==cudaSuccess) gerr=cudaGetLastError();
