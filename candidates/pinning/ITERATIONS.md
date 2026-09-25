@@ -340,7 +340,7 @@ a score, so neither own track is pending. Prefer the strongest substantial
 successor while retaining both terminal source snapshots for diagnosis.
 
 
-## 2026-09-17 — proof-checker two-chain partition prerequisite
+## 2026-09-17 — Bend two-chain partition prerequisite
 
 Refreshed pinning frontier: promoted `04664954`, commit `067302c`, official
 score 686,230,583 verified candidates/s. The source still uses one 15-point
@@ -348,10 +348,10 @@ deferred-XYZZ chain; its public note identifies a balanced two-chain split as
 the largest unmeasured ILP direction. Relevant pending notes were inspected;
 none establishes this split as solved or faster.
 
-Added `research/ (removed) two_chain_partition/` against exact promoted source hashes.
-proof checker proves a reusable append/sum law and the exact 8+7 partition of the
-frontier's 15 signed shifted terms. the checker prints `All terms check.`.
-A deliberate dropped-chunk-8 mutation in `mutated proof` is rejected. The theorem
+Added `research/bend/two_chain_partition/` against exact promoted source hashes.
+Bend 2.0.5 proves a reusable append/sum law and the exact 8+7 partition of the
+frontier's 15 signed shifted terms. `bend PROOF.bend` prints `All terms check.`.
+A deliberate dropped-chunk-8 mutation in `BROKEN.bend` is rejected. The theorem
 covers term and weight preservation only; it does not cover secp256k1 exceptional
 addition, XYZZ/deferred-anchor invariants, CUDA behavior, or speed.
 
@@ -381,7 +381,7 @@ prepare changes or a materially lower-state two-chain construction.
 
 ## 2026-09-17 — naïve two-XYZZ chain rejected by resource lower bound
 
-Combined the checked proof-checker 8+7 schedule law with the exact-frontier native CUDA
+Combined the checked Bend 8+7 schedule law with the exact-frontier native CUDA
 report. The promoted prepare specialization already consumes 128 registers per
 thread with zero spills. A second live XYZZ accumulator requires at least 32
 additional 32-bit register-equivalents; its affine-Y anchor adds eight before
@@ -397,7 +397,7 @@ expensive CUDA implementation/submission of the obvious split while pending
 fused-reduction and two-field-checkpoint candidates provide official evidence.
 
 
-## 2026-09-17 — proof-checker check of pending two-field denominator
+## 2026-09-17 — Bend check of pending two-field denominator
 
 Inspected pending `31e98e4`. Its revised two-field checkpoint removes the
 candidate-tree checkpoint and reduces saved state from96B to64B/candidate,
@@ -405,7 +405,7 @@ claiming roughly2GiB less logical state/checkpoint traffic per2^24 batch. It
 trades extra cofactor products for that traffic reduction and reports a local
 counterbalanced+1.7063% RTX4090 result; this remains unofficial while validating.
 
-Added `research/ (removed) two_field_denominator/`. proof checker proves the polynomial
+Added `research/bend/two_field_denominator/`. Bend2.0.5 proves the polynomial
 prerequisite for its denominator substitution: the XYZZ invariant V^2=A^3
 implies V^2*d=A^3*d, which is the cross product behind
 A/(V*d)=V/(A^2*d). A deliberate A^2 exponent mutation is rejected. The proof
