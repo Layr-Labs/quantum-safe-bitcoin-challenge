@@ -49,6 +49,48 @@ __device__ __forceinline__ void qsb_packed_raw_mul(
     Load256(out,tmp);
 }
 
+/* QSB_FIN_CAP_IMAD (GPUMath.h): the finish kernel's hot products use _ModMultCoreFin, whose
+ * carry captures run on the multiply pipe. Same bits as qsb_packed_raw_mul for every input. */
+#if QSB_FIN_CAP_IMAD
+#if !QSB_SHA_ALU_ADD || !QSB_FIELD_SC
+#error "QSB_FIN_CAP_IMAD needs pin_zero_add (QSB_SHA_ALU_ADD=1) and the short-carry field product (QSB_FIELD_SC=1)"
+#endif
+__device__ __forceinline__ void qsb_packed_raw_mul_fin(
+    uint64_t *out,const uint64_t *a,const uint64_t *b) {
+    uint64_t tmp[5];_ModMultCoreFin(tmp,a,b);tmp[4]=0;
+    Load256(out,tmp);
+}
+#define QSB_FIN_RAW_MUL qsb_packed_raw_mul_fin
+#else
+#define QSB_FIN_RAW_MUL qsb_packed_raw_mul
+#endif
+
+/* QSB_FIN_BAL2 (GPUMath.h): the finish kernel's field adds use the finish-only copies, whose
+ * selects, captures and K32 masks run on the multiply pipe. Same bits for every input. */
+#if QSB_FIN_BAL2
+#if !QSB_SHA_ALU_ADD
+#error "QSB_FIN_BAL2 needs pin_zero_add (QSB_SHA_ALU_ADD=1)"
+#endif
+#define QSB_FIN_ADD _ModAdd256Fin
+#define QSB_FIN_ADDL _ModAddLazyFin
+#define QSB_FIN_SUB _ModSub256Fin
+#else
+#define QSB_FIN_ADD _ModAdd256
+#define QSB_FIN_ADDL _ModAddLazy
+#define QSB_FIN_SUB _ModSub256
+#endif
+#if QSB_FIN_BAL2 & 2
+/* QSB_FIN_BAL2 bit 2: the two parities leave qsb_packed_finish as the two pubkey prefix bytes,
+ * byte 0 = 2 + parity_u and byte 1 = 2 + parity_v (each parity is 0 or 1, so the bytes cannot
+ * carry into each other). The kernel picks byte ri with the PRMT that builds pb[0], so the
+ * pack (shift, or), the unpack (shift) and the two "| 2" ops are gone. Both adds run as IMAD. */
+__device__ __forceinline__ uint32_t qsb_fin_prefix_bytes(uint32_t pu, uint32_t pv) {
+    uint32_t y;
+    asm("{\n.reg .u32 f;\nld.const.u32 f,[pin_pow2+32];\nmad.lo.u32 %0,%1,f,%2;\n}" : "=r"(y) : "r"(pv), "r"(pu));
+    return qsb_fadd(y, pin_one_mul, 0x202u);
+}
+#endif
+
 #ifndef QSB_PARITY_WINDOW
 #define QSB_PARITY_WINDOW 1
 #endif
@@ -63,15 +105,62 @@ __device__ __forceinline__ void qsb_packed_prepare(
     bool usable, bool active, int n, ulonglong2 *saved, uint64_t *roots) {
     // All lanes finish reading their digits/anchor before tree overwrites.
     __syncthreads();
+#if QSB_TREE_GFILL
+    /* QSB_TREE_GFILL (cofactor_checkpoint.h): D comes back as hc = U*cofactor, exact. */
+    static_assert(QSB_RECOVERY_N==QSB_TREE_N && QSB_PREP_STATE,"QSB_TREE_GFILL geometry");
+#if QSB_TREE_TOP5 && (QSB_POST_GLUE & 1)
+    /* QSB_POST_GLUE bit 1 (cofactor_checkpoint.h): TOP5 with 16-byte limb pairs in shared memory. */
+    qsb_cofactor_top5v<QSB_RECOVERY_N>(D,U,roots,(char *)qsb_digit_arena());
+#elif QSB_TREE_TOP5
+    /* QSB_TREE_TOP5 (cofactor_checkpoint.h): same contract, 24 warp-multiplies per block. */
+    qsb_cofactor_top5<QSB_RECOVERY_N>(D,U,roots,(uint64_t (*)[QSB_GF_COLS])qsb_digit_arena());
+#else
+    qsb_cofactor_gfill<QSB_RECOVERY_N>(D,U,roots,(uint64_t (*)[QSB_GF_COLS])qsb_digit_arena());
+#endif
+    if(active) {
+        uint64_t hc[4],vbar[4],tbar[4];
+        #pragma unroll
+        for(int k=0;k<4;k++)hc[k]=usable?D[k]:0ULL;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
     uint64_t (*products)[2*QSB_RECOVERY_N]=(uint64_t (*)[2*QSB_RECOVERY_N])qsb_digit_arena();
     uint64_t (*excluded)[QSB_RECOVERY_N]=(uint64_t (*)[QSB_RECOVERY_N])(qsb_digit_arena()+8*QSB_TREE_N);
     qsb_cofactor_prepare<QSB_RECOVERY_N>(D,roots,products,excluded);
     if(active) {
         uint64_t hc[4],vbar[4],tbar[4];
+#endif
+#if QSB_TREE_GFILL
+#elif QSB_PREP_STATE
+        /* Zero state for unusable lanes from hc = 0 (QSB_PREP_STATE, pinning.cu). */
+        qsb_packed_raw_mul(hc,U,D);
+        #pragma unroll
+        for(int k=0;k<4;k++)hc[k]=usable?hc[k]:0ULL;
+        qsb_packed_raw_mul(vbar,Y,hc);
+        qsb_packed_raw_mul(tbar,V,hc);
+#else
         qsb_packed_raw_mul(hc,U,D);
         qsb_packed_raw_mul(vbar,Y,hc);
         qsb_packed_raw_mul(tbar,V,hc);
         if(!usable)for(int k=0;k<4;k++){vbar[k]=0;tbar[k]=0;}
+#endif
+#if QSB_PREP_STATE
+        /* Block-major state (QSB_PREP_STATE, pinning.cu): plane p at st + p*QSB_RECOVERY_N. */
+        (void)n;
+        ulonglong2 *st=saved+(uint32_t)(blockIdx.x*(QSB_STATE_PLANES*QSB_RECOVERY_N)+threadIdx.x);
+#if QSB_PREP_STATE == 2
+        uint64_t *sw=(uint64_t *)st;
+        qsb_st_u64(sw,vbar[0]); qsb_st_u64(sw+1,vbar[1]);
+        qsb_st_u64(sw+2*QSB_RECOVERY_N,vbar[2]); qsb_st_u64(sw+2*QSB_RECOVERY_N+1,vbar[3]);
+        qsb_st_u64(sw+4*QSB_RECOVERY_N,tbar[0]); qsb_st_u64(sw+4*QSB_RECOVERY_N+1,tbar[1]);
+        qsb_st_u64(sw+6*QSB_RECOVERY_N,tbar[2]); qsb_st_u64(sw+6*QSB_RECOVERY_N+1,tbar[3]);
+#else
+        qsb_st_v2(st,vbar[0],vbar[1]);
+        qsb_st_v2(st+QSB_RECOVERY_N,vbar[2],vbar[3]);
+        qsb_st_v2(st+2*QSB_RECOVERY_N,tbar[0],tbar[1]);
+        qsb_st_v2(st+3*QSB_RECOVERY_N,tbar[2],tbar[3]);
+#endif
+#else
         size_t i=(size_t)blockIdx.x*QSB_RECOVERY_N+threadIdx.x,s=(size_t)n;
 #if QSB_STREAM2
         qsb_st_v2(&saved[0*s+i],vbar[0],vbar[1]);
@@ -83,6 +172,7 @@ __device__ __forceinline__ void qsb_packed_prepare(
         saved[1*s+i]=make_ulonglong2(vbar[2],vbar[3]);
         saved[2*s+i]=make_ulonglong2(tbar[0],tbar[1]);
         saved[3*s+i]=make_ulonglong2(tbar[2],tbar[3]);
+#endif
 #endif
     }
 }
@@ -103,14 +193,14 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * accept any representative in [0,2^256); only x1/x2 (hashed) and the parity inputs
      * need [0,p). So u and v stay raw and m, sum use the carry-folding lazy add
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
-    qsb_packed_raw_mul(u,tbar,weighted_inv);
-    qsb_packed_raw_mul(v,vbar,root_inv);
+    QSB_FIN_RAW_MUL(u,tbar,weighted_inv);
+    QSB_FIN_RAW_MUL(v,vbar,root_inv);
 #if QSB_NEG_Y_MAC
-    _ModAddLazy(l,u,v); _ModSub256(m,u,v);
+    QSB_FIN_ADDL(l,u,v); QSB_FIN_SUB(m,u,v);
 #else
-    _ModSub256(l,u,v); _ModAddLazy(m,u,v);
+    QSB_FIN_SUB(l,u,v); QSB_FIN_ADDL(m,u,v);
 #endif
-    _ModAddLazy(sum,l,m);
+    QSB_FIN_ADDL(sum,l,m);
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
@@ -136,20 +226,20 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * subtraction-free identity: x_i - a == sum*(l or m - c)), so a - x_i == -r_i and
      * s1 = l*(a-x1) == -(l*r1), s2 = m*(a-x2) == -(m*r2). See qsb_sum_parity. */
 #if QSB_FIN_RAWS
-    _ModSub256(t,l,c); qsb_packed_raw_mul(s,sum,t);
+    QSB_FIN_SUB(t,l,c); QSB_FIN_RAW_MUL(s,sum,t);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_u=qsb_parity_product_window(l,s,b,1u);
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
-    qsb_add_boundary(s,a); _ModAdd256(x1,s,a);
-    _ModSub256(t,m,c); qsb_packed_raw_mul(s,sum,t);
+    qsb_add_boundary(s,a); QSB_FIN_ADD(x1,s,a);
+    QSB_FIN_SUB(t,m,c); QSB_FIN_RAW_MUL(s,sum,t);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
 #endif
-    qsb_add_boundary(s,a); _ModAdd256(x2,s,a);
+    qsb_add_boundary(s,a); QSB_FIN_ADD(x2,s,a);
 #else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW
@@ -164,7 +254,9 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     qsb_packed_raw_mul(v,m,s);
 #endif
 #endif
-#if QSB_PARITY_WINDOW
+#if QSB_PARITY_WINDOW && (QSB_FIN_BAL2 & 2)
+    return qsb_fin_prefix_bytes(parity_u,parity_v);
+#elif QSB_PARITY_WINDOW
     return parity_u|(parity_v<<1);
 #else
     return qsb_sum_parity(u,b,1u)|(qsb_sum_parity(v,b,0u)<<1);

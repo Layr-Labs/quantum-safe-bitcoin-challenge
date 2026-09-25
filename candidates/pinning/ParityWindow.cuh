@@ -12,6 +12,19 @@
 #ifndef QSB_PARITY_WINDOW_NARROW
 #define QSB_PARITY_WINDOW_NARROW 1
 #endif
+/* QSB_FIN_BAL2 bit 1: the narrow window's two carry accumulators start from the constant-bank
+ * zero pin_zero_add instead of the literal 0. top = 0 + carry is the same value, but ptxas then
+ * emits the first capture as IMAD.X (multiply pipe) instead of SEL. */
+#if QSB_FIN_BAL2 & 1
+#define QSB_PW_TOP0 "ld.const.u32 top,[pin_zero_add];\n"
+/* Bit 1 also adds a0*b0 into mid1 (bit 0 of a0*b0 is a0 & b0 & 1, and bit 0 of a sum is the XOR
+ * of the addends' bit 0) and leaves mid1 unmasked: the only reader of mid >> 32 is the fast-path
+ * return in qsb_parity_product_window, which keeps bit 0 alone. */
+#define QSB_PW_MID1_TAIL "mad.lo.u32 mid1,a0,b0,mid1;\n"
+#else
+#define QSB_PW_TOP0 "mov.u32 top,0;\n"
+#define QSB_PW_MID1_TAIL "and.b32 mid1,mid1,1;\n"
+#endif
 
 __device__ __forceinline__ void qsb_parity_window_words(
     uint64_t &mid, uint64_t &top, const uint64_t *a, const uint64_t *b) {
@@ -30,7 +43,7 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mov.b64 {b6,b7}, %9;\n"
 #if QSB_PARITY_WINDOW_NARROW
         "mul.wide.u32 acc,a0,b6;\n"
-        "mov.u32 top,0;\n"
+        QSB_PW_TOP0
 #else
         "mul.wide.u32 acc,a0,b5;\n"
         "mov.u32 pcarry,0;\n"
@@ -93,6 +106,19 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a7,b0;\n"
         "add.u64 mid,mid,t;\n"
         "mov.b64 {mid0,mid1},mid;\n"
+#if QSB_FIN_CAP_IMAD
+        /* QSB_FIN_CAP_IMAD: only bit 0 of mid1 survives the final mask, and bit 0 of a sum is
+         * the XOR of the addends' bit 0 (no carry reaches bit 0), while bit 0 of a_i*b_j is
+         * a_i & b_j & 1. So mid1 + sum(a_i*b_j) has the same bit 0 as the XOR chain below,
+         * and the seven steps run as IMAD on the multiply pipe instead of LOP3. */
+        "mad.lo.u32 mid1,a1,b7,mid1;\n"
+        "mad.lo.u32 mid1,a2,b6,mid1;\n"
+        "mad.lo.u32 mid1,a3,b5,mid1;\n"
+        "mad.lo.u32 mid1,a4,b4,mid1;\n"
+        "mad.lo.u32 mid1,a5,b3,mid1;\n"
+        "mad.lo.u32 mid1,a6,b2,mid1;\n"
+        "mad.lo.u32 mid1,a7,b1,mid1;\n"
+#else
         "and.b32 bit,a1,b7;\n"
         "xor.b32 mid1,mid1,bit;\n"
         "and.b32 bit,a2,b6;\n"
@@ -107,11 +133,12 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "xor.b32 mid1,mid1,bit;\n"
         "and.b32 bit,a7,b1;\n"
         "xor.b32 mid1,mid1,bit;\n"
-        "and.b32 mid1,mid1,1;\n"
+#endif
+        QSB_PW_MID1_TAIL
         "mov.b64 %0,{mid0,mid1};\n"
 #if QSB_PARITY_WINDOW_NARROW
         "mul.wide.u32 acc,a6,b7;\n"
-        "mov.u32 top,0;\n"
+        QSB_PW_TOP0
 #else
         "mul.wide.u32 acc,a5,b7;\n"
         "mov.u32 pcarry,0;\n"
@@ -164,7 +191,13 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     // limb too, so the baseline sum-parity exceptional correction cannot fire.
     if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u) {
 #endif
+#if QSB_FIN_BAL2 & 1
+        /* QSB_FIN_BAL2 bit 1: mid >> 32 already holds a0*b0 + mid1, whose bit 0 is a0&b0 ^ mid1,
+         * so the a[0]&b[0] term is gone and two LOP3 (XOR3, then mask) finish the same bit 0. */
+        return ((uint32_t)(mid>>32)^(uint32_t)beta[0]^(uint32_t)(q>>32)^neg)&1u;
+#else
         return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(q>>32)^neg)&1u);
+#endif
     }
     uint64_t raw[4];
     qsb_packed_raw_mul(raw,a,b);
