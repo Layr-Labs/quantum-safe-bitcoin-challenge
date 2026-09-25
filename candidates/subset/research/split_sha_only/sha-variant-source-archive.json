@@ -1,0 +1,19 @@
+{
+  "archive": "sha-variant-sources.tar.xz",
+  "sources": [
+    {
+      "source": "candidate.cu",
+      "sha256": "fa0a1b1878148e9224b7e9c08b94320db2426cac538b37ae1751bebf46cc38be"
+    },
+    {
+      "source": "candidate_bound3.cu",
+      "sha256": "ec0aa9552b413fe081a503d1ade28a57268b18abd48696c48ab10235b46aa7b6"
+    },
+    {
+      "source": "candidate_single.cu",
+      "sha256": "60afb273baae9406da99207547c3916360f5c85512ef21d160115bd5099b7204"
+    }
+  ],
+  "restore_command": "tar -xJf sha-variant-sources.tar.xz",
+  "scope": "Completed and unselected SHA variants; no live process uses these loose sources."
+}

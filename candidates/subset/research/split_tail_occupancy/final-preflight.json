@@ -1,0 +1,10 @@
+{
+  "checkedAt": "2026-09-24T23:00:21.705345+00:00",
+  "production_hashes_match": true,
+  "production_ptx_sha256": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+  "track_bytes": 8254931,
+  "limit": 8388608,
+  "root_score_absent": true,
+  "submitted": false,
+  "submission_permission": "Still pending explicit user permission after prior automatic-review denial; no retry."
+}

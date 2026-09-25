@@ -1,0 +1,26 @@
+{
+  "ptx_sha256": "2d04e2054a16f3f3b3ea4d71140acc962ad4335ee5804a84c5bffc103bd67c32",
+  "results": [
+    {
+      "arch": "sm_86",
+      "entries": [
+        {
+          "kernel": "_Z15kernel_sha_onlyPKjPmjj",
+          "properties": "for 'sm_86'\nptxas info    : Function properties for _Z15kernel_sha_onlyPKjPmjj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 80 registers, used 0 barriers, 376 bytes cmem[0]\nptxas info    : Compile time = 416.055 ms\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "f8af2181720d53a0f1a2f232dda8a64e676c98c53559dc9e6c358d3920c096a9"
+    },
+    {
+      "arch": "sm_89",
+      "entries": [
+        {
+          "kernel": "_Z15kernel_sha_onlyPKjPmjj",
+          "properties": "for 'sm_89'\nptxas info    : Function properties for _Z15kernel_sha_onlyPKjPmjj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 80 registers, used 0 barriers, 376 bytes cmem[0]\nptxas info    : Compile time = 395.341 ms\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "af080019f0922d33655167faec93fdea60440dd39b3db62ac4a912cb4e59be28"
+    }
+  ],
+  "scope": "offline ptxas compilation, not GPU execution"
+}

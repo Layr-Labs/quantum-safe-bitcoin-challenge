@@ -1,0 +1,16 @@
+QSB Digest Search [GPU 0]
+  GPU: NVIDIA GeForce RTX 3090 (82 SMs)
+  Loaded: n=150, t=9, preimage=9906, tail=218, suffix=44, prefix_rem=42
+  Patched tx_suffix: seq=0x10A994D9 (off=0) lt=2399405719 (off=36) tx_suffix_len=44
+  Short-epoch split: cut=137, 6 early omissions x 8218472724 epochs, 3 window omissions x 128 per epoch (1.052e+12 candidates)
+  Register-resident assembly: 10 kept pushes (108 message bytes) + 69 constant words, 6 SHA-256 blocks per candidate
+  GTable built on GPU in 0.17s (1048576 points, 64 MiB total, spot check passed)
+Window schedule classes: first=8 second=53 of 128
+  Mode: REAL, GPU 0 (global 0 of 1)
+  Batch: 8388608 combos per kernel launch
+  Search space (GLOBAL): C(150,9) = 1051964508672 combos
+  Search space (this GPU's slice): 82947113349100 combos (7884.973% of global)
+  Using short-epoch producer/consumer path (131072 epochs per launch)
+  [GPU 0] epoch=29884416/8218472724 (3825M/1051964M)  254.8M/s  elapsed=15s
+  [GPU 0] epoch=59768832/8218472724 (7650M/1051964M)  254.1M/s  elapsed=30s
+  [GPU 0] epoch=89653248/8218472724 (11475M/1051964M)  253.6M/s  elapsed=45s

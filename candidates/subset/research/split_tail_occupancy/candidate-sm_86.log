@@ -1,0 +1,69 @@
+ptxas info    : 56352 bytes gmem, 9048 bytes cmem[3], 56 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh' for 'sm_86'
+ptxas info    : Function properties for _Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 0 barriers, 392 bytes cmem[0], 8 bytes cmem[2]
+ptxas info    : Compile time = 121.286 ms
+ptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z21kernel_split_inverse4Pmjj' for 'sm_86'
+ptxas info    : Function properties for _Z21kernel_split_inverse4Pmjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 126 registers, used 1 barriers, 24576 bytes smem, 368 bytes cmem[0], 8 bytes cmem[2]
+ptxas info    : Compile time = 95.891 ms
+ptxas info    : Function properties for _Z15qsb_root_fermat15QsbInverseWords
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z18kernel_split_pointPKhPmPhj' for 'sm_86'
+ptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 0 barriers, 380 bytes cmem[0]
+ptxas info    : Compile time = 139.178 ms
+ptxas info    : Function properties for _Z23qsb_pair_front3_z_valuemmmmPKhmmmmmmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z16kernel_split_shaPKjPmjj' for 'sm_86'
+ptxas info    : Function properties for _Z16kernel_split_shaPKjPmjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 124 registers, used 0 barriers, 376 bytes cmem[0]
+ptxas info    : Compile time = 524.002 ms
+ptxas info    : Compiling entry function '_Z19kernel_build_gtablePKmS0_Ph' for 'sm_86'
+ptxas info    : Function properties for _Z19kernel_build_gtablePKmS0_Ph
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 0 barriers, 120 bytes cumulative stack size, 376 bytes cmem[0]
+ptxas info    : Compile time = 88.323 ms
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z23kernel_verify_pair_hitsPKhPhPK12epoch_desc_tPKjS0_i' for 'sm_86'
+ptxas info    : Function properties for _Z23kernel_verify_pair_hitsPKhPhPK12epoch_desc_tPKjS0_i
+    120 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 140 registers, used 1 barriers, 120 bytes cumulative stack size, 396 bytes cmem[0], 8 bytes cmem[2]
+ptxas info    : Compile time = 1624.720 ms
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z25qsb_pair_verify_candidatePK12epoch_desc_tPKjiPKh
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj' for 'sm_86'
+ptxas info    : Function properties for _Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj
+    96 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 96 bytes cumulative stack size, 424 bytes cmem[0]
+ptxas info    : Compile time = 43.304 ms
+ptxas info    : Compiling entry function '_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm' for 'sm_86'
+ptxas info    : Function properties for _Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm
+    112 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 112 bytes cumulative stack size, 440 bytes cmem[0]
+ptxas info    : Compile time = 95.754 ms
+ptxas info    : Compiling entry function '_Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_tPj' for 'sm_86'
+ptxas info    : Function properties for _Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_tPj
+    80 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 47 registers, used 0 barriers, 80 bytes cumulative stack size, 424 bytes cmem[0]
+ptxas info    : Compile time = 79.343 ms
+ptxas info    : Compiling entry function '_Z23kernel_build_first_flatPK12epoch_desc_tPjjj' for 'sm_86'
+ptxas info    : Function properties for _Z23kernel_build_first_flatPK12epoch_desc_tPjjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 47 registers, used 0 barriers, 376 bytes cmem[0]
+ptxas info    : Compile time = 30.439 ms

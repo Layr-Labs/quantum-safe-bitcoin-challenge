@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/run_qualified.py", line 6, in <module>
+    subprocess.run([str(p/'audit')],stdout=log,stderr=subprocess.STDOUT,check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/audit']' returned non-zero exit status 1.

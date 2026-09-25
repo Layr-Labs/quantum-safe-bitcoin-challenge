@@ -1,0 +1,6 @@
+{
+  "tested": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+  "production": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+  "matches": true,
+  "host_geometry_review": "For default 256 threads and 128 windows, 4*(block/windows)=8; positive epoch counts are at most 524288, so ceil division is unchanged without overflow."
+}

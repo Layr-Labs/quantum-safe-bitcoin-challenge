@@ -1,0 +1,23 @@
+{
+  "tested_epoch_counts": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    8,
+    9,
+    15,
+    16,
+    17,
+    31,
+    32,
+    33,
+    65
+  ],
+  "mapping_bijective": true,
+  "pairing_unchanged": true,
+  "scope": "Default 128 windows only; checks index mapping, not SHA arithmetic.",
+  "checkedAt": "2026-09-24T21:51:43.630127+00:00"
+}

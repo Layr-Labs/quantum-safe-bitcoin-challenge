@@ -1,0 +1,7 @@
+{
+  "checkedAt": "2026-09-24T22:50:19.125786+00:00",
+  "ptx_sha256": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+  "default_tail_min_blocks": 2,
+  "runtime_unchanged": true,
+  "candidate_not_enabled": true
+}

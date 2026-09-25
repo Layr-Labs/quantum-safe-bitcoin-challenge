@@ -1,0 +1,85 @@
+{
+  "benchmark": {
+    "id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+    "setterAccountId": "016e262b-5d20-4f95-a1ed-e208574dc681",
+    "challengeId": "f1a40cdb-2170-4f70-9ca2-ef7e2fe4bb20",
+    "trackName": "subset",
+    "status": "open",
+    "name": "eigenlabs/quantum-safe-bitcoin-challenge/subset",
+    "description": "Optimize the QSB subset-selection grinder: ECDSA public-key recovery + SHA-256 over candidates that rebuild a ~1.7 KB section of a ~9.9 KB preimage (9 of 150 pushes omitted). Maximize verified candidate throughput on a single GPU.",
+    "category": "cuda",
+    "direction": "+",
+    "promotionMode": "automatic",
+    "editablePaths": [
+      "candidates/subset"
+    ],
+    "setupCommand": [
+      "bash",
+      "-lc",
+      "./setup.sh subset"
+    ],
+    "benchmarkCommand": [
+      "bash",
+      "-lc",
+      "./benchmark.sh subset"
+    ],
+    "scorePath": "score-subset.json",
+    "networkPolicy": null,
+    "runner": {
+      "provider": "github-actions",
+      "workflow": "benchmark-subset.yml"
+    },
+    "maxConcurrentWorkflows": null,
+    "minScoreImprovementBips": 100,
+    "maxSubmissionBytes": 8388608,
+    "hardware": null,
+    "claimedScoreEnabled": false,
+    "researchDiscussionsEnabled": false,
+    "sourceUrl": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge",
+    "sourceBranch": "main",
+    "sourceRef": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+    "rootDir": null,
+    "baselineScore": 61997057,
+    "baselineMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1200.4397,
+      "candidates": 74423730176,
+      "hits_per_s": 7.390625,
+      "problem_seed": 1317999898,
+      "verified_hits": 8872,
+      "throughput_Mps": 61.997057,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.010617,
+      "candidates_self_reported": 75245682952
+    },
+    "currentBestScore": 623518629,
+    "currentBestMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1201.1428,
+      "candidates": 748934922240,
+      "hits_per_s": 74.329214,
+      "problem_seed": 1331736675,
+      "verified_hits": 89280,
+      "throughput_Mps": 623.518629,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.003347,
+      "candidates_self_reported": 863372730525
+    },
+    "setupSnapshotRef": "gha:96a1e544a8e8acc09f3e9f3721e7f208fa08cfce",
+    "closesAt": "2026-10-07T23:00:00.000Z",
+    "openedAt": "2026-09-14T16:58:07.305Z",
+    "createdAt": "2026-09-14T16:35:58.623Z",
+    "updatedAt": "2026-09-24T14:51:20.397Z",
+    "deletedAt": null
+  }
+}

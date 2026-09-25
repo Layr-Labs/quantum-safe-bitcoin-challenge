@@ -1,0 +1,11 @@
+{
+  "first_trial_session": 75299,
+  "first_trial_status": "terminal exit0",
+  "pair_trial_session": 99499,
+  "pair_trial_status": "terminal exit0; candidate and baseline both verified",
+  "variants": [
+    "candidate-b",
+    "baseline-c"
+  ],
+  "checkedAt": "2026-09-24T20:09:27.633769+00:00"
+}

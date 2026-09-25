@@ -1,0 +1,7 @@
+{
+  "execSessionId": 22555,
+  "submissionId": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+  "script": "watch_submission.py",
+  "pollSeconds": 120,
+  "instruction": "Poll this existing process handle; do not start a duplicate monitor while it is live. A timeout is not a terminal remote verdict. Read watch-latest.json only alongside a live process poll."
+}

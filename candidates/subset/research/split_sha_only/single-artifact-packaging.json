@@ -1,0 +1,27 @@
+[
+  {
+    "original": "output-candidate_single-i/run.json",
+    "compressed": "output-candidate_single-i/run.json.gz",
+    "sha256": "f66875476c49114a5832a26e2f7c5027c9ce6e2e481cca8daaeb0fa417f18adc"
+  },
+  {
+    "original": "output-candidate_single-j/run.json",
+    "compressed": "output-candidate_single-j/run.json.gz",
+    "sha256": "c5e4e411c2afbf8d14c8c8425e41c58056c90b4040cd8d53c05bc71d6ac506e7"
+  },
+  {
+    "original": "output-candidate-k/run.json",
+    "compressed": "output-candidate-k/run.json.gz",
+    "sha256": "80626398663330b34cf17fd4c74f57561e7a51af576253e21e0e0cf8bbb5903f"
+  },
+  {
+    "removed_rebuildable_binary": "candidate_single",
+    "sha256": "b787c3f1daa1e6236a16cc769ce4c3553107399c6d1f4c5ee5bdab7cad6f1248",
+    "terminal_session": 87946
+  },
+  {
+    "removed_rebuildable_binary": "audit_single",
+    "sha256": "2cc7403eca76c3eb61daf9bce1e592c8eeae670cc1b9e6c93045e499ea910039",
+    "terminal_session": 87946
+  }
+]

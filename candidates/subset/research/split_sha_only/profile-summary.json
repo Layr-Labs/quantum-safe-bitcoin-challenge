@@ -1,0 +1,74 @@
+{
+  "paired": {
+    "attributes": [
+      "PROFILE_DEVICE name=NVIDIA GeForce RTX 3090 cc=8.6 sms=82 l2_bytes=6291456",
+      "PROFILE_ATTR kernel=sha registers=123 local_bytes=0 shared_bytes=0 active_blocks=2",
+      "PROFILE_ATTR kernel=consumer registers=128 local_bytes=16 shared_bytes=49152 active_blocks=2"
+    ],
+    "measured_batches": 24,
+    "excluded_initial_batches": 4,
+    "steady_mean_ms": {
+      "producer": 1.5802112,
+      "first": 0.6793216,
+      "sha": 43.27536625,
+      "consumer": 209.3879806,
+      "replay": 0.1798656
+    },
+    "steady_stage_share_percent": {
+      "producer": 0.6194410798877908,
+      "first": 0.26629333186291926,
+      "sha": 16.963896726234857,
+      "consumer": 82.0798617415114,
+      "replay": 0.07050712050304757
+    },
+    "steady_mean_total_ms": 255.10274525
+  },
+  "bound3": {
+    "attributes": [
+      "PROFILE_DEVICE name=NVIDIA GeForce RTX 3090 cc=8.6 sms=82 l2_bytes=6291456",
+      "PROFILE_ATTR kernel=sha registers=79 local_bytes=0 shared_bytes=0 active_blocks=3",
+      "PROFILE_ATTR kernel=consumer registers=128 local_bytes=16 shared_bytes=49152 active_blocks=2"
+    ],
+    "measured_batches": 24,
+    "excluded_initial_batches": 4,
+    "steady_mean_ms": {
+      "producer": 1.5692944,
+      "first": 0.6789632,
+      "sha": 42.911693050000004,
+      "consumer": 210.6022408,
+      "replay": 0.150528
+    },
+    "steady_stage_share_percent": {
+      "producer": 0.613214694202258,
+      "first": 0.2653104548532045,
+      "sha": 16.7680970067547,
+      "consumer": 82.29455779010128,
+      "replay": 0.05882005408856203
+    },
+    "steady_mean_total_ms": 255.91271945
+  },
+  "single": {
+    "attributes": [
+      "PROFILE_DEVICE name=NVIDIA GeForce RTX 3090 cc=8.6 sms=82 l2_bytes=6291456",
+      "PROFILE_ATTR kernel=sha registers=40 local_bytes=0 shared_bytes=0 active_blocks=6",
+      "PROFILE_ATTR kernel=consumer registers=128 local_bytes=16 shared_bytes=49152 active_blocks=2"
+    ],
+    "measured_batches": 24,
+    "excluded_initial_batches": 4,
+    "steady_mean_ms": {
+      "producer": 1.5646112,
+      "first": 0.7510015999999999,
+      "sha": 43.53218555,
+      "consumer": 211.99861685,
+      "replay": 0.175104
+    },
+    "steady_stage_share_percent": {
+      "producer": 0.6063878721631836,
+      "first": 0.2910616146779125,
+      "sha": 16.871532919026393,
+      "consumer": 82.16315348708326,
+      "replay": 0.0678641070492542
+    },
+    "steady_mean_total_ms": 258.0215192
+  }
+}

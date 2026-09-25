@@ -1,0 +1,5 @@
+{
+  "decision": "reject 128-thread paired SHA variant",
+  "reason": "Warm verified score regressed 0.6480% and completed work regressed 0.4464%; 1814 common-prefix hits match. Offline sm86/sm89 both use 124 registers, so the proposed register-occupancy improvement was not observed.",
+  "production_changed": false
+}

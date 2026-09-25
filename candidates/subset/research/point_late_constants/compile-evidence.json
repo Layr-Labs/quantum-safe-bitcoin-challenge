@@ -1,0 +1,86 @@
+{
+  "default_production_ptx_unchanged": true,
+  "variants": {
+    "baseline": {
+      "ptx_sha256": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+      "binary_sha256": "f61497c0addded620799c8aa2a61797125549f407821b80268437363a835327a"
+    },
+    "late": {
+      "ptx_sha256": "fe46109f34308d03f179011718b729d747ffbf6e1e445abf159833d90af1e851",
+      "binary_sha256": "cc714c9dd18ae9e93964fbbef24a8a12daf037ec163d156c3515da9ff2eefb97"
+    },
+    "late3": {
+      "ptx_sha256": "3fecbd79752601377fcd1e6c002f03af13383171833fca03a4670e65faedd0ff",
+      "binary_sha256": "7559ebe7214b8148f4f6c1e120d16f2c1b16951be4f7dca37f1845013aa904b3"
+    }
+  },
+  "resources": [
+    {
+      "variant": "baseline",
+      "arch": "sm_86",
+      "entries": [
+        {
+          "kernel": "_Z18kernel_split_pointPKhPmPhj",
+          "properties": "for 'sm_86'\nptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 0 barriers, 380 bytes cmem[0]\nptxas info    : Compile time = 134.218 ms\nptxas info    : Function properties for _Z23qsb_pair_front3_z_valuemmmmPKhmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "610ac1ee0b51649e8db17253644d618f35546cc58407ecc1d21fb2bedba30437"
+    },
+    {
+      "variant": "baseline",
+      "arch": "sm_89",
+      "entries": [
+        {
+          "kernel": "_Z18kernel_split_pointPKhPmPhj",
+          "properties": "for 'sm_89'\nptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 0 barriers, 380 bytes cmem[0]\nptxas info    : Compile time = 135.644 ms\nptxas info    : Function properties for _Z23qsb_pair_front3_z_valuemmmmPKhmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "7d188ec338be9f4d63cec45d3d2dc4fb373ba3e1d70590af08740724023f30ff"
+    },
+    {
+      "variant": "late",
+      "arch": "sm_86",
+      "entries": [
+        {
+          "kernel": "_Z18kernel_split_pointPKhPmPhj",
+          "properties": "for 'sm_86'\nptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 0 barriers, 380 bytes cmem[0]\nptxas info    : Compile time = 135.308 ms\nptxas info    : Function properties for _Z20qsb_late_point_frontmmmmPKh\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "829f73a23872259979b114a684e8ef44d19453c9a16078f0f43cf553b04d1a37"
+    },
+    {
+      "variant": "late",
+      "arch": "sm_89",
+      "entries": [
+        {
+          "kernel": "_Z18kernel_split_pointPKhPmPhj",
+          "properties": "for 'sm_89'\nptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 0 barriers, 380 bytes cmem[0]\nptxas info    : Compile time = 139.300 ms\nptxas info    : Function properties for _Z20qsb_late_point_frontmmmmPKh\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "cef3c13f87bf79a971c79e7995803c69bbc6d0c1e38a0f90dce15070acb3650e"
+    },
+    {
+      "variant": "late3",
+      "arch": "sm_86",
+      "entries": [
+        {
+          "kernel": "_Z18kernel_split_pointPKhPmPhj",
+          "properties": "for 'sm_86'\nptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj\n    280 bytes stack frame, 32 bytes spill stores, 36 bytes spill loads\nptxas info    : Used 80 registers, used 0 barriers, 280 bytes cumulative stack size, 380 bytes cmem[0]\nptxas info    : Compile time = 136.093 ms\nptxas info    : Function properties for _Z20qsb_late_point_frontmmmmPKh\n    0 bytes stack frame, 456 bytes spill stores, 436 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "b064890bcecffd935d693433528f682753041c87d9fcccd296cca65cd524f381"
+    },
+    {
+      "variant": "late3",
+      "arch": "sm_89",
+      "entries": [
+        {
+          "kernel": "_Z18kernel_split_pointPKhPmPhj",
+          "properties": "for 'sm_89'\nptxas info    : Function properties for _Z18kernel_split_pointPKhPmPhj\n    280 bytes stack frame, 32 bytes spill stores, 36 bytes spill loads\nptxas info    : Used 80 registers, used 0 barriers, 280 bytes cumulative stack size, 380 bytes cmem[0]\nptxas info    : Compile time = 134.179 ms\nptxas info    : Function properties for _Z20qsb_late_point_frontmmmmPKh\n    0 bytes stack frame, 456 bytes spill stores, 436 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "6388243e60e824b673d2a71a85c832c3c22d9b9639fb0075610c82ba9fbfca35"
+    }
+  ],
+  "scope": "Offline CUDA12.8 ptxas resources; no GPU correctness or throughput result. Derived PTX/cubins removed after hashing; sources and commands reproduce them."
+}

@@ -1,0 +1,10 @@
+{
+  "total_file_bytes_before_this_record": 5413904,
+  "track_max_expanded_bytes": 8388608,
+  "root_diagnostic_score_absent": true,
+  "production_source_hashes_verified": true,
+  "production_ptx_matches_tested": true,
+  "submitted": false,
+  "authorization_pending": true,
+  "prior_official_frontier": 623518629
+}

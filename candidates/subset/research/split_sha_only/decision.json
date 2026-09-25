@@ -1,0 +1,10 @@
+{
+  "decision": "Retain as smaller-workspace research alternative; leave prepared production unchanged.",
+  "reason": "Warm gain over four-stage quad baseline is below 1%; direct comparison against promoted public baseline would measure total gain independently.",
+  "warm_verified_gain_percent": 0.39916875110908023,
+  "warm_completed_gain_percent": 0.4405286343612369,
+  "correctness": "1850 emitted hits verified; all 1844 shared-prefix hits identical. This is not an exhaustive arithmetic proof.",
+  "workspace_bytes_per_candidate": 32,
+  "production_workspace_bytes_per_candidate": 129,
+  "external_source_upload": false
+}
