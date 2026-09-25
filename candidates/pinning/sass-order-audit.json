@@ -1,0 +1,61 @@
+{
+  "function": "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre",
+  "first_address": "0xeb10",
+  "permutation": [
+    2,
+    3,
+    0,
+    1
+  ],
+  "original": [
+    {
+      "address": 60176,
+      "file_offset": 140304,
+      "lo": 26676328833,
+      "hi": 4125367830748416,
+      "dest": 8,
+      "base": 54,
+      "offset": 0,
+      "text": "LDG.E.128.CONSTANT R8, [R54.64]",
+      "function": "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre"
+    },
+    {
+      "address": 60192,
+      "file_offset": 140320,
+      "lo": 17618862635393,
+      "hi": 255086900976896,
+      "dest": 12,
+      "base": 54,
+      "offset": 16,
+      "text": "LDG.E.128.CONSTANT R12, [R54.64+0x10]",
+      "function": "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre"
+    },
+    {
+      "address": 60208,
+      "file_offset": 140336,
+      "lo": 35211049990529,
+      "hi": 325455645154560,
+      "dest": 32,
+      "base": 54,
+      "offset": 32,
+      "text": "LDG.E.128.CONSTANT R32, [R54.64+0x20]",
+      "function": "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre"
+    },
+    {
+      "address": 60224,
+      "file_offset": 140352,
+      "lo": 52803235248513,
+      "hi": 389227319565568,
+      "dest": 20,
+      "base": 54,
+      "offset": 48,
+      "text": "LDG.E.128.CONSTANT R20, [R54.64+0x30]",
+      "function": "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre"
+    }
+  ],
+  "changed_bytes": 16,
+  "original_sha256": "b28ecfb85c48c1449cee691b7f41f650b72bd4d6bd9e44e28ccb1b9cc1378818",
+  "candidate_sha256": "3feab7926416e401d8f7bc83f9887a8fb7cb3ccc98ce5f4fcf300920ffe56ea0",
+  "unchanged_outside_bundle": true,
+  "gpu_validated": false
+}
