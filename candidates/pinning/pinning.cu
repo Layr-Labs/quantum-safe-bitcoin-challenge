@@ -328,6 +328,27 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
+/* Host-only async loop (no device code, no carrier knob, no kernel argument change).
+ * QSB_ASYNC=1: QSB_SLOTS stays the number of DEVICE buffer sets (stream + completion lane +
+ *   pipeline state), which the 21 GiB table caps at 2; QSB_ASYNC_HOST_SLOTS batches are in
+ *   flight, batch b on device set b%QSB_SLOTS with its own readback + completion event
+ *   (host slot b%HOST_SLOTS). Reusing a device set waits on the GPU (cudaStreamWaitEvent on
+ *   batch b-QSB_SLOTS's event), never on the host, so the host runs HOST_SLOTS-1 batches
+ *   ahead (32 x 8M at ~950 M/s = ~0.28 s) instead of one (~9 ms).
+ * QSB_ASYNC_BLOCKING: cudaDeviceScheduleBlockingSync + cudaEventBlockingSync slot events, so
+ *   the launch thread sleeps instead of spinning and a quota/SIGSTOP-starved host is not
+ *   charged for waiting.
+ * The exact OpenSSL gate and hit writes run on their own thread, and SIGTERM/SIGINT drain
+ *   every launched batch (hits gated and written) before exit 0, so in-flight work is kept. */
+#ifndef QSB_ASYNC
+#define QSB_ASYNC 1
+#endif
+#ifndef QSB_ASYNC_HOST_SLOTS
+#define QSB_ASYNC_HOST_SLOTS 32
+#endif
+#ifndef QSB_ASYNC_BLOCKING
+#define QSB_ASYNC_BLOCKING 1
+#endif
 #ifndef QSB_SKIP_UNUSED_MIDSTATE
 #define QSB_SKIP_UNUSED_MIDSTATE 1 /* scored TAIL_PRE path already carries the midstate in qsb_tail_pre */
 #endif
@@ -4084,6 +4105,78 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 }
 #endif
 
+#if QSB_ASYNC && (!QSB_SLOTPIPE || !QSB_REFILL_BEFORE_GATE || !QSB_COMPACT_READBACK || !QSB_HOST_GATE || \
+                  QSB_TAIL_TAB || !QSB_OVERLAP_SEQUENCES || !QSB_TAIL_PRE || !QSB_SKIP_UNUSED_MIDSTATE || \
+                  QSB_ASYNC_HOST_SLOTS <= QSB_SLOTS)
+#error "QSB_ASYNC needs the slot pipeline, refill-before-gate, compact readback, the host gate, overlapped sequences, no tail table, the tail-pre midstate path, and HOST_SLOTS > QSB_SLOTS"
+#endif
+#if QSB_ASYNC
+#include <pthread.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+static volatile sig_atomic_t g_pin_stop = 0;
+static void qsb_pin_on_stop(int sig) { g_pin_stop = sig; }
+/* Publication thread: the launch thread hands each retired batch's (seq, lt, hits) here. */
+enum { QSB_PV_RING = 256 };
+typedef struct { uint32_t seq, lt, n; uint32_t hits[64]; } qsb_pv_job_t;
+typedef struct {
+    pthread_t th; pthread_mutex_t mu; pthread_cond_t cv_put, cv_get;
+    qsb_pv_job_t ring[QSB_PV_RING]; unsigned head, tail; int done, fail, fd; uint64_t published;
+    const pinning2_params_t *pp; EC_GROUP *grp; BN_CTX *ctx; const BIGNUM *order, *nri; const EC_POINT *R;
+} qsb_pv_t;
+static qsb_pv_t g_pv;
+static void *qsb_pv_main(void *arg) {
+    qsb_pv_t *q = (qsb_pv_t *)arg;
+    sigset_t ms; sigemptyset(&ms); sigaddset(&ms, SIGTERM); sigaddset(&ms, SIGINT); sigaddset(&ms, SIGHUP);
+    pthread_sigmask(SIG_BLOCK, &ms, NULL);   /* stop signals stay with the launch thread */
+    for (;;) {
+        pthread_mutex_lock(&q->mu);
+        while (q->head == q->tail && !q->done) pthread_cond_wait(&q->cv_get, &q->mu);
+        if (q->head == q->tail) { pthread_mutex_unlock(&q->mu); break; }
+        qsb_pv_job_t *j = &q->ring[q->tail % QSB_PV_RING];
+        pthread_mutex_unlock(&q->mu);
+        for (uint32_t h = 0; h < j->n; h++) {
+            const uint32_t raw = j->hits[h];
+            const uint32_t lt = j->lt + (raw & 0x3FFFFFFF);
+            const int ri = qsb_gate_accept(q->pp, j->seq, lt, (raw >> 30) & 1, q->grp, q->ctx, q->order, q->nri, q->R);
+            if (ri < 0) continue;
+            char line[80];
+            int wl = snprintf(line, sizeof line, "sequence=%u locktime=%u recid=%d\n", j->seq, lt, ri);
+            const char *wp = line;
+            while (wl > 0) {
+                ssize_t k = write(q->fd, wp, (size_t)wl);
+                if (k < 0) { if (errno == EINTR) continue; __atomic_store_n(&q->fail, 1, __ATOMIC_RELAXED); break; }
+                wp += k; wl -= (int)k;
+            }
+            __atomic_add_fetch(&q->published, 1, __ATOMIC_RELAXED);
+        }
+        pthread_mutex_lock(&q->mu);
+        q->tail++;
+        pthread_cond_signal(&q->cv_put);
+        pthread_mutex_unlock(&q->mu);
+    }
+    return NULL;
+}
+static void qsb_pv_push(qsb_pv_t *q, uint32_t seq, uint32_t lt, uint32_t n, const uint32_t *hits) {
+    if (n == 0) return;
+    if (n > 64) n = 64;
+    pthread_mutex_lock(&q->mu);
+    while (q->head - q->tail >= (unsigned)QSB_PV_RING) pthread_cond_wait(&q->cv_put, &q->mu);
+    qsb_pv_job_t *j = &q->ring[q->head % QSB_PV_RING];
+    pthread_mutex_unlock(&q->mu);
+    j->seq = seq; j->lt = lt; j->n = n; memcpy(j->hits, hits, n * sizeof(uint32_t));
+    pthread_mutex_lock(&q->mu);
+    q->head++;
+    pthread_cond_signal(&q->cv_get);
+    pthread_mutex_unlock(&q->mu);
+}
+static void qsb_pv_finish(qsb_pv_t *q) {
+    pthread_mutex_lock(&q->mu); q->done = 1; pthread_cond_signal(&q->cv_get); pthread_mutex_unlock(&q->mu);
+    pthread_join(q->th, NULL);
+}
+#endif
 
 int main(int argc, char **argv) {
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
@@ -4620,6 +4713,21 @@ int main(int argc, char **argv) {
                (int)QSB_SLOTS);
         fflush(stdout);
     }
+#if QSB_ASYNC
+    /* Host slots: one readback (count + 64 indices, device + pinned) and one completion event per
+     * in-flight batch. Device sets (streams, lanes, pipeline state) stay QSB_SLOTS. */
+    qsb::SlotReadback a_rb[QSB_ASYNC_HOST_SLOTS];
+    cudaEvent_t a_done[QSB_ASYNC_HOST_SLOTS];
+    {
+        cudaError_t se = cudaSuccess;
+        for (int h = 0; h < QSB_ASYNC_HOST_SLOTS && se == cudaSuccess; h++) {
+            se = a_rb[h].init();
+            if (se == cudaSuccess)
+                se = cudaEventCreateWithFlags(&a_done[h], cudaEventDisableTiming | (QSB_ASYNC_BLOCKING ? cudaEventBlockingSync : 0));
+        }
+        if (se != cudaSuccess) { fprintf(stderr, "Async host slot setup failed: %s\n", cudaGetErrorString(se)); return 1; }
+    }
+#endif
 #else
     uint32_t *d_hit_cnt, *d_hit_idx;
 #if QSB_HOST_READBACK
@@ -4788,6 +4896,16 @@ int main(int argc, char **argv) {
      * Only the host's waiting changes -- it waits on the slot it is about to
      * reuse instead of on the whole device, so slot A's root-group kernels and
      * finish kernel overlap slot B's prepare kernel. */
+#if QSB_ASYNC
+    /* Set after the (sync-heavy) table build so setup keeps its default waits; the slot
+     * events carry cudaEventBlockingSync regardless. */
+    { cudaError_t fe = QSB_ASYNC_BLOCKING ? cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync) : cudaSuccess;
+      unsigned df = 0; cudaGetDeviceFlags(&df);
+      if (fe != cudaSuccess) cudaGetLastError();
+      printf("  Host sync: %s (flags 0x%x rc %d), %d batches in flight on %d device sets, publish thread on\n",
+             (df & cudaDeviceScheduleMask) == cudaDeviceScheduleBlockingSync ? "blocking" : "spin/auto",
+             df, (int)fe, (int)QSB_ASYNC_HOST_SLOTS, (int)QSB_SLOTS); }
+#endif
     cudaDeviceSynchronize();      /* table build + uploads ran on the legacy
                                    * default stream; non-blocking slot streams
                                    * are not ordered against it. */
@@ -4800,6 +4918,36 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_ASYNC
+    uint32_t a_seq[QSB_ASYNC_HOST_SLOTS] = {0}, a_lt[QSB_ASYNC_HOST_SLOTS] = {0};
+    int a_busy[QSB_ASYNC_HOST_SLOTS] = {0};
+    auto a_collect = [&](int h, uint32_t &count, uint32_t *hits) -> int {
+        count = 0;
+        if (!a_busy[h]) return 0;
+        cudaError_t err = cudaEventSynchronize(a_done[h]);
+        if (err == cudaSuccess) err = cudaGetLastError();
+        if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+        count = a_rb[h].count();
+        if (count > 64) count = 64;
+        if (count) memcpy(hits, a_rb[h].indices(), count * sizeof(uint32_t));
+        a_busy[h] = 0;
+        return 0;
+    };
+    {
+        mkdir("results", 0755);
+        char fname[256];
+        snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+        g_pv.fd = open(fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (g_pv.fd < 0) { fprintf(stderr, "ERROR: cannot open %s\n", fname); return 1; }
+        g_pv.pp = &pp; g_pv.grp = gate_grp; g_pv.ctx = gate_ctx; g_pv.order = gate_order; g_pv.nri = gate_nri; g_pv.R = gate_R;
+        g_pv.head = g_pv.tail = 0; g_pv.done = g_pv.fail = 0; g_pv.published = 0;
+        pthread_mutex_init(&g_pv.mu, NULL); pthread_cond_init(&g_pv.cv_put, NULL); pthread_cond_init(&g_pv.cv_get, NULL);
+        if (pthread_create(&g_pv.th, NULL, qsb_pv_main, &g_pv) != 0) { fprintf(stderr, "ERROR: publish thread\n"); return 1; }
+    }
+    signal(SIGTERM, qsb_pin_on_stop);
+    signal(SIGINT, qsb_pin_on_stop);
+    int a_stop = 0;
+#endif
 #if QSB_REFILL_BEFORE_GATE
     auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
                             uint32_t h_hit, const uint32_t *hits) -> int {
@@ -4926,6 +5074,51 @@ int main(int argc, char **argv) {
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
+#if QSB_ASYNC
+            {
+            const uint64_t b = batch_no++;
+            const int d = (int)(b % (uint64_t)QSB_SLOTS);                 /* device set */
+            const int h = (int)(b % (uint64_t)QSB_ASYNC_HOST_SLOTS);      /* host slot  */
+            const uint32_t completed_seq = a_seq[h], completed_lt = a_lt[h];
+            uint32_t completed_count = 0, completed_hits[64];
+            if (a_collect(h, completed_count, completed_hits)) return 1;  /* batch b-HOST_SLOTS */
+            cudaStream_t st = slot_stream[d];
+            a_seq[h] = seq; a_lt[h] = batch_lt;
+            cudaError_t slot_error = cudaSuccess;
+            /* Device set d was last used by batch b-QSB_SLOTS, still in flight: order on the GPU. */
+            if (b >= (uint64_t)QSB_SLOTS)
+                slot_error = cudaStreamWaitEvent(st, a_done[(b - QSB_SLOTS) % QSB_ASYNC_HOST_SLOTS], 0);
+            if (slot_error == cudaSuccess)
+                slot_error = cudaMemsetAsync(a_rb[h].device_count(), 0, sizeof(uint32_t), st);
+            if (slot_error != cudaSuccess) {
+                fprintf(stderr, "Slot input enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                return 1;
+            }
+            launch_pinning_pipeline<true>(
+                d_mid_slot[d], d_suffix, gpu_suffix_len,
+                pp.seq_offset, pp.lt_offset,
+                pp.total_preimage_len,
+                seq, batch_lt,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+                a_rb[h].device_count(), a_rb[h].device_indices(),
+                batch_sz, easy, single_hash,
+                d_pipeline_state[d],d_pipeline_roots[d],d_pipeline_tree[d],
+                d_super_roots[d],d_root_checkpoint[d], cur_tp, st, &slot_flow[d]);
+            st = slot_flow[d].completion_stream();
+            slot_error = a_rb[h].enqueue(st, a_done[h]);
+            if (slot_error != cudaSuccess) {
+                fprintf(stderr, "Slot completion enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                return 1;
+            }
+            a_busy[h] = 1;
+            if (__atomic_load_n(&g_pv.fail, __ATOMIC_RELAXED)) { fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+            qsb_pv_push(&g_pv, completed_seq, completed_lt, completed_count, completed_hits);
+            total_searched += batch_sz;
+            if (g_pin_stop) { a_stop = 1; break; }
+            continue;
+            }
+#endif
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
 #if QSB_REFILL_BEFORE_GATE
@@ -4999,6 +5192,9 @@ int main(int argc, char **argv) {
             }
         }
 
+#if QSB_ASYNC
+        if (a_stop) break;
+#endif
         /* slot_seq/slot_lt remain attached to the old batch until its done
          * event is synchronized on reuse. cur_tp is passed to the kernel by
          * value; the optional uploaded midstate is also private to each slot.
@@ -5020,6 +5216,27 @@ int main(int argc, char **argv) {
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
         }
     }
+#if QSB_ASYNC
+    /* Stop: drain every launched batch oldest first, publish its hits, empty the gate queue. */
+    for (int i = 0; i < QSB_ASYNC_HOST_SLOTS; i++) {
+        const int h = (int)((batch_no + (uint64_t)i) % (uint64_t)QSB_ASYNC_HOST_SLOTS);
+        uint32_t count = 0, hits[64];
+        const uint32_t hs = a_seq[h], hl = a_lt[h];
+        if (a_collect(h, count, hits)) return 1;
+        qsb_pv_push(&g_pv, hs, hl, count, hits);
+    }
+    qsb_pv_finish(&g_pv);
+    if (g_pv.fail) { fprintf(stderr, "ERROR: hit write failed\n"); return 1; }
+    {
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
+        printf("  [GPU %d] Stopped by signal %d after draining every launched batch: %luM in %.2fs (%.1fM/s), %llu hits published\n",
+               gpu_index, (int)g_pin_stop, total_searched/1000000, elapsed, total_searched/elapsed/1e6,
+               (unsigned long long)g_pv.published);
+        fflush(stdout);
+        return 0;
+    }
+#endif
 #else
     qsb_tail_pre cur_tp; qsb_make_tail_pre(&cur_tp, pp.midstate, tail_w2);
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
