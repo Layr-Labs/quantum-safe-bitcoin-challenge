@@ -1,60 +1,96 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: i34-9's GLV11 geometry on our GLV12 native-carrier tree (de0d4f55): one fewer addition per candidate, with every cold record fetched with the one-access `.L2::64B` hint (+2.74% ± 0.06 locally vs de0d4f55)
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+Effort: max. Prepared with Claude Opus 5.5 in Claude Code on a dedicated RTX 4090 (driver 595.71, CUDA 12.8.93 toolchain). The ranked build line and argv are unchanged.
+
+## What this is
+
+This package is our `de0d4f55` with i34-9's GLV11 table geometry from their public `14675ab0`, ported into it. In `de0d4f55`:
+- GLV12 four-bank table plus the native sm_89 carrier from newjordan's `d1ddefca`;
+- warp-distributed root inverse;
+- our no-JIT startup;
+- `QSB_SHA_FMA_ADD`.
+
+**GLV11 (P18 layout).**
+- **Q component:** keeps its six GLV12 terms.
+- **P component:** uses five terms: segment 0 (18 bits, in the pinned 48 MiB), two new cold segments of 27 and 28 bits, and GLV12's cold segments 4 and 5. The new segments hold 2^26 and 2^27 records, appended after the GLV12 table.
+- **Per candidate:** 11 table gathers and 10 point additions, instead of 12 and 11, at the price of two more cold (DRAM) records: 6 instead of 4.
+- **Table:** 354,501,773 records, 22.7 GB (21,637 MiB). It fits the 24 GB card because the epoch-group buffers are sized exactly (below).
+
+i34-9's `14675ab0` has the geometry but not the native image, so its cold records are two DRAM accesses each. It was ranked at 618.46 with a peak self rate of 811.7. That is above every GLV12 draw (789–793), but with a lower decay ratio (0.762), as expected from more DRAM traffic.
+
+This package fetches all six cold records per candidate with newjordan's one-access `ld.global.cs.nc.L2::64B` load: the cold segments are read evict-first, and the first 16 B slice carries the 64 B prefetch-size hint. Our reading of the runner data:
+- that hint lifted GLV12's decay ratio from 0.776–0.785 to 0.794;
+- with 6 cold records per candidate instead of 4, it should matter more here.
+
+## Measurement (local, same protocol as our earlier notes)
+
+Paired ABBA on one RTX 4090 at the 450 W cap, fixed generated problem (seed 424242), 62 s arms, 3 rounds, rate between the first and last progress lines:
+
+| build | steady M/s | nJ/candidate | Δ vs `de0d4f55` |
+|---|---:|---:|---:|
+| `de0d4f55` (GLV12) | 825.55 | 544.3 | — |
+| **this package (GLV11)** | **848.19** | **530.0** | **+2.743% ± 0.060** (energy −2.63%) |
+
+For context, our no-DRAM probe on GLV12 put the four cold records at about 4.6% of the energy locally. The two extra cold records here cost about 2.3%, and the saved addition returns about 5%.
+
+**Exactness.**
+- On the fixed problem the search is deterministic. In 30 s, `de0d4f55` wrote 2,800 hits and this package 2,828. All 2,800 are in this package's set; the 28 extra come from searching further in the same time.
+- At startup the host self-check runs the 11-term walker against `q9_bigtbl_code` (Q) and `q11_bigtbl_code` (P) on 4,096 random scalars.
+- The table heal reported 0 off-curve flags, and the 256-sample OpenSSL spot check passed.
+- **Unmodified harness** (`benchmark.sh subset`, 90 s, fresh problem seed): see the validation line at the end of this note.
+- Every published hit is still recomputed by the exact host (OpenSSL) publication gate.
+
+**Startup.** The search starts at 1.23 s instead of 0.70 s: the GPU table build grows from 0.51 s to 0.96 s for 2.3× the records. That costs about 0.04% of the 1200 s window. The compute_52 image is still never JIT-compiled while the carrier is on.
+
+## Memory: exact epoch-group capacity
+
+The GLV11 table leaves about 1.2 GB for everything else. `QSB_GROUP_CAP_EXACT` (i34-9's, from `14675ab0`) sizes the two epoch-group buffers at 228,771 records instead of 2·epochs+4 = 2,097,156, which frees about 460 MiB.
+
+We checked the bound independently. The epochs are the 6-subsets of {0..136} in lex order, 1,048,576 per launch, and a launch spans rank5(last) − rank5(first) + 1 groups. With exact combinatorics over all 7,838 launches of the search space, the maximum is **181,498 groups**, at the last launch. The bound holds with margin, and the host still checks every launch against it.
+
+Local peak GPU memory is about 23.3 GB of 24.5 GB.
+
+## Implementation
+
+- `tests/gpu_epochs/tree.cu`:
+  - `QSB_GLV11` / `QSB_GLV11_P18` knobs: 8 segments, 11 terms, `gt_entries/offset/shift` for segments 6 and 7, static asserts, and the H2-ladder bound for m < 2^28.
+  - The 11-term `QSB_S3_DESC_INIT`, and the 11-term host self-check.
+  - `QSB_GROUP_CAP_EXACT` with `qsb_group_capacity()`.
+  - The three new knobs are added to the carrier build fingerprint.
+- `GLVScalar.cuh`: `q11_bigtbl_code`, used by the self-check.
+- `qsb_carrier_sm89.h`: regenerated with `build_carrier.sh` and CUDA 12.8.93. cubin sha256 `0810c43218e80725…`, 478,240 B, 2 `LTC64B` loads in the digest kernel, 0 spills in every function.
+- **Unchanged:**
+  - the chain, walker and loaders, which are generic in the term count; the cold test `off >= GT_DENSE_ENTRIES` picks up segments 6 and 7;
+  - the builder and heal kernels, the pipeline, the host gate and the no-JIT startup.
+
+Default-build PTX sha256 prefix: `2804dda9cf09`. It is only JIT-compiled if the carrier is off.
+
+## Other measurements this morning (on `de0d4f55`, not shipped)
+
+| variant | Δ |
+|---|---:|
+| σ shifts via IMAD.HI (`QSB_SHA_FMA_ROT=8`) | −0.212% ± 0.042 |
+| SHA256d second compression, constant-folded (`_SHA256TransformDigest32Q`) | −0.051% (hit sets identical) |
+| the same with FMA-pipe adds | −0.688% |
+| `QSB_SHA_FMA_ROT=3`, `=12` | spill 12 B |
+
+FMA-pipe adds pay only in the pubkey gate.
 
 ## Base and attribution
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+- **GLV11 geometry, the P18 layout and the exact group capacity:** i34-9's `14675ab0`. Co-author.
+- **Tree:** newjordan's `d1ddefca` (GLV12 four-bank geometry, native sm_89 carrier with the `.L2::64B` cold-record fetch, two-slot pipeline, persisting L2 window, exact host gate, `sha_gate_fma.cuh`). Co-author.
+- **GLV12 four-bank port:** ercumentyildirim's `933abead`. Co-author.
+- **fk-lean tree and FMA-pipe gate adds:** fkiene (`eaba5205`, `b864a72c`). Co-author.
+- **Carrier design:** Ryun1's pinning `25bd990a`. Co-author.
+- **Warp root inverse:** newjordan's `5b198ddf`, file set via i34-9's `78208a18`.
+- **Ours:** the no-JIT startup (`ef1b37e9`), `QSB_SHA_FMA_ADD` enabled with its census (`de0d4f55`), and this port with the group-capacity proof.
+- **Promoted crown:** `7aef224a` (Akashneelesh) and every contributor it credits.
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
-
-## What is new
-
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
-
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
-
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
-
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
-
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
-
-## Static evidence (no GPU on the authoring host)
-
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
-
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
-
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
-
-## What does not pay (census-verified, all left off or removed)
-
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
-
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
-
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
-
-## Correctness
-
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
-
-## Expectations and limits
-
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+All inherited source, GPLv3 notices (`COPYING`, `COPYING-secp256k1`, VanitySearch headers) and attributions are retained.
 
 ## Packaging
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are untouched, and no binary or build stamp is included. There are no includes outside `candidates/subset/`.
+
+**Validation of this exact package:** the unmodified harness (`benchmark.sh subset`, 90 s, fresh problem seed) verified 8,953 of 8,953 hits: `RESULT: PASS`.
