@@ -1,14 +1,8 @@
+#define QSB_AUTODRAW_09250338 1   /* inert re-measurement tag; unreferenced */
+#define QSB_BATCH 4194304
+#define QSB_CARRIER_POUNCE_09242200 1
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
-#endif
-#ifndef QSB_CODEX_DRAW_20260924_C
-#define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
-#endif
-#ifndef QSB_CODEX_DRAW_20260924_D
-#define QSB_CODEX_DRAW_20260924_D 1 /* no runtime effect; identifies the SHA-pipe A/B draw */
-#endif
-#ifndef QSB_CODEX_DRAW_20260924_E
-#define QSB_CODEX_DRAW_20260924_E 1 /* no runtime effect; identifies the exact early SHA scheduling draw */
 #endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
@@ -126,7 +120,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 16777216   /* candidates per pipeline launch */
+#define QSB_BATCH 8388608    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -189,9 +183,6 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
 #endif
-#ifndef QSB_CHAIN_PIPE
-#define QSB_CHAIN_PIPE 0      /* 1: overlap next GLV table gather with current XYZZ add using dead point buffers */
-#endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
 #endif
@@ -228,7 +219,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 // Root-priority scheduling: 0 baseline, 1 priority roots, 2 priority tail,
 // 3 same-priority split control. No change to device arithmetic.
 #ifndef QSB_COMPLETION_MODE
-#define QSB_COMPLETION_MODE 1
+#define QSB_COMPLETION_MODE 2
 #endif
 static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion mode");
 #if QSB_COMPLETION_MODE && !QSB_SLOTPIPE
@@ -496,7 +487,8 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
 #if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
-    /* Native carrier only: request both 32-byte sectors of this record. */
+    /* Native carrier image only: the 64 B prefetch-size hint makes a table miss fetch
+     * both 32 B sectors of the record in one DRAM access (QsbCarrier.h). */
     ulonglong2 x0;
     asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
         : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
@@ -790,12 +782,10 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
 }
-__device__ __forceinline__ uint32_t qsb_glv_code(unsigned term) {
+__device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
+                                             uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    return codes[(size_t)term*QSB_TREE_N+threadIdx.x];
-}
-__device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t code,
-                                                  uint64_t *x,uint64_t *y) {
+    uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
     gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
@@ -804,53 +794,6 @@ __device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t 
 #endif
                           ((uint64_t)m32<<32)|m32,x,y);
 }
-__device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
-                                             uint64_t *x,uint64_t *y) {
-    qsb_load_glv_code(table,qsb_glv_code(term),x,y);
-}
-#if QSB_CHAIN_PIPE
-#if !QSB_BIGTBL || !QSB_YOFF || !QSB_NEG_Y_MAC || !QSB_FUSE_SQRADDSUB2 || !QSB_XY_DIRECT
-#error "QSB_CHAIN_PIPE requires the current BIGTBL/YOFF/NEG_Y_MAC/FUSE_SQRADDSUB2/XY_DIRECT path"
-#endif
-__device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_t code,
-                                                     uint64_t *y) {
-    const uint32_t idx=code&0x7fffffffu;
-    const uint64_t m32=(uint32_t)((int32_t)code>>31);
-    const uint64_t m=(m32<<32)|m32;
-    const ulonglong2 *ty=(const ulonglong2 *)(table+(size_t)idx*64+32);
-    ulonglong2 y0=__ldg(ty),y1=__ldg(ty+1);
-    y[0]=y0.x^m; y[1]=y0.y^m; y[2]=y1.x^m; y[3]=y1.y^m;
-}
-__device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
-                                                     uint64_t *x) {
-    const uint32_t idx=code&0x7fffffffu;
-    const ulonglong2 *tx=(const ulonglong2 *)(table+(size_t)idx*64);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1);
-    x[0]=x0.x; x[1]=x0.y; x[2]=x1.x; x[3]=x1.y;
-}
-
-/* Next Y/X gather uses point buffers after their current values are consumed. */
-__device__ __forceinline__ void qsb_pointadd_chain_pipe(
-    uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
-    uint64_t *X2,uint64_t *Y2,uint64_t *Yoff,
-    const uint8_t *table,uint32_t next_code) {
-    uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4];
-    _ModAddLazyOff(S2,Y2,Yoff);
-    qsb_muladd_seed(R,S2,ZZZ1,Y1);
-    qsb_load_glv_y_code(table,next_code,Yoff);
-    _ModMult(U2,X2,ZZ1);
-    qsb_load_glv_x_code(table,next_code,X2);
-    _ModSub256(P,U2,X1);
-    _ModSqr(PP,P);
-    _ModMult(PPP,PP,P);
-    _ModMult(Q,U2,PP);
-    _ModSqrAddSub2(X1,R,PPP,Q);
-    _ModMult(ZZZ1,PPP);
-    _ModMult(ZZ1,PP);
-    _ModSub256(Q,X1,Q);
-    _ModMult(Y1,Q,R);
-}
-#endif
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
@@ -895,28 +838,6 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first+1,x1,y1);
 #endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
-#if QSB_CHAIN_PIPE
-    if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
-    #pragma unroll 1
-    for(int term=first+2;term<last;term++) {
-        if(term==GT_CHUNKS) {
-            const uint64_t beta[4]={
-                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
-                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
-            };
-            _ModMult(X,X,(uint64_t*)beta);
-        }
-        if(term+1<last) {
-            const uint32_t next_code=qsb_glv_code(term+1);
-            qsb_pointadd_chain_pipe(X,Y,U,V,x1,y1,y0,table,next_code);
-            #pragma unroll
-            for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
-        } else {
-            _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-            Load256(y0,y1);
-        }
-    }
-#else
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -932,7 +853,6 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
-#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
@@ -967,7 +887,7 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #ifndef QSB_ZEROS_N
 #define QSB_ZEROS_N 24
 #endif
-/* Native carrier fingerprint; checked against the fixed compute_52 build. */
+/* Build fingerprint the native carrier checks before use (QsbCarrier.h). */
 __device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
@@ -3315,13 +3235,8 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
-    cudaError_t xyerr = QSB_TO_SYMBOL(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
-    if (xyerr == cudaSuccess)
-        xyerr = QSB_TO_SYMBOL(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
-    if (xyerr != cudaSuccess) {
-        fprintf(stderr, "Failed to upload recovery coordinates: %s\n", cudaGetErrorString(xyerr));
-        return 1;
-    }
+    QSB_TO_SYMBOL(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
+    QSB_TO_SYMBOL(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
 #if QSB_ISO_XR
     if(QSB_TO_SYMBOL(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
        QSB_TO_SYMBOL(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
@@ -3410,16 +3325,6 @@ int main(int argc, char **argv) {
             }
         }
 #endif
-#if QSB_SHA_ALU_ADD
-        {
-            uint32_t zero = 0u;
-            cudaError_t zerr = QSB_TO_SYMBOL(pin_zero_add, &zero, sizeof(zero));
-            if (zerr != cudaSuccess) {
-                fprintf(stderr, "Failed to upload SHA addend: %s\n", cudaGetErrorString(zerr));
-                return 1;
-            }
-        }
-#endif
         cudaError_t copy_err = QSB_TO_SYMBOL(pin_tail_words, words, sizeof(words));
         if (copy_err != cudaSuccess) {
             fprintf(stderr, "Failed to upload fixed SHA tail: %s\n",
@@ -3452,7 +3357,7 @@ int main(int argc, char **argv) {
      * launched batch must start at a multiple of 256 and the stage-0 block must be 128 threads.
      * The batch size is checked here; the batch start (LT_MIN) is checked below, where it is
      * defined. Both hold for the ranked geometry (LT_MIN = 500000000 = 256*1953125,
-     * QSB_BATCH = 2^24, QSB_S0_THREADS = 128). */
+     * QSB_BATCH = 2^23, QSB_S0_THREADS = 128). */
     static_assert(QSB_S0_THREADS == 128 && (QSB_BATCH % 256) == 0,
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
