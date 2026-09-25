@@ -53,34 +53,24 @@
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
-/* QSB_GLV11=1: P (the phi component) uses five terms instead of six -- segment 0,
- * two appended streaming segments 6 (shift 18, 27 bits, 2^26 records) and 7
- * (shift 45, 28 bits, 2^27 records), then segments 4 and 5 -- so 11 gathers and 10
- * additions per candidate instead of 12 and 11. Q keeps its six GLV12 terms.
- * Layout after i34-9 14675ab0 ("P18"). 0 restores the GLV12 table and chain. */
+// GLV11 "P18" (i34-9 14675ab0, ported to subset by terrapinelf 62cf62b8):
+// P uses five terms (segment 0 + two new cold segments of 27/28 bits + segments 4,5).
 #ifndef QSB_GLV11
-#define QSB_GLV11 0
+#define QSB_GLV11 1
 #endif
 #if QSB_GLV11 != 0 && QSB_GLV11 != 1
 #error QSB_GLV11 must be 0 or 1
 #endif
 #if QSB_GLV11 && !(QSB_BIGTBL && QSB_FOUR_HOT)
-#error QSB_GLV11 extends the four-hot GLV12 table (QSB_BIGTBL=1, QSB_FOUR_HOT=1)
+#error QSB_GLV11 requires QSB_BIGTBL=1 and QSB_FOUR_HOT=1
 #endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
-#if QSB_GLV11
-#define QSB_GT_TOTAL 354501773u
-#define QSB_GT_SEGMENTS 8
-#else
 #define QSB_GT_TOTAL 153175181u
-#define QSB_GT_SEGMENTS 6
-#endif
 #define QSB_GT_RADIX_BITS 14
 #define QSB_GT_TOP_CENTER 170559769u
 #define QSB_GT_TOP_SHIFT 100u
 #else
 #define QSB_GT_TOTAL 22893641u
-#define QSB_GT_SEGMENTS 6
 #define QSB_GT_RADIX_BITS 12
 #define QSB_GT_TOP_CENTER 10659985u
 #define QSB_GT_TOP_SHIFT 104u
@@ -99,9 +89,6 @@
  * Both exactly reconstruct the same bounded signed GLV component.
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
-#if QSB_GLV11
-    if(c>=6) return c==6?67108864u:134217728u;
-#endif
 #if QSB_FOUR_HOT
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
 #else
@@ -109,9 +96,6 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
-#if QSB_GLV11
-    if(c>=6) return c==6?153175181u:220284045u;
-#endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
@@ -121,9 +105,6 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
-#if QSB_GLV11
-    if(c>=6) return c==6?18u:45u;
-#endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
 #else
@@ -159,21 +140,36 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
 #if QSB_GLV11
-/* P's five terms t=0..4 read segments 0,6,7,4,5. Shifts 0,18,45,73,100 keep the
- * signed chain 18->45->73->100 contiguous, so the digit biases telescope to the
- * same segment-0 bias K as GLV12 and the five digits sum exactly to the
- * magnitude. Segments 6 and 7 are plain signed fields of 27 and 28 bits. */
+/* GLV11 P18 (after i34-9 14675ab0 / terrapinelf 62cf62b8): P's five terms are
+ * segment 0 (shift 0, 18 bits), segment 6 (shift 18, 27 bits, 2^26 records at
+ * 153175181), segment 7 (shift 45, 28 bits, 2^27 records at 220284045), then
+ * GLV12 segments 4 (shift 73) and 5 (top, shift 100). The signed-digit bias
+ * telescopes over [18,100) exactly as in the six-term split, so the biased
+ * segment-0 constant is unchanged. */
 __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
-    const uint64_t mag[2],unsigned sign,int t) {
-    if(t==0) return q9_bigtbl_code(mag,sign,0);
-    if(t>=3) return q9_bigtbl_code(mag,sign,t+1);
-    const int c=t+5;
-    const unsigned shift=q9_bigtbl_shift(c),bits=t==1?27u:28u;
-    const uint64_t wide=(mag[0]>>shift)|(mag[1]<<(64u-shift));
-    const uint32_t f=(uint32_t)wide&((1u<<bits)-1u);
-    const uint32_t neg_digit=1u-(f>>(bits-1u));
-    const uint32_t idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
-    return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
+    const uint64_t mag[2],unsigned sign,int c) {
+    const unsigned shift=c==0?0u:c==1?18u:c==2?45u:c==3?73u:100u;
+    uint64_t wide;
+    if(shift<64u) {
+        wide=mag[0]>>shift;
+        if(shift) wide|=mag[1]<<(64u-shift);
+    } else wide=mag[1]>>(shift-64u);
+    uint32_t f=(uint32_t)wide,idx,neg_digit;
+    if(c==0) {
+        idx=f&((1u<<18)-1u);neg_digit=0;
+    } else if(c==4) {
+        const int32_t d=(int32_t)(2u*f)-(int32_t)QSB_GT_TOP_CENTER;
+        neg_digit=(uint32_t)d>>31;
+        const uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
+        idx=(ad-1u)>>1;
+    } else {
+        const unsigned bits=c==2?28u:27u;
+        f&=(1u<<bits)-1u;
+        neg_digit=1u-(f>>(bits-1u));
+        idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    }
+    const uint32_t off=c==0?0u:c==1?153175181u:c==2?220284045u:c==3?786432u:67895296u;
+    return (off+idx)|((neg_digit^sign)<<31);
 }
 #endif
 // END QSB_BIGTBL_HOST_EXACT
@@ -235,6 +231,26 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code_lean(
     const uint32_t idx=(f^~xs)&((1u<<(bits-1u))-1u);
     return q9_bigtbl_offset(c)+idx+((~xs^s31)&0x80000000u);
 }
+#if QSB_GLV11
+/* GLV11: q11_bigtbl_code_lean(mag,s31,t) == q11_bigtbl_code(mag,sign,t) with s31 = sign<<31.
+ * Terms 0, 3 and 4 are GLV12's chunks 0, 4 and 5 (same field, same record); terms 1 and 2 are
+ * plain radix chunks of 27 bits at shift 18 and 28 bits at shift 45, decoded by the radix
+ * step of q9_bigtbl_code_lean with those widths and offsets. */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_lean(
+    const uint64_t mag[2],uint32_t s31,int t) {
+    if(t==0) return q9_bigtbl_code_lean(mag,s31,0);
+    if(t>=3) return q9_bigtbl_code_lean(mag,s31,t+1);
+    const unsigned shift=t==1?18u:45u,bits=t==1?27u:28u;
+    const uint32_t off=t==1?153175181u:220284045u;
+    const uint32_t ws[5]={(uint32_t)mag[0],(uint32_t)(mag[0]>>32),
+                          (uint32_t)mag[1],(uint32_t)(mag[1]>>32),0u};
+    const unsigned q=shift>>5,r=shift&31u;
+    const uint32_t f=r?q9_funnel_r(ws[q],ws[q+1],r):ws[q];
+    const uint32_t xs=(uint32_t)((int32_t)(f<<(32u-bits))>>31);
+    const uint32_t idx=(f^~xs)&((1u<<(bits-1u))-1u);
+    return off+idx+((~xs^s31)&0x80000000u);
+}
+#endif /* QSB_GLV11 */
 #endif /* QSB_DIGIT_LEAN */
 #if QSB_GLV_ZDEC && QSB_DIGIT_LEAN && QSB_FOUR_HOT
 /* q9_bigtbl_code_z(w,top,m32,c) == q9_bigtbl_code(mag,sign,c) with mag = w ^ M (M = -s on every
@@ -304,6 +320,40 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code_z(
     return v^(~u&0x80000000u);
 #endif
 }
+#if QSB_GLV11
+/* GLV11: q11_bigtbl_code_z(w,top,m32,t) == q11_bigtbl_code(mag,sign,t) under the same
+ * w = mag ^ M convention as q9_bigtbl_code_z. Terms 0, 3 and 4 are GLV12's chunks 0, 4 and 5;
+ * terms 1 and 2 are the radix step of q9_bigtbl_code_z with a 27-bit window at shift 18
+ * (offset 153175181) and a 28-bit window at shift 45 (offset 220284045): the same top-aligned
+ * window, sign fold and offset add, so every code is bit-identical to q11_bigtbl_code. */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_z(
+    const uint64_t w[2],uint32_t top,uint32_t m32,int t) {
+    if(t==0) return q9_bigtbl_code_z(w,top,m32,0);
+    if(t>=3) return q9_bigtbl_code_z(w,top,m32,t+1);
+    const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
+    const unsigned shift=t==1?18u:45u,bits=t==1?27u:28u;
+    const unsigned r=shift+bits-32u,q=r>>5,rs=r&31u;
+    const uint32_t off=(t==1?153175181u:220284045u)-(1u<<(bits-1u));
+    (void)top;
+#ifdef __CUDA_ARCH__
+    uint32_t code;
+    asm("{\n\t.reg .u32 u,x,v;\n\t"
+        "shf.r.clamp.b32 u,%1,%2,%3;\n\t"       /* top-aligned window */
+        "shr.s32 x,u,31;\n\t"
+        "lop3.b32 v,u,x,0,0xC3;\n\t"            /* u ^ ~x */
+        "shr.u32 v,v,%4;\n\t"
+        "add.u32 v,v,%5;\n\t"                   /* offset + idx */
+        "lop3.b32 %0,v,u,0x80000000,0xD2;\n\t}" /* v ^ (~u & 2^31) */
+        : "=r"(code) : "r"(ws[q]),"r"(ws[q+1]),"r"(rs),"r"(32u-bits),"r"(off));
+    return code;
+#else
+    const uint32_t u=q9_funnel_r(ws[q],ws[q+1],rs);
+    const uint32_t xs=(uint32_t)((int32_t)u>>31);
+    const uint32_t v=((u^~xs)>>(32u-bits))+off;
+    return v^(~u&0x80000000u);
+#endif
+}
+#endif /* QSB_GLV11 */
 #endif
 #endif
 #if QSB_GLV_ZDEC && QSB_DIGIT_LEAN && QSB_FOUR_HOT
