@@ -25,8 +25,8 @@
     },
     {
       "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
+      "bytes": 27959,
+      "sha256": "9cd23a42df582f3a4689361e742f42f7cb9cd8b4983f69df4cfac9df129c9020"
     },
     {
       "path": "candidates/pinning/GPUHash.h",
