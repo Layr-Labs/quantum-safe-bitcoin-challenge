@@ -268,21 +268,21 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
 static_assert(GT_TOTAL_ENTRIES*64ULL == 144ULL*1024*1024,
               "14-term table must contain exactly 144 MiB");
 #else
-#define GT_CHUNKS 15
-#define GT_TOTAL_ENTRIES (1u << 20)
+#define GT_CHUNKS 16
+#define GT_TOTAL_ENTRIES (1u << 19)
 #define GT_LO 256
-#define GT_HI 1024
+#define GT_HI 256
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-    return c == 0 ? (1u << 17) : (1u << 16);
+    return 1u << 15;
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-    return c == 0 ? 0u : (unsigned)(c+1) << 16;
+    return (unsigned)c << 15;
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
-    return c == 0 ? 0 : 17*c+1;
+    return 16*c;
 }
-static_assert(GT_TOTAL_ENTRIES*64ULL == 64ULL*1024*1024,
-              "mixed table must contain exactly 64 MiB");
+static_assert(GT_TOTAL_ENTRIES*64ULL == 32ULL*1024*1024,
+              "uniform table must contain exactly 32 MiB");
 #endif
 
 /* n = secp256k1 group order, little-endian limbs */
@@ -355,9 +355,9 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
     #pragma unroll
     for(int c=GT_BIG;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<18>(M,sign);
 #else
-    e[0]=gt_mixed_step<18>(M,sign);
+    e[0]=gt_mixed_step<16>(M,sign);
     #pragma unroll
-    for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<17>(M,sign);
+    for(int c=1;c<GT_CHUNKS-1;c++)e[c]=gt_mixed_step<16>(M,sign);
 #endif
     e[GT_CHUNKS-1]=sign*(int32_t)M[0];
 }
@@ -615,7 +615,7 @@ __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
@@ -623,20 +623,20 @@ __device__ void qsb_replay_chain_exact(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
-    int32_t ec=gt_mixed_step<18>(M,sign);
+    int32_t ec=gt_mixed_step<16>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
+    ec=gt_mixed_step<16>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
     _PointAddXYZZ_mm_def(X,Y,ZZ,ZZZ, x0,y0, x1,y1);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
+        ec=gt_mixed_step<16>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         _PointAddXYZZ_def<true>(X,Y,ZZ,ZZZ, cx,cy, y0);
         Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         ec=sign*(int32_t)M[0];
@@ -725,7 +725,7 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         qsb_replay_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
         Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
@@ -733,20 +733,20 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         qsb_complete_last_add(X,Y,ZZ,ZZZ, cx,cy, y0);
     }
 #else
-    int32_t ec=gt_mixed_step<18>(M,sign);
+    int32_t ec=gt_mixed_step<16>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
+    ec=gt_mixed_step<16>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
     qsb_replay_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
+        ec=gt_mixed_step<16>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         qsb_replay_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
         Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         ec=sign*(int32_t)M[0];
@@ -862,7 +862,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
 #if !QSB_CHAIN_ANCHOR_UPDATE
         Load256(y0, cy);                /* current affine y anchors next madd */
 #endif
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         const uint32_t f=w0&((1u<<W2)-1u);
@@ -879,7 +879,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         gt_load_signed_flat_f(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
         Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         gt_direct_digit(M,sflag,pos,gt_width(2),true,&idx,&neg);
@@ -888,20 +888,20 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     }
 #endif
 #else
-    int32_t ec=gt_mixed_step<18>(M,sign);
+    int32_t ec=gt_mixed_step<16>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,0,idx,neg,x0,y0);
-    ec=gt_mixed_step<17>(M,sign);
+    ec=gt_mixed_step<16>(M,sign);
     gt_digit_idx(ec, &idx, &neg); gt_load_signed(gTable,1,idx,neg,x1,y1);
     qsb_filter_point_seed(X,Y,ZZ,ZZZ, x0,y0, x1,y1,bad);
     uint64_t cx[4],cy[4];
     uint32_t table_base=gt_offset(2);
     #pragma unroll 1
     for (int c=2;c<GT_CHUNKS-1;c++){
-        ec=gt_mixed_step<17>(M,sign);
+        ec=gt_mixed_step<16>(M,sign);
         gt_digit_idx(ec, &idx, &neg); gt_load_signed_flat(gTable,table_base,idx,neg,cx,cy);
         qsb_filter_point_add<true>(X,Y,ZZ,ZZZ, cx,cy, y0,bad);
         Load256(y0, cy);                /* current affine y anchors next madd */
-        table_base += 1u << 16;
+        table_base += 1u << 15;
     }
     {
         ec=sign*(int32_t)M[0];
@@ -2048,7 +2048,7 @@ __global__ void kernel_build_gtable(
 #if ZLAB_T14
     int ch=t<((uint64_t)GT_BIG<<18)?(int)(t>>18):GT_BIG+(int)((t-((uint64_t)GT_BIG<<18))>>17);
 #else
-    int ch=t<(1u<<17)?0:1+(int)((t-(1u<<17))>>16);
+    int ch=(int)(t>>15);
 #endif
     int d=(int)(t-gt_offset(ch));
     int m  = 2*d + 1;                        /* odd multiple below 2^18 */
