@@ -2,6 +2,9 @@
 // Only the first block depends on the epoch remainder. The second block's
 // expanded schedule is shared by every epoch with the same window choice.
 #pragma once
+#ifndef QSB_950_PACK
+#define QSB_950_PACK 0   /* packed lane record + uint4 first-state loads measured -0.065 % +/-0.008 on the 4090 (ABBA) on this stack */
+#endif
 #define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
@@ -10,6 +13,8 @@ __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
+/* Public PR950: lossless (first_slot << 16) | second_slot. */
+__device__ uint32_t QSB_LANE_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
@@ -35,7 +40,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     uint32_t first_classes[QSB_SE_PER_EPOCH], first_unique[QSB_SE_PER_EPOCH][14], transposed[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS]={};
     int first_distinct=0;
     int distinct=0;
-    if (cudaMemcpyFromSymbol(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
+    if (QSB_FROM_SYMBOL(round_k, K, sizeof(round_k)) != cudaSuccess) return 1;
     for (int lane=0; lane<QSB_SE_PER_EPOCH; lane++) {
         uint8_t bytes[128]={};
         int pos=8, sel=0;
@@ -74,12 +79,19 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if(first_distinct>QSB_FIRST_SLOTS)return 1;
     for(int slot=0;slot<first_distinct;slot++)
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
-    if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
-    if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
-    if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
-    return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
+#if QSB_950_PACK
+    {   uint32_t packed[QSB_SE_PER_EPOCH];
+        for(int lane=0;lane<QSB_SE_PER_EPOCH;lane++)
+            packed[lane]=(first_classes[lane]<<16)|classes[lane];
+        if(QSB_TO_SYMBOL(QSB_LANE_CLASS,packed,sizeof(packed))!=cudaSuccess)return 1;
+    }
+#endif
+    if (QSB_TO_SYMBOL(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
+    if (QSB_TO_SYMBOL(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
+    return QSB_TO_SYMBOL(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
 /* First-block states for every (epoch, class) of a launch, computed as its own
@@ -159,11 +171,17 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 }
 
 #if ZLAB_DUAL_EPOCH_SHA
+/* QSB_PAIR_SHA_UNROLL_WINDOW (kill switch): 0 = the paired window block runs its eight 8-round
+ * groups as a rolled loop (same rounds, same order, same schedule words); 1 = fully unrolled. */
 #ifndef QSB_PAIR_SHA_UNROLL_WINDOW
-#define QSB_PAIR_SHA_UNROLL_WINDOW 1
+#define QSB_PAIR_SHA_UNROLL_WINDOW 0
 #endif
 #ifndef QSB_PAIR_SHA_UNROLL_CONST
 #define QSB_PAIR_SHA_UNROLL_CONST 1
+#endif
+/* Keep the four-block loop unrolled; roll only its 8-round inner loop. */
+#ifndef QSB_PAIR_SHA_UNROLL_CONST_INNER
+#define QSB_PAIR_SHA_UNROLL_CONST_INNER 0
 #endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
  * second block and constant suffix) in both epochs.  Load each schedule word
@@ -171,13 +189,30 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     uint32_t *stateA, uint32_t *stateB, int lane,
     const uint32_t *firstA, const uint32_t *firstB) {
+#if QSB_950_PACK
+    const uint32_t lane_rec=QSB_LANE_CLASS[lane];
+    const int first_slot=(int)(lane_rec>>16);
+    const int slot=(int)(lane_rec&0xffffu);
+#else
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
+#endif
+#if QSB_950_PACK
+    {   const uint4 *pA=reinterpret_cast<const uint4*>(firstA+first_slot*8);
+        const uint4 *pB=reinterpret_cast<const uint4*>(firstB+first_slot*8);
+        const uint4 vA0=pA[0], vA1=pA[1], vB0=pB[0], vB1=pB[1];
+        stateA[0]=vA0.x;stateA[1]=vA0.y;stateA[2]=vA0.z;stateA[3]=vA0.w;
+        stateA[4]=vA1.x;stateA[5]=vA1.y;stateA[6]=vA1.z;stateA[7]=vA1.w;
+        stateB[0]=vB0.x;stateB[1]=vB0.y;stateB[2]=vB0.z;stateB[3]=vB0.w;
+        stateB[4]=vB1.x;stateB[5]=vB1.y;stateB[6]=vB1.z;stateB[7]=vB1.w;
+    }
+#else
     #pragma unroll
     for(int j=0;j<8;j++){
         stateA[j]=firstA[first_slot*8+j];
         stateB[j]=firstB[first_slot*8+j];
     }
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
@@ -216,7 +251,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
 #endif
     for(int block=0;block<4;block++){
         QSB_PAIR_STATE_LOAD();
-#if QSB_PAIR_SHA_UNROLL_CONST
+#if QSB_PAIR_SHA_UNROLL_CONST_INNER
         #pragma unroll
 #else
         #pragma unroll 1

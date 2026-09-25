@@ -1,0 +1,296 @@
+{
+  "entries": [
+    {
+      "name": "kernel_build_first_flat",
+      "symbol": "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4
+      ]
+    },
+    {
+      "name": "kernel_epoch_groups",
+      "symbol": "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+      "bytes": [
+        8,
+        4,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_build_epochs_inc",
+      "symbol": "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_digest",
+      "symbol": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+      "bytes": [
+        8,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        4,
+        8,
+        4,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        4,
+        4,
+        4,
+        4,
+        4,
+        8,
+        4,
+        4,
+        8,
+        4,
+        8,
+        8,
+        8,
+        4
+      ]
+    },
+    {
+      "name": "kernel_build_gtable",
+      "symbol": "_Z19kernel_build_gtablePKmS0_S0_Ph",
+      "bytes": [
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_gt_heal_scan",
+      "symbol": "_Z19kernel_gt_heal_scanPKhPKmPjj",
+      "bytes": [
+        8,
+        8,
+        8,
+        4
+      ]
+    }
+  ],
+  "globals": [
+    {
+      "symbol": "MULTI_EIGHT",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 260
+    },
+    {
+      "symbol": "COMBO_SYMBOLS",
+      "space": "const",
+      "alignment": 1,
+      "bytes": 100
+    },
+    {
+      "symbol": "K",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 256
+    },
+    {
+      "symbol": "I",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 32
+    },
+    {
+      "symbol": "ripemd160_sizedesc_32",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 8
+    },
+    {
+      "symbol": "_KECCAKF_RNDC",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 192
+    },
+    {
+      "symbol": "QSB_CONST_SCHEDULE",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 1024
+    },
+    {
+      "symbol": "QSB_U2R",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 64
+    },
+    {
+      "symbol": "QSB_U2R_ISO",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 64
+    },
+    {
+      "symbol": "QSB_ISO_INVU",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_ISO_XNEG",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "QSB_U2R_C",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_PUSH_WORDS",
+      "space": "global",
+      "alignment": 16,
+      "bytes": 2416
+    },
+    {
+      "symbol": "BINOM_C",
+      "space": "global",
+      "alignment": 8,
+      "bytes": 12080
+    },
+    {
+      "symbol": "GT_ORDER_N",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_S3_DESC",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 176
+    },
+    {
+      "symbol": "WIN3",
+      "space": "const",
+      "alignment": 1,
+      "bytes": 384
+    },
+    {
+      "symbol": "QSB_WINDOW_FIRST",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 7168
+    },
+    {
+      "symbol": "QSB_WINDOW_SECOND",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 32768
+    },
+    {
+      "symbol": "QSB_WINDOW_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_FIRST_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_LANE_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_FIRST_UNIQUE",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 896
+    },
+    {
+      "symbol": "QSB_FIRST_COUNT",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "ZI_BY_LUT",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 6656
+    },
+    {
+      "symbol": "pin_one_mul",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "pin_pow2",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 128
+    }
+  ],
+  "host_globals": [
+    "BINOM_C",
+    "K",
+    "QSB_CONST_SCHEDULE",
+    "QSB_FIRST_CLASS",
+    "QSB_FIRST_COUNT",
+    "QSB_FIRST_UNIQUE",
+    "QSB_ISO_INVU",
+    "QSB_ISO_XNEG",
+    "QSB_PUSH_WORDS",
+    "QSB_U2R",
+    "QSB_U2R_C",
+    "QSB_U2R_ISO",
+    "QSB_WINDOW_CLASS",
+    "QSB_WINDOW_FIRST",
+    "QSB_WINDOW_SECOND",
+    "WIN3"
+  ]
+}

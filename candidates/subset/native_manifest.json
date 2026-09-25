@@ -1,0 +1,440 @@
+{
+  "toolchain": "CUDA 12.8.93",
+  "arch": "sm_89",
+  "zeros_n": 24,
+  "frontend": [
+    "nvcc",
+    "-O3",
+    "-DQSB_ZEROS_N=24",
+    "-DQSB_NATIVE_MODULE=0",
+    "--ptx",
+    "subset.cu"
+  ],
+  "assembler": [
+    "ptxas",
+    "-arch=sm_89",
+    "-O3"
+  ],
+  "cubin_bytes": 451744,
+  "cubin_sha256": "9879c5c19034fbd6bc58a270f1222e70dadd35f8b9766b6d259b8b70165c3333",
+  "ptx_sha256": "911488455b00b18da7e1c0f1dd2469bbdd4a9098c3e430557c205dc4e3fdc5eb",
+  "entries": [
+    {
+      "name": "kernel_build_first_flat",
+      "symbol": "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4
+      ]
+    },
+    {
+      "name": "kernel_epoch_groups",
+      "symbol": "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+      "bytes": [
+        8,
+        4,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_build_epochs_inc",
+      "symbol": "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+      "bytes": [
+        8,
+        8,
+        4,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_digest",
+      "symbol": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+      "bytes": [
+        8,
+        4,
+        4,
+        8,
+        8,
+        4,
+        8,
+        8,
+        4,
+        8,
+        4,
+        4,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        4,
+        4,
+        4,
+        4,
+        4,
+        8,
+        4,
+        4,
+        8,
+        4,
+        8,
+        8,
+        8,
+        4
+      ]
+    },
+    {
+      "name": "kernel_build_gtable",
+      "symbol": "_Z19kernel_build_gtablePKmS0_S0_Ph",
+      "bytes": [
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "name": "kernel_gt_heal_scan",
+      "symbol": "_Z19kernel_gt_heal_scanPKhPKmPjj",
+      "bytes": [
+        8,
+        8,
+        8,
+        4
+      ]
+    }
+  ],
+  "globals": [
+    {
+      "symbol": "MULTI_EIGHT",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 260
+    },
+    {
+      "symbol": "COMBO_SYMBOLS",
+      "space": "const",
+      "alignment": 1,
+      "bytes": 100
+    },
+    {
+      "symbol": "K",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 256
+    },
+    {
+      "symbol": "I",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 32
+    },
+    {
+      "symbol": "ripemd160_sizedesc_32",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 8
+    },
+    {
+      "symbol": "_KECCAKF_RNDC",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 192
+    },
+    {
+      "symbol": "QSB_CONST_SCHEDULE",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 1024
+    },
+    {
+      "symbol": "QSB_U2R",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 64
+    },
+    {
+      "symbol": "QSB_U2R_ISO",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 64
+    },
+    {
+      "symbol": "QSB_ISO_INVU",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_ISO_XNEG",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "QSB_U2R_C",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_PUSH_WORDS",
+      "space": "global",
+      "alignment": 16,
+      "bytes": 2416
+    },
+    {
+      "symbol": "BINOM_C",
+      "space": "global",
+      "alignment": 8,
+      "bytes": 12080
+    },
+    {
+      "symbol": "GT_ORDER_N",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 32
+    },
+    {
+      "symbol": "QSB_S3_DESC",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 176
+    },
+    {
+      "symbol": "WIN3",
+      "space": "const",
+      "alignment": 1,
+      "bytes": 384
+    },
+    {
+      "symbol": "QSB_WINDOW_FIRST",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 7168
+    },
+    {
+      "symbol": "QSB_WINDOW_SECOND",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 32768
+    },
+    {
+      "symbol": "QSB_WINDOW_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_FIRST_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_LANE_CLASS",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 512
+    },
+    {
+      "symbol": "QSB_FIRST_UNIQUE",
+      "space": "global",
+      "alignment": 4,
+      "bytes": 896
+    },
+    {
+      "symbol": "QSB_FIRST_COUNT",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "ZI_BY_LUT",
+      "space": "const",
+      "alignment": 8,
+      "bytes": 6656
+    },
+    {
+      "symbol": "pin_one_mul",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 4
+    },
+    {
+      "symbol": "pin_pow2",
+      "space": "const",
+      "alignment": 4,
+      "bytes": 128
+    }
+  ],
+  "host_globals": [
+    "BINOM_C",
+    "K",
+    "QSB_CONST_SCHEDULE",
+    "QSB_FIRST_CLASS",
+    "QSB_FIRST_COUNT",
+    "QSB_FIRST_UNIQUE",
+    "QSB_ISO_INVU",
+    "QSB_ISO_XNEG",
+    "QSB_PUSH_WORDS",
+    "QSB_U2R",
+    "QSB_U2R_C",
+    "QSB_U2R_ISO",
+    "QSB_WINDOW_CLASS",
+    "QSB_WINDOW_FIRST",
+    "QSB_WINDOW_SECOND",
+    "WIN3"
+  ],
+  "sources": {
+    "subset.cu": "8d63efb47bdbe8c469b5dbdcb92696631ad8db1fadb8ff86cdd7efe8371a05cc",
+    "tests/gpu_epochs/tree.cu": "e91ff2a57e413e2ccf70017a8bab3aba68187735e378bfc2bee246c04a3f4644",
+    "native_runtime.cuh": "07cb7ac45136b4fdbfdf3aa69fbbfd69528982e69100a8d149f5171b95833d82",
+    "native_adapt.cuh": "ae79b19f3de242820b80af001a67fc175a20b128d324d6268be35b81fb9e8088",
+    "native_contract.cuh": "97e7754aecdd02354a5bd3d8c4a6ae944f37092ec17218d67bb8cbee87a2d08b",
+    "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GLVScalar.cuh": "65f3ceaecad033ccc1b173956a273ac8a9f1d668f8881efcc27d21fc8ee0ce38",
+    "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+    "hit_filter_field.cuh": "1efd238ee80935f8a7c0559eafce15e7d1e5a813a04173efd54e0f87074e3a45",
+    "hit_filter_field_sc.cuh": "a45d2340228a6827676e7a9ce0bc1ab4c04b1c24f626917dd5927f4621113f62",
+    "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "077ffba78839bbd5d1127b1b059784f24730e112fae7d6237ce45d6e3229e534",
+    "tests/gpu_epochs/epoch_groups.cuh": "ae0b03eae7d0c8036020a3af0d7965530372789ed4ee4bdbde7cc44be22a5c10",
+    "tests/gpu_epochs/tree_inverse.cuh": "66814b22db01b27b452e03756611e1edc1ff92d7597e0cb05d0f544b6a51bb6a",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
+    "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8",
+    "tests/gpu_epochs/inverse_limbs.cuh": "3a41eddc68eec089a716852c54fd99c6ac29a1fa49a46e90e578e9b74a3060df",
+    "tests/gpu_epochs/pair_shared.cuh": "2f4ca74b18928d9766c53635162074c0600beaa5abae23ea4bae51558cce2099",
+    "tests/gpu_epochs/parity_window_subset.cuh": "a4773e34fe2a9394cfcf83555af36310a66054b9851ad6602608b7fc5a1373ad",
+    "sha_gate_fma.cuh": "35d749885132d3d69d93e32198ca8a232affc779fee8650d8f7879477064cadc",
+    "tests/gpu_epochs/qsb_host_verify.h": "4c19a9ed933fab4296cc913aa59ff73ec3e3f4afce8957b2ad554db8d8b9e74f"
+  },
+  "contract": {
+    "terms": 11,
+    "psi_term": 6,
+    "total_entries": 354501773,
+    "dense_entries": 786432,
+    "descriptor_words": [
+      262143,
+      0,
+      0,
+      18,
+      524287,
+      524288,
+      262144,
+      19,
+      262143,
+      262144,
+      524288,
+      18,
+      262143,
+      262144,
+      655360,
+      18,
+      134217727,
+      134217728,
+      786432,
+      27,
+      268435455,
+      170559770,
+      67895296,
+      28,
+      262143,
+      0,
+      0,
+      18,
+      134217727,
+      134217728,
+      153175181,
+      27,
+      268435455,
+      268435456,
+      220284045,
+      28,
+      134217727,
+      134217728,
+      786432,
+      27,
+      268435455,
+      170559770,
+      67895296,
+      28
+    ],
+    "banks": [
+      [
+        262144,
+        0,
+        0
+      ],
+      [
+        262144,
+        262144,
+        18
+      ],
+      [
+        131072,
+        524288,
+        37
+      ],
+      [
+        131072,
+        655360,
+        55
+      ],
+      [
+        67108864,
+        786432,
+        73
+      ],
+      [
+        85279885,
+        67895296,
+        100
+      ],
+      [
+        67108864,
+        153175181,
+        18
+      ],
+      [
+        134217728,
+        220284045,
+        45
+      ]
+    ]
+  },
+  "generated_header_sha256": "59219bbe672fe7f9c1ffffd61bc1e955acd82725237f6e356355e8cc1d09ba11",
+  "generated_image_sha256": "46555f91e0ef986ac9b62e02c108ddd91139f6376a9824cf7c3265503035a602"
+}
