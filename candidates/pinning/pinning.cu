@@ -255,8 +255,17 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_REC_MASK32
 #define QSB_REC_MASK32 1      /* 1: record index masked in an opaque 32-bit AND so the gather address is a plain LEA */
 #endif
+/* Default follows the prepare residency (QSB_S0_SM_THREADS, below): at the 96-register budget of
+ * five blocks the two-add trip spills 332 B per lane (56 STL / 70 LDL in the chain loop) while the
+ * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free. */
 #ifndef QSB_CHAIN_ROLES
-#define QSB_CHAIN_ROLES 1     /* 1: pair-ordinate chain runs two additions per trip with the y buffers' roles alternating (no swap) */
+#define QSB_CHAIN_ROLES 0
+#endif
+#ifndef QSB_CHAIN_PEEL
+#define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
+#endif
+#ifndef QSB_CHAIN_UNROLL
+#define QSB_CHAIN_UNROLL 0    /* 1: the GLV11 role-alternating chain trips written out (phi and code slots compile-time) */
 #endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
@@ -357,11 +366,17 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #define QSB_STREAM_PARM
 #define QSB_STREAM_ARG
 #endif
+/* QSB_S0_SM_THREADS: prepare-kernel threads resident per SM, the launch-bounds register
+ * budget (512 = 4 x 128 blocks at <= 128 registers; 640 = 5 x 128 at <= 102). Same source
+ * and the same values; only the register allocation and residency move. */
+#ifndef QSB_S0_SM_THREADS
+#define QSB_S0_SM_THREADS 512
+#endif
 #if QSB_TREE_N != 256 && QSB_S0_THREADS == 256
 #undef QSB_S0_THREADS
 #define QSB_S0_THREADS QSB_TREE_N
 #undef QSB_S0_BLOCKS
-#define QSB_S0_BLOCKS (512/QSB_TREE_N)    /* keep 4 x 128 = 8 x 64 = 512 threads per SM */
+#define QSB_S0_BLOCKS (QSB_S0_SM_THREADS/QSB_TREE_N)
 #endif
 #if QSB_S0_THREADS != QSB_TREE_N && !QSB_TREE_OFFLOAD
 #error "prepare block size must equal the tree width unless the tree is offloaded"
@@ -1344,6 +1359,29 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
      * scale) is even and so always opens a trip. */
     static_assert((GT_GLV_TERMS&1)==1 && (GT_CHUNKS&1)==0,
                   "QSB_CHAIN_ROLES needs an odd term count and an even Q/P boundary");
+#if QSB_CHAIN_UNROLL
+    /* The same trips in the same order as the rolled loop below, written out. first is 0 or
+     * GT_CHUNKS: from 0 the loop runs terms 2, 4, 6 (phi first), 8; from GT_CHUNKS only 8. */
+    static_assert(GT_CHUNKS==6 && GT_GLV_TERMS==11,
+                  "QSB_CHAIN_UNROLL is written for the GLV11 chain (Q terms 0-5, P terms 6-10)");
+#define QSB_CHAIN_TRIP(T) \
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code((T)+1)); \
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code((T)+2));
+    if(first==0) {
+        QSB_CHAIN_TRIP(2)
+        QSB_CHAIN_TRIP(4)
+        {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        QSB_CHAIN_TRIP(6)
+    }
+    QSB_CHAIN_TRIP(8)
+#undef QSB_CHAIN_TRIP
+#else
     #pragma unroll 1
     for(int term=first+2;term<last-1;term+=2) {
         if(term==GT_CHUNKS) {
@@ -1356,7 +1394,40 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(term+1));
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code(term+2));
     }
+#endif
     qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
+    Load256(y0,y1);
+#else
+#if QSB_CHAIN_PEEL
+    /* The loop's last trip (term == last-1, the only one taking the unpiped branch) peeled
+     * out: every other trip is the piped add and the swap, in the same order; the peeled
+     * trip is the else branch. It can never be the phi trip (static_assert), so the
+     * statement sequence, and every value, is the rolled loop's for every input. The loop
+     * body holds one addition instead of two. */
+    static_assert(GT_CHUNKS < GT_GLV_TERMS-1, "QSB_CHAIN_PEEL: phi must precede the last trip");
+    #pragma unroll 1
+    for(int term=first+2;term<last-1;term++) {
+        if(term==GT_CHUNKS) {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+        const uint32_t next_code=qsb_glv_code(term+1);
+#if QSB_PAIR_ORD
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,next_code);
+#else
+        qsb_pointadd_chain_pipe(X,Y,U,V,x1,y1,y0,table,next_code);
+#endif
+        #pragma unroll
+        for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
+    }
+#if QSB_PAIR_ORD
+    qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
+#else
+    _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#endif
     Load256(y0,y1);
 #else
     #pragma unroll 1
@@ -1386,6 +1457,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             Load256(y0,y1);
         }
     }
+#endif
 #endif
 #elif QSB_CHAIN_PP
     #pragma unroll 1
@@ -4475,7 +4547,7 @@ int main(int argc, char **argv) {
      * calls, so their static frames are sized by the driver at launch; a refused
      * limit keeps the driver default and is cleared here. QSB_STACK_LIMIT=0 skips it. */
 #ifndef QSB_STACK_LIMIT
-#define QSB_STACK_LIMIT (QSB_GLV11 ? 0 : 32768)
+#define QSB_STACK_LIMIT (QSB_GLV11 ? 1024 : 32768)
 #endif
 #if QSB_STACK_LIMIT > 0
     {
@@ -4644,6 +4716,25 @@ int main(int argc, char **argv) {
 #endif
 
     int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
+#if QSB_GLV11
+    /* Size the batch (multiple of 2^20, 1M..QSB_BATCH) to the memory left. */
+    {
+        size_t fr=0,tot=0;
+        cudaMemGetInfo(&fr,&tot);
+        const size_t margin=(size_t)128<<20;
+        const double per_cand=(double)QSB_STATE_PLANES*sizeof(ulonglong2)
+            +8.0*sizeof(uint64_t)/QSB_TREE_N
+            +4.0*sizeof(uint64_t)*(1+QSB_CHECKPOINT_STRIDE)/(256.0*QSB_TREE_N);
+        size_t fit=fr>margin?(size_t)((double)(fr-margin)/(QSB_SLOTS*per_cand)):0;
+        fit&=~(size_t)((1u<<20)-1u);
+        if(fit<(size_t)BATCH) BATCH=(int)fit;
+        if(BATCH<(1<<20)) BATCH=1<<20;
+        fprintf(stderr,"QSB batch: %d candidates/slot x %d slots (%.0f MiB free before pipeline)\n",
+                BATCH,(int)QSB_SLOTS,(double)fr/1048576.0);
+        printf("  Batch: %d candidates/slot (%.0f MiB free before pipeline)\n",
+               BATCH,(double)fr/1048576.0);
+    }
+#endif
     int BLKSZ = 256;
     (void)BLKSZ;
     int GRDSZ = (BATCH+QSB_TREE_N-1)/QSB_TREE_N;
@@ -4657,25 +4748,52 @@ int main(int argc, char **argv) {
     ulonglong2 *d_pipeline_state[QSB_SLOTS];
     uint64_t *d_pipeline_roots[QSB_SLOTS],*d_pipeline_tree[QSB_SLOTS];
     uint64_t *d_super_roots[QSB_SLOTS],*d_root_checkpoint[QSB_SLOTS];
-    size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
-    size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=0;
-    size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
-    size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+    size_t pipeline_state_bytes,pipeline_root_bytes,pipeline_tree_bytes=0,
+           super_root_bytes,root_checkpoint_bytes;
+    cudaError_t pipeline_err=cudaSuccess;
+#if QSB_GLV11
+  for (;;) {   /* retry with a halved batch if the pipeline does not fit */
+#endif
+    GRDSZ=(BATCH+QSB_TREE_N-1)/QSB_TREE_N;
+    ROOT_GRDSZ=(GRDSZ+255)/256;
+    pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
+    pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
+    super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
+    root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+    pipeline_err=cudaSuccess;
     for (int s = 0; s < QSB_SLOTS; s++) {
         d_pipeline_state[s]=NULL; d_pipeline_roots[s]=NULL; d_pipeline_tree[s]=NULL;
         d_super_roots[s]=NULL; d_root_checkpoint[s]=NULL;
-        cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
+    }
+    for (int s = 0; s < QSB_SLOTS && pipeline_err==cudaSuccess; s++) {
+        pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_super_roots[s],super_root_bytes);
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_root_checkpoint[s],root_checkpoint_bytes);
-        if(pipeline_err!=cudaSuccess){
-            fprintf(stderr,"Pipeline allocation failed (slot %d): %s\n",s,cudaGetErrorString(pipeline_err));
-            return 1;
+    }
+#if QSB_GLV11
+    if(pipeline_err!=cudaSuccess && BATCH>(1<<20)) {
+        (void)cudaGetLastError();
+        for (int s = 0; s < QSB_SLOTS; s++) {
+            cudaFree(d_pipeline_state[s]); cudaFree(d_pipeline_roots[s]);
+            cudaFree(d_super_roots[s]); cudaFree(d_root_checkpoint[s]);
         }
+        BATCH=((BATCH/2)>>20)<<20; if(BATCH<(1<<20)) BATCH=1<<20;
+        fprintf(stderr,"QSB pipeline allocation failed (%s); retrying with batch %d\n",
+                cudaGetErrorString(pipeline_err),BATCH);
+        continue;
+    }
+    break;
+  }
+#endif
+    if(pipeline_err!=cudaSuccess){
+        fprintf(stderr,"Pipeline allocation failed: %s\n",cudaGetErrorString(pipeline_err));
+        return 1;
+    }
+    for (int s = 0; s < QSB_SLOTS; s++) {
         if(((uintptr_t)d_pipeline_state[s] & (alignof(ulonglong2)-1u)) != 0){
             fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
             return 1;
