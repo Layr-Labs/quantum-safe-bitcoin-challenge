@@ -27,6 +27,8 @@
 #include <math.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <thread>
+#include <vector>
 #include <cuda_runtime.h>
 #include "RecoveryConstant.h"
 
@@ -2761,15 +2763,25 @@ static void gt_biased_ladder(EC_GROUP *grp, const EC_POINT *first,
     }
 }
 
-/* Build the short L/H ladders for problem-dependent A=neg_r_inv*G. */
-static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32],
-                             const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+/* Build the short L/H ladders for problem-dependent A=neg_r_inv*G.
+ * One independent part per (chunk, L|H): every part derives its own base from
+ * neg_r_inv with private OpenSSL objects, so the parts can run concurrently
+ * (QSB_LADDER_MT) and each writes a disjoint slice of hL/hH. The points and
+ * their order are exactly those of the serial builder. */
+#ifndef QSB_LADDER_MT
+#define QSB_LADDER_MT 1
+#endif
+static void gt_build_ladder_part(int ch, int part, uint64_t *hL, uint64_t *hH,
+                                 const uint8_t neg_r_inv[32],
+                                 const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *x=BN_new(),*y=BN_new(),*factor=BN_new(),*order=BN_new(),
            *nri=BN_new(),*bscal=BN_new(),*field_p=BN_new(),
            *alpha=BN_new(),*beta=BN_new(),*bias=BN_new();
     EC_POINT *base=EC_POINT_new(grp),*step=EC_POINT_new(grp),*first=EC_POINT_new(grp);
+    if(!grp||!ctx||!x||!y||!factor||!order||!nri||!bscal||!field_p||!alpha||!beta||!bias||
+       !base||!step||!first) { fprintf(stderr,"Ladder setup failed\n"); exit(2); }
     EC_GROUP_get_order(grp,order,ctx);
     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
@@ -2780,24 +2792,25 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
-    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
-    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
-    for(int ch=0;ch<GT_CHUNKS;ch++) {
-        if(ch==0) {
-            /* base=A, L[lo]=(K+lo)A, H[hi]=hi*256A. */
-            EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
+    if(ch==0) {
+        /* base=A, L[lo]=(K+lo)A, H[hi]=hi*256A. */
+        EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
+        if(part==0) {
             BN_mod_mul(bscal,bias,nri,order,ctx);
             EC_POINT_mul(grp,first,bscal,NULL,NULL,ctx);
             gt_biased_ladder(grp,first,base,GT_LO,
                 hL,x,y,alpha,beta,field_p,ctx);
-        } else {
-            /* base=2^(shift-1)A, L[lo]=lo*base. */
-            BN_one(factor); BN_lshift(factor,factor,gt_shift(ch)-1);
-            BN_mod_mul(bscal,factor,nri,order,ctx);
-            EC_POINT_mul(grp,base,bscal,NULL,NULL,ctx);
+        }
+    } else {
+        /* base=2^(shift-1)A, L[lo]=lo*base. */
+        BN_one(factor); BN_lshift(factor,factor,gt_shift(ch)-1);
+        BN_mod_mul(bscal,factor,nri,order,ctx);
+        EC_POINT_mul(grp,base,bscal,NULL,NULL,ctx);
+        if(part==0)
             gt_batch_ladder(grp,base,GT_LO-1,
                 hL+(size_t)ch*GT_LO*8,x,y,alpha,beta,field_p,ctx);
-        }
+    }
+    if(part==1) {
 #if QSB_BIGTBL
         BN_set_word(factor,GT_LO);
 #else
@@ -2817,6 +2830,27 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     BN_free(bscal);BN_free(field_p);BN_free(alpha);BN_free(beta);BN_free(bias);
     EC_POINT_free(base);EC_POINT_free(step);EC_POINT_free(first);
     EC_GROUP_free(grp);BN_CTX_free(ctx);
+}
+
+static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv[32],
+                             const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
+    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
+    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
+#if QSB_LADDER_MT
+    std::vector<std::thread> workers;
+    bool threaded=true;
+    try {
+        for(int part=0;part<2;part++)
+            for(int ch=0;ch<GT_CHUNKS;ch++)
+                workers.emplace_back(gt_build_ladder_part,ch,part,hL,hH,neg_r_inv,alpha_le,beta_le);
+    } catch(...) { threaded=false; }
+    for(auto &w:workers) w.join();
+    if(threaded) return;
+    /* Thread creation failed part-way: rebuild everything serially. */
+#endif
+    for(int ch=0;ch<GT_CHUNKS;ch++)
+        for(int part=0;part<2;part++)
+            gt_build_ladder_part(ch,part,hL,hH,neg_r_inv,alpha_le,beta_le);
 }
 
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
