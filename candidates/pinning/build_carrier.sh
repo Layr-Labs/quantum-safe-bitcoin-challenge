@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate qsb_carrier_sm89.h, the native sm_89 image that QsbCarrier.h loads.
 # Development tool, never run by the ranked harness. Rerun after ANY edit to
-# pinning.cu or a header it includes, with the same CUDA toolkit as the runner (12.8).
+# pinning.cu or a header it includes, with the same CUDA toolkit as the runner (12.8; e.g. inside nvidia/cuda:12.8.1-devel-ubuntu22.04).
 #   ./build_carrier.sh [QSB_ZEROS_N]
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -32,7 +32,7 @@ for kid, pat in want:
     names.append(hits[0])
 for g in ("qsb_carrier_zeros", "pin_u2rx_words", "pin_u2ry_words", "pin_iso_invu_words",
           "pin_iso_u2ry_words", "pin_iso_xneg", "pin_recovery_c", "pin_u2rk_words",
-          "pin_one_mul", "pin_zero_add", "pin_tail_words"):
+          "pin_one_mul", "pin_tail_words"):
     if not re.search(r"\b%s\b" % g, syms):
         sys.exit(f"build_carrier: global {g} missing from image")
 # The hint must be present in the prepare kernel (the only table reader on the hot path).

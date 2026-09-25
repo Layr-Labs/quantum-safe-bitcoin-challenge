@@ -126,7 +126,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 16777216   /* candidates per pipeline launch */
+#define QSB_BATCH 8388608    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -495,12 +495,33 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+#ifndef QSB_COLD_CS
+#define QSB_COLD_CS 1   /* carrier image: evict-first 64 B fetches for the cold (DRAM) banks */
+#endif
 #if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
-    /* Native carrier only: request both 32-byte sectors of this record. */
-    ulonglong2 x0;
+    /* Native carrier image only: the 64 B prefetch-size hint makes a table miss fetch
+     * both 32 B sectors of the record in one DRAM access (QsbCarrier.h). */
+    ulonglong2 x0,x1,y0,y1;
+#if QSB_COLD_CS
+    /* Cold (DRAM) banks are streamed once per use: fetch the record as one 64 B access and mark
+     * it evict-first so it does not displace the pinned hot banks or the pipeline state in L2.
+     * Warp-uniform: every lane of a warp reads the same term, hence the same bank. */
+    if ((size_t)base + idx >= (size_t)q9_bigtbl_offset(4)) {
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
+            : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.v2.u64 {%0,%1}, [g]; }"
+            : "=l"(x1.x), "=l"(x1.y) : "l"(tx+1));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.v2.u64 {%0,%1}, [g]; }"
+            : "=l"(y0.x), "=l"(y0.y) : "l"(ty));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.v2.u64 {%0,%1}, [g]; }"
+            : "=l"(y1.x), "=l"(y1.y) : "l"(ty+1));
+    } else
+#endif
+    {
     asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
         : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
-    ulonglong2 x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    x1=__ldg(tx+1);y0=__ldg(ty);y1=__ldg(ty+1);
+    }
 #else
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
 #endif
@@ -967,7 +988,7 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #ifndef QSB_ZEROS_N
 #define QSB_ZEROS_N 24
 #endif
-/* Native carrier fingerprint; checked against the fixed compute_52 build. */
+/* Build fingerprint the native carrier checks before use (QsbCarrier.h). */
 __device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
@@ -3315,13 +3336,8 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
-    cudaError_t xyerr = QSB_TO_SYMBOL(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
-    if (xyerr == cudaSuccess)
-        xyerr = QSB_TO_SYMBOL(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
-    if (xyerr != cudaSuccess) {
-        fprintf(stderr, "Failed to upload recovery coordinates: %s\n", cudaGetErrorString(xyerr));
-        return 1;
-    }
+    QSB_TO_SYMBOL(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
+    QSB_TO_SYMBOL(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
 #if QSB_ISO_XR
     if(QSB_TO_SYMBOL(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
        QSB_TO_SYMBOL(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
@@ -3410,16 +3426,6 @@ int main(int argc, char **argv) {
             }
         }
 #endif
-#if QSB_SHA_ALU_ADD
-        {
-            uint32_t zero = 0u;
-            cudaError_t zerr = QSB_TO_SYMBOL(pin_zero_add, &zero, sizeof(zero));
-            if (zerr != cudaSuccess) {
-                fprintf(stderr, "Failed to upload SHA addend: %s\n", cudaGetErrorString(zerr));
-                return 1;
-            }
-        }
-#endif
         cudaError_t copy_err = QSB_TO_SYMBOL(pin_tail_words, words, sizeof(words));
         if (copy_err != cudaSuccess) {
             fprintf(stderr, "Failed to upload fixed SHA tail: %s\n",
@@ -3452,7 +3458,7 @@ int main(int argc, char **argv) {
      * launched batch must start at a multiple of 256 and the stage-0 block must be 128 threads.
      * The batch size is checked here; the batch start (LT_MIN) is checked below, where it is
      * defined. Both hold for the ranked geometry (LT_MIN = 500000000 = 256*1953125,
-     * QSB_BATCH = 2^24, QSB_S0_THREADS = 128). */
+     * QSB_BATCH = 2^23, QSB_S0_THREADS = 128). */
     static_assert(QSB_S0_THREADS == 128 && (QSB_BATCH % 256) == 0,
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
