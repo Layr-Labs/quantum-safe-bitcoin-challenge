@@ -487,6 +487,10 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
  * Branchless: y is selected between y and p-y by a mask. */
 /* Mask-taking variant used by the direct-digit path: the caller already has
  * the sign as an all-ones/zero mask, so the loader does not redo 0-neg. */
+#ifndef QSB_COLD_CS
+#define QSB_COLD_CS 0   /* 1: evict-first loads for the DRAM-resident terms */
+#endif
+template<bool COLD = false>
 __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict__ gTable,
                                                       uint32_t base, uint32_t idx,
                                                       uint64_t m,
@@ -495,14 +499,15 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
+    ulonglong2 x0,x1,y0,y1;
 #if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
     /* Native carrier only: request both 32-byte sectors of this record. */
-    ulonglong2 x0;
     asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
         : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
-    ulonglong2 x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    x1=__ldg(tx+1);y0=__ldg(ty);y1=__ldg(ty+1);
 #else
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    if (COLD) { x0=__ldcs(tx); x1=__ldcs(tx+1); y0=__ldcs(ty); y1=__ldcs(ty+1); }
+    else      { x0=__ldg(tx);  x1=__ldg(tx+1);  y0=__ldg(ty);  y1=__ldg(ty+1); }
 #endif
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -797,6 +802,14 @@ __device__ __forceinline__ uint32_t qsb_glv_code(unsigned term) {
 __device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t code,
                                                   uint64_t *x,uint64_t *y) {
     uint32_t m32=(uint32_t)((int32_t)code>>31);
+#if QSB_BIGTBL && QSB_FOUR_HOT && QSB_COLD_CS
+    /* Terms 4,5 (P) and 10,11 (Q) read the streaming banks; the branch is
+     * uniform across the block because term is the loop counter. */
+    if ((term % GT_CHUNKS) >= 4u) {
+        gt_load_signed_flat_m<true>(table,0u,code&0x7fffffffu,((uint64_t)m32<<32)|m32,x,y);
+        return;
+    }
+#endif
 #if QSB_BIGTBL
     gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
 #else
@@ -852,6 +865,24 @@ __device__ __forceinline__ void qsb_pointadd_chain_pipe(
 }
 #endif
 
+#ifndef QSB_COLD_PF
+#define QSB_COLD_PF 1   /* 0: none; 1: hint each streaming record QSB_COLD_PF_LEAD adds ahead; 2: both per component up front */
+#endif
+#ifndef QSB_COLD_PF_LEAD
+#define QSB_COLD_PF_LEAD 2   /* mixed additions between the L2 hint and the load; one add is about 1.9 us per warp on AD102 at 16 warps per SM, loaded DRAM latency about 1.4 us */
+#endif
+#if QSB_COLD_PF
+/* First streaming (DRAM-resident) term of a component: geometry from
+ * q9_bigtbl_entries in GLVScalar.cuh (FOUR_HOT: terms 4,5; otherwise 3,4,5). */
+#define QSB_COLD_FIRST (QSB_FOUR_HOT ? 4u : 3u)
+/* L2 hint for one table record; both 32 B sectors, no destination register. */
+__device__ __forceinline__ void qsb_cold_prefetch(const uint8_t *table,unsigned term) {
+    volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
+    const uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
+    const uint8_t *rec=table+(size_t)(code&0x7fffffffu)*64;
+    qsb_prefetch_l2(rec); qsb_prefetch_l2(rec+32);
+}
+#endif
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
     uint64_t (*unused)[2*QSB_TREE_N]) {
@@ -917,6 +948,10 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         }
     }
 #else
+#if QSB_COLD_PF == 2
+    /* The first component's streaming records fill L2 while its hot adds run. */
+    for(unsigned t=QSB_COLD_FIRST;t<GT_CHUNKS;t++) qsb_cold_prefetch(table,first+t);
+#endif
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -927,7 +962,16 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
                 0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
             };
             _ModMult(X,X,(uint64_t*)beta);
+#if QSB_COLD_PF == 2
+            for(unsigned t=QSB_COLD_FIRST;t<GT_CHUNKS;t++) qsb_cold_prefetch(table,GT_CHUNKS+t);
+#endif
         }
+#if QSB_COLD_PF == 1
+        /* QSB_COLD_PF_LEAD mixed additions of work separate the hint from the load of
+         * its record; the predicate is uniform because term is the loop counter. */
+        if(term+QSB_COLD_PF_LEAD<last && (unsigned)((term+QSB_COLD_PF_LEAD)%GT_CHUNKS)>=QSB_COLD_FIRST)
+            qsb_cold_prefetch(table,term+QSB_COLD_PF_LEAD);
+#endif
         qsb_load_glv(table,term,x1,y1);
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
@@ -1712,6 +1756,7 @@ __device__ __constant__ uint32_t pin_iso_xneg;
 // storage gives adjacent lanes adjacent 64-bit words instead of a 32-byte AoS
 // stride. Whole-block participation is required: the caller maps inactive and
 // unusable tail lanes to the multiplicative identity before entering here.
+template<bool SCALE_ISO = true>
 __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
     __shared__ uint64_t products[4][512];
     __shared__ uint64_t inverses[4][256];
@@ -1754,7 +1799,9 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
 #if QSB_ISO_XR
         /* Scale the single outer-tree inverse by u^-1.  The down-sweep is
          * linear in that inverse, so every returned group-root inverse keeps
-         * the factor; the packed cofactor exponents cancel it in finish. */
+         * the factor; the packed cofactor exponents cancel it in finish.
+         * SCALE_ISO=false gives the plain inverse (table construction). */
+        if (SCALE_ISO) {
         uint64_t invu[5]={pin_iso_invu_words[0],pin_iso_invu_words[1],
                           pin_iso_invu_words[2],pin_iso_invu_words[3],0};
         uint64_t scaled[5];
@@ -1762,6 +1809,7 @@ __device__ __forceinline__ void qsb_block_inverse(uint64_t *value) {
         #pragma unroll
         for(int k=0;k<4;k++)root[k]=scaled[k];
         root[4]=0;
+        }
 #endif
         #pragma unroll
         for(int k=0;k<4;k++)inverses[k][254]=root[k];
@@ -2819,6 +2867,16 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
     EC_GROUP_free(grp);BN_CTX_free(ctx);
 }
 
+#ifndef QSB_FAST_INIT
+#define QSB_FAST_INIT 0   /* GPU ladders + batched-inversion table build (FastInit.cuh) */
+#endif
+#ifndef QSB_TABLE_CKSUM
+#define QSB_TABLE_CKSUM 0 /* diagnostic: print a table digest after the offset pass and exit */
+#endif
+#if QSB_FAST_INIT || QSB_TABLE_CKSUM
+#include "FastInit.cuh"
+#endif
+
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
     if(ch==0) {
 #if QSB_BIGTBL
@@ -3143,7 +3201,30 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #endif
 
 
+
+/* Init-phase timing (stderr only; the bridge parses stdout for M/s). */
+#include <time.h>
+static double qsb_init_t0 = 0.0;
+static double qsb_now_seconds(void) {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+static void qsb_init_mark(const char *phase) {
+    static double last = 0.0;
+    const double now = qsb_now_seconds();
+    if (qsb_init_t0 == 0.0) { qsb_init_t0 = now; last = now; }
+    fprintf(stderr, "[init] %-18s +%7.3f s  total %7.3f s\n", phase, now - last, now - qsb_init_t0);
+    last = now;
+}
+#ifndef QSB_STACK_LIMIT
+#define QSB_STACK_LIMIT 32768      /* frontier value; local 4 GB cards use a smaller override */
+#endif
+#ifndef QSB_PROGRESS_EVERY
+#define QSB_PROGRESS_EVERY 10      /* progress print cadence in sequences; frontier value */
+#endif
+
 int main(int argc, char **argv) {
+    qsb_init_mark("process");
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
     uint32_t tail_w0 = 0;   /* W0 of the static tail block with a zero low byte (QSB_TAIL_TAB) */
     if (argc < 2) {
@@ -3176,6 +3257,7 @@ int main(int argc, char **argv) {
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
     qsb_carrier_init(prop);
+    qsb_init_mark("context");
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
@@ -3189,6 +3271,7 @@ int main(int argc, char **argv) {
     iso.alpha[0]=iso.beta[0]=1;
 #endif
 
+    qsb_init_mark("problem");
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
     uint8_t *d_gt;
@@ -3207,22 +3290,36 @@ int main(int argc, char **argv) {
          * The result is then spot-checked against OpenSSL, and anything that
          * does not match falls back to the original host builder -- a wrong
          * table yields zero verifiable hits, so it must never reach the run. */
+        qsb_init_mark("gt_malloc");
         struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
         size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
         size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
+        int gt_total = GT_TOTAL_ENTRIES;
+#if QSB_FAST_INIT && QSB_BIGTBL
+        uint64_t *dL=NULL,*dH=NULL;
+        if(cudaMalloc(&dL,lb)!=cudaSuccess || cudaMalloc(&dH,hb)!=cudaSuccess ||
+           cudaMemset(dL,0,lb)!=cudaSuccess || cudaMemset(dH,0,hb)!=cudaSuccess){
+            fprintf(stderr,"OOM: gtable ladders\n"); return 1;
+        }
+        if(!qsb_fast_ladders(dL,dH,pp.neg_r_inv,iso.alpha,iso.beta)) return 1;
+        qsb_init_mark("ladders_gpu");
+        kernel_build_gtable_batched<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+#else
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
         gt_build_ladders(hL,hH,pp.neg_r_inv,iso.alpha,iso.beta);
+        qsb_init_mark("ladders_host");
         uint64_t *dL=NULL,*dH=NULL; cudaMalloc(&dL,lb); cudaMalloc(&dH,hb);
         cudaMemcpy(dL,hL,lb,cudaMemcpyHostToDevice);
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
-        int gt_total = GT_TOTAL_ENTRIES;
+        qsb_init_mark("ladders_upload");
         if(qsb_carrier_has(QK_BUILD))
             qsb_carrier_launch(kernel_build_gtable,QK_BUILD,dim3((gt_total+255)/256),dim3(256),(cudaStream_t)0,
                 dL,dH,d_gt);
         else
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+            kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+#endif
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
         if(gerr==cudaSuccess) gerr=cudaGetLastError();
@@ -3231,6 +3328,7 @@ int main(int argc, char **argv) {
         cudaError_t gerr = cudaGetLastError();
 #endif
         cudaFree(dL); cudaFree(dH);
+        qsb_init_mark("gt_build_kernel");
 #if QSB_GT_SPARSE_CHECK
         uint8_t *chk_table=NULL;
 #else
@@ -3254,6 +3352,7 @@ int main(int argc, char **argv) {
                                   iso.alpha,iso.beta);
 #endif
         }
+        qsb_init_mark("spot_check");
         clock_gettime(CLOCK_MONOTONIC, &tb);
         double gt_secs=(tb.tv_sec-ta.tv_sec)+(tb.tv_nsec-ta.tv_nsec)/1e9;
         if(gt_ok){
@@ -3280,6 +3379,19 @@ int main(int argc, char **argv) {
         cudaError_t yerr = cudaDeviceSynchronize();
         if (yerr == cudaSuccess) yerr = cudaGetLastError();
         if (yerr != cudaSuccess) { fprintf(stderr, "Table offset pass failed: %s\n", cudaGetErrorString(yerr)); return 1; }
+#endif
+        qsb_init_mark("yoff_pass");
+#if QSB_TABLE_CKSUM
+        {
+            unsigned long long *d_acc=NULL, h_acc[2]={0,0};
+            if(cudaMalloc(&d_acc,sizeof(h_acc))!=cudaSuccess || cudaMemset(d_acc,0,sizeof(h_acc))!=cudaSuccess) return 1;
+            kernel_table_checksum<<<(GT_TOTAL_ENTRIES+255u)/256u,256>>>(d_gt,d_acc);
+            if(cudaDeviceSynchronize()!=cudaSuccess || cudaMemcpy(h_acc,d_acc,sizeof(h_acc),cudaMemcpyDeviceToHost)!=cudaSuccess) return 1;
+            printf("  TABLE CHECKSUM entries=%u sum=%016llx xor=%016llx fast_init=%d\n",
+                   (unsigned)GT_TOTAL_ENTRIES,h_acc[0],h_acc[1],(int)QSB_FAST_INIT);
+            fflush(stdout);
+            return 0;
+        }
 #endif
     }
 
@@ -3457,7 +3569,9 @@ int main(int argc, char **argv) {
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    qsb_init_mark("constants");
+    cudaDeviceSetLimit(cudaLimitStackSize, QSB_STACK_LIMIT);
+    qsb_init_mark("stack_limit");
 
     /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
      * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
@@ -3566,6 +3680,7 @@ int main(int argc, char **argv) {
                (int)QSB_SLOTS);
         fflush(stdout);
     }
+    qsb_init_mark("l2_and_slots");
 #else
     uint32_t *d_hit_cnt, *d_hit_idx;
 #if QSB_HOST_READBACK
@@ -3653,6 +3768,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
+    qsb_init_mark("pipeline_alloc");
     printf("  Pipeline checkpoints: %.0f MiB state + %.0f MiB tree + %.0f MiB roots + %.2f MiB root tree\n",
            (double)pipeline_state_bytes/(1024*1024),
            (double)pipeline_tree_bytes/(1024*1024),
@@ -3687,6 +3803,7 @@ int main(int argc, char **argv) {
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
+    qsb_init_mark("loop_start");
     uint64_t total_searched = 0;
     int found = 0;
 
@@ -3932,6 +4049,7 @@ int main(int argc, char **argv) {
 #endif
 
             total_searched += batch_sz;
+            { static int first_batches = 0; if (first_batches < 3) { first_batches++; qsb_init_mark(first_batches == 1 ? "batch1_queued" : first_batches == 2 ? "batch2_queued" : "batch3_queued"); } }
 
             /* Check if another GPU found it */
             if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
@@ -3956,14 +4074,15 @@ int main(int argc, char **argv) {
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
 #endif
 
-        /* Progress every 10 sequences */
+        /* Progress every QSB_PROGRESS_EVERY sequences (10 on the promoted tree) */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
-        if (seqs_done % 10 == 0) {
+        if (seqs_done % QSB_PROGRESS_EVERY == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;
             printf("  [GPU %d] seq #%u (0x%08X), %luM total, %.1fM/s, %.0fs\n",
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
+            fflush(stdout);
         }
     }
 #else
@@ -4082,14 +4201,15 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Progress every 10 sequences */
+        /* Progress every QSB_PROGRESS_EVERY sequences (10 on the promoted tree) */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
-        if (seqs_done % 10 == 0) {
+        if (seqs_done % QSB_PROGRESS_EVERY == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;
             printf("  [GPU %d] seq #%u (0x%08X), %luM total, %.1fM/s, %.0fs\n",
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
+            fflush(stdout);
         }
     }
 #endif
