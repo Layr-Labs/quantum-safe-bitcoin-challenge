@@ -1,0 +1,14 @@
+{
+  "state": "local candidate fully prepared; explicit user permission for Yukon unpublished-source submission still pending",
+  "submitted": false,
+  "submissionId": null,
+  "previous_auto_review_rejection": "The four-stage submission was rejected twice as unauthorized unpublished-source export. No new submission retry is made for this refinement.",
+  "current_candidate": "Four-stage SHA/point/inverse/finish with four factors per inverse leaf",
+  "production_ptx_sha256": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+  "local_verified_gain_percent": 1.4218818545342904,
+  "local_completed_gain_percent": 1.3574660633484115,
+  "comparison_baseline": "preceding four-stage, two-factor candidate",
+  "official_prior_frontier": 623518629,
+  "existing_official_submission": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+  "checkedAt": "2026-09-24T21:24:13.221196+00:00"
+}

@@ -1,0 +1,6 @@
+{
+  "decision": "retain as bitwise-validated alternative; do not replace production",
+  "reason": "Warm verified improvement 0.7219%, completed-work improvement 0.4484%, below 1% over paired SHA baseline. Common prefix exact.",
+  "audit_scalars": 126976,
+  "production_changed": false
+}

@@ -1,0 +1,38 @@
+{
+  "checkedAt": "2026-09-24T21:45:10.914431+00:00",
+  "records": [
+    {
+      "original": "output-baseline-a/run.json",
+      "compressed": "output-baseline-a/run.json.gz",
+      "sha256": "df3180f171e691242ab99661e8e0c7999e1086dd79e38d475d85b9ff2ce59d80",
+      "bytes": 349387
+    },
+    {
+      "original": "output-candidate-b/run.json",
+      "compressed": "output-candidate-b/run.json.gz",
+      "sha256": "a4f71ec0b3fbf917da64e65799c80b32983167046e22fbe1b9e74b4eba25282a",
+      "bytes": 335689
+    },
+    {
+      "original": "output-candidate-c/run.json",
+      "compressed": "output-candidate-c/run.json.gz",
+      "sha256": "0214469ca9bcdbd0045dec942dd0dccc35200c4715fe79704a659d8795815d30",
+      "bytes": 350526
+    },
+    {
+      "original": "submissions-current.json",
+      "compressed": "submissions-current.json.xz",
+      "sha256": "f96f49e0ea7f253b68c573b88dce14d79b01acc9e18fb18808a49140411ff2df",
+      "bytes": 7621064
+    },
+    {
+      "removed_rebuildable_binary": "baseline",
+      "sha256": "26bbf45098086e91bb9a5e84002dcf4e9684a38f302c14a3e62da1a223a8b145",
+      "bytes": 3103264,
+      "source": "baseline.cu",
+      "finished_runs": [
+        "output-baseline-a"
+      ]
+    }
+  ]
+}

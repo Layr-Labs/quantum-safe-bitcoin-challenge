@@ -1,0 +1,60 @@
+{
+  "checkedAt": "2026-09-24T23:34:16.265684+00:00",
+  "currentBestScore": 623518629,
+  "best": {
+    "id": "7aef224a-e3ff-43f9-9877-50cdbda3f653",
+    "status": "accepted",
+    "officialScore": 623518629,
+    "officialMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1201.1428,
+      "candidates": 748934922240,
+      "hits_per_s": 74.329214,
+      "problem_seed": 1331736675,
+      "verified_hits": 89280,
+      "throughput_Mps": 623.518629,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.003347,
+      "candidates_self_reported": 863372730525
+    },
+    "improved": true,
+    "rejectionReason": null,
+    "submissionCommitSha": "9ac2515450446dbadbe061e98ebfc317c36d4999",
+    "promotionStatus": "promoted",
+    "promotedSourceRef": "9ac2515450446dbadbe061e98ebfc317c36d4999",
+    "updatedAt": "2026-09-21T15:55:14.341Z"
+  },
+  "ours": {
+    "id": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+    "status": "rejected",
+    "officialScore": 500784234,
+    "officialMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1200.9421,
+      "candidates": 601412861952,
+      "hits_per_s": 59.698132,
+      "problem_seed": 389704731,
+      "verified_hits": 71694,
+      "throughput_Mps": 500.784234,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.003735,
+      "candidates_self_reported": 755457330176
+    },
+    "improved": false,
+    "rejectionReason": "score did not improve current best",
+    "submissionCommitSha": "e7ba81746f12be9c1f46f91fc5491a19f4327724",
+    "promotionStatus": null,
+    "promotedSourceRef": null,
+    "updatedAt": "2026-09-24T23:31:46.197Z"
+  }
+}

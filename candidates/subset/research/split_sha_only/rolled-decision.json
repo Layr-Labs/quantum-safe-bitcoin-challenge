@@ -1,0 +1,12 @@
+{
+  "decision": "do not schedule GPU run",
+  "reason": "The hypothesis was reduced live register pressure while retaining paired SHA. Both sm86 and sm89 still use 124 registers with window unrolling disabled. No intended resource benefit was demonstrated.",
+  "gpu_tested": false,
+  "source": "candidate_rolled.cu",
+  "audit_compile_flags": [
+    "-O3",
+    "-DQSB_ZEROS_N=24",
+    "-DQSB_PAIR_SHA_UNROLL_WINDOW=0"
+  ],
+  "audit_executed": false
+}

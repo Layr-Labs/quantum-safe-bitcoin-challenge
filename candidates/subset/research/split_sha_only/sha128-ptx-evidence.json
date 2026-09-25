@@ -1,0 +1,7 @@
+{
+  "raw_dump_sha256": "eefd42937801bcbec88ab9f7ba8adf9f613188ce11b75f9b467912edf1ecf4d1",
+  "binary_sha256": "7825aac5a32614510101dbc5970751741f49a2d93309bb460ea9bb8a369b12ac",
+  "source_sha256": "18aa15ffe7656a615995fd18b97aa425876b64979dcd2f2544ebf36eebb50a26",
+  "header_sha256": "22ca7c245bf830762d9219181a50df4fb67fa332678572eb440df8f0a13ffc79",
+  "resource_target": "sm_52 compiler output; RTX 3090 runs use driver JIT"
+}

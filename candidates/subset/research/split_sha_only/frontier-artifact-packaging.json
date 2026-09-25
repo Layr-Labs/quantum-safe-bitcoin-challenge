@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-09-24T21:53:06.967052+00:00",
+  "records": [
+    {
+      "original": "output-frontier-d/run.json",
+      "compressed": "output-frontier-d/run.json.gz",
+      "sha256": "36a0d8c3716468f5d1fa4a8b5a0fc0150bb3bf8e25aa7345326f83ac87eaa041",
+      "bytes": 339310
+    },
+    {
+      "original": "output-candidate-e/run.json",
+      "compressed": "output-candidate-e/run.json.gz",
+      "sha256": "d15622226cdb4fb530448307b103107c6cc668755be800f9bde61d4cc54356ba",
+      "bytes": 347494
+    },
+    {
+      "removed_rebuildable_binary": "frontier",
+      "sha256": "eb889952da270d2ac87c06f4ae3c26867f04fda7ec61620dcd1740df471c8d18",
+      "source": "frontier.cu",
+      "terminalSession": 9760
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+QSB Digest Search [GPU 0]
+  GPU: NVIDIA GeForce RTX 3090 (82 SMs)
+  Loaded: n=150, t=9, preimage=9906, tail=218, suffix=44, prefix_rem=42
+  Patched tx_suffix: seq=0x10A994D9 (off=0) lt=2399405719 (off=36) tx_suffix_len=44
+  Short-epoch split: cut=137, 6 early omissions x 8218472724 epochs, 3 window omissions x 128 per epoch (1.052e+12 candidates)
+  Register-resident assembly: 10 kept pushes (108 message bytes) + 69 constant words, 6 SHA-256 blocks per candidate
+  GTable built on GPU in 0.17s (1048576 points, 64 MiB total, spot check passed)
+Window schedule classes: first=8 second=53 of 128
+  Mode: REAL, GPU 0 (global 0 of 1)
+  Batch: 8388608 combos per kernel launch
+  Search space (GLOBAL): C(150,9) = 1051964508672 combos
+  Search space (this GPU's slice): 82947113349100 combos (7884.973% of global)
+  Using short-epoch producer/consumer path (131072 epochs per launch)
+PROFILE_DEVICE name=NVIDIA GeForce RTX 3090 cc=8.6 sms=82 l2_bytes=6291456
+PROFILE_ATTR kernel=sha registers=40 local_bytes=0 shared_bytes=0 active_blocks=6
+PROFILE_ATTR kernel=consumer registers=128 local_bytes=16 shared_bytes=49152 active_blocks=2
+PROFILE batch=1 producer=1.524736 first=0.610304 sha=37.568512 consumer=209.245178 replay=0.260096 ms
+PROFILE batch=2 producer=1.596128 first=1.692672 sha=43.428864 consumer=207.963135 replay=0.151552 ms
+PROFILE batch=3 producer=1.623488 first=0.658432 sha=42.903553 consumer=208.507904 replay=0.152576 ms
+PROFILE batch=4 producer=1.735136 first=0.663552 sha=42.395649 consumer=217.372665 replay=0.159744 ms
+PROFILE batch=5 producer=1.686752 first=0.690176 sha=45.156353 consumer=212.107269 replay=0.148480 ms
+PROFILE batch=6 producer=1.580192 first=1.080320 sha=42.156033 consumer=207.948807 replay=0.151552 ms
+PROFILE batch=7 producer=1.580512 first=0.659456 sha=44.392448 consumer=209.727493 replay=0.151552 ms
+PROFILE batch=8 producer=1.522912 first=0.658432 sha=42.430466 consumer=214.879227 replay=0.151552 ms
+PROFILE batch=9 producer=2.091008 first=1.122304 sha=43.156479 consumer=213.808121 replay=0.151552 ms
+PROFILE batch=10 producer=1.506624 first=1.083392 sha=43.901951 consumer=209.176575 replay=0.149504 ms
+PROFILE batch=11 producer=1.531200 first=1.099776 sha=43.722752 consumer=210.936829 replay=0.150528 ms
+PROFILE batch=12 producer=1.891424 first=0.663552 sha=43.898880 consumer=213.244934 replay=0.150528 ms
+PROFILE batch=13 producer=1.490112 first=0.664576 sha=45.318146 consumer=211.783676 replay=0.150528 ms
+PROFILE batch=14 producer=1.604672 first=0.663552 sha=43.632641 consumer=210.609146 replay=0.152576 ms
+PROFILE batch=15 producer=1.410784 first=0.664576 sha=43.335678 consumer=212.373505 replay=0.151552 ms
+PROFILE batch=16 producer=1.537792 first=0.657408 sha=42.915840 consumer=215.981049 replay=0.636928 ms
+PROFILE batch=17 producer=1.433728 first=0.664576 sha=42.754047 consumer=213.130234 replay=0.151552 ms
+PROFILE batch=18 producer=1.797600 first=0.664576 sha=43.836414 consumer=211.068924 replay=0.152576 ms
+PROFILE batch=19 producer=1.475744 first=0.657408 sha=43.598846 consumer=210.898941 replay=0.150528 ms
+PROFILE batch=20 producer=1.346976 first=0.664576 sha=43.269119 consumer=213.523453 replay=0.148480 ms
+PROFILE batch=21 producer=1.305376 first=0.664576 sha=43.218945 consumer=211.560455 replay=0.149504 ms
+PROFILE batch=22 producer=1.887072 first=0.662528 sha=43.649025 consumer=210.649094 replay=0.151552 ms
+PROFILE batch=23 producer=1.247776 first=0.669696 sha=43.549698 consumer=212.058105 replay=0.150528 ms
+PROFILE batch=24 producer=1.363968 first=0.664576 sha=42.749950 consumer=214.506500 replay=0.150528 ms

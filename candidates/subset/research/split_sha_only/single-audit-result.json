@@ -1,0 +1,14 @@
+{
+  "checkedAt": "2026-09-24T22:10:33.537300+00:00",
+  "result": "pass",
+  "compared_scalars": 126976,
+  "scalar_bits": 256,
+  "boundary_cases": 60,
+  "guard_regions_pass": true,
+  "reference_1": "unchanged paired SHA producer",
+  "reference_2": "independent CPU SHA compression with OpenSSL SHA256 second hash",
+  "audit_source_sha256": "f659b27e5367fa4e5bb99a37fc7f5543ea7ca7ffd309aab0ad4051de23d0734a",
+  "candidate_source_sha256": "60afb273baae9406da99207547c3916360f5c85512ef21d160115bd5099b7204",
+  "candidate_header_sha256": "e604d4292ea435e8f93eee34e1f12882d30c606e1d7207567042d36b18b1e557",
+  "scope": "SHA scalar equivalence for four synthetic fixtures over 15 odd/boundary epoch counts; does not test downstream EC arithmetic or establish performance."
+}

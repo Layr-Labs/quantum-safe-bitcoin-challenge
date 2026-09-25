@@ -1,0 +1,60 @@
+{
+  "default_production_ptx_unchanged": true,
+  "variants": {
+    "baseline": {
+      "ptx_sha256": "6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417",
+      "binary_sha256": "9e9c33f014db84bb518c000757a259615f01cdffbda5ef4e21d9ad5c6c1bfb29"
+    },
+    "candidate": {
+      "ptx_sha256": "1d7eedf83f1b3acacaff662bfe41d4376c0e50430a81d3a2a7fa951beaee5d24",
+      "binary_sha256": "8c5171b1580349f8803893e05389013c19d4ec14d0bb0108f06af642a93ff96b"
+    }
+  },
+  "resources": [
+    {
+      "variant": "baseline",
+      "arch": "sm_86",
+      "entries": [
+        {
+          "kernel": "_Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh",
+          "properties": "for 'sm_86'\nptxas info    : Function properties for _Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 127 registers, used 0 barriers, 392 bytes cmem[0], 8 bytes cmem[2]\nptxas info    : Compile time = 126.052 ms\nptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "610ac1ee0b51649e8db17253644d618f35546cc58407ecc1d21fb2bedba30437"
+    },
+    {
+      "variant": "baseline",
+      "arch": "sm_89",
+      "entries": [
+        {
+          "kernel": "_Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh",
+          "properties": "for 'sm_89'\nptxas info    : Function properties for _Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 127 registers, used 0 barriers, 392 bytes cmem[0], 8 bytes cmem[2]\nptxas info    : Compile time = 122.773 ms\nptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "7d188ec338be9f4d63cec45d3d2dc4fb373ba3e1d70590af08740724023f30ff"
+    },
+    {
+      "variant": "candidate",
+      "arch": "sm_86",
+      "entries": [
+        {
+          "kernel": "_Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh",
+          "properties": "for 'sm_86'\nptxas info    : Function properties for _Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 80 registers, used 0 barriers, 392 bytes cmem[0], 8 bytes cmem[2]\nptxas info    : Compile time = 121.286 ms\nptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "238364f1354ca4d4196ac4b7fb5be3a76d0923cd18fe92cbcc2eb12fc89f9559"
+    },
+    {
+      "variant": "candidate",
+      "arch": "sm_89",
+      "entries": [
+        {
+          "kernel": "_Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh",
+          "properties": "for 'sm_89'\nptxas info    : Function properties for _Z17kernel_split_tailPKmPKhjPK12epoch_desc_tPh\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 80 registers, used 0 barriers, 392 bytes cmem[0], 8 bytes cmem[2]\nptxas info    : Compile time = 116.364 ms\nptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    :"
+        }
+      ],
+      "cubin_sha256": "09124c2b9be33cb22d230578fb2ce4740f46ee8fd02129ca6185f0b486ecf277"
+    }
+  ],
+  "scope": "Offline CUDA12.8 ptxas resources, not GPU execution"
+}

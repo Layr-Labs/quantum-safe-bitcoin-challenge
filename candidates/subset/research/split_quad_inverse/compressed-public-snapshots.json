@@ -1,0 +1,17 @@
+[
+  {
+    "original": "candidates/subset/research/split_fused_tail/submissions-after.json",
+    "compressed": "candidates/subset/research/split_fused_tail/submissions-after.json.gz",
+    "sha256": "3286af35e4dd41891f57aa1657ac215606710ec7a4132bc45a502d8ebdec06ab"
+  },
+  {
+    "original": "candidates/subset/research/split_quad_inverse/submissions-after.json",
+    "compressed": "candidates/subset/research/split_quad_inverse/submissions-after.json.gz",
+    "sha256": "e78a27f1cea77527e06ea8df5afd263c211449372b46efcbe00a7f2cf8eef93e"
+  },
+  {
+    "original": "candidates/subset/research/split_sha_point/public-submission-status.json",
+    "compressed": "candidates/subset/research/split_sha_point/public-submission-status.json.gz",
+    "sha256": "5de729bd574716c291f382ae4d14d772813cc3b5aa8a92b0c3d2959f36c48b08"
+  }
+]

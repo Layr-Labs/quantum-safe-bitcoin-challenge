@@ -1,0 +1,44 @@
+{
+  "archive": "profile-sources.tar.xz",
+  "archive_sha256": "be4fd45220270501407399cf5677b3ed2ed85d64d192112b7ce229a220b00e2b",
+  "sources": [
+    {
+      "source": "profile_paired.cu",
+      "sha256": "99b9946e12613fe4fbe8643ad9d988a2d853d0a4f345c5d61a3f7fef818b27ef"
+    },
+    {
+      "source": "profile_bound3.cu",
+      "sha256": "4ea059b8ce855e6357b161382f3b245be1506a86ec73e2b8c73623774947a050"
+    },
+    {
+      "source": "profile_single.cu",
+      "sha256": "a0fe49d209adfb7d8420a19cf148d50908d0246fff51356f770bcf3bc0150c7b"
+    },
+    {
+      "source": "profile_quad.cu",
+      "sha256": "4e98e1333c6e62dcaaf67e960738cccf63c886596598f020925441e6157da35c"
+    }
+  ],
+  "removed_rebuildable_binaries": [
+    {
+      "binary": "profile_paired",
+      "sha256": "7fa5b4f24f7da165ea861024450816618597b3aeed5972026a80ce7617e03960",
+      "terminal_session": 7551
+    },
+    {
+      "binary": "profile_bound3",
+      "sha256": "f911765a1593c60701344c575010791a7210b7f727cd8a46eb35574765b9b8a0",
+      "terminal_session": 7551
+    },
+    {
+      "binary": "profile_single",
+      "sha256": "b0d4e717c1f00d149fb61dd478af5e831e343edd3b8599df3a65d5014dc4c201",
+      "terminal_session": 7551
+    },
+    {
+      "binary": "profile_quad",
+      "sha256": "ee33f61f2679572817134074a2eba307cb88443ca88b30b0521fa469a1bc83ba",
+      "terminal_session": 61764
+    }
+  ]
+}

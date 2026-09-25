@@ -1,0 +1,87 @@
+raw epochs=1 index=0 quad=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30 ref=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30
+raw epochs=1 index=17 quad=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30 ref=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30
+raw epochs=1 index=34 quad=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30 ref=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30
+raw epochs=1 index=51 quad=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30 ref=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30
+epochs=1 count=128 cumulative_failures=0
+epochs=2 count=256 cumulative_failures=0
+epochs=3 count=384 cumulative_failures=0
+epochs=4 count=512 cumulative_failures=0
+epochs=5 count=640 cumulative_failures=0
+epochs=7 count=896 cumulative_failures=0
+epochs=8 count=1024 cumulative_failures=0
+epochs=9 count=1152 cumulative_failures=0
+epochs=15 count=1920 cumulative_failures=0
+epochs=16 count=2048 cumulative_failures=0
+epochs=17 count=2176 cumulative_failures=0
+epochs=31 count=3968 cumulative_failures=0
+epochs=32 count=4096 cumulative_failures=0
+epochs=33 count=4224 cumulative_failures=0
+epochs=65 count=8320 cumulative_failures=0
+exact_factors_checked=31744 modular_failures=0 quad_failures=0 reference_failures=0 raw_representation_differences=1874
+
+  pinning: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-baseline-a/problems/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-baseline-a/problems/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=2026092501 — no real coin material)
+▶ grinder: python3 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/stage_profile/capture.py --src /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/baseline.cu --no-build --bench subset --zeros 24 --mode fixed_time --out /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-baseline-a/run.json --seconds 60.0 --hits 200
+  compile: reusing /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/baseline (already built for N=24)
+  run: stdbuf -oL timeout 60 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/baseline /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-baseline-a/problems/subset.bin 0 279549145 2399405719 1 0 single_hash
+  → /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-baseline-a/run.json: 252.3M/s, 15,156,205,307 candidates, 1800 hits
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 15,156,205,307  in 60.2s (harness clock)
+  candidates (from N verified hits): 15,099,494,400
+  grinder self-reported: 60.1s, 252.3 M/s (not scored)
+  verified hits: 1800 / 1800
+  hit rel. variance: 0.02357
+--------------------------------------------------------
+  SCORE (throughput) : 251.0177 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 29.923645 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+
+{
+  "verified_hits": 1800,
+  "elapsed_s": 60.1531,
+  "throughput_Mps": 251.017691,
+  "problem_seed": 2026092501,
+  "score": {
+    "primary_throughput_Mps": 251.017691,
+    "secondary_hits_per_s": 29.923645,
+    "valid": true
+  }
+}
+  pinning: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-candidate-b/problems/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-candidate-b/problems/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=2026092501 — no real coin material)
+▶ grinder: python3 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/stage_profile/capture.py --src /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/candidate.cu --no-build --bench subset --zeros 24 --mode fixed_time --out /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-candidate-b/run.json --seconds 60.0 --hits 200
+  compile: reusing /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/candidate (already built for N=24)
+  run: stdbuf -oL timeout 60 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/candidate /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-candidate-b/problems/subset.bin 0 279549145 2399405719 1 0 single_hash
+  → /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_quad_inverse/output-candidate-b/run.json: 252.6M/s, 15,175,199,942 candidates, 1729 hits
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 15,175,199,942  in 60.2s (harness clock)
+  candidates (from N verified hits): 14,503,903,232
+  grinder self-reported: 60.1s, 252.6 M/s (not scored)
+  verified hits: 1729 / 1729
+  hit rel. variance: 0.024049
+--------------------------------------------------------
+  SCORE (throughput) : 241.0442 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 28.734725 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+
+{
+  "verified_hits": 1729,
+  "elapsed_s": 60.1711,
+  "throughput_Mps": 241.044199,
+  "problem_seed": 2026092501,
+  "score": {
+    "primary_throughput_Mps": 241.044199,
+    "secondary_hits_per_s": 28.734725,
+    "valid": true
+  }
+}

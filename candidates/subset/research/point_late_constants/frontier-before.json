@@ -1,0 +1,240 @@
+{
+  "benchmark": {
+    "id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+    "setterAccountId": "016e262b-5d20-4f95-a1ed-e208574dc681",
+    "challengeId": "f1a40cdb-2170-4f70-9ca2-ef7e2fe4bb20",
+    "trackName": "subset",
+    "status": "open",
+    "name": "eigenlabs/quantum-safe-bitcoin-challenge/subset",
+    "description": "Optimize the QSB subset-selection grinder: ECDSA public-key recovery + SHA-256 over candidates that rebuild a ~1.7 KB section of a ~9.9 KB preimage (9 of 150 pushes omitted). Maximize verified candidate throughput on a single GPU.",
+    "category": "cuda",
+    "direction": "+",
+    "promotionMode": "automatic",
+    "editablePaths": [
+      "candidates/subset"
+    ],
+    "setupCommand": [
+      "bash",
+      "-lc",
+      "./setup.sh subset"
+    ],
+    "benchmarkCommand": [
+      "bash",
+      "-lc",
+      "./benchmark.sh subset"
+    ],
+    "scorePath": "score-subset.json",
+    "networkPolicy": null,
+    "runner": {
+      "provider": "github-actions",
+      "workflow": "benchmark-subset.yml"
+    },
+    "maxConcurrentWorkflows": null,
+    "minScoreImprovementBips": 100,
+    "maxSubmissionBytes": 8388608,
+    "hardware": null,
+    "claimedScoreEnabled": false,
+    "researchDiscussionsEnabled": false,
+    "sourceUrl": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge",
+    "sourceBranch": "main",
+    "sourceRef": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+    "rootDir": null,
+    "baselineScore": 61997057,
+    "baselineMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1200.4397,
+      "candidates": 74423730176,
+      "hits_per_s": 7.390625,
+      "problem_seed": 1317999898,
+      "verified_hits": 8872,
+      "throughput_Mps": 61.997057,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.010617,
+      "candidates_self_reported": 75245682952
+    },
+    "currentBestScore": 623518629,
+    "currentBestMetrics": {
+      "gpu": "RTX_4090",
+      "mode": "fixed_time",
+      "unit": "verified candidates per second",
+      "bench": "subset",
+      "verified": true,
+      "direction": "higher is better",
+      "elapsed_s": 1201.1428,
+      "candidates": 748934922240,
+      "hits_per_s": 74.329214,
+      "problem_seed": 1331736675,
+      "verified_hits": 89280,
+      "throughput_Mps": 623.518629,
+      "leading_zero_bits": 24,
+      "hit_relative_variance": 0.003347,
+      "candidates_self_reported": 863372730525
+    },
+    "setupSnapshotRef": "gha:96a1e544a8e8acc09f3e9f3721e7f208fa08cfce",
+    "closesAt": "2026-10-07T23:00:00.000Z",
+    "openedAt": "2026-09-14T16:58:07.305Z",
+    "createdAt": "2026-09-14T16:35:58.623Z",
+    "updatedAt": "2026-09-24T14:51:20.397Z",
+    "deletedAt": null
+  },
+  "submissions": [
+    {
+      "id": "7aef224a-e3ff-43f9-9877-50cdbda3f653",
+      "createdAt": "2026-09-21T15:29:18.381Z",
+      "status": "accepted",
+      "officialScore": 623518629,
+      "rejectionReason": null,
+      "submissionCommitSha": "9ac2515450446dbadbe061e98ebfc317c36d4999",
+      "promotionStatus": "promoted",
+      "promotedSourceRef": "9ac2515450446dbadbe061e98ebfc317c36d4999"
+    },
+    {
+      "id": "f9738952-d471-42b4-9da8-9c1ce088b09d",
+      "createdAt": "2026-09-22T22:14:30.397Z",
+      "status": "rejected",
+      "officialScore": 624752385,
+      "rejectionReason": "score improved but fell short of the required 100 bips improvement over the current best",
+      "submissionCommitSha": "d5d2283e47fdb0108ff36b3e6acc5d16c115d8ad",
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "cc35b5d5-fdae-4406-b5c7-4125b6972b9e",
+      "createdAt": "2026-09-23T20:00:18.375Z",
+      "status": "rejected",
+      "officialScore": 625993049,
+      "rejectionReason": "score improved but fell short of the required 100 bips improvement over the current best",
+      "submissionCommitSha": "ad636b6aa340f1b73098c66e01e82c718390caec",
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "49197eb8-51fc-473c-ae53-1778ea612acc",
+      "createdAt": "2026-09-24T19:26:26.153Z",
+      "status": "rejected",
+      "officialScore": 612310038,
+      "rejectionReason": "score did not improve current best",
+      "submissionCommitSha": "f6757f3bdcf52a20480b754cdfe2694d4d57402e",
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "5b5719c6-bf00-49d2-bdad-1f0372618e50",
+      "createdAt": "2026-09-24T19:31:47.635Z",
+      "status": "rejected",
+      "officialScore": 612632756,
+      "rejectionReason": "score did not improve current best",
+      "submissionCommitSha": "6a009e2c1434d6fd6b5b801e738a55e1b536ad96",
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "b864a72c-4084-4789-a601-ed15110cec99",
+      "createdAt": "2026-09-24T19:40:20.539Z",
+      "status": "validating",
+      "officialScore": null,
+      "rejectionReason": null,
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "f8448bc8-19b7-43a5-8f70-e285d1634aae",
+      "createdAt": "2026-09-24T19:45:29.247Z",
+      "status": "rejected",
+      "officialScore": null,
+      "rejectionReason": "Submission rejected: submission archive expands to 12900701 bytes; at most 8388608 are allowed",
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+      "createdAt": "2026-09-24T19:50:55.357Z",
+      "status": "validating",
+      "officialScore": null,
+      "rejectionReason": null,
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "de3e41d2-6cad-49d9-9591-2002edf65323",
+      "createdAt": "2026-09-24T20:15:58.645Z",
+      "status": "validating",
+      "officialScore": null,
+      "rejectionReason": null,
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "5d4528ed-9f17-4bbd-ad2c-21c71c6cb9f7",
+      "createdAt": "2026-09-24T20:49:52.981Z",
+      "status": "validating",
+      "officialScore": null,
+      "rejectionReason": null,
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "3995bc0f-d161-4035-819c-0d2084c2efa7",
+      "createdAt": "2026-09-24T20:55:16.984Z",
+      "status": "validating",
+      "officialScore": null,
+      "rejectionReason": null,
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "03cccdbd-5964-4cf3-a34d-cb6937111226",
+      "createdAt": "2026-09-24T20:59:31.935Z",
+      "status": "cancelled",
+      "officialScore": null,
+      "rejectionReason": "cancelled by submitter",
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    },
+    {
+      "id": "60f1706e-c12d-499b-bc1d-7aff60b1d0ec",
+      "createdAt": "2026-09-24T22:19:45.721Z",
+      "status": "validating",
+      "officialScore": null,
+      "rejectionReason": null,
+      "submissionCommitSha": null,
+      "promotionStatus": null,
+      "promotedSourceRef": null
+    }
+  ],
+  "workflow_runs": [
+    {
+      "id": 36068642101,
+      "status": "queued",
+      "conclusion": null,
+      "created_at": "2026-09-24T22:39:20Z",
+      "updated_at": "2026-09-24T22:39:20Z",
+      "html_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/36068642101",
+      "head_sha": "e7ba81746f12be9c1f46f91fc5491a19f4327724",
+      "submission_message": "Validate submission fd16dfa4-4db2-4aee-ab1f-519c564a53b8"
+    },
+    {
+      "id": 36066076668,
+      "status": "in_progress",
+      "conclusion": null,
+      "created_at": "2026-09-24T22:12:08Z",
+      "updated_at": "2026-09-24T22:39:02Z",
+      "html_url": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/36066076668",
+      "head_sha": "eb252e00a65c5ac22825784e99e9e387010c9d7d",
+      "submission_message": "Validate submission b864a72c-4084-4789-a601-ed15110cec99"
+    }
+  ],
+  "checkedAt": "2026-09-24T22:44:49.462266+00:00"
+}

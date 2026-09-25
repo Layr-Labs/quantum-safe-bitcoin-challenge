@@ -1,0 +1,11 @@
+{
+  "execSessionId": 52498,
+  "state": "finished; all three harness artifacts valid and final warm report present; exec handle no longer exists",
+  "checkedAt": "2026-09-24T21:42:27.761674+00:00",
+  "runs": [
+    "output-baseline-a",
+    "output-candidate-b",
+    "output-candidate-c"
+  ],
+  "instruction": "Do not relaunch completed comparison."
+}

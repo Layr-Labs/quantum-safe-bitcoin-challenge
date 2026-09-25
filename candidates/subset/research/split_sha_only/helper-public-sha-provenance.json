@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-09-24T21:59:54.353554+00:00",
+  "records": [
+    {
+      "path": "candidates/subset/tests/gpu_epochs/tree.cu",
+      "git_extraction": "git show HEAD:candidates/subset/tests/gpu_epochs/tree.cu",
+      "commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+      "public_url": "https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/7e95c40c99e57bded233ce57c7f453fbde9fd21c/candidates/subset/tests/gpu_epochs/tree.cu",
+      "public_bytes_equal": true,
+      "source_sha256": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+      "line_start": 119,
+      "line_end": 211,
+      "snippet_sha256": "2200959ce6df9329bd2ab252fc1da3fd2f58dae2c4ed9e74c4e38b2d1d2dd381"
+    },
+    {
+      "path": "candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh",
+      "git_extraction": "git show HEAD:candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh",
+      "commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+      "public_url": "https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/7e95c40c99e57bded233ce57c7f453fbde9fd21c/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh",
+      "public_bytes_equal": true,
+      "source_sha256": "c05fc8a82c7b54b55a794540412b1f96deb76b8b05bf9bc24a207e2ff0fac685",
+      "line_start": 127,
+      "line_end": 239,
+      "snippet_sha256": "a2f7b3e28c4f737a771d89acce9e8bb274fa1b9b0a99aeb65b81105211cbeaa0"
+    }
+  ],
+  "prompt_bytes": 12395,
+  "unpublished_source_included": false
+}

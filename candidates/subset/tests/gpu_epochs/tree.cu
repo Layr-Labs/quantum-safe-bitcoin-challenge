@@ -97,13 +97,13 @@ static int qsb_prepare_push_words(const uint8_t *bytes,int n){
         words[i].z=((uint32_t)r[8]<<8)|r[9];
         words[i].w=0;
     }
-    return cudaMemcpyToSymbol(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
+    return QSB_TO_SYMBOL(QSB_PUSH_WORDS,words,n*sizeof(uint4))==cudaSuccess?0:1;
 }
 static uint32_t qsb_host_rotr(uint32_t x,int n){return (x>>n)|(x<<(32-n));}
 static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
  if(count!=69)return 1;
  uint32_t round_k[64],expanded[4][64];
- if(cudaMemcpyFromSymbol(round_k,K,sizeof(round_k))!=cudaSuccess)return 1;
+ if(QSB_FROM_SYMBOL(K,round_k,sizeof(round_k))!=cudaSuccess)return 1;
  for(int block=0;block<4;block++){
   uint32_t *w=expanded[block];memcpy(w,words+5+block*16,64);
   for(int i=16;i<64;i++){
@@ -114,7 +114,7 @@ static int qsb_prepare_constant_schedule(const uint32_t *words,int count){
   }
   for(int i=0;i<64;i++)w[i]+=round_k[i];
  }
- return cudaMemcpyToSymbol(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
+ return QSB_TO_SYMBOL(QSB_CONST_SCHEDULE,expanded,sizeof(expanded))==cudaSuccess?0:1;
 }
 template<int block> __device__ __forceinline__ void qsb_compress_constant(uint32_t *output){
  uint32_t a=output[0],b=output[1],c=output[2],d=output[3],e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
@@ -364,6 +364,21 @@ __device__ __forceinline__ void gt_recode_signed(const uint64_t k[4], int32_t e[
 
 /* Load table point (c, idx) into (gx,gy); negate y (p - y) when neg != 0.
  * Branchless: y is selected between y and p-y by a mask. */
+/* QSB_CARRIER_BUILD: the sm_89 image build (build_carrier.sh) may request both
+ * 32-byte sectors of a 64-byte table record in one L2/DRAM transaction. The
+ * compute_52 build cannot express this qualifier and keeps the plain __ldg. */
+#if defined(QSB_CARRIER_BUILD) && !defined(QSB_GT_NO_HINT) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#define QSB_GT_LD64B(dst, ptr)                                                  \
+    do {                                                                        \
+        uint64_t qsb_ga_;                                                       \
+        asm("cvta.to.global.u64 %0, %1;" : "=l"(qsb_ga_) : "l"(ptr));           \
+        asm("ld.global.nc.L2::64B.v2.u64 {%0,%1}, [%2];"                        \
+            : "=l"((dst).x), "=l"((dst).y) : "l"(qsb_ga_));                     \
+    } while (0)
+#else
+#define QSB_GT_LD64B(dst, ptr) ((dst) = __ldg(ptr))
+#endif
+
 __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ gTable,
                                                      uint32_t base, uint32_t idx,
                                                      uint64_t neg,
@@ -372,7 +387,8 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0; QSB_GT_LD64B(x0, tx);
+    ulonglong2 x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
@@ -402,7 +418,8 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+    ulonglong2 x0; QSB_GT_LD64B(x0, tx);
+    ulonglong2 x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
     gy[0]=(y0.x^m)+(0xFFFFFFFEFFFFFC30ULL&m); gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
@@ -981,6 +998,11 @@ __device__ int gpu_is_der_relaxed(const uint8_t *d, int l) {
 #ifndef QSB_ZEROS_N
 #define QSB_ZEROS_N 24
 #endif
+#if defined(QSB_CARRIER_BUILD)
+/* Identity constant of the embedded sm_89 image; QsbCarrier.h compares it with
+ * the harness's QSB_ZEROS_N so a stale image can never run with other settings. */
+__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+#endif
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -1087,9 +1109,23 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #define QSB_SE_BLOCK   256
 #define QSB_SE_HALVES  (QSB_SE_BLOCK / QSB_SE_WINDOWS)
 #define QSB_SE_PER_EPOCH QSB_SE_WINDOWS
-/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
+/* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch.  This is a
+ * PER-BATCH STATE FOOTPRINT knob, not a launch-overhead knob.  The batch's
+ * first-state table is QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*QSB_FIRST_SLOTS*8*4
+ * bytes, and the epoch descriptors are QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL*64:
+ *
+ *     262144 -> 512 MiB of first states + 64 MiB of descriptors
+ *      32768 ->  64 MiB of first states +  8 MiB of descriptors
+ *
+ * The ranked device has 72 MiB of L2 and a 64 MiB fixed-base table.  A batch
+ * whose per-batch state is seven times the whole L2 cannot leave that table
+ * resident, and the table is re-read for every candidate. This value was the
+ * documented promoted one before it was raised to match another lineage; it is
+ * restored here.  Measured locally at 60 s arms, A/B/B/A: 262144 -> 1836, 1823
+ * and 32768 -> 1830, 1826, i.e. neutral within noise on a 6 MiB-L2 device that
+ * cannot show either effect. */
 #ifndef ZLAB_LAUNCH_BLOCKS
-#define ZLAB_LAUNCH_BLOCKS 262144  /* Match PR309: 134217728 paired candidates per full launch. */
+#define ZLAB_LAUNCH_BLOCKS 32768
 #endif
 #define QSB_SE_LAUNCH_BLOCKS ZLAB_LAUNCH_BLOCKS   /* x 256 threads = 8M candidates/launch */
 
@@ -2450,6 +2486,7 @@ int main(int argc, char **argv) {
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Digest Search [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
+    qsb_carrier_init(prop);
 
     digest_params_t dp;
     if (load_digest_params(argv[1], &dp) < 0) return 1;
@@ -2715,6 +2752,9 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
+        if (qsb_carrier_has(QK_BUILD))
+            qsb_carrier_launch(kernel_build_gtable, QK_BUILD, dim3((gt_total+255)/256), dim3(256), 0, dL, dH, d_gt);
+        else
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
         cudaDeviceSynchronize();
         cudaError_t gerr = cudaGetLastError();
@@ -2818,7 +2858,7 @@ int main(int argc, char **argv) {
             }
             memcpy(h_win3[j],w,3);
         }
-        cudaMemcpyToSymbol(WIN3, h_win3, sizeof(h_win3));
+        QSB_TO_SYMBOL(WIN3, h_win3, sizeof(h_win3));
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -2844,7 +2884,7 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry,dp.u2r_y,32,cudaMemcpyHostToDevice);
     uint64_t h_u2r[8];
     memcpy(h_u2r,dp.u2r_x,32);memcpy(h_u2r+4,dp.u2r_y,32);
-    if(cudaMemcpyToSymbol(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
+    if(QSB_TO_SYMBOL(QSB_U2R,h_u2r,sizeof(h_u2r))!=cudaSuccess){
         fprintf(stderr,"ERROR: QSB_U2R upload failed\n");return 1;
     }
     /* QSB_U2R_C = 3*xR^2 * (2*yR)^-1 mod p (recovery finish constant). */
@@ -2865,7 +2905,7 @@ int main(int argc, char **argv) {
         BN_mod_mul(bc,bc,by,bp,ctx);                  /* 3*xR^2/(2*yR) */
         uint64_t h_c[4];
         if(BN_bn2lebinpad(bc,(uint8_t*)h_c,32)!=32){fprintf(stderr,"ERROR: QSB_U2R_C encode failed\n");return 1;}
-        if(cudaMemcpyToSymbol(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
+        if(QSB_TO_SYMBOL(QSB_U2R_C,h_c,sizeof(h_c))!=cudaSuccess){
             fprintf(stderr,"ERROR: QSB_U2R_C upload failed\n");return 1;
         }
         BN_free(bp);BN_free(bx);BN_free(by);BN_free(bc);BN_free(b3);BN_CTX_free(ctx);
@@ -2948,7 +2988,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        cudaMemcpyToSymbol(BINOM_C, h_binom, sizeof(h_binom));
+        QSB_TO_SYMBOL(BINOM_C, h_binom, sizeof(h_binom));
     }
 
     /* ── DEBUG MODE ──
@@ -3105,11 +3145,26 @@ int main(int argc, char **argv) {
                 const uint32_t n_groups = (uint32_t)n_groups64;
                 if (n_groups64 > (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * 2 + 4) {
                     /* Cannot happen for the pinned 6-of-137 shape; keep the direct producer as a guard. */
+                    if (qsb_carrier_has(QK_BELEAF))
+                        qsb_carrier_launch(kernel_build_epochs, QK_BELEAF, dim3((epochs_in_batch + 255) / 256), dim3(256), 0,
+                            epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
+                            d_mid, d_prem, (int)dp.prefix_remainder_len,
+                            d_dsigs, d_epochs, zh_cnt);
+                    else
                     kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
                         epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                         d_mid, d_prem, (int)dp.prefix_remainder_len,
                         d_dsigs, d_epochs, zh_cnt);
                 } else {
+                if (qsb_carrier_has(QK_EPGRP))
+                    qsb_carrier_launch(kernel_epoch_groups, QK_EPGRP, dim3((n_groups + 255) / 256), dim3(256), 0,
+                        r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
+                        d_dsigs, d_groups
+#if QSB_EPOCH_FAST
+                        , d_epoch_group, epoch_base, epoch_base+(uint64_t)epochs_in_batch
+#endif
+                        );
+                else
                 kernel_epoch_groups<<<(n_groups + 255) / 256, 256>>>(
                     r5a, n_groups, window_start, s_early, d_mid, d_prem, (int)dp.prefix_remainder_len,
                     d_dsigs, d_groups
@@ -3117,6 +3172,15 @@ int main(int argc, char **argv) {
                     , d_epoch_group, epoch_base, epoch_base+(uint64_t)epochs_in_batch
 #endif
                     );
+                if (qsb_carrier_has(QK_BEPOCH))
+                    qsb_carrier_launch(kernel_build_epochs_inc, QK_BEPOCH, dim3((epochs_in_batch + 255) / 256), dim3(256), 0,
+                        epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
+                        d_dsigs, d_groups, r5a, d_epochs, zh_cnt
+#if QSB_EPOCH_FAST
+                        , d_epoch_group
+#endif
+                        );
+                else
                 kernel_build_epochs_inc<<<(epochs_in_batch + 255) / 256, 256>>>(
                     epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                     d_dsigs, d_groups, r5a, d_epochs, zh_cnt
@@ -3127,6 +3191,12 @@ int main(int argc, char **argv) {
                 }
             }
 #elif ZLAB_HITPATH
+            if (qsb_carrier_has(QK_BELEAF))
+                qsb_carrier_launch(kernel_build_epochs, QK_BELEAF, dim3((epochs_in_batch + 255) / 256), dim3(256), 0,
+                    epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
+                    d_mid, d_prem, (int)dp.prefix_remainder_len,
+                    d_dsigs, d_epochs, zh_cnt);
+            else
             kernel_build_epochs<<<(epochs_in_batch + 255) / 256, 256>>>(
                 epoch_base, epoch_base+epochs_in_batch, window_start, s_early,
                 d_mid, d_prem, (int)dp.prefix_remainder_len,
@@ -3140,7 +3210,33 @@ int main(int argc, char **argv) {
 #endif
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
+              if (qsb_carrier_has(QK_BFIRST))
+                  qsb_carrier_launch(kernel_build_first_flat, QK_BFIRST, dim3((nthr+255)/256), dim3(256), 0,
+                      d_epochs, d_first, (unsigned)epochs_in_batch, (unsigned)qsb_first_class_count);
+              else
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
+            const dim3 qsb_dig_grid(nblk), qsb_dig_block(QSB_SE_BLOCK);
+            if (qsb_carrier_has(QK_DIGEST)) {
+                qsb_carrier_launch(kernel_digest, QK_DIGEST, qsb_dig_grid, qsb_dig_block, 0,
+                (const uint8_t*)NULL, n_pool, t_sel,
+                d_mid,
+                d_prem, 0,
+                d_dsigs, d_tail, dp.tail_section_len,
+                d_suf, dp.tx_suffix_len, dp.total_preimage_len,
+                d_nri, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry,
+                d_gt,
+#if ZLAB_HITPATH
+                zh_cnt, zh_idx,
+                zh_combos, d_hit_sighash,
+#else
+                d_hit_cnt, d_hit_idx,
+                d_hit_combos, d_hit_sighash,
+#endif
+                d_hit_keynonce, d_hit_pubhash,
+                d_hit_qx, d_hit_qy,
+                batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
+                t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+            } else {
             kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -3160,6 +3256,11 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_epochs, d_first, epochs_in_batch);
+            }
+            if (qsb_carrier_has(QK_VERIFY))
+                qsb_carrier_launch(kernel_verify_pair_hits, QK_VERIFY, dim3(1), dim3(64), 0,
+                    d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
+            else
             kernel_verify_pair_hits<<<1,64>>>(d_hitbuf,d_verified_hitbuf,d_epochs,d_first,d_gt,epochs_in_batch);
             // Blocking hit-buffer copy below waits for the default-stream kernels.
             cudaError_t err = cudaGetLastError();
