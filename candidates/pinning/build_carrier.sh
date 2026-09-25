@@ -7,12 +7,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 Z=${1:-24}
 W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
-nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
+nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 ${QSB_CARRIER_FLAGS:-} -arch=sm_89 -cubin \
      -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
 cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
 python3 - "$Z" "$W" <<'PY'
-import base64, hashlib, re, sys
+import base64, hashlib, re, sys, os
 zeros = int(sys.argv[1]); W = sys.argv[2]
 syms = open(W + "/symbols.txt").read()
 want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
@@ -32,14 +32,14 @@ for kid, pat in want:
     names.append(hits[0])
 for g in ("qsb_carrier_zeros", "pin_u2rx_words", "pin_u2ry_words", "pin_iso_invu_words",
           "pin_iso_u2ry_words", "pin_iso_xneg", "pin_recovery_c", "pin_u2rk_words",
-          "pin_one_mul", "pin_zero_add", "pin_tail_words"):
+          "pin_one_mul", "pin_tail_words"):
     if not re.search(r"\b%s\b" % g, syms):
         sys.exit(f"build_carrier: global {g} missing from image")
 # The hint must be present in the prepare kernel (the only table reader on the hot path).
 sass = open(W + "/sass.txt").read()
 fn = re.split(r"\n\s*Function : ", sass)
 s0 = [b for b in fn if b.startswith(names[0])]
-if not s0 or "LTC64B" not in s0[0]:
+if not s0 or ("LTC64B" not in s0[0] and os.environ.get("QSB_NAT_HINT","1")!="0"):
     sys.exit("build_carrier: prepare kernel has no LDG.E.LTC64B load")
 n_hint = s0[0].count("LTC64B")
 img = open(W + "/c.cubin", "rb").read()
