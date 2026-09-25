@@ -103,13 +103,10 @@ __device__ __forceinline__ uint32_t qsb_shrf(uint32_t x, int k) {
 #define QSB_SHA_ALU_ADD 1     /* route exact SHA additions to the ALU pipe */
 #endif
 #if QSB_SHA_ALU_ADD
-__device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by the host */
+__device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also uploaded by the host */
 #define QSB_Z (pin_zero_add)
 #else
 #define QSB_Z 0u
-#endif
-#if defined(QSB_CHAIN_ALU) && QSB_CHAIN_ALU && !QSB_SHA_ALU_ADD
-#error "QSB_CHAIN_ALU reads pin_zero_add, which exists only with QSB_SHA_ALU_ADD=1"
 #endif
 
 /* One round; kw = K_i + W_i (a literal when W_i is constant). */
@@ -143,12 +140,6 @@ QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
 
 /* WMIX with a constant-bank zero addend (QSB_SHA_ALU_ADD): keeps every schedule add on the
  * ALU pipe, same instruction count. */
-#ifndef QSB_DIGEST_WMIX_Z
-#define QSB_DIGEST_WMIX_Z 0
-#endif
-#if QSB_DIGEST_WMIX_Z && !QSB_SHA_ALU_ADD
-#error "QSB_DIGEST_WMIX_Z needs the constant-bank zero from QSB_SHA_ALU_ADD=1"
-#endif
 #define QSB_WMIX_Z() { \
 w[0] += s1(w[14]) + w[9] + s0(w[1]) + QSB_Z;\
 w[1] += s1(w[15]) + w[10] + s0(w[2]) + QSB_Z;\
@@ -264,19 +255,9 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     }
 
     QSB_RND16L(16);
-#if QSB_DIGEST_WMIX_Z
-    /* Outer-digest schedule with the constant-bank zero addend: the four-input sums become
-     * five-input, so ptxas emits two IADD3 instead of IADD3 plus a multiply-pipe IMAD.IADD. */
-    QSB_WMIX_Z();
-#else
     WMIX();
-#endif
     QSB_RND16L(32);
-#if QSB_DIGEST_WMIX_Z
-    QSB_WMIX_Z();
-#else
     WMIX();
-#endif
     QSB_RND15L(48);
     QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
     out[1] = QSB_IV1 + b;
@@ -286,40 +267,6 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     out[6] = QSB_IV6 + g;
     out[7] = QSB_IV7 + h;
 }
-
-/* QSB_FIN_KW_IMAD: finish-kernel pipe balance. In the pubkey compression every add already
- * runs on the multiply pipe (qsb_fadd), except the round-constant add K_i + W_i, which ptxas
- * emits as an ALU-pipe IADD3 with an immediate. With the switch on it becomes
- * qsb_fadd(W_i, one, K_i): ptxas keeps `one` in a register (it already does, for the constant
- * adds of round 63) and emits IMAD R, R_w, R_one, K_i on the multiply pipe. Exact: W*1 + K is
- * W + K mod 2^32 for every W, with the same instruction count. Rounds 0 and 1 (IV state) get
- * the same treatment below at two extra instructions per hash. With the switch at 0 every macro
- * expands to the original expression. */
-#ifndef QSB_FIN_KW_IMAD
-#define QSB_FIN_KW_IMAD 1
-#endif
-#if QSB_FIN_KW_IMAD
-#define QSB_KWF(K, X) qsb_fadd((X), one, (K))
-/* Rounds 0 and 1 of the pubkey hash (QSB_IV_ROUNDS01 with a..h = IV) written as two-input
- * multiply-pipe adds: every constant term is folded at compile time and joined to the one
- * live addend it meets, so round 0 is d = W0 + C and h = W0 + C', and round 1 adds W1 + C,
- * S1(d), Ch(d,IV4,IV5), then forks into c (+ IV2 - (IV0&IV1)) and g (+ S0(h), + h&(IV0^IV1)).
- * The same terms as QSB_IV_ROUNDS01, summed mod 2^32 in another order. */
-#define QSB_IV_ROUNDS01_F(W0, W1) { \
-    const uint32_t r0t1 = QSB_IV7 + S1(QSB_IV4) + Ch(QSB_IV4, QSB_IV5, QSB_IV6) + qsb_klit(0); \
-    const uint32_t r0t2 = S0(QSB_IV0) + Maj(QSB_IV0, QSB_IV1, QSB_IV2); \
-    d = qsb_fadd((W0), one, QSB_IV3 + r0t1); \
-    h = qsb_fadd((W0), one, r0t1 + r0t2); \
-    t1 = qsb_fadd((W1), one, QSB_IV6 + qsb_klit(1) + (QSB_IV0 & QSB_IV1)); \
-    t1 = qsb_fadd(t1, one, S1(d)); \
-    t1 = qsb_fadd(t1, one, Ch(d, QSB_IV4, QSB_IV5)); \
-    c = qsb_fadd(t1, one, QSB_IV2 - (QSB_IV0 & QSB_IV1)); \
-    t2 = qsb_fadd(t1, one, S0(h)); \
-    g = qsb_fadd(t2, one, h & (QSB_IV0 ^ QSB_IV1)); }
-#else
-#define QSB_KWF(K, X) K + X
-#define QSB_IV_ROUNDS01_F(W0, W1) QSB_IV_ROUNDS01(W0, W1)
-#endif
 
 #if QSB_SHA_FMA_ADD
 #if QSB_SHA_FMA_ROT & 1
@@ -340,31 +287,31 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
 #define QSB_RND15L_F(k) {\
-QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(k), w[0]));\
-QSB_RL_F(h, a, b, c, d, e, f, g, QSB_KWF(qsb_klit(k + 1), w[1]));\
-QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(k + 2), w[2]));\
-QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(k + 3), w[3]));\
-QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(k + 4), w[4]));\
-QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(k + 5), w[5]));\
-QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 6), w[6]));\
-QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 7), w[7]));\
-QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(k + 8), w[8]));\
-QSB_RL_F(h, a, b, c, d, e, f, g, QSB_KWF(qsb_klit(k + 9), w[9]));\
-QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(k + 10), w[10]));\
-QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(k + 11), w[11]));\
-QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(k + 12), w[12]));\
-QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(k + 13), w[13]));\
-QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 14), w[14]));\
+QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(k) + w[0]);\
+QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(k + 1) + w[1]);\
+QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(k + 2) + w[2]);\
+QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(k + 3) + w[3]);\
+QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(k + 4) + w[4]);\
+QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(k + 5) + w[5]);\
+QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(k + 6) + w[6]);\
+QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(k + 7) + w[7]);\
+QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(k + 8) + w[8]);\
+QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(k + 9) + w[9]);\
+QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(k + 10) + w[10]);\
+QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(k + 11) + w[11]);\
+QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(k + 12) + w[12]);\
+QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(k + 13) + w[13]);\
+QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(k + 14) + w[14]);\
 }
 #define QSB_RND16L_F(k) {\
 QSB_RND15L_F(k);\
-QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
+QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
 }
 #define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
     w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
     w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
     w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
-    QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
+    QSB_RL_F(a,b,c,d,e,f,g,h,qsb_klit((base)+(j)) + w[j]); \
 } while (0)
 #define QSB_INTERLEAVED15L_F(base) do { \
     QSB_STEPL_F(0,a,b,c,d,e,f,g,h,base); \
@@ -410,14 +357,14 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 #if QSB_SHA_FMA_ADD && QSB_SHA_FMA_EARLY
     {
         const uint32_t one = pin_one_mul;
-        QSB_IV_ROUNDS01_F(w[0], w[1]);
-        QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(2), w[2]));
-        QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(3), w[3]));
-        QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(4), w[4]));
-        QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(5), w[5]));
-        QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(6), w[6]));
-        QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(7), w[7]));
-        QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(8), w[8]));
+        QSB_IV_ROUNDS01(w[0], w[1]);
+        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
+        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
+        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
+        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
+        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
+        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
+        QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(8) + w[8]);
         QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(9));
         QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(10));
         QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(11));

@@ -9,7 +9,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
 #ifdef __CUDA_ARCH__
  uint64_t r0,r1,r2,r3;
  asm(
-  "{" QZ_DECL "\n"
+  "{\n"
   "\t.reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n"
   "\t.reg .u64 e0,e1,e2,e3,e4,e5,e6,e7,o0,o1,o2,o3,o4,o5,o6,t,lc;\n"
   "\t.reg .u32 cy,o15;\n"
@@ -192,7 +192,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\taddc.cc.u32 x12, x12, y12;\n"
   "\taddc.cc.u32 x13, x13, y13;\n"
   "\taddc.cc.u32 x14, x14, y14;\n"
-  "\taddc.u32 x15, x15, o15;" QZ_ADD("x15") "\n"
+  "\taddc.u32 x15, x15, o15;\n"
   "\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n"
   "\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n"
   "\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
@@ -229,7 +229,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
 #if QSB_SEED_MUL_CUT
   QSB_MUL_Z8
 #else
-  "\taddc.u32 z8, f8, w7;" QZ_ADD("z8") "\n"
+  "\taddc.u32 z8, f8, w7;\n"
 #endif
   "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n"
 #if QSB_SEED_MUL_CUT
