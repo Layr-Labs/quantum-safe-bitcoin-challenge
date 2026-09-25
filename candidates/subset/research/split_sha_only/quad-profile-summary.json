@@ -1,0 +1,31 @@
+{
+  "attributes": [
+    "PROFILE_DEVICE name=NVIDIA GeForce RTX 3090 cc=8.6 sms=82 l2_bytes=6291456",
+    "PROFILE_ATTR kernel=sha registers=123 local_bytes=0 shared_bytes=0 active_blocks=2",
+    "PROFILE_ATTR kernel=point registers=128 local_bytes=0 shared_bytes=0 active_blocks=2",
+    "PROFILE_ATTR kernel=inverse registers=126 local_bytes=0 shared_bytes=24576 active_blocks=2",
+    "PROFILE_ATTR kernel=tail registers=127 local_bytes=0 shared_bytes=0 active_blocks=2"
+  ],
+  "measured_batches": 24,
+  "excluded_initial_batches": 4,
+  "steady_mean_ms": {
+    "producer": 1.4177056000000001,
+    "first": 0.6401024000000001,
+    "sha": 41.7654782,
+    "point": 167.7773819,
+    "inverse": 11.6558336,
+    "tail": 28.7257087,
+    "replay": 0.1636864
+  },
+  "steady_stage_share_percent": {
+    "producer": 0.5622560660285153,
+    "first": 0.25386191412336323,
+    "sha": 16.564012633181186,
+    "point": 66.53980256243456,
+    "inverse": 4.622654482156935,
+    "tail": 11.39249500569307,
+    "replay": 0.06491733638237018
+  },
+  "steady_mean_total_ms": 252.1458968,
+  "scope": "Unscored local RTX3090 diagnostic, not adjacent to earlier SHA-only profiles and not a ranked score comparison."
+}

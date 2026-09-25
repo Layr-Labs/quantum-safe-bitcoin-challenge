@@ -1,0 +1,14 @@
+{
+  "state": "ready but submit rejected by automatic approval review; user clarification requested",
+  "checkedAt": "2026-09-24T20:17:51.203904+00:00",
+  "submitted": false,
+  "submissionId": null,
+  "reason": "Review treats public-committed-source restriction as applying to Yukon and rejected the same-action authorization clarification. No workaround attempted.",
+  "requested_authorization": "Explicitly authorize unpublished local CUDA/source submission to official Yukon QSB evaluation; DeepSeek restriction remains unchanged.",
+  "production_ptx_sha256": "62d52f6a19ef01e9f8b5b835ca84539cde1b6ec485543decc64dbacb0dd6bcaf",
+  "local_gain_over_preceding_pipeline_percent": 2.1524223891725702,
+  "official_prior_frontier": 623518629,
+  "already_pending_official_submission": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+  "superseded_locally_by": "../split_quad_inverse/submission-approval-status.json",
+  "authorization_still_pending": true
+}

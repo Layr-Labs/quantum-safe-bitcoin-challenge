@@ -1,0 +1,35 @@
+[
+  {
+    "original": "output-candidate_bound3-l/run.json",
+    "compressed": "output-candidate_bound3-l/run.json.gz",
+    "sha256": "363f9d0c4b2cc8e6d8d68a7acc931cc4794e567a65c563284c9e264eab4807e4"
+  },
+  {
+    "original": "output-candidate_bound3-m/run.json",
+    "compressed": "output-candidate_bound3-m/run.json.gz",
+    "sha256": "273f42e98c9372b5b56bf2f6a1d87b7b44e57fb7b4efe8cb757dcd4af242f4c0"
+  },
+  {
+    "original": "output-candidate-n/run.json",
+    "compressed": "output-candidate-n/run.json.gz",
+    "sha256": "b9c1f276191aae5bd5fc1df9aad8a6c7652d2354c98dbda480ad17a3e1585fd0"
+  },
+  {
+    "removed_rebuildable_binary": "candidate",
+    "sha256": "161159b8971587fae5a9d51a7e1b1bd5ab8d873a6029fa4689e106c85f1f952c",
+    "terminal_session": 14207,
+    "note": "Live profiles use independent profile_* binaries."
+  },
+  {
+    "removed_rebuildable_binary": "candidate_bound3",
+    "sha256": "eede7ea31492e9e9504ff5a1977c6916e9ef3542e0740d6d3c853598b1174c79",
+    "terminal_session": 14207,
+    "note": "Live profiles use independent profile_* binaries."
+  },
+  {
+    "removed_rebuildable_binary": "audit_bound3",
+    "sha256": "f351f13b35574f7f602ad8d85430c2b5acf1362993308c668f50667d8d26592d",
+    "terminal_session": 14207,
+    "note": "Live profiles use independent profile_* binaries."
+  }
+]

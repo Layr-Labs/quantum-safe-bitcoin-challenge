@@ -1,0 +1,17 @@
+{
+  "baseline_verified_hits": 1844,
+  "candidate_verified_hits": 1850,
+  "baseline_verified_Mps": 257.059952,
+  "candidate_verified_Mps": 258.086055,
+  "verified_gain_percent": 0.39916875110908023,
+  "baseline_completed": 15233712128,
+  "candidate_completed": 15300820992,
+  "completed_gain_percent": 0.4405286343612369,
+  "common_epochs": 119013376,
+  "baseline_common_hits": 1844,
+  "candidate_common_hits": 1844,
+  "common_prefix_exact": true,
+  "baseline_only_hits": 0,
+  "candidate_only_hits": 0,
+  "hardware": "local RTX 3090, not official RTX 4090"
+}

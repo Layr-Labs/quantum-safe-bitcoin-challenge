@@ -1,0 +1,93 @@
+{
+  "scope": "Offline CUDA 12.8 ptxas compilation of extracted embedded PTX, not driver-JIT measurement and not a GPU benchmark. Cubins are rebuildable and removed after hashing.",
+  "results": [
+    {
+      "variant": "candidate",
+      "arch": "sm_86",
+      "returncode": 0,
+      "entries": [
+        {
+          "kernel": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_iS4_j",
+          "registers": 128,
+          "stack_bytes": 16,
+          "shared_bytes": 49152
+        },
+        {
+          "kernel": "_Z15kernel_sha_onlyPKjPmjj",
+          "registers": 124,
+          "stack_bytes": 0,
+          "shared_bytes": 0
+        }
+      ],
+      "cubin_sha256": "f0659be5c6c993fa9a2eff3bd39828389cf921a8aafb71089bdf75ca935f0af9",
+      "ptx_sha256": "5faa12546dd8fbe38e0af465d878000c96f8cc2a2fcf3dc1e00741a5d590e461",
+      "log": "candidate-sm_86-ptxas.log"
+    },
+    {
+      "variant": "candidate",
+      "arch": "sm_89",
+      "returncode": 0,
+      "entries": [
+        {
+          "kernel": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_iS4_j",
+          "registers": 128,
+          "stack_bytes": 16,
+          "shared_bytes": 49152
+        },
+        {
+          "kernel": "_Z15kernel_sha_onlyPKjPmjj",
+          "registers": 124,
+          "stack_bytes": 0,
+          "shared_bytes": 0
+        }
+      ],
+      "cubin_sha256": "24e514d037b1615be1bc767fdb68d7c7ae91c227a7f81583be39055b99723498",
+      "ptx_sha256": "5faa12546dd8fbe38e0af465d878000c96f8cc2a2fcf3dc1e00741a5d590e461",
+      "log": "candidate-sm_89-ptxas.log"
+    },
+    {
+      "variant": "candidate128",
+      "arch": "sm_86",
+      "returncode": 0,
+      "entries": [
+        {
+          "kernel": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_iS4_j",
+          "registers": 128,
+          "stack_bytes": 16,
+          "shared_bytes": 49152
+        },
+        {
+          "kernel": "_Z15kernel_sha_onlyPKjPmjj",
+          "registers": 124,
+          "stack_bytes": 0,
+          "shared_bytes": 0
+        }
+      ],
+      "cubin_sha256": "3244debe3d23b0cf0c3b2de4a70b6382bb8d03e3e99746081c2167ea17d5622e",
+      "ptx_sha256": "9604a67faa2f640a5828a59e0e5a96ede29ffa14822205e1b35e1b505dd17de4",
+      "log": "candidate128-sm_86-ptxas.log"
+    },
+    {
+      "variant": "candidate128",
+      "arch": "sm_89",
+      "returncode": 0,
+      "entries": [
+        {
+          "kernel": "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_iS4_j",
+          "registers": 128,
+          "stack_bytes": 16,
+          "shared_bytes": 49152
+        },
+        {
+          "kernel": "_Z15kernel_sha_onlyPKjPmjj",
+          "registers": 124,
+          "stack_bytes": 0,
+          "shared_bytes": 0
+        }
+      ],
+      "cubin_sha256": "2113580c20c798f0cf1ae10bd579390a206f5ea9928746a1d1b1454613ca5d70",
+      "ptx_sha256": "9604a67faa2f640a5828a59e0e5a96ede29ffa14822205e1b35e1b505dd17de4",
+      "log": "candidate128-sm_89-ptxas.log"
+    }
+  ]
+}

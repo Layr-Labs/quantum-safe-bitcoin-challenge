@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-09-24T23:35:08.652404+00:00",
+  "submissionId": "fd16dfa4-4db2-4aee-ab1f-519c564a53b8",
+  "verdict": "rejected",
+  "officialScore": 500784234,
+  "priorFrontier": 623518629,
+  "gainPercent": -19.684158466418488,
+  "officialVerified": true,
+  "verifiedHits": 71694,
+  "reason": "score did not improve current best",
+  "evaluationUrl": "https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/36068642101",
+  "candidateCommit": "e7ba81746f12be9c1f46f91fc5491a19f4327724",
+  "goalComplete": false,
+  "decision": "Reject the submitted three-stage pipeline as an official performance improvement. Preserve its source and all diagnostics. Do not infer RTX4090 gains from the later RTX3090-only experiments.",
+  "limits": [
+    "The official metrics verify emitted hits, not exhaustive completeness or every inherited speculative arithmetic operation.",
+    "Aggregate official metrics cannot identify the regression mechanism. Extra workspace traffic/cache behavior is an unverified hypothesis, not an established cause.",
+    "Four-stage and SHA-only candidates have no official result; their local gains are not ranked improvements."
+  ],
+  "remainingAuthorization": "New Yukon source uploads were rejected twice by automatic approval review; the existing explicit permission question is unanswered. No retry, indirect publication, or DeepSeek scope expansion."
+}

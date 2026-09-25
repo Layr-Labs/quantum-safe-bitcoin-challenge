@@ -1,0 +1,19 @@
+{
+  "decision": "reject; no robust incremental performance improvement",
+  "before_baseline_gain_percent": -0.8008512638668197,
+  "after_baseline_gain_percent": 0.551354097106449,
+  "correctness": "all emitted hits verified; both completed-prefix comparisons exact",
+  "production_header_restored": true,
+  "rejected_source_overlay": "rejected-source-overlay.tar.xz",
+  "overlay_members": [
+    {
+      "member": "tests/gpu_epochs/split_pipeline.cuh",
+      "sha256": "5b2462c69d37121acab35051960ea2d4dd04b048274fc5eb9648e55acd2e8e1e"
+    },
+    {
+      "member": "research/split_tail_occupancy/candidate.cu",
+      "sha256": "f97cbf1ff270553f4d1eaec310c1c12d8ab531ceb1250e463f52321ae0d67a3d"
+    }
+  ],
+  "reproduction": "Extract overlay into isolated copy of candidates/subset with the prepared quad production sources before rebuilding candidate."
+}

@@ -74,12 +74,12 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if(first_distinct>QSB_FIRST_SLOTS)return 1;
     for(int slot=0;slot<first_distinct;slot++)
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
-    if(cudaMemcpyToSymbol(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
-    if(cudaMemcpyToSymbol(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
-    if(cudaMemcpyToSymbol(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
-    if (cudaMemcpyToSymbol(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
-    return cudaMemcpyToSymbol(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_CLASS,first_classes,sizeof(first_classes))!=cudaSuccess)return 1;
+    if(QSB_TO_SYMBOL(QSB_FIRST_UNIQUE,transposed,sizeof(transposed))!=cudaSuccess)return 1;
+    if (QSB_TO_SYMBOL(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
+    if (QSB_TO_SYMBOL(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
+    return QSB_TO_SYMBOL(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
 }
 
 /* First-block states for every (epoch, class) of a launch, computed as its own

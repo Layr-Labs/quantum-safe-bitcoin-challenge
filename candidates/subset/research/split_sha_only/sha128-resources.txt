@@ -1,0 +1,47 @@
+
+Fatbin elf code:
+================
+arch = sm_52
+code version = [1,7]
+host = linux
+compile_size = 64bit
+
+Resource usage:
+ Common:
+  GLOBAL:0
+
+Fatbin elf code:
+================
+arch = sm_52
+code version = [1,7]
+host = linux
+compile_size = 64bit
+
+Resource usage:
+ Common:
+  GLOBAL:56352 CONSTANT[3]:9048 CONSTANT[4]:56
+ Function _Z19kernel_build_gtablePKmS0_Ph:
+  REG:119 STACK:120 SHARED:0 LOCAL:0 CONSTANT[0]:344 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_iS4_j:
+  REG:128 STACK:0 SHARED:49152 LOCAL:0 CONSTANT[2]:20 CONSTANT[0]:612 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z15kernel_sha_onlyPKjPmjj:
+  REG:77 STACK:0 SHARED:0 LOCAL:0 CONSTANT[2]:20 CONSTANT[0]:344 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z23kernel_verify_pair_hitsPKhPhPK12epoch_desc_tPKjS0_i:
+  REG:126 STACK:120 SHARED:0 LOCAL:0 CONSTANT[2]:32 CONSTANT[0]:364 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj:
+  REG:48 STACK:96 SHARED:0 LOCAL:0 CONSTANT[0]:392 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm:
+  REG:48 STACK:112 SHARED:0 LOCAL:0 CONSTANT[0]:408 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z19kernel_build_epochsmmiiPKjPKhiS2_P12epoch_desc_tPj:
+  REG:48 STACK:80 SHARED:0 LOCAL:0 CONSTANT[0]:392 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _Z23kernel_build_first_flatPK12epoch_desc_tPjjj:
+  REG:40 STACK:0 SHARED:0 LOCAL:0 CONSTANT[0]:344 TEXTURE:0 SURFACE:0 SAMPLER:0
+
+Fatbin ptx code:
+================
+arch = sm_52
+code version = [8,7]
+host = linux
+compile_size = 64bit
+compressed
+ptxasOptions = 

@@ -1,0 +1,33 @@
+  pinning: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/output-candidate-a/problems/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/output-candidate-a/problems/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=2026092501 — no real coin material)
+▶ grinder: python3 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/stage_profile/capture.py --src /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/candidate.cu --no-build --bench subset --zeros 24 --mode fixed_time --out /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/output-candidate-a/run.json --seconds 60.0 --hits 200
+  compile: reusing /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/candidate (already built for N=24)
+  run: stdbuf -oL timeout 60 /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/candidate /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/output-candidate-a/problems/subset.bin 0 279549145 2399405719 1 0 single_hash
+  → /mnt/d/kongtaoxing/qsb-subset/candidates/subset/research/split_sha_point/output-candidate-a/run.json: 249.3M/s, 14,983,742,965 candidates, 1694 hits
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 14,983,742,965  in 60.2s (harness clock)
+  candidates (from N verified hits): 14,210,301,952
+  grinder self-reported: 60.1s, 249.3 M/s (not scored)
+  verified hits: 1694 / 1694
+  hit rel. variance: 0.024296
+--------------------------------------------------------
+  SCORE (throughput) : 236.0822 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 28.143181 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+
+{
+  "verified_hits": 1694,
+  "elapsed_s": 60.1922,
+  "throughput_Mps": 236.082224,
+  "problem_seed": 2026092501,
+  "score": {
+    "primary_throughput_Mps": 236.082224,
+    "secondary_hits_per_s": 28.143181,
+    "valid": true
+  }
+}

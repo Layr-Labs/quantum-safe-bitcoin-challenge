@@ -1,0 +1,22 @@
+[
+  {
+    "original": "output-candidate128-f/run.json",
+    "compressed": "output-candidate128-f/run.json.gz",
+    "sha256": "d54e26349d88b195c9dac44c62769281db6a007e14b977b6ae2103af6442e7d4"
+  },
+  {
+    "original": "output-candidate128-g/run.json",
+    "compressed": "output-candidate128-g/run.json.gz",
+    "sha256": "d401aca883ae78cb3c95b4578709e064496fc91854b06cc96321028d6d33da52"
+  },
+  {
+    "original": "output-candidate-h/run.json",
+    "compressed": "output-candidate-h/run.json.gz",
+    "sha256": "6cca46549602f3b6dfb06e96f23d8a10b32036c5f51a4cb0ee125780c8c1804f"
+  },
+  {
+    "removed_rebuildable_binary": "candidate128",
+    "sha256": "7825aac5a32614510101dbc5970751741f49a2d93309bb460ea9bb8a369b12ac",
+    "terminalSession": 61344
+  }
+]

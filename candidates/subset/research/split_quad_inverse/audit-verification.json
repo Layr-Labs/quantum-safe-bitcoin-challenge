@@ -1,0 +1,10 @@
+{
+  "exact_factors_checked": 31744,
+  "modular_failures": 0,
+  "quad_failures": 0,
+  "reference_failures": 0,
+  "noncanonical_representation_samples": 1874,
+  "printed_raw_samples_are_prime_plus_one_in_both_kernels": true,
+  "initial_failure_explanation": "Raw equality incorrectly required canonical limb representation; both baseline and candidate produce p+1 for some unit inverses. Original failing source/log retained.",
+  "arithmetic_mode": "QSB_SHORT_CARRY3=0 and QSB_K2S_PARITY_WINDOW=0; this does not prove inherited speculative production arithmetic exact on all inputs."
+}

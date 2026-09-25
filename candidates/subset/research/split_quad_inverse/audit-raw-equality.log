@@ -1,0 +1,24 @@
+mismatch epochs=1 index=0
+mismatch epochs=1 index=17
+mismatch epochs=1 index=34
+mismatch epochs=1 index=51
+mismatch epochs=1 index=68
+mismatch epochs=1 index=85
+mismatch epochs=1 index=102
+mismatch epochs=1 index=119
+epochs=1 count=128 cumulative_failures=8
+epochs=2 count=256 cumulative_failures=24
+epochs=3 count=384 cumulative_failures=47
+epochs=4 count=512 cumulative_failures=78
+epochs=5 count=640 cumulative_failures=116
+epochs=7 count=896 cumulative_failures=169
+epochs=8 count=1024 cumulative_failures=230
+epochs=9 count=1152 cumulative_failures=298
+epochs=15 count=1920 cumulative_failures=411
+epochs=16 count=2048 cumulative_failures=532
+epochs=17 count=2176 cumulative_failures=660
+epochs=31 count=3968 cumulative_failures=894
+epochs=32 count=4096 cumulative_failures=1135
+epochs=33 count=4224 cumulative_failures=1384
+epochs=65 count=8320 cumulative_failures=1874
+canonical_factors_checked=31744 failures=1874

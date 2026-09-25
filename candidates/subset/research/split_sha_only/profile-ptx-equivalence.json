@@ -1,0 +1,20 @@
+[
+  {
+    "variant": "paired",
+    "ptx_sha256": "5faa12546dd8fbe38e0af465d878000c96f8cc2a2fcf3dc1e00741a5d590e461",
+    "identical_to_tested_variant": true,
+    "source_sha256": "99b9946e12613fe4fbe8643ad9d988a2d853d0a4f345c5d61a3f7fef818b27ef"
+  },
+  {
+    "variant": "bound3",
+    "ptx_sha256": "2d04e2054a16f3f3b3ea4d71140acc962ad4335ee5804a84c5bffc103bd67c32",
+    "identical_to_tested_variant": true,
+    "source_sha256": "4ea059b8ce855e6357b161382f3b245be1506a86ec73e2b8c73623774947a050"
+  },
+  {
+    "variant": "single",
+    "ptx_sha256": "92a244afee69245c5b14efd18dfc17ea46c2a8dc68fcc245bef08c5470c3e1f1",
+    "identical_to_tested_variant": true,
+    "source_sha256": "a0fe49d209adfb7d8420a19cf148d50908d0246fff51356f770bcf3bc0150c7b"
+  }
+]

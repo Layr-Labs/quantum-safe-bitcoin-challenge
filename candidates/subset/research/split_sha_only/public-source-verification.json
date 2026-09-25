@@ -1,0 +1,13 @@
+{
+  "checkedAt": "2026-09-24T21:42:33.722950+00:00",
+  "commit": "7e95c40c99e57bded233ce57c7f453fbde9fd21c",
+  "extraction": [
+    "git",
+    "show",
+    "HEAD:candidates/subset/tests/gpu_epochs/tree.cu"
+  ],
+  "public_url": "https://raw.githubusercontent.com/Layr-Labs/quantum-safe-bitcoin-challenge/7e95c40c99e57bded233ce57c7f453fbde9fd21c/candidates/subset/tests/gpu_epochs/tree.cu",
+  "sha256": "c1afd09f93a338073e6753cf5a36b3827aa7397358fb13851b131ebea6d33c09",
+  "public_bytes_equal": true,
+  "sent_to_helper": false
+}

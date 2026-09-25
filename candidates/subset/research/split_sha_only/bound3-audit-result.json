@@ -1,0 +1,12 @@
+{
+  "result": "pass",
+  "compared_scalars": 126976,
+  "boundary_cases": 60,
+  "guards_pass": true,
+  "references": [
+    "unchanged single-state GPU SHA",
+    "independent CPU/OpenSSL oracle"
+  ],
+  "scope": "paired SHA launch_bounds(256,3) scalar computation; no downstream arithmetic or performance proof",
+  "audit_sha256": "bb84114bca83fb721083fe800dc6a1088534fdca13ad0b70b9cb67a6fec00c7f"
+}

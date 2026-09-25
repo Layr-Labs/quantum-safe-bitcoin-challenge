@@ -1,0 +1,17 @@
+# Four factors per inverse-tree leaf
+
+Qualified locally and integrated into the pending production candidate. Group four denominator factors per thread, using two pair products and their product as the leaf for the same 256-thread inverse tree. After the tree returns the reciprocal leaf, recover each factor inverse with two subpair inverses. Double candidates per tree launch block while preserving the SHA, point and tail kernels, enumeration and exact replay. This changes speculative multiplication grouping, so both canonical arithmetic checks and end-to-end production hit checks are required. Inactive factors are identity and all lanes participate in collectives. Earlier production is preserved in previous-* files; current production contains this locally qualified refinement.
+
+## Current scope and algebra
+
+This research variant is fixed to 256 threads and 128 windows, hence eight epochs per inverse block. Each thread owns four records separated by 128 indices; the two thread halves cover disjoint four-epoch groups. For factors a,b,c,d, left=ab and right=cd. The block tree yields leaf_inverse=1/(abcd); multiplying by right and left yields 1/(ab) and 1/(cd), then multiplication by sibling factors yields each inverse. All absent factors are identity. Canonical correctness is checked independently with OpenSSL and compared with the original two-factor kernel over 15 epoch counts (31744 factors total). This does not assert universal correctness of the inherited production carry-truncated multiplier. Production-path end-to-end verification remains required. If selected for integration, derive the eight-epoch geometry from block/window constants or reject unsupported window settings explicitly.
+
+## Audit and initial production run
+
+The initial raw-limb equality oracle failed on 1874 unit-factor cases. It was corrected to compare field values modulo the prime, retaining original source/log and printing raw outputs. Both reference and quad kernels return p+1 in the printed unit cases, congruent to 1. The independently verified OpenSSL modular audit passes all 31744 factors for both kernels with zero modular errors. Exact arithmetic is enabled only in that audit; production benchmarking retains the inherited speculative arithmetic.
+
+Initial production baseline: 1800 verified hits, 251.017691 M/s; first-use quad: 1729 verified hits, 241.044199 M/s. All 1729 common-prefix hits match exactly. Around 45 seconds the diagnostic rates were baseline 251.0 and quad 251.9 M/s. First-use startup prevents using the wall difference as the final decision, so one warm repeat is pending. Production files remain unchanged.
+
+## Warm result and prepared production candidate
+
+Warm quad: 1826/1826 verified hits, 254.586866 M/s versus 251.017691 M/s baseline (+1.4219%). Completed candidates rise from 14831058944 to 15032385536 (+1.3575%). Common 115867648-epoch range has exactly the same 1800 hits. The production integration derives epoch geometry from thread/window constants; its default normalized PTX matches tested candidate: 6924c12d9c27e1240c044c75a1a3ec5e66f7025e660ac90bd150666e14362417. Previous production source, note and manifest are preserved here. All local processes are terminal and rebuildable binaries were removed with hashes retained. Submission has NOT occurred: explicit user permission is still pending after the earlier automatic approval rejection. The existing three-stage official submission continues to be monitored independently.

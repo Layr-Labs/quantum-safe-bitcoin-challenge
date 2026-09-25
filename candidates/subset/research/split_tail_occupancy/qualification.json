@@ -1,0 +1,36 @@
+{
+  "output-baseline-a": {
+    "baseline_verified_hits": 1814,
+    "candidate_verified_hits": 1800,
+    "baseline_verified_Mps": 252.97444,
+    "candidate_verified_Mps": 250.948491,
+    "verified_gain_percent": -0.8008512638668197,
+    "baseline_completed": 14965276672,
+    "candidate_completed": 14831058944,
+    "completed_gain_percent": -0.8968609865470878,
+    "common_epochs": 115867648,
+    "baseline_common_hits": 1800,
+    "candidate_common_hits": 1800,
+    "common_prefix_exact": true,
+    "baseline_only_hits": 0,
+    "candidate_only_hits": 0,
+    "hardware": "local RTX 3090, not official RTX 4090"
+  },
+  "output-baseline-d": {
+    "baseline_verified_hits": 1791,
+    "candidate_verified_hits": 1800,
+    "baseline_verified_Mps": 249.572463,
+    "candidate_verified_Mps": 250.948491,
+    "verified_gain_percent": 0.551354097106449,
+    "baseline_completed": 14763950080,
+    "candidate_completed": 14831058944,
+    "completed_gain_percent": 0.454545454545463,
+    "common_epochs": 115343360,
+    "baseline_common_hits": 1791,
+    "candidate_common_hits": 1791,
+    "common_prefix_exact": true,
+    "baseline_only_hits": 0,
+    "candidate_only_hits": 0,
+    "hardware": "local RTX 3090, not official RTX 4090"
+  }
+}
