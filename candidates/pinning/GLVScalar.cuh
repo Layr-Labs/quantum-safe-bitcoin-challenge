@@ -16,6 +16,17 @@
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
+// GLV11 "P18" (i34-9 14675ab0, ported to subset by terrapinelf 62cf62b8):
+// P uses five terms (segment 0 + two new cold segments of 27/28 bits + segments 4,5).
+#ifndef QSB_GLV11
+#define QSB_GLV11 1
+#endif
+#if QSB_GLV11 != 0 && QSB_GLV11 != 1
+#error QSB_GLV11 must be 0 or 1
+#endif
+#if QSB_GLV11 && !(QSB_BIGTBL && QSB_FOUR_HOT)
+#error QSB_GLV11 requires QSB_BIGTBL=1 and QSB_FOUR_HOT=1
+#endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
 #define QSB_GT_TOTAL 153175181u
 #define QSB_GT_RADIX_BITS 14
@@ -91,6 +102,39 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     }
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
+#if QSB_GLV11
+/* GLV11 P18 (after i34-9 14675ab0 / terrapinelf 62cf62b8): P's five terms are
+ * segment 0 (shift 0, 18 bits), segment 6 (shift 18, 27 bits, 2^26 records at
+ * 153175181), segment 7 (shift 45, 28 bits, 2^27 records at 220284045), then
+ * GLV12 segments 4 (shift 73) and 5 (top, shift 100). The signed-digit bias
+ * telescopes over [18,100) exactly as in the six-term split, so the biased
+ * segment-0 constant is unchanged. */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
+    const uint64_t mag[2],unsigned sign,int c) {
+    const unsigned shift=c==0?0u:c==1?18u:c==2?45u:c==3?73u:100u;
+    uint64_t wide;
+    if(shift<64u) {
+        wide=mag[0]>>shift;
+        if(shift) wide|=mag[1]<<(64u-shift);
+    } else wide=mag[1]>>(shift-64u);
+    uint32_t f=(uint32_t)wide,idx,neg_digit;
+    if(c==0) {
+        idx=f&((1u<<18)-1u);neg_digit=0;
+    } else if(c==4) {
+        const int32_t d=(int32_t)(2u*f)-(int32_t)QSB_GT_TOP_CENTER;
+        neg_digit=(uint32_t)d>>31;
+        const uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
+        idx=(ad-1u)>>1;
+    } else {
+        const unsigned bits=c==2?28u:27u;
+        f&=(1u<<bits)-1u;
+        neg_digit=1u-(f>>(bits-1u));
+        idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    }
+    const uint32_t off=c==0?0u:c==1?153175181u:c==2?220284045u:c==3?786432u:67895296u;
+    return (off+idx)|((neg_digit^sign)<<31);
+}
+#endif
 // END QSB_BIGTBL_HOST_EXACT
 #endif
 
