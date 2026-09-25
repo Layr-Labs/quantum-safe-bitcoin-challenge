@@ -168,6 +168,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_EARLY_LOAD
 #define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
+#ifndef QSB_BETA_OUT
+#define QSB_BETA_OUT 1     /* kaankolcu fdd6302: phi hoisted out of the GLV chain loop; 0 restores */
+#endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
 #endif
@@ -826,6 +829,32 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first+1,x1,y1);
 #endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#if QSB_BETA_OUT
+    {
+        /* kaankolcu's QSB_BETA_OUT (fdd6302): run the Q terms to the component
+         * boundary, apply phi once, then run the P terms with the same loop.
+         * Same operations in the same order as the per-trip test below. */
+        const uint64_t beta[4]={
+            0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+            0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+        };
+        int term=first+2, end=first==0?GT_CHUNKS:last;
+        #pragma unroll 1
+        for(;;) {
+            #pragma unroll 1
+            for(;term<end;term++) {
+                qsb_load_glv(table,term,x1,y1);
+                _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+                Load256(y0,y1);
+            }
+            if(end==last) break;
+            /* phi(X/ZZ,Y/ZZZ)=(beta*X/ZZ,Y/ZZZ).  The isomorphic X scale,
+             * Y offset and deferred negative-Y anchor are all unchanged. */
+            _ModMult(X,X,(uint64_t*)beta);
+            end=last;
+        }
+    }
+#else
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -841,6 +870,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
+#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
