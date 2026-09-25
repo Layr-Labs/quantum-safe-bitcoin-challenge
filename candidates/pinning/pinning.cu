@@ -1,15 +1,6 @@
 #ifndef QSB_RESUB_0920120629
 #define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
 #endif
-#ifndef QSB_CODEX_DRAW_20260924_C
-#define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
-#endif
-#ifndef QSB_CODEX_DRAW_20260924_D
-#define QSB_CODEX_DRAW_20260924_D 1 /* no runtime effect; identifies the SHA-pipe A/B draw */
-#endif
-#ifndef QSB_CODEX_DRAW_20260924_E
-#define QSB_CODEX_DRAW_20260924_E 1 /* no runtime effect; identifies the exact early SHA scheduling draw */
-#endif
 /* qsb_real_search.cu — Real pinning search with sequence + locktime variation
  *
  * Reads pinning2.bin (midstate with sequence in suffix)
@@ -126,7 +117,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 16777216   /* candidates per pipeline launch */
+#define QSB_BATCH 8388608    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -188,9 +179,6 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_HOST_READBACK
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
-#endif
-#ifndef QSB_CHAIN_PIPE
-#define QSB_CHAIN_PIPE 0      /* 1: overlap next GLV table gather with current XYZZ add using dead point buffers */
 #endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
@@ -495,15 +483,7 @@ __device__ __forceinline__ void gt_load_signed_flat_m(const uint8_t *__restrict_
     size_t off = ((size_t)base + idx) * 64;
     const ulonglong2 *tx=(const ulonglong2 *)(gTable+off);
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
-#if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
-    /* Native carrier only: request both 32-byte sectors of this record. */
-    ulonglong2 x0;
-    asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
-        : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
-    ulonglong2 x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
-#else
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
-#endif
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
 #if !QSB_YOFF
@@ -790,12 +770,10 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
 }
-__device__ __forceinline__ uint32_t qsb_glv_code(unsigned term) {
+__device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
+                                             uint64_t *x,uint64_t *y) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
-    return codes[(size_t)term*QSB_TREE_N+threadIdx.x];
-}
-__device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t code,
-                                                  uint64_t *x,uint64_t *y) {
+    uint32_t code=codes[(size_t)term*QSB_TREE_N+threadIdx.x];
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
     gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
@@ -804,53 +782,6 @@ __device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t 
 #endif
                           ((uint64_t)m32<<32)|m32,x,y);
 }
-__device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
-                                             uint64_t *x,uint64_t *y) {
-    qsb_load_glv_code(table,qsb_glv_code(term),x,y);
-}
-#if QSB_CHAIN_PIPE
-#if !QSB_BIGTBL || !QSB_YOFF || !QSB_NEG_Y_MAC || !QSB_FUSE_SQRADDSUB2 || !QSB_XY_DIRECT
-#error "QSB_CHAIN_PIPE requires the current BIGTBL/YOFF/NEG_Y_MAC/FUSE_SQRADDSUB2/XY_DIRECT path"
-#endif
-__device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_t code,
-                                                     uint64_t *y) {
-    const uint32_t idx=code&0x7fffffffu;
-    const uint64_t m32=(uint32_t)((int32_t)code>>31);
-    const uint64_t m=(m32<<32)|m32;
-    const ulonglong2 *ty=(const ulonglong2 *)(table+(size_t)idx*64+32);
-    ulonglong2 y0=__ldg(ty),y1=__ldg(ty+1);
-    y[0]=y0.x^m; y[1]=y0.y^m; y[2]=y1.x^m; y[3]=y1.y^m;
-}
-__device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
-                                                     uint64_t *x) {
-    const uint32_t idx=code&0x7fffffffu;
-    const ulonglong2 *tx=(const ulonglong2 *)(table+(size_t)idx*64);
-    ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1);
-    x[0]=x0.x; x[1]=x0.y; x[2]=x1.x; x[3]=x1.y;
-}
-
-/* Next Y/X gather uses point buffers after their current values are consumed. */
-__device__ __forceinline__ void qsb_pointadd_chain_pipe(
-    uint64_t *X1,uint64_t *Y1,uint64_t *ZZ1,uint64_t *ZZZ1,
-    uint64_t *X2,uint64_t *Y2,uint64_t *Yoff,
-    const uint8_t *table,uint32_t next_code) {
-    uint64_t U2[4],S2[4],P[4],R[4],PP[4],PPP[4],Q[4];
-    _ModAddLazyOff(S2,Y2,Yoff);
-    qsb_muladd_seed(R,S2,ZZZ1,Y1);
-    qsb_load_glv_y_code(table,next_code,Yoff);
-    _ModMult(U2,X2,ZZ1);
-    qsb_load_glv_x_code(table,next_code,X2);
-    _ModSub256(P,U2,X1);
-    _ModSqr(PP,P);
-    _ModMult(PPP,PP,P);
-    _ModMult(Q,U2,PP);
-    _ModSqrAddSub2(X1,R,PPP,Q);
-    _ModMult(ZZZ1,PPP);
-    _ModMult(ZZ1,PP);
-    _ModSub256(Q,X1,Q);
-    _ModMult(Y1,Q,R);
-}
-#endif
 
 __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t *U,uint64_t *V,const uint64_t k[4],const uint8_t *table,
@@ -895,28 +826,6 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first+1,x1,y1);
 #endif
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
-#if QSB_CHAIN_PIPE
-    if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
-    #pragma unroll 1
-    for(int term=first+2;term<last;term++) {
-        if(term==GT_CHUNKS) {
-            const uint64_t beta[4]={
-                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
-                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
-            };
-            _ModMult(X,X,(uint64_t*)beta);
-        }
-        if(term+1<last) {
-            const uint32_t next_code=qsb_glv_code(term+1);
-            qsb_pointadd_chain_pipe(X,Y,U,V,x1,y1,y0,table,next_code);
-            #pragma unroll
-            for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
-        } else {
-            _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
-            Load256(y0,y1);
-        }
-    }
-#else
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
         if(term==GT_CHUNKS) {
@@ -932,7 +841,6 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
         Load256(y0,y1);
     }
-#endif
 #if QSB_YOFF
     qsb_yoff_to_y(y0);
 #endif
@@ -967,8 +875,6 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #ifndef QSB_ZEROS_N
 #define QSB_ZEROS_N 24
 #endif
-/* Native carrier fingerprint; checked against the fixed compute_52 build. */
-__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -2491,13 +2397,6 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
-#include "QsbCarrier.h"
-#if QSB_SLOTPIPE
-#define QSB_LAUNCH_ST st
-#else
-#define QSB_LAUNCH_ST 0
-#endif
-
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -2513,13 +2412,6 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
-    if(FAST_TAIL && qsb_carrier_has(QK_S0))
-        qsb_carrier_launch(kernel_pinning_pipeline<FAST_TAIL,0>,QK_S0,dim3(blocks0),dim3(QSB_S0_THREADS),QSB_LAUNCH_ST,
-            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-            saved,roots,tree,tp);
-    else
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
@@ -2548,10 +2440,6 @@ static void launch_pinning_pipeline(
     }
 #endif
     int root_groups=(blocks+255)/256;
-    if(qsb_carrier_has(QK_RGP))
-        qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(root_groups),dim3(256),QSB_LAUNCH_ST,
-            roots,blocks,super_roots,root_checkpoint);
-    else
     qsb_root_group_prepare<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
@@ -2559,20 +2447,12 @@ static void launch_pinning_pipeline(
         fprintf(stderr,"Root-group prepare launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    if(qsb_carrier_has(QK_ISR))
-        qsb_carrier_launch(qsb_invert_super_roots,QK_ISR,dim3((root_groups+255)/256),dim3(256),QSB_LAUNCH_ST,
-            super_roots,root_groups);
-    else
     qsb_invert_super_roots<<<(root_groups+255)/256,256 QSB_STREAM_ARG>>>(super_roots,root_groups);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Super-root inverse launch failed: %s\n",cudaGetErrorString(err));
         exit(2);
     }
-    if(qsb_carrier_has(QK_RGF))
-        qsb_carrier_launch(qsb_root_group_finish,QK_RGF,dim3(root_groups),dim3(256),QSB_LAUNCH_ST,
-            roots,blocks,super_roots,root_checkpoint);
-    else
     qsb_root_group_finish<<<root_groups,256 QSB_STREAM_ARG>>>(
         roots,blocks,super_roots,root_checkpoint);
     err=cudaGetLastError();
@@ -2598,13 +2478,6 @@ static void launch_pinning_pipeline(
     }
 #endif
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
-    if(FAST_TAIL && qsb_carrier_has(QK_S2))
-        qsb_carrier_launch(kernel_pinning_pipeline<FAST_TAIL,2>,QK_S2,dim3(blocks2),dim3(QSB_S2_THREADS),QSB_LAUNCH_ST,
-            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
-            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
-            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-            saved,roots,tree,tp);
-    else
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
@@ -3141,6 +3014,12 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
     return -1;
 }
 #endif
+#ifndef QSB_CPU_GRIND
+#define QSB_CPU_GRIND 1
+#endif
+#if QSB_CPU_GRIND && QSB_HOST_GATE
+#include "CpuGrind.h"
+#endif
 
 
 int main(int argc, char **argv) {
@@ -3171,11 +3050,26 @@ int main(int argc, char **argv) {
 
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+#ifndef QSB_L2_FETCH_GRAN
+#define QSB_L2_FETCH_GRAN 64
+#endif
+#if QSB_L2_FETCH_GRAN > 0
+    {   /* Table records are 64 B and both 32 B sectors are always consumed. The RTX 4090
+         * driver reports a 64 B default but behaves like 32 B: at stage-0 occupancy a
+         * random 64 B record costs two DRAM accesses (4.4 G records/s on a probe) unless
+         * 64 B is requested explicitly (7.8 G records/s). Pure hint; readback printed. */
+        size_t g0 = 0, g1 = 0;
+        cudaDeviceGetLimit(&g0, cudaLimitMaxL2FetchGranularity);
+        cudaDeviceSetLimit(cudaLimitMaxL2FetchGranularity, (size_t)QSB_L2_FETCH_GRAN);
+        cudaDeviceGetLimit(&g1, cudaLimitMaxL2FetchGranularity);
+        cudaGetLastError();
+        printf("  L2 fetch granularity: %zu -> %zu B\n", g0, g1);
+    }
+#endif
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
-    qsb_carrier_init(prop);
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
@@ -3218,10 +3112,6 @@ int main(int argc, char **argv) {
         cudaMemcpy(dH,hH,hb,cudaMemcpyHostToDevice);
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
-        if(qsb_carrier_has(QK_BUILD))
-            qsb_carrier_launch(kernel_build_gtable,QK_BUILD,dim3((gt_total+255)/256),dim3(256),(cudaStream_t)0,
-                dL,dH,d_gt);
-        else
         kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
@@ -3272,10 +3162,6 @@ int main(int argc, char **argv) {
         fflush(stdout);
         free(chk_table);
 #if QSB_YOFF
-        if(qsb_carrier_has(QK_YOFF))
-            qsb_carrier_launch(qsb_table_offset_y,QK_YOFF,dim3((GT_TOTAL_ENTRIES+255)/256),dim3(256),(cudaStream_t)0,
-                d_gt);
-        else
         qsb_table_offset_y<<<(GT_TOTAL_ENTRIES+255)/256,256>>>(d_gt);
         cudaError_t yerr = cudaDeviceSynchronize();
         if (yerr == cudaSuccess) yerr = cudaGetLastError();
@@ -3315,17 +3201,12 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_nri, pp.neg_r_inv, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2rx, pp.u2r_x, 32, cudaMemcpyHostToDevice);
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
-    cudaError_t xyerr = QSB_TO_SYMBOL(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
-    if (xyerr == cudaSuccess)
-        xyerr = QSB_TO_SYMBOL(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
-    if (xyerr != cudaSuccess) {
-        fprintf(stderr, "Failed to upload recovery coordinates: %s\n", cudaGetErrorString(xyerr));
-        return 1;
-    }
+    cudaMemcpyToSymbol(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
+    cudaMemcpyToSymbol(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
 #if QSB_ISO_XR
-    if(QSB_TO_SYMBOL(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
-       QSB_TO_SYMBOL(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
-       QSB_TO_SYMBOL(pin_iso_xneg,&iso.xneg,sizeof(iso.xneg))!=cudaSuccess){
+    if(cudaMemcpyToSymbol(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
+       cudaMemcpyToSymbol(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||
+       cudaMemcpyToSymbol(pin_iso_xneg,&iso.xneg,sizeof(iso.xneg))!=cudaSuccess){
         fprintf(stderr,"Failed to upload isomorphic recovery constants\n");
         return 1;
     }
@@ -3333,7 +3214,7 @@ int main(int argc, char **argv) {
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
         uint64_t recovery_c[4];
         if(!qsb_make_recovery_constant(recovery_c,pp.u2r_x,pp.u2r_y) ||
-           QSB_TO_SYMBOL(pin_recovery_c,recovery_c,sizeof(recovery_c))!=cudaSuccess){
+           cudaMemcpyToSymbol(pin_recovery_c,recovery_c,sizeof(recovery_c))!=cudaSuccess){
             fprintf(stderr,"Failed to prepare the squaring-free recovery constant\n");
             return 1;
         }
@@ -3360,7 +3241,7 @@ int main(int argc, char **argv) {
             uint64_t kw[4]={0,0,0,0};
             for(int i=0;i<4;i++)for(int b=0;b<8;b++)
                 kw[i]|=(uint64_t)kb[31-i*8-b]<<(b*8);
-            cudaError_t kerr=QSB_TO_SYMBOL(pin_u2rk_words,kw,sizeof(kw));
+            cudaError_t kerr=cudaMemcpyToSymbol(pin_u2rk_words,kw,sizeof(kw));
             if(kerr!=cudaSuccess){
                 fprintf(stderr,"Failed to upload recovery K: %s\n",cudaGetErrorString(kerr));
                 return 1;
@@ -3403,24 +3284,14 @@ int main(int argc, char **argv) {
 #if QSB_SHA_FMA_ADD
         {
             uint32_t one = 1u;
-            cudaError_t oerr = QSB_TO_SYMBOL(pin_one_mul, &one, sizeof(one));
+            cudaError_t oerr = cudaMemcpyToSymbol(pin_one_mul, &one, sizeof(one));
             if (oerr != cudaSuccess) {
                 fprintf(stderr, "Failed to upload FMA-add multiplier: %s\n", cudaGetErrorString(oerr));
                 return 1;
             }
         }
 #endif
-#if QSB_SHA_ALU_ADD
-        {
-            uint32_t zero = 0u;
-            cudaError_t zerr = QSB_TO_SYMBOL(pin_zero_add, &zero, sizeof(zero));
-            if (zerr != cudaSuccess) {
-                fprintf(stderr, "Failed to upload SHA addend: %s\n", cudaGetErrorString(zerr));
-                return 1;
-            }
-        }
-#endif
-        cudaError_t copy_err = QSB_TO_SYMBOL(pin_tail_words, words, sizeof(words));
+        cudaError_t copy_err = cudaMemcpyToSymbol(pin_tail_words, words, sizeof(words));
         if (copy_err != cudaSuccess) {
             fprintf(stderr, "Failed to upload fixed SHA tail: %s\n",
                     cudaGetErrorString(copy_err));
@@ -3452,7 +3323,7 @@ int main(int argc, char **argv) {
      * launched batch must start at a multiple of 256 and the stage-0 block must be 128 threads.
      * The batch size is checked here; the batch start (LT_MIN) is checked below, where it is
      * defined. Both hold for the ranked geometry (LT_MIN = 500000000 = 256*1953125,
-     * QSB_BATCH = 2^24, QSB_S0_THREADS = 128). */
+     * QSB_BATCH = 2^23, QSB_S0_THREADS = 128). */
     static_assert(QSB_S0_THREADS == 128 && (QSB_BATCH % 256) == 0,
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
@@ -3727,6 +3598,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
+#if QSB_CPU_GRIND && QSB_HOST_GATE
+    qcpu::start(&pp);   /* idle host cores grind a disjoint sequence range (CpuGrind.h) */
+#endif
 #if QSB_SLOTPIPE
     /* Slotted batch loop.  Nothing here changes what the device computes: the
      * same five kernels receive the same arguments for the same batches in the
@@ -3860,7 +3734,7 @@ int main(int argc, char **argv) {
          * still be reading the table when it is replaced. */
         {
             qsb_tail_tab_t h_tab[256]; qsb_make_tail_tab(h_tab, cur_tp, tail_w0);
-            cudaError_t terr = QSB_TO_SYMBOL(pin_tail_tab, h_tab, sizeof(h_tab));
+            cudaError_t terr = cudaMemcpyToSymbol(pin_tail_tab, h_tab, sizeof(h_tab));
             if (terr != cudaSuccess) {
                 fprintf(stderr, "Failed to upload tail table: %s\n", cudaGetErrorString(terr));
                 return 1;
@@ -3981,7 +3855,7 @@ int main(int argc, char **argv) {
 #if QSB_TAIL_TAB
             {
                 qsb_tail_tab_t h_tab[256]; qsb_make_tail_tab(h_tab, cur_tp, tail_w0);
-                cudaError_t terr = QSB_TO_SYMBOL(pin_tail_tab, h_tab, sizeof(h_tab));
+                cudaError_t terr = cudaMemcpyToSymbol(pin_tail_tab, h_tab, sizeof(h_tab));
                 if (terr != cudaSuccess) {
                     fprintf(stderr, "Failed to upload tail table: %s\n", cudaGetErrorString(terr));
                     return 1;
