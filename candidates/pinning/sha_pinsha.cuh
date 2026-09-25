@@ -103,7 +103,7 @@ __device__ __forceinline__ uint32_t qsb_shrf(uint32_t x, int k) {
 #define QSB_SHA_ALU_ADD 1     /* route exact SHA additions to the ALU pipe */
 #endif
 #if QSB_SHA_ALU_ADD
-__device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also uploaded by the host */
+__device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by the host */
 #define QSB_Z (pin_zero_add)
 #else
 #define QSB_Z 0u
