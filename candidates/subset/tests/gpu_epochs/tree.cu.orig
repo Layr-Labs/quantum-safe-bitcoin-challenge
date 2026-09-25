@@ -959,34 +959,6 @@ __host__ __device__ __forceinline__ uint32_t qsb_s3_code(qsb_s3_walker &w, int t
     return (d.off + idx) | (((nm & 1u) ^ sign) << 31);
 }
 // END QSB_S3_HOST_EXACT
-/* QSB_S3_HALF_WALK: the same codes with half the walker shifts. Q's six widths tile exactly its 128
- * bits (every Q field ends at or below bit 127), so no Q field ever reads a bit of P: the Q half shifts
- * only w[0..3] and P waits unshifted in w[4..7]. After term QSB_S3_PSI_TERM-1 the 256-bit walker holds
- * exactly P in w[0..3] and zero in w[4..7]; qsb_s3_psi_swap makes w[0..3] = P there, and from then on
- * w[4..7] of the 256-bit walker are zero, so shifting w[0..3] alone is again the same value. 4 funnel
- * shifts per term instead of 8; qsb_s3_selfcheck runs this form against q9_bigtbl_code too. */
-#ifndef QSB_S3_HALF_WALK
-#define QSB_S3_HALF_WALK 1
-#endif
-__host__ __device__ __forceinline__ uint32_t qsb_s3_code_half(qsb_s3_walker &w, int t, const qsb_s3_desc_t d) {
-    const uint32_t f = w.w[0] & d.mask;
-    const uint32_t dig = 2u * f + 1u - d.centre;
-    const uint32_t nm = (uint32_t)((int32_t)dig >> 31);
-    const uint32_t idx = ((dig ^ nm) - nm - 1u) >> 1;
-    const uint32_t sign = (w.signs >> (t >= QSB_S3_PSI_TERM ? 1 : 0)) & 1u;
-    #pragma unroll
-    for (int i = 0; i < 3; i++) w.w[i] = qsb_s3_shr(w.w[i], w.w[i + 1], d.width);
-    w.w[3] >>= d.width;
-    return (d.off + idx) | (((nm & 1u) ^ sign) << 31);
-}
-__host__ __device__ __forceinline__ void qsb_s3_psi_swap(qsb_s3_walker &w) {
-    w.w[0] = w.w[4]; w.w[1] = w.w[5]; w.w[2] = w.w[6]; w.w[3] = w.w[7];
-}
-#if QSB_S3_HALF_WALK
-#define QSB_S3_CODE qsb_s3_code_half
-#else
-#define QSB_S3_CODE qsb_s3_code
-#endif
 /* Table point for a code: segments 0-3 (inside the pinned L2 window) with the ordinary read-only load,
  * segments 4-5 (DRAM) with evict-first ld.global.cs so the 9 GiB stream does not displace the rest of
  * the kernel's L2 working set (S-P1 probe: plain loads at these footprints put subset in a stall regime).
@@ -1033,27 +1005,15 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     qsb_s3_walker w;
     qsb_s3_begin(w, mag[0], sgn[0], mag[1], sgn[1]);
     uint64_t x0[4], y0[4], x1[4], y1[4];
-    uint32_t code = QSB_S3_CODE(w, 0, QSB_S3_DESC[0]);
+    uint32_t code = qsb_s3_code(w, 0, QSB_S3_DESC[0]);
     qsb_s3_load(gTable, code, false, x0, y0);
-    code = QSB_S3_CODE(w, 1, QSB_S3_DESC[1]);
+    code = qsb_s3_code(w, 1, QSB_S3_DESC[1]);
     qsb_s3_load(gTable, code, false, x1, y1);
     qsb_filter_point_seed(X, Y, ZZ, ZZZ, x0, y0, x1, y1, bad);
     uint64_t cx[4], cy[4];
     #pragma unroll 1
     for (int t = 2; t < GT_GLV_TERMS - 1; t++) {
         const qsb_s3_desc_t d = QSB_S3_DESC[t];
-#if QSB_S3_HALF_WALK
-        /* P enters w[0..3] before its first field is read; the psi scale rides in the same branch
-         * (it only has to precede this term's addition). */
-        if (t == QSB_S3_PSI_TERM) {
-            qsb_s3_psi_swap(w);
-            const uint64_t beta[4] = {0xC1396C28719501EEULL, 0x9CF0497512F58995ULL,
-                                      0x6E64479EAC3434E9ULL, 0x7AE96A2B657C0710ULL};
-            qsb_filter_mul(X, X, beta, bad);
-        }
-        code = qsb_s3_code_half(w, t, d);
-        qsb_s3_load(gTable, code, d.off >= GT_DENSE_ENTRIES, cx, cy);
-#else
         code = qsb_s3_code(w, t, d);
         qsb_s3_load(gTable, code, d.off >= GT_DENSE_ENTRIES, cx, cy);
         if (t == QSB_S3_PSI_TERM) {
@@ -1063,13 +1023,12 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
                                       0x6E64479EAC3434E9ULL, 0x7AE96A2B657C0710ULL};
             qsb_filter_mul(X, X, beta, bad);
         }
-#endif
         qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad);
 #if !QSB_CHAIN_ANCHOR_UPDATE
         Load256(y0, cy);                /* current affine y anchors next madd */
 #endif
     }
-    code = QSB_S3_CODE(w, GT_GLV_TERMS - 1, QSB_S3_DESC[GT_GLV_TERMS - 1]);
+    code = qsb_s3_code(w, GT_GLV_TERMS - 1, QSB_S3_DESC[GT_GLV_TERMS - 1]);
     qsb_s3_load(gTable, code, true, cx, cy);
     qsb_filter_last_add(X, Y, ZZ, ZZZ, cx, cy, y0, bad);
 }
@@ -2854,13 +2813,10 @@ static int qsb_s3_selfcheck(void) {
         }
         const unsigned sp = it & 1, sq = (it >> 1) & 1;
         qsb_s3_walker w; qsb_s3_begin(w, m[0], sp, m[1], sq);
-        qsb_s3_walker h; qsb_s3_begin(h, m[0], sp, m[1], sq);
         for (int t = 0; t < 12; t++) {
             const uint32_t got = qsb_s3_code(w, t, desc[t]);
             const uint32_t want = t < 6 ? q9_bigtbl_code(m[1], sq, t) : q9_bigtbl_code(m[0], sp, t - 6);
             if (got != want) return 0;
-            if (t == QSB_S3_PSI_TERM) qsb_s3_psi_swap(h);
-            if (qsb_s3_code_half(h, t, desc[t]) != want) return 0;
         }
     }
     return 1;
@@ -3444,7 +3400,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_NEGFOLD_PARITY) QSB_CARRIER_KV(QSB_NEG_SHORT) QSB_CARRIER_KV(QSB_PAIR_SHARED) \
     QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_CONST) QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_CONST_INNER) \
     QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_WINDOW) QSB_CARRIER_KV(QSB_GLV_LEAN) QSB_CARRIER_KV(QSB_GLV_ROUND_CC) QSB_CARRIER_KV(QSB_GLV_HIGH15_HI) QSB_CARRIER_KV(QSB_PREFIX_BLOCKS) \
-    QSB_CARRIER_KV(QSB_R_CBANK) QSB_CARRIER_KV(QSB_S3_HALF_WALK) QSB_CARRIER_KV(QSB_ROOT_MAX_BATCHES) QSB_CARRIER_KV(QSB_SHA_ALU_ADD) \
+    QSB_CARRIER_KV(QSB_R_CBANK) QSB_CARRIER_KV(QSB_ROOT_MAX_BATCHES) QSB_CARRIER_KV(QSB_SHA_ALU_ADD) \
     QSB_CARRIER_KV(QSB_SHA_FMA_ADD) QSB_CARRIER_KV(QSB_SHA_FMA_ROT) QSB_CARRIER_KV(QSB_SHA_UNROLL_CONST) \
     QSB_CARRIER_KV(QSB_SHORT_CARRY) QSB_CARRIER_KV(QSB_SHORT_CARRY2) \
     QSB_CARRIER_KV(QSB_SHORT_CARRY2_SENTINEL) QSB_CARRIER_KV(QSB_SHORT_CARRY3) \
