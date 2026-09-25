@@ -1,3 +1,4 @@
+#define QSB_AUTODRAW_09252258 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
