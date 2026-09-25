@@ -60,9 +60,7 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
  * One IMAD.WIDE.U32 (c-bank multiplier, so ptxas cannot fold it back into shifts) plus one IMAD
  * add replaces one ALU-pipe SHF. Exact for every x and every 1 <= k <= 31. */
 #ifndef QSB_SHA_FMA_ROT
-#define QSB_SHA_FMA_ROT 8     /* bit 8 only: schedule-sigma logical shifts as IMAD.HI (no extra
-                               * instruction); rotations stay on the ALU pipe: IMAD.WIDE rotations
-                               * (bits 1/2/4) measured -0.8..-2.3% */
+#define QSB_SHA_FMA_ROT 0     /* rotations stay on the ALU pipe: IMAD.WIDE measured -0.8..-2.3% */
 #endif
 __device__ __constant__ uint32_t pin_pow2[32] = {
     1u,2u,4u,8u,16u,32u,64u,128u,256u,512u,1024u,2048u,4096u,8192u,16384u,32768u,
@@ -146,7 +144,7 @@ QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
 /* WMIX with a constant-bank zero addend (QSB_SHA_ALU_ADD): keeps every schedule add on the
  * ALU pipe, same instruction count. */
 #ifndef QSB_DIGEST_WMIX_Z
-#define QSB_DIGEST_WMIX_Z 0
+#define QSB_DIGEST_WMIX_Z 1
 #endif
 #if QSB_DIGEST_WMIX_Z && !QSB_SHA_ALU_ADD
 #error "QSB_DIGEST_WMIX_Z needs the constant-bank zero from QSB_SHA_ALU_ADD=1"
