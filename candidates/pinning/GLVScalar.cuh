@@ -53,6 +53,17 @@
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
+// GLV11 "P18" (i34-9 14675ab0; subset port terrapinelf 62cf62b8): P uses five
+// terms (segment 0, two new cold segments of 27/28 bits, segments 4 and 5).
+#ifndef QSB_GLV11
+#define QSB_GLV11 1
+#endif
+#if QSB_GLV11 != 0 && QSB_GLV11 != 1
+#error QSB_GLV11 must be 0 or 1
+#endif
+#if QSB_GLV11 && !(QSB_BIGTBL && QSB_FOUR_HOT && QSB_DIGIT_LEAN && QSB_GLV_ZDEC)
+#error QSB_GLV11 is written for QSB_BIGTBL, QSB_FOUR_HOT, QSB_DIGIT_LEAN and QSB_GLV_GLUE bit 2
+#endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
 #define QSB_GT_TOTAL 153175181u
 #define QSB_GT_RADIX_BITS 14
@@ -127,6 +138,45 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
         idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
     }
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
+}
+#if QSB_GLV11
+/* GLV11 P18 reference (host self-check): P's five terms are segment 0 (shift 0),
+ * segment 6 (shift 18, 27 bits, 2^26 records at 153175181), segment 7 (shift 45,
+ * 28 bits, 2^27 records at 220284045), segment 4 (shift 73) and segment 5 (top,
+ * shift 100). The digit bias telescopes over [18,100) as in the six-term split. */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
+    const uint64_t mag[2],unsigned sign,int c) {
+    const unsigned shift=c==0?0u:c==1?18u:c==2?45u:c==3?73u:100u;
+    uint64_t wide;
+    if(shift<64u) {
+        wide=mag[0]>>shift;
+        if(shift) wide|=mag[1]<<(64u-shift);
+    } else wide=mag[1]>>(shift-64u);
+    uint32_t f=(uint32_t)wide,idx,neg_digit;
+    if(c==0) {
+        idx=f&((1u<<18)-1u);neg_digit=0;
+    } else if(c==4) {
+        const int32_t d=(int32_t)(2u*f)-(int32_t)QSB_GT_TOP_CENTER;
+        neg_digit=(uint32_t)d>>31;
+        const uint32_t ad=((uint32_t)d^(0u-neg_digit))+neg_digit;
+        idx=(ad-1u)>>1;
+    } else {
+        const unsigned bits=c==2?28u:27u;
+        f&=(1u<<bits)-1u;
+        neg_digit=1u-(f>>(bits-1u));
+        idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    }
+    const uint32_t off=c==0?0u:c==1?153175181u:c==2?220284045u:c==3?786432u:67895296u;
+    return (off+idx)|((neg_digit^sign)<<31);
+}
+#endif
+/* Physical segment geometry for the signed-residual decode: 0..5 are GLV12's,
+ * 6 and 7 the GLV11 P18 segments (shift 18/45, 27/28 bits). */
+__host__ __device__ __forceinline__ unsigned q11_seg_shift(int c) {
+    return c<6?q9_bigtbl_shift(c):c==6?18u:45u;
+}
+__host__ __device__ __forceinline__ unsigned q11_seg_offset(int c) {
+    return c<6?q9_bigtbl_offset(c):c==6?153175181u:220284045u;
 }
 // END QSB_BIGTBL_HOST_EXACT
 
@@ -235,9 +285,9 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code_z(
         return q9_bigtbl_offset(c)+(h^s)+((h^m32)&0x80000000u);
 #endif
     }
-    const unsigned bits=c==1?19u:c<4?18u:27u;
-    const unsigned r=q9_bigtbl_shift(c)+bits-32u,q=r>>5,rs=r&31u;
-    const uint32_t off=q9_bigtbl_offset(c)-(1u<<(bits-1u));
+    const unsigned bits=c==1?19u:c<4?18u:c==7?28u:27u;
+    const unsigned r=q11_seg_shift(c)+bits-32u,q=r>>5,rs=r&31u;
+    const uint32_t off=q11_seg_offset(c)-(1u<<(bits-1u));
 #ifdef __CUDA_ARCH__
     uint32_t code;
     asm("{\n\t.reg .u32 u,x,v;\n\t"
