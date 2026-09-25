@@ -2176,10 +2176,9 @@ __device__ __forceinline__ void qsb_negate_residue(uint64_t *r) {
  * separate Y multiply and one reduction per addition disappear: 11 per candidate (the seed
  * mmadd plus ten chain trips), 9 IMAD.WIDE each. The reduction keeps every carry, so the
  * result is congruent to the base value for every input; no truncated tail is added.
- * 0 leaves the source and PTX unchanged. Default 0: the QSB_CHAIN_PIPE chain carries the same
- * pair itself (QSB_PAIR_ORD, pinning.cu); qsb_muladd2_exact still forms its final resolve. */
+ * 0 (default) leaves the source and PTX unchanged. */
 #ifndef QSB_Y_PAIR
-#define QSB_Y_PAIR 0
+#define QSB_Y_PAIR 1
 #endif
 #if QSB_Y_PAIR != 0 && QSB_Y_PAIR != 1
 #error "QSB_Y_PAIR must be 0 or 1"
@@ -2187,7 +2186,9 @@ __device__ __forceinline__ void qsb_negate_residue(uint64_t *r) {
 #if QSB_Y_PAIR && (!QSB_NEG_Y_MAC || !QSB_YOFF || !QSB_FUSE_SQRADDSUB2 || !QSB_XY_DIRECT)
 #error "QSB_Y_PAIR requires the NEG_Y_MAC / YOFF / FUSE_SQRADDSUB2 / XY_DIRECT chain"
 #endif
+#if QSB_Y_PAIR
 #include "y_pair_mac.cuh"
+#endif
 
 //Secp256k1 Point Addition implementation
 __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, uint64_t *p2x, uint64_t *p2y)
