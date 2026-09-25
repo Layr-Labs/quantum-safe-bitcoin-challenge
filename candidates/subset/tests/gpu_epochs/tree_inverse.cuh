@@ -154,10 +154,24 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __shared__ uint64_t products[4][512];
+#if QSB_L1_LDS_LUT
+    __shared__ __align__(16) uint64_t inverses[4][256];
+#else
     __shared__ uint64_t inverses[4][256];
+#endif
     const int tid=threadIdx.x,n=blockDim.x;
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
+#if QSB_L1_LDS_LUT
+    /* L1' (QSB_L1_LDS_LUT): stage 6656 B = 416 uint4 of divstep LUT into the dead `inverses`
+     * array before the first barrier. 256 threads => 2 vector loads/stores (2nd predicated).
+     * The LUT is fully consumed by the root inverse before the down-sweep overwrites `inverses`. */
+    {
+        const uint4 *src=(const uint4*)ZI_BY_LUT_G; uint4 *dst=(uint4*)&inverses[0][0];
+        dst[tid]=__ldg(src+tid);
+        if(tid<416-256)dst[256+tid]=__ldg(src+256+tid);
+    }
+#endif
     __syncthreads();
     // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
     // formed by lanes < count/2 and read by lanes < count/4.
@@ -184,7 +198,19 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
         a[4]=b[4]=0;__syncwarp(0x0000000f);QSB_TREE_MUL(root,a,b);qsb_field_normalize(root);
+#if QSB_L1_LDS_LUT
+        root[4]=0;zi_inverse_quad(root,tid,(const uint64_t*)&inverses[0][0]);
+#else
         root[4]=0;zi_inverse_quad(root,tid);
+#endif
+#if QSB_L1_LDS_LUT && QSB_L1_ROOT_SYNCW
+        /* L1'-fix (default ON): the divstep reads the LUT from inverses[] on lanes 0-1; without a
+         * warp barrier the following lanes 0-1 writes to inverses[k][offset-n+tid] (indices that
+         * alias staged LUT cells) form a warp-level WAR that compute-sanitizer racecheck flags
+         * (32 WAR warnings). __syncwarp orders all root lanes' LUT reads before those writes and
+         * clears the hazard (verified 0-spill + 0 racecheck hazards). Bit-neutral. */
+        __syncwarp(0x0000000fu);
+#endif
         if(tid<2){
             uint64_t child[5];
             #pragma unroll
