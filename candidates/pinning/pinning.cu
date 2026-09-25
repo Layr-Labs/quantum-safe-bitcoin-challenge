@@ -350,23 +350,51 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 /* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
  * FOUR_HOT selects four cached banks and two streaming banks.
  * One 32-bit code still holds the absolute record index and Y sign. */
-#define GT_CHUNKS 6
+#define GT_CHUNKS 6            /* Q terms (and the physical GLV12 segments 0..5) */
+#if QSB_GLV11
+/* GLV11 P18: Q keeps six terms, P uses five (segments 0,6,7,4,5); segments 6
+ * and 7 (2^26 + 2^27 cold records) follow the GLV12 table. 11 gathers and 10
+ * point additions per candidate instead of 12 and 11, for two more cold
+ * records (6 instead of 4). Table: 354,501,773 records = 21,637 MiB. */
+#define GT_P_CHUNKS 5
+#define GT_SEGS 8
+#define GT_GLV_TERMS 11
+#define GT_TOTAL_ENTRIES 354501773u
+#else
+#define GT_P_CHUNKS 6
+#define GT_SEGS 6
 #define GT_GLV_TERMS 12
 #define GT_TOTAL_ENTRIES QSB_GT_TOTAL
+#endif
 #define GT_LO (1u << QSB_GT_RADIX_BITS)
 #define GT_HI (1u << QSB_GT_RADIX_BITS)
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?67108864u:134217728u;
+#endif
     return q9_bigtbl_entries(c);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?153175181u:220284045u;
+#endif
     return q9_bigtbl_offset(c);
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?18:45;
+#endif
     return (int)q9_bigtbl_shift(c);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
-              "GLV12 geometry/table-byte mismatch");
+              (QSB_GLV11?22688113472ULL:QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              "GLV12/GLV11 geometry/table-byte mismatch");
+#if QSB_GLV11
+static_assert(QSB_GT_TOTAL+67108864u+134217728u==GT_TOTAL_ENTRIES,
+              "segments 6 and 7 must follow the GLV12 table");
+static_assert(((2u*134217728u-1u)>>QSB_GT_RADIX_BITS) < GT_HI,
+              "H ladder must cover the largest odd multiplier of segment 7");
+#endif
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
@@ -378,6 +406,8 @@ static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bi
  * architecture: public GLV40 commit 4b77964f (Pieter Wuille/secp256k1 split).
  */
 #define GT_CHUNKS 7
+#define GT_P_CHUNKS 7
+#define GT_SEGS 7
 #define GT_GLV_TERMS 14
 #define GT_TOTAL_ENTRIES 1215139u
 #define GT_LO 256
@@ -720,10 +750,14 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
 #endif
                                                      ) {
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++) {
+    for(int c=0;c<(SIDE?GT_CHUNKS:GT_P_CHUNKS);c++) {
 #if QSB_BIGTBL
         const unsigned slot=SIDE?c:GT_CHUNKS+c;
+#if QSB_GLV11
+        const uint32_t code=SIDE?q9_bigtbl_code(mag,sign,c):q11_bigtbl_code(mag,sign,c);
+#else
         const uint32_t code=q9_bigtbl_code(mag,sign,c);
+#endif
 #if QSB_GLV_SEED_REG
         if(SIDE==1 && c==0)*seed0=code;
         else if(SIDE==1 && c==1)*seed1=code;
@@ -2645,7 +2679,7 @@ __global__ void kernel_build_gtable(
     if (t >= GT_TOTAL_ENTRIES) return;
     int ch=-1;
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++)
+    for(int c=0;c<GT_SEGS;c++)
         if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
     if(ch<0) return;
     int d=(int)(t-gt_offset(ch));
@@ -2780,9 +2814,9 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
-    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
-    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
-    for(int ch=0;ch<GT_CHUNKS;ch++) {
+    memset(hL,0,(size_t)GT_SEGS*GT_LO*8*sizeof(uint64_t));
+    memset(hH,0,(size_t)GT_SEGS*GT_HI*8*sizeof(uint64_t));
+    for(int ch=0;ch<GT_SEGS;ch++) {
         if(ch==0) {
             /* base=A, L[lo]=(K+lo)A, H[hi]=hi*256A. */
             EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
@@ -2865,13 +2899,13 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
-        if (t < GT_CHUNKS * 4) {
+        if (t < GT_SEGS * 4) {
             ch = t / 4;
             const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
             i = corner[t % 4];
         } else {
             seed = seed * 1664525u + 1013904223u;
-            ch = (int)(seed >> 28) % GT_CHUNKS;
+            ch = (int)(seed >> 28) % GT_SEGS;
 #if QSB_BIGTBL
             /* Modulo samples the non-power-of-two top segment as well. */
             seed = seed * 1664525u + 1013904223u;
@@ -2924,7 +2958,7 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
-    for(int ch=0;ch<GT_CHUNKS;ch++) {
+    for(int ch=0;ch<GT_SEGS;ch++) {
         gt_table_scalar(k,ch,0); BN_mod_mul(k,k,nri,order,ctx);
         EC_POINT_mul(grp,pt,k,NULL,NULL,ctx);
         if(ch==0) BN_copy(stepk,nri);
@@ -3208,8 +3242,8 @@ int main(int argc, char **argv) {
          * does not match falls back to the original host builder -- a wrong
          * table yields zero verifiable hits, so it must never reach the run. */
         struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
-        size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
-        size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
+        size_t lb = (size_t)GT_SEGS*GT_LO*8*sizeof(uint64_t);
+        size_t hb = (size_t)GT_SEGS*GT_HI*8*sizeof(uint64_t);
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
         gt_build_ladders(hL,hH,pp.neg_r_inv,iso.alpha,iso.beta);
@@ -3240,7 +3274,7 @@ int main(int argc, char **argv) {
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
 #if QSB_GT_SPARSE_CHECK
-            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
+            gt_ok = gt_spot_check(d_gt,GT_SEGS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
 #else
 #if QSB_BIGTBL
@@ -3250,7 +3284,7 @@ int main(int argc, char **argv) {
 #else
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
 #endif
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
+            gt_ok = gt_spot_check(chk_table,GT_SEGS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
 #endif
         }
@@ -3457,7 +3491,14 @@ int main(int argc, char **argv) {
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
 
+#if QSB_GLV11
+    /* 32 KiB x 1536 threads x 128 SMs would reserve 6 GiB that the 21.1 GiB
+     * GLV11 table needs; every kernel's frame is ~120 B, so keep the default
+     * 1 KiB (the driver grows it at launch if a kernel ever needs more). */
+    cudaDeviceSetLimit(cudaLimitStackSize, 1024);
+#else
     cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+#endif
 
     /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
      * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
@@ -3590,6 +3631,28 @@ int main(int argc, char **argv) {
 #endif
 
     int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
+#if QSB_GLV11
+    /* The GLV11 table leaves ~2 GiB on a 24 GB card; two 16M-candidate slots
+     * need 2,072 MiB. Size the batch (a multiple of 2^20, so every batch start
+     * stays 256-aligned) to the memory actually left, keeping a margin. */
+    {
+        size_t fr=0,tot=0;
+        cudaMemGetInfo(&fr,&tot);
+        const size_t margin=(size_t)160<<20;
+        const double per_cand=(double)QSB_STATE_PLANES*sizeof(ulonglong2)
+            +8.0*sizeof(uint64_t)/QSB_TREE_N
+            +4.0*sizeof(uint64_t)*(1+QSB_CHECKPOINT_STRIDE)/(256.0*QSB_TREE_N);
+        size_t fit=fr>margin?(size_t)((double)(fr-margin)/(QSB_SLOTS*per_cand)):0;
+        fit&=~(size_t)((1u<<20)-1u);
+        if(fit<(size_t)BATCH) BATCH=(int)fit;
+        if(BATCH<(1<<22)) {
+            fprintf(stderr,"GLV11: only %.0f MiB free after the table\n",(double)fr/1048576.0);
+            return 1;
+        }
+        printf("  GLV11 batch: %d candidates/slot (%.0f MiB free before pipeline)\n",
+               BATCH,(double)fr/1048576.0);
+    }
+#endif
     int BLKSZ = 256;
     (void)BLKSZ;
     int GRDSZ = (BATCH+QSB_TREE_N-1)/QSB_TREE_N;
