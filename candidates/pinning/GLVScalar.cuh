@@ -16,13 +16,34 @@
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
+/* QSB_GLV11=1: P (the phi component) uses five terms instead of six -- segment 0,
+ * two appended streaming segments 6 (shift 18, 27 bits, 2^26 records) and 7
+ * (shift 45, 28 bits, 2^27 records), then segments 4 and 5 -- so 11 gathers and 10
+ * additions per candidate instead of 12 and 11. Q keeps its six GLV12 terms.
+ * Layout after i34-9 14675ab0 ("P18"). 0 restores the GLV12 table and chain. */
+#ifndef QSB_GLV11
+#define QSB_GLV11 0
+#endif
+#if QSB_GLV11 != 0 && QSB_GLV11 != 1
+#error QSB_GLV11 must be 0 or 1
+#endif
+#if QSB_GLV11 && !(QSB_BIGTBL && QSB_FOUR_HOT)
+#error QSB_GLV11 extends the four-hot GLV12 table (QSB_BIGTBL=1, QSB_FOUR_HOT=1)
+#endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
+#if QSB_GLV11
+#define QSB_GT_TOTAL 354501773u
+#define QSB_GT_SEGMENTS 8
+#else
 #define QSB_GT_TOTAL 153175181u
+#define QSB_GT_SEGMENTS 6
+#endif
 #define QSB_GT_RADIX_BITS 14
 #define QSB_GT_TOP_CENTER 170559769u
 #define QSB_GT_TOP_SHIFT 100u
 #else
 #define QSB_GT_TOTAL 22893641u
+#define QSB_GT_SEGMENTS 6
 #define QSB_GT_RADIX_BITS 12
 #define QSB_GT_TOP_CENTER 10659985u
 #define QSB_GT_TOP_SHIFT 104u
@@ -41,6 +62,9 @@
  * Both exactly reconstruct the same bounded signed GLV component.
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?67108864u:134217728u;
+#endif
 #if QSB_FOUR_HOT
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
 #else
@@ -48,6 +72,9 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?153175181u:220284045u;
+#endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
@@ -57,6 +84,9 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #endif
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
+#if QSB_GLV11
+    if(c>=6) return c==6?18u:45u;
+#endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
 #else
@@ -91,6 +121,24 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     }
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
+#if QSB_GLV11
+/* P's five terms t=0..4 read segments 0,6,7,4,5. Shifts 0,18,45,73,100 keep the
+ * signed chain 18->45->73->100 contiguous, so the digit biases telescope to the
+ * same segment-0 bias K as GLV12 and the five digits sum exactly to the
+ * magnitude. Segments 6 and 7 are plain signed fields of 27 and 28 bits. */
+__host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
+    const uint64_t mag[2],unsigned sign,int t) {
+    if(t==0) return q9_bigtbl_code(mag,sign,0);
+    if(t>=3) return q9_bigtbl_code(mag,sign,t+1);
+    const int c=t+5;
+    const unsigned shift=q9_bigtbl_shift(c),bits=t==1?27u:28u;
+    const uint64_t wide=(mag[0]>>shift)|(mag[1]<<(64u-shift));
+    const uint32_t f=(uint32_t)wide&((1u<<bits)-1u);
+    const uint32_t neg_digit=1u-(f>>(bits-1u));
+    const uint32_t idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
+}
+#endif
 // END QSB_BIGTBL_HOST_EXACT
 #endif
 
