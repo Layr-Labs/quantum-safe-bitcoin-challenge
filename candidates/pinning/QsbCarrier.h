@@ -12,11 +12,10 @@
  * `ld.global.nc.L2::64B`, so the whole record (both 32 B sectors) is fetched as one
  * DRAM access instead of two independent sector misses.
  *
- * If the GPU is not sm_89, the image is missing, a required kernel or the zeros
- * fingerprint fails to resolve, or the image was built for another QSB_ZEROS_N,
- * the program runs the unchanged compute_52 kernels. Later symbol-upload and
- * launch errors are fatal rather than silently losing hits. The exact OpenSSL
- * host gate checks every published hit in both modes.
+ * Every step is optional. If the GPU is not sm_89, the image is missing, any kernel
+ * or symbol fails to resolve, or the image was built for a different QSB_ZEROS_N,
+ * the program runs the unchanged compute_52 kernels. The exact OpenSSL host gate
+ * still checks every published hit in both modes.
  */
 #include <cuda_runtime.h>
 #include <stdio.h>
@@ -132,15 +131,8 @@ template <typename... P, typename... A>
 static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
                                       A &&...a) {
     static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
-    cudaError_t e = qsb_carrier_launch_impl<P...>(kid, g, b, st,
-                                                std::index_sequence_for<P...>{},
-                                                std::forward<A>(a)...);
-    if (e != cudaSuccess) {
-        fprintf(stderr, "Native carrier kernel %d launch failed: %s\n",
-                kid, cudaGetErrorString(e));
-        exit(2);
-    }
-    return e;
+    return qsb_carrier_launch_impl<P...>(kid, g, b, st, std::index_sequence_for<P...>{},
+                                         std::forward<A>(a)...);
 }
 
 /* cudaMemcpyToSymbol that targets the carrier image's copy of the symbol when it is on. */
