@@ -1,6 +1,3 @@
-#ifndef QSB_RESUB_0920120629
-#define QSB_RESUB_0920120629 1 /* inert resubmission tag: identical build, fresh ranked draw */
-#endif
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -125,8 +122,18 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_TREE_N != 256 && QSB_TREE_N != 128 && QSB_TREE_N != 64
 #error "QSB_TREE_N must be 256, 128 or 64"
 #endif
+/* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
+ * Its 21.1 GiB table leaves room for two 8M-candidate slots (2 x 512 MiB of
+ * pipeline state) on a 24 GiB card, not two 16M slots. */
+#ifndef QSB_GLV11
+#define QSB_GLV11 1
+#endif
 #ifndef QSB_BATCH
+#if QSB_GLV11
+#define QSB_BATCH 8388608    /* candidates per pipeline launch */
+#else
 #define QSB_BATCH 16777216   /* candidates per pipeline launch */
+#endif
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -190,7 +197,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
 #endif
 #ifndef QSB_CHAIN_PIPE
-#define QSB_CHAIN_PIPE 0      /* 1: overlap next GLV table gather with current XYZZ add using dead point buffers */
+#define QSB_CHAIN_PIPE 1      /* 1: overlap next GLV table gather with current XYZZ add using dead point buffers */
 #endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
@@ -237,6 +244,24 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #ifndef QSB_SLOTS
 #define QSB_SLOTS 2           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it */
 #endif
+/* Per-kernel shared-memory carveout hints, in percent of the SM's maximum shared
+ * memory (sm_89: 100 KiB of the 128 KiB L1/shared array); -1 leaves the driver's
+ * choice. Host scheduling only: the hint selects the L1/shared split an SM runs the
+ * kernel under and never changes what a thread computes. Stage 0 needs 4 x 13 KiB
+ * for its four resident 128-thread blocks, so 64 (a 64 KiB carveout) keeps full
+ * occupancy and leaves 64 KiB of L1 for the table-record loads. */
+#ifndef QSB_CARVE_S0
+#define QSB_CARVE_S0 64
+#endif
+#ifndef QSB_CARVE_S2
+#define QSB_CARVE_S2 -1
+#endif
+#ifndef QSB_CARVE_ROOT
+#define QSB_CARVE_ROOT -1
+#endif
+static_assert(QSB_CARVE_S0 >= -1 && QSB_CARVE_S0 <= 100 &&
+              QSB_CARVE_S2 >= -1 && QSB_CARVE_S2 <= 100 &&
+              QSB_CARVE_ROOT >= -1 && QSB_CARVE_ROOT <= 100, "carveout is a percent or -1");
 #ifndef QSB_SKIP_UNUSED_MIDSTATE
 #define QSB_SKIP_UNUSED_MIDSTATE 1 /* scored TAIL_PRE path already carries the midstate in qsb_tail_pre */
 #endif
@@ -350,8 +375,9 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 /* GLV12: six terms per component; 48 MiB of dense segments at offset zero.
  * FOUR_HOT selects four cached banks and two streaming banks.
  * One 32-bit code still holds the absolute record index and Y sign. */
-#define GT_CHUNKS 6
-#define GT_GLV_TERMS 12
+#define GT_CHUNKS 6                        /* Q terms; P's terms start at slot GT_CHUNKS */
+#define GT_SEGMENTS QSB_GT_SEGMENTS        /* physical table segments */
+#define GT_GLV_TERMS (2*GT_CHUNKS-QSB_GLV11)
 #define GT_TOTAL_ENTRIES QSB_GT_TOTAL
 #define GT_LO (1u << QSB_GT_RADIX_BITS)
 #define GT_HI (1u << QSB_GT_RADIX_BITS)
@@ -365,9 +391,17 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              (QSB_GLV11?22688113472ULL:QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
               "GLV12 geometry/table-byte mismatch");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
+#if QSB_GLV11
+static_assert(786432u+67108864u+85279885u == 153175181u &&
+              153175181u+67108864u == 220284045u &&
+              220284045u+134217728u == GT_TOTAL_ENTRIES,
+              "segments 6 and 7 must follow segment 5 back to back");
+static_assert(((2u*134217728u-1u)>>QSB_GT_RADIX_BITS) < GT_HI,
+              "H ladder must cover segment 7's largest odd multiplier");
+#endif
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
  * physical segments use widths [18,19,18,18,18,18,19] at shifts
@@ -378,6 +412,7 @@ static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bi
  * architecture: public GLV40 commit 4b77964f (Pieter Wuille/secp256k1 split).
  */
 #define GT_CHUNKS 7
+#define GT_SEGMENTS GT_CHUNKS
 #define GT_GLV_TERMS 14
 #define GT_TOTAL_ENTRIES 1215139u
 #define GT_LO 256
@@ -720,10 +755,14 @@ __device__ __forceinline__ void qsb_decode_glv_side(const uint64_t mag[2],unsign
 #endif
                                                      ) {
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++) {
+    for(int c=0;c<(SIDE?GT_CHUNKS:GT_GLV_TERMS-GT_CHUNKS);c++) {
 #if QSB_BIGTBL
         const unsigned slot=SIDE?c:GT_CHUNKS+c;
+#if QSB_GLV11
+        const uint32_t code=SIDE?q9_bigtbl_code(mag,sign,c):q11_bigtbl_code(mag,sign,c);
+#else
         const uint32_t code=q9_bigtbl_code(mag,sign,c);
+#endif
 #if QSB_GLV_SEED_REG
         if(SIDE==1 && c==0)*seed0=code;
         else if(SIDE==1 && c==1)*seed1=code;
@@ -818,7 +857,16 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
     const uint64_t m32=(uint32_t)((int32_t)code>>31);
     const uint64_t m=(m32<<32)|m32;
     const ulonglong2 *ty=(const ulonglong2 *)(table+(size_t)idx*64+32);
+#if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
+    /* Native carrier: the Y half is gathered first, so it carries the 64 B L2 fetch
+     * that brings the record's X sector along for qsb_load_glv_x_code. */
+    ulonglong2 y0;
+    asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
+        : "=l"(y0.x), "=l"(y0.y) : "l"(ty));
+    ulonglong2 y1=__ldg(ty+1);
+#else
     ulonglong2 y0=__ldg(ty),y1=__ldg(ty+1);
+#endif
     y[0]=y0.x^m; y[1]=y0.y^m; y[2]=y1.x^m; y[3]=y1.y^m;
 }
 __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
@@ -2498,6 +2546,28 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #define QSB_LAUNCH_ST 0
 #endif
 
+/* Apply the QSB_CARVE_* hints to the image that will actually run each kernel: the
+ * native carrier copy when it resolved, else the compute_52 kernel (only then, so a
+ * carrier run never forces the static module to load). A refused hint is reported
+ * and cleared; it cannot affect results, only the SM's L1/shared split. */
+static void qsb_apply_carveouts() {
+    struct { int kid; const void *stat; int pct; const char *name; } hints[] = {
+        {QK_S0,  (const void *)kernel_pinning_pipeline<true,0>, QSB_CARVE_S0,   "prepare"},
+        {QK_S2,  (const void *)kernel_pinning_pipeline<true,2>, QSB_CARVE_S2,   "finish"},
+        {QK_RGP, (const void *)qsb_root_group_prepare,          QSB_CARVE_ROOT, "root prepare"},
+        {QK_RGF, (const void *)qsb_root_group_finish,           QSB_CARVE_ROOT, "root finish"},
+    };
+    for (const auto &h : hints) {
+        if (h.pct < 0) continue;
+        const void *fn = qsb_carrier_has(h.kid) ? (const void *)g_qsb_carrier.k[h.kid] : h.stat;
+        cudaError_t e = cudaFuncSetAttribute(fn, cudaFuncAttributePreferredSharedMemoryCarveout, h.pct);
+        printf("  Carveout hint: %s %d%% %s\n", h.name, h.pct,
+               e == cudaSuccess ? "ok" : cudaGetErrorString(e));
+        if (e != cudaSuccess) cudaGetLastError();
+    }
+    fflush(stdout);
+}
+
 template<bool FAST_TAIL>
 static void launch_pinning_pipeline(
     const uint32_t *d_midstate, const uint8_t *d_suffix,
@@ -2637,15 +2707,15 @@ static void launch_pinning_pipeline(
  * ============================================================ */
 
 __global__ void kernel_build_gtable(
-    const uint64_t * __restrict__ d_L,   /* [GT_CHUNKS][GT_LO][8] : x[4] then y[4] */
-    const uint64_t * __restrict__ d_H,   /* [GT_CHUNKS][GT_HI][8] */
+    const uint64_t * __restrict__ d_L,   /* [GT_SEGMENTS][GT_LO][8] : x[4] then y[4] */
+    const uint64_t * __restrict__ d_H,   /* [GT_SEGMENTS][GT_HI][8] */
     uint8_t * __restrict__ gTable)
 {
     uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= GT_TOTAL_ENTRIES) return;
     int ch=-1;
     #pragma unroll
-    for(int c=0;c<GT_CHUNKS;c++)
+    for(int c=0;c<GT_SEGMENTS;c++)
         if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
     if(ch<0) return;
     int d=(int)(t-gt_offset(ch));
@@ -2780,9 +2850,9 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 #else
     BN_set_word(bias,333126); BN_lshift(bias,bias,108); BN_sub_word(bias,1u<<17);
 #endif
-    memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
-    memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
-    for(int ch=0;ch<GT_CHUNKS;ch++) {
+    memset(hL,0,(size_t)GT_SEGMENTS*GT_LO*8*sizeof(uint64_t));
+    memset(hH,0,(size_t)GT_SEGMENTS*GT_HI*8*sizeof(uint64_t));
+    for(int ch=0;ch<GT_SEGMENTS;ch++) {
         if(ch==0) {
             /* base=A, L[lo]=(K+lo)A, H[hi]=hi*256A. */
             EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
@@ -2865,13 +2935,13 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
     for (int t = 0; t < samples && ok; t++) {
         /* always include the corners of each chunk, then pseudo-random entries */
         int ch, i;
-        if (t < GT_CHUNKS * 4) {
+        if (t < GT_SEGMENTS * 4) {
             ch = t / 4;
             const int corner[4] = {0, 1, 2, (int)gt_entries(ch) - 1};
             i = corner[t % 4];
         } else {
             seed = seed * 1664525u + 1013904223u;
-            ch = (int)(seed >> 28) % GT_CHUNKS;
+            ch = (int)(seed >> 28) % GT_SEGMENTS;
 #if QSB_BIGTBL
             /* Modulo samples the non-power-of-two top segment as well. */
             seed = seed * 1664525u + 1013904223u;
@@ -2924,7 +2994,7 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
-    for(int ch=0;ch<GT_CHUNKS;ch++) {
+    for(int ch=0;ch<GT_SEGMENTS;ch++) {
         gt_table_scalar(k,ch,0); BN_mod_mul(k,k,nri,order,ctx);
         EC_POINT_mul(grp,pt,k,NULL,NULL,ctx);
         if(ch==0) BN_copy(stepk,nri);
@@ -3176,6 +3246,7 @@ int main(int argc, char **argv) {
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
     qsb_carrier_init(prop);
+    qsb_apply_carveouts();
 
     pinning2_params_t pp;
     if (load_pinning2(argv[1], &pp) < 0) return 1;
@@ -3208,8 +3279,8 @@ int main(int argc, char **argv) {
          * does not match falls back to the original host builder -- a wrong
          * table yields zero verifiable hits, so it must never reach the run. */
         struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
-        size_t lb = (size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t);
-        size_t hb = (size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t);
+        size_t lb = (size_t)GT_SEGMENTS*GT_LO*8*sizeof(uint64_t);
+        size_t hb = (size_t)GT_SEGMENTS*GT_HI*8*sizeof(uint64_t);
         uint64_t *hL=(uint64_t*)malloc(lb), *hH=(uint64_t*)malloc(hb);
         if(!hL||!hH){ fprintf(stderr,"OOM: gtable ladders\n"); return 1; }
         gt_build_ladders(hL,hH,pp.neg_r_inv,iso.alpha,iso.beta);
@@ -3240,7 +3311,7 @@ int main(int argc, char **argv) {
         int gt_ok = (gerr==cudaSuccess);
         if(gt_ok){
 #if QSB_GT_SPARSE_CHECK
-            gt_ok = gt_spot_check(d_gt,GT_CHUNKS*4+192,pp.neg_r_inv,
+            gt_ok = gt_spot_check(d_gt,GT_SEGMENTS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
 #else
 #if QSB_BIGTBL
@@ -3250,7 +3321,7 @@ int main(int argc, char **argv) {
 #else
             cudaMemcpy(chk_table,d_gt,gt_sz,cudaMemcpyDeviceToHost);
 #endif
-            gt_ok = gt_spot_check(chk_table,GT_CHUNKS*4+192,pp.neg_r_inv,
+            gt_ok = gt_spot_check(chk_table,GT_SEGMENTS*4+192,pp.neg_r_inv,
                                   iso.alpha,iso.beta);
 #endif
         }
@@ -3457,7 +3528,25 @@ int main(int argc, char **argv) {
                   "QSB_SHA_UNIF needs 128-thread stage-0 blocks and a 256-aligned batch");
 #endif
 
-    cudaDeviceSetLimit(cudaLimitStackSize, 32768);
+    /* The stack limit is reserved for every resident thread (32 KiB x 1536 x 128 SMs =
+     * 6 GiB on AD102). Next to the 21.1 GiB GLV11 table that reservation cannot be
+     * met, and an ignored failure surfaced as "out of memory" at the first
+     * cudaGetLastError of the search. The kernels have no recursion or indirect
+     * calls, so their static frames are sized by the driver at launch; a refused
+     * limit keeps the driver default and is cleared here. QSB_STACK_LIMIT=0 skips it. */
+#ifndef QSB_STACK_LIMIT
+#define QSB_STACK_LIMIT (QSB_GLV11 ? 0 : 32768)
+#endif
+#if QSB_STACK_LIMIT > 0
+    {
+        cudaError_t se = cudaDeviceSetLimit(cudaLimitStackSize, QSB_STACK_LIMIT);
+        if (se != cudaSuccess) {
+            printf("  Stack limit: %d B refused (%s), driver default kept\n",
+                   QSB_STACK_LIMIT, cudaGetErrorString(se));
+            cudaGetLastError();
+        }
+    }
+#endif
 
     /* Pin the fixed-base table in L2. The 64 MiB table is sized to be
      * L2-resident on AD102's 72 MB L2, but the pipeline streams ~2.1 GiB of
