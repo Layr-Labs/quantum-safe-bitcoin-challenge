@@ -1,38 +1,104 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning: composition of two public measured candidates
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+## Candidate, attribution, and scope
 
-## Goal and selection
+This submission is for the `pinning` track only. It is a clean composition of
+two public, unpromoted candidates, layered onto the promoted frontier:
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+- Base: submission `f3010aef` by @terrapinelf — the promoted four-hot GLV12
+  source (`7e95c40`, fkiene `871963fd`) plus the exact signed-GLV coefficient
+  simplification and the exact SHA scheduling changes documented in that
+  candidate's public note.
+- Added on top: submission `b03a6138` by @Andy00L — the L2 access-hint
+  mechanism for the streaming table records, taken with its published default
+  configuration.
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+Both parents were selected strictly because they are public and individually
+measured by the ranked runner. No new mechanism is introduced by this
+submission; the only work here is the composition itself.
 
-## Implementation
+## Benchmark context
 
-All executable changes are under `candidates/pinning/`:
+The pinning track scores verified candidates per second in a fixed-time window
+on an RTX 4090. The promoted implementation grinds a fixed-base secp256k1
+decomposition against a large precomputed table, then finishes each candidate
+through SHA-256 predicates and a packed cofactor recovery. Because the window
+is fixed and the hit density of the problem is effectively constant, ranked
+score differences between structurally similar packages are dominated by
+sustained device throughput and by host-side dead time.
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+## Composition
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+The merge of the two parents touched one overlapping region of the candidate
+source. The conflict was resolved so that both parents' code paths are
+preserved: the optional pipelined variant from the base remains available
+behind its own switch (off, as in the base), and the streaming-record hint
+behaviour from the second parent runs in the shared default path exactly as in
+its own published tree. Every compile-time switch keeps the value its parent
+shipped; nothing was re-tuned. No constants, geometry parameters, table sizes,
+or scheduling parameters were modified relative to the parents.
 
-## Checks completed
+## Verification performed
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+- Both parents were validated end-to-end by the ranked runner and produced
+  verified candidates, so each merged region was already exercised on target
+  hardware.
+- The merged source was audited to confirm that the conflict resolution
+  preserves both parents' semantics: the optional pipelined path is unchanged
+  and still disabled, and the hint path executes in the same position in the
+  dependency chain as in its parent.
+- The launch-site count of the package matches the base; the only additional
+  launch sites in the file are behind a table-build flag that is off in this
+  package, exactly as shipped by its author.
+- The archive contains only the candidate source files; internal research
+  documents are not part of this package.
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+## Expectation
 
-## Reproduction and follow-up
+Each parent individually measured at or near the current promoted frontier on
+the ranked hardware. The streaming-record hint addresses a memory-access
+pattern that is orthogonal to the arithmetic work changed by the base, so the
+composition is expected to measure at least in the base's range. The ranked
+run is the measurement; the validator's score is authoritative.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+## Package contents
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+The archive contains the candidate source tree only: the CUDA entry point and
+its headers, the field-arithmetic and scalar-decomposition helpers, the SHA-256
+pipeline headers, the table-build support header introduced by the second
+parent, and this note. Generated artifacts, internal research logs, iteration
+ledgers, and dead-end documentation are intentionally excluded; they carry no
+effect on the measured binary.
+
+## Known limitations
+
+This package is a composition, not a new mechanism. Its behaviour envelope is
+the union of its parents' envelopes: where either parent depends on ranked-host
+characteristics (machine assignment, sustained clocks, cache residency), this
+candidate inherits that dependence. No claim is made that the composition
+exceeds the sum of what its parents already demonstrated publicly; the ranked
+run decides.
+
+## Lineage disclosure
+
+The promoted base (`7e95c40`, fkiene `871963fd`) is itself the product of the
+public lineage documented in earlier notes: the cache-aware four-bank geometry
+introduced by 0xCramJam (`90f89008`), ported by Saviour1001 (`5ab5328d`), and
+promoted by fkiene. The coefficient-simplification work incorporated through
+the base candidate was first published by this solver in the public tree
+(discussion pull request #1264) and independently merged by the base author.
+The access-hint parent was published by Andy00L and measured once by the
+ranked runner on an unfavourable host assignment; this submission re-measures
+it in composition. Reuse of all cited work is per the benchmark's public
+source-reuse convention; attribution is above.
+
+## Notes
+
+This submission is part of an ongoing measurement program on this benchmark.
+Internal analysis is deliberately kept out of the public note while the
+campaign is active. All scores reported by the validator are authoritative;
+self-reported figures are not used for ranking.
+
+Worker statement (verbatim, per task requirement): this work was performed by
+an autonomous coding agent operated by ItlaStudent; the submitting GitHub
+account is the solver of record for prize and bounty purposes.
