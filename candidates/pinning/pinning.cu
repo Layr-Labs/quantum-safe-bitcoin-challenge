@@ -790,6 +790,11 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     unsigned q_nonzero=(mag[1][0]|mag[1][1])!=0;
     return q_nonzero|(p_nonzero<<1);
 }
+/* Opaque 31-bit record mask: with the AND visible, NVVM folds it into a 64-bit shifted mask
+ * (SHF+2xLOP3+IADD3+IADD3.X); hidden, the address is a plain LEA/LEA.HI.X. Same value. */
+__device__ __forceinline__ uint32_t qsb_rec_idx(uint32_t code) {
+    uint32_t i; asm("and.b32 %0, %1, 0x7fffffff;" : "=r"(i) : "r"(code)); return i;
+}
 __device__ __forceinline__ uint32_t qsb_glv_code(unsigned term) {
     volatile uint32_t *codes=(volatile uint32_t*)qsb_digit_arena();
     return codes[(size_t)term*QSB_TREE_N+threadIdx.x];
@@ -798,7 +803,7 @@ __device__ __forceinline__ void qsb_load_glv_code(const uint8_t *table,uint32_t 
                                                   uint64_t *x,uint64_t *y) {
     uint32_t m32=(uint32_t)((int32_t)code>>31);
 #if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,code&0x7fffffffu,
+    gt_load_signed_flat_m(table,0u,qsb_rec_idx(code),
 #else
     gt_load_signed_flat_m(table,0u,code&0x1fffffu,
 #endif
@@ -878,14 +883,14 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     }
     uint32_t m0=(uint32_t)((int32_t)seed0>>31);
 #if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,seed0&0x7fffffffu,
+    gt_load_signed_flat_m(table,0u,qsb_rec_idx(seed0),
 #else
     gt_load_signed_flat_m(table,0u,seed0&0x1fffffu,
 #endif
                          ((uint64_t)m0<<32)|m0,x0,y0);
     uint32_t m1=(uint32_t)((int32_t)seed1>>31);
 #if QSB_BIGTBL
-    gt_load_signed_flat_m(table,0u,seed1&0x7fffffffu,
+    gt_load_signed_flat_m(table,0u,qsb_rec_idx(seed1),
 #else
     gt_load_signed_flat_m(table,0u,seed1&0x1fffffu,
 #endif
@@ -894,8 +899,16 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     qsb_load_glv(table,first,x0,y0);
     qsb_load_glv(table,first+1,x1,y1);
 #endif
+#if QSB_LAZY_Y
+    uint64_t Ry[4];   /* Y holds Qy: deferred ordinate = Qy*Ry until the end */
+    _PointAddXYZZ_mm_LY(X,Y,Ry,U,V,x0,y0,x1,y1);
+#else
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
+#endif
 #if QSB_CHAIN_PIPE
+#if QSB_LAZY_Y
+#error "QSB_CHAIN_PIPE is not combined with QSB_LAZY_Y"
+#endif
     if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
     #pragma unroll 1
     for(int term=first+2;term<last;term++) {
@@ -929,7 +942,11 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             _ModMult(X,X,(uint64_t*)beta);
         }
         qsb_load_glv(table,term,x1,y1);
+#if QSB_LAZY_Y
+        _PointAddXYZZ_LY(X,Y,Ry,U,V,x1,y1,y0);
+#else
         _PointAddXYZZT<true>(X,Y,U,V,x1,y1,y0);
+#endif
         Load256(y0,y1);
     }
 #endif
@@ -938,7 +955,11 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #endif
 #if QSB_NEG_Y_MAC
     // Keep -Yactual across checkpoint; packed finish swaps the slopes.
+#if QSB_LAZY_Y
+    qsb_mul2add(Y,Y,Ry,y0,V);  /* y0*V + Qy*Ry, one reduction */
+#else
     qsb_muladd_seed(Y,y0,V,Y);
+#endif
 #else
     _ModMult(x1,y0,V);_ModSub256(Y,Y,x1);
 #endif
@@ -3141,6 +3162,12 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
     return -1;
 }
 #endif
+#ifndef QSB_CPU_GRIND
+#define QSB_CPU_GRIND 1
+#endif
+#if QSB_CPU_GRIND && QSB_HOST_GATE
+#include "CpuGrind.h"
+#endif
 
 
 int main(int argc, char **argv) {
@@ -3171,6 +3198,23 @@ int main(int argc, char **argv) {
 
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+#ifndef QSB_L2_FETCH_GRAN
+#define QSB_L2_FETCH_GRAN 64
+#endif
+#if QSB_L2_FETCH_GRAN > 0
+    {   /* Table records are 64 B and both 32 B sectors are always consumed. The RTX 4090
+         * driver reports a 64 B default but behaves like 32 B: at stage-0 occupancy a
+         * random 64 B record costs two DRAM accesses (4.4 G records/s on a probe) unless
+         * 64 B is requested explicitly (7.8 G records/s). This also covers every load the
+         * native image does not hint (compute_52 fallback, planes, roots). Pure hint. */
+        size_t g0 = 0, g1 = 0;
+        cudaDeviceGetLimit(&g0, cudaLimitMaxL2FetchGranularity);
+        cudaDeviceSetLimit(cudaLimitMaxL2FetchGranularity, (size_t)QSB_L2_FETCH_GRAN);
+        cudaDeviceGetLimit(&g1, cudaLimitMaxL2FetchGranularity);
+        cudaGetLastError();
+        printf("  L2 fetch granularity: %zu -> %zu B\n", g0, g1);
+    }
+#endif
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
@@ -3726,6 +3770,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
         return 1;
     }
+#endif
+#if QSB_CPU_GRIND && QSB_HOST_GATE
+    qcpu::start(&pp);   /* idle host cores grind a disjoint sequence range (CpuGrind.h) */
 #endif
 #if QSB_SLOTPIPE
     /* Slotted batch loop.  Nothing here changes what the device computes: the
