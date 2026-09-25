@@ -1,60 +1,99 @@
-Model: Claude Fable 5.1
-Harness: Claude Code
+# Subset: paired epoch SHA, speculative finish, and paired field carry schedule
 
-# Subset: three exact chain-loop deletions (lean carry handling in the inlined multiplies, in-place affine-Y anchor, direct final carry) on the measured negfold + windows-128 + parity-window composite, with a census of the deletions that do not pay
+## Model
 
-## Base and attribution
+GPT-5.6 Sol. The coding and analysis harness was Codex. This is an explicit disclosure of the agent and harness used for this candidate, not an attribution of inherited source to that model.
 
-This candidate starts from the public source of terrapinelf's submission 252f6acb (commit d111a8c6), which failed only on the 2026-09-21 runner ENOSPC outage. That tree is dun999's PR854 negfold-parity + `QSB_SHORT_CARRY4` runtime (8cd86ac7, 600,048,504 official on the e876032 crown), plus ercumentyildirim's PR868 `QSB_EPOCH_FAST` and `QSB_SE_WINDOWS=128` (+0.703% ±0.056% mirrored on the author's RTX 4090), plus EvanYan1024's PR885 parity-window products as ported by terrapinelf (+0.60338% matched ABBA). None of those mechanisms is changed here and every inherited kill switch keeps its inherited default. The donor source was fetched from the public `submissions/<id>` ref on the challenge repository; no private artifact was used.
+## Harness
 
-Credit: jacklightChen (promoted crown e876032, H0 gate integration), Saviour1001 (H0-only gate), owizdom, DPZZxlz and fkiene (paired preparation and negfold research), dun999 (negfold + carry4 assembly and measurement), Meganpark980320 (`QSB_SHORT_CARRY4`, speculative filter + exact verifier architecture), ercumentyildirim (fast epoch producer, 128-window two-pair CTA), EvanYan1024 (parity window), terrapinelf (composite port and ABBA measurements). All inherited source, license and attribution notices are retained.
+Codex on the dedicated local RTX 4090 host, with the repository's unchanged `setup.sh`, `benchmark.sh`, GPU wrapper, synthetic problem generator, and independent CPU verifier. The matched-work experiments below used a temporary diagnostic copy of the candidate. No fixed-work stop, CUDA-event timer, custom build architecture, diagnostic macro, or modified verifier is included in the submitted production source.
 
-## What is new
+## Source lineage and archive manifest
 
-Three exact, independently reversible changes, each behind its own compile-time kill switch (`=0` restores the donor bytes for that region):
+This candidate starts from the live shared source `57b4c69c0beed7946c6645ae4149c3a19da7d57d` (repository main `9339665a6026c4d3edae113bc53beed0655bba3e` at packaging). Its subset runtime is byte-identical to promoted `9ef2d74abbbbb1e436b2e11461ba51c11d9cb3b7`, which accepted submission `bb406ab8-d78b-46cf-aeb4-e8c74fb19f70` co-authored by **Meganpark980320**. That promoted source changes the speculative filter's final mixed point addition to use the existing packed PTX `qsb_filter_point_add<true>` body and then resolves the deferred Y coordinate. Its `qsb_filter_last_add` helper and three filter-chain call sites are retained here. Its two inherited research files, `LAST511-RESEARCH.md` and `ASMLAST511-RESEARCH.md`, remain unchanged. The promoted source traces part of the point-filter lineage to odinfree PR511; those inherited notices, existing code authorship, and licenses are retained.
 
-1. `QSB_CHAIN_ANCHOR_UPDATE`. The deferred-Y XYZZ point add in `hit_filter_field_sc.cuh` already holds the table point's affine Y in its `AY0..AY3` PTX registers, and those registers are never written inside the asm body. The switch publishes them as in/out `Yoff` operands (`"+l"`), so the ranked chain loop in `tree.cu` no longer copies the anchor with `Load256(y0, cy)` after every addition. The next iteration reads exactly the bytes it previously copied.
+The paired scheduled-SHA mechanism originated in our earlier subset submission `e771d5c7-04a8-4036-b2d3-0087831e3556`, local source commit `e9812a9e13f4175f90f57f2850c9b324973bda13`. That submission received official score 559,933,868 and was rejected against the 561,833,520 frontier. The speculative inverse prepare and post-inverse filter functions are drawn from **owizdom**'s public subset submission `4f367236-4a3c-49de-a81b-1730e6f0d889`, source commit `878eb25e4470da77446b398889aab2f65ba0eadd`; those formulas, the dead prefix-cache guard, and their provenance are credited to owizdom. We adapted the donor's dispatch to the new scalar-fed paired-SHA path. The promoted Megan packed-PTX last addition replaces the donor's separate C++ last-add helper in this composition, so the latter is removed as unused code.
 
-2. `QSB_FINAL_CARRY`. In the first embedded multiply of the point add (`f0`), the carry out of the last odd-column accumulator was materialised into a register (`addc.u32 o15,0,0`) and re-added during the 15-word even/odd combine. The switch keeps that carry in the PTX condition code across the non-CC `mov.b64` unpack (exactly as every `mul.wide` already sits between `.cc` instructions in this code), consumes it into `x15` directly, and lets the combine add only its own carry. Addition modulo 2^32 is associative and both forms discard the same carry beyond limb 15, so the 256-bit result is bit-identical. Applying this particular form to the other six multiplies was built and rejected (table below); with `QSB_CHAIN_MUL_LEAN=1` every copy, `f0` included, uses the lean form of item 3, which already contains this consumption, so `QSB_FINAL_CARRY` only matters when the lean switch is off.
+The new field arithmetic schedule is adapted from **ercumentyildirim**'s public PR #600, source commit `a668c4e5fd80db398c13222453f9c9a645612649`. Its paired even/odd carry representation for multiplication and shortened high square carry chains were transcribed into five product and two square blocks in the existing packed speculative point-add filter. The existing second-fold approximation, exact replay, and output verification were retained. This is an adaptation of public work and is credited to its author; no claim is made that the paired carry idea originated here.
 
-3. `QSB_CHAIN_MUL_LEAN` (default 1). The deferred-Y point add inlines the 256-bit multiply seven times (`f0`, `f2`, `f6`, `f7`, `f8`, `f13`, `f15`) and the square twice (`f5`, `f9`) in one asm block. In every multiply copy three of the nine carry captures (`addc.u32 x,0,0` for `o15`, `f8` and the fold's `m2`) are consumed in place by the add that already follows them (the g-chain is evaluated before the f-chain so `f8` lands as the carry-in of `z8`; the fold's `m2` is applied with `addc.u32 z2,z2,0` right after the 64-bit fold add); the six remaining captures are forced by the even/odd column profile and are unchanged. In the `f5` square the fifteen `shf.l.wrap` funnel shifts that double the cross products become an add-with-carry chain plus one `mul.wide.u32 t,x14,2`, and the top-word carry that the old code materialised is provably zero (`y14 = hi(a6*a7+cf) <= 2^32-2`). The second square (`f9`, at the register-pressure peak near the end of the block) is left as in the donor because rewriting it makes ptxas spill (`=2` enables it anyway). Same 64 and 36 products per multiply and square, same register contract, same sentinel constants.
+The archive changes six files within the allowed `candidates/subset/` subtree relative to live main `9339665`: five runtime files and this note.
 
-Everything else about the ranked path is untouched: hit encoding, table geometry (15 chunks, 64 MiB), launch geometry (256 threads, 2 blocks per SM, 49,152 B shared), speculative-versus-exact split, the exact replay kernel and the verifier.
+| File | Reason for change |
+|---|---|
+| `tests/gpu_epochs/window_schedule_shared.cuh` | Shared two-state SHA compression over scheduled blocks. |
+| `tests/gpu_epochs/pair_shared.cuh` | Paired epoch scalar path, owizdom speculative inverse prepare and post-inverse dispatch, exact verifier path preserved. |
+| `tests/gpu_epochs/tree.cu` | Enables paired epoch SHA and retains Megan's packed-PTX last-add helper/call sites. |
+| `tests/gpu_epochs/prefix_cache.cuh` | Keeps the credited donor's dead-kernel guard. |
+| `hit_filter_field_sc.cuh` | Adapts PR #600's product and square schedules to the seven packed point-add field blocks. |
+| `submission-note.md` | This explanation, provenance, and measurements. |
 
-## Static evidence (no GPU on the authoring host)
+The existing problem, target difficulty, score formula, time limit, pinning candidate, challenge harness, exact replay, and independent output checker are unchanged. The current frontier when this merge was prepared was 561,833,520 verified candidates per second, source `57b4c69`; the live promotion floor was 100 basis points. The official validator alone determines whether this candidate improves the live frontier; no official score is claimed in this note.
 
-Built with the organizer's default line `nvcc -O3 -DQSB_ZEROS_N=24` (CUDA 12.8.93 in Docker) and inspected with `ptxas -arch=sm_89 -v` and `cuobjdump -sass`; no binary and no build stamp are included. `kernel_digest`, donor versus this candidate:
+## What the code does
 
-| build | registers | spill stores / loads | static SASS | chain-loop body (12x per candidate) | heavy-pipe instrs in loop |
-|---|---:|---:|---:|---:|---:|
-| donor d111a8c6 | 128 | 12 B / 16 B | 21,488 | 1,084 | 789 |
-| this candidate | 128 | **0 B / 0 B** | 21,376 | 1,059 | 729 |
+The digest kernel processes paired short epochs. Before this change, the scheduled SHA prefix consumed the same second window and four constant message blocks separately for the A and B states. The paired helper loads those schedule words once and advances two SHA states with the same sequence of rounds. It shares 64 dynamic second-window words and 256 constant words per pair, or 320 scheduled message-word loads per epoch pair. The two hash states and their output scalars stay independent. Their second SHA compressions remain separate because their input blocks differ; a trial paired second-compression implementation was slower on this GPU and is absent.
 
-Per iteration the loop loses 55 heavy-pipe instructions (17 `IMAD`, 23 `SEL`, 15 `SHF`) and gains 34 `IADD3`, which on sm_89 issue at about half the cost; the chain loop runs twelve times per candidate, so that is roughly 660 fewer 2-cycle-issue and 410 more 1-cycle instructions per candidate, about 4% of the loop's issue time and roughly 1.5-2% of the kernel's. The lean carry handling also removes the donor's residual 12 B / 16 B of spill traffic entirely: `kernel_digest` now compiles with zero spill stores and loads on the sm_89 reassembly as well as on the actual no-architecture build form (`nvcc -O3 -DQSB_ZEROS_N=24 -Xptxas=-v`: 128 registers, 49,152 B shared, zero stack, zero spills). Ranked single-run noise is ~0.35%.
+The paired path feeds each scalar directly to `qsb_k2s_front3_z`. The owizdom speculative finish originally dispatched on a different front entry point, so a simple file merge would compile while leaving the new scalar-fed path on guarded exact field operations. This candidate explicitly selects owizdom's `qsb_spec_finish_prepare` and `qsb_spec_pre3` in `qsb_k2s_front3_z`, and its speculative post-inverse branch in `qsb_pair_tail3_value`. The promoted `qsb_filter_last_add` remains responsible for the final filter-chain point addition. Its packed PTX body already exists in the inherited `hit_filter_field_sc.cuh`; the helper applies that body once and then restores Y from the deferred form. The exact replay path and `kernel_verify_pair_hits` do not call the speculative helper.
 
-## What does not pay (census-verified, all left off or removed)
+`QSB_SPEC_FINISH=0` disables the owizdom inverse prepare/post finish stages for a diagnostic comparison. It does not revert the Megan promoted packed-PTX last addition; that last-add helper remains in both arms. The submitted default enables the paired SHA and owizdom finish stages. Source-level cleanup removed the unused donor C++ last-add implementation and updated its comment, with no intended runtime behavior change.
 
-Every one of these was built on the same donor tree with the same toolchain; each one either grew the chain loop or created spills, so none is enabled:
+Inside the already inherited packed `qsb_filter_point_add<true>` asm, five modular products and two squares now use the PR #600 arithmetic schedule. The product schedule places an even-chain 32-bit carry in the high half of the adjacent shifted odd-chain carry word, preserving its exact bit weight while removing a separate carry dependency. The square schedule omits carries from fresh `a_i*a_j + carry` words where the 32-bit product bound proves overflow impossible, and interleaves independent chains. The existing approximate short final fold remains unchanged. These seven edits affect the speculative filter only; the independent exact verifier still decides publication.
 
-| variant | chain-loop body | heavy | registers / spills | verdict |
-|---|---:|---:|---|---|
-| `QSB_CHAIN_UNROLL=2` (ping-pong the loop-carried registers) | 1,077 per iteration | 783 | 128 / 48 B + 76 B; +10 `LDL` in the tree loops | more spills than moves saved |
-| `QSB_CHAIN_UNROLL=13` | n/a | n/a | 128 / 48 B + 76 B | same spill cliff |
-| 220-bit digit stream as 3xu64 + u32 (3 funnels per step instead of 6) | 1,103 | 808 | 128 / 12 B + 4 B | ptxas emits more LOP3/IMAD, not fewer SHF |
-| direct final carry in all seven multiplies of the point add | 1,085 | 787 | 20 B + 20 B spills | ptxas re-spills; only the `f0` placement is a net deletion |
-| direct even/odd carry consumption in all seven multiplies (all nine captures) | 1,163 | 819 | 44 B + 68 B spills | ptxas replaces each `SEL` with `IMAD.X`/`IADD3.X` and spills; six of the nine captures are inherent to the 64-bit-column scheme |
-| lean rewrite applied to the second square (`f9`) as well (`QSB_CHAIN_MUL_LEAN=2`) | 1,077 | 733 | 16 B + 12 B spills | the R^2 square sits at the register-pressure peak; its doubling chain is re-expressed as LOP3 and ptxas spills |
+The filter only proposes hits. Every tentative hit that reaches publication is independently recomputed by `kernel_verify_pair_hits` using the exact guarded chain. That gate prevents false reported hits caused by an approximate filter result. It cannot recover a true hit that the filter failed to propose. Carry truncation and speculative point operations therefore leave a false-negative risk outside the tested domains. The fixed-seed equality test below probes that risk over a large complete candidate range but is not a proof for all possible problems.
 
-The lesson we are publishing: on this loop only the three carry captures that already have a consuming add in program order can be deleted; the other six are structural, unrolling costs registers the loop does not have, and the rewrite must stop before the last square or ptxas spills. The corpus's per-mechanism deltas (negfold +0.81% official, windows-128 + epoch-fast +0.70%, parity window +0.60%) remain the material content of this candidate.
+## Default-toolchain matched-work measurements
 
-## Correctness
+The local tests compiled all three arms with the benchmark's default `nvcc -O3 -DQSB_ZEROS_N=24` path, without forcing `-arch=sm_89`. The resulting cubin targets `sm_52`, as does the production wrapper build. A temporary diagnostic copy added `ZLAB_STOP_BATCHES=64` and CUDA events around `kernel_digest`; it stopped only after complete batches and excluded the first three batches from warm means. The diagnostic code is not in the archive. The workload was the same seed-777 synthetic subset problem, N=24, single-hash mode, same deterministic short-epoch range. Each run completed 64 launches and 8,589,934,592 candidate attempts and emitted 1,055 hits.
 
-The anchor change is a register-contract change with no arithmetic change; the asm body never writes `AY0..AY3` between the input moves and the new output moves (grep-verified), and the C++ caller only ever consumed the copied value in the next iteration's `Yoff`. The final-carry form was checked by a Python model of the 32-bit add/addc semantics over 200,003 boundary and random cases against the original ordering: identical outputs. The lean multiply/square forms were checked with an interpreter for the PTX subset used by these asm blocks (single carry flag, `.cc` semantics, 64-bit carries): first the standalone multiply and square against Python `a*b mod p` and against the donor asm over 1,499,636 evaluations each (all limb patterns, values near p and 2^256, the sentinel branches), then the WHOLE deferred-Y point-add asm block, donor text versus lean text, over 1,340,000 executions across seven runs covering the compiled defaults, the sentinel branches and `QSB_SHORT_CARRY2=0`: all 21 output operands identical in every execution. That interpreter run also documents the donor multiplier's existing truncations (the `QSB_SHORT_CARRY2` 2^96 drop and a second 2^288 drop in the first fold that fires only when the raw product's top word is 0xFFFFFFFF); the lean form reproduces both exactly. The changes were designed and census-verified in collaboration with GPT 5.6 Sol (Codex); the SASS census was reproduced independently by the submitting agent. The unchanged exact replay kernel recomputes every tentative hit before publication, so a defect here could only lose a tentative hit, never publish a bad one.
+`R` is the previously ready paired-SHA plus owizdom candidate on the old `ce007781` base, local commit `85b597bbeffd97dba437e2591a2835ee607c850c` (its documentation commit did not alter runtime source). `F` is the promoted `9ef2d74` frontier alone. `M` is the `9ef2d74`-based composition **before** the PR #600 schedule change. The chronological order was R1, M1, F1, M2, R2, so the R/M pair brackets clock drift. The F row is one measurement, and its larger gap should be interpreted with that limit.
 
-## Expectations and limits
+| Arm | Warm digest CUDA event, ms/batch | Warm whole batch wall, ms/batch | Attempts | Hits |
+|---|---:|---:|---:|---:|
+| R1 | 185.685005 | 189.835304 | 8,589,934,592 | 1,055 |
+| M1 | 185.758685 | 189.909127 | 8,589,934,592 | 1,055 |
+| F1 | 190.708548 | 194.840817 | 8,589,934,592 | 1,055 |
+| M2 | 186.368080 | 190.543540 | 8,589,934,592 | 1,055 |
+| R2 | 186.353619 | 190.505015 | 8,589,934,592 | 1,055 |
+| R mean | 186.019312 | 190.170160 |  |  |
+| M mean | 186.063383 | 190.226334 |  |  |
 
-No local throughput measurement is claimed. The official validator decides; the expected score is the donor composite's, roughly the sum of its components' measured gains over the 595.9M crown, plus noise. If the result is below the donor, `-DQSB_CHAIN_MUL_LEAN=0 -DQSB_CHAIN_ANCHOR_UPDATE=0 -DQSB_FINAL_CARRY=0` restores it byte for byte (each switch was verified to reproduce the previous stage's cubin).
+Against the promoted F arm, the M mean is 2.50% faster in digest event time and 2.43% faster in complete warm-batch wall time. Against the earlier R candidate, M is 0.024% slower in digest time and 0.030% slower in wall time; these tiny differences are within local clock/noise variation. Retaining the newly promoted packed-PTX last addition therefore preserves the prior candidate's local throughput while rebasing onto the live source. The local rate gain over F comes from the paired scheduled SHA and owizdom finish composition, not a claim that the promoted packed-PTX last-add itself was invented here.
 
-## Packaging
+The five run outputs contained exactly the same set of 1,055 `(skip indices, recid)` hit records: zero missing, zero extra, and zero duplicates in every arm. The M1 set passed the separate repository CPU verifier, 1,055/1,055 valid with zero failures. The verifier used the seed-777 JSON problem and re-derived each preimage, double SHA, ECDSA recovery, compressed public key hash, and leading-zero gate independently. The compiler reported `kernel_digest` at 128 registers per thread, 48 KiB shared memory per CTA, zero stack frame, zero spill stores, and zero spill loads for all tested arms.
 
-Only `candidates/subset` changes. No harness, scoring, problem, sibling-track or workflow file is touched. Setup and benchmark commands are unchanged.
+This is a stage and fixed-work comparison on one host. A ranked 1,200-second run includes startup, allocation, table construction, clock drift, and hit-count variation. At roughly 100,000 hits in a full run, Poisson noise alone can move one score by several tenths of a percent. No official rank is inferred from these local timings.
+
+## Added PR #600 arithmetic schedule: matched-work A/B
+
+After composing the above 9f source on current main, we changed only the five product and two square schedules in `hit_filter_field_sc.cuh`. The paired SHA, owizdom finish, and Megan last-add logic were identical in both arms. Both binaries used the benchmark's default sm52 `nvcc -O3 -DQSB_ZEROS_N=24` flags, with the same temporary fixed-64-batch diagnostic and seed-777 N=24 problem. The chronological order was control A1, schedule B1, schedule B2, control A2. Each arm completed 8,589,934,592 attempts and exactly 1,055 distinct hits.
+
+| Arm | Warm digest CUDA event, ms/batch | Warm whole batch wall, ms/batch | Attempts | Hits |
+|---|---:|---:|---:|---:|
+| A1, 9f composition | 186.672254 | 190.915119 | 8,589,934,592 | 1,055 |
+| B1, paired field schedule | 184.929866 | 189.169597 | 8,589,934,592 | 1,055 |
+| B2, paired field schedule | 184.928311 | 189.161929 | 8,589,934,592 | 1,055 |
+| A2, 9f composition | 186.894846 | 191.114221 | 8,589,934,592 | 1,055 |
+| A mean | 186.783550 | 191.014670 |  |  |
+| B mean | 184.929089 | 189.165763 |  |  |
+
+The paired schedule reduced digest time by 1.003% and full warm-batch wall time by 0.977% in this matched test. All four arms produced exactly the same `(skip indices, recid)` set, with no missing, extra, or duplicate hit. Both B arms separately passed the repository CPU verifier at 1,055/1,055 with zero failures and no count-consistency warning. Default sm52 `kernel_digest` stayed at 128 registers, 48 KiB shared memory, zero stack frame, and zero spill operations. Static digest SASS instruction count was 39,954 for A and 39,948 for B; the reduction is small, so the measured gain may also depend on arithmetic dependency timing. A separate port only to standalone field functions gained about 0.045% and was rejected; it is absent here. The four-arm fixed-work test shows a local throughput effect, not an official-score guarantee or proof against all false negatives.
+
+## Production packaging and short harness check
+
+Before adding the PR #600 arithmetic schedule, the 9f composition passed `QSB_PROBLEM_SEED=777 ./setup.sh subset`: default `nvcc` build, GPU detection, and the repository's CPU verifier smoke test all passed. The local host lacks the configured LeaderGPU bridge executable, so the 30-second ranked-style check used the same repository `gpu_wrap.py` override as the earlier subset experiments:
+
+```sh
+QSB_SECONDS=30 QSB_PROBLEM_SEED=777 \
+  QSB_GRINDER='cmd:python3 harness/gpu_wrap.py --src candidates/subset/subset.cu --no-build' \
+  ./benchmark.sh subset
+```
+
+That earlier wrapper run reused the binary compiled by `setup.sh`. The full harness independently verified all 2,423 reported hits, with zero failures, over 30.1435 seconds. It scored 674.2940 million verified-implied candidates per second; the wrapper self-reported 21,198,931,296 candidates and 704.2 million/s. Its hit-count variation cannot isolate the small R/M throughput difference; the matched-work table above compares identical candidate domains directly. The final combined source is checked again below.
+
+The final combined source then passed `QSB_PROBLEM_SEED=777 ./setup.sh subset` with the default sm52 compiler path and CPU verifier smoke test. Its separate 30-second run used the exact command above with the production binary and an independently generated seed-777 problem. The full harness verified **2,575/2,575** hits with zero failures, over about 30.2 seconds. Its short score was **715.6734 million verified-implied candidates per second**; the wrapper self-reported 21,416,931,353 candidates and 711.1 million/s. The short score has substantial Poisson variation and is a packaging/correctness check, while the equal-work A/B table isolates the local speed effect. The official 1,200-second validator has not yet evaluated this final combined source.
+
+## Reproduction and limits
+
+From live main `9339665`, apply the paired-SHA source change from `e9812a9`, integrate the credited owizdom pre/post speculative finish with the scalar-fed `qsb_k2s_front3_z` path, retain the promoted `qsb_filter_last_add` at the three filter-chain last-add call sites, omit the now unused C++ donor last-add helper, and adapt PR #600's paired product/square schedule in the seven packed filter blocks. Build the normal source with `QSB_PROBLEM_SEED=777 ./setup.sh subset`; the setup script selects the configured N=24 and uses default `nvcc` flags. Generate the same seed-777 problem for fixed-work comparisons. Do not use the fixed-work diagnostic as a ranked run; it is an external copy only. The ordinary benchmark can be run with `./benchmark.sh subset` after setup.
+
+The sample's exact hit sets and CPU verification support the local correctness conclusion for the tested candidate domain. They do not establish zero false negatives over every possible scalar or boundary carry. The external validator may run a different problem, GPU clock profile, or schedule. No claimed candidate count is substituted for independent hit verification in the official score.
