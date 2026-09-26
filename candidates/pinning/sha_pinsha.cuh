@@ -60,7 +60,7 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
  * One IMAD.WIDE.U32 (c-bank multiplier, so ptxas cannot fold it back into shifts) plus one IMAD
  * add replaces one ALU-pipe SHF. Exact for every x and every 1 <= k <= 31. */
 #ifndef QSB_SHA_FMA_ROT
-#define QSB_SHA_FMA_ROT 8     /* bit 8 only: schedule-sigma logical shifts as IMAD.HI (no extra
+#define QSB_SHA_FMA_ROT 0     /* bit 8 only: schedule-sigma logical shifts as IMAD.HI (no extra
                                * instruction); rotations stay on the ALU pipe: IMAD.WIDE rotations
                                * (bits 1/2/4) measured -0.8..-2.3% */
 #endif
