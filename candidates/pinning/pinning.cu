@@ -1292,6 +1292,9 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #error "QSB_TBL_L2POL takes the hot/cold split from the QSB_FOUR_HOT bank order"
 #endif
 #define QSB_HOT_RECS 786432u   /* q9_bigtbl_offset(4): segments 0..3, 48 MiB */
+#ifndef QSB_TBL_POL_PRED
+#define QSB_TBL_POL_PRED 1
+#endif
 #if QSB_TBL_L2POL && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define QSB_TBL_L2POL_ON 1
 __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
@@ -1303,6 +1306,19 @@ __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
     asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
 #endif
     return (code&0x7fffffffu)>=QSB_HOT_RECS ? cold : hot;
+}
+/* QSB_TBL_POL_PRED (default 1): the piped gathers issue each 16 B load twice under a
+ * complementary predicate (record >= QSB_HOT_RECS), one carrying the cold policy and one the
+ * hot policy, so both descriptors stay compile-time constants in uniform registers instead of a
+ * per-lane select copied into uniform registers for every load. Each lane issues exactly one load
+ * of each pair, with the same policy qsb_tbl_policy returns; the bytes are unchanged. */
+__device__ __forceinline__ void qsb_tbl_policies(uint64_t &cold,uint64_t &hot) {
+    asm("createpolicy.fractional.L2::evict_first.b64 %0, 1.0;" : "=l"(cold));
+#if QSB_TBL_L2POL == 2
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(hot));
+#else
+    asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
+#endif
 }
 #else
 #define QSB_TBL_L2POL_ON 0
@@ -1342,7 +1358,18 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
     /* Native carrier: the Y half is gathered first, so it carries the 64 B L2 fetch
      * that brings the record's X sector along for qsb_load_glv_x_code. */
     ulonglong2 y0;
-#if QSB_TBL_L2POL_ON
+#if QSB_TBL_L2POL_ON && QSB_TBL_POL_PRED
+    ulonglong2 y1;
+    uint64_t pc,ph;
+    qsb_tbl_policies(pc,ph);
+    asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %6;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+        : "=l"(y0.x), "=l"(y0.y), "=l"(y1.x), "=l"(y1.y)
+        : "l"(ty), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+#elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 y1;
 #if QSB_GATHER_V4
@@ -1375,7 +1402,18 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
 __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
                                                      uint64_t *x) {
     const ulonglong2 *tx=qsb_pipe_half(table,code,0u);
-#if QSB_TBL_L2POL_ON
+#if QSB_TBL_L2POL_ON && QSB_TBL_POL_PRED
+    ulonglong2 x0,x1;
+    uint64_t pc,ph;
+    qsb_tbl_policies(pc,ph);
+    asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %6;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+        : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y)
+        : "l"(tx), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+#elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 x0,x1;
 #if QSB_GATHER_V4
