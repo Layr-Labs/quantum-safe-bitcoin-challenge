@@ -1,10 +1,11 @@
-/* l2state variant fkF20c8 + split retry */
+/* l2state variant fkF20c8 + split retry; +finish L2 discard, 12 shared SMs, SHA_FMA_ROT=0 */
+#define QSB_SHA_FMA_ROT 0
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
-#define QSB_L2STATE 1
+#define QSB_L2STATE 3
 #define QSB_GREEN 20
-#define QSB_GREEN_SHARED 8
+#define QSB_GREEN_SHARED 12
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
