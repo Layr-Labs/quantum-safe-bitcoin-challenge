@@ -4497,6 +4497,13 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+#if QSB_BIGTBL
+        /* Only the dense 786432-record prefix is reused enough to persist.
+         * Reserving the device maximum also protects cold-table records and
+         * takes cache capacity away from the remaining random gathers. */
+        const size_t hot_bytes = 786432u * 64u;
+        if (want > hot_bytes) want = hot_bytes;
+#endif
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
@@ -4600,6 +4607,13 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
 #if QSB_BIGTBL
+        /* Only the dense 786432-record prefix is reused enough to persist.
+         * Reserving the device maximum also protects cold-table records and
+         * takes cache capacity away from the remaining random gathers. */
+        const size_t hot_bytes = 786432u * 64u;
+        if (want > hot_bytes) want = hot_bytes;
+#endif
+#if QSB_BIGTBL
         size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
 #else
         size_t skip = QSB_GLV_DENSE_FIRST ? 0u :
@@ -4654,33 +4668,61 @@ int main(int argc, char **argv) {
      * keeps the candidate tree in shared memory), so slot 0 is byte-for-byte the
      * single-stream allocation and the only change is that there are QSB_SLOTS
      * of them. */
-    ulonglong2 *d_pipeline_state[QSB_SLOTS];
-    uint64_t *d_pipeline_roots[QSB_SLOTS],*d_pipeline_tree[QSB_SLOTS];
-    uint64_t *d_super_roots[QSB_SLOTS],*d_root_checkpoint[QSB_SLOTS];
-    size_t pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
-    size_t pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
-    size_t pipeline_tree_bytes=0;
-    size_t super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
-    size_t root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
-    for (int s = 0; s < QSB_SLOTS; s++) {
-        d_pipeline_state[s]=NULL; d_pipeline_roots[s]=NULL; d_pipeline_tree[s]=NULL;
-        d_super_roots[s]=NULL; d_root_checkpoint[s]=NULL;
-        cudaError_t pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
-        if(pipeline_err==cudaSuccess)
-            pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);
-        if(pipeline_err==cudaSuccess)
-            pipeline_err=cudaMalloc(&d_super_roots[s],super_root_bytes);
-        if(pipeline_err==cudaSuccess)
-            pipeline_err=cudaMalloc(&d_root_checkpoint[s],root_checkpoint_bytes);
-        if(pipeline_err!=cudaSuccess){
-            fprintf(stderr,"Pipeline allocation failed (slot %d): %s\n",s,cudaGetErrorString(pipeline_err));
-            return 1;
+    ulonglong2 *d_pipeline_state[QSB_SLOTS] = {};
+    uint64_t *d_pipeline_roots[QSB_SLOTS] = {}, *d_pipeline_tree[QSB_SLOTS] = {};
+    uint64_t *d_super_roots[QSB_SLOTS] = {}, *d_root_checkpoint[QSB_SLOTS] = {};
+    size_t pipeline_state_bytes=0, pipeline_root_bytes=0, pipeline_tree_bytes=0;
+    size_t super_root_bytes=0, root_checkpoint_bytes=0;
+    /* No launch has used these buffers yet. An unsuccessful attempt owns only
+     * its non-null pointers; release every slot before choosing a smaller batch. */
+    auto release_pipeline = [&]() {
+        for (int s = 0; s < QSB_SLOTS; s++) {
+            if (d_pipeline_state[s]) cudaFree(d_pipeline_state[s]);
+            if (d_pipeline_roots[s]) cudaFree(d_pipeline_roots[s]);
+            if (d_super_roots[s]) cudaFree(d_super_roots[s]);
+            if (d_root_checkpoint[s]) cudaFree(d_root_checkpoint[s]);
+            d_pipeline_state[s]=NULL; d_pipeline_roots[s]=NULL;
+            d_super_roots[s]=NULL; d_root_checkpoint[s]=NULL;
         }
-        if(((uintptr_t)d_pipeline_state[s] & (alignof(ulonglong2)-1u)) != 0){
-            fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
-            return 1;
+    };
+    for (;;) {
+        GRDSZ=(BATCH+QSB_TREE_N-1)/QSB_TREE_N;
+        ROOT_GRDSZ=(GRDSZ+255)/256;
+        pipeline_state_bytes=(size_t)BATCH*QSB_STATE_PLANES*sizeof(ulonglong2);
+        pipeline_root_bytes=(size_t)GRDSZ*8u*sizeof(uint64_t);
+        super_root_bytes=(size_t)ROOT_GRDSZ*4u*sizeof(uint64_t);
+        root_checkpoint_bytes=(size_t)ROOT_GRDSZ*4u*QSB_CHECKPOINT_STRIDE*sizeof(uint64_t);
+        cudaError_t pipeline_err=cudaSuccess;
+        int failed_slot=-1;
+        for (int s = 0; s < QSB_SLOTS; s++) {
+            pipeline_err=cudaMalloc(&d_pipeline_state[s],pipeline_state_bytes);
+            if(pipeline_err==cudaSuccess)
+                pipeline_err=cudaMalloc(&d_pipeline_roots[s],pipeline_root_bytes);
+            if(pipeline_err==cudaSuccess)
+                pipeline_err=cudaMalloc(&d_super_roots[s],super_root_bytes);
+            if(pipeline_err==cudaSuccess)
+                pipeline_err=cudaMalloc(&d_root_checkpoint[s],root_checkpoint_bytes);
+            if(pipeline_err!=cudaSuccess) { failed_slot=s; break; }
+            if(((uintptr_t)d_pipeline_state[s] & (alignof(ulonglong2)-1u)) != 0) {
+                fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
+                release_pipeline();
+                return 1;
+            }
         }
+        if (pipeline_err==cudaSuccess) break;
+        fprintf(stderr,"Pipeline allocation failed (slot %d, batch %d): %s\n",
+                failed_slot,BATCH,cudaGetErrorString(pipeline_err));
+        release_pipeline();
+        /* Invalid contexts and other CUDA errors must not be hidden by retries.
+         * Keep batches 256-aligned for SHA_UNIF and both supported tree sizes. */
+        if (pipeline_err!=cudaErrorMemoryAllocation || BATCH<=1048576) return 1;
+        (void)cudaGetLastError();
+        BATCH=((BATCH/2)/256)*256;
+        if (BATCH<1048576) BATCH=1048576;
+        fprintf(stderr,"Retrying pipeline with %d candidates per slot\n",BATCH);
     }
+    printf("  Pipeline allocation: %d candidates per slot, %d slots\n",BATCH,(int)QSB_SLOTS);
+
 #else
     ulonglong2 *d_pipeline_state=NULL;
     uint64_t *d_pipeline_roots=NULL,*d_pipeline_tree=NULL;
