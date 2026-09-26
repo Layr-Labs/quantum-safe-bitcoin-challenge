@@ -4497,6 +4497,13 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+#if QSB_BIGTBL
+        /* Only the dense 786432-record prefix is reused enough to persist.
+         * Reserving the device maximum also protects cold-table records and
+         * takes cache capacity away from the remaining random gathers. */
+        const size_t hot_bytes = 786432u * 64u;
+        if (want > hot_bytes) want = hot_bytes;
+#endif
         /* Chunk 0 holds 2^17 entries for one access per candidate, the other
          * chunks 2^16 each: pinning the dense chunks first captures more of the
          * 15 random reads. The window stays inside the table. */
@@ -4599,6 +4606,13 @@ int main(int argc, char **argv) {
         cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, gpu_index);
         cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, gpu_index);
         size_t want = gt_sz < (size_t)max_persist ? gt_sz : (size_t)max_persist;
+#if QSB_BIGTBL
+        /* Only the dense 786432-record prefix is reused enough to persist.
+         * Reserving the device maximum also protects cold-table records and
+         * takes cache capacity away from the remaining random gathers. */
+        const size_t hot_bytes = 786432u * 64u;
+        if (want > hot_bytes) want = hot_bytes;
+#endif
 #if QSB_BIGTBL
         size_t skip = 0u; // 48 MiB dense prefix, then the bounded top segment.
 #else
