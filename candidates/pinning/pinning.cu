@@ -153,7 +153,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * (six to eight DRAM row activations per candidate) and measured -18.5 % on an
  * RTX 4090. Defined here, before GLVScalar.cuh, so the seed gather's second window matches. */
 #ifndef QSB_QGLV5
-#define QSB_QGLV5 0
+#define QSB_QGLV5 1
 #endif
 #if QSB_QGLV5 != 0 && QSB_QGLV5 != 1
 #error "QSB_QGLV5 must be 0 or 1"
