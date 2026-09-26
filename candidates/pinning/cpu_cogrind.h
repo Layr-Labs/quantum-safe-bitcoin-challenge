@@ -1,4 +1,7 @@
 /* cpu_cogrind.h -- host-CPU co-grinding for the pinning search.
+ * September 26: IFMA52, four-way SHA-NI and safegcd roots; optional signed
+ * 13-window folded-table backend with complete exceptional-point recovery.
+ * Host backends are selected on the actual CPU; all retain the same device ABI.
  *
  * The GPU walks sequences upward from 0x80000000 (about 900 of them in a 1200 s run), each over
  * locktimes [LT_MIN, LT_MAX). Idle host cores grind sequences counting DOWN from 0xFFFFFFFE over
@@ -20,9 +23,9 @@
  * Contention safety. Workers run SCHED_IDLE (fallback nice 19), so the GPU host thread always
  * preempts them. The worker count is min(affinity CPUs, cgroup CPU quota) minus a reserve; a
  * runtime check lowers it if the workers receive less CPU time than they ask for (hidden quota
- * or foreign load). Once a minute the controller pauses the workers for two 1 s windows and
- * compares the GPU batch interval with and without them; it sheds a quarter of the workers if
- * two consecutive checks show a GPU loss above 1.5% that exceeds what the CPU adds.
+ * or foreign load). The ABBA controller compares GPU batch intervals in four 2 s windows and
+ * measures CPU contribution during the on windows. Two trials with excess GPU loss above the
+ * CPU contribution plus a 0.3 percentage-point margin shed a quarter of the workers.
  * QSB_CPU_GRIND=0 removes all of it.
  */
 #ifndef QSB_CPU_COGRIND_H
@@ -170,7 +173,7 @@ static inline void fe_to_w(uint64_t *w, const fe *a) {
     w[3] = (a->n[3] >> 36) | (a->n[4] << 16);
 }
 /* a^(p-2): libsecp256k1's addition chain */
-static void fe_inv(fe *r, const fe *a) {
+static void fe_inv_fermat(fe *r, const fe *a) {
     fe x2, x3, x6, x9, x11, x22, x44, x88, x176, x220, x223, t1;
     int j;
     fe_sqr(&x2, a); fe_mul(&x2, &x2, a);
@@ -190,6 +193,8 @@ static void fe_inv(fe *r, const fe *a) {
     for (j = 0; j < 2; j++) fe_sqr(&t1, &t1); fe_mul(r, a, &t1);
 }
 
+#include "cpu_safegcd.h"
+
 /* ---------------- configuration ---------------- */
 #ifndef QSB_CG_W
 #define QSB_CG_W 16                       /* fixed-window width (bits) */
@@ -203,6 +208,9 @@ static void fe_inv(fe *r, const fe *a) {
 #define QSB_CG_MAXB 2048
 #endif
 #define QSB_CG_MAXW 256                   /* max worker threads */
+
+
+#include "cpu_signed_plan.h"
 
 struct tentry { uint64_t x[4], y[4]; };   /* 64 B, one cache line */
 
@@ -236,7 +244,7 @@ static void tentry_set(tentry *e, fe x, fe y) { fe_normalize(&x); fe_normalize(&
  * Row 0 (d = 1..256) sequentially, then row r = row r-1 + 256*Bj with one batched
  * inversion per row. The single doubling in that chain (d = 512 = 256 + 256) is done
  * separately. */
-static void build_window(tentry *e, const fe *bx, const fe *by) {
+static void build_window(tentry *e, const fe *bx, const fe *by, unsigned count = QSB_CG_TSIZE) {
     fe rx[256], ry[256], c[256], inv, t, mx, my;
     fe px = *bx, py = *by;
     rx[0] = px; ry[0] = py;
@@ -244,9 +252,9 @@ static void build_window(tentry *e, const fe *bx, const fe *by) {
         if (k == 1) aff_dbl1(&px, &py); else aff_add1(&px, &py, bx, by);
         rx[k] = px; ry[k] = py;
     }
-    for (int k = 0; k < 256; k++) if (k + 1 < (int)QSB_CG_TSIZE) tentry_set(&e[k + 1], rx[k], ry[k]);   /* d = 1..256 */
+    for (int k = 0; k < 256; k++) if (k + 1 < (int)count) tentry_set(&e[k + 1], rx[k], ry[k]);   /* d = 1..256 */
     mx = rx[255]; my = ry[255];                                            /* 256 * Bj */
-    const unsigned rows = QSB_CG_TSIZE / 256;
+    const unsigned rows = (count + 254) / 256;
     for (unsigned r = 1; r < rows; r++) {
         /* new d = 256 r + k + 1 for k = 0..255; skip d >= 2^W */
         int n = 256;
@@ -272,7 +280,7 @@ static void build_window(tentry *e, const fe *bx, const fe *by) {
         }
         for (int k = 0; k < n; k++) {
             unsigned d = 256 * r + (unsigned)k + 1;
-            if (d < QSB_CG_TSIZE) tentry_set(&e[d], rx[k], ry[k]);
+            if (d < count) tentry_set(&e[d], rx[k], ry[k]);
         }
     }
 }
@@ -284,6 +292,8 @@ struct shared_t {
     int nblk, cache_first;                /* suffix blocks; block 0 holds seq only -> once per sequence */
     uint64_t n_chunks;
     tentry *table;                        /* QSB_CG_NWIN * QSB_CG_TSIZE */
+    tentry *signed_table;                 /* optional 13-window folded table */
+    bool signed_infinity[2];              /* published by the ready release/acquire */
     fe ax, ay;                            /* A = u2 R (recid 0) */
     int hit_fd;
     std::atomic<uint64_t> next_chunk;
@@ -296,9 +306,10 @@ struct shared_t {
     std::atomic<int> ready;               /* table built */
     std::atomic<int> failed;
     int nworkers;
-    int simd_ok;                          /* bit 4: AVX2 usable, bit 8: AVX-512F usable */
-    int simd_env;                         /* QSB_CPU_GRIND_SIMD override (0/4/8), else -1 */
-    std::atomic<int> simd;                /* chosen path: 8, 4 or 0 (scalar); -1 until chosen */
+    int sha4;                            /* immutable runtime SHA-NI self-check result */
+    int simd_ok;                          /* bits 4/8/16: AVX2/AVX-512F/IFMA52 usable */
+    int simd_env;                         /* QSB_CPU_GRIND_SIMD override (0/4/8/16), else -1 */
+    std::atomic<int> simd;                /* chosen path: 16, 8, 4 or 0 (scalar); -1 until chosen */
     std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];   /* per-worker thread CPU time */
     std::atomic<uint64_t> sha_cyc, ec_cyc;
 };
@@ -347,6 +358,8 @@ static inline void sha_blocks(uint32_t st[8], const uint8_t *p, size_t nblk) {
     for (size_t i = 0; i < nblk; i++) SHA256_Transform(&c, p + 64 * i);
     memcpy(st, c.h, 32);
 }
+
+#include "cpu_sha4.h"
 
 /* digit j (bits W j .. W j + W - 1) of the 256-bit little-endian word array */
 static inline unsigned digit(const uint64_t *z, int j) {
@@ -526,10 +539,14 @@ static void ec_batch(worker_t *w) {
 #undef QCG_NS
 #undef QCG_VW
 #undef QCG_TARGET
+#include "cpu_cogrind_ifma.h"
+#include "cpu_cogrind_fold.h"
 #define QSB_CG_HAVE_SIMD 1
 #else
 #define QSB_CG_HAVE_SIMD 0
 #endif
+
+#include "cpu_fold_table.h"
 
 /* Fill the batch with one chunk of locktimes of one CPU sequence: SHA256d per candidate. */
 static int fill_batch(worker_t *w, uint8_t *scratch) {
@@ -558,20 +575,33 @@ static int fill_batch(worker_t *w, uint8_t *scratch) {
         w->cur_seq_tag = (uint64_t)seq + 1;
     }
     w->seq = seq;
-    for (int i = 0; i < n; i++) {
-        const uint32_t lt = lt0 + (uint32_t)i;
-        for (int b = 0; b < 4; b++) m[lo + b] = (uint8_t)(lt >> (8 * b));
-        uint32_t st[8]; memcpy(st, w->mid1, 32);
-        if (S->cache_first) sha_blocks(st, m + 64, 1); else sha_blocks(st, m, (size_t)S->nblk);
-        uint8_t d1[64];
-        for (int b = 0; b < 8; b++) be_store32(d1 + 4 * b, st[b]);
-        d1[32] = 0x80; memset(d1 + 33, 0, 29); d1[62] = 0x01; d1[63] = 0x00;   /* 256 bits */
-        uint32_t h2[8]; memcpy(h2, SHA_IV, 32); sha_blocks(h2, d1, 1);
-        w->z[i][0] = ((uint64_t)h2[6] << 32) | h2[7];
-        w->z[i][1] = ((uint64_t)h2[4] << 32) | h2[5];
-        w->z[i][2] = ((uint64_t)h2[2] << 32) | h2[3];
-        w->z[i][3] = ((uint64_t)h2[0] << 32) | h2[1];
-        w->lt[i] = lt;
+    for (int i = 0; i < n; i += 4) {
+        uint8_t msgs[4][128], d1[4][64] = {}; const uint8_t *ptr[4];
+        uint32_t st[4][8], h2[4][8];
+        const int take = n - i < 4 ? n - i : 4;
+        for (int l = 0; l < 4; ++l) {
+            memcpy(msgs[l], m, 128);
+            const uint32_t lt = lt0 + (uint32_t)(i + (l < take ? l : 0));
+            for (int b = 0; b < 4; b++) msgs[l][lo + b] = (uint8_t)(lt >> (8 * b));
+            memcpy(st[l], w->mid1, 32);
+            if (l < take) w->lt[i+l] = lt;
+        }
+        for (int block = S->cache_first ? 1 : 0; block < S->nblk; ++block) {
+            for (int l = 0; l < 4; ++l) ptr[l] = msgs[l] + 64 * block;
+            cpu_hash4(st, ptr);
+        }
+        for (int l = 0; l < 4; ++l) {
+            for (int b = 0; b < 8; ++b) be_store32(d1[l] + 4*b, st[l][b]);
+            d1[l][32] = 0x80; d1[l][62] = 1;
+            memcpy(h2[l], SHA_IV, 32); ptr[l] = d1[l];
+        }
+        cpu_hash4(h2, ptr);
+        for (int l = 0; l < take; ++l) {
+            w->z[i+l][0] = ((uint64_t)h2[l][6] << 32) | h2[l][7];
+            w->z[i+l][1] = ((uint64_t)h2[l][4] << 32) | h2[l][5];
+            w->z[i+l][2] = ((uint64_t)h2[l][2] << 32) | h2[l][3];
+            w->z[i+l][3] = ((uint64_t)h2[l][0] << 32) | h2[l][1];
+        }
     }
     w->n = n;
     return n;
@@ -600,9 +630,14 @@ static void *worker_main(void *arg) {
         !BN_lebin2bn(S->pp->u2r_y, 32, w->ry) ||
         !EC_POINT_set_affine_coordinates_GFp(w->grp, w->Ru2, w->rx, w->ry, w->ctx)) { S->failed.store(1); return NULL; }
 #if QSB_CG_HAVE_SIMD
-    v4::vstate *vs4 = NULL; v8::vstate *vs8 = NULL;
+    v4::vstate *vs4 = NULL; v8::vstate *vs8 = NULL; vi::vstate *vsi = NULL; sf::state *vsf = NULL;
     if (S->simd_ok & 4) vs4 = (v4::vstate *)aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
     if (S->simd_ok & 8) vs8 = (v8::vstate *)aligned_alloc(64, (sizeof(v8::vstate) + 63) & ~(size_t)63);
+    if (S->simd_ok & 16) vsi = (vi::vstate *)aligned_alloc(64, (sizeof(vi::vstate) + 63) & ~(size_t)63);
+    if (S->signed_table) vsf = (sf::state *)malloc(sizeof(sf::state));
+    if ((S->simd_ok & 16) && !vsi) { S->failed.store(1); return NULL; }
+    if ((S->simd_ok & 8) && !vs8) { S->failed.store(1); return NULL; }
+    if ((S->simd_ok & 4) && !vs4) { S->failed.store(1); return NULL; }
 #endif
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load()) return NULL; usleep(2000); }
 #if QSB_CG_HAVE_SIMD
@@ -610,17 +645,18 @@ static void *worker_main(void *arg) {
      * candidates are real work and are counted); the others wait for the choice. */
     if (id == 0 && S->simd < 0) {
         int best = S->simd_env >= 0 ? S->simd_env : 0; double bt = 1e30;
-        const int cand[3] = {8, 4, 0};
-        for (int c = 0; c < 3 && S->simd_env < 0; c++) {
+        const bool fold_ok = S->signed_table && vsf && vsi && sf::selfcheck(w,vsi,vsf);
+        const int cand[5] = {32, 16, 8, 4, 0};
+        for (int c = 0; c < 5 && S->simd_env < 0; c++) {
             const int m = cand[c];
-            if (m && !(S->simd_ok & m)) continue;
+            if (m == 32 ? !fold_ok : (m && !(S->simd_ok & m))) continue;
             if (!m && S->simd_ok) continue;                        /* scalar only without SIMD */
             double t = 0;
             for (int rep = 0; rep < 3; rep++) {
                 const int n = fill_batch(w, scratch);
                 if (!n) break;
                 const uint64_t r0 = __rdtsc();
-                if (m == 8) v8::ec_batch_vec(w, vs8); else if (m == 4) v4::ec_batch_vec(w, vs4); else ec_batch(w);
+                if (m == 32) sf::ec_batch(w,vsi,vsf); else if (m == 16) vi::ec_batch(w, vsi); else if (m == 8) v8::ec_batch_vec(w, vs8); else if (m == 4) v4::ec_batch_vec(w, vs4); else ec_batch(w);
                 const double dt = (double)(__rdtsc() - r0) / n;
                 if (rep > 0) t += dt;                                 /* first batch warms caches */
                 S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
@@ -628,7 +664,7 @@ static void *worker_main(void *arg) {
             if (t > 0 && t < bt) { bt = t; best = m; }
         }
         S->simd = best;
-        if (g_ctl_verbose) printf("  [CPU] EC path: %s\n", best == 8 ? "avx512f x8" : best == 4 ? "avx2 x4" : "scalar");
+        if (g_ctl_verbose) printf("  [CPU] EC path: %s\n", best == 32 ? "signed-fold13 IFMA52 x8" : best == 16 ? "IFMA52 x8" : best == 8 ? "avx512f x8" : best == 4 ? "avx2 x4" : "scalar");
     }
     while (S->simd < 0) { if (S->stop.load()) return NULL; usleep(1000); }
 #endif
@@ -640,6 +676,8 @@ static void *worker_main(void *arg) {
         int n = fill_batch(w, scratch);
         const uint64_t r1 = __rdtsc();
 #if QSB_CG_HAVE_SIMD
+        if (n && S->simd == 32) { if(vsf) sf::ec_batch(w,vsi,vsf); else vi::ec_batch(w,vsi); } else
+        if (n && S->simd == 16) vi::ec_batch(w, vsi); else
         if (n && S->simd == 8) v8::ec_batch_vec(w, vs8); else
         if (n && S->simd == 4) v4::ec_batch_vec(w, vs4); else
 #endif
@@ -655,11 +693,15 @@ static void *worker_main(void *arg) {
 }
 
 /* table-builder thread: windows are split across builders */
-struct build_arg { int j0, j1; fe bx[QSB_CG_NWIN], by[QSB_CG_NWIN]; };
+struct build_arg {
+    int j0,j1,f0,f1;fe bx[QSB_CG_NWIN],by[QSB_CG_NWIN];
+    fe fx[qcg_signed_plan::windows],fy[qcg_signed_plan::windows];
+};
 static void *builder_main(void *arg) {
     build_arg *a = (build_arg *)arg;
     set_idle_priority();
     for (int j = a->j0; j < a->j1; j++) build_window(g_cg->table + (size_t)j * QSB_CG_TSIZE, &a->bx[j], &a->by[j]);
+    if(g_cg->signed_table)for(int j=a->f0;j<a->f1;++j)build_signed_window(j,a->fx[j],a->fy[j]);
     return NULL;
 }
 
@@ -697,7 +739,8 @@ struct ctl_t {
     double next_ab;
     uint64_t busy0; double busy_t0;
     uint64_t cand0; double cand_t0;
-    double win_t0; int win_n, win_skip, strikes;
+    double win_t0, win_gpu_dt, ab_cpu_time; int win_n, win_skip, strikes;
+    uint64_t win_cand0, ab_cpu_done;
     int verbose;
 };
 static ctl_t g_ctl;
@@ -739,9 +782,12 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     S->n_chunks = (uint64_t)S->chunks_per_seq * 0x3FFFFFFFull;      /* sequences 0xFFFFFFFE down to 0xC0000000 */
     S->nblk = pp->suffix_len < 56 ? 1 : 2;
     S->cache_first = S->nblk == 2 && pp->seq_offset + 4 <= 64 && pp->lt_offset >= 64;
+    S->sha4 = cpu_sha4_check();
     S->simd.store(0); S->simd_ok = 0; S->simd_env = -1;
 #if QSB_CG_HAVE_SIMD
-    S->simd_ok = (__builtin_cpu_supports("avx2") ? 4 : 0) | (__builtin_cpu_supports("avx512f") ? 8 : 0);
+    S->simd_ok = (__builtin_cpu_supports("avx2") ? 4 : 0) | (__builtin_cpu_supports("avx512f") ? 8 : 0) |
+        ((__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma")) ? 16 : 0);
+    if ((S->simd_ok & 16) && !vi::field_selfcheck()) S->simd_ok &= ~16;
     if (getenv("QSB_CPU_GRIND_SIMD")) { S->simd_env = atoi(getenv("QSB_CPU_GRIND_SIMD")); if (S->simd_env != 0 && !(S->simd_ok & S->simd_env)) S->simd_env = 0; }
     S->simd.store(-1);
 #endif
@@ -752,6 +798,13 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     if (!S->table) { g_cg = NULL; return 0; }
     madvise(S->table, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry), MADV_HUGEPAGE);
     for (int j = 0; j < QSB_CG_NWIN; j++) memset(&S->table[(size_t)j * QSB_CG_TSIZE], 0, sizeof(tentry));
+    S->signed_table=NULL;S->signed_infinity[0]=S->signed_infinity[1]=false;
+#if QSB_CG_HAVE_SIMD
+    if((S->simd_ok & 16) && S->simd_env<0 && signed_memory_ok(nw)) {
+        if(posix_memalign((void **)&S->signed_table,2u<<20,qcg_signed_plan::table_bytes)!=0)S->signed_table=NULL;
+        if(S->signed_table)madvise(S->signed_table,qcg_signed_plan::table_bytes,MADV_HUGEPAGE);
+    }
+#endif
     /* window bases Bj = 2^(W j) * neg_r_inv * G and A = u2 R, via OpenSSL */
     static build_arg ba[QSB_CG_NWIN];
     {
@@ -762,6 +815,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
         EC_GROUP_get_order(grp, order, ctx);
         BN_lebin2bn(pp->neg_r_inv, 32, k);
         fe bx[QSB_CG_NWIN], by[QSB_CG_NWIN];
+        fe fx[qcg_signed_plan::windows],fy[qcg_signed_plan::windows];
         for (int j = 0; j < QSB_CG_NWIN; j++) {
             EC_POINT_mul(grp, P, k, NULL, NULL, ctx);
             EC_POINT_get_affine_coordinates(grp, P, x, y, ctx);
@@ -771,6 +825,17 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
             fe_from_w(&bx[j], xw); fe_from_w(&by[j], yw);
             for (int s = 0; s < QSB_CG_W; s++) BN_mod_lshift1(k, k, order, ctx);
         }
+        if(S->signed_table) {
+            bool ok=BN_lebin2bn(pp->neg_r_inv,32,k)!=NULL;
+            for(int j=0;ok && j<qcg_signed_plan::windows;++j) {
+                uint64_t xw[4],yw[4];
+                ok=EC_POINT_mul(grp,P,k,NULL,NULL,ctx) && EC_POINT_get_affine_coordinates(grp,P,x,y,ctx) &&
+                   BN_bn2lebinpad(x,(unsigned char *)xw,32)==32 && BN_bn2lebinpad(y,(unsigned char *)yw,32)==32;
+                if(ok) {fe_from_w(&fx[j],xw);fe_from_w(&fy[j],yw);}
+                for(unsigned bit=0;ok && bit<qcg_signed_plan::width(j);++bit)ok=BN_mod_lshift1(k,k,order,ctx);
+            }
+            if(!ok) {free(S->signed_table);S->signed_table=NULL;}
+        }
         uint64_t aw[4], bw[4]; memcpy(aw, pp->u2r_x, 32); memcpy(bw, pp->u2r_y, 32);
         fe_from_w(&S->ax, aw); fe_from_w(&S->ay, bw);
         BN_free(order); BN_free(k); BN_free(x); BN_free(y); EC_POINT_free(P); BN_CTX_free(ctx); EC_GROUP_free(grp);
@@ -779,6 +844,8 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
         for (int b = 0; b < nb; b++) {
             ba[b].j0 = QSB_CG_NWIN * b / nb; ba[b].j1 = QSB_CG_NWIN * (b + 1) / nb;
             memcpy(ba[b].bx, bx, sizeof bx); memcpy(ba[b].by, by, sizeof by);
+            ba[b].f0=qcg_signed_plan::windows*b/nb;ba[b].f1=qcg_signed_plan::windows*(b+1)/nb;
+            if(S->signed_table) {memcpy(ba[b].fx,fx,sizeof fx);memcpy(ba[b].fy,fy,sizeof fy);}
         }
         /* builders run detached-by-join in a helper so start() returns at once */
         struct helper_arg { int nb; build_arg *ba; };
@@ -847,37 +914,44 @@ static void tick(double now, double gpu_batch) {
         return;
     }
     if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
-        /* A/B: four windows on,off,on,off; each lasts >= 1 s and >= 3 GPU batches, and the
-         * first batch after each switch (it straddles both settings) is not measured */
+        /* ABBA: on,off,off,on. Equal-weight 2 s windows cancel first-order
+         * drift in the GPU batch interval; discard the first straddling batch.
+         * CPU contribution is measured only during the on windows. */
         C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
+        C.ab_cpu_time = 0; C.ab_cpu_done = 0;
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1; C.win_gpu_dt = 0;
+        C.win_cand0 = S->cand_done.load(std::memory_order_relaxed);
         return;
     }
     if (C.phase == 3) {
-        /* windows: >= 1 s and >= 3 GPU batches each */
-        const int on = (C.ab_left & 1) == 0;       /* 4: on, 3: off, 2: on, 1: off */
+        const int on = C.ab_left == 4 || C.ab_left == 1;
         if (C.win_skip) C.win_skip = 0;
-        else { if (on) { C.ab_on_sum += dt; C.ab_on_n++; } else { C.ab_off_sum += dt; C.ab_off_n++; } C.win_n++; }
-        if (C.win_n < 3 || now - C.win_t0 < 1.0) return;
+        else { C.win_gpu_dt += dt; C.win_n++; }
+        if (C.win_n < 3 || now - C.win_t0 < 2.0) return;
+        const uint64_t cd = S->cand_done.load(std::memory_order_relaxed);
+        const double mean_dt = C.win_gpu_dt / C.win_n;
+        if (on) {
+            C.ab_on_sum += mean_dt; C.ab_on_n++;
+            C.ab_cpu_done += cd - C.win_cand0;
+            C.ab_cpu_time += now - C.win_t0;
+        } else { C.ab_off_sum += mean_dt; C.ab_off_n++; }
         C.ab_left--;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
-        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.wmax : 0); return; }
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1; C.win_gpu_dt = 0; C.win_cand0 = cd;
+        if (C.ab_left > 0) { set_allowed(C.ab_left == 1 ? C.wmax : 0); return; }
         set_allowed(C.wmax);
         const double on_t = C.ab_on_sum / (C.ab_on_n ? C.ab_on_n : 1);
         const double off_t = C.ab_off_sum / (C.ab_off_n ? C.ab_off_n : 1);
-        const double loss = on_t / off_t - 1.0;     /* GPU slowdown with the workers on */
-        const uint64_t cd = S->cand_done.load();
-        const double cpu_rate = C.cand_t0 > 0 && now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
+        const double loss = on_t > 0 && off_t > 0 ? on_t / off_t - 1.0 : 0;
+        const double cpu_rate = C.ab_cpu_time > 0 ? (double)C.ab_cpu_done / C.ab_cpu_time : 0;
         C.cand0 = cd; C.cand_t0 = now;
-        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
+        if (C.verbose) printf("  [CPU] ABBA: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
                               on_t, off_t, 100 * loss, cpu_rate, C.wmax,
                               (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
-        /* The comparison guards against real contention (a hidden CPU quota, a shared core),
-         * not against noise: one window's noise is up to ~1% on short GPU batches. Shed a quarter
-         * of the workers only after two consecutive windows each show a GPU loss above 1.5% that
-         * also exceeds what the workers add. */
-        const double cpu_frac = on_t > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
-        const int bad = loss > 0.015 && loss > cpu_frac;
+        /* Net candidates improve iff CPU/GPU_on exceeds the measured interval
+         * loss. Keep a 0.3 percentage-point margin and require two consecutive
+         * ABBA trials; do not grant a blanket 1.5% GPU-loss allowance. */
+        const double cpu_frac = on_t > 0 && gpu_batch > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
+        const int bad = loss > cpu_frac + 0.003;
         if (bad && C.strikes >= 1) {
             int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
             C.wmax = nw; set_allowed(nw); C.strikes = 0;

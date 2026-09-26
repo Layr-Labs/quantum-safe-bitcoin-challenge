@@ -398,15 +398,23 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
             vfe_neg(&t, &qx, 1); t2 = vs->x[b]; vfe_add(&t2, &t);
             vfe_mul(&qy, &l, &t2); vfe_add(&qy, &ny); vfe_normalize(&qy);
             V xw[4]; vfe_to_w(xw, &qx);
-            for (int ln = 0; ln < QCG_VW; ln++) {
-                const int i = QCG_VW * b + ln;
-                if (i >= n || w->inf[i]) continue;
-                uint8_t blk[64];
-                blk[0] = (uint8_t)(0x02 | (lane(qy.n[0], ln) & 1));
-                for (int k = 0; k < 4; k++) { uint64_t v = lane(xw[3 - k], ln); for (int bb = 0; bb < 8; bb++) blk[1 + 8 * k + bb] = (uint8_t)(v >> (56 - 8 * bb)); }
-                blk[33] = 0x80; memset(blk + 34, 0, 30); blk[62] = 0x01; blk[63] = 0x08;
-                uint32_t h[8]; memcpy(h, SHA_IV, 32); sha_blocks(h, blk, 1);
-                if (lz_ok(h)) publish(w, i, recid);
+            for (int ln0 = 0; ln0 < QCG_VW; ln0 += 4) {
+                uint8_t blk[4][64] = {}; const uint8_t *ptr[4]; uint32_t h[4][8];
+                for (int lane4 = 0; lane4 < 4; ++lane4) {
+                    const int ln = ln0 + lane4;
+                    blk[lane4][0] = (uint8_t)(0x02 | (lane(qy.n[0], ln) & 1));
+                    for (int k = 0; k < 4; k++) {
+                        uint64_t v = lane(xw[3 - k], ln);
+                        for (int bb = 0; bb < 8; bb++) blk[lane4][1 + 8*k + bb] = (uint8_t)(v >> (56 - 8*bb));
+                    }
+                    blk[lane4][33] = 0x80; blk[lane4][62] = 1; blk[lane4][63] = 8;
+                    memcpy(h[lane4], SHA_IV, 32); ptr[lane4] = blk[lane4];
+                }
+                cpu_hash4(h, ptr);
+                for (int lane4 = 0; lane4 < 4; ++lane4) {
+                    const int i = QCG_VW*b + ln0 + lane4;
+                    if (i < n && !w->inf[i] && lz_ok(h[lane4])) publish(w, i, recid);
+                }
             }
         }
     }
