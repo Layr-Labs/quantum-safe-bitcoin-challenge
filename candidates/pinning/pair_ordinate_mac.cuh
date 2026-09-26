@@ -4,6 +4,21 @@
 // tail. Ported from Ryun1 submission 5089a297 (lazy deferred ordinate, generated
 // asm), carried here by the fixed-base chain as the unmultiplied ordinate pair.
 #pragma once
+/* QSB_PO_ALU: the register-plus-carry adds of qsb_mul2add (addc.u32 k, k, 0 and the like,
+ * carry-out unused) take the constant-bank zero pin_zero_add as their addend, as QSB_CHAIN_ALU
+ * does for the multiply tails. ptxas can then only lower them to IADD3.X on the ALU pipe instead
+ * of IMAD.X on the multiply pipe, which bounds the prepare kernel. x + 0 + carry is exactly
+ * x + carry, so every result is unchanged. 0 restores the literal zero and the original PTX. */
+#ifndef QSB_PO_ALU
+#define QSB_PO_ALU 1
+#endif
+#if QSB_PO_ALU
+#define QSB_PO_Z "qz"
+#define QSB_PO_ZDECL "\t.reg .u32 qz;\n\tld.const.u32 qz, [pin_zero_add];\n"
+#else
+#define QSB_PO_Z "0"
+#define QSB_PO_ZDECL ""
+#endif
 /* QSB_PAIR_ORD_G8=0 (default): the g-chain carry g8 (bit 288) is dropped exactly as in every
  * _ModMultCore tail; for a SUM of two products it fires when a*b+c*d lies within ~2^-22 below
  * 2^512 (~2^-23.6 per op, the square-class exposure QSB_SAS_Z9SUB_ALL documents; host-gated).
@@ -25,6 +40,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3,sfa,sft,kx;\n"
   "\t.reg .u32 z0,z1,z2,z3,z4,z5,z6,z7,z8,w0,w1,w2,w3,w4,w5,w6,w7,sfl,sfh,kl,kh,g8;\n"
   "\tmov.u32 zz, 0;\n"
+  QSB_PO_ZDECL
   "\tmov.b64 {a0,a1}, %4;\n"
   "\tmov.b64 {a2,a3}, %5;\n"
   "\tmov.b64 {a4,a5}, %6;\n"
@@ -102,7 +118,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, c1, d6;\n"
   "addc.cc.u64 o3, o3, t;\n"
-  "addc.u32 k2, k2, 0;\n"
+  "addc.u32 k2, k2, " QSB_PO_Z ";\n"
   "mul.wide.u32 t, a2, b1;\n"
   "add.cc.u64 o1, o1, t;\n"
   "mul.wide.u32 t, a2, b3;\n"
@@ -129,7 +145,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e3, e3, t;\n"
   "mul.wide.u32 t, c2, d6;\n"
   "addc.cc.u64 e4, e4, t;\n"
-  "addc.u32 k4, k4, 0;\n"
+  "addc.u32 k4, k4, " QSB_PO_Z ";\n"
   "mul.wide.u32 t, c2, d1;\n"
   "add.cc.u64 o1, o1, t;\n"
   "mul.wide.u32 t, c2, d3;\n"
@@ -174,7 +190,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, c3, d6;\n"
   "addc.cc.u64 o4, o4, t;\n"
-  "addc.u32 k6, k6, 0;\n"
+  "addc.u32 k6, k6, " QSB_PO_Z ";\n"
   "mul.wide.u32 t, a4, b1;\n"
   "add.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, a4, b3;\n"
@@ -201,7 +217,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e4, e4, t;\n"
   "mul.wide.u32 t, c4, d6;\n"
   "addc.cc.u64 e5, e5, t;\n"
-  "addc.u32 k8, k8, 0;\n"
+  "addc.u32 k8, k8, " QSB_PO_Z ";\n"
   "mul.wide.u32 t, c4, d1;\n"
   "add.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, c4, d3;\n"
@@ -246,7 +262,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o4, o4, t;\n"
   "mul.wide.u32 t, c5, d6;\n"
   "addc.cc.u64 o5, o5, t;\n"
-  "addc.u32 k10, k10, 0;\n"
+  "addc.u32 k10, k10, " QSB_PO_Z ";\n"
   "mul.wide.u32 t, a6, b1;\n"
   "add.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, a6, b3;\n"
@@ -273,7 +289,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e5, e5, t;\n"
   "mul.wide.u32 t, c6, d6;\n"
   "addc.cc.u64 e6, e6, t;\n"
-  "addc.u32 k12, k12, 0;\n"
+  "addc.u32 k12, k12, " QSB_PO_Z ";\n"
   "mul.wide.u32 t, c6, d1;\n"
   "add.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, c6, d3;\n"
@@ -318,7 +334,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o5, o5, t;\n"
   "mul.wide.u32 t, c7, d6;\n"
   "addc.cc.u64 o6, o6, t;\n"
-  "addc.u32 k14, k14, 0;\n"
+  "addc.u32 k14, k14, " QSB_PO_Z ";\n"
 #if QSB_PAIR_ORD_G8
   "mov.b64 {x0,x1}, e0; mov.b64 {x2,x3}, e1; mov.b64 {x4,x5}, e2; mov.b64 {x6,x7}, e3;\n"
   "mov.b64 {x8,x9}, e4; mov.b64 {x10,x11}, e5; mov.b64 {x12,x13}, e6; mov.b64 {x14,x15}, e7;\n"
@@ -339,7 +355,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u32 x13, x13, y13;\n"
   "addc.cc.u32 x14, x14, y14;\n"
   "addc.cc.u32 x15, x15, k14;\n"
-  "addc.u32 x16, k15, 0;\n"
+  "addc.u32 x16, k15, " QSB_PO_Z ";\n"
   "mov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
   "mov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n"
   "mul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n"
@@ -391,7 +407,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u32 x13, x13, y13;\n"
   "addc.cc.u32 x14, x14, y14;\n"
   "addc.cc.u32 x15, x15, k14;\n"
-  "addc.u32 x16, k15, 0;\n"
+  "addc.u32 x16, k15, " QSB_PO_Z ";\n"
   "mov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
   "mov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n"
   "mul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n"
@@ -420,7 +436,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "mov.b64 {sfl, sfh}, sfa;\n"
   "mov.u32 z0, sfl;\n"
   "add.cc.u32 z1, sfh, z8;\n"
-  "addc.u32 z2, z2, 0;\n"
+  "addc.u32 z2, z2, " QSB_PO_Z ";\n"
   "mov.b64 %0, {z0,z1}; mov.b64 %1, {z2,z3}; mov.b64 %2, {z4,z5}; mov.b64 %3, {z6,z7};\n"
 #endif
   "}\n"

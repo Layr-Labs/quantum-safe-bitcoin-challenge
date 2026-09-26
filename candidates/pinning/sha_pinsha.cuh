@@ -113,6 +113,9 @@ __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by t
 #if defined(QSB_CHAIN_ALU) && QSB_CHAIN_ALU && !QSB_SHA_ALU_ADD
 #error "QSB_CHAIN_ALU reads pin_zero_add, which exists only with QSB_SHA_ALU_ADD=1"
 #endif
+#if defined(QSB_PO_ALU) && QSB_PO_ALU && !QSB_SHA_ALU_ADD
+#error "QSB_PO_ALU reads pin_zero_add, which exists only with QSB_SHA_ALU_ADD=1"
+#endif
 
 /* One round; kw = K_i + W_i (a literal when W_i is constant). */
 #define QSB_RL(a, b, c, d, e, f, g, h, kw) \
