@@ -128,9 +128,9 @@ struct shared_t {
     std::atomic<int> ready;
     std::atomic<int> failed;
     int nworkers;
-    int has_avx2, has_adx, has_sha;
+    int has_ifma, has_avx2, has_adx, has_sha;
     int ec_env, sha_env;                  /* overrides, -1 = auto */
-    std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4; -1 until chosen */
+    std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4, 3 = ifma8; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
     std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
@@ -411,15 +411,24 @@ static int fill_batch(worker_t *w) {
 #define QSB_CG_HAVE_SIMD 0
 #endif
 
+/* ---------------- AVX-512 IFMA EC back end ---------------- */
+#if defined(__x86_64__) && !defined(QSB_CG_NO_IFMA)
+#include "cg_ifma8.h"
+#define QSB_CG_HAVE_IFMA 1
+#else
+#define QSB_CG_HAVE_IFMA 0
+#endif
+
 /* ---------------- table build ---------------- */
 #include "cg_table.h"
 
 
 static void run_ec(worker_t *w, int mode, void *vs, void *ss) {
+#if QSB_CG_HAVE_IFMA
+    if (mode == 3) { v8::ec_batch(w, (v8::vstate *)vs); return; }
+#endif
 #if QSB_CG_HAVE_SIMD
     if (mode == 2) { v4::ec_batch(w, (v4::vstate *)vs); return; }
-#else
-    (void)vs;
 #endif
     if (mode == 1) ec_scalar<qcg_fe::FeAsm>(w, (sstate *)ss);
     else ec_scalar<qcg_fe::FeC>(w, (sstate *)ss);
@@ -442,22 +451,33 @@ static void *worker_main(void *arg) {
         !BN_lebin2bn(S->pp->u2r_y, 32, w->ry) ||
         !EC_POINT_set_affine_coordinates(w->grp, w->Ru2, w->rx, w->ry, w->ctx)) { S->failed.store(1); return NULL; }
     void *vs = NULL;
+#if QSB_CG_HAVE_SIMD || QSB_CG_HAVE_IFMA
+    size_t vs_sz = 0;
 #if QSB_CG_HAVE_SIMD
-    if (S->has_avx2) vs = aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
+    if (sizeof(v4::vstate) > vs_sz) vs_sz = sizeof(v4::vstate);
+#endif
+#if QSB_CG_HAVE_IFMA
+    if (sizeof(v8::vstate) > vs_sz) vs_sz = sizeof(v8::vstate);
+#endif
+    if (S->has_avx2 || S->has_ifma) vs = aligned_alloc(64, (vs_sz + 63) & ~(size_t)63);
 #endif
     sstate *ss = (sstate *)aligned_alloc(64, (sizeof(sstate) + 63) & ~(size_t)63);
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load() || S->failed.load()) return NULL; usleep(2000); }
     /* Worker 0 picks the SHA and EC paths on this CPU from timed real batches (their candidates
      * are real work and are counted); the others wait. Each (SHA, EC) combination runs 5 batches,
-     * the first discarded; the minimum per-candidate time of each stage decides. The AVX2 EC
-     * stage is the design point: the scalar MULX stage is chosen only if it is >10% faster. */
+     * the first discarded; the minimum per-candidate time of each stage decides. */
     if (id == 0 && S->ec_mode.load() < 0) {
-        int ecs[3], nec = 0, shs[3], nsh = 0;
+        int ecs[4], nec = 0, shs[3], nsh = 0;
         if (S->ec_env >= 0) ecs[nec++] = S->ec_env;
-        else { if (S->has_avx2 && QSB_CG_HAVE_SIMD) ecs[nec++] = 2; if (S->has_adx) ecs[nec++] = 1; if (!nec) ecs[nec++] = 0; }
+        else {
+            if (S->has_ifma && QSB_CG_HAVE_IFMA) ecs[nec++] = 3;
+            if (S->has_avx2 && QSB_CG_HAVE_SIMD) ecs[nec++] = 2;
+            if (S->has_adx) ecs[nec++] = 1;
+            if (!nec) ecs[nec++] = 0;
+        }
         if (S->sha_env >= 0) shs[nsh++] = S->sha_env;
         else { if (S->has_sha) shs[nsh++] = 2; if (S->has_avx2) shs[nsh++] = 1; if (!nsh) shs[nsh++] = 0; }
-        double sha_best[3] = {1e30, 1e30, 1e30}, ec_best[3] = {1e30, 1e30, 1e30};   /* indexed by mode */
+        double sha_best[3] = {1e30, 1e30, 1e30}, ec_best[4] = {1e30, 1e30, 1e30, 1e30};   /* indexed by mode */
         for (int a = 0; a < nsh; a++) {
             S->sha_mode.store(shs[a]);
             for (int b = 0; b < nec; b++) {
@@ -480,19 +500,18 @@ static void *worker_main(void *arg) {
         for (int a = 1; a < nsh; a++) if (sha_best[shs[a]] < sha_best[bsha]) bsha = shs[a];
         for (int b = 1; b < nec; b++) {
             const int m = ecs[b];
-            const double margin = (bec == 2 && m != 2) ? 0.9 : (m == 2 && bec != 2) ? 1.0 / 0.9 : 1.0;
-            if (ec_best[m] < margin * ec_best[bec]) bec = m;
+            if (ec_best[m] < ec_best[bec]) bec = m;
         }
         S->sha_mode.store(bsha);
         S->ec_mode.store(bec);
         if (g_ctl_verbose) {
-            char tb[6][16];
-            const double tv[6] = {sha_best[2], sha_best[1], sha_best[0], ec_best[2], ec_best[1], ec_best[0]};
-            for (int q = 0; q < 6; q++) { if (tv[q] < 1e29) snprintf(tb[q], sizeof tb[q], "%.0f", tv[q]); else snprintf(tb[q], sizeof tb[q], "-"); }
-            printf("  [CPU] tsc/cand sha: sha-ni %s avx2x8 %s ref %s | ec: avx2x4 %s mulx %s c %s\n", tb[0], tb[1], tb[2], tb[3], tb[4], tb[5]);
+            char tb[7][16];
+            const double tv[7] = {sha_best[2], sha_best[1], sha_best[0], ec_best[3], ec_best[2], ec_best[1], ec_best[0]};
+            for (int q = 0; q < 7; q++) { if (tv[q] < 1e29) snprintf(tb[q], sizeof tb[q], "%.0f", tv[q]); else snprintf(tb[q], sizeof tb[q], "-"); }
+            printf("  [CPU] tsc/cand sha: sha-ni %s avx2x8 %s ref %s | ec: ifma8 %s avx2x4 %s mulx %s c %s\n", tb[0], tb[1], tb[2], tb[3], tb[4], tb[5], tb[6]);
             printf("  [CPU] chosen: sha=%s ec=%s, table %s (%.0f MiB, %d windows, built in %.2f s)\n",
                    bsha == 2 ? "sha-ni" : bsha == 1 ? "avx2x8" : "ref",
-                   bec == 2 ? "avx2x4" : bec == 1 ? "mulx" : "c", S->lay.name,
+                   bec == 3 ? "ifma8" : bec == 2 ? "avx2x4" : bec == 1 ? "mulx" : "c", S->lay.name,
                    (double)S->table_bytes / 1048576.0, S->lay.nwin, S->t_build);
         }
     }
@@ -631,6 +650,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     if (env) nw = atoi(env);
     if (nw > QSB_CG_MAXW) nw = QSB_CG_MAXW;
     const int has_avx2 = __builtin_cpu_supports("avx2"), has_bmi2 = __builtin_cpu_supports("bmi2");
+    const int has_ifma = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma");
     int has_adx = 0;
     { unsigned r[4] = {0, 0, 0, 0}; __cpuid_count(7, 0, r[0], r[1], r[2], r[3]); has_adx = (r[1] >> 19) & 1; }
     const int has_sha = __builtin_cpu_supports("sha") && __builtin_cpu_supports("sse4.1");
@@ -647,9 +667,9 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
         else if (avail >= 900) lok = layout_by_name(&L, "small");
         else if (avail >= 500) lok = layout_by_name(&L, "tiny");
     }
-    printf("  CPU co-grind: %d CPUs in affinity, cgroup quota %s%.2f, %d workers%s%s%s%s, mem avail %.0f MiB\n",
+    printf("  CPU co-grind: %d CPUs in affinity, cgroup quota %s%.2f, %d workers%s%s%s%s%s, mem avail %.0f MiB\n",
            ncpu, quota > 0 ? "" : "none ", quota > 0 ? quota : 0.0, nw > 0 ? nw : 0, guard_ok ? ", smt-guard" : "",
-           has_avx2 ? ", avx2" : "", has_adx && has_bmi2 ? ", adx" : "", has_sha ? ", sha-ni" : "", avail);
+           has_ifma ? ", ifma8" : "", has_avx2 ? ", avx2" : "", has_adx && has_bmi2 ? ", adx" : "", has_sha ? ", sha-ni" : "", avail);
     if (nw <= 0 || lok != 0) return 0;
     if (pp->suffix_len > 119 || pp->seq_offset + 4 > pp->suffix_len || pp->lt_offset + 4 > pp->suffix_len || lt_max <= lt_min) return 0;
 
@@ -661,13 +681,15 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     S->n_chunks = (uint64_t)S->chunks_per_seq * 0x3FFFFFFFull;      /* sequences 0xFFFFFFFE down to 0xC0000000 */
     S->nblk = pp->suffix_len < 56 ? 1 : 2;
     S->cache_first = S->nblk == 2 && pp->seq_offset + 4 <= 64 && pp->lt_offset >= 64;
-    S->has_avx2 = has_avx2; S->has_adx = has_adx && has_bmi2; S->has_sha = has_sha;
+    S->has_ifma = has_ifma; S->has_avx2 = has_avx2; S->has_adx = has_adx && has_bmi2; S->has_sha = has_sha;
     g_fe_asm = S->has_adx;
     S->ec_env = -1; S->sha_env = -1;
     if (getenv("QSB_COGRIND_EC")) {
         const char *e = getenv("QSB_COGRIND_EC");
-        S->ec_env = !strcmp(e, "avx2") ? 2 : !strcmp(e, "mulx") ? 1 : 0;
-        if ((S->ec_env == 2 && !(has_avx2 && QSB_CG_HAVE_SIMD)) || (S->ec_env == 1 && !S->has_adx)) S->ec_env = 0;
+        S->ec_env = (!strcmp(e, "ifma") || !strcmp(e, "ifma8")) ? 3 : !strcmp(e, "avx2") ? 2 : !strcmp(e, "mulx") ? 1 : 0;
+        if ((S->ec_env == 3 && !(has_ifma && QSB_CG_HAVE_IFMA)) ||
+            (S->ec_env == 2 && !(has_avx2 && QSB_CG_HAVE_SIMD)) ||
+            (S->ec_env == 1 && !S->has_adx)) S->ec_env = 0;
     }
     if (getenv("QSB_COGRIND_SHA")) {
         const char *e = getenv("QSB_COGRIND_SHA");
@@ -690,6 +712,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     mkdir("results", 0755);
     S->hit_fd = open("results/pinning_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (S->hit_fd < 0) { g_cg = NULL; return 0; }
+    atexit(stop_and_report);
     if (table_start(S, nw) != 0) { g_cg = NULL; return 0; }
     recode_init(S->lay);
     S->allowed.store(0);
