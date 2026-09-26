@@ -144,7 +144,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
- * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 4 x 4M here, 2 x 8M before. */
+ * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 3 x 4M here (4 x 4M, 2 x 8M before). */
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
@@ -168,7 +168,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 16
+#define QSB_PMIX12 32
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -196,7 +196,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 1
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
@@ -421,8 +421,8 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
-                               * 4 x 4M holds the 2 x 8M state bytes: each sequence's final drain and
+#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+                               * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
 #endif
@@ -565,6 +565,15 @@ __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
                  :: "l"(p), "l"(a) : "memory");
 #else
     qsb_st_u64(p, a);
+#endif
+}
+/* 16-byte form of qsb_st_state_u64 (same L2 policy): one entry of a state plane. */
+__device__ __forceinline__ void qsb_st_state_v2(ulonglong2 *p, uint64_t a, uint64_t b) {
+#if QSB_L2STATE & 1
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(a), "l"(b) : "memory");
+#else
+    qsb_st_v2(p, a, b);
 #endif
 }
 __device__ __forceinline__ void qsb_discard_l2(const void *p) {
@@ -3515,14 +3524,13 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
     Load256(W,rw);
     W[4]=0;
 }
-/* The state stores of qsb_packed_prepare (QSB_PREP_STATE == 2): same bytes, same addresses. */
+/* The state stores of qsb_packed_prepare, as four 16-byte stores: same bytes, same addresses. */
 __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *vbar, const uint64_t *tbar) {
     ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
-    uint64_t *sw=(uint64_t *)st;
-    qsb_st_state_u64(sw,vbar[0]); qsb_st_state_u64(sw+1,vbar[1]);
-    qsb_st_state_u64(sw+2*QSB_TREE_N,vbar[2]); qsb_st_state_u64(sw+2*QSB_TREE_N+1,vbar[3]);
-    qsb_st_state_u64(sw+4*QSB_TREE_N,tbar[0]); qsb_st_state_u64(sw+4*QSB_TREE_N+1,tbar[1]);
-    qsb_st_state_u64(sw+6*QSB_TREE_N,tbar[2]); qsb_st_state_u64(sw+6*QSB_TREE_N+1,tbar[3]);
+    qsb_st_state_v2(st,vbar[0],vbar[1]);
+    qsb_st_state_v2(st+QSB_TREE_N,vbar[2],vbar[3]);
+    qsb_st_state_v2(st+2*QSB_TREE_N,tbar[0],tbar[1]);
+    qsb_st_state_v2(st+3*QSB_TREE_N,tbar[2],tbar[3]);
 }
 #if QSB_POST_GLUE & 4
 /* QSB_POST_GLUE bit 4: an unusable lane (W == 0, or inactive) also enters the tree with U = 0.
@@ -4268,7 +4276,11 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            if (qsb_carrier_has(QK_RF))
+                qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+                    dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[0],nb);
+            else
+                qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4330,7 +4342,11 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        if (qsb_carrier_has(QK_RF))
+            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
+        else
+            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
