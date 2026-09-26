@@ -18,8 +18,6 @@ __device__ uint32_t QSB_LANE_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_UNIQUE[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS];
 __device__ __constant__ int QSB_FIRST_COUNT;
 static int qsb_first_class_count=0;
-/* Host copy of the distinct first-block words (words 2..15 per class), kept for the host producers. */
-static uint32_t qsb_first_unique_host[QSB_FIRST_SLOTS][14];
 
 static uint32_t qsb_window_second_key(const uint8_t w[3]) {
     uint32_t key=0;
@@ -79,7 +77,6 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     printf("Window schedule classes: first=%d second=%d of %d\n",first_distinct,distinct,QSB_SE_PER_EPOCH);
     qsb_first_class_count=first_distinct;
     if(first_distinct>QSB_FIRST_SLOTS)return 1;
-    for(int slot=0;slot<first_distinct;slot++)memcpy(qsb_first_unique_host[slot],first_unique[slot],56);
     for(int slot=0;slot<first_distinct;slot++)
         for(int j=0;j<14;j++)transposed[j][slot]=first_unique[slot][j];
     if(QSB_TO_SYMBOL(QSB_FIRST_COUNT,&first_distinct,sizeof(first_distinct))!=cudaSuccess)return 1;
