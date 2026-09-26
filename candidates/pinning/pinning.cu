@@ -185,6 +185,10 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
+/* QSB_FIN_CAP_IMAD REVERTED: forcing 8 blocks/SM at 64 registers caused register spills
+ * to local memory on the GLV11 P18 schedule (official score 886M, -6.5% vs 948.94M baseline).
+ * The 7-block/72-register path trades one fewer concurrent block for spill-free execution;
+ * for the multiply-heavy finish kernel, spill-free is faster. Leave at 7 (default). */
 #if QSB_FIN_CAP_IMAD
 /* QSB_FIN_CAP_IMAD: ptxas spends the 72-register headroom of a 7-block bound on the new schedule
  * (70 to 72 registers, which drops the finish kernel from 8 to 7 resident blocks per SM). A bound
@@ -218,6 +222,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  *   0: untouched (base). 1: print the driver default only.
  *   32, 64, 128: print the default, request this value, print what the driver kept. */
 #ifndef QSB_L2_FETCH
+/* QSB_L2_FETCH=0: leave driver fetch granularity untouched (baseline). QSB_L2_FETCH=64
+ * was tested in v28 but produced 886M (-6.5%) alongside QSB_FIN_CAP_IMAD=1; impact
+ * isolated requires a separate draw. Restoring to 0 to match the 948.94M baseline. */
 #define QSB_L2_FETCH 0
 #endif
 #if QSB_L2_FETCH != 0 && QSB_L2_FETCH != 1 && QSB_L2_FETCH != 32 && QSB_L2_FETCH != 64 && QSB_L2_FETCH != 128
