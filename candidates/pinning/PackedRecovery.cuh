@@ -183,6 +183,15 @@ __device__ __forceinline__ void qsb_packed_prepare(
 #ifndef QSB_FIN_RAWS
 #define QSB_FIN_RAWS 1
 #endif
+/* QSB_XOUT_LAZY (kill switch, default 1): x_i = s + a through the carry-folding lazy add.
+ * s is a raw product in [0,2^256) and a is canonical, so the folded sum is congruent and
+ * lies in [0,2^256); it is non-canonical only when it lands in [p,2^256), a window of
+ * 2^32+977 values (probability < 2^-223), or when the fold carries twice (a 2^-223 input).
+ * Such an x_i only mis-hashes that candidate, which the host exact gate would reject.
+ * 0 keeps the boundary normalisation and the reducing add. */
+#ifndef QSB_XOUT_LAZY
+#define QSB_XOUT_LAZY 1
+#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -232,14 +241,22 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
+#if QSB_XOUT_LAZY
+    QSB_FIN_ADDL(x1,s,a);
+#else
     qsb_add_boundary(s,a); QSB_FIN_ADD(x1,s,a);
+#endif
     QSB_FIN_SUB(t,m,c); QSB_FIN_RAW_MUL(s,sum,t);
 #if QSB_PARITY_WINDOW
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
     qsb_packed_raw_mul(v,m,s);
 #endif
+#if QSB_XOUT_LAZY
+    QSB_FIN_ADDL(x2,s,a);
+#else
     qsb_add_boundary(s,a); QSB_FIN_ADD(x2,s,a);
+#endif
 #else
     _ModSub256(t,l,c); qsb_recovery_mul(s,sum,t); _ModAdd256(x1,s,a);
 #if QSB_PARITY_WINDOW

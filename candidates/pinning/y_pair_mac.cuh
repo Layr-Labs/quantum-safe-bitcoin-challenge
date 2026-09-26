@@ -7,6 +7,16 @@
 // 513-bit sum is reduced with every carry kept, so the result is in [0,2^256) and
 // congruent to a*b + c*d for EVERY input a,b,c,d in [0,2^256).
 #pragma once
+// QSB_RMAC_TAIL (kill switch, default 1): the reduction tail drops four carries that are set
+// with probability below 2^-21 each on the hashed operands (carry out of r3 + x14*977 and of
+// h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of
+// z8 = k16 + w7 and of {z0,z8+k16} + z8*977) and stops the second fold's carry at z3. A dropped
+// carry only changes that one candidate's recovered ordinate, which the host exact gate
+// would reject: a candidate lost with probability < 2^-19, never a false hit. 0 is the
+// every-carry-kept tail described above.
+#ifndef QSB_RMAC_TAIL
+#define QSB_RMAC_TAIL 1
+#endif
 __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a, const uint64_t *b,
                                                   const uint64_t *c, const uint64_t *d) {
 #ifdef __CUDA_ARCH__
@@ -393,7 +403,9 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.cc.u64 f2, r2, t;\n"
   "mul.wide.u32 t, x14, 977;\n"
   "addc.cc.u64 f3, r3, t;\n"
+#if !QSB_RMAC_TAIL
   "addc.u32 f8, k16, 0;\n"
+#endif
   "mul.wide.u32 t, x9, 977;\n"
   "add.cc.u64 g0, h0, t;\n"
   "mul.wide.u32 t, x11, 977;\n"
@@ -402,7 +414,9 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.cc.u64 g2, h2, t;\n"
   "mul.wide.u32 t, x15, 977;\n"
   "addc.cc.u64 g3, h3, t;\n"
+#if !QSB_RMAC_TAIL
   "addc.u32 g8, x16, 0;\n"
+#endif
   "mov.b64 {z0,z1}, f0;\n"
   "mov.b64 {z2,z3}, f1;\n"
   "mov.b64 {z4,z5}, f2;\n"
@@ -418,6 +432,19 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.cc.u32 z5, z5, w4;\n"
   "addc.cc.u32 z6, z6, w5;\n"
   "addc.cc.u32 z7, z7, w6;\n"
+#if QSB_RMAC_TAIL
+  /* z8 = k16 + w7 + carry(z7); z9 = x16 and k9 = k16 (dropped carries above). Second fold:
+   * {z0,z1} += z8*977 + (z8 + k16)<<32, z2 += x16 plus the carry, which stops after z3. */
+  "addc.u32 z8, k16, w7;\n"
+  "add.u32 sfq, z8, k16;\n"
+  "mov.b64 sfz, {z0, sfq};\n"
+  "mul.wide.u32 sft, z8, 977;\n"
+  "add.u64 sft, sft, sfz;\n"
+  "mov.b64 {z0, sfhi}, sft;\n"
+  "add.cc.u32 z1, z1, sfhi;\n"
+  "addc.cc.u32 z2, z2, x16;\n"
+  "addc.u32 z3, z3, 0;\n"
+#else
   "addc.cc.u32 z8, f8, w7;\n"
   "addc.u32 z9, g8, 0;\n"
   "mul.lo.u32 k9, z9, 977;\n"
@@ -440,6 +467,7 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "add.cc.u32 z0, z0, k0;\n"
   "addc.cc.u32 z1, z1, cf;\n"
   "addc.u32 z2, z2, 0;\n"
+#endif
   "mov.b64 %0, {z0,z1};\n"
   "mov.b64 %1, {z2,z3};\n"
   "mov.b64 %2, {z4,z5};\n"
