@@ -1,3 +1,5 @@
+/* CPU-only comparison integration: retain the original epoch start. */
+#define QSB_CPU_DIAG_EPOCH 0
 #define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */

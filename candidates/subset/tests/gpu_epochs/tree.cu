@@ -3598,6 +3598,9 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #if QSB_HOST_PRODUCERS && QSB_SLOT_PIPELINE && ZLAB_HITPATH
 #include "host_producers.h"
 #define QSB_HP_ON 1
+static int qhp_blocksync() { return qhp::blocksync(); }
+#else
+static int qhp_blocksync() { return 0; }
 #endif
 /* QSB_CPU_GRIND: host-CPU co-grinding on candidates disjoint from the GPU's (CpuGrindSubset.h). */
 #ifndef QSB_CPU_GRIND
@@ -4633,7 +4636,7 @@ int main(int argc, char **argv) {
             cudaError_t se = cudaSuccess;
             for (int s = 0; s < 2 && se == cudaSuccess; s++) {
                 se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
-                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (qhp_blocksync() ? cudaEventBlockingSync : 0));
             }
             if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
             if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_tent, 2 * (size_t)SP_HOST_BYTES, cudaHostAllocDefault);

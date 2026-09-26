@@ -23,9 +23,29 @@
  * QSB_HP_MAX_FALLBACKS consecutive fallbacks the host producers are switched off (watchdog).
  * Host-only code: the device image (and the carrier cubin) is unchanged.
  *
- * Environment (diagnostics): QSB_HP_DISABLE=1 off; QSB_HP_THREADS (1..3, default 3);
+ * Placement (QSB_HP_PLACE, default 1): the main thread is pinned to the one logical CPU it runs on
+ * and the producer is pinned to that core's other SMT sibling(s), which were idle before (the main
+ * thread spins in cudaEventSynchronize); every other CPU is left to the co-grinder's workers. A
+ * second, floating producer (the helper, QSB_HP_HELPER, default 1) takes chunks only while the ring
+ * is behind (no host batch ready beyond the one being launched), so it preempts co-grinder workers
+ * only when the pinned producer cannot keep up. QSB_HP_PLACE=0: the previous placement (main thread
+ * on both siblings of its core, QSB_HP_THREADS floating producers).
+ *
+ * Environment (diagnostics): QSB_HP_DISABLE=1 off; QSB_HP_THREADS (1..3, default 3 with PLACE=0);
  * QSB_HP_NOSHANI=1 forces the OpenSSL path; QSB_HP_WAIT_MS (default 40);
  * QSB_HP_CORRUPT=1 flips one host word of batch 0 (self-check test). */
+#ifndef QSB_HP_PLACE
+#define QSB_HP_PLACE 1
+#endif
+#ifndef QSB_HP_HELPER
+#define QSB_HP_HELPER 1
+#endif
+/* QSB_HP_BLOCKSYNC (default 1, env override): with PLACE=1 the main thread's per-batch event wait
+ * blocks (sleeps) instead of spinning, and the co-grinder may then also run a worker on the main
+ * thread's CPU (a SCHED_OTHER wake-up preempts a SCHED_IDLE worker at once). */
+#ifndef QSB_HP_BLOCKSYNC
+#define QSB_HP_BLOCKSYNC 1
+#endif
 #pragma once
 #include <atomic>
 #include <thread>
@@ -46,6 +66,13 @@
 namespace qhp {
 
 enum { MAXK = 8, NCLS = 16, CHUNK = 16384, NSLOT = 4 };
+static int blocksync() {
+    static int v = -1;
+    if (v < 0) { v = QSB_HP_BLOCKSYNC; if (getenv("QSB_HP_BLOCKSYNC")) v = atoi(getenv("QSB_HP_BLOCKSYNC")) ? 1 : 0; }
+    return v;
+}
+/* Set by start(): the main thread's CPU, which the co-grinder may also use for a worker (blocking sync). */
+static int g_share_cpu = -1;
 
 /* ---- SHA-256 compression: 4-lane (and 1-lane) SHA-NI, else OpenSSL ---- */
 #define QHP_SHA __attribute__((target("sha,sse4.1,ssse3")))
@@ -147,50 +174,24 @@ struct Params {
     int cut, K, ncls;
     uint64_t n_epochs, cap;     /* epoch space size, epochs per batch */
     ClsVec cv[NCLS];            /* first-block class words (QSB_FIRST_UNIQUE) */
+    /* Precomputed message schedules (W[i] + K[i], 64 words per block), SHA-NI path only. A block's
+     * schedule depends on its 64 message bytes alone, and the producer's blocks repeat:
+     *  - the stream is prefix_remainder ++ kept pushes, 8 (mod 64) bytes long, so counted from the
+     *    END of the push array the block boundaries are the same for every epoch: block e-from-end
+     *    of any epoch's suffix (all blocks but the first) is tail_rows[e];
+     *  - the first suffix block of an epoch with last omission o6 holds the last `len` stream bytes
+     *    before the suffix and the start of P[o6+1..]; when the pushes covering those `len` bytes
+     *    are all kept (o_{K-1} < o6 - ceil(len/10)) it is first_rows[o6], else it is expanded per epoch;
+     *  - the 8 first-block class states hash [w0 w1 | class words]: their schedules depend on the
+     *    epoch only through the 8 remainder bytes, which take 2-3 values (per-thread cache, cls_cache). */
+    enum { TAILMAX = 24 };
+    uint32_t *tail_rows;        /* TAILMAX x 64, block e from the end of the suffix */
+    uint32_t *first_rows;       /* cut x 64, first suffix block by o6 (see first_ok) */
+    uint8_t first_ok[256];      /* first_rows[o6] exists (nb >= 1) */
+    uint8_t first_m[256];       /* pushes covered by the buffered bytes: ceil(len(o6)/10) */
+    size_t e_total;             /* bytes of prefix_remainder ++ all pushes */
 };
 
-/* First-block states of 4 classes for one epoch: compress(mid, [w0 w1 | class words 2..15]).
- * Rounds 0-1 read only w0/w1, so the first sha256rnds2 is shared by all classes. */
-QHP_SHA static void first4(const uint32_t mid[8], uint32_t w0, uint32_t w1, const ClsVec *cv, uint32_t (*out)[8]) {
-    __m128i t = _mm_loadu_si128((const __m128i *)&mid[0]);
-    __m128i u = _mm_loadu_si128((const __m128i *)&mid[4]);
-    t = _mm_shuffle_epi32(t, 0xB1); u = _mm_shuffle_epi32(u, 0x1B);
-    const __m128i A0 = _mm_alignr_epi8(t, u, 8), A1 = _mm_blend_epi16(u, t, 0xF0);
-    const __m128i K0 = _mm_load_si128((const __m128i *)&k_[0]);
-    const __m128i S1s = _mm_sha256rnds2_epu32(A1, A0, _mm_add_epi32(_mm_set_epi32(0, 0, (int)w1, (int)w0), K0));
-    __m128i S0[4], S1[4], M[4][4];
-#pragma GCC unroll 4
-    for (int l = 0; l < 4; l++) {
-        M[l][0] = _mm_set_epi32((int)cv[l].w3, (int)cv[l].w2, (int)w1, (int)w0);
-        M[l][1] = cv[l].M1; M[l][2] = cv[l].M2; M[l][3] = cv[l].M3;
-        S1[l] = S1s;
-        S0[l] = _mm_sha256rnds2_epu32(A0, S1s, _mm_shuffle_epi32(_mm_add_epi32(M[l][0], K0), 0x0E));
-    }
-#pragma GCC unroll 15
-    for (int r = 1; r < 16; r++) {
-        const __m128i K = _mm_load_si128((const __m128i *)&k_[4 * r]);
-#pragma GCC unroll 4
-        for (int l = 0; l < 4; l++) {
-            if (r >= 4) {
-                __m128i x = _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
-                x = _mm_add_epi32(x, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
-                M[l][r & 3] = _mm_sha256msg2_epu32(x, M[l][(r + 3) & 3]);
-            }
-            __m128i m = _mm_add_epi32(M[l][r & 3], K);
-            S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m);
-            m = _mm_shuffle_epi32(m, 0x0E);
-            S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m);
-        }
-    }
-#pragma GCC unroll 4
-    for (int l = 0; l < 4; l++) {
-        __m128i a = _mm_add_epi32(S0[l], A0), b = _mm_add_epi32(S1[l], A1);
-        __m128i x = _mm_shuffle_epi32(a, 0x1B);
-        b = _mm_shuffle_epi32(b, 0xB1);
-        _mm_storeu_si128((__m128i *)&out[l][0], _mm_blend_epi16(x, b, 0xF0));
-        _mm_storeu_si128((__m128i *)&out[l][4], _mm_alignr_epi8(b, x, 8));
-    }
-}
 static void first_sw(const Params &P, const uint32_t mid[8], const uint8_t rem8[8], uint32_t *fo) {
     for (int c = 0; c < P.ncls; c++) {
         uint8_t blk[64]; uint32_t w[16];
@@ -203,13 +204,238 @@ static void first_sw(const Params &P, const uint32_t mid[8], const uint8_t rem8[
     }
 }
 
+/* st[l] <- compress(st[l], block with schedule rows[b*4 + l]) for b < nblk, l < 4 (ABEF/CDGH layout kept
+ * across the blocks; no message expansion, no K additions: the rows hold W[i] + K[i]). */
+QHP_SHA static void sha_pre4(uint32_t (*st)[8], const uint32_t *const *rows, int nblk) {
+    __m128i S0[4], S1[4];
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        __m128i t = _mm_loadu_si128((const __m128i *)&st[l][0]);
+        __m128i u = _mm_loadu_si128((const __m128i *)&st[l][4]);
+        t = _mm_shuffle_epi32(t, 0xB1); u = _mm_shuffle_epi32(u, 0x1B);
+        S0[l] = _mm_alignr_epi8(t, u, 8); S1[l] = _mm_blend_epi16(u, t, 0xF0);
+    }
+    for (int b = 0; b < nblk; b++) {
+        const uint32_t *const w0 = rows[4 * b], *const w1 = rows[4 * b + 1], *const w2 = rows[4 * b + 2], *const w3 = rows[4 * b + 3];
+        const uint32_t *const w[4] = {w0, w1, w2, w3};
+        __m128i I0[4], I1[4];
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) { I0[l] = S0[l]; I1[l] = S1[l]; }
+#pragma GCC unroll 16
+        for (int r = 0; r < 16; r++) {
+#pragma GCC unroll 4
+            for (int l = 0; l < 4; l++) {
+                S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
+                S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
+            }
+        }
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) { S0[l] = _mm_add_epi32(S0[l], I0[l]); S1[l] = _mm_add_epi32(S1[l], I1[l]); }
+    }
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        __m128i t = _mm_shuffle_epi32(S0[l], 0x1B), b = _mm_shuffle_epi32(S1[l], 0xB1);
+        _mm_storeu_si128((__m128i *)&st[l][0], _mm_blend_epi16(t, b, 0xF0));
+        _mm_storeu_si128((__m128i *)&st[l][4], _mm_alignr_epi8(b, t, 8));
+    }
+}
+/* Lanes of different lengths: lane l runs blocks 0..nb[l]-1 (rows[b*4 + l]; any row for b >= nb[l]) and its
+ * state after block nb[l]-1 is written to F[l]; the chaining state stays in registers across the blocks. */
+QHP_SHA static void sha_pre4_var(const uint32_t (*st)[8], const uint32_t *const *rows, const int *nb, int maxnb, uint32_t (*F)[8]) {
+    __m128i S0[4], S1[4];
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        __m128i t = _mm_loadu_si128((const __m128i *)&st[l][0]);
+        __m128i u = _mm_loadu_si128((const __m128i *)&st[l][4]);
+        t = _mm_shuffle_epi32(t, 0xB1); u = _mm_shuffle_epi32(u, 0x1B);
+        S0[l] = _mm_alignr_epi8(t, u, 8); S1[l] = _mm_blend_epi16(u, t, 0xF0);
+        if (nb[l] == 0) { _mm_storeu_si128((__m128i *)&F[l][0], _mm_loadu_si128((const __m128i *)&st[l][0])); _mm_storeu_si128((__m128i *)&F[l][4], _mm_loadu_si128((const __m128i *)&st[l][4])); }
+    }
+    for (int b = 0; b < maxnb; b++) {
+        const uint32_t *const w0 = rows[4 * b], *const w1 = rows[4 * b + 1], *const w2 = rows[4 * b + 2], *const w3 = rows[4 * b + 3];
+        const uint32_t *const w[4] = {w0, w1, w2, w3};
+        __m128i I0[4], I1[4];
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) { I0[l] = S0[l]; I1[l] = S1[l]; }
+#pragma GCC unroll 16
+        for (int r = 0; r < 16; r++) {
+#pragma GCC unroll 4
+            for (int l = 0; l < 4; l++) {
+                S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
+                S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
+            }
+        }
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) {
+            S0[l] = _mm_add_epi32(S0[l], I0[l]); S1[l] = _mm_add_epi32(S1[l], I1[l]);
+            if (b == nb[l] - 1) {
+                __m128i t = _mm_shuffle_epi32(S0[l], 0x1B), v = _mm_shuffle_epi32(S1[l], 0xB1);
+                _mm_storeu_si128((__m128i *)&F[l][0], _mm_blend_epi16(t, v, 0xF0));
+                _mm_storeu_si128((__m128i *)&F[l][4], _mm_alignr_epi8(v, t, 8));
+            }
+        }
+    }
+}
+/* One state, 8 rows: out[c] <- compress(st, rows[c]) for c < 8 (the first-block class states of one epoch). */
+QHP_SHA static void sha_pre8_same(const uint32_t st[8], const uint32_t *const *rows, uint32_t *out) {
+    __m128i t = _mm_loadu_si128((const __m128i *)&st[0]);
+    __m128i u = _mm_loadu_si128((const __m128i *)&st[4]);
+    t = _mm_shuffle_epi32(t, 0xB1); u = _mm_shuffle_epi32(u, 0x1B);
+    const __m128i A0 = _mm_alignr_epi8(t, u, 8), A1 = _mm_blend_epi16(u, t, 0xF0);
+    for (int c0 = 0; c0 < 8; c0 += 4) {
+        __m128i S0[4], S1[4];
+        const uint32_t *const w[4] = {rows[c0], rows[c0 + 1], rows[c0 + 2], rows[c0 + 3]};
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) { S0[l] = A0; S1[l] = A1; }
+#pragma GCC unroll 16
+        for (int r = 0; r < 16; r++) {
+#pragma GCC unroll 4
+            for (int l = 0; l < 4; l++) {
+                S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
+                S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
+            }
+        }
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) {
+            __m128i a = _mm_shuffle_epi32(_mm_add_epi32(S0[l], A0), 0x1B), b = _mm_shuffle_epi32(_mm_add_epi32(S1[l], A1), 0xB1);
+            _mm_stream_si128((__m128i *)(out + (size_t)(c0 + l) * 8), _mm_blend_epi16(a, b, 0xF0));
+            _mm_stream_si128((__m128i *)(out + (size_t)(c0 + l) * 8 + 4), _mm_alignr_epi8(b, a, 8));
+        }
+    }
+}
+/* W[i] + K[i] of one 64-byte block (big-endian words), with the SHA-NI schedule steps. */
+QHP_SHA static void sha_schedule(uint32_t wk[64], const uint8_t *blk) {
+    const __m128i BSWAP = _mm_set_epi64x(0x0c0d0e0f08090a0bULL, 0x0405060700010203ULL);
+    __m128i M[4];
+    for (int j = 0; j < 4; j++) M[j] = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i *)(blk + 16 * j)), BSWAP);
+#pragma GCC unroll 16
+    for (int r = 0; r < 16; r++) {
+        if (r >= 4) {
+            __m128i t = _mm_sha256msg1_epu32(M[r & 3], M[(r + 1) & 3]);
+            t = _mm_add_epi32(t, _mm_alignr_epi8(M[(r + 3) & 3], M[(r + 2) & 3], 4));
+            M[r & 3] = _mm_sha256msg2_epu32(t, M[(r + 3) & 3]);
+        }
+        _mm_storeu_si128((__m128i *)(wk + 4 * r), _mm_add_epi32(M[r & 3], _mm_load_si128((const __m128i *)&k_[4 * r])));
+    }
+}
+static void *alloc64(size_t n) { void *p = nullptr; if (posix_memalign(&p, 64, n)) return nullptr; memset(p, 0, n); return p; }
+/* Schedule tables from the omission-free stream T = prefix_remainder ++ P[0..cut-1]. */
+static bool build_tables(Params &P, const uint8_t *prem, int prl) {
+    const int cut = P.cut, K = P.K;
+    std::vector<uint8_t> T((size_t)prl + (size_t)cut * SIG_PUSH_SIZE);
+    memcpy(T.data(), prem, prl); memcpy(T.data() + prl, P.rows, (size_t)cut * SIG_PUSH_SIZE);
+    P.e_total = T.size();
+    P.tail_rows = (uint32_t *)alloc64((size_t)Params::TAILMAX * 64 * sizeof(uint32_t));
+    P.first_rows = (uint32_t *)alloc64((size_t)cut * 64 * sizeof(uint32_t));
+    if (!P.tail_rows || !P.first_rows) return false;
+    /* block e from the end: T bytes [E - 8 - 64 (e + 1), E - 8 - 64 e) */
+    for (int e = 0; e < Params::TAILMAX; e++) {
+        const size_t end = P.e_total - 8 - (size_t)64 * e;
+        if (end < 64 + (size_t)prl + SIG_PUSH_SIZE) break;                      /* never used */
+        sha_schedule(P.tail_rows + (size_t)e * 64, T.data() + end - 64);
+    }
+    memset(P.first_ok, 0, sizeof P.first_ok); memset(P.first_m, 0, sizeof P.first_m);
+    for (int o6 = K - 1; o6 < cut; o6++) {
+        const int len = (prl + SIG_PUSH_SIZE * (o6 - (K - 1))) & 63;
+        const int span_len = (cut - 1 - o6) * SIG_PUSH_SIZE;
+        const int nb = (len + span_len) >> 6;
+        P.first_m[o6] = (uint8_t)((len + SIG_PUSH_SIZE - 1) / SIG_PUSH_SIZE);
+        if (nb < 1) continue;
+        const size_t pos6 = (size_t)prl + (size_t)o6 * SIG_PUSH_SIZE;           /* T offset of P[o6] */
+        uint8_t blk[64];
+        memcpy(blk, T.data() + pos6 - len, len);                                 /* last len bytes before P[o6] */
+        memcpy(blk + len, T.data() + pos6 + SIG_PUSH_SIZE, 64 - len);            /* start of P[o6+1..] */
+        sha_schedule(P.first_rows + (size_t)o6 * 64, blk);
+        P.first_ok[o6] = 1;
+    }
+    return true;
+}
+/* Per-thread cache of the first-block class schedules by remainder value (w0, w1). */
+struct ClsCache { enum { N = 4 }; uint64_t key[N]; int age[N]; int tick; alignas(64) uint32_t rows[N][NCLS][64]; };
+static const uint32_t *cls_rows(const Params &P, ClsCache &cc, uint32_t w0, uint32_t w1) {
+    const uint64_t key = (uint64_t)w0 << 32 | w1;
+    cc.tick++;
+    for (int i = 0; i < ClsCache::N; i++) if (cc.age[i] > 0 && cc.key[i] == key) { cc.age[i] = cc.tick; return &cc.rows[i][0][0]; }
+    int v = 0; for (int i = 1; i < ClsCache::N; i++) if (cc.age[i] < cc.age[v]) v = i;
+    for (int c = 0; c < P.ncls; c++) {
+        uint8_t blk[64]; uint32_t w[16];
+        w[0] = w0; w[1] = w1; w[2] = P.cv[c].w2; w[3] = P.cv[c].w3;
+        _mm_storeu_si128((__m128i *)&w[4], P.cv[c].M1); _mm_storeu_si128((__m128i *)&w[8], P.cv[c].M2);
+        _mm_storeu_si128((__m128i *)&w[12], P.cv[c].M3);
+        for (int j = 0; j < 16; j++) { blk[4*j] = (uint8_t)(w[j] >> 24); blk[4*j+1] = (uint8_t)(w[j] >> 16); blk[4*j+2] = (uint8_t)(w[j] >> 8); blk[4*j+3] = (uint8_t)w[j]; }
+        sha_schedule(cc.rows[v][c], blk);
+    }
+    cc.key[v] = key; cc.age[v] = cc.tick;
+    return &cc.rows[v][0][0];
+}
+
 /* One pending epoch for the 4-lane tail. */
-struct Lane { SCtx c; int o6; uint32_t idx; uint8_t early[MAXK]; };
+struct Lane { SCtx c; int o6, o5; uint32_t idx; uint8_t early[MAXK]; };
 
 /* Hash the suffix P[o6+1..cut-1] of nl (<=4) lanes in lockstep, then their first-block states.
  * The suffix is contiguous in `rows`: only each lane's first block is assembled, the others are
  * read in place. */
-static void flush(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
+static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out);
+/* SHA-NI path: every compression uses a precomputed schedule (tail_rows / first_rows / class cache);
+ * an epoch whose first suffix block is not in first_rows (an omission inside the buffered bytes, or
+ * o6 near the start) gets that one block expanded here. */
+QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
+    alignas(64) uint32_t scratch[4][64];
+    const uint32_t *rows[Params::TAILMAX * 4];                /* rows[b * 4 + l] */
+    const uint8_t *rem8[4];
+    alignas(16) uint32_t S[4][8], F[4][8];
+    int nb[4], maxnb = 0;
+    for (int l = 0; l < 4; l++) {
+        if (l >= nl) { nb[l] = 0; memset(S[l], 0, 32); continue; }
+        const Lane &L = Ls[l];
+        const uint8_t *span = P.rows + (size_t)(L.o6 + 1) * SIG_PUSH_SIZE;
+        const int span_len = (P.cut - 1 - L.o6) * SIG_PUSH_SIZE;
+        nb[l] = (L.c.len + span_len) >> 6;                  /* the remainder is always 8 bytes */
+        memcpy(S[l], L.c.st, 32);
+        if (nb[l] == 0) { rem8[l] = L.c.buf; continue; }
+        rem8[l] = span + span_len - 8;
+        if (P.first_ok[L.o6] && L.o5 < L.o6 - (int)P.first_m[L.o6]) rows[l] = P.first_rows + (size_t)L.o6 * 64;
+        else {
+            alignas(16) uint8_t fb[64];
+            memcpy(fb, L.c.buf, L.c.len); memcpy(fb + L.c.len, span, 64 - L.c.len);
+            sha_schedule(scratch[l], fb); rows[l] = scratch[l];
+        }
+        for (int b = 1; b < nb[l]; b++) rows[4 * b + l] = P.tail_rows + (size_t)(nb[l] - 1 - b) * 64;
+        if (nb[l] > maxnb) maxnb = nb[l];
+    }
+    for (int b = 0; b < maxnb; b++)
+        for (int l = 0; l < 4; l++) if (b >= nb[l]) rows[4 * b + l] = P.tail_rows;   /* idle lane: any row */
+    sha_pre4_var(S, rows, nb, maxnb, F);
+    for (int l = 0; l < nl; l++) {
+        const Lane &L = Ls[l];
+        const uint32_t w0 = be32(rem8[l]), w1 = be32(rem8[l] + 4);
+        uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
+        alignas(16) uint8_t rec[64];
+        memcpy(rec, F[l], 32);
+        memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
+        memset(rec + 40, 0, 24);
+        memcpy(rec + 40, L.early, MAXK);
+        memset(rec + 40 + P.K, 0, MAXK - P.K);
+        for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+        uint32_t *fo = fi_out + (size_t)L.idx * P.ncls * 8;
+        const uint32_t *cr = cls_rows(P, cc, w0, w1);
+        if (P.ncls == 8) {
+            const uint32_t *r8[8] = {cr, cr + 64, cr + 128, cr + 192, cr + 256, cr + 320, cr + 384, cr + 448};
+            sha_pre8_same(F[l], r8, fo);
+            continue;
+        }
+        alignas(16) uint32_t T4[4][8];
+        for (int c0 = 0; c0 < P.ncls; c0 += 4) {
+            const uint32_t *r4[4] = {cr + (size_t)c0 * 64, cr + (size_t)(c0 + 1) * 64, cr + (size_t)(c0 + 2) * 64, cr + (size_t)(c0 + 3) * 64};
+            for (int q = 0; q < 4; q++) memcpy(T4[q], F[l], 32);
+            sha_pre4(T4, r4, 1);
+            if (P.ncls - c0 >= 4)
+                for (int q = 0; q < 8; q++) _mm_stream_si128((__m128i *)(fo + (size_t)c0 * 8) + q, _mm_load_si128((const __m128i *)T4 + q));
+            else memcpy(fo + (size_t)c0 * 8, T4, (size_t)(P.ncls - c0) * 32);
+        }
+    }
+}
+static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
     alignas(16) uint8_t fb[4][64];
     alignas(16) static const uint8_t dummy[64] = {0};
     const uint8_t *tail[4], *rem8[4];
@@ -249,16 +475,11 @@ static void flush(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *
         /* write-once output read by DMA: non-temporal stores (no read-for-ownership; +40% here) */
         for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
         uint32_t *fo = fi_out + (size_t)L.idx * P.ncls * 8;
-        if (g_shani) {
-            alignas(16) uint32_t T[4][8];
-            for (int c0 = 0; c0 < P.ncls; c0 += 4) {
-                first4(F[l], w0, w1, P.cv + c0, T);
-                if (P.ncls - c0 >= 4)
-                    for (int q = 0; q < 8; q++) _mm_stream_si128((__m128i *)(fo + (size_t)c0 * 8) + q, _mm_load_si128((const __m128i *)T + q));
-                else memcpy(fo + (size_t)c0 * 8, T, (size_t)(P.ncls - c0) * 32);
-            }
-        } else first_sw(P, F[l], rem8[l], fo);
+        first_sw(P, F[l], rem8[l], fo);
     }
+}
+static inline void flush(const Params &P, ClsCache &cc, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
+    if (g_shani) flush_pre(P, cc, Ls, nl, ep_out, fi_out); else flush_sw(P, Ls, nl, ep_out, fi_out);
 }
 
 /* Epochs [e0, e1) of the batch starting at `base`, written at index e - base. */
@@ -272,13 +493,14 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
         ctx[k] = ctx[k - 1];
         for (int i = (k == 1 ? 0 : o[k - 2] + 1); i < o[k - 1]; i++) sc_push(ctx[k], P.rows + (size_t)i * SIG_PUSH_SIZE);
     }
+    static thread_local ClsCache cc = {};
     Lane L[4]; int nl = 0;
     for (uint64_t e = e0; e < e1; e++) {
         Lane &x = L[nl++];
         memcpy(x.c.st, ctx[K].st, 32); x.c.len = ctx[K].len; memcpy(x.c.buf, ctx[K].buf, 64);
-        x.o6 = o[K - 1]; x.idx = (uint32_t)(e - base);
+        x.o6 = o[K - 1]; x.o5 = o[K - 2]; x.idx = (uint32_t)(e - base);
         memcpy(x.early, o, MAXK);
-        if (nl == 4) { flush(P, L, 4, ep_out, fi_out); nl = 0; }
+        if (nl == 4) { flush(P, cc, L, 4, ep_out, fi_out); nl = 0; }
         if (e + 1 == e1) break;
         int i = K - 1;
         while (i >= 0 && o[i] == N - K + i) i--;
@@ -287,156 +509,8 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
         o[i]++;
         for (int j = i + 1; j < K; j++) { o[j] = o[j - 1] + 1; ctx[j + 1] = ctx[j]; }
     }
-    if (nl) flush(P, L, nl, ep_out, fi_out);
+    if (nl) flush(P, cc, L, nl, ep_out, fi_out);
     _mm_sfence();                                            /* order the streamed stores before "chunk done" */
-}
-
-
-/* ---- 16-lane AVX-512 path (QSB_HP16): the same bytes as flush()/produce(), 16 epochs per SHA-256 pass ----
- * On Zen 4 each sha256rnds2 holds an FP pipe for several cycles, so 4-lane SHA-NI is the slow way to hash on that
- * host; AVX-512F rounds (vprord, vpternlogd) for 16 lanes cost far fewer pipe-cycles per block. The suffix blocks
- * of 16 epochs are hashed in lockstep (lanes whose suffix is shorter keep their state, masked), and the
- * first-block states run class-major: one pass per class for all 16 epochs, message words 2..15 broadcast. */
-#define QHP_S16 __attribute__((target("avx512f,avx512bw")))
-#define HP16_ROR(x, n) _mm512_ror_epi32((x), (n))
-#define HP16_ROUND(a, b, c, d, e, f, g, h, WK) do { \
-    const __m512i t1_ = _mm512_add_epi32(_mm512_add_epi32(h, _mm512_ternarylogic_epi32(HP16_ROR(e, 6), HP16_ROR(e, 11), HP16_ROR(e, 25), 0x96)), \
-                                         _mm512_add_epi32(_mm512_ternarylogic_epi32(e, f, g, 0xCA), (WK))); \
-    const __m512i t2_ = _mm512_add_epi32(_mm512_ternarylogic_epi32(HP16_ROR(a, 2), HP16_ROR(a, 13), HP16_ROR(a, 22), 0x96), \
-                                         _mm512_ternarylogic_epi32(a, b, c, 0xE8)); \
-    d = _mm512_add_epi32(d, t1_); h = _mm512_add_epi32(t1_, t2_); } while (0)
-QHP_S16 static inline __m512i hp16_w(__m512i *W, int t) {    /* message word t (W is the 16-word ring, updated in place) */
-    if (t < 16) return W[t];
-    const __m512i w15 = W[(t - 15) & 15], w2 = W[(t - 2) & 15];
-    const __m512i s0 = _mm512_ternarylogic_epi32(HP16_ROR(w15, 7), HP16_ROR(w15, 18), _mm512_srli_epi32(w15, 3), 0x96);
-    const __m512i s1 = _mm512_ternarylogic_epi32(HP16_ROR(w2, 17), HP16_ROR(w2, 19), _mm512_srli_epi32(w2, 10), 0x96);
-    W[t & 15] = _mm512_add_epi32(_mm512_add_epi32(W[t & 15], s0), _mm512_add_epi32(W[(t - 7) & 15], s1));
-    return W[t & 15];
-}
-#define HP16_WK(t) _mm512_add_epi32(hp16_w(W, (t)), _mm512_set1_epi32((int)k_[(t)]))
-/* s <- s + compress(s, W) in 16 lanes; W[0..15] = message words (values), used as the schedule ring */
-QHP_S16 static void hp16_block(__m512i s[8], __m512i *W) {
-    __m512i a = s[0], b = s[1], c = s[2], d = s[3], e = s[4], f = s[5], g = s[6], h = s[7];
-#pragma GCC unroll 8
-    for (int t = 0; t < 64; t += 8) {
-        HP16_ROUND(a, b, c, d, e, f, g, h, HP16_WK(t + 0)); HP16_ROUND(h, a, b, c, d, e, f, g, HP16_WK(t + 1));
-        HP16_ROUND(g, h, a, b, c, d, e, f, HP16_WK(t + 2)); HP16_ROUND(f, g, h, a, b, c, d, e, HP16_WK(t + 3));
-        HP16_ROUND(e, f, g, h, a, b, c, d, HP16_WK(t + 4)); HP16_ROUND(d, e, f, g, h, a, b, c, HP16_WK(t + 5));
-        HP16_ROUND(c, d, e, f, g, h, a, b, HP16_WK(t + 6)); HP16_ROUND(b, c, d, e, f, g, h, a, HP16_WK(t + 7));
-    }
-    s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d);
-    s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h);
-}
-#undef HP16_WK
-static std::atomic<bool> g_s16{false};   /* chosen path (after the batch-0 calibration) */
-static bool g_s16_ok = false;    /* the 16-lane path is available on this host */
-static bool s16_supported() { __builtin_cpu_init(); return __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw"); }
-
-/* flush() for up to 16 lanes. */
-QHP_S16 static void flush16(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
-    alignas(64) uint8_t fb[16][64];
-    alignas(64) static const uint8_t dummy[64] = {0};
-    const uint8_t *tail[16], *rem8[16];
-    alignas(64) uint32_t S[8][16], T[16][16];
-    int nb[16], maxnb = 0;
-    for (int l = 0; l < 16; l++) {
-        if (l >= nl) { nb[l] = 0; for (int j = 0; j < 8; j++) S[j][l] = 0; rem8[l] = dummy; tail[l] = dummy; continue; }
-        const Lane &L = Ls[l];
-        const uint8_t *span = P.rows + (size_t)(L.o6 + 1) * SIG_PUSH_SIZE;
-        const int span_len = (P.cut - 1 - L.o6) * SIG_PUSH_SIZE;
-        nb[l] = (L.c.len + span_len) >> 6;                  /* the remainder is always 8 bytes */
-        for (int j = 0; j < 8; j++) S[j][l] = L.c.st[j];
-        if (nb[l] == 0) { rem8[l] = L.c.buf; tail[l] = dummy; }
-        else {
-            memcpy(fb[l], L.c.buf, L.c.len); memcpy(fb[l] + L.c.len, span, 64 - L.c.len);
-            tail[l] = span + (64 - L.c.len) - 64;            /* block b >= 1 at tail + 64 b */
-            rem8[l] = span + span_len - 8;
-        }
-        if (nb[l] > maxnb) maxnb = nb[l];
-    }
-    __m512i s[8];
-    for (int j = 0; j < 8; j++) s[j] = _mm512_load_si512((const void *)S[j]);
-    for (int b = 0; b < maxnb; b++) {
-        __mmask16 act = 0;
-        for (int l = 0; l < 16; l++) {
-            const uint8_t *bp = b >= nb[l] ? dummy : b == 0 ? fb[l] : tail[l] + 64 * b;
-            if (b < nb[l]) act |= (__mmask16)(1u << l);
-            for (int i = 0; i < 16; i++) T[i][l] = be32(bp + 4 * i);
-        }
-        __m512i W[16], ns[8];
-        for (int i = 0; i < 16; i++) W[i] = _mm512_load_si512((const void *)T[i]);
-        for (int j = 0; j < 8; j++) ns[j] = s[j];
-        hp16_block(ns, W);
-        for (int j = 0; j < 8; j++) s[j] = _mm512_mask_mov_epi32(s[j], act, ns[j]);   /* finished lanes keep their state */
-    }
-    for (int j = 0; j < 8; j++) _mm512_store_si512((void *)S[j], s[j]);
-    alignas(64) uint32_t w0a[16], w1a[16];
-    for (int l = 0; l < 16; l++) { w0a[l] = be32(rem8[l]); w1a[l] = be32(rem8[l] + 4); }
-    for (int l = 0; l < nl; l++) {                           /* descriptors, exactly as flush() */
-        const Lane &L = Ls[l];
-        const uint32_t w0 = w0a[l], w1 = w1a[l];
-        uint8_t *d = ep_out + (size_t)L.idx * 64;
-        alignas(16) uint8_t rec[64];
-        uint32_t F[8]; for (int j = 0; j < 8; j++) F[j] = S[j][l];
-        memcpy(rec, F, 32);
-        memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
-        memset(rec + 40, 0, 24);
-        memcpy(rec + 40, L.early, MAXK);
-        memset(rec + 40 + P.K, 0, MAXK - P.K);
-        for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
-    }
-    const __m512i W0 = _mm512_load_si512((const void *)w0a), W1 = _mm512_load_si512((const void *)w1a);
-    for (int c = 0; c < P.ncls; c++) {                       /* first-block states, class-major */
-        alignas(16) uint32_t cw[16];
-        cw[2] = P.cv[c].w2; cw[3] = P.cv[c].w3;
-        _mm_storeu_si128((__m128i *)&cw[4], P.cv[c].M1); _mm_storeu_si128((__m128i *)&cw[8], P.cv[c].M2);
-        _mm_storeu_si128((__m128i *)&cw[12], P.cv[c].M3);
-        __m512i W[16], st[8];
-        W[0] = W0; W[1] = W1;
-        for (int i = 2; i < 16; i++) W[i] = _mm512_set1_epi32((int)cw[i]);
-        for (int j = 0; j < 8; j++) st[j] = s[j];
-        hp16_block(st, W);
-        alignas(64) uint32_t O[8][16];
-        for (int j = 0; j < 8; j++) _mm512_store_si512((void *)O[j], st[j]);
-        for (int l = 0; l < nl; l++) {
-            uint32_t *fo = fi_out + ((size_t)Ls[l].idx * P.ncls + c) * 8;
-            alignas(16) uint32_t R[8]; for (int j = 0; j < 8; j++) R[j] = O[j][l];
-            _mm_stream_si128((__m128i *)fo, _mm_load_si128((const __m128i *)R));
-            _mm_stream_si128((__m128i *)(fo + 4), _mm_load_si128((const __m128i *)(R + 4)));
-        }
-    }
-}
-/* produce() with 16 lanes per flush. */
-static void produce16(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, uint8_t *ep_out, uint32_t *fi_out) {
-    const int K = P.K, N = P.cut;
-    uint8_t o[MAXK] = {0};
-    qsb_host_unrank(e0, N, K, o);
-    SCtx ctx[MAXK + 1];
-    ctx[0] = P.c0;
-    for (int k = 1; k <= K; k++) {
-        ctx[k] = ctx[k - 1];
-        for (int i = (k == 1 ? 0 : o[k - 2] + 1); i < o[k - 1]; i++) sc_push(ctx[k], P.rows + (size_t)i * SIG_PUSH_SIZE);
-    }
-    Lane L[16]; int nl = 0;
-    for (uint64_t e = e0; e < e1; e++) {
-        Lane &x = L[nl++];
-        memcpy(x.c.st, ctx[K].st, 32); x.c.len = ctx[K].len; memcpy(x.c.buf, ctx[K].buf, 64);
-        x.o6 = o[K - 1]; x.idx = (uint32_t)(e - base);
-        memcpy(x.early, o, MAXK);
-        if (nl == 16) { flush16(P, L, 16, ep_out, fi_out); nl = 0; }
-        if (e + 1 == e1) break;
-        int i = K - 1;
-        while (i >= 0 && o[i] == N - K + i) i--;
-        if (i < 0) break;                                    /* end of the epoch space */
-        sc_push(ctx[i + 1], P.rows + (size_t)o[i] * SIG_PUSH_SIZE);
-        o[i]++;
-        for (int j = i + 1; j < K; j++) { o[j] = o[j - 1] + 1; ctx[j + 1] = ctx[j]; }
-    }
-    if (nl) flush16(P, L, nl, ep_out, fi_out);
-    _mm_sfence();                                            /* order the streamed stores before "chunk done" */
-}
-static inline void produce_any(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, uint8_t *ep_out, uint32_t *fi_out) {
-    if (g_s16.load(std::memory_order_relaxed)) produce16(P, base, e0, e1, ep_out, fi_out); else produce(P, base, e0, e1, ep_out, fi_out);
 }
 
 /* ---- batch pipeline ----
@@ -472,10 +546,10 @@ struct Hp {
     double tg = 0, t_last_acq = 0, tchunk = 0;
     /* stats / watchdog */
     uint64_t n_host = 0, n_fb = 0, ahead_sum = 0, ahead_n = 0; int consec_fb = 0, max_fb = 16, wait_ms = 40, ahead_min = 99;
-    /* hashing-path calibration on batch 0: its chunks alternate SHA-NI x4 / AVX-512 x16, both are self-checked */
-    double t_path[2] = {0, 0}; int n_path[2] = {0, 0};
     bool active = false, dead = false;
     int nthreads = 3, dev = 0, corrupt = 0;
+    /* placement: thread 0 pinned to the main core's sibling(s), thread 1 the floating helper */
+    int place = 0; bool behind = true; uint64_t helper_chunks = 0;
 };
 static Hp *g_hp = nullptr;
 
@@ -558,6 +632,7 @@ static bool release_locked(Hp *h) {
 static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
     if (use_mask) pthread_setaffinity_np(pthread_self(), sizeof(mask), &mask);
     cudaSetDevice(h->dev);
+    const bool helper = h->place && id == 1;
     std::unique_lock<std::mutex> lk(h->m);
     while (!h->stop) {
         /* 1. self-check: build batch 0 on the host, then compare once the GPU copy is complete */
@@ -565,21 +640,12 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
             const int ch = h->c_next++;
             lk.unlock();
             const uint64_t n = batch_len(h, 0), e0 = (uint64_t)ch * CHUNK, e1 = e0 + CHUNK < n ? e0 + CHUNK : n;
-            const bool use16 = g_s16_ok && (ch & 1);
             const double t0 = now_s();
-            if (use16) produce16(h->P, 0, e0, e1, h->c_ep, h->c_fi); else produce(h->P, 0, e0, e1, h->c_ep, h->c_fi);
+            produce(h->P, 0, e0, e1, h->c_ep, h->c_fi);
             const double dt = now_s() - t0;
             lk.lock();
             h->tchunk = h->tchunk > 0 ? 0.8 * h->tchunk + 0.2 * dt : dt;
-            if (e1 - e0 == CHUNK) { h->t_path[use16] += dt; h->n_path[use16]++; }
             h->c_done++;
-            if (h->c_done == h->c_nchunks && g_s16_ok && h->n_path[0] && h->n_path[1]) {
-                const double a4 = h->t_path[0] / h->n_path[0], a16 = h->t_path[1] / h->n_path[1];
-                g_s16.store(a16 < 0.98 * a4, std::memory_order_relaxed);   /* adopted only if clearly faster */
-                printf("  Host producers: calibration %.2f ms per chunk with SHA-NI x4, %.2f ms with AVX-512 x16: using %s\n",
-                       a4 * 1e3, a16 * 1e3, g_s16.load() ? "AVX-512 x16" : "SHA-NI x4");
-                fflush(stdout);
-            }
             continue;
         }
         if (h->check == 0 && h->c_done == h->c_nchunks && h->chk_enqueued && !h->chk_running) {
@@ -606,7 +672,7 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
         /* 3. ring production (only once the self-check has passed: until then batches go to the GPU) */
         const bool inflight = release_locked(h);
         Slot *w = nullptr;
-        if (h->check == 1) {
+        if (h->check == 1 && !(helper && !h->behind)) {
             for (int s = 0; s < NSLOT; s++) {
                 Slot &x = h->slot[s];
                 if (x.state == S_PROD && x.next_chunk < x.nchunks && (!w || x.batch < w->batch)) w = &x;
@@ -644,13 +710,14 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
         }
         const int ch = w->next_chunk++;
         const int64_t b = w->batch;
+        if (helper) h->helper_chunks++;
         lk.unlock();
         const uint64_t base = (uint64_t)b * h->P.cap, n = batch_len(h, b);
         const uint64_t e0 = base + (uint64_t)ch * CHUNK;
         const uint64_t e1 = (uint64_t)(ch + 1) * CHUNK < n ? base + (uint64_t)(ch + 1) * CHUNK : base + n;
         const int p = (int)(((uint64_t)ch * CHUNK) / h->pe);           /* chunks never straddle pieces */
         const double t0 = now_s();
-        produce_any(h->P, base + (uint64_t)p * h->pe, e0, e1, w->ep[p], w->fi[p]);
+        produce(h->P, base + (uint64_t)p * h->pe, e0, e1, w->ep[p], w->fi[p]);
         const double dt = now_s() - t0;
         lk.lock();
         h->tchunk = 0.8 * h->tchunk + 0.2 * dt;
@@ -693,10 +760,9 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
         printf("  Host producers: off (unsupported shape)\n"); delete h; return;
     }
     g_shani = shani_supported() && !(getenv("QSB_HP_NOSHANI") && atoi(getenv("QSB_HP_NOSHANI")));
-    g_s16_ok = s16_supported() && !(getenv("QSB_HP_NO16") && atoi(getenv("QSB_HP_NO16")));
-    g_s16.store(false);                                       /* batch 0 decides (calibration below); SHA-NI x4 until then */
     memcpy(P.c0.st, dp->midstate, 32); P.c0.len = 0;
     sc_bytes(P.c0, dp->prefix_remainder, (int)dp->prefix_remainder_len);
+    if (g_shani && !build_tables(P, dp->prefix_remainder, (int)dp->prefix_remainder_len)) { printf("  Host producers: off (schedule tables)\n"); delete h; return; }
     for (int c = 0; c < ncls; c++) {
         const uint32_t *w = qsb_first_unique_host[c];         /* words 2..15 of the class block */
         P.cv[c].w2 = w[0]; P.cv[c].w3 = w[1];
@@ -718,24 +784,46 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
               cudaMalloc((void **)&h->d_scr_fi, (size_t)n0 * ncls * 32) == cudaSuccess &&
               cudaEventCreateWithFlags(&h->chk_evt, cudaEventDisableTiming) == cudaSuccess;
     if (!ok) { (void)cudaGetLastError(); printf("  Host producers: off (self-check buffers)\n"); return; }
-    /* Main thread stays on its current core (both SMT siblings); workers get every other allowed CPU. */
-    cpu_set_t allowed, mine, wmask; bool use_mask = false;
-    CPU_ZERO(&wmask);
+    /* Placement. PLACE=1: main thread on its current logical CPU, producer 0 on that core's other
+     * sibling(s), the helper (if any) floating over the remaining CPUs. PLACE=0 (or no SMT sibling):
+     * main thread on its whole core, producers floating over the other CPUs. */
+    int place = QSB_HP_PLACE;
+    if (getenv("QSB_HP_PLACE")) place = atoi(getenv("QSB_HP_PLACE")) ? 1 : 0;
+    int helper = QSB_HP_HELPER;
+    if (getenv("QSB_HP_HELPER")) helper = atoi(getenv("QSB_HP_HELPER")) ? 1 : 0;
+    cpu_set_t allowed, mine, core, sib, wmask; bool use_mask = false;
+    CPU_ZERO(&wmask); CPU_ZERO(&sib);
     const int cpu = sched_getcpu();
     if (cpu >= 0 && sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
-        cpu_core_siblings(cpu, &mine);
-        CPU_AND(&mine, &mine, &allowed);
-        for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &allowed) && !CPU_ISSET(c, &mine)) CPU_SET(c, &wmask);
+        cpu_core_siblings(cpu, &core);
+        CPU_AND(&core, &core, &allowed);
+        for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &core) && c != cpu) CPU_SET(c, &sib);
+        if (place && CPU_COUNT(&sib) < 1) place = 0;
+        if (place) { CPU_ZERO(&mine); CPU_SET(cpu, &mine); } else mine = core;
+        for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &allowed) && !CPU_ISSET(c, &core)) CPU_SET(c, &wmask);
         if (CPU_COUNT(&wmask) >= 1 && CPU_COUNT(&mine) >= 1) {
             use_mask = true;
             pthread_setaffinity_np(pthread_self(), sizeof(mine), &mine);
-        }
-    }
+        } else place = 0;
+    } else place = 0;
+    h->place = place;
+    if (place && blocksync()) g_share_cpu = cpu;
     g_hp = h;
-    for (int t = 0; t < h->nthreads; t++) h->th.emplace_back(worker, h, t, wmask, use_mask);
-    printf("  Host producers: %d threads (%s, %s), %d pinned slots of %.0f MiB, self-check on batch 0\n",
-           h->nthreads, g_s16_ok ? (g_shani ? "SHA-NI x4 or AVX-512 x16, calibrated on batch 0" : "AVX-512 x16 or OpenSSL, calibrated on batch 0") : g_shani ? "SHA-NI x4" : "OpenSSL", use_mask ? "off the main core" : "unpinned",
-           NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0);
+    if (place) {
+        h->nthreads = 1 + helper;
+        h->th.emplace_back(worker, h, 0, sib, true);
+        if (helper) h->th.emplace_back(worker, h, 1, wmask, true);
+        char sibs[64] = ""; int n = 0;
+        for (int c = 0; c < CPU_SETSIZE && n < 40; c++) if (CPU_ISSET(c, &sib)) n += snprintf(sibs + n, sizeof sibs - n, "%s%d", n ? "," : "", c);
+        printf("  Host producers: 1 thread pinned to CPU %s (the main thread's SMT sibling; main thread on CPU %d, %s)%s (%s), %d pinned slots of %.0f MiB, self-check on batch 0\n",
+               sibs, cpu, blocksync() ? "blocking event waits" : "spinning event waits", helper ? " + a floating helper while the ring is behind" : "", g_shani ? "SHA-NI, precomputed schedules" : "OpenSSL",
+               NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0);
+    } else {
+        for (int t = 0; t < h->nthreads; t++) h->th.emplace_back(worker, h, t, wmask, use_mask);
+        printf("  Host producers: %d threads (%s, %s), %d pinned slots of %.0f MiB, self-check on batch 0\n",
+               h->nthreads, g_shani ? "SHA-NI, precomputed schedules" : "OpenSSL", use_mask ? "off the main core" : "unpinned",
+               NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0);
+    }
     fflush(stdout);
 }
 
@@ -778,14 +866,18 @@ static Slot *acquire(int64_t k) {
         h->cv_ready.wait_for(lk, std::chrono::milliseconds(h->wait_ms), [&] { return s->state == S_READY || h->dead; });
     if (s && s->state == S_READY && !h->dead) {
         s->state = S_UPLOAD; h->n_host++; h->consec_fb = 0;
+        int ahead = 0;
+        for (int i = 0; i < NSLOT; i++) if (h->slot[i].state == S_READY && h->slot[i].batch > k) ahead++;
         if (h->n_host > 16) {       /* after the catch-up: host batches queued beyond this one */
-            int ahead = 0;
-            for (int i = 0; i < NSLOT; i++) if (h->slot[i].state == S_READY && h->slot[i].batch > k) ahead++;
             h->ahead_sum += ahead; h->ahead_n++; if (ahead < h->ahead_min) h->ahead_min = ahead;
         }
+        /* helper policy: work only while no host batch beyond the one being launched is ready */
+        if (ahead == 0) { if (!h->behind) { h->behind = true; h->cv_work.notify_all(); } }
+        else h->behind = false;
         return s;
     }
     if (s) abandon_locked(h, s);
+    if (!h->behind) { h->behind = true; h->cv_work.notify_all(); }
     h->n_fb++;
     if (++h->consec_fb >= h->max_fb) kill_locked(h, "host cannot keep up (watchdog)");
     return nullptr;
@@ -811,12 +903,13 @@ static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, 
     return e;
 }
 
-static void stats(uint64_t *host, uint64_t *fb, int *state, double *ahead_avg = nullptr, int *ahead_min = nullptr) {
+static void stats(uint64_t *host, uint64_t *fb, int *state, double *ahead_avg = nullptr, int *ahead_min = nullptr, uint64_t *helper_chunks = nullptr) {
     Hp *h = g_hp; if (!h) { *host = *fb = 0; *state = -2; return; }
     std::lock_guard<std::mutex> g(h->m);
     *host = h->n_host; *fb = h->n_fb; *state = h->dead ? -1 : h->active ? 1 : 0;
     if (ahead_avg) *ahead_avg = h->ahead_n ? (double)h->ahead_sum / h->ahead_n : 0.0;
     if (ahead_min) *ahead_min = h->ahead_n ? h->ahead_min : 0;
+    if (helper_chunks) *helper_chunks = h->helper_chunks;
 }
 
 /* Stop and join the workers (a chunk or one piece allocation takes a few ms). */
