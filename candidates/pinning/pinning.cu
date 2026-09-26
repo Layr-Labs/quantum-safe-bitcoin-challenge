@@ -30,6 +30,15 @@
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
 #endif
+#ifndef QSB_TRUNC_FOLD_R3
+#define QSB_TRUNC_FOLD_R3 1  /* square first-fold f8 cut + terminal z2 carry-CC removal */
+#endif
+#if QSB_TRUNC_FOLD_R3 != 0 && QSB_TRUNC_FOLD_R3 != 1
+#error "QSB_TRUNC_FOLD_R3 must be 0 or 1"
+#endif
+#if QSB_TRUNC_FOLD_R3 && !QSB_HOST_GATE
+#error "QSB_TRUNC_FOLD_R3 requires QSB_HOST_GATE"
+#endif
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
 #endif
