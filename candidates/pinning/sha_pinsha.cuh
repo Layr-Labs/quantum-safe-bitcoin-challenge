@@ -144,9 +144,10 @@ QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(k + 15) + w[15]);\
 }
 
 /* WMIX with a constant-bank zero addend (QSB_SHA_ALU_ADD): keeps every schedule add on the
- * ALU pipe, same instruction count. */
+ * ALU pipe, same instruction count. Kill switch: 0 restores the plain WMIX digest schedule.
+ * Exact: the addend is the constant-bank word pin_zero_add == 0. */
 #ifndef QSB_DIGEST_WMIX_Z
-#define QSB_DIGEST_WMIX_Z 0
+#define QSB_DIGEST_WMIX_Z 1
 #endif
 #if QSB_DIGEST_WMIX_Z && !QSB_SHA_ALU_ADD
 #error "QSB_DIGEST_WMIX_Z needs the constant-bank zero from QSB_SHA_ALU_ADD=1"
