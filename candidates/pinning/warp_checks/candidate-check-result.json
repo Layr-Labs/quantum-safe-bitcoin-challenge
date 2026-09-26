@@ -1,0 +1,35 @@
+{
+  "status": "PASS_STATIC_COMPOSITION_ONLY",
+  "base": "e892e6e5590b6277a8b1f00473645ce0615bf596",
+  "unchanged_tracked_files": 486,
+  "original_pinning_cu_reconstructed_exactly": true,
+  "include_closure": 28,
+  "promoted_carrier_sha256": "b0453a45f11e40802b5b7c5b772414c86a8ab6a60d9a3084da68d4569c5d186a",
+  "shape": {
+    "lanes": 128,
+    "roots": 1024,
+    "root_allocation_bytes": 65536,
+    "shared_bytes": 12288,
+    "balanced_scratch_rows": 768,
+    "max_scratch_end_row": 1792
+  },
+  "model": {
+    "old_scalar_m": 4094,
+    "new_scalar_m": 4093,
+    "old_warp_m": 136,
+    "new_warp_m": 135,
+    "old_logical_root_bytes": 184320,
+    "new_logical_root_bytes": 180224,
+    "local_product_depth_before": 7,
+    "local_product_depth_after": 3,
+    "local_inverse_expansion_depth_before": 7,
+    "local_inverse_expansion_depth_after": 3,
+    "old_barriers": 14,
+    "new_barriers": 15,
+    "inverse_calls_per_4M": 32,
+    "scalar_to_warp_inverse": true
+  },
+  "native_compile": false,
+  "GPU_execution": false,
+  "performance_claim": false
+}
