@@ -29,6 +29,14 @@
 #ifndef QSB_CARRIER
 #define QSB_CARRIER 1
 #endif
+/* QSB_NOJIT (host only): while the carrier is on, every launch site takes the carrier
+ * kernel, so the compute_52 image is never needed. Its module is then never touched:
+ * no preload, no constant uploads into it. Under the CUDA 12 default of lazy module
+ * loading its PTX is therefore never JIT-compiled inside the timed window. 0 restores
+ * the double upload. */
+#ifndef QSB_NOJIT
+#define QSB_NOJIT 1
+#endif
 
 enum QsbCarrierKernel {
     QK_S0 = 0,   /* kernel_pinning_pipeline<true,0>  (prepare) */
@@ -38,6 +46,9 @@ enum QsbCarrierKernel {
     QK_RGF,      /* qsb_root_group_finish  */
     QK_BUILD,    /* kernel_build_gtable    */
     QK_YOFF,     /* qsb_table_offset_y     */
+    QK_RF,       /* qsb_root_fused<N>      */
+    QK_RR,       /* qsb_root_register      */
+    QK_PFC,      /* qsb_prefix_field_check_kernel */
     QK_N
 };
 
@@ -143,9 +154,9 @@ static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, c
     return e;
 }
 
-/* cudaMemcpyToSymbol into the carrier image's copy of the symbol when it is on, and always
- * into the compute_52 image's copy: kernels that stay on the compute_52 image (the leaf-tree
- * pair) then read the same constants as the carrier kernels. */
+/* cudaMemcpyToSymbol into the carrier image's copy of the symbol when it is on, and into
+ * the compute_52 image's copy unless QSB_NOJIT keeps that image untouched (see above):
+ * with the carrier on, every launched kernel lives in the carrier image. */
 template <class T>
 static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src, size_t n) {
     if (g_qsb_carrier.on) {
@@ -155,6 +166,9 @@ static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src
         if (n > sz) return cudaErrorInvalidValue;
         e = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
         if (e != cudaSuccess) return e;
+#if QSB_NOJIT
+        return cudaSuccess;
+#endif
     }
     return cudaMemcpyToSymbol(sym, src, n);
 }

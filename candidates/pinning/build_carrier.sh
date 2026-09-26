@@ -23,6 +23,9 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_RGF",   r"_Z21qsb_root_group_finish\w+"),
     ("QK_BUILD", r"_Z19kernel_build_gtable\w+"),
     ("QK_YOFF",  r"_Z18qsb_table_offset_y\w+"),
+    ("QK_RF",    r"_Z\d+qsb_root_fusedILi\d+EE\w+"),
+    ("QK_RR",    r"_Z\d+qsb_root_register\w+"),
+    ("QK_PFC",   r"_Z\d+qsb_prefix_field_check_kernel\w+"),
 ]
 names = []
 for kid, pat in want:
