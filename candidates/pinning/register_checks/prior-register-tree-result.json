@@ -1,0 +1,23 @@
+{
+  "status": "PASS_PYTHON_REGISTER_ROUTING_COMPACT_LAYOUT_INTERLEAVING",
+  "batches": 77,
+  "roots": 25922,
+  "zero_or_p_roots": 9806,
+  "interleaving_events": 29876,
+  "shared_words_used": 1344,
+  "shared_bytes": 11008,
+  "warp_sync_rounds": 6,
+  "CTA_barriers": 0,
+  "extra_upper_words_retained_across_inverse": 2,
+  "stats": {
+    "cooperative_unique_calls": 5010,
+    "actual_subgroup_calls": 8720,
+    "shuffle_lanes": 97664,
+    "shared_accesses": 310464,
+    "negative_bad_route": 128
+  },
+  "native_compile": false,
+  "GPU_execution": false,
+  "included_in_candidate": false,
+  "sha256": "78a3937f5b03f5c800f1e48242490e7cbaae1127a0df0f4ce6633a4dc61d764d"
+}

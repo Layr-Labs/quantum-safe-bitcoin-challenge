@@ -1,0 +1,625 @@
+{
+  "samples": 1200,
+  "single_mean_batches": 18.124166666666667,
+  "four_max_mean_batches": 18.36,
+  "joint_max_vs_four_max_cases": {
+    "less": 376,
+    "same": 730,
+    "greater": 94
+  },
+  "sampled_max_batches": 19,
+  "cases": 75,
+  "predicted_GPU_performance": false,
+  "actual_warp_mapping_verified": false,
+  "CTA_barrier_savings_modeled": false,
+  "shared_bytes_old_and_new": 12288,
+  "old_scalar_field_M": 4093,
+  "new_scalar_field_M": 4084,
+  "old_field_warp_calls": 135,
+  "new_regular_field_warp_calls": 136,
+  "new_cooperative_field_warp_calls": 20,
+  "old_inverse_warp_calls": 1,
+  "new_inverse_warp_calls": 4,
+  "rows": [
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 139.53104166666665,
+      "new_mean_normalized_work_time": 162.1025,
+      "ratio_new_over_old": 1.1617665722531874
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 144.06208333333333,
+      "new_mean_normalized_work_time": 180.205,
+      "ratio_new_over_old": 1.2508843120298252
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 153.12416666666667,
+      "new_mean_normalized_work_time": 216.41,
+      "ratio_new_over_old": 1.4132974873332644
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 171.24833333333333,
+      "new_mean_normalized_work_time": 288.82,
+      "ratio_new_over_old": 1.6865565601611694
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 207.49666666666667,
+      "new_mean_normalized_work_time": 433.64,
+      "ratio_new_over_old": 2.089864897428071
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 139.53104166666665,
+      "new_mean_normalized_work_time": 166.1025,
+      "ratio_new_over_old": 1.1904340282702923
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 144.06208333333333,
+      "new_mean_normalized_work_time": 184.205,
+      "ratio_new_over_old": 1.2786501190169748
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 153.12416666666667,
+      "new_mean_normalized_work_time": 220.41,
+      "ratio_new_over_old": 1.4394200784766176
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 171.24833333333333,
+      "new_mean_normalized_work_time": 292.82,
+      "ratio_new_over_old": 1.7099144517221578
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 207.49666666666667,
+      "new_mean_normalized_work_time": 437.64,
+      "ratio_new_over_old": 2.1091423155392053
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 139.53104166666665,
+      "new_mean_normalized_work_time": 170.1025,
+      "ratio_new_over_old": 1.2191014842873973
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 144.06208333333333,
+      "new_mean_normalized_work_time": 188.205,
+      "ratio_new_over_old": 1.3064159260041244
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 153.12416666666667,
+      "new_mean_normalized_work_time": 224.41,
+      "ratio_new_over_old": 1.4655426696199707
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 171.24833333333333,
+      "new_mean_normalized_work_time": 296.82,
+      "ratio_new_over_old": 1.7332723432831463
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 207.49666666666667,
+      "new_mean_normalized_work_time": 441.64,
+      "ratio_new_over_old": 2.1284197336503397
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 139.53104166666665,
+      "new_mean_normalized_work_time": 174.1025,
+      "ratio_new_over_old": 1.2477689403045022
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 144.06208333333333,
+      "new_mean_normalized_work_time": 192.205,
+      "ratio_new_over_old": 1.3341817329912742
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 153.12416666666667,
+      "new_mean_normalized_work_time": 228.41,
+      "ratio_new_over_old": 1.4916652607633238
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 171.24833333333333,
+      "new_mean_normalized_work_time": 300.82,
+      "ratio_new_over_old": 1.7566302348441347
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 207.49666666666667,
+      "new_mean_normalized_work_time": 445.64,
+      "ratio_new_over_old": 2.147697151761474
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 139.53104166666665,
+      "new_mean_normalized_work_time": 179.1025,
+      "ratio_new_over_old": 1.2836032603258833
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 144.06208333333333,
+      "new_mean_normalized_work_time": 197.205,
+      "ratio_new_over_old": 1.3688889917252112
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 153.12416666666667,
+      "new_mean_normalized_work_time": 233.41,
+      "ratio_new_over_old": 1.5243184996925152
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 171.24833333333333,
+      "new_mean_normalized_work_time": 305.82,
+      "ratio_new_over_old": 1.7858275992953703
+    },
+    {
+      "hypothetical_independent_resources": 1,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 207.49666666666667,
+      "new_mean_normalized_work_time": 450.64,
+      "ratio_new_over_old": 2.171793924400392
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 77.53104166666667,
+      "new_mean_normalized_work_time": 81.09666666666666,
+      "ratio_new_over_old": 1.0459896439329408
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 82.06208333333333,
+      "new_mean_normalized_work_time": 90.19333333333333,
+      "ratio_new_over_old": 1.0990865655575808
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 91.12416666666667,
+      "new_mean_normalized_work_time": 108.38666666666667,
+      "ratio_new_over_old": 1.189439318146485
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 109.24833333333333,
+      "new_mean_normalized_work_time": 144.77333333333334,
+      "ratio_new_over_old": 1.3251765854551558
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 145.49666666666667,
+      "new_mean_normalized_work_time": 217.54666666666665,
+      "ratio_new_over_old": 1.495200348232491
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 77.53104166666667,
+      "new_mean_normalized_work_time": 83.09666666666666,
+      "ratio_new_over_old": 1.0717857632292442
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 82.06208333333333,
+      "new_mean_normalized_work_time": 92.19333333333333,
+      "ratio_new_over_old": 1.1234583572396915
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 91.12416666666667,
+      "new_mean_normalized_work_time": 110.38666666666667,
+      "ratio_new_over_old": 1.2113873926601981
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 109.24833333333333,
+      "new_mean_normalized_work_time": 146.77333333333334,
+      "ratio_new_over_old": 1.3434835008924622
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 145.49666666666667,
+      "new_mean_normalized_work_time": 219.54666666666665,
+      "ratio_new_over_old": 1.5089463676143782
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 77.53104166666667,
+      "new_mean_normalized_work_time": 85.09666666666666,
+      "ratio_new_over_old": 1.0975818825255474
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 82.06208333333333,
+      "new_mean_normalized_work_time": 94.19333333333333,
+      "ratio_new_over_old": 1.1478301489218021
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 91.12416666666667,
+      "new_mean_normalized_work_time": 112.38666666666667,
+      "ratio_new_over_old": 1.2333354671739112
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 109.24833333333333,
+      "new_mean_normalized_work_time": 148.77333333333334,
+      "ratio_new_over_old": 1.3617904163297687
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 145.49666666666667,
+      "new_mean_normalized_work_time": 221.54666666666665,
+      "ratio_new_over_old": 1.5226923869962656
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 77.53104166666667,
+      "new_mean_normalized_work_time": 87.09666666666666,
+      "ratio_new_over_old": 1.1233780018218509
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 82.06208333333333,
+      "new_mean_normalized_work_time": 96.19333333333333,
+      "ratio_new_over_old": 1.1722019406039126
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 91.12416666666667,
+      "new_mean_normalized_work_time": 114.38666666666667,
+      "ratio_new_over_old": 1.255283541687624
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 109.24833333333333,
+      "new_mean_normalized_work_time": 150.77333333333334,
+      "ratio_new_over_old": 1.380097331767075
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 145.49666666666667,
+      "new_mean_normalized_work_time": 223.54666666666665,
+      "ratio_new_over_old": 1.5364384063781529
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 77.53104166666667,
+      "new_mean_normalized_work_time": 89.59666666666666,
+      "ratio_new_over_old": 1.1556231509422301
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 82.06208333333333,
+      "new_mean_normalized_work_time": 98.69333333333333,
+      "ratio_new_over_old": 1.2026666802065509
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 91.12416666666667,
+      "new_mean_normalized_work_time": 116.88666666666667,
+      "ratio_new_over_old": 1.2827186348297652
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 109.24833333333333,
+      "new_mean_normalized_work_time": 153.27333333333334,
+      "ratio_new_over_old": 1.4029809760637082
+    },
+    {
+      "hypothetical_independent_resources": 2,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 145.49666666666667,
+      "new_mean_normalized_work_time": 226.04666666666665,
+      "ratio_new_over_old": 1.553620930605512
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 47.53104166666667,
+      "new_mean_normalized_work_time": 40.59,
+      "ratio_new_over_old": 0.8539682400536492
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 52.062083333333334,
+      "new_mean_normalized_work_time": 45.18,
+      "ratio_new_over_old": 0.8678100665071349
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 61.12416666666667,
+      "new_mean_normalized_work_time": 54.36,
+      "ratio_new_over_old": 0.8893372779451663
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 79.24833333333333,
+      "new_mean_normalized_work_time": 72.72,
+      "ratio_new_over_old": 0.9176218216997203
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.4,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 115.49666666666667,
+      "new_mean_normalized_work_time": 109.44,
+      "ratio_new_over_old": 0.9475598141360501
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 47.53104166666667,
+      "new_mean_normalized_work_time": 41.59,
+      "ratio_new_over_old": 0.8750071225383412
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 52.062083333333334,
+      "new_mean_normalized_work_time": 46.18,
+      "ratio_new_over_old": 0.8870179033045482
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 61.12416666666667,
+      "new_mean_normalized_work_time": 55.36,
+      "ratio_new_over_old": 0.905697419187719
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 79.24833333333333,
+      "new_mean_normalized_work_time": 73.72,
+      "ratio_new_over_old": 0.9302403836042819
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.6,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 115.49666666666667,
+      "new_mean_normalized_work_time": 110.44,
+      "ratio_new_over_old": 0.9562180726716499
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 47.53104166666667,
+      "new_mean_normalized_work_time": 42.59,
+      "ratio_new_over_old": 0.8960460050230332
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 52.062083333333334,
+      "new_mean_normalized_work_time": 47.18,
+      "ratio_new_over_old": 0.9062257401019616
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 61.12416666666667,
+      "new_mean_normalized_work_time": 56.36,
+      "ratio_new_over_old": 0.9220575604302716
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 79.24833333333333,
+      "new_mean_normalized_work_time": 74.72,
+      "ratio_new_over_old": 0.9428589455088435
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 0.8,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 115.49666666666667,
+      "new_mean_normalized_work_time": 111.44,
+      "ratio_new_over_old": 0.9648763312072498
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 47.53104166666667,
+      "new_mean_normalized_work_time": 43.59,
+      "ratio_new_over_old": 0.9170848875077253
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 52.062083333333334,
+      "new_mean_normalized_work_time": 48.18,
+      "ratio_new_over_old": 0.9254335768993749
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 61.12416666666667,
+      "new_mean_normalized_work_time": 57.36,
+      "ratio_new_over_old": 0.9384177016728245
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 79.24833333333333,
+      "new_mean_normalized_work_time": 75.72,
+      "ratio_new_over_old": 0.9554775074134051
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.0,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 115.49666666666667,
+      "new_mean_normalized_work_time": 112.44,
+      "ratio_new_over_old": 0.9735345897428497
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 0.25,
+      "old_mean_normalized_work_time": 47.53104166666667,
+      "new_mean_normalized_work_time": 44.84,
+      "ratio_new_over_old": 0.9433834906135903
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 0.5,
+      "old_mean_normalized_work_time": 52.062083333333334,
+      "new_mean_normalized_work_time": 49.43,
+      "ratio_new_over_old": 0.9494433728961417
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 1,
+      "old_mean_normalized_work_time": 61.12416666666667,
+      "new_mean_normalized_work_time": 58.61,
+      "ratio_new_over_old": 0.9588678782260154
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 2,
+      "old_mean_normalized_work_time": 79.24833333333333,
+      "new_mean_normalized_work_time": 76.97,
+      "ratio_new_over_old": 0.9712507097941071
+    },
+    {
+      "hypothetical_independent_resources": 4,
+      "helper_cost_over_scalar": 1.25,
+      "inverse_batch_cost_over_field_M": 4,
+      "old_mean_normalized_work_time": 115.49666666666667,
+      "new_mean_normalized_work_time": 113.69,
+      "ratio_new_over_old": 0.9843574129123496
+    }
+  ]
+}
