@@ -1,3 +1,6 @@
+/* QSB_GEOM_FORCED */
+#define QSB_GLV11 1
+#define QSB_GLV10 1
 #define QSB_REDRAW_09241557 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
