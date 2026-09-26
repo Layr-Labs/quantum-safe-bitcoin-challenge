@@ -110,8 +110,8 @@
     },
     {
       "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
+      "bytes": 279246,
+      "sha256": "67320b84976c9b8927d1064a31ac667147b885059c55fdc6a53c9c7b999a3877"
     },
     {
       "path": "candidates/pinning/sha_pinsha.cuh",
