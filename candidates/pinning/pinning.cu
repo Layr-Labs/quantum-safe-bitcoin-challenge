@@ -168,7 +168,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 16
+#define QSB_PMIX12 32
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -196,7 +196,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 1
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
