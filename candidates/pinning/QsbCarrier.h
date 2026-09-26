@@ -38,6 +38,7 @@ enum QsbCarrierKernel {
     QK_RGF,      /* qsb_root_group_finish  */
     QK_BUILD,    /* kernel_build_gtable    */
     QK_YOFF,     /* qsb_table_offset_y     */
+    QK_RF,       /* qsb_root_fused<K> (sub-batch pipeline roots) */
     QK_N
 };
 
@@ -47,9 +48,19 @@ struct QsbCarrierState {
     cudaKernel_t k[QK_N];
 };
 static QsbCarrierState g_qsb_carrier = {0, nullptr, {}};
+/* QSB_C52_SKIP: 1 while the carrier is on and every kernel this build launches is a carrier
+ * kernel (set in main after qsb_carrier_init). The compute_52 image is then never touched:
+ * no symbol copy, no preload, so the driver never loads it and never JIT-compiles its PTX
+ * (about 0.9 s on a cold cache, inside the timed window). With the carrier off, or with any
+ * compute_52-only kernel configured, it stays 0 and nothing changes. */
+static int g_qsb_c52_skip = 0;
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+/* The generated header must list exactly the kernels of the enum above (a stale header from
+ * before QK_RF would be read past its end): regenerate it with build_carrier.sh. */
+static_assert(sizeof(qsb_carrier_kernel_names) / sizeof(qsb_carrier_kernel_names[0]) == QK_N,
+              "qsb_carrier_sm89.h does not match QsbCarrier.h's kernel list: run build_carrier.sh");
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -156,6 +167,7 @@ static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src
         e = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
         if (e != cudaSuccess) return e;
     }
+    if (g_qsb_carrier.on && g_qsb_c52_skip) return cudaSuccess;   /* compute_52 image never used */
     return cudaMemcpyToSymbol(sym, src, n);
 }
 #define QSB_TO_SYMBOL(sym, src, n) qsb_to_symbol(sym, #sym, src, n)
