@@ -478,6 +478,14 @@ struct Hp {
     int nthreads = 3, dev = 0, corrupt = 0;
 };
 static Hp *g_hp = nullptr;
+/* QSB_HP_CPU_YIELD (kill switch, host-only): when the main thread asks for a batch the producers
+ * have not finished, publish a 50 ms window (CLOCK_MONOTONIC seconds) in which the co-grinder's
+ * second worker of each SMT core sleeps, so the producer threads get whole cores back. The GPU
+ * is waiting on them; a co-grinder candidate is worth far less than a GPU batch. 0 = off. */
+#ifndef QSB_HP_CPU_YIELD
+#define QSB_HP_CPU_YIELD 1
+#endif
+static std::atomic<double> g_lag_until{0.0};
 
 static double now_s() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 static uint64_t batch_len(const Hp *h, int64_t b) {
@@ -773,6 +781,9 @@ static Slot *acquire(int64_t k) {
     Slot *s = nullptr;
     for (int i = 0; i < NSLOT; i++)
         if (h->slot[i].batch == k && (h->slot[i].state == S_PROD || h->slot[i].state == S_READY)) s = &h->slot[i];
+#if QSB_HP_CPU_YIELD
+    if (h->active && k >= 1 && (!s || s->state == S_PROD)) g_lag_until.store(t + 0.05, std::memory_order_relaxed);
+#endif
     if (!h->active) { if (s) abandon_locked(h, s); return nullptr; }
     if (s && s->state == S_PROD && h->wait_ms > 0)
         h->cv_ready.wait_for(lk, std::chrono::milliseconds(h->wait_ms), [&] { return s->state == S_READY || h->dead; });
