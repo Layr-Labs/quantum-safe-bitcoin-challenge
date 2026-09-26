@@ -46,6 +46,17 @@ __host__ __device__ __forceinline__ constexpr uint32_t qsb_klit(int i)
 #ifndef QSB_SHA_FMA_ADD
 #define QSB_SHA_FMA_ADD 0     /* pubkey-hash adds on the FMA-heavy pipe (stage 2 is ALU-bound) */
 #endif
+/* Optional pubkey-head FMA routing, from fkiene's public source
+ * 8c07297bb79a8340632b1101e5704ac1294f2b13. Existing later rounds are unchanged. */
+#ifndef QSB_PK_HEAD_FMA
+#define QSB_PK_HEAD_FMA 1
+#endif
+#if QSB_PK_HEAD_FMA != 0 && QSB_PK_HEAD_FMA != 1
+#error "QSB_PK_HEAD_FMA must be 0 or 1"
+#endif
+#if QSB_PK_HEAD_FMA && !QSB_SHA_FMA_ADD
+#error "QSB_PK_HEAD_FMA requires QSB_SHA_FMA_ADD"
+#endif
 __device__ __constant__ uint32_t pin_one_mul = 1;   /* 1; also re-uploaded by the host */
 __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t b) {
     uint32_t r; asm("mad.lo.u32 %0, %1, %2, %3;" : "=r"(r) : "r"(a), "r"(one), "r"(b)); return r;
@@ -346,6 +357,44 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     for (int i = 0; i < 9; i++) w[i] = m[i];
 
     QSB_IV_ROUNDS01(w[0], w[1]);
+#if QSB_SHA_FMA_ADD && QSB_PK_HEAD_FMA
+    {
+        const uint32_t one = pin_one_mul;
+        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
+        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
+        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
+        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
+        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
+        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
+        QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(8) + w[8]);
+        QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(9));
+        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(10));
+        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(11));
+        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(12));
+        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(13));
+        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(14));
+        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(15) + 0x108u);
+
+        /* schedule head W16..W31 (as the pre-increment of w[0..15]); every add on the FMA-heavy
+         * pipe, same terms as the #else block, only regrouped (addition mod 2^32 is associative) */
+        w[0]  = qsb_fadd(w[0], one, QSB_s0M(w[1]));
+        w[1]  = qsb_fadd(qsb_fadd(w[1], one, QSB_s0M(w[2])), one, s1(0x108u));
+        w[2]  = qsb_fadd(qsb_fadd(w[2], one, QSB_s1M(w[0])), one, QSB_s0M(w[3]));
+        w[3]  = qsb_fadd(qsb_fadd(w[3], one, QSB_s1M(w[1])), one, QSB_s0M(w[4]));
+        w[4]  = qsb_fadd(qsb_fadd(w[4], one, QSB_s1M(w[2])), one, QSB_s0M(w[5]));
+        w[5]  = qsb_fadd(qsb_fadd(w[5], one, QSB_s1M(w[3])), one, QSB_s0M(w[6]));
+        w[6]  = qsb_fadd(qsb_fadd(w[6], one, QSB_s1M(w[4])), one, QSB_s0M(w[7]) + 0x108u);
+        w[7]  = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]), one, QSB_s0M(w[8]));
+        w[8]  = qsb_fadd(qsb_fadd(w[8], one, QSB_s1M(w[6])), one, w[1]);
+        w[9]  = qsb_fadd(QSB_s1M(w[7]), one, w[2]);
+        w[10] = qsb_fadd(QSB_s1M(w[8]), one, w[3]);
+        w[11] = qsb_fadd(QSB_s1M(w[9]), one, w[4]);
+        w[12] = qsb_fadd(QSB_s1M(w[10]), one, w[5]);
+        w[13] = qsb_fadd(QSB_s1M(w[11]), one, w[6]);
+        w[14] = qsb_fadd(qsb_fadd(QSB_s1M(w[12]), one, w[7]), one, s0(0x108u));
+        w[15] = qsb_fadd(qsb_fadd(qsb_fadd(QSB_s1M(w[13]), one, w[8]), one, QSB_s0M(w[0])), one, 0x108u);
+    }
+#else
     QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
     QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
     QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
@@ -382,6 +431,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[14] = QSB_s1M(w[12]) + w[7] + s0(0x108u);
         w[15] = 0x108u + QSB_s1M(w[13]) + w[8] + QSB_s0M(w[0]);
     }
+#endif
 
 #if QSB_SHA_FMA_ADD
     {

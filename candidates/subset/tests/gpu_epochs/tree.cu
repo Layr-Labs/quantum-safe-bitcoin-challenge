@@ -910,7 +910,7 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
  * centre 0 gives segment 0's d = 2f+1 >= 1, i.e. record off+f with no digit sign (the biased unsigned
  * field); centre 2^w gives the odd signed digit 2f+1-2^w of a w-bit field; centre T+1 gives the bounded top
  * digit 2f-T. Terms 0..5 are Q's segments 0..5 and terms 6..11 P's, i.e. the walker's field after term t
- * starts at the next segment's shift. The checker (/root/w/exp/s3/host/check_s3.py) compiles this block
+ * starts at the next segment's shift. The host checker compiles this block
  * verbatim and requires qsb_s3_code == q9_bigtbl_code on every tested input. */
 // BEGIN QSB_S3_HOST_EXACT
 typedef struct { uint32_t mask, centre, off, width; } qsb_s3_desc_t;
@@ -3427,7 +3427,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * knobs whose value is one token are listed (derived macros such as QSB_PAIR_MUL follow
  * from them), so the string does not depend on how a preprocessor spaces expressions;
  * a knob that is not defined in this configuration stringifies to its own name. */
-#define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+#if QSB_PK_HEAD_FMA
+#define QSB_PK_HEAD_FMA_KNOB QSB_CARRIER_KV(QSB_PK_HEAD_FMA)
+#else
+#define QSB_PK_HEAD_FMA_KNOB
+#endif
+#define QSB_CARRIER_KNOBS QSB_PK_HEAD_FMA_KNOB QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
