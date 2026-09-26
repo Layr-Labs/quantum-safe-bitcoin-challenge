@@ -90,7 +90,7 @@
 #define QSB_FIELD_SC 1
 #endif
 #ifndef QSB_TAIL_TAB
-#define QSB_TAIL_TAB 0   /* per-sequence 256-entry table (indexed by the low locktime byte) that
+#define QSB_TAIL_TAB 1   /* per-sequence 256-entry table (indexed by the low locktime byte) that
                           * replaces rounds 0 and 1 of the tail block; needs QSB_SHA_UNIF */
 #endif
 #ifndef QSB_SHA_SMEM_W1
