@@ -155,6 +155,7 @@ static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src
         if (n > sz) return cudaErrorInvalidValue;
         e = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
         if (e != cudaSuccess) return e;
+        return cudaSuccess;   /* fk2g nojit: no compute_52 copy (its module is never loaded when the carrier is on) */
     }
     return cudaMemcpyToSymbol(sym, src, n);
 }
