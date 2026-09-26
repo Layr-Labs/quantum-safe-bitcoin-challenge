@@ -1,3 +1,4 @@
+#define QSB_PAIR_SHA_UNROLL_CONST_INNER 1
 #define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
