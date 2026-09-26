@@ -281,7 +281,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "finish block size must equal the tree width unless the inverse tree is offloaded"
 #endif
 #ifndef QSB_EARLY_LOAD
-#define QSB_EARLY_LOAD 0      /* 1: load the next table record inside the mixed addition, once cx/cy die */
+#define QSB_EARLY_LOAD 1      /* 1: load the next table record inside the mixed addition, once cx/cy die */
 #endif
 #ifndef QSB_UNROLL
 #define QSB_UNROLL 1          /* unroll factor of the 13-iteration chain loop */
