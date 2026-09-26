@@ -291,154 +291,6 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
     _mm_sfence();                                            /* order the streamed stores before "chunk done" */
 }
 
-
-/* ---- 16-lane AVX-512 path (QSB_HP16): the same bytes as flush()/produce(), 16 epochs per SHA-256 pass ----
- * On Zen 4 each sha256rnds2 holds an FP pipe for several cycles, so 4-lane SHA-NI is the slow way to hash on that
- * host; AVX-512F rounds (vprord, vpternlogd) for 16 lanes cost far fewer pipe-cycles per block. The suffix blocks
- * of 16 epochs are hashed in lockstep (lanes whose suffix is shorter keep their state, masked), and the
- * first-block states run class-major: one pass per class for all 16 epochs, message words 2..15 broadcast. */
-#define QHP_S16 __attribute__((target("avx512f,avx512bw")))
-#define HP16_ROR(x, n) _mm512_ror_epi32((x), (n))
-#define HP16_ROUND(a, b, c, d, e, f, g, h, WK) do { \
-    const __m512i t1_ = _mm512_add_epi32(_mm512_add_epi32(h, _mm512_ternarylogic_epi32(HP16_ROR(e, 6), HP16_ROR(e, 11), HP16_ROR(e, 25), 0x96)), \
-                                         _mm512_add_epi32(_mm512_ternarylogic_epi32(e, f, g, 0xCA), (WK))); \
-    const __m512i t2_ = _mm512_add_epi32(_mm512_ternarylogic_epi32(HP16_ROR(a, 2), HP16_ROR(a, 13), HP16_ROR(a, 22), 0x96), \
-                                         _mm512_ternarylogic_epi32(a, b, c, 0xE8)); \
-    d = _mm512_add_epi32(d, t1_); h = _mm512_add_epi32(t1_, t2_); } while (0)
-QHP_S16 static inline __m512i hp16_w(__m512i *W, int t) {    /* message word t (W is the 16-word ring, updated in place) */
-    if (t < 16) return W[t];
-    const __m512i w15 = W[(t - 15) & 15], w2 = W[(t - 2) & 15];
-    const __m512i s0 = _mm512_ternarylogic_epi32(HP16_ROR(w15, 7), HP16_ROR(w15, 18), _mm512_srli_epi32(w15, 3), 0x96);
-    const __m512i s1 = _mm512_ternarylogic_epi32(HP16_ROR(w2, 17), HP16_ROR(w2, 19), _mm512_srli_epi32(w2, 10), 0x96);
-    W[t & 15] = _mm512_add_epi32(_mm512_add_epi32(W[t & 15], s0), _mm512_add_epi32(W[(t - 7) & 15], s1));
-    return W[t & 15];
-}
-#define HP16_WK(t) _mm512_add_epi32(hp16_w(W, (t)), _mm512_set1_epi32((int)k_[(t)]))
-/* s <- s + compress(s, W) in 16 lanes; W[0..15] = message words (values), used as the schedule ring */
-QHP_S16 static void hp16_block(__m512i s[8], __m512i *W) {
-    __m512i a = s[0], b = s[1], c = s[2], d = s[3], e = s[4], f = s[5], g = s[6], h = s[7];
-#pragma GCC unroll 8
-    for (int t = 0; t < 64; t += 8) {
-        HP16_ROUND(a, b, c, d, e, f, g, h, HP16_WK(t + 0)); HP16_ROUND(h, a, b, c, d, e, f, g, HP16_WK(t + 1));
-        HP16_ROUND(g, h, a, b, c, d, e, f, HP16_WK(t + 2)); HP16_ROUND(f, g, h, a, b, c, d, e, HP16_WK(t + 3));
-        HP16_ROUND(e, f, g, h, a, b, c, d, HP16_WK(t + 4)); HP16_ROUND(d, e, f, g, h, a, b, c, HP16_WK(t + 5));
-        HP16_ROUND(c, d, e, f, g, h, a, b, HP16_WK(t + 6)); HP16_ROUND(b, c, d, e, f, g, h, a, HP16_WK(t + 7));
-    }
-    s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d);
-    s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h);
-}
-#undef HP16_WK
-static std::atomic<bool> g_s16{false};   /* chosen path (after the batch-0 calibration) */
-static bool g_s16_ok = false;    /* the 16-lane path is available on this host */
-static bool s16_supported() { __builtin_cpu_init(); return __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw"); }
-
-/* flush() for up to 16 lanes. */
-QHP_S16 static void flush16(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
-    alignas(64) uint8_t fb[16][64];
-    alignas(64) static const uint8_t dummy[64] = {0};
-    const uint8_t *tail[16], *rem8[16];
-    alignas(64) uint32_t S[8][16], T[16][16];
-    int nb[16], maxnb = 0;
-    for (int l = 0; l < 16; l++) {
-        if (l >= nl) { nb[l] = 0; for (int j = 0; j < 8; j++) S[j][l] = 0; rem8[l] = dummy; tail[l] = dummy; continue; }
-        const Lane &L = Ls[l];
-        const uint8_t *span = P.rows + (size_t)(L.o6 + 1) * SIG_PUSH_SIZE;
-        const int span_len = (P.cut - 1 - L.o6) * SIG_PUSH_SIZE;
-        nb[l] = (L.c.len + span_len) >> 6;                  /* the remainder is always 8 bytes */
-        for (int j = 0; j < 8; j++) S[j][l] = L.c.st[j];
-        if (nb[l] == 0) { rem8[l] = L.c.buf; tail[l] = dummy; }
-        else {
-            memcpy(fb[l], L.c.buf, L.c.len); memcpy(fb[l] + L.c.len, span, 64 - L.c.len);
-            tail[l] = span + (64 - L.c.len) - 64;            /* block b >= 1 at tail + 64 b */
-            rem8[l] = span + span_len - 8;
-        }
-        if (nb[l] > maxnb) maxnb = nb[l];
-    }
-    __m512i s[8];
-    for (int j = 0; j < 8; j++) s[j] = _mm512_load_si512((const void *)S[j]);
-    for (int b = 0; b < maxnb; b++) {
-        __mmask16 act = 0;
-        for (int l = 0; l < 16; l++) {
-            const uint8_t *bp = b >= nb[l] ? dummy : b == 0 ? fb[l] : tail[l] + 64 * b;
-            if (b < nb[l]) act |= (__mmask16)(1u << l);
-            for (int i = 0; i < 16; i++) T[i][l] = be32(bp + 4 * i);
-        }
-        __m512i W[16], ns[8];
-        for (int i = 0; i < 16; i++) W[i] = _mm512_load_si512((const void *)T[i]);
-        for (int j = 0; j < 8; j++) ns[j] = s[j];
-        hp16_block(ns, W);
-        for (int j = 0; j < 8; j++) s[j] = _mm512_mask_mov_epi32(s[j], act, ns[j]);   /* finished lanes keep their state */
-    }
-    for (int j = 0; j < 8; j++) _mm512_store_si512((void *)S[j], s[j]);
-    alignas(64) uint32_t w0a[16], w1a[16];
-    for (int l = 0; l < 16; l++) { w0a[l] = be32(rem8[l]); w1a[l] = be32(rem8[l] + 4); }
-    for (int l = 0; l < nl; l++) {                           /* descriptors, exactly as flush() */
-        const Lane &L = Ls[l];
-        const uint32_t w0 = w0a[l], w1 = w1a[l];
-        uint8_t *d = ep_out + (size_t)L.idx * 64;
-        alignas(16) uint8_t rec[64];
-        uint32_t F[8]; for (int j = 0; j < 8; j++) F[j] = S[j][l];
-        memcpy(rec, F, 32);
-        memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
-        memset(rec + 40, 0, 24);
-        memcpy(rec + 40, L.early, MAXK);
-        memset(rec + 40 + P.K, 0, MAXK - P.K);
-        for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
-    }
-    const __m512i W0 = _mm512_load_si512((const void *)w0a), W1 = _mm512_load_si512((const void *)w1a);
-    for (int c = 0; c < P.ncls; c++) {                       /* first-block states, class-major */
-        alignas(16) uint32_t cw[16];
-        cw[2] = P.cv[c].w2; cw[3] = P.cv[c].w3;
-        _mm_storeu_si128((__m128i *)&cw[4], P.cv[c].M1); _mm_storeu_si128((__m128i *)&cw[8], P.cv[c].M2);
-        _mm_storeu_si128((__m128i *)&cw[12], P.cv[c].M3);
-        __m512i W[16], st[8];
-        W[0] = W0; W[1] = W1;
-        for (int i = 2; i < 16; i++) W[i] = _mm512_set1_epi32((int)cw[i]);
-        for (int j = 0; j < 8; j++) st[j] = s[j];
-        hp16_block(st, W);
-        alignas(64) uint32_t O[8][16];
-        for (int j = 0; j < 8; j++) _mm512_store_si512((void *)O[j], st[j]);
-        for (int l = 0; l < nl; l++) {
-            uint32_t *fo = fi_out + ((size_t)Ls[l].idx * P.ncls + c) * 8;
-            alignas(16) uint32_t R[8]; for (int j = 0; j < 8; j++) R[j] = O[j][l];
-            _mm_stream_si128((__m128i *)fo, _mm_load_si128((const __m128i *)R));
-            _mm_stream_si128((__m128i *)(fo + 4), _mm_load_si128((const __m128i *)(R + 4)));
-        }
-    }
-}
-/* produce() with 16 lanes per flush. */
-static void produce16(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, uint8_t *ep_out, uint32_t *fi_out) {
-    const int K = P.K, N = P.cut;
-    uint8_t o[MAXK] = {0};
-    qsb_host_unrank(e0, N, K, o);
-    SCtx ctx[MAXK + 1];
-    ctx[0] = P.c0;
-    for (int k = 1; k <= K; k++) {
-        ctx[k] = ctx[k - 1];
-        for (int i = (k == 1 ? 0 : o[k - 2] + 1); i < o[k - 1]; i++) sc_push(ctx[k], P.rows + (size_t)i * SIG_PUSH_SIZE);
-    }
-    Lane L[16]; int nl = 0;
-    for (uint64_t e = e0; e < e1; e++) {
-        Lane &x = L[nl++];
-        memcpy(x.c.st, ctx[K].st, 32); x.c.len = ctx[K].len; memcpy(x.c.buf, ctx[K].buf, 64);
-        x.o6 = o[K - 1]; x.idx = (uint32_t)(e - base);
-        memcpy(x.early, o, MAXK);
-        if (nl == 16) { flush16(P, L, 16, ep_out, fi_out); nl = 0; }
-        if (e + 1 == e1) break;
-        int i = K - 1;
-        while (i >= 0 && o[i] == N - K + i) i--;
-        if (i < 0) break;                                    /* end of the epoch space */
-        sc_push(ctx[i + 1], P.rows + (size_t)o[i] * SIG_PUSH_SIZE);
-        o[i]++;
-        for (int j = i + 1; j < K; j++) { o[j] = o[j - 1] + 1; ctx[j + 1] = ctx[j]; }
-    }
-    if (nl) flush16(P, L, nl, ep_out, fi_out);
-    _mm_sfence();                                            /* order the streamed stores before "chunk done" */
-}
-static inline void produce_any(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, uint8_t *ep_out, uint32_t *fi_out) {
-    if (g_s16.load(std::memory_order_relaxed)) produce16(P, base, e0, e1, ep_out, fi_out); else produce(P, base, e0, e1, ep_out, fi_out);
-}
-
 /* ---- batch pipeline ----
  * Ring of NSLOT pinned slots, each NPIECE pieces (40 MiB each at the ranked shape), pinned only once the
  * search loop runs and one piece per driver call, so no allocation holds the driver for long while the
@@ -472,8 +324,6 @@ struct Hp {
     double tg = 0, t_last_acq = 0, tchunk = 0;
     /* stats / watchdog */
     uint64_t n_host = 0, n_fb = 0, ahead_sum = 0, ahead_n = 0; int consec_fb = 0, max_fb = 16, wait_ms = 40, ahead_min = 99;
-    /* hashing-path calibration on batch 0: its chunks alternate SHA-NI x4 / AVX-512 x16, both are self-checked */
-    double t_path[2] = {0, 0}; int n_path[2] = {0, 0};
     bool active = false, dead = false;
     int nthreads = 3, dev = 0, corrupt = 0;
 };
@@ -565,21 +415,12 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
             const int ch = h->c_next++;
             lk.unlock();
             const uint64_t n = batch_len(h, 0), e0 = (uint64_t)ch * CHUNK, e1 = e0 + CHUNK < n ? e0 + CHUNK : n;
-            const bool use16 = g_s16_ok && (ch & 1);
             const double t0 = now_s();
-            if (use16) produce16(h->P, 0, e0, e1, h->c_ep, h->c_fi); else produce(h->P, 0, e0, e1, h->c_ep, h->c_fi);
+            produce(h->P, 0, e0, e1, h->c_ep, h->c_fi);
             const double dt = now_s() - t0;
             lk.lock();
             h->tchunk = h->tchunk > 0 ? 0.8 * h->tchunk + 0.2 * dt : dt;
-            if (e1 - e0 == CHUNK) { h->t_path[use16] += dt; h->n_path[use16]++; }
             h->c_done++;
-            if (h->c_done == h->c_nchunks && g_s16_ok && h->n_path[0] && h->n_path[1]) {
-                const double a4 = h->t_path[0] / h->n_path[0], a16 = h->t_path[1] / h->n_path[1];
-                g_s16.store(a16 < 0.98 * a4, std::memory_order_relaxed);   /* adopted only if clearly faster */
-                printf("  Host producers: calibration %.2f ms per chunk with SHA-NI x4, %.2f ms with AVX-512 x16: using %s\n",
-                       a4 * 1e3, a16 * 1e3, g_s16.load() ? "AVX-512 x16" : "SHA-NI x4");
-                fflush(stdout);
-            }
             continue;
         }
         if (h->check == 0 && h->c_done == h->c_nchunks && h->chk_enqueued && !h->chk_running) {
@@ -650,7 +491,7 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
         const uint64_t e1 = (uint64_t)(ch + 1) * CHUNK < n ? base + (uint64_t)(ch + 1) * CHUNK : base + n;
         const int p = (int)(((uint64_t)ch * CHUNK) / h->pe);           /* chunks never straddle pieces */
         const double t0 = now_s();
-        produce_any(h->P, base + (uint64_t)p * h->pe, e0, e1, w->ep[p], w->fi[p]);
+        produce(h->P, base + (uint64_t)p * h->pe, e0, e1, w->ep[p], w->fi[p]);
         const double dt = now_s() - t0;
         lk.lock();
         h->tchunk = 0.8 * h->tchunk + 0.2 * dt;
@@ -693,8 +534,6 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
         printf("  Host producers: off (unsupported shape)\n"); delete h; return;
     }
     g_shani = shani_supported() && !(getenv("QSB_HP_NOSHANI") && atoi(getenv("QSB_HP_NOSHANI")));
-    g_s16_ok = s16_supported() && !(getenv("QSB_HP_NO16") && atoi(getenv("QSB_HP_NO16")));
-    g_s16.store(false);                                       /* batch 0 decides (calibration below); SHA-NI x4 until then */
     memcpy(P.c0.st, dp->midstate, 32); P.c0.len = 0;
     sc_bytes(P.c0, dp->prefix_remainder, (int)dp->prefix_remainder_len);
     for (int c = 0; c < ncls; c++) {
@@ -734,7 +573,7 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
     g_hp = h;
     for (int t = 0; t < h->nthreads; t++) h->th.emplace_back(worker, h, t, wmask, use_mask);
     printf("  Host producers: %d threads (%s, %s), %d pinned slots of %.0f MiB, self-check on batch 0\n",
-           h->nthreads, g_s16_ok ? (g_shani ? "SHA-NI x4 or AVX-512 x16, calibrated on batch 0" : "AVX-512 x16 or OpenSSL, calibrated on batch 0") : g_shani ? "SHA-NI x4" : "OpenSSL", use_mask ? "off the main core" : "unpinned",
+           h->nthreads, g_shani ? "SHA-NI x4" : "OpenSSL", use_mask ? "off the main core" : "unpinned",
            NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0);
     fflush(stdout);
 }
