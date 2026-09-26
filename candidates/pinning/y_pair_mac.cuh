@@ -7,15 +7,8 @@
 // 513-bit sum is reduced with every carry kept, so the result is in [0,2^256) and
 // congruent to a*b + c*d for EVERY input a,b,c,d in [0,2^256).
 #pragma once
-// QSB_RMAC_TAIL (kill switch, default 1): the reduction tail drops four carries that are set
-// with probability below 2^-21 each on the hashed operands (carry out of r3 + x14*977 and of
-// h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of
-// z8 = k16 + w7 and of {z0,z8+k16} + z8*977) and stops the second fold's carry at z3. A dropped
-// carry only changes that one candidate's recovered ordinate, which the host exact gate
-// would reject: a candidate lost with probability < 2^-19, never a false hit. 0 is the
-// every-carry-kept tail described above.
-#ifndef QSB_RMAC_TAIL
-#define QSB_RMAC_TAIL 1
+#ifndef QSB_MAC_CUT
+#define QSB_MAC_CUT 1   /* 1: bounded-rare-carry reduction tail (see int_patch.py) */
 #endif
 __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a, const uint64_t *b,
                                                   const uint64_t *c, const uint64_t *d) {
@@ -403,7 +396,7 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.cc.u64 f2, r2, t;\n"
   "mul.wide.u32 t, x14, 977;\n"
   "addc.cc.u64 f3, r3, t;\n"
-#if !QSB_RMAC_TAIL
+#if !QSB_MAC_CUT
   "addc.u32 f8, k16, 0;\n"
 #endif
   "mul.wide.u32 t, x9, 977;\n"
@@ -414,7 +407,7 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.cc.u64 g2, h2, t;\n"
   "mul.wide.u32 t, x15, 977;\n"
   "addc.cc.u64 g3, h3, t;\n"
-#if !QSB_RMAC_TAIL
+#if !QSB_MAC_CUT
   "addc.u32 g8, x16, 0;\n"
 #endif
   "mov.b64 {z0,z1}, f0;\n"
@@ -432,9 +425,10 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.cc.u32 z5, z5, w4;\n"
   "addc.cc.u32 z6, z6, w5;\n"
   "addc.cc.u32 z7, z7, w6;\n"
-#if QSB_RMAC_TAIL
-  /* z8 = k16 + w7 + carry(z7); z9 = x16 and k9 = k16 (dropped carries above). Second fold:
-   * {z0,z1} += z8*977 + (z8 + k16)<<32, z2 += x16 plus the carry, which stops after z3. */
+#if QSB_MAC_CUT
+  /* z8 = k16 + w7 + carry (f8 = k16: f-chain carry dropped); z9 = x16 (g-chain and z8 carries dropped),
+   * so k9 = k16 and sfh = sfc = x16. Second fold: {z0,z1} += z8*977 + (z8 + k16)<<32, z2 += x16,
+   * carry stopped after z3 (the multiply stops after z2). */
   "addc.u32 z8, k16, w7;\n"
   "add.u32 sfq, z8, k16;\n"
   "mov.b64 sfz, {z0, sfq};\n"
