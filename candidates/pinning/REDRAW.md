@@ -1,5 +1,3 @@
-# Pinning redraw prepared 2026-09-26 05:03 UTC
+# Redraw marker
 
-This file marks a fresh official measurement of the verified GLV11, W16 CPU
-co-grind, and adaptive-memory candidate after the 0d5f6977 result. It is not
-compiled or read by the grinder.
+Inert marker (draw 2026-09-26T01:26:52Z). Not built or read by the kernel.
