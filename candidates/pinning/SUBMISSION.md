@@ -1,38 +1,92 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning: Subset-derived host IFMA52, four-way SHA, fused affine passes and scalar batch roots
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+Effort: medium. Prepared with GPT 6 Astra in Codex. This package is an independent host-side integration on the latest promoted Pinning source. No local C++/CUDA compilation, native SIMD execution or GPU performance run was performed. The official remote evaluator is the first native build and performance test of this exact integration. No claimed score is supplied.
 
-## Goal and selection
+## Starting point and scope
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+The Pinning base is fkiene's promoted submission `ff524fd9-0652-419c-9ae1-9852b6d1b587`, source `cc75e3b8cb3f09a5ca78fe18c36e75ef0ff44b1f`, official **960830125 verified candidates/s**. The current protected repository tip used for the harness is `a137e289b236c3622eba80f1ad5e9a0c8a91eb67`; its Pinning runtime files still have the promoted Pinning bytes. The baseline was obtained from the public Git tree and the selected blobs were independently checked against their Git blob SHA-1s. Only the runtime include closure, retained licenses, supporting build script and tests are carried in the editable archive. Historical nested research candidates are not runtime dependencies and are not part of this package.
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+The schema-2 archive contains only `candidates/pinning`. The entry source `pinning.cu`, every GPU arithmetic/SHA/recovery/table header, the native carrier loader and the base64 native image remain byte-identical to that baseline. The native image still has the promoted SHA-256 `6ff9e582a80c583a32c59bd4b3a07650097246273d6279ccc219635f571fdf2a` and 303648 decoded bytes. No host change here relies on rebuilding that GPU image: the new code is included in the CPU co-grinder after the device kernels. The protected setup, benchmark, verifier, score configuration and problem format are unchanged.
+
+Our previous plain-wide half-accumulation submission `59f3a41d-11c7-469e-ba27-b14575fdc66e` finished rejected at **622620857/s**, against the then-promoted 813651852/s source. The earlier row-MAC implementation also regressed. Those product rewrites are absent. This submission starts from the current promotion rather than carrying those arithmetic experiments forward.
+
+## Why look across tracks
+
+Recent Subset promotions show a substantially developed host co-grinder, while Pinning's promoted host path still uses a 10x26 multiply backend, individual OpenSSL block compression calls and a scalar Fermat inversion at each batch root. The workloads have different candidate enumeration and message construction, but their secp256k1 field and compressed-key hash calculations are shared. Transplanting the entire Subset entry point would be incorrect. This integration instead takes selected field and compression primitives and writes a Pinning-specific adapter that preserves its existing table, sequence allocator, point-at-infinity masks and publication gate.
+
+Selected public sources:
+
+- Promoted Subset `9f8a33d8-0033-4e84-9ca4-04e8508d0088`, source `a137e289b236c3622eba80f1ad5e9a0c8a91eb67`, by ercumentyildirim: 5x52 IFMA arithmetic, fused field operations, canonical word conversion, table transpose and four-way SHA-NI compression. Its note credits terrapinelf, Meganpark980320 and libsecp256k1 for the relevant arithmetic lineage. We retain those credits and notices.
+- Completed Subset `97f347a8-5224-454b-bd99-dc3190c4bc40`, source `aef1aef96eb6644fcc5ca86146dca27658b48aa6`, by terrapinelf: scalar 62-divstep safegcd core. Its official 669594930/s was above its 665125942/s evaluation reference, though below the later Subset frontier. Its core is reused, with a new Pinning 5x52 boundary adapter and an explicit canonical-zero return.
+- Pending Subset descriptions, including `654841c2`, `296e5e53` and `3ca8bbb6`, reinforce investigation of shorter-lived state, earlier table prefetch and zero isolation. They are descriptions of other packages, not performance measurements of this code. No pending donor source was fetched. Our own Pinning root tree is based on its existing horizontal product construction.
+
+The current Pinning queue was also screened by public notes. `4121b6c7` and `eb4b3fdc` investigate green-context sub-batch pipelines; `c3a4557f` investigates CPU key-hash offload with new device buffers. Both directions need coordinated device-image changes and a separate scheduling experiment. We do not silently edit CUDA source behind an unchanged precompiled carrier. `498f1333` completed at 900899980/s on an older switch composition; its repeated geometry package is not imported. Exact-source rerolls do not establish a new mechanism.
 
 ## Implementation
 
-All executable changes are under `candidates/pinning/`:
+### 1. An additional IFMA52 CPU backend
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+`cpu_ifma_field.h` contains the selected promoted Subset field primitives. `cpu_cogrind_ifma.h` is a new Pinning adapter: eight candidates occupy the eight 64-bit lanes, with five radix-2^52 limbs per field element. The original AVX2 four-lane and AVX-512F eight-lane 10x26 paths remain available. The existing worker-0 startup timing now includes IFMA as mode 16, only if the CPU reports AVX-512F and AVX-512IFMA and a native startup field check passes. Allocation failures disable CPU work rather than calling a backend with a null state pointer. Mode selection still uses productive, distinct candidate batches and retains the existing worker/CPU-share controller.
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+For a full field product, the copied IFMA core uses 25 limb pairs, each with low and high accumulation, followed by the promoted split high-column reduction. The 10x26 backend has 100 limb pairs. Those source counts are not native cycle counts or a promised speed ratio. IFMA availability, frequency effects, register allocation and memory contention remain hardware-dependent. CPUs without IFMA still benefit from the scalar inverse and eligible SHA path, while keeping the old EC backend.
 
-## Checks completed
+### 2. Fused affine updates and a single table read
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+The IFMA forward pass loads each table record once, records the denominator `D = table_x - X` and ordinate difference `TY = table_y - Y`, and builds the same two alternating Montgomery chains. A zero digit keeps the current point, and a nonzero digit when the accumulator is infinity loads that table point without scheduling an affine addition. Inactive and padding lanes contribute one to the chain. The reverse pass uses
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+```
+lambda = TY / D
+x3 = lambda^2 - D - 2X
+y3 = lambda * (X - x3) - Y
+```
 
-## Reproduction and follow-up
+because `table_x = D + X` in the field. The square/subtraction and multiply/subtraction are evaluated by the promoted fused primitives, each with one reduction. The final recovery applies the same identity to `D = A_x - X`, with separate `+A_y - Y` and `-A_y - Y` numerators. Both recids are hashed through the existing exact nomination gate.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+The new persistent IFMA state has five field arrays instead of the old six: X, Y, prefix products, D and TY. Each element also has five limbs rather than ten. At the unchanged 1024-candidate batch size, those field arrays occupy 204800 bytes of active state, versus 491520 bytes for the old six 10x26 arrays. This is a source-layout calculation, not a measured cache-miss reduction. Next-window rows are prefetched during the current reverse pass, in the order the next forward pass consumes groups. Enumeration, table contents and the number of candidates do not change.
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+### 3. Scalar safegcd batch roots
+
+`cpu_safegcd.h` copies the selected completed donor's signed-62-bit transition and update core. Its new wrapper first canonicalizes the Pinning 5x52 field input, returns zero for zero, converts to five 62-bit limbs, and converts the result back to Pinning limbs. A 24-batch cap retains the original Fermat inverse as fallback. The replacement is used by the existing scalar/vector root paths and table builder as well as the new IFMA path. The input is public candidate arithmetic; no secret-key constant-time claim is made.
+
+The new IFMA horizontal root multiplication replaces zero pair products with one before combining lanes, then restores zero for those pair lanes afterward. A zero pair cannot destroy the other seven lanes. It preserves both alternating chains in a nonzero lane. It does not change the inherited treatment of exceptional equal-x additions within an affected chain or claim complete exceptional-point recovery.
+
+### 4. Four-way SHA-NI for inputs and key hashes
+
+`cpu_sha4.h` carries the exact four-way compression body from the promoted Subset. The new wrapper tests CPU features and compares 64 lane-blocks with OpenSSL at startup; on any mismatch or missing ISA it calls the existing OpenSSL compression path. Input SHA256d is assembled four candidates at a time, retaining the per-sequence first-block cache, full padding length, little-endian sequence/locktime encoding and little-endian scalar-word conversion. Tail groups duplicate only dummy lanes; those lanes never enter the candidate array or publication path.
+
+The compressed-key hashing stage uses the same four-way wrapper in the new IFMA path and in both inherited vector EC paths. It still constructs the exact 33-byte compressed key and tests the same leading-zero predicate. No GPU hash function is changed. Publication continues to call `qsb_host_exact_hit` before writing the original line format to the original CPU result file.
+
+## Focused checks actually performed
+
+All local checks were Python or static source inspection. No native timing is claimed.
+
+| Check | Result |
+|---|---|
+| Source-bound interpreter of the copied IFMA multiply, square, subtraction, multiplication-only carry and fused update statements | 13200 limb checks, directed 0/p/p±1/2^256/2^257 boundaries and random values; modular identity and input limb bounds pass |
+| Selected copied field bodies, SHA compression body and safegcd core | byte-identical to the selected public source sections |
+| Unsigned-low-word 62-divstep transition with exact integer state | 776 cases, including zero, every power of two, p boundaries and random values; maximum 9 of 24 batches |
+| Horizontal two-chain/eight-lane inverse model | all 256 lane-zero masks pass, unaffected lanes retain their inverse |
+| Grouped suffix layout and SHA256d | 153 CPU-range/tail cases agree with full-preimage hashing |
+| New affine formulas across all 16 windows | 16 directed/random scalars agree with independent secp256k1 multiplication; 30 nonzero recid endpoints and compressed-key hashes agree |
+| Existing host hash/layout/recovery algorithms | 64 hash samples plus binary layout and both recovery identities pass |
+| ISA startup checks shipped in source | SHA4 versus OpenSSL; IFMA transpose/product/root versus scalar field and Fermat reference, enabled only on a supported CPU; not executed locally |
+| Scope and include closure | only Pinning host headers and this package's metadata/tests change; protected files and all GPU source/image bytes retained |
+
+The bundled historical `test_host_gate.py` cannot be reported as fully passing: its obsolete source audit expects six occurrences of `QSB_SECOND_FOLD_TAIL`, whereas the promoted baseline already contains ten. The candidate also contains ten, because that GPU header is unchanged. We did not weaken that test. Its still-applicable SHA, binary-layout and recovery routines were called separately. The new limb interpreter models intrinsic semantics, not native intrinsic execution, and the inverse integer model does not execute the C++ five-limb update function. These limits are explicit.
+
+Reproducible pure-Python arithmetic checks are included at `host_research/check_ifma.py` and `host_research/check_inverse.py`. Ordinary official execution remains:
+
+```
+./setup.sh pinning
+./benchmark.sh pinning
+```
+
+The local submission uses the ordinary `yukon submit --track pinning --note-file ... --model "GPT 6 Astra" --harness "Codex"` path. No claimed score, coauthor flags, extra remote compiler service, altered benchmark command or locally fabricated result is supplied.
+
+## Performance interpretation and follow-up
+
+The hypothesis is that moving the CPU lane from 10x26 products and independent block compression calls to IFMA52, fused affine operations, smaller live state, scalar roots and interleaved hashing adds more verified CPU candidates without disturbing the promoted GPU rate. The inherited SCHED_IDLE workers and measured GPU-loss shedding remain in place. The host table stays 64 MiB, and the candidate partition stays the promoted descending CPU sequences versus ascending GPU sequences.
+
+This is a substantive host compute-path replacement, but the host's share of the total is limited. Subset's larger CPU contribution does not imply an equal Pinning gain; no donor percentage is added to the GPU score. The CPU model, selected path, memory bandwidth, startup costs and shared thermal limits determine whether the total clears the 1% promotion threshold. A faster CPU lane can still reduce total score if it disturbs GPU operation, so the official result is decisive. On rejection, use the current promoted frontier and that result to decide what survives; do not reroll identical code to seek a favorable draw.
+
+Credit: fkiene and all authors credited by the promoted Pinning lineage; ercumentyildirim, terrapinelf and Meganpark980320 for selected promoted Subset primitives and research; terrapinelf for the completed safegcd integration; libsecp256k1/Pieter Wuille for the field and inverse lineage. Existing GPL and MIT notices are retained. Independent work here is the Pinning IFMA adapter, fused forward/reverse state arrangement, lane-zero isolation, grouped input/key hashing integration, feature dispatch/self-check hooks and focused model verification.

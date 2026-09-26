@@ -1,4 +1,6 @@
 /* cpu_cogrind.h -- host-CPU co-grinding for the pinning search.
+ * September 26: Subset-derived IFMA52 backend, four-way SHA-NI, safegcd roots.
+ * GPU code and carrier unchanged. Host backends still selected on actual CPU.
  *
  * The GPU walks sequences upward from 0x80000000 (about 900 of them in a 1200 s run), each over
  * locktimes [LT_MIN, LT_MAX). Idle host cores grind sequences counting DOWN from 0xFFFFFFFE over
@@ -170,7 +172,7 @@ static inline void fe_to_w(uint64_t *w, const fe *a) {
     w[3] = (a->n[3] >> 36) | (a->n[4] << 16);
 }
 /* a^(p-2): libsecp256k1's addition chain */
-static void fe_inv(fe *r, const fe *a) {
+static void fe_inv_fermat(fe *r, const fe *a) {
     fe x2, x3, x6, x9, x11, x22, x44, x88, x176, x220, x223, t1;
     int j;
     fe_sqr(&x2, a); fe_mul(&x2, &x2, a);
@@ -189,6 +191,8 @@ static void fe_inv(fe *r, const fe *a) {
     for (j = 0; j < 3; j++) fe_sqr(&t1, &t1); fe_mul(&t1, &t1, &x2);
     for (j = 0; j < 2; j++) fe_sqr(&t1, &t1); fe_mul(r, a, &t1);
 }
+
+#include "cpu_safegcd.h"
 
 /* ---------------- configuration ---------------- */
 #ifndef QSB_CG_W
@@ -296,9 +300,10 @@ struct shared_t {
     std::atomic<int> ready;               /* table built */
     std::atomic<int> failed;
     int nworkers;
-    int simd_ok;                          /* bit 4: AVX2 usable, bit 8: AVX-512F usable */
-    int simd_env;                         /* QSB_CPU_GRIND_SIMD override (0/4/8), else -1 */
-    std::atomic<int> simd;                /* chosen path: 8, 4 or 0 (scalar); -1 until chosen */
+    int sha4;                            /* immutable runtime SHA-NI self-check result */
+    int simd_ok;                          /* bits 4/8/16: AVX2/AVX-512F/IFMA52 usable */
+    int simd_env;                         /* QSB_CPU_GRIND_SIMD override (0/4/8/16), else -1 */
+    std::atomic<int> simd;                /* chosen path: 16, 8, 4 or 0 (scalar); -1 until chosen */
     std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];   /* per-worker thread CPU time */
     std::atomic<uint64_t> sha_cyc, ec_cyc;
 };
@@ -347,6 +352,8 @@ static inline void sha_blocks(uint32_t st[8], const uint8_t *p, size_t nblk) {
     for (size_t i = 0; i < nblk; i++) SHA256_Transform(&c, p + 64 * i);
     memcpy(st, c.h, 32);
 }
+
+#include "cpu_sha4.h"
 
 /* digit j (bits W j .. W j + W - 1) of the 256-bit little-endian word array */
 static inline unsigned digit(const uint64_t *z, int j) {
@@ -526,6 +533,7 @@ static void ec_batch(worker_t *w) {
 #undef QCG_NS
 #undef QCG_VW
 #undef QCG_TARGET
+#include "cpu_cogrind_ifma.h"
 #define QSB_CG_HAVE_SIMD 1
 #else
 #define QSB_CG_HAVE_SIMD 0
@@ -558,20 +566,33 @@ static int fill_batch(worker_t *w, uint8_t *scratch) {
         w->cur_seq_tag = (uint64_t)seq + 1;
     }
     w->seq = seq;
-    for (int i = 0; i < n; i++) {
-        const uint32_t lt = lt0 + (uint32_t)i;
-        for (int b = 0; b < 4; b++) m[lo + b] = (uint8_t)(lt >> (8 * b));
-        uint32_t st[8]; memcpy(st, w->mid1, 32);
-        if (S->cache_first) sha_blocks(st, m + 64, 1); else sha_blocks(st, m, (size_t)S->nblk);
-        uint8_t d1[64];
-        for (int b = 0; b < 8; b++) be_store32(d1 + 4 * b, st[b]);
-        d1[32] = 0x80; memset(d1 + 33, 0, 29); d1[62] = 0x01; d1[63] = 0x00;   /* 256 bits */
-        uint32_t h2[8]; memcpy(h2, SHA_IV, 32); sha_blocks(h2, d1, 1);
-        w->z[i][0] = ((uint64_t)h2[6] << 32) | h2[7];
-        w->z[i][1] = ((uint64_t)h2[4] << 32) | h2[5];
-        w->z[i][2] = ((uint64_t)h2[2] << 32) | h2[3];
-        w->z[i][3] = ((uint64_t)h2[0] << 32) | h2[1];
-        w->lt[i] = lt;
+    for (int i = 0; i < n; i += 4) {
+        uint8_t msgs[4][128], d1[4][64] = {}; const uint8_t *ptr[4];
+        uint32_t st[4][8], h2[4][8];
+        const int take = n - i < 4 ? n - i : 4;
+        for (int l = 0; l < 4; ++l) {
+            memcpy(msgs[l], m, 128);
+            const uint32_t lt = lt0 + (uint32_t)(i + (l < take ? l : 0));
+            for (int b = 0; b < 4; b++) msgs[l][lo + b] = (uint8_t)(lt >> (8 * b));
+            memcpy(st[l], w->mid1, 32);
+            if (l < take) w->lt[i+l] = lt;
+        }
+        for (int block = S->cache_first ? 1 : 0; block < S->nblk; ++block) {
+            for (int l = 0; l < 4; ++l) ptr[l] = msgs[l] + 64 * block;
+            cpu_hash4(st, ptr);
+        }
+        for (int l = 0; l < 4; ++l) {
+            for (int b = 0; b < 8; ++b) be_store32(d1[l] + 4*b, st[l][b]);
+            d1[l][32] = 0x80; d1[l][62] = 1;
+            memcpy(h2[l], SHA_IV, 32); ptr[l] = d1[l];
+        }
+        cpu_hash4(h2, ptr);
+        for (int l = 0; l < take; ++l) {
+            w->z[i+l][0] = ((uint64_t)h2[l][6] << 32) | h2[l][7];
+            w->z[i+l][1] = ((uint64_t)h2[l][4] << 32) | h2[l][5];
+            w->z[i+l][2] = ((uint64_t)h2[l][2] << 32) | h2[l][3];
+            w->z[i+l][3] = ((uint64_t)h2[l][0] << 32) | h2[l][1];
+        }
     }
     w->n = n;
     return n;
@@ -600,9 +621,13 @@ static void *worker_main(void *arg) {
         !BN_lebin2bn(S->pp->u2r_y, 32, w->ry) ||
         !EC_POINT_set_affine_coordinates_GFp(w->grp, w->Ru2, w->rx, w->ry, w->ctx)) { S->failed.store(1); return NULL; }
 #if QSB_CG_HAVE_SIMD
-    v4::vstate *vs4 = NULL; v8::vstate *vs8 = NULL;
+    v4::vstate *vs4 = NULL; v8::vstate *vs8 = NULL; vi::vstate *vsi = NULL;
     if (S->simd_ok & 4) vs4 = (v4::vstate *)aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
     if (S->simd_ok & 8) vs8 = (v8::vstate *)aligned_alloc(64, (sizeof(v8::vstate) + 63) & ~(size_t)63);
+    if (S->simd_ok & 16) vsi = (vi::vstate *)aligned_alloc(64, (sizeof(vi::vstate) + 63) & ~(size_t)63);
+    if ((S->simd_ok & 16) && !vsi) { S->failed.store(1); return NULL; }
+    if ((S->simd_ok & 8) && !vs8) { S->failed.store(1); return NULL; }
+    if ((S->simd_ok & 4) && !vs4) { S->failed.store(1); return NULL; }
 #endif
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load()) return NULL; usleep(2000); }
 #if QSB_CG_HAVE_SIMD
@@ -610,8 +635,8 @@ static void *worker_main(void *arg) {
      * candidates are real work and are counted); the others wait for the choice. */
     if (id == 0 && S->simd < 0) {
         int best = S->simd_env >= 0 ? S->simd_env : 0; double bt = 1e30;
-        const int cand[3] = {8, 4, 0};
-        for (int c = 0; c < 3 && S->simd_env < 0; c++) {
+        const int cand[4] = {16, 8, 4, 0};
+        for (int c = 0; c < 4 && S->simd_env < 0; c++) {
             const int m = cand[c];
             if (m && !(S->simd_ok & m)) continue;
             if (!m && S->simd_ok) continue;                        /* scalar only without SIMD */
@@ -620,7 +645,7 @@ static void *worker_main(void *arg) {
                 const int n = fill_batch(w, scratch);
                 if (!n) break;
                 const uint64_t r0 = __rdtsc();
-                if (m == 8) v8::ec_batch_vec(w, vs8); else if (m == 4) v4::ec_batch_vec(w, vs4); else ec_batch(w);
+                if (m == 16) vi::ec_batch(w, vsi); else if (m == 8) v8::ec_batch_vec(w, vs8); else if (m == 4) v4::ec_batch_vec(w, vs4); else ec_batch(w);
                 const double dt = (double)(__rdtsc() - r0) / n;
                 if (rep > 0) t += dt;                                 /* first batch warms caches */
                 S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
@@ -628,7 +653,7 @@ static void *worker_main(void *arg) {
             if (t > 0 && t < bt) { bt = t; best = m; }
         }
         S->simd = best;
-        if (g_ctl_verbose) printf("  [CPU] EC path: %s\n", best == 8 ? "avx512f x8" : best == 4 ? "avx2 x4" : "scalar");
+        if (g_ctl_verbose) printf("  [CPU] EC path: %s\n", best == 16 ? "IFMA52 x8" : best == 8 ? "avx512f x8" : best == 4 ? "avx2 x4" : "scalar");
     }
     while (S->simd < 0) { if (S->stop.load()) return NULL; usleep(1000); }
 #endif
@@ -640,6 +665,7 @@ static void *worker_main(void *arg) {
         int n = fill_batch(w, scratch);
         const uint64_t r1 = __rdtsc();
 #if QSB_CG_HAVE_SIMD
+        if (n && S->simd == 16) vi::ec_batch(w, vsi); else
         if (n && S->simd == 8) v8::ec_batch_vec(w, vs8); else
         if (n && S->simd == 4) v4::ec_batch_vec(w, vs4); else
 #endif
@@ -739,9 +765,12 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     S->n_chunks = (uint64_t)S->chunks_per_seq * 0x3FFFFFFFull;      /* sequences 0xFFFFFFFE down to 0xC0000000 */
     S->nblk = pp->suffix_len < 56 ? 1 : 2;
     S->cache_first = S->nblk == 2 && pp->seq_offset + 4 <= 64 && pp->lt_offset >= 64;
+    S->sha4 = cpu_sha4_check();
     S->simd.store(0); S->simd_ok = 0; S->simd_env = -1;
 #if QSB_CG_HAVE_SIMD
-    S->simd_ok = (__builtin_cpu_supports("avx2") ? 4 : 0) | (__builtin_cpu_supports("avx512f") ? 8 : 0);
+    S->simd_ok = (__builtin_cpu_supports("avx2") ? 4 : 0) | (__builtin_cpu_supports("avx512f") ? 8 : 0) |
+        ((__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma")) ? 16 : 0);
+    if ((S->simd_ok & 16) && !vi::field_selfcheck()) S->simd_ok &= ~16;
     if (getenv("QSB_CPU_GRIND_SIMD")) { S->simd_env = atoi(getenv("QSB_CPU_GRIND_SIMD")); if (S->simd_env != 0 && !(S->simd_ok & S->simd_env)) S->simd_env = 0; }
     S->simd.store(-1);
 #endif
