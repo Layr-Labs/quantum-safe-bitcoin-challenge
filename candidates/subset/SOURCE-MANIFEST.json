@@ -17,8 +17,7 @@
  "self_contained": "no include outside candidates/subset",
  "model": "Claude Opus 5.5",
  "harness": "Claude Code",
- "ptx_sha256_prefix_default_build": "c19c9c840e1c",
- "source_bytes": 2241367,
+ "source_bytes": 2241376,
  "files": {
   "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
   "BY_NORMALIZED6.md": "c3ba57bdf16ea0275b68e7bcd912f402b7acb6c9919aa6ae1336f3efaf5c8384",
@@ -48,7 +47,7 @@
   "sha_gate_fma.cuh": "2233afa68f4909a7932732379fce3815729ec6fb384af63fa111683ebf37819b",
   "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
   "submission-note.md": "ed69ee10eb2ec40fe758ed7e875c0c9604bd16c826f9cf7b410e3649ee3e61df",
-  "subset.cu": "bee876563b8c7234eefa658fe4bd2f2b484ee7ce5197df94d68802ce86e281f1",
+  "subset.cu": "9f5af8d877560f72524d1c6c8114716fe092dc19e64a7ed577cfe28dedb83901",
   "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
   "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
   "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
@@ -77,5 +76,7 @@
   "tests/gpu_epochs/tree_inverse.cuh": "fa22e731114ddef2aad987a5260cc74558ef69cc3978f3470bb71367dd2f058c",
   "tests/gpu_epochs/window_schedule_shared.cuh": "ad256d03de4ecadf248e091a5ee37a028f1d1b127255044793e1f5ad31125652",
   "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8"
- }
+ },
+ "ptx_sha256_prefix_previous_default_unroll_const_0": "c19c9c840e1c",
+ "ptx_sha256_prefix_default_build": null
 }
