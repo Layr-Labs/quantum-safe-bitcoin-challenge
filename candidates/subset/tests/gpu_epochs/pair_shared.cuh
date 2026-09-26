@@ -234,6 +234,44 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#if QSB_PAIR_SHA_ALU_ADD
+/* The outer SHA-256d block of each candidate, with the same round form as the paired epoch SHA
+ * (QSB_P2R: d += t1 on the ALU pipe). Same rounds, message schedule and feed-forward as
+ * _SHA256Transform; only the round macro differs. */
+#define QSB_P2_RND(k) {\
+QSB_P2R(a, b, c, d, e, f, g, h, K[k], w[0]);\
+QSB_P2R(h, a, b, c, d, e, f, g, K[k + 1], w[1]);\
+QSB_P2R(g, h, a, b, c, d, e, f, K[k + 2], w[2]);\
+QSB_P2R(f, g, h, a, b, c, d, e, K[k + 3], w[3]);\
+QSB_P2R(e, f, g, h, a, b, c, d, K[k + 4], w[4]);\
+QSB_P2R(d, e, f, g, h, a, b, c, K[k + 5], w[5]);\
+QSB_P2R(c, d, e, f, g, h, a, b, K[k + 6], w[6]);\
+QSB_P2R(b, c, d, e, f, g, h, a, K[k + 7], w[7]);\
+QSB_P2R(a, b, c, d, e, f, g, h, K[k + 8], w[8]);\
+QSB_P2R(h, a, b, c, d, e, f, g, K[k + 9], w[9]);\
+QSB_P2R(g, h, a, b, c, d, e, f, K[k + 10], w[10]);\
+QSB_P2R(f, g, h, a, b, c, d, e, K[k + 11], w[11]);\
+QSB_P2R(e, f, g, h, a, b, c, d, K[k + 12], w[12]);\
+QSB_P2R(d, e, f, g, h, a, b, c, K[k + 13], w[13]);\
+QSB_P2R(c, d, e, f, g, h, a, b, K[k + 14], w[14]);\
+QSB_P2R(b, c, d, e, f, g, h, a, K[k + 15], w[15]);\
+}
+__device__ __forceinline__ void qsb_pair_outer_transform(uint32_t output[8], uint32_t *w){
+    uint32_t t1, t2;
+    uint32_t a=output[0],b=output[1],c=output[2],d=output[3];
+    uint32_t e=output[4],f=output[5],g=output[6],h=output[7];
+    QSB_P2_RND(0);
+    WMIX();
+    QSB_P2_RND(16);
+    WMIX();
+    QSB_P2_RND(32);
+    WMIX();
+    QSB_P2_RND(48);
+    output[0]+=a;output[1]+=b;output[2]+=c;output[3]+=d;
+    output[4]+=e;output[5]+=f;output[6]+=g;output[7]+=h;
+}
+#undef QSB_P2_RND
+#endif
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
     uint32_t b2[16];
     #pragma unroll
@@ -244,7 +282,11 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     b2[15]=0x00000100;
     uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+#if QSB_PAIR_SHA_ALU_ADD
+    qsb_pair_outer_transform(s2,b2);
+#else
     _SHA256Transform(s2,b2);
+#endif
     z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
     z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
