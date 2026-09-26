@@ -147,7 +147,39 @@ struct Params {
     int cut, K, ncls;
     uint64_t n_epochs, cap;     /* epoch space size, epochs per batch */
     ClsVec cv[NCLS];            /* first-block class words (QSB_FIRST_UNIQUE) */
+    bool first_cached = false;
+    std::vector<uint32_t> first_wk;  /* [(K+1)][ncls][64]: trailing omissions, class, W+K */
 };
+
+/* A first block is the final 8 bytes of the last kept row, followed by 56
+ * class bytes. With K omissions that last row has only K+1 possibilities. */
+static inline uint32_t first_ror(uint32_t x, unsigned n) { return (x >> n) | (x << (32 - n)); }
+static inline const uint32_t *first_words(const Params &P, int r, int c) {
+    return P.first_wk.data() + ((size_t)r * P.ncls + c) * 64;
+}
+static void prep_first_cache(Params &P) {
+    P.first_cached = SIG_PUSH_SIZE >= 8 && P.cut > P.K && !getenv("QSB_HP_NOFIRSTCACHE");
+    if (!P.first_cached) return;
+    try { P.first_wk.resize((size_t)(P.K + 1) * P.ncls * 64); }
+    catch (...) { P.first_cached = false; return; }
+    for (int r = 0; r <= P.K; r++) for (int c = 0; c < P.ncls; c++) {
+        uint32_t w[64];
+        const uint8_t *rem = P.rows + (size_t)(P.cut - r) * SIG_PUSH_SIZE - 8;
+        w[0] = be32(rem); w[1] = be32(rem + 4);
+        w[2] = P.cv[c].w2; w[3] = P.cv[c].w3;
+        _mm_storeu_si128((__m128i *)&w[4], P.cv[c].M1);
+        _mm_storeu_si128((__m128i *)&w[8], P.cv[c].M2);
+        _mm_storeu_si128((__m128i *)&w[12], P.cv[c].M3);
+        for (int t = 16; t < 64; t++) {
+            const uint32_t a = w[t - 15], b = w[t - 2];
+            const uint32_t s0 = first_ror(a, 7) ^ first_ror(a, 18) ^ (a >> 3);
+            const uint32_t s1 = first_ror(b, 17) ^ first_ror(b, 19) ^ (b >> 10);
+            w[t] = w[t - 16] + s0 + w[t - 7] + s1;
+        }
+        uint32_t *wk = P.first_wk.data() + ((size_t)r * P.ncls + c) * 64;
+        for (int t = 0; t < 64; t++) wk[t] = w[t] + k_[t];
+    }
+}
 
 /* First-block states of 4 classes for one epoch: compress(mid, [w0 w1 | class words 2..15]).
  * Rounds 0-1 read only w0/w1, so the first sha256rnds2 is shared by all classes. */
@@ -191,6 +223,38 @@ QHP_SHA static void first4(const uint32_t mid[8], uint32_t w0, uint32_t w1, cons
         _mm_storeu_si128((__m128i *)&out[l][4], _mm_alignr_epi8(b, x, 8));
     }
 }
+/* Same compression as first4, but the schedule is immutable and shared. */
+QHP_SHA static void first4_cached(const Params &P, int remid, int cls,
+                                  const uint32_t mid[8], uint32_t (*out)[8]) {
+    __m128i t = _mm_loadu_si128((const __m128i *)&mid[0]);
+    __m128i u = _mm_loadu_si128((const __m128i *)&mid[4]);
+    t = _mm_shuffle_epi32(t, 0xB1); u = _mm_shuffle_epi32(u, 0x1B);
+    const __m128i A0 = _mm_alignr_epi8(t, u, 8), A1 = _mm_blend_epi16(u, t, 0xF0);
+    __m128i S0[4], S1[4]; const uint32_t *wk[4];
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        S0[l] = A0; S1[l] = A1;
+        wk[l] = first_words(P, remid, cls + l < P.ncls ? cls + l : P.ncls - 1);
+    }
+#pragma GCC unroll 16
+    for (int r = 0; r < 16; r++) {
+#pragma GCC unroll 4
+        for (int l = 0; l < 4; l++) {
+            __m128i m = _mm_loadu_si128((const __m128i *)(wk[l] + 4 * r));
+            S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m);
+            m = _mm_shuffle_epi32(m, 0x0E);
+            S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m);
+        }
+    }
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        __m128i a = _mm_add_epi32(S0[l], A0), b = _mm_add_epi32(S1[l], A1);
+        __m128i x = _mm_shuffle_epi32(a, 0x1B); b = _mm_shuffle_epi32(b, 0xB1);
+        _mm_storeu_si128((__m128i *)&out[l][0], _mm_blend_epi16(x, b, 0xF0));
+        _mm_storeu_si128((__m128i *)&out[l][4], _mm_alignr_epi8(b, x, 8));
+    }
+}
+
 static void first_sw(const Params &P, const uint32_t mid[8], const uint8_t rem8[8], uint32_t *fo) {
     for (int c = 0; c < P.ncls; c++) {
         uint8_t blk[64]; uint32_t w[16];
@@ -205,6 +269,11 @@ static void first_sw(const Params &P, const uint32_t mid[8], const uint8_t rem8[
 
 /* One pending epoch for the 4-lane tail. */
 struct Lane { SCtx c; int o6; uint32_t idx; uint8_t early[MAXK]; };
+static inline int first_remid(const Params &P, const Lane &L) {
+    int r = 0;
+    while (r < P.K && L.early[P.K - 1 - r] == P.cut - 1 - r) r++;
+    return r;
+}
 
 /* Hash the suffix P[o6+1..cut-1] of nl (<=4) lanes in lockstep, then their first-block states.
  * The suffix is contiguous in `rows`: only each lane's first block is assembled, the others are
@@ -252,7 +321,8 @@ static void flush(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *
         if (g_shani) {
             alignas(16) uint32_t T[4][8];
             for (int c0 = 0; c0 < P.ncls; c0 += 4) {
-                first4(F[l], w0, w1, P.cv + c0, T);
+                if (P.first_cached) first4_cached(P, first_remid(P, L), c0, F[l], T);
+                else first4(F[l], w0, w1, P.cv + c0, T);
                 if (P.ncls - c0 >= 4)
                     for (int q = 0; q < 8; q++) _mm_stream_si128((__m128i *)(fo + (size_t)c0 * 8) + q, _mm_load_si128((const __m128i *)T + q));
                 else memcpy(fo + (size_t)c0 * 8, T, (size_t)(P.ncls - c0) * 32);
@@ -328,6 +398,24 @@ QHP_S16 static void hp16_block(__m512i s[8], __m512i *W) {
     s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h);
 }
 #undef HP16_WK
+/* Class-major cached schedule. One or two remainder variants cover the common
+ * lexicographic groups. More variants retain hp16_block's generic path. */
+template <bool TWO>
+QHP_S16 static void hp16_first_cached(__m512i s[8], const uint32_t *wk0,
+                                     const uint32_t *wk1, __mmask16 second) {
+#define HP16_CWK(t) (TWO ? _mm512_mask_set1_epi32(_mm512_set1_epi32((int)wk0[(t)]), second, (int)wk1[(t)]) : _mm512_set1_epi32((int)wk0[(t)]))
+    __m512i a = s[0], b = s[1], c = s[2], d = s[3], e = s[4], f = s[5], g = s[6], h = s[7];
+#pragma GCC unroll 8
+    for (int t = 0; t < 64; t += 8) {
+        HP16_ROUND(a, b, c, d, e, f, g, h, HP16_CWK(t + 0)); HP16_ROUND(h, a, b, c, d, e, f, g, HP16_CWK(t + 1));
+        HP16_ROUND(g, h, a, b, c, d, e, f, HP16_CWK(t + 2)); HP16_ROUND(f, g, h, a, b, c, d, e, HP16_CWK(t + 3));
+        HP16_ROUND(e, f, g, h, a, b, c, d, HP16_CWK(t + 4)); HP16_ROUND(d, e, f, g, h, a, b, c, HP16_CWK(t + 5));
+        HP16_ROUND(c, d, e, f, g, h, a, b, HP16_CWK(t + 6)); HP16_ROUND(b, c, d, e, f, g, h, a, HP16_CWK(t + 7));
+    }
+    s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d);
+    s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h);
+#undef HP16_CWK
+}
 static std::atomic<bool> g_s16{false};   /* chosen path (after the batch-0 calibration) */
 static bool g_s16_ok = false;    /* the 16-lane path is available on this host */
 static bool s16_supported() { __builtin_cpu_init(); return __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw"); }
@@ -386,16 +474,30 @@ QHP_S16 static void flush16(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, 
         for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
     }
     const __m512i W0 = _mm512_load_si512((const void *)w0a), W1 = _mm512_load_si512((const void *)w1a);
+    int rid0 = first_remid(P, Ls[0]), rid1 = -1; __mmask16 second = 0;
+    bool cached = P.first_cached;
+    for (int l = 1; l < nl && cached; l++) {
+        const int r = first_remid(P, Ls[l]);
+        if (r == rid0) continue;
+        if (rid1 < 0) rid1 = r;
+        else if (r != rid1) { cached = false; break; }
+        second |= (__mmask16)(1u << l);
+    }
     for (int c = 0; c < P.ncls; c++) {                       /* first-block states, class-major */
-        alignas(16) uint32_t cw[16];
-        cw[2] = P.cv[c].w2; cw[3] = P.cv[c].w3;
-        _mm_storeu_si128((__m128i *)&cw[4], P.cv[c].M1); _mm_storeu_si128((__m128i *)&cw[8], P.cv[c].M2);
-        _mm_storeu_si128((__m128i *)&cw[12], P.cv[c].M3);
-        __m512i W[16], st[8];
-        W[0] = W0; W[1] = W1;
-        for (int i = 2; i < 16; i++) W[i] = _mm512_set1_epi32((int)cw[i]);
+        __m512i st[8];
         for (int j = 0; j < 8; j++) st[j] = s[j];
-        hp16_block(st, W);
+        if (cached) {
+            if (rid1 < 0) hp16_first_cached<false>(st, first_words(P, rid0, c), first_words(P, rid0, c), 0);
+            else hp16_first_cached<true>(st, first_words(P, rid0, c), first_words(P, rid1, c), second);
+        } else {
+            alignas(16) uint32_t cw[16];
+            cw[2] = P.cv[c].w2; cw[3] = P.cv[c].w3;
+            _mm_storeu_si128((__m128i *)&cw[4], P.cv[c].M1); _mm_storeu_si128((__m128i *)&cw[8], P.cv[c].M2);
+            _mm_storeu_si128((__m128i *)&cw[12], P.cv[c].M3);
+            __m512i W[16]; W[0] = W0; W[1] = W1;
+            for (int i = 2; i < 16; i++) W[i] = _mm512_set1_epi32((int)cw[i]);
+            hp16_block(st, W);
+        }
         alignas(64) uint32_t O[8][16];
         for (int j = 0; j < 8; j++) _mm512_store_si512((void *)O[j], st[j]);
         for (int l = 0; l < nl; l++) {
@@ -704,6 +806,7 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
         P.cv[c].M2 = _mm_set_epi32((int)w[9], (int)w[8], (int)w[7], (int)w[6]);
         P.cv[c].M3 = _mm_set_epi32((int)w[13], (int)w[12], (int)w[11], (int)w[10]);
     }
+    prep_first_cache(P);
     h->n_batches = (int64_t)((n_epochs + cap - 1) / cap);
     if (getenv("QSB_HP_THREADS")) { int t = atoi(getenv("QSB_HP_THREADS")); if (t >= 1 && t <= 3) h->nthreads = t; }
     if (getenv("QSB_HP_WAIT_MS")) { int t = atoi(getenv("QSB_HP_WAIT_MS")); if (t >= 0 && t <= 1000) h->wait_ms = t; }
