@@ -12,7 +12,14 @@
  */
 namespace QCG_NS {
 #define QCG_AVX2 __attribute__((target(QCG_TARGET), always_inline))
+/* GCC temporary-expression substitution can inflate the register lifetimes
+ * of the wide field expressions. Keep that pass off in these two host-only
+ * functions; inline helpers remain within their callers' ISA target. */
+#if defined(__GNUC__) && !defined(__clang__)
+#define QCG_AVX2F __attribute__((target(QCG_TARGET), noinline, optimize("no-tree-ter")))
+#else
 #define QCG_AVX2F __attribute__((target(QCG_TARGET), noinline))
+#endif
 typedef uint64_t V __attribute__((vector_size(8 * QCG_VW)));
 typedef int64_t VI __attribute__((vector_size(8 * QCG_VW)));
 static inline QCG_AVX2 V vset1(uint64_t x) { return (V){} + x; }
@@ -21,7 +28,9 @@ static inline QCG_AVX2 V vset1(uint64_t x) { return (V){} + x; }
 #else
 #define MUL(a, b) ((V)_mm512_mul_epu32((__m512i)(a), (__m512i)(b)))
 #endif
-static inline QCG_AVX2 V MULK(V c, uint64_t k) { const V kk = vset1(k); return MUL(c, kk) + (MUL(c >> 32, kk) << 32); }
+/* 977=1024-32-16+1: exact modulo-2^64 wide reduction, no vector multiply. */
+static inline QCG_AVX2 V mul977(V c) { return (c << 10) - (c << 5) - (c << 4) + c; }
+static inline QCG_AVX2 V MULK(V c, uint64_t k) { if(k == 977) return mul977(c); const V kk = vset1(k); return MUL(c, kk) + (MUL(c >> 32, kk) << 32); }
 struct vfe { V n[10]; };
 
 static inline QCG_AVX2 void vfe_mul_inner(V *r, const V *a, const V *b) {
@@ -248,7 +257,7 @@ static inline QCG_AVX2 void tr4(__m256i w[4], const tentry *const *e, int half) 
     w[1] = _mm256_permute2x128_si256(t1, t3, 0x20); w[3] = _mm256_permute2x128_si256(t1, t3, 0x31);
 }
 /* gather QCG_VW table entries (64 B each: x words, y words) into x and y */
-static inline QCG_AVX2 void vfe_gather(vfe *x, vfe *y, const tentry *const *e) {
+static inline QCG_AVX2 void vfe_gather(vfe *x, vfe *y, const tentry *const *e, V neg) {
     for (int half = 0; half < 2; half++) {
         V w[4];
 #if QCG_VW == 4
@@ -258,7 +267,15 @@ static inline QCG_AVX2 void vfe_gather(vfe *x, vfe *y, const tentry *const *e) {
         __m256i a[4], b[4]; tr4(a, e, half); tr4(b, e + 4, half);
         for (int k = 0; k < 4; k++) w[k] = (V)_mm512_inserti64x4(_mm512_castsi256_si512(a[k]), b[k], 1);
 #endif
+        if (half) for (int k = 0; k < 4; k++) w[k] ^= neg;
         vfe_from_w(half ? y : x, w[0], w[1], w[2], w[3]);
+        if (half) {
+            // 2p-c in radix 26. Bounds: table ordinate <3p, dy <8p.
+            y->n[0] += vset1(2*0x3FFFC2FULL - (0x800001e8ULL & 0x3FFFFFFULL));
+            y->n[1] += vset1(2*0x3FFFFBFULL - (0x800001e8ULL >> 26));
+            for (int k = 2; k < 9; k++) y->n[k] += vset1(2*0x3FFFFFFULL);
+            y->n[9] += vset1(2*0x03FFFFFULL);
+        }
     }
 }
 static inline QCG_AVX2 uint64_t lane(V v, int l) { return v[l]; }
@@ -297,6 +314,7 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
     shared_t *S = g_cg;
     const int n = w->n;
     const int nb = (n + QCG_VW - 1) / QCG_VW;
+    recode(w);
     const tentry *T = S->table;
     vfe acc[2], inv[2], one; vfe_one(&one);
     /* window 0: load */
@@ -304,11 +322,13 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
         const tentry *e[QCG_VW];
         for (int l = 0; l < QCG_VW; l++) {
             const int i = QCG_VW * b + l;
-            unsigned d = i < n ? digit(w->z[i], 0) : 0;
+            unsigned d = i < n ? digit_abs(w->sd[0][i]) : 0;
             e[l] = &T[d]; w->inf[i] = !d;
-            if (i < n) __builtin_prefetch(&T[(size_t)QSB_CG_TSIZE + digit(w->z[i], 1)]);
+            if (i < n) __builtin_prefetch(&T[(size_t)QSB_CG_TSIZE + digit_abs(w->sd[1][i])]);
         }
-        vfe_gather(&vs->x[b], &vs->y[b], e);
+        V neg;
+        for (int l = 0; l < QCG_VW; l++) { int i = QCG_VW*b+l; neg[l] = i < n && w->sd[0][i] < 0 ? ~0ull : 0; }
+        vfe_gather(&vs->x[b], &vs->y[b], e, neg);
     }
     for (int j = 1; j < QSB_CG_NWIN; j++) {
         const tentry *Tj = T + (size_t)j * QSB_CG_TSIZE;
@@ -319,8 +339,8 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
                 const int i = QCG_VW * b + l;
                 unsigned d = 0;
                 if (i < n) {
-                    d = digit(w->z[i], j);
-                    if (j + 1 < QSB_CG_NWIN) __builtin_prefetch(&T[(size_t)(j + 1) * QSB_CG_TSIZE + digit(w->z[i], j + 1)]);
+                    d = digit_abs(w->sd[j][i]);
+                    if (j + 1 < QSB_CG_NWIN) __builtin_prefetch(&T[(size_t)(j + 1) * QSB_CG_TSIZE + digit_abs(w->sd[j + 1][i])]);
                 }
                 e[l] = &Tj[d];
                 const int live = i < n && d;
@@ -330,7 +350,9 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
                 if (live) w->inf[i] = 0;
             }
             vs->act[b] = am; vs->ld[b] = lm; vs->anyld[b] = (uint8_t)anyl;
-            vfe_gather(&vs->ex[b], &vs->ey[b], e);
+            V neg;
+            for (int l = 0; l < QCG_VW; l++) { int i = QCG_VW*b+l; neg[l] = i < n && w->sd[j][i] < 0 ? ~0ull : 0; }
+            vfe_gather(&vs->ex[b], &vs->ey[b], e, neg);
             vfe t; vfe_neg(&t, &vs->x[b], 1);
             vfe d3 = vs->ex[b]; vfe_add(&d3, &t);                      /* mag 3 */
             vfe_sel(&vs->dx[b], vs->act[b], &d3, &one);
@@ -387,7 +409,7 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
         vfe ik, ny, sx, t;
         if (b >= 2) vfe_mul(&ik, &inv[g], &vs->c[b - 2]); else ik = inv[g];
         vfe_mul(&inv[g], &inv[g], &vs->dx[b]);
-        vfe_neg(&ny, &vs->y[b], 1);
+        vfe_neg(&ny, &vs->y[b], 0);
         vfe_neg(&sx, &vs->x[b], 1); vfe_add(&sx, &nax);                 /* -(px + ax), mag 4 */
         for (int recid = 0; recid < 2; recid++) {
             vfe dy, l, l2, qx, qy, t2;
@@ -398,15 +420,26 @@ static QCG_AVX2F void ec_batch_vec(worker_t *w, vstate *vs) {
             vfe_neg(&t, &qx, 1); t2 = vs->x[b]; vfe_add(&t2, &t);
             vfe_mul(&qy, &l, &t2); vfe_add(&qy, &ny); vfe_normalize(&qy);
             V xw[4]; vfe_to_w(xw, &qx);
+            /* EC already produced four/eight independent pubkeys. Interleave
+             * their final SHA-NI compression instead of serial OpenSSL calls.
+             * Inactive lanes are hashed but never nominated. */
+            alignas(16) uint8_t blk[QCG_VW][64];
+            uint32_t h[QCG_VW][8];
+            const uint8_t *bp[QCG_VW];
+            for (int ln = 0; ln < QCG_VW; ln++) {
+                blk[ln][0] = (uint8_t)(0x02 | (lane(qy.n[0], ln) & 1));
+                for (int k = 0; k < 4; k++) { uint64_t v = lane(xw[3 - k], ln); for (int bb = 0; bb < 8; bb++) blk[ln][1 + 8 * k + bb] = (uint8_t)(v >> (56 - 8 * bb)); }
+                blk[ln][33] = 0x80; memset(blk[ln] + 34, 0, 30); blk[ln][62] = 0x01; blk[ln][63] = 0x08;
+                memcpy(h[ln], SHA_IV, 32); bp[ln] = blk[ln];
+            }
+            if (S->shani) {
+                for (int ln = 0; ln < QCG_VW; ln += 4) qsha_x4(h + ln, bp + ln);
+            } else {
+                for (int ln = 0; ln < QCG_VW; ln++) sha_blocks(h[ln], blk[ln], 1);
+            }
             for (int ln = 0; ln < QCG_VW; ln++) {
                 const int i = QCG_VW * b + ln;
-                if (i >= n || w->inf[i]) continue;
-                uint8_t blk[64];
-                blk[0] = (uint8_t)(0x02 | (lane(qy.n[0], ln) & 1));
-                for (int k = 0; k < 4; k++) { uint64_t v = lane(xw[3 - k], ln); for (int bb = 0; bb < 8; bb++) blk[1 + 8 * k + bb] = (uint8_t)(v >> (56 - 8 * bb)); }
-                blk[33] = 0x80; memset(blk + 34, 0, 30); blk[62] = 0x01; blk[63] = 0x08;
-                uint32_t h[8]; memcpy(h, SHA_IV, 32); sha_blocks(h, blk, 1);
-                if (lz_ok(h)) publish(w, i, recid);
+                if (i < n && !w->inf[i] && lz_ok(h[ln])) publish(w, i, recid);
             }
         }
     }
