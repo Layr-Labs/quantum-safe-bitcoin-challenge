@@ -4491,9 +4491,13 @@ int main(int argc, char **argv) {
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
                 fflush(stdout);
+#if QSB_HOST_VERIFY && QSB_CPU_GRIND
+                qcpu::progress(); fflush(stdout);
+                if (summary_f) fprintf(summary_f, "CPU attempts=%llu\n", (unsigned long long)qcpu::candidates());
+#endif
                 if (summary_f) {
                     time_t now_epoch = time(NULL);
-                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.3f hits_so_far=%llu\n",
                             (long)now_epoch, (unsigned long long)total_searched,
                             rate/1e6, elapsed_total, (unsigned long long)hit_counter);
                     fflush(summary_f);
@@ -4714,9 +4718,13 @@ int main(int argc, char **argv) {
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
                 fflush(stdout);
+#if QSB_HOST_VERIFY && QSB_CPU_GRIND
+                qcpu::progress(); fflush(stdout);
+                if (summary_f) fprintf(summary_f, "CPU attempts=%llu\n", (unsigned long long)qcpu::candidates());
+#endif
                 if (summary_f) {
                     time_t now_epoch = time(NULL);
-                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.3f hits_so_far=%llu\n",
                             (long)now_epoch, (unsigned long long)total_searched,
                             rate/1e6, elapsed_total, (unsigned long long)hit_counter);
                     fflush(summary_f);
@@ -4915,9 +4923,13 @@ int main(int argc, char **argv) {
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
                 fflush(stdout);
+#if QSB_HOST_VERIFY && QSB_CPU_GRIND
+                qcpu::progress(); fflush(stdout);
+                if (summary_f) fprintf(summary_f, "CPU attempts=%llu\n", (unsigned long long)qcpu::candidates());
+#endif
                 if (summary_f) {
                     time_t now_epoch = time(NULL);
-                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.0f hits_so_far=%llu\n",
+                    fprintf(summary_f, "PROGRESS %ld attempts=%llu rate_M_per_s=%.1f elapsed_s=%.3f hits_so_far=%llu\n",
                             (long)now_epoch, (unsigned long long)total_searched,
                             rate/1e6, elapsed_total, (unsigned long long)hit_counter);
                     fflush(summary_f);
