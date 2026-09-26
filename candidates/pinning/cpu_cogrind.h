@@ -191,11 +191,14 @@ static void fe_inv(fe *r, const fe *a) {
 }
 
 /* ---------------- configuration ---------------- */
-#ifndef QSB_CG_W
-#define QSB_CG_W 16                       /* fixed-window width (bits) */
-#endif
-#define QSB_CG_NWIN ((256 + QSB_CG_W - 1) / QSB_CG_W)
-#define QSB_CG_TSIZE (1u << QSB_CG_W)     /* entries per window, index 0 unused */
+/* Fixed-window width, chosen at startup: 20 bits (13 windows, 832 MiB table) when the host has
+ * plenty of free memory, else 16 bits (16 windows, 64 MiB). */
+static int g_W = 16, g_nwin = 16;
+static unsigned g_tsize = 1u << 16;
+#define QSB_CG_W g_W
+#define QSB_CG_NWIN g_nwin
+#define QSB_CG_TSIZE g_tsize                 /* entries per window, index 0 unused */
+#define QSB_CG_NWIN_MAX 32
 #ifndef QSB_CG_BATCH_MIN
 #define QSB_CG_BATCH_MIN 1024             /* candidates per inversion batch (lower bound) */
 #endif
@@ -285,6 +288,8 @@ struct shared_t {
     uint64_t n_chunks;
     tentry *table;                        /* QSB_CG_NWIN * QSB_CG_TSIZE */
     fe ax, ay;                            /* A = u2 R (recid 0) */
+    uint8_t nri[32];                      /* neg_r_inv, little-endian */
+    int table_started;
     int hit_fd;
     std::atomic<uint64_t> next_chunk;
     std::atomic<uint64_t> cand_done;
@@ -326,6 +331,7 @@ static inline int lz_ok(const uint32_t *h) {
 
 struct worker_t {
     int id;
+    uint64_t next_k;                            /* this worker's next epoch / chunk index */
     /* batch state */
     int n;
     uint32_t seq, lt[QSB_CG_MAXB];
@@ -339,6 +345,9 @@ struct worker_t {
     uint32_t mid1[8];
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order, *nri, *rx, *ry; EC_POINT *Ru2;
 };
+
+/* 0 scalar, 1 AVX2, 2 AVX-512F, 3 while the startup timing runs */
+static inline int simd_code() { const int m = g_cg->simd.load(std::memory_order_relaxed); return m < 0 ? 3 : m == 8 ? 2 : m == 4 ? 1 : 0; }
 
 static const uint32_t SHA_IV[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
 
@@ -536,9 +545,15 @@ static int fill_batch(worker_t *w, uint8_t *scratch) {
     shared_t *S = g_cg;
     const pinning2_params_t *pp = S->pp;
     (void)scratch;
-    const uint64_t k = S->next_chunk.fetch_add(1, std::memory_order_relaxed);
-    if (k >= S->n_chunks) return 0;
-    const uint32_t seq = 0xFFFFFFFEu - (uint32_t)(k / S->chunks_per_seq);
+    /* Worker w walks its own sequences 0xFFFFFFFE - (code + 256 r), r = 0, 1, ..., with
+     * code = 64 * path + w (path 0 scalar, 1 AVX2, 2 AVX-512F, 3 = the startup timing batches),
+     * locktimes rising from LT_MIN. Every published CPU hit therefore names the worker and EC
+     * path that found it, and its locktime shows how far that worker had got. */
+    const uint32_t code = (uint32_t)(64 * simd_code() + (w->id & 63));
+    const uint64_t k = w->next_k++;
+    const uint64_t r = k / S->chunks_per_seq;
+    if (r >= 0x100000ull) return 0;
+    const uint32_t seq = 0xFFFFFFFEu - (code + 256u * (uint32_t)r);
     const uint32_t off = (uint32_t)(k % S->chunks_per_seq) * (uint32_t)QSB_CG_BATCH_MIN;
     int n = QSB_CG_BATCH_MIN;
     if (off + (uint32_t)n > S->lt_range) n = (int)(S->lt_range - off);
@@ -577,6 +592,69 @@ static int fill_batch(worker_t *w, uint8_t *scratch) {
     return n;
 }
 
+/* ---------------- core plan (light profile) ---------------- */
+#ifndef QSB_CG_WMAX
+#define QSB_CG_WMAX 64
+#endif
+static int g_ncores_w = -1;                 /* usable worker cores; -1 = topology unknown */
+static int g_core_cpu[QSB_CG_WMAX > 0 ? QSB_CG_WMAX : 1];
+static cpu_set_t g_host_set;
+static int g_host_ok = 0;
+static int read_int_file(const char *p, long *v) {
+    FILE *f = fopen(p, "r"); if (!f) return 0;
+    const int ok = fscanf(f, "%ld", v) == 1; fclose(f); return ok;
+}
+/* One logical CPU per physical core for the workers: cores ordered by maximum frequency
+ * (performance cores first on hybrid parts), then from the highest CPU number down; the core the
+ * calling (GPU host) thread runs on is never used. The host thread's own mask becomes the allowed
+ * CPUs minus every hyperthread of the chosen cores (only if >= 4 CPUs remain). */
+static void plan_cores() {
+    cpu_set_t aff; CPU_ZERO(&aff);
+    if (sched_getaffinity(0, sizeof aff, &aff) != 0) return;
+    const int hcpu = sched_getcpu();
+    enum { MAXC = 1024 };
+    static long pkg[MAXC], core[MAXC], fmax[MAXC];
+    int cpus[MAXC], n = 0;
+    for (int c = 0; c < MAXC && c < CPU_SETSIZE; c++) {
+        if (!CPU_ISSET(c, &aff)) continue;
+        char p[160];
+        snprintf(p, sizeof p, "/sys/devices/system/cpu/cpu%d/topology/core_id", c);
+        if (!read_int_file(p, &core[c])) return;
+        snprintf(p, sizeof p, "/sys/devices/system/cpu/cpu%d/topology/physical_package_id", c);
+        if (!read_int_file(p, &pkg[c])) pkg[c] = 0;
+        snprintf(p, sizeof p, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", c);
+        if (!read_int_file(p, &fmax[c])) fmax[c] = 0;
+        cpus[n++] = c;
+    }
+    if (n == 0 || hcpu < 0 || hcpu >= MAXC || !CPU_ISSET(hcpu, &aff)) return;
+    /* candidates: highest max frequency first, then highest CPU number */
+    for (int i = 0; i < n; i++) for (int j = i + 1; j < n; j++) {
+        const int a = cpus[i], b = cpus[j];
+        if (fmax[b] > fmax[a] || (fmax[b] == fmax[a] && b > a)) { cpus[i] = b; cpus[j] = a; }
+    }
+    int k = 0;
+    for (int i = 0; i < n && k < QSB_CG_WMAX; i++) {
+        const int c = cpus[i];
+        if (pkg[c] == pkg[hcpu] && core[c] == core[hcpu]) continue;      /* the host thread's core */
+        int dup = 0;
+        for (int j = 0; j < k; j++) if (pkg[g_core_cpu[j]] == pkg[c] && core[g_core_cpu[j]] == core[c]) dup = 1;
+        if (!dup) g_core_cpu[k++] = c;
+    }
+    g_ncores_w = k;
+    CPU_ZERO(&g_host_set); int left = 0;
+    for (int i = 0; i < n; i++) {
+        const int c = cpus[i]; int used = 0;
+        for (int j = 0; j < k; j++) if (pkg[g_core_cpu[j]] == pkg[c] && core[g_core_cpu[j]] == core[c]) used = 1;
+        if (!used) { CPU_SET(c, &g_host_set); left++; }
+    }
+    g_host_ok = left >= 4;
+}
+static void pin_worker(int id) {
+    if (g_ncores_w <= 0) return;
+    cpu_set_t cs; CPU_ZERO(&cs); CPU_SET(g_core_cpu[id % g_ncores_w], &cs);
+    pthread_setaffinity_np(pthread_self(), sizeof cs, &cs);
+}
+
 static void set_idle_priority() {
     struct sched_param sp; memset(&sp, 0, sizeof sp);
     if (pthread_setschedparam(pthread_self(), SCHED_IDLE, &sp) != 0)
@@ -587,10 +665,11 @@ static void *worker_main(void *arg) {
     shared_t *S = g_cg;
     const int id = (int)(intptr_t)arg;
     set_idle_priority();
+    pin_worker(id);
     worker_t *w = (worker_t *)aligned_alloc(64, (sizeof(worker_t) + 63) & ~(size_t)63);
     uint8_t *scratch = NULL;
     if (!w) return NULL;
-    w->id = id; w->cur_seq_tag = 0;
+    w->id = id; w->next_k = 0; w->cur_seq_tag = 0;
     w->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     w->ctx = BN_CTX_new(); w->order = BN_new(); w->nri = BN_new(); w->rx = BN_new(); w->ry = BN_new();
     w->Ru2 = w->grp ? EC_POINT_new(w->grp) : NULL;
@@ -604,7 +683,7 @@ static void *worker_main(void *arg) {
     if (S->simd_ok & 4) vs4 = (v4::vstate *)aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
     if (S->simd_ok & 8) vs8 = (v8::vstate *)aligned_alloc(64, (sizeof(v8::vstate) + 63) & ~(size_t)63);
 #endif
-    while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load()) return NULL; usleep(2000); }
+    while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load() || S->failed.load()) return NULL; usleep(2000); }
 #if QSB_CG_HAVE_SIMD
     /* Worker 0 picks the fastest available EC path on this CPU (a few timed batches each; the
      * candidates are real work and are counted); the others wait for the choice. */
@@ -655,10 +734,11 @@ static void *worker_main(void *arg) {
 }
 
 /* table-builder thread: windows are split across builders */
-struct build_arg { int j0, j1; fe bx[QSB_CG_NWIN], by[QSB_CG_NWIN]; };
+struct build_arg { int j0, j1; fe bx[QSB_CG_NWIN_MAX], by[QSB_CG_NWIN_MAX]; };
 static void *builder_main(void *arg) {
     build_arg *a = (build_arg *)arg;
     set_idle_priority();
+    pin_worker(0);
     for (int j = a->j0; j < a->j1; j++) build_window(g_cg->table + (size_t)j * QSB_CG_TSIZE, &a->bx[j], &a->by[j]);
     return NULL;
 }
@@ -684,12 +764,59 @@ static double cgroup_quota_cpus() {
     return -1.0;
 }
 
+/* Bytes of memory this process may still use: MemAvailable, capped by a cgroup memory limit. */
+static double mem_headroom() {
+    double avail = -1;
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (f) { char k[64]; long long v; char u[16];
+        while (fscanf(f, "%63s %lld %15s", k, &v, u) >= 2) if (!strcmp(k, "MemAvailable:")) { avail = (double)v * 1024; break; }
+        fclose(f); }
+    const char *lim[][2] = {{"/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"},
+                            {"/sys/fs/cgroup/memory/memory.limit_in_bytes", "/sys/fs/cgroup/memory/memory.usage_in_bytes"}};
+    for (int i = 0; i < 2; i++) {
+        FILE *a = fopen(lim[i][0], "r"); if (!a) continue;
+        char buf[64] = {0}; int ok = fscanf(a, "%63s", buf) == 1; fclose(a);
+        if (!ok || !strcmp(buf, "max")) break;
+        double l = atof(buf), u = 0;
+        FILE *b = fopen(lim[i][1], "r"); if (b) { if (fscanf(b, "%lf", &u) != 1) u = 0; fclose(b); }
+        if (l > 0 && l < 1e17) { const double h = l - u; if (avail < 0 || h < avail) avail = h; }
+        break;
+    }
+    return avail;
+}
+static void choose_width() {
+    int w = 16;
+    const double big = 13.0 * (1 << 20) * 64;                   /* W = 20: 832 MiB */
+    const double room = mem_headroom();
+    /* The 832 MiB table is used only with a very wide margin: 16x the table in free memory
+     * (MemAvailable, capped by a visible cgroup memory limit) and room under RLIMIT_AS and
+     * RLIMIT_DATA. Otherwise the 64 MiB table: an unseen memory limit must never cost the run. */
+    int ok = room > 16 * big;
+    {
+        double vm = 0; FILE *f = fopen("/proc/self/statm", "r");
+        if (f) { double pages; if (fscanf(f, "%lf", &pages) == 1) vm = pages * (double)sysconf(_SC_PAGESIZE); fclose(f); }
+        struct rlimit rl;
+        if (getrlimit(RLIMIT_AS, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && (double)rl.rlim_cur < vm + 4 * big) ok = 0;
+        if (getrlimit(RLIMIT_DATA, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && (double)rl.rlim_cur < vm + 4 * big) ok = 0;
+    }
+    (void)ok;                          /* light profile: always the 64 MiB, 16-bit table */
+    if (getenv("QSB_CPU_GRIND_W")) w = atoi(getenv("QSB_CPU_GRIND_W"));
+    if (w < 9 || w > 22) w = 16;
+    g_W = w; g_nwin = (256 + w - 1) / w; g_tsize = 1u << w;
+    if (g_ctl_verbose) printf("  CPU co-grind: %d-bit windows (%d windows, %.0f MiB table; %.1f GiB free)\n", g_W, g_nwin,
+           (double)g_nwin * g_tsize * 64 / 1048576.0, room / 1073741824.0);
+}
+
 /* ---------------- controller (called from the GPU host loop) ---------------- */
 struct ctl_t {
-    int wmax, cur;
-    int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
-    double t_phase;
-    double last_done;       /* time of the last GPU batch completion */
+    int wmax, cur, ceiling;
+    int phase;              /* 0 before the table is ready, 1 ramping/steady */
+    double t_period, hold_until, t_full;
+    uint64_t drains, starved;            /* current evaluation period */
+    uint64_t base_drains, base_starved;  /* before any worker ran */
+    double base_rate;
+    int share_done;
+    double last_done;
     /* A/B measurement */
     int ab_left;
     double ab_on_sum; int ab_on_n;
@@ -697,12 +824,60 @@ struct ctl_t {
     double next_ab;
     uint64_t busy0; double busy_t0;
     uint64_t cand0; double cand_t0;
-    double win_t0; int win_n, win_skip, strikes;
+    double win_t0; int win_n, win_skip, strikes, ab_level;
     int verbose;
 };
 static ctl_t g_ctl;
 
 static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].load(std::memory_order_relaxed); return s; }
+
+/* Table construction, started by the first qcg::tick() -- i.e. only once the GPU pipeline is
+ * running, so the host memory it takes and the CPU time of the builders never compete with the
+ * GPU's own startup, and an allocation failure just leaves the co-grinder off. */
+static build_arg g_ba[QSB_CG_NWIN_MAX];
+static void *table_main(void *) {
+    shared_t *S = g_cg;
+    set_idle_priority();
+    choose_width();
+    S->table = (tentry *)aligned_alloc(2u << 20, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry));
+    if (!S->table && g_W > 16) { g_W = 16; g_nwin = 16; g_tsize = 1u << 16;
+        S->table = (tentry *)aligned_alloc(2u << 20, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry)); }
+    if (!S->table) { S->failed.store(1); return NULL; }
+    madvise(S->table, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry), MADV_HUGEPAGE);
+    for (int j = 0; j < QSB_CG_NWIN; j++) memset(&S->table[(size_t)j * QSB_CG_TSIZE], 0, sizeof(tentry));
+    /* window bases Bj = 2^(W j) * neg_r_inv * G, via OpenSSL */
+    fe bx[QSB_CG_NWIN_MAX], by[QSB_CG_NWIN_MAX];
+    {
+        EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+        BN_CTX *ctx = BN_CTX_new();
+        BIGNUM *order = BN_new(), *k = BN_new(), *x = BN_new(), *y = BN_new();
+        EC_POINT *P = EC_POINT_new(grp);
+        EC_GROUP_get_order(grp, order, ctx);
+        BN_lebin2bn(S->nri, 32, k);
+        for (int j = 0; j < QSB_CG_NWIN; j++) {
+            EC_POINT_mul(grp, P, k, NULL, NULL, ctx);
+            EC_POINT_get_affine_coordinates(grp, P, x, y, ctx);
+            uint8_t xb[32], yb[32];
+            BN_bn2lebinpad(x, xb, 32); BN_bn2lebinpad(y, yb, 32);
+            uint64_t xw[4], yw[4]; memcpy(xw, xb, 32); memcpy(yw, yb, 32);
+            fe_from_w(&bx[j], xw); fe_from_w(&by[j], yw);
+            for (int s = 0; s < QSB_CG_W; s++) BN_mod_lshift1(k, k, order, ctx);
+        }
+        BN_free(order); BN_free(k); BN_free(x); BN_free(y); EC_POINT_free(P); BN_CTX_free(ctx); EC_GROUP_free(grp);
+    }
+    /* builders write the table window by window, so its pages are touched gradually */
+    int nb = S->nworkers / 2 < QSB_CG_NWIN ? S->nworkers / 2 : QSB_CG_NWIN; if (nb > 8) nb = 8; if (nb < 1) nb = 1;
+    pthread_t t[8];
+    for (int b = 0; b < nb; b++) {
+        g_ba[b].j0 = QSB_CG_NWIN * b / nb; g_ba[b].j1 = QSB_CG_NWIN * (b + 1) / nb;
+        memcpy(g_ba[b].bx, bx, sizeof bx); memcpy(g_ba[b].by, by, sizeof by);
+    }
+    int started = 0;
+    for (int b = 0; b < nb; b++) if (pthread_create(&t[b], NULL, builder_main, &g_ba[b]) == 0) started++; else { builder_main(&g_ba[b]); }
+    for (int b = 0; b < nb; b++) if (b < started) pthread_join(t[b], NULL);
+    S->ready.store(1, std::memory_order_release);
+    return NULL;
+}
 
 /* Start: build the table in the background and spawn the (paused) workers. */
 static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) {
@@ -724,8 +899,18 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     if (quota > 0 && quota < ncpu) nw = (int)ceil(quota) - 2;
     else nw = ncpu - 1;
     if (nw < 0) nw = 0;
+    /* Light profile: at most QSB_CG_WMAX workers, one per physical core, never on the core the
+     * GPU host thread starts on; the host thread is then kept off the workers' cores. */
+    plan_cores();
+    if (nw > QSB_CG_WMAX) nw = QSB_CG_WMAX;
+    if (g_ncores_w >= 0 && nw > g_ncores_w) nw = g_ncores_w;
     if (env) nw = atoi(env);
-    if (nw > QSB_CG_MAXW) nw = QSB_CG_MAXW;
+    if (nw > 64) nw = 64;                  /* worker id is encoded in 6 bits of the search position */
+    if (g_ncores_w > 0) {
+        printf("  CPU co-grind: worker cores");
+        for (int i = 0; i < g_ncores_w && i < nw; i++) printf(" %d", g_core_cpu[i]);
+        printf(" (host thread started on %d)\n", sched_getcpu());
+    }
     printf("  CPU co-grind: %d CPUs in affinity, cgroup quota %s%.2f, %d workers%s\n",
            ncpu, quota > 0 ? "" : "none ", quota > 0 ? quota : 0.0, nw > 0 ? nw : 0,
            __builtin_cpu_supports("avx512f") ? ", avx512f" : __builtin_cpu_supports("avx2") ? ", avx2" : "");
@@ -748,56 +933,17 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     mkdir("results", 0755);
     S->hit_fd = open("results/pinning_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (S->hit_fd < 0) { g_cg = NULL; return 0; }
-    S->table = (tentry *)aligned_alloc(2u << 20, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry));
-    if (!S->table) { g_cg = NULL; return 0; }
-    madvise(S->table, (size_t)QSB_CG_NWIN * QSB_CG_TSIZE * sizeof(tentry), MADV_HUGEPAGE);
-    for (int j = 0; j < QSB_CG_NWIN; j++) memset(&S->table[(size_t)j * QSB_CG_TSIZE], 0, sizeof(tentry));
-    /* window bases Bj = 2^(W j) * neg_r_inv * G and A = u2 R, via OpenSSL */
-    static build_arg ba[QSB_CG_NWIN];
-    {
-        EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
-        BN_CTX *ctx = BN_CTX_new();
-        BIGNUM *order = BN_new(), *k = BN_new(), *x = BN_new(), *y = BN_new();
-        EC_POINT *P = EC_POINT_new(grp);
-        EC_GROUP_get_order(grp, order, ctx);
-        BN_lebin2bn(pp->neg_r_inv, 32, k);
-        fe bx[QSB_CG_NWIN], by[QSB_CG_NWIN];
-        for (int j = 0; j < QSB_CG_NWIN; j++) {
-            EC_POINT_mul(grp, P, k, NULL, NULL, ctx);
-            EC_POINT_get_affine_coordinates(grp, P, x, y, ctx);
-            uint8_t xb[32], yb[32];
-            BN_bn2lebinpad(x, xb, 32); BN_bn2lebinpad(y, yb, 32);
-            uint64_t xw[4], yw[4]; memcpy(xw, xb, 32); memcpy(yw, yb, 32);
-            fe_from_w(&bx[j], xw); fe_from_w(&by[j], yw);
-            for (int s = 0; s < QSB_CG_W; s++) BN_mod_lshift1(k, k, order, ctx);
-        }
+    {   /* A = u2 R (recid 0); the table itself is built later, see table_main */
         uint64_t aw[4], bw[4]; memcpy(aw, pp->u2r_x, 32); memcpy(bw, pp->u2r_y, 32);
         fe_from_w(&S->ax, aw); fe_from_w(&S->ay, bw);
-        BN_free(order); BN_free(k); BN_free(x); BN_free(y); EC_POINT_free(P); BN_CTX_free(ctx); EC_GROUP_free(grp);
-        int nb = nw < 8 ? nw : 8; if (nb < 1) nb = 1;
-        pthread_t bt[8];
-        for (int b = 0; b < nb; b++) {
-            ba[b].j0 = QSB_CG_NWIN * b / nb; ba[b].j1 = QSB_CG_NWIN * (b + 1) / nb;
-            memcpy(ba[b].bx, bx, sizeof bx); memcpy(ba[b].by, by, sizeof by);
-        }
-        /* builders run detached-by-join in a helper so start() returns at once */
-        struct helper_arg { int nb; build_arg *ba; };
-        static helper_arg ha; ha.nb = nb; ha.ba = ba;
-        pthread_t ht;
-        auto helper = [](void *p) -> void * {
-            helper_arg *h = (helper_arg *)p;
-            pthread_t t[8];
-            for (int b = 0; b < h->nb; b++) pthread_create(&t[b], NULL, builder_main, &h->ba[b]);
-            for (int b = 0; b < h->nb; b++) pthread_join(t[b], NULL);
-            g_cg->ready.store(1, std::memory_order_release);
-            return NULL;
-        };
-        (void)bt;
-        if (pthread_create(&ht, NULL, helper, &ha) != 0) { g_cg = NULL; return 0; }
-        pthread_detach(ht);
+        memcpy(S->nri, pp->neg_r_inv, 32);
     }
     S->allowed.store(0);
     S->nworkers = nw;
+    if (g_ncores_w > 0 && nw > 0 && g_host_ok) {
+        /* keep the GPU host thread off the workers' cores (both hyperthreads of each) */
+        pthread_setaffinity_np(pthread_self(), sizeof g_host_set, &g_host_set);
+    }
     for (int i = 0; i < nw; i++) {
         pthread_t t;
         if (pthread_create(&t, NULL, worker_main, (void *)(intptr_t)i) != 0) { S->nworkers = i; break; }
@@ -814,79 +960,105 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
 
 static void set_allowed(int n) { if (g_cg) g_cg->allowed.store(n, std::memory_order_relaxed); g_ctl.cur = n; }
 
-/* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates. */
-static void tick(double now, double gpu_batch) {
+/* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates. `starved`
+ * is 1 when the host found the pipeline's other in-flight batch already finished, i.e. the GPU ran
+ * out of queued work because the host was late.
+ *
+ * Policy. Before the table is ready no worker runs, and the starvation rate of the unloaded host
+ * is recorded. Then 2 workers start; every 5 s (and >= 20 batches) the starvation rate is compared
+ * with that baseline: more than 1 point above it halves the workers (2 -> 0) and caps them there
+ * for 60 s; otherwise they double up to the budget. Once at the budget the CPU-time share check
+ * runs (hidden quota), and once a minute an on/off comparison of the GPU batch interval sheds a
+ * quarter of the workers only after three consecutive windows each lose more than 3% and more
+ * than the CPU adds. */
+static void tick(double now, double gpu_batch, int starved) {
     shared_t *S = g_cg;
     if (!S) return;
+    if (!S->table_started) {
+        S->table_started = 1;
+        pthread_t tt;
+        if (pthread_create(&tt, NULL, table_main, NULL) == 0) pthread_detach(tt); else S->failed.store(1);
+    }
     ctl_t &C = g_ctl;
     const double dt = C.last_done > 0 ? now - C.last_done : 0;
     C.last_done = now;
-    if (!S->ready.load(std::memory_order_acquire) || S->failed.load()) return;
+    if (!S->ready.load(std::memory_order_acquire) || S->failed.load() || S->simd.load() < 0) return;
+    if (C.phase == 0) { C.phase = 4; C.t_period = now; return; }
+    if (C.phase == 4) {                 /* baseline: >= 3 s and >= 20 batches with no worker running */
+        C.base_drains++; C.base_starved += starved != 0;
+        if (now - C.t_period < 3.0 || C.base_drains < 20) return;
+        C.phase = 0;                    /* falls through to the start below */
+    }
     if (S->tentative.load() >= 8 && S->hits.load() == 0) {   /* CPU path disagrees with the exact gate */
-        if (C.cur) printf("  CPU co-grind: off (%llu tentative hits, none exact)\n", (unsigned long long)S->tentative.load());
-        C.wmax = 0; set_allowed(0); return;
+        if (C.cur) set_allowed(0);
+        C.wmax = 0; return;
     }
-    if (C.phase == 0) {                        /* table ready: enable all workers */
-        set_allowed(C.wmax);
-        C.phase = 1; C.t_phase = now;
-        C.busy0 = busy_total(); C.busy_t0 = now;
-        C.cand0 = S->cand_done.load(); C.cand_t0 = now;
-        C.next_ab = now + 20.0;
+    C.drains++; C.starved += starved != 0;
+    if (C.phase == 0) {             /* entered only from the baseline phase */
+        C.base_rate = C.base_drains >= 20 ? (double)C.base_starved / C.base_drains : 0;
+        C.phase = 1; C.t_period = now; C.drains = C.starved = 0; C.ceiling = C.wmax; C.hold_until = 0;
+        C.cand0 = S->cand_done.load(); C.cand_t0 = now; C.next_ab = now + 60.0;
+        set_allowed(C.base_rate > 0.05 ? 0 : (C.wmax < 2 ? C.wmax : 2));
+        if (C.verbose) printf("  [CPU] base starvation %.3f (%llu drains); start with %d workers\n",
+                              C.base_rate, (unsigned long long)C.base_drains, C.cur);
         return;
     }
-    if (C.phase == 1 && now - C.t_phase >= 2.0) {
-        /* CPU share check: do the workers get the CPU time they ask for? */
-        const double got = (double)(busy_total() - C.busy0) * 1e-9 / (now - C.busy_t0);
-        if (C.verbose) printf("  [CPU] share check: %d workers received %.2f CPUs\n", C.cur, got);
-        if (got < 0.8 * C.cur) {
-            int nw = (int)got - 2; if (nw < 0) nw = 0;
-            C.wmax = nw; set_allowed(nw);
-            printf("  CPU co-grind: workers received %.1f CPUs; using %d\n", got, nw);
-        }
-        C.phase = 2; C.t_phase = now;
-        return;
-    }
-    if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
-        /* A/B: four windows on,off,on,off; each lasts >= 1 s and >= 3 GPU batches, and the
-         * first batch after each switch (it straddles both settings) is not measured */
-        C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
-        return;
-    }
-    if (C.phase == 3) {
-        /* windows: >= 1 s and >= 3 GPU batches each */
-        const int on = (C.ab_left & 1) == 0;       /* 4: on, 3: off, 2: on, 1: off */
+    if (C.phase == 3) {                                  /* A/B window in progress */
+        const int on = (C.ab_left & 1) == 0;
         if (C.win_skip) C.win_skip = 0;
         else { if (on) { C.ab_on_sum += dt; C.ab_on_n++; } else { C.ab_off_sum += dt; C.ab_off_n++; } C.win_n++; }
         if (C.win_n < 3 || now - C.win_t0 < 1.0) return;
         C.ab_left--;
         C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
-        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.wmax : 0); return; }
-        set_allowed(C.wmax);
+        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.ab_level : 0); return; }
+        set_allowed(C.ab_level);
         const double on_t = C.ab_on_sum / (C.ab_on_n ? C.ab_on_n : 1);
         const double off_t = C.ab_off_sum / (C.ab_off_n ? C.ab_off_n : 1);
-        const double loss = on_t / off_t - 1.0;     /* GPU slowdown with the workers on */
+        const double loss = on_t / off_t - 1.0;
         const uint64_t cd = S->cand_done.load();
-        const double cpu_rate = C.cand_t0 > 0 && now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
+        const double cpu_rate = now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
         C.cand0 = cd; C.cand_t0 = now;
-        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
-                              on_t, off_t, 100 * loss, cpu_rate, C.wmax,
-                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
-        /* The comparison guards against real contention (a hidden CPU quota, a shared core),
-         * not against noise: one window's noise is up to ~1% on short GPU batches. Shed a quarter
-         * of the workers only after two consecutive windows each show a GPU loss above 1.5% that
-         * also exceeds what the workers add. */
         const double cpu_frac = on_t > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
-        const int bad = loss > 0.015 && loss > cpu_frac;
-        if (bad && C.strikes >= 1) {
+        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
+                              on_t, off_t, 100 * loss, cpu_rate, C.cur,
+                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
+        const int bad = loss > 0.03 && loss > cpu_frac;
+        if (bad && C.strikes >= 2) {
             int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
-            C.wmax = nw; set_allowed(nw); C.strikes = 0;
-            printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
-            C.next_ab = now + 5.0;
-        } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
+            C.wmax = nw; C.ceiling = nw; if (C.cur > nw) set_allowed(nw); C.strikes = 0; C.next_ab = now + 5.0;
+        } else if (bad) { C.strikes++; C.next_ab = now + 2.0; }
         else { C.strikes = 0; C.next_ab = now + 60.0; }
-        C.phase = 2;
+        C.phase = 1; C.t_period = now; C.drains = C.starved = 0;
         return;
+    }
+    /* phase 1: starvation-driven ramp */
+    if (now - C.t_period >= 5.0 && C.drains >= 20) {
+        const double rate = (double)C.starved / C.drains;
+        if (rate > C.base_rate + 0.01 && C.cur > 0) {
+            const int nw = C.cur <= 2 ? 0 : C.cur / 2;
+            set_allowed(nw); C.ceiling = nw; C.hold_until = now + 60.0;
+            if (C.verbose) printf("  [CPU] starvation %.3f (base %.3f): %d workers\n", rate, C.base_rate, nw);
+        } else if (C.cur < C.wmax) {
+            int cap = now < C.hold_until ? C.ceiling : C.wmax;
+            int nw = C.cur < 1 ? 1 : C.cur * 2; if (nw > cap) nw = cap;
+            if (nw > C.cur) {
+                set_allowed(nw);
+                if (C.verbose) printf("  [CPU] starvation %.3f: ramp to %d workers\n", rate, nw);
+                if (nw == C.wmax) { C.t_full = now; C.busy0 = busy_total(); C.busy_t0 = now; }
+            }
+        }
+        C.t_period = now; C.drains = C.starved = 0;
+    }
+    /* share check, once, 2 s after first reaching the budget */
+    if (!C.share_done && C.cur == C.wmax && C.wmax > 0 && C.t_full > 0 && now - C.t_full >= 2.0) {
+        C.share_done = 1;
+        const double got = (double)(busy_total() - C.busy0) * 1e-9 / (now - C.busy_t0);
+        if (C.verbose) printf("  [CPU] share check: %d workers received %.2f CPUs\n", C.cur, got);
+        if (got < 0.8 * C.cur) { int nw = (int)got - 1; if (nw < 0) nw = 0; C.wmax = nw; C.ceiling = nw; set_allowed(nw); }
+    }
+    if (now >= C.next_ab && C.cur > 0) {
+        C.phase = 3; C.ab_level = C.cur; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
     }
 }
 
