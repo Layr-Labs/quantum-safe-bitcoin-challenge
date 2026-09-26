@@ -3383,7 +3383,7 @@ static void on_term_signal(int sig) {
                 (unsigned long long)g_total_searched,
                 (unsigned long long)g_hit_counter);
         fflush((FILE*)g_summary_f);
-        fsync(fileno((FILE*)g_summary_f));
+        /* qsb fsync removed */
     }
     /* Re-raise to default handler so process actually exits. */
     signal(sig, SIG_DFL);
@@ -4223,7 +4223,7 @@ int main(int argc, char **argv) {
         fprintf(summary_f, "# Format: STARTED|PROGRESS|HIT|STATUS=...\n");
         fprintf(summary_f, "# Hits are also written to digest_hit_<gpu>.txt and digest_calibrate_<gpu>.txt\n");
         fflush(summary_f);
-        fsync(fileno(summary_f));
+        /* qsb fsync removed */
     } else {
         fprintf(stderr, "WARN: cannot open summary file %s\n", summary_path);
     }
@@ -4823,7 +4823,7 @@ int main(int argc, char **argv) {
                 fprintf(summary_f, "STATUS=KILLED %ld signal=%d total_attempts=%llu hits=%llu\n",
                         (long)now_epoch, (int)g_stop_signal, (unsigned long long)total_searched,
                         (unsigned long long)hit_counter);
-                fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+                fflush(summary_f); /* qsb fsync removed */ fclose(summary_f);
                 g_summary_f = NULL;
             }
             free(h_combos);
@@ -4848,7 +4848,7 @@ int main(int argc, char **argv) {
             fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
                     (long)now_epoch, (unsigned long long)total_searched,
                     elapsed, (unsigned long long)hit_counter);
-            fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+            fflush(summary_f); /* qsb fsync removed */ fclose(summary_f);
             g_summary_f = NULL;
         }
         free(h_combos);
@@ -5029,7 +5029,7 @@ int main(int argc, char **argv) {
             fprintf(summary_f, "STATUS=EXHAUSTED %ld total_attempts=%llu elapsed_s=%.0f hits=%llu\n",
                     (long)now_epoch, (unsigned long long)total_searched,
                     elapsed, (unsigned long long)hit_counter);
-            fflush(summary_f); fsync(fileno(summary_f)); fclose(summary_f);
+            fflush(summary_f); /* qsb fsync removed */ fclose(summary_f);
             g_summary_f = NULL;
         }
         free(h_combos);
@@ -5183,7 +5183,7 @@ int main(int argc, char **argv) {
                             g_hit_counter = hit_counter;
                         }
                         fflush(summary_f);
-                        fsync(fileno(summary_f));   /* immediate, on every hit */
+                        /* qsb fsync removed */   /* immediate, on every hit */
                     }
                 }
             }
@@ -5236,7 +5236,7 @@ int main(int argc, char **argv) {
                          * (Hits get fsync'd immediately, that's the critical path.) */
                         static double last_fsync = 0;
                         if (elapsed_total - last_fsync > 300) {
-                            fsync(fileno(summary_f));
+                            /* qsb fsync removed */
                             last_fsync = elapsed_total;
                         }
                     }
@@ -5285,7 +5285,7 @@ int main(int argc, char **argv) {
                 (unsigned long long)my_slice_total,
                 elapsed, (unsigned long long)hit_counter);
         fflush(summary_f);
-        fsync(fileno(summary_f));
+        /* qsb fsync removed */
         fclose(summary_f);
     }
 
