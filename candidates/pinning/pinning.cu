@@ -337,6 +337,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_CHAIN_ROLES
 #define QSB_CHAIN_ROLES 0
 #endif
+#ifndef QSB_PHI_HOIST
+#define QSB_PHI_HOIST 1       /* 1: phi between two passes of the peeled one-add trip loop, not inside it */
+#endif
 #ifndef QSB_CHAIN_PEEL
 #define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
 #endif
@@ -1689,6 +1692,19 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
      * statement sequence, and every value, is the rolled loop's for every input. The loop
      * body holds one addition instead of two. */
     static_assert(GT_Q_TERMS < GT_GLV_TERMS-1, "QSB_CHAIN_PEEL: phi must precede the last trip");
+#if QSB_PHI_HOIST
+    /* QSB_PHI_HOIST: phi runs between two passes of the same trip loop instead of behind a
+     * per-trip test inside it. The first pass stops at term GT_Q_TERMS, phi scales X, and the
+     * second pass continues from there, so phi still runs exactly before trip GT_Q_TERMS, and
+     * only when the chain passes that term (first == 0). The trip body is emitted once and no
+     * longer carries the multiply, which keeps the hot loop's instruction footprint smaller. */
+    int term=first+2;
+    #pragma unroll 1
+    for(;;) {
+        const int stop=(term<GT_Q_TERMS)?GT_Q_TERMS:last-1;
+        #pragma unroll 1
+        for(;term<stop;term++) {
+#else
     #pragma unroll 1
     for(int term=first+2;term<last-1;term++) {
         if(term==GT_Q_TERMS) {
@@ -1698,6 +1714,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             };
             _ModMult(X,X,(uint64_t*)beta);
         }
+#endif
         const uint32_t next_code=qsb_glv_code(term+1);
 #if QSB_CHAIN_L2PF & 1
         qsb_pf_rec(table,qsb_glv_code(term+2<last?term+2:term+1));
@@ -1710,6 +1727,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         #pragma unroll
         for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
     }
+#if QSB_PHI_HOIST
+        if(term!=GT_Q_TERMS) break;
+        {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+    }
+#endif
 #if QSB_PAIR_ORD
     qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
 #else
