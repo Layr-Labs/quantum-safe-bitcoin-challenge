@@ -218,7 +218,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  *   0: untouched (base). 1: print the driver default only.
  *   32, 64, 128: print the default, request this value, print what the driver kept. */
 #ifndef QSB_L2_FETCH
-#define QSB_L2_FETCH 0
+#define QSB_L2_FETCH 64   /* L2 miss fetch granularity 64 B (i34-9 08eea76e) */
 #endif
 #if QSB_L2_FETCH != 0 && QSB_L2_FETCH != 1 && QSB_L2_FETCH != 32 && QSB_L2_FETCH != 64 && QSB_L2_FETCH != 128
 #error "QSB_L2_FETCH must be 0, 1, 32, 64 or 128"
@@ -4084,6 +4084,18 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 }
 #endif
 
+/* QSB_COGRIND (kill switch, host only): 1 = idle host cores grind sequences counting down from
+ * 0xFFFFFFFE (disjoint from the GPU's upward walk from 0x80000000), cpu_cogrind.h; 0 = GPU only.
+ * Co-grinder API and controller: Meganpark980320 (66c7e04); engine rewritten in this tree. */
+#ifndef QSB_COGRIND
+#define QSB_COGRIND 1
+#endif
+#if QSB_COGRIND && QSB_HOST_GATE
+#include <fcntl.h>
+#include <unistd.h>
+#include "cpu_cogrind.h"
+#endif
+
 
 int main(int argc, char **argv) {
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
@@ -4507,6 +4519,7 @@ int main(int argc, char **argv) {
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
 #endif
         if (want > gt_sz - skip) want = gt_sz - skip;
+        { const size_t hot=(size_t)gt_offset(4)*64u; if (want > hot) want = hot; } /* set-aside and window = the hot banks only (i34-9 08eea76e) */
         if (want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
             cudaStreamAttrValue av = {};
@@ -4606,6 +4619,7 @@ int main(int argc, char **argv) {
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
 #endif
         if (want > gt_sz - skip) want = gt_sz - skip;
+        { const size_t hot=(size_t)gt_offset(4)*64u; if (want > hot) want = hot; } /* set-aside and window = the hot banks only (i34-9 08eea76e) */
         if (want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
@@ -4781,6 +4795,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
+#if QSB_COGRIND && QSB_HOST_GATE
+    if (!easy && effective_total == 1 && !seq_start_override && single_hash)
+        qcg::start(&pp, LT_MIN, LT_MAX);
+#endif
 #if QSB_SLOTPIPE
     /* Slotted batch loop.  Nothing here changes what the device computes: the
      * same five kernels receive the same arguments for the same batches in the
@@ -4811,6 +4829,9 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_COGRIND && QSB_HOST_GATE
+        qcg::tick(qcg::mono_s(), (double)BATCH);
+#endif
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
         const uint32_t *hits = slot_readback[s].indices();
@@ -4883,6 +4904,9 @@ int main(int argc, char **argv) {
         const uint32_t *source = h_hit_idx + (size_t)s*64;
 #endif
         if (count > 64) count = 64;
+#if QSB_COGRIND && QSB_HOST_GATE
+        qcg::tick(qcg::mono_s(), (double)BATCH);
+#endif
         /* Copy before reuse: the next D2H is allowed to overwrite the pinned
          * report while OpenSSL checks this ordinary host-stack snapshot. */
         if (count) memcpy(hits, source, count*sizeof(uint32_t));

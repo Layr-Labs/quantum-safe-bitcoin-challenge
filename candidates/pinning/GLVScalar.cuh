@@ -1030,7 +1030,14 @@ __device__ __forceinline__ unsigned q9_glv_split_z(const uint64_t input[4],uint6
                                                    uint32_t *t1,uint32_t *t2,uint32_t *m1,uint32_t *m2){
     const uint64_t n[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
     uint64_t k[4]={input[0],input[1],input[2],input[3]};
+#ifndef QSB_GLV_NOREDUCE
+#define QSB_GLV_NOREDUCE 1   /* 1: no k >= n pre-reduction (z >= n has probability ~2^-128; the host gate re-checks every hit) -- i34-9 28f6b89d */
+#endif
+#if !QSB_GLV_NOREDUCE
     if(k[3]==n[3]&&(k[2]>n[2]||(k[2]==n[2]&&(k[1]>n[1]||(k[1]==n[1]&&k[0]>=n[0])))))q9_sub4(k,k,n);
+#else
+    (void)n;
+#endif
     const uint64_t g1[4]={0xE893209A45DBB031ULL,0x3DAA8A1471E8CA7FULL,0xE86C90E49284EB15ULL,0x3086D221A7D46BCDULL};
     const uint64_t g2[4]={0x1571B4AE8AC47F71ULL,0x221208AC9DF506C6ULL,0x6F547FA90ABFE4C4ULL,0xE4437ED6010E8828ULL};
     const uint32_t a1[4]={0x9284eb15,0xe86c90e4,0xa7d46bcd,0x3086d221};
