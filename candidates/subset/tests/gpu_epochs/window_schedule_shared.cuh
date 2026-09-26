@@ -187,6 +187,25 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
  * second block and constant suffix) in both epochs.  Load each schedule word
  * once and advance two independent SHA-256 states with it. */
+/* QSB_PAIR_SHA_ALU_ADD (kill switch): the paired epoch SHA (window block and the four
+ * constant-suffix blocks) runs beside the IMAD-bound chain loop, and ptxas lowers each round's
+ * two-input d += t1 to IMAD.IADD on the FMA-heavy pipe. A constant-bank zero addend makes it a
+ * three-input add that only IADD3 (ALU pipe) can issue: same instruction count, exact
+ * (x + y + 0 = x + y mod 2^32). QSB_SHA_ALU_ADD's trick, applied to the paired path it does not
+ * cover. (h = t1 + t2 already fuses into one IADD3.) 0 = S2Round unchanged. */
+#ifndef QSB_PAIR_SHA_ALU_ADD
+#define QSB_PAIR_SHA_ALU_ADD 1
+#endif
+#if QSB_PAIR_SHA_ALU_ADD
+__device__ __constant__ uint32_t qsb_pair_zero_add = 0;   /* always 0 */
+#define QSB_P2R(a, b, c, d, e, f, g, h, k, w) \
+    t1 = h + S1(e) + Ch(e,f,g) + k + (w); \
+    t2 = S0(a) + Maj(a,b,c); \
+    d += t1 + qsb_pair_zero_add; \
+    h = t1 + t2;
+#else
+#define QSB_P2R(a, b, c, d, e, f, g, h, k, w) S2Round(a, b, c, d, e, f, g, h, k, w)
+#endif
 __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     uint32_t *stateA, uint32_t *stateB, int lane,
     const uint32_t *firstA, const uint32_t *firstB) {
@@ -235,14 +254,14 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     #pragma unroll 1
 #endif
     for(int r=0;r<64;r+=8){
-        {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+2][slot];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+3][slot];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+4][slot];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+5][slot];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+6][slot];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-        {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r][slot];QSB_P2R(a0,b0,c0,d0,e0,f0,g0,h0,0,w);QSB_P2R(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];QSB_P2R(h0,a0,b0,c0,d0,e0,f0,g0,0,w);QSB_P2R(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+2][slot];QSB_P2R(g0,h0,a0,b0,c0,d0,e0,f0,0,w);QSB_P2R(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+3][slot];QSB_P2R(f0,g0,h0,a0,b0,c0,d0,e0,0,w);QSB_P2R(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+4][slot];QSB_P2R(e0,f0,g0,h0,a0,b0,c0,d0,0,w);QSB_P2R(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+5][slot];QSB_P2R(d0,e0,f0,g0,h0,a0,b0,c0,0,w);QSB_P2R(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+6][slot];QSB_P2R(c0,d0,e0,f0,g0,h0,a0,b0,0,w);QSB_P2R(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+        {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];QSB_P2R(b0,c0,d0,e0,f0,g0,h0,a0,0,w);QSB_P2R(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
     }
     QSB_PAIR_STATE_ADD();
 #if QSB_PAIR_SHA_UNROLL_CONST
@@ -258,14 +277,14 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         #pragma unroll 1
 #endif
         for(int r=0;r<64;r+=8){
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+1];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+2];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+3];S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+4];S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+5];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+6];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+7];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r];QSB_P2R(a0,b0,c0,d0,e0,f0,g0,h0,0,w);QSB_P2R(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+1];QSB_P2R(h0,a0,b0,c0,d0,e0,f0,g0,0,w);QSB_P2R(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+2];QSB_P2R(g0,h0,a0,b0,c0,d0,e0,f0,0,w);QSB_P2R(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+3];QSB_P2R(f0,g0,h0,a0,b0,c0,d0,e0,0,w);QSB_P2R(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+4];QSB_P2R(e0,f0,g0,h0,a0,b0,c0,d0,0,w);QSB_P2R(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+5];QSB_P2R(d0,e0,f0,g0,h0,a0,b0,c0,0,w);QSB_P2R(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+6];QSB_P2R(c0,d0,e0,f0,g0,h0,a0,b0,0,w);QSB_P2R(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+            {const uint32_t w=QSB_CONST_SCHEDULE[block][r+7];QSB_P2R(b0,c0,d0,e0,f0,g0,h0,a0,0,w);QSB_P2R(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
         }
         QSB_PAIR_STATE_ADD();
     }
