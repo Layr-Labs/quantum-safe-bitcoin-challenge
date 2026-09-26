@@ -1,9 +1,10 @@
-/* l2state variant fkF20c8 + split retry */
+/* l2state variant fkF20c8 + split retry + partition check + PMIX12 32/1 */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1
 #define QSB_GREEN 20
+#define QSB_GREEN_TUNE 0
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
@@ -168,7 +169,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 16
+#define QSB_PMIX12 32
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -186,7 +187,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * value, and a lane's digit-arena slots are indexed by its own threadIdx.x, so the codes
  * written and the trips taken always agree. 0: blockIdx.x mod K == 0, block-uniform. */
 #ifndef QSB_PMIX12_WARP
-#define QSB_PMIX12_WARP 1
+#define QSB_PMIX12_WARP 0
 #endif
 /* QSB_PMIX12_N (1 <= N < K, default 2): N of every K consecutive global warps decode P with
  * GLV12, spread evenly: warp g is chosen when (g*N) mod K < N. For N = 1 that is g mod K == 0,
@@ -196,7 +197,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 1
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
@@ -4119,7 +4120,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, int nShared, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4145,7 +4146,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
     }
     if (sr != CUDA_SUCCESS || ng != (unsigned)nB / 2u) return 0;
     int na = 0; partA[na++] = rem;
-    for (int i = 0; i < QSB_GREEN_SHARED / 2 && i < (int)ng; i++) partA[na++] = grp[i];
+    for (int i = 0; i < nShared / 2 && i < (int)ng; i++) partA[na++] = grp[i];
     CUdevResourceDesc dA, dB; CUgreenCtx gA, gB;
     if (qsb_cuDevResourceGenerateDesc(&dB, grp, ng) != CUDA_SUCCESS) return 0;
     if (qsb_cuDevResourceGenerateDesc(&dA, partA, na) != CUDA_SUCCESS) return 0;
@@ -4180,9 +4181,15 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
  * Every kernel gets exactly the arguments the monolithic launch would give it for the same
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
+#ifndef QSB_GREEN_TUNE
+#define QSB_GREEN_TUNE 1   /* finish partitions QSB_GREEN, +2, -2 SMs; the fastest over sequences 2-7 is kept */
+#endif
+#define QSB_GREEN_NCFG 3
 struct QsbSubPipe {
     int ready;
     cudaStream_t s0[2], rt, s2, s2b[2];
+    int ncfg, cfg, cfg_sms[QSB_GREEN_NCFG];
+    cudaStream_t c_s0[QSB_GREEN_NCFG][2], c_rt[QSB_GREEN_NCFG], c_s2b[QSB_GREEN_NCFG][2];
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
@@ -4217,13 +4224,32 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
-        if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
-            printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
-            return 0;
+        /* config 0 is the tuned default; the others are the neighbouring finish sizes, tried
+         * over a few whole sequences at startup (qsb_green_tune_seq) */
+        /* finish SMs / shared SMs: at 22 a wider shared band costs less than more own SMs
+         * (local: 12+10 -0.22%, 14+8 -0.55% vs 12+8) */
+        static const int want[QSB_GREEN_NCFG] = {QSB_GREEN, QSB_GREEN + 2, QSB_GREEN - 2};
+        static const int wsh[QSB_GREEN_NCFG] = {QSB_GREEN_SHARED, QSB_GREEN_SHARED + 2, QSB_GREEN_SHARED};
+        P.ncfg = 0;
+        for (int c = 0; c < (QSB_GREEN_TUNE ? QSB_GREEN_NCFG : 1); c++) {
+            cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
+            if (!qsb_green_streams(dev, want[c], wsh[c], sA, sB, least, greatest, &nA, &nB)) {
+                (void)cudaGetLastError();
+                if (c == 0) {
+                    printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
+                    return 0;
+                }
+                break;
+            }
+            const int k = P.ncfg++;
+            P.cfg_sms[k] = (int)nB;
+            P.c_s0[k][0] = sA[0]; P.c_s0[k][1] = sA[1]; P.c_rt[k] = sA[2];
+            P.c_s2b[k][0] = sB[0]; P.c_s2b[k][1] = sB[1];
+            if (c == 0) printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
         }
-        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
-        printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
+        P.cfg = 0;
+        P.s0[0] = P.c_s0[0][0]; P.s0[1] = P.c_s0[0][1]; P.rt = P.c_rt[0];
+        P.s2b[0] = P.c_s2b[0][0]; P.s2b[1] = P.c_s2b[0][1]; P.s2 = P.s2b[0];
     }
 #else
     for (int i = 0; i < 2 && e == cudaSuccess; i++)
@@ -4239,6 +4265,12 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
         cudaStream_t all[5] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1]};
         for (int i = 0; i < 5; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+#if QSB_GREEN
+        for (int c = 1; c < P.ncfg; c++) {
+            cudaStream_t more[5] = {P.c_s0[c][0], P.c_s0[c][1], P.c_rt[c], P.c_s2b[c][0], P.c_s2b[c][1]};
+            for (int i = 0; i < 5; i++) cudaStreamSetAttribute(more[i], cudaStreamAttributeAccessPolicyWindow, &av);
+        }
+#endif
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -4378,6 +4410,46 @@ static void qsb_subpipe_launch(
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(st, P.ev_out2, 0);
     if (e != cudaSuccess) qsb_subpipe_die("output ordering", e);
 }
+#if QSB_GREEN
+/* Startup partition choice.  Called by the host loop once per sequence, after the
+ * sequence's last batch is enqueued; selects the partition for the next sequence.
+ * Sequences 2..7 run the configs in the order 0,1,2,2,1,0 (a linear drift cancels);
+ * afterwards the config with the least mean sequence time is kept (the default
+ * unless another is faster by more than 0.1%).  Only stream placement changes:
+ * every sub-batch still runs the same kernels on the same arguments. */
+static void qsb_green_tune_seq(uint32_t seqs_done) {
+    QsbSubPipe &P = g_qsb_sub;
+    static double t_last = 0, dur[6];
+    static int done = 0;
+    if (!P.ready || P.ncfg < 2 || done) return;
+    static const int sched[6] = {0, 1, 2, 2, 1, 0};
+    const uint32_t S0 = 2;
+    timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    const double now = ts.tv_sec + ts.tv_nsec * 1e-9;
+    const uint32_t fin = seqs_done - 1;              /* 0-based index of the sequence just enqueued */
+    if (fin >= S0 && fin < S0 + 6) dur[fin - S0] = now - t_last;
+    t_last = now;
+    int c = -1;
+    if (seqs_done >= S0 && seqs_done < S0 + 6) c = sched[seqs_done - S0] < P.ncfg ? sched[seqs_done - S0] : 0;
+    else if (seqs_done == S0 + 6) {
+        double m[QSB_GREEN_NCFG] = {0}; int n[QSB_GREEN_NCFG] = {0};
+        for (int i = 0; i < 6; i++) if (sched[i] < P.ncfg) { m[sched[i]] += dur[i]; n[sched[i]]++; }
+        c = 0;
+        for (int k = 1; k < P.ncfg; k++)
+            if (n[k] && m[k] / n[k] < (m[c] / n[c]) * (c == 0 ? 0.999 : 1.0)) c = k;
+        printf("  Partition check:");
+        for (int k = 0; k < P.ncfg; k++) printf(" finish %d SMs %.4f s/seq%s", P.cfg_sms[k], n[k] ? m[k] / n[k] : 0.0,
+                                               k + 1 < P.ncfg ? "," : "");
+        printf(" -> finish on %d SMs\n", P.cfg_sms[c]); fflush(stdout);
+        done = 1;
+    }
+    if (c >= 0 && c != P.cfg) {
+        P.cfg = c;
+        P.s0[0] = P.c_s0[c][0]; P.s0[1] = P.c_s0[c][1]; P.rt = P.c_rt[c];
+        P.s2b[0] = P.c_s2b[c][0]; P.s2b[1] = P.c_s2b[c][1]; P.s2 = P.s2b[0];
+    }
+}
+#endif
 #endif
 
 /* ============================================================
@@ -6053,6 +6125,9 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
+#if QSB_SUBPIPE && QSB_GREEN
+        if (g_qsb_sub_ok) qsb_green_tune_seq(seqs_done);
+#endif
         if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
