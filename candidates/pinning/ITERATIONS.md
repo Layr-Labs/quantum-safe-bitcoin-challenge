@@ -1,5 +1,44 @@
 # Pinning experiment ledger
 
+## v28 verdict (2026-09-26 ~07:11Z) — DEAD END: FIN_CAP_IMAD=1
+
+**REJECTED — official 886,791,649 (-6.5% vs 948.94M baseline). 126,960 hits, 105.71 hits/s.**
+
+Root cause: `QSB_FIN_CAP_IMAD=1` forced `QSB_S2_BLOCKS=8`, compelling ptxas to
+target 64 registers on the finish kernel. The GLV11 P18 schedule naturally uses
+70-72 registers; constraining to 64 causes **register spills to local memory**.
+For a multiply-heavy batch-inversion kernel, each spill/reload is an L2 round-trip
+inside the critical path — far worse than one fewer concurrent block at 7 blocks/SM.
+**`QSB_FIN_CAP_IMAD` is CLOSED. Do not retry.**
+
+`QSB_L2_FETCH=64` was active simultaneously; its isolated impact is unknown but
+cannot be evaluated while FIN_CAP_IMAD was damaging. Both reverted to baseline.
+
+**Draw 3: clean fkiene baseline re-queued (commit 9331852 reverted → new commit).**
+
+## v28: FIN_CAP_IMAD + L2_FETCH=64 on GLV11 P18 (2026-09-26 ~00:18Z)
+
+**Draw 2 on the 948.94M frontier — two host-only tweaks, zero arithmetic change.**
+
+Changes vs Draw 1 baseline:
+- `QSB_FIN_CAP_IMAD=1` (new): Caps finish kernel at 8 blocks/SM, forcing ptxas
+  to target 64 registers instead of 70-72 under the 7-block bound. Recovers
+  full SM occupancy lost to GLV11 P18 schedule register pressure.
+- `QSB_L2_FETCH=64` (new): Sets `cudaLimitMaxL2FetchGranularity=64` at runtime.
+  Halves cold DRAM fetch traffic per GLV record gather (64 B record, 128 B
+  driver default → 64 B of unused adjacent-record data eliminated per miss).
+- Carrier cubin must be rebuilt with `build_carrier.sh` on the runner's CUDA
+  12.8 toolkit before submission.
+- Expected gain vs Draw 1: +0.5–1.3% → target 953–961M (floor 958,433,235).
+
+## Draw 1 on GLV11 P18 frontier (2026-09-26 ~00:10Z)
+
+**Synchronized to promoted world-record frontier `4f0f50e` by `fkiene` (official 948,943,797).**
+- Frontier architecture: GLV11 P18 five-term decomposition (11 DRAM gathers instead of 12), gather pipelining (`QSB_CHAIN_PIPE`), role-alternating trips (`QSB_CHAIN_ROLES`), and native `sm_89` cubin carrier image.
+- Target floor: $\ge 958,433,235$ (+1.00% over 948.94M).
+- Action: Dispatched Draw 1 on the 948.94M frontier to evaluate worker performance and hit distribution.
+
+
 ## v25 verdict + v26 submitted (2026-09-24 ~09:11Z)
 
 **v25 `62651c13`: REJECTED — official 878,283,220.** self 902.0M/s,
