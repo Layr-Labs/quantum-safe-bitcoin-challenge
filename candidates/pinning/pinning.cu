@@ -185,6 +185,13 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
+/* QSB_FIN_CAP_IMAD=1: cap the finish kernel at 8 blocks/SM so that ptxas's register
+ * pressure from the GLV11 P18 schedule (70-72 registers in the 7-block path) does not
+ * drop SM occupancy. At 8 the compiler targets 64 registers, keeping residency at the
+ * record baseline. Zero arithmetic change; host-only occupancy hint. */
+#ifndef QSB_FIN_CAP_IMAD
+#define QSB_FIN_CAP_IMAD 1
+#endif
 #if QSB_FIN_CAP_IMAD
 /* QSB_FIN_CAP_IMAD: ptxas spends the 72-register headroom of a 7-block bound on the new schedule
  * (70 to 72 registers, which drops the finish kernel from 8 to 7 resident blocks per SM). A bound
@@ -218,7 +225,12 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  *   0: untouched (base). 1: print the driver default only.
  *   32, 64, 128: print the default, request this value, print what the driver kept. */
 #ifndef QSB_L2_FETCH
-#define QSB_L2_FETCH 0
+/* QSB_L2_FETCH=64: each cold-bank GLV record gather reads exactly one 64-byte-aligned
+ * record (X then Y). The driver default is 128 B, pulling a full cache line that includes
+ * 64 B of an adjacent record that no thread reads. Forcing 64 B halves the spurious DRAM
+ * traffic per miss. State-plane misses stride by 512 B/warp so they gain nothing either way.
+ * Host-only advisory hint; no device code changes. */
+#define QSB_L2_FETCH 64
 #endif
 #if QSB_L2_FETCH != 0 && QSB_L2_FETCH != 1 && QSB_L2_FETCH != 32 && QSB_L2_FETCH != 64 && QSB_L2_FETCH != 128
 #error "QSB_L2_FETCH must be 0, 1, 32, 64 or 128"
