@@ -46,7 +46,10 @@
 #endif
 
 #ifndef QSB_CPU_RESERVE
-#define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
+#define QSB_CPU_RESERVE 1          /* leave one logical CPU for the GPU host thread and driver */
+#endif
+#ifndef QSB_CPU_IDLE
+#define QSB_CPU_IDLE 0             /* normal priority keeps the disjoint host lane fed */
 #endif
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 4096
@@ -923,7 +926,7 @@ static inline void pk_words(uint32_t *w, const fe &x, unsigned ypar) {
 }
 #endif
 static void worker_body(Ctx *c, int tid) {
-#ifdef SCHED_IDLE
+#if defined(SCHED_IDLE) && QSB_CPU_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
@@ -1228,7 +1231,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     fe_from_le32(c->cx, dp->u2r_x); fe_from_le32(c->cy, dp->u2r_y);
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
     try { std::thread([c, fax, fay, nth]() {
-#ifdef SCHED_IDLE
+#if defined(SCHED_IDLE) && QSB_CPU_IDLE
         struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
         const double t0 = now_s();
