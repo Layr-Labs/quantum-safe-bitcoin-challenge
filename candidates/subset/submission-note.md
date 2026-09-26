@@ -224,7 +224,7 @@ The GPU rate is unchanged within noise: 808.8–811.3 M/s across 8 interleaved 6
 - The runner's CPU model and memory are not published. Our AVX-512 cycle estimates come from llvm-mca's znver4 model, not from Zen 4 hardware. That is why the hashing choice and the hybrid are calibrated on the host instead of hard-coded.
 - The calibration measures only the co-grinder's own rate. Pinning leaves a whole core free for the GPU host thread, and on our host the GPU rate is unchanged within noise with the co-grinder on or off. The GPU host thread's behavior on the runner is not measured.
 - The table uses at most 4.3 GiB (11 lookups), and less on a host with less than 13 GiB available.
-- On this tree the host producers' 3 threads run at normal priority; the co-grinder's workers are `SCHED_IDLE`, pinned off the GPU host thread's core, and yield to them.
+- On the promoted base the host producers' 3 threads run at normal priority and the co-grinder workers are `SCHED_IDLE`. This follow-up keeps the same disjoint CPU placement but runs the co-grinder workers at normal priority, because they are pinned away from the GPU host thread and producer lane. It also reserves one logical CPU instead of two, leaving one host lane for the driver.
 - `QSB_CPU_DEVBENCH` / `QSB_CPU_DEVCAND` (CPU-only rate, deterministic hit-set runs) and the `QSB_CPU_MODE` / `QSB_CPU_TABLE_MB` / `QSB_CPU_NOPIN` / `QSB_CPU_NOFOLD` / `QSB_CPU_NOFAST` environment switches are dev-only. The first two are compiled out of the ranked build, and the rest are never set by the harness.
 
 ## Base and attribution
@@ -242,3 +242,13 @@ The GPU rate is unchanged within noise: 808.8–811.3 M/s across 8 interleaved 6
 - **Ours:** the signed memory-sized table and builder, the budget and cgroup logic, the C fold, the precomputed-schedule and 16-lane SHA paths, the 5×52 scalar batch path, the SMT pinning, hybrid and calibration, `fe8_canon_words`/`fe8_sub2`, the fused field operations, the specialized digit recoding, the host-core worker, the producers' 16-lane path and its batch-0 calibration (on terrapinelf's producer design), exception-safe threading, and the SDE/llvm-mca/hit-set test method.
 
 All inherited source, GPLv3 notices and attributions are kept.
+
+## Follow-up scheduling canary
+
+This submission is the promoted `a137e289b236c3622eba80f1ad5e9a0c8a91eb67` tree with one host-only scheduling change in `CpuGrindSubset.h`:
+
+- `QSB_CPU_RESERVE` changes from 2 to 1, allowing one additional logical CPU to participate in the co-grinder while one lane remains available for the GPU host thread and driver.
+- The two `SCHED_IDLE` calls are guarded by `QSB_CPU_IDLE`, whose ranked default is 0. Workers remain pinned away from the host lane, so normal priority avoids the idle scheduler penalty without putting work on the host core.
+- No device code, table geometry, arithmetic, hit publication, verifier, producer algorithm, carrier knob, or benchmark harness code changes. The embedded CUDA 12.8 sm_89 carrier remains compatible because its build-knob fingerprint is unchanged.
+
+The official fixed-time runner is the authority for the gain. All inherited exactness gates, producer self-checks, memory probe safeguards, and verifier checks remain unchanged from the promoted base.

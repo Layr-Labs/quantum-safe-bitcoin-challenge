@@ -48,7 +48,10 @@
 #endif
 
 #ifndef QSB_CPU_RESERVE
-#define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
+#define QSB_CPU_RESERVE 1          /* leave one logical CPU for the GPU host thread and driver */
+#endif
+#ifndef QSB_CPU_IDLE
+#define QSB_CPU_IDLE 0             /* keep the disjoint host lane at normal priority */
 #endif
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 4096
@@ -1678,7 +1681,7 @@ S16T static void keyhash16(const fe *qx, const uint8_t *qp, int n, uint32_t *h0)
 }
 #endif
 static void worker_body(Ctx *c, int tid) {
-#ifdef SCHED_IDLE
+#if defined(SCHED_IDLE) && QSB_CPU_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     bool pinned = false;
@@ -2134,7 +2137,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
     try { std::thread([c, fax, fay, nth]() {
       try {
-  #ifdef SCHED_IDLE
+  #if defined(SCHED_IDLE) && QSB_CPU_IDLE
           struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
   #endif
   #ifdef CPU_SET
