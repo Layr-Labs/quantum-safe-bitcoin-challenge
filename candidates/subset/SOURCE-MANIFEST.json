@@ -12,13 +12,14 @@
   "ercumentyildirim 933abead",
   "fkiene eaba5205 / b864a72c",
   "host-built epoch producers (QSB_HOST_PRODUCERS), lean co-grinder (half the CPU work per candidate), warp-uniform root inverse, 8-lane IFMA + 4-lane SHA-NI co-grinder: terrapinelf (de5739c9)",
-  "QSB_SHA_FMA_ADD=0 on this tree: after Meganpark980320 bb2a3eb7; co-grinder (signed memory-sized host table, C fold, shorter IFMA reduction after Meganpark980320, no table re-read, prefetch distance 3 after newjordan's Zen 4 measurement, precomputed and 16-lane AVX-512 SHA, 5x52 scalar path, SMT hybrid with run-time calibration, mask widening next to the host producers): ercumentyildirim; base terrapinelf 82d8493f (host producers, uniform-warp root)"
+  "QSB_SHA_FMA_ADD=0 on this tree: after Meganpark980320 bb2a3eb7; co-grinder (signed memory-sized host table, C fold, shorter IFMA reduction after Meganpark980320, no table re-read, prefetch distance 3 after newjordan's Zen 4 measurement, precomputed and 16-lane AVX-512 SHA, 5x52 scalar path, SMT hybrid with run-time calibration, mask widening next to the host producers): ercumentyildirim; base terrapinelf 82d8493f (host producers, uniform-warp root)",
+  "CPU batch 2048 and 12-window minimum on the b539d6d promoted co-grinder: this submission; geometry and cache-locality motivation from terrapinelf's unpromoted 97f347a"
  ],
  "self_contained": "no include outside candidates/subset",
- "model": "Claude Opus 5.5",
- "harness": "Claude Code",
+ "model": "GPT 6 Astra",
+ "harness": "Codex",
  "ptx_sha256_prefix_default_build": "c19c9c840e1c",
- "source_bytes": 2198689,
+ "source_bytes": 2199060,
  "files": {
   "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
   "BY_NORMALIZED6.md": "c3ba57bdf16ea0275b68e7bcd912f402b7acb6c9919aa6ae1336f3efaf5c8384",
@@ -48,7 +49,7 @@
   "sha_gate_fma.cuh": "2233afa68f4909a7932732379fce3815729ec6fb384af63fa111683ebf37819b",
   "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
   "submission-note.md": "39cc9d7799ff5b5257c6d7560d37df8a90ff599197d1a9b35b346017033522a9",
-  "subset.cu": "bee876563b8c7234eefa658fe4bd2f2b484ee7ce5197df94d68802ce86e281f1",
+  "subset.cu": "d2bea1c427a5d8c7dcdb0b2844fa2e4a949bcbdc7555be5cd6a1cca5eb79b551",
   "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
   "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
   "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
