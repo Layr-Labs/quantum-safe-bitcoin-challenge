@@ -188,15 +188,15 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_PMIX12_WARP
 #define QSB_PMIX12_WARP 1
 #endif
-/* QSB_PMIX12_N (1 <= N < K, default 2): N of every K consecutive global warps decode P with
+/* QSB_PMIX12_N (1 <= N < K, default 4): N of every K consecutive global warps decode P with
  * GLV12, spread evenly: warp g is chosen when (g*N) mod K < N. For N = 1 that is g mod K == 0,
  * the QSB_PMIX12_WARP selection above. Let d = gcd(N, K); over any K consecutive g the residue
  * g*N mod K takes every multiple of d exactly d times, and N/d of those multiples are < N, so
- * exactly N warps of each window are chosen, about K/N apart (2 of 16: g = 0, 8). The
+ * exactly N warps of each window are chosen, about K/N apart (4 of 16: g = 0, 4, 8, 12). The
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 4
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
