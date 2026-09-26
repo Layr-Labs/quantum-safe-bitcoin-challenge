@@ -38,6 +38,7 @@ enum QsbCarrierKernel {
     QK_RGF,      /* qsb_root_group_finish  */
     QK_BUILD,    /* kernel_build_gtable    */
     QK_YOFF,     /* qsb_table_offset_y     */
+    QK_RF,       /* qsb_root_fused<K> (QSB_SUBPIPE && QSB_ROOT_FUSED) */
     QK_N
 };
 
