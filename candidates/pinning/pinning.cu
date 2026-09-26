@@ -3277,6 +3277,9 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #endif
 
 #include "QsbCarrier.h"
+#if QSB_CARRIER_ONLY && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_CARRIER_ONLY skips the compute_52 constants, but the leaf-tree offload kernels run from that image"
+#endif
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4183,9 +4186,11 @@ int main(int argc, char **argv) {
 #endif
 #if QSB_FAST_START
     /* Load every kernel now (on a cold JIT cache this is where the module is compiled),
-     * while the workers still run, instead of at the first launch after them. */
+     * while the workers still run, instead of at the first launch after them.
+     * QSB_CARRIER_ONLY (QsbCarrier.h): with the carrier on, no compute_52 kernel is ever
+     * launched, so that module is left unloaded and its JIT never runs. */
     int fs_loaded = 0;
-    {
+    if (!(QSB_CARRIER_ONLY && g_qsb_carrier.on)) {
         const void *fs_k[] = {
             (const void*)kernel_build_gtable,
 #if QSB_YOFF

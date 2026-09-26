@@ -143,9 +143,22 @@ static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, c
     return e;
 }
 
-/* cudaMemcpyToSymbol into the carrier image's copy of the symbol when it is on, and always
- * into the compute_52 image's copy: kernels that stay on the compute_52 image (the leaf-tree
- * pair) then read the same constants as the carrier kernels. */
+/* QSB_CARRIER_ONLY (host only, default 1): when the carrier is on, every kernel the ranked run
+ * launches comes from the carrier (fast_tail is required, and the leaf-tree offload kernels are
+ * compiled out), so the compute_52 module is never needed. Its symbols are then not written:
+ * cudaMemcpyToSymbol on them is what forced that module to load, and on a cold cache to be
+ * JIT-compiled from PTX, inside the timed window. With the carrier off, both copies are written
+ * exactly as before. 0 restores the unconditional compute_52 copy. */
+#ifndef QSB_CARRIER_ONLY
+#define QSB_CARRIER_ONLY 1
+#endif
+#if QSB_CARRIER_ONLY != 0 && QSB_CARRIER_ONLY != 1
+#error "QSB_CARRIER_ONLY must be 0 or 1"
+#endif
+
+/* cudaMemcpyToSymbol into the carrier image's copy of the symbol when it is on, and into the
+ * compute_52 image's copy whenever a compute_52 kernel can run (carrier off, or
+ * QSB_CARRIER_ONLY=0): those kernels then read the same constants as the carrier kernels. */
 template <class T>
 static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src, size_t n) {
     if (g_qsb_carrier.on) {
@@ -155,6 +168,7 @@ static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src
         if (n > sz) return cudaErrorInvalidValue;
         e = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
         if (e != cudaSuccess) return e;
+        if (QSB_CARRIER_ONLY) return cudaSuccess;
     }
     return cudaMemcpyToSymbol(sym, src, n);
 }
