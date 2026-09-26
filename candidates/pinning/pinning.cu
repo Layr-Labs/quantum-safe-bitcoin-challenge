@@ -1299,7 +1299,7 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
  * Off: on the 1004f554 tree it measured +0.532 % against that tree's +0.635 %
  * (RTX 4090, ABBA), so the C address stays. */
 #ifndef QSB_PIPE_LEA
-#define QSB_PIPE_LEA 0
+#define QSB_PIPE_LEA 1
 #endif
 #if QSB_PIPE_LEA != 0 && QSB_PIPE_LEA != 1
 #error "QSB_PIPE_LEA must be 0 or 1"
