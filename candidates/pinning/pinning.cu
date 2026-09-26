@@ -5062,17 +5062,6 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 }
 #endif
 
-/* QSB_CPU_GRIND (kill switch, host only): 1 = idle host cores grind sequences counting down
- * from 0xFFFFFFFE (disjoint from the GPU's upward walk from 0x80000000) and publish only
- * hits the exact OpenSSL gate re-derives (cpu_cogrind.h); 0 = GPU only. */
-#ifndef QSB_CPU_GRIND
-#define QSB_CPU_GRIND 1
-#endif
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-#include <fcntl.h>
-#include <unistd.h>
-#include "cpu_cogrind.h"
-#endif
 
 
 int main(int argc, char **argv) {
@@ -5799,10 +5788,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-    if (!easy && effective_total == 1 && !seq_start_override && single_hash)
-        qcg::start(&pp, LT_MIN, LT_MAX);
-#endif
 #if QSB_SLOTPIPE
     /* Slotted batch loop.  Nothing here changes what the device computes: the
      * same five kernels receive the same arguments for the same batches in the
@@ -5833,9 +5818,6 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
-#endif
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
         const uint32_t *hits = slot_readback[s].indices();
@@ -5908,9 +5890,6 @@ int main(int argc, char **argv) {
         const uint32_t *source = h_hit_idx + (size_t)s*64;
 #endif
         if (count > 64) count = 64;
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
-#endif
         /* Copy before reuse: the next D2H is allowed to overwrite the pinned
          * report while OpenSSL checks this ordinary host-stack snapshot. */
         if (count) memcpy(hits, source, count*sizeof(uint32_t));
