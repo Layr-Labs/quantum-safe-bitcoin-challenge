@@ -14,6 +14,11 @@
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
 
+/* QSB_HV_JOINT (host only; kill switch): the publication gate forms Q = u1*G + (+-R) with one
+ * two-term EC_POINT_mul. 0 = separate u1*G and EC_POINT_add. */
+#ifndef QSB_HV_JOINT
+#define QSB_HV_JOINT 1
+#endif
 typedef struct {
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order; BIGNUM *nri; EC_POINT *Ru2;
     const digest_params_t *dp;
@@ -72,10 +77,16 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
     BIGNUM *z = BN_bin2bn(d2, 32, NULL), *u1 = BN_new(), *qx = BN_new(), *qy = BN_new();
     EC_POINT *P = EC_POINT_new(h->grp), *Q = EC_POINT_new(h->grp), *R = EC_POINT_dup(h->Ru2, h->grp);
     int ok = 0;
-    if (z && u1 && qx && qy && P && Q && R &&
-        BN_mod_mul(u1, z, h->nri, h->order, h->ctx) && EC_POINT_mul(h->grp, P, u1, NULL, NULL, h->ctx)) {
+    if (z && u1 && qx && qy && P && Q && R && BN_mod_mul(u1, z, h->nri, h->order, h->ctx)) {
         if (recid) EC_POINT_invert(h->grp, R, h->ctx);
-        if (EC_POINT_add(h->grp, Q, P, R, h->ctx) && !EC_POINT_is_at_infinity(h->grp, Q) &&
+#if QSB_HV_JOINT
+        /* Q = u1*G + 1*(+-R) in one interleaved wNAF pass instead of a constant-time ladder for u1*G
+         * followed by an add: the same group element, about half the host field work per check. */
+        const int qok = EC_POINT_mul(h->grp, Q, u1, R, BN_value_one(), h->ctx);
+#else
+        const int qok = EC_POINT_mul(h->grp, P, u1, NULL, NULL, h->ctx) && EC_POINT_add(h->grp, Q, P, R, h->ctx);
+#endif
+        if (qok && !EC_POINT_is_at_infinity(h->grp, Q) &&
             EC_POINT_get_affine_coordinates(h->grp, Q, qx, qy, h->ctx)) {
             uint8_t pub[33]; memset(pub, 0, sizeof pub);
             int nb = BN_num_bytes(qx);
