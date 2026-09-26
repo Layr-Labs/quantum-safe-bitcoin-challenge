@@ -72,6 +72,24 @@
 #ifndef QSB_SLOT_PIPELINE
 #define QSB_SLOT_PIPELINE 1
 #endif
+/* QSB_HOST_PRODUCERS (kill switch): 1 = build each batch's epoch descriptors and first-block
+ * states on up to 3 host threads (tests/gpu_epochs/host_producers.h) and upload them in front of
+ * kernel_digest instead of running kernel_epoch_groups / kernel_build_epochs_inc /
+ * kernel_build_first_flat; start-up self-check against the GPU producers, per-batch GPU fallback,
+ * watchdog. Host-only: the device code is unchanged. 0 = GPU producers only. */
+#ifndef QSB_HOST_PRODUCERS
+#define QSB_HOST_PRODUCERS 1
+#endif
+/* QSB_TRACE_START (diagnostic, default 0): print launch times of batches 0,1,2,4,..,64 in ms since
+ * process start (stderr), to compare start-up latency between builds. */
+#ifndef QSB_TRACE_START
+#define QSB_TRACE_START 0
+#endif
+#if QSB_TRACE_START
+#include <time.h>
+static double qsb_trace_now() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
+static const double qsb_trace_t_start = qsb_trace_now();
+#endif
 /* QSB_TABLE_L2_WINDOW (host-only kill switch): 1 = a persisting-L2
  * access-policy window over the fixed-base table on every stream the digest
  * runs on, clipped to the device's persisting-L2 limit and maximum window
@@ -3291,6 +3309,10 @@ static void unrank_combo_host(uint64_t rank, int n, int t, uint8_t *out) {
 #if QSB_HOST_VERIFY
 static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "qsb_host_verify.h"
+#if QSB_HOST_PRODUCERS && QSB_SLOT_PIPELINE && ZLAB_HITPATH
+#include "host_producers.h"
+#define QSB_HP_ON 1
+#endif
 /* QSB_CPU_GRIND: host-CPU co-grinding on candidates disjoint from the GPU's (CpuGrindSubset.h). */
 #ifndef QSB_CPU_GRIND
 #define QSB_CPU_GRIND 1
@@ -3968,6 +3990,10 @@ int main(int argc, char **argv) {
         memcpy(g_hv_win3, h_win3, sizeof(h_win3));
 #endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
+#ifdef QSB_HP_ON
+        qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
+                   (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+#endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
 #if QSB_EPOCH_GROUPS
@@ -4369,7 +4395,24 @@ int main(int argc, char **argv) {
             uint8_t *combos = d_hb + 8;
             const int nblk = (epochs_in_batch + QSB_PAIR_MUL - 1) / QSB_PAIR_MUL;
             const int batch_pos = nblk * QSB_SE_BLOCK;
-            {
+#if QSB_TRACE_START
+            if ((sp_batch_no & (sp_batch_no - 1)) == 0 && sp_batch_no <= 64)
+                fprintf(stderr, "TRACE launch %llu at %.1f ms\n", (unsigned long long)sp_batch_no, (qsb_trace_now() - qsb_trace_t_start) * 1e3);
+#endif
+#ifdef QSB_HP_ON
+            /* Host producers: release finished uploads, then take this batch from the host if it
+             * is ready (else the GPU producers below build it). */
+            qhp::poll();
+            qhp::Slot *hp_slot = qhp::acquire((int64_t)sp_batch_no);
+            if (hp_slot) {
+                /* The upload replaces all three producers, including epochs_inc's reset of this
+                 * slot's tentative count. */
+                cudaError_t he = cudaMemsetAsync(cnt, 0, sizeof(uint32_t), st);
+                if (he == cudaSuccess) he = qhp::upload(hp_slot, st, d_ep, d_fi, (size_t)QSB_FIRST_SLOTS * 8 * sizeof(uint32_t), epochs_in_batch);
+                if (he != cudaSuccess) { printf("CUDA error: %s (host producer upload)\n", cudaGetErrorString(he)); return 1; }
+            } else
+#endif
+            {{
                 uint8_t h_o[MAX_T];
                 qsb_host_unrank(base, window_start, s_early, h_o);
                 const uint64_t r5a = qsb_host_rank(h_o, s_early - 1, window_start);
@@ -4424,6 +4467,11 @@ int main(int argc, char **argv) {
               if (!qsb_carrier_try(kernel_build_first_flat, QK_BFF, dim3((nthr + 255) / 256), dim3(256), st,
                       d_ep, d_fi, (unsigned)epochs_in_batch, (unsigned)qsb_first_class_count))
               kernel_build_first_flat<<<(nthr + 255) / 256, 256, 0, st>>>(d_ep, d_fi, (unsigned)epochs_in_batch, (unsigned)qsb_first_class_count); }
+#ifdef QSB_HP_ON
+            if (sp_batch_no == 0)   /* start-up self-check: device copy of the GPU-built batch 0, stream-ordered */
+                qhp::enqueue_check_copy(st, d_ep, d_fi, (size_t)QSB_FIRST_SLOTS * 8 * sizeof(uint32_t));
+#endif
+            }
             if (!qsb_carrier_try(kernel_digest, QK_DIG, dim3(nblk), dim3(QSB_SE_BLOCK), st,
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
@@ -4457,6 +4505,7 @@ int main(int argc, char **argv) {
             if (err == cudaSuccess) err = cudaEventRecord(sp_done[s], st);
             if (err == cudaSuccess) err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s (batch %llu enqueue)\n", cudaGetErrorString(err), (unsigned long long)sp_batch_no); return 1; }
+
             sp_busy[s] = 1;
             sp_epochs[s] = epochs_in_batch;
             return 0;
@@ -4490,6 +4539,11 @@ int main(int argc, char **argv) {
                        (unsigned long long)(total_searched/1000000),
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
+#ifdef QSB_HP_ON
+                { uint64_t hb, fb; int hst; qhp::stats(&hb, &fb, &hst);
+                  if (hst != -2) printf("  [HP] host-built batches %llu, GPU-built after start-up %llu, host producers %s\n",
+                                        (unsigned long long)hb, (unsigned long long)fb, hst == 1 ? "on" : hst == 0 ? "pending" : "off"); }
+#endif
                 fflush(stdout);
                 if (summary_f) {
                     time_t now_epoch = time(NULL);
@@ -4501,6 +4555,12 @@ int main(int argc, char **argv) {
                 t_last_se = t_now;
             }
         }
+#ifdef QSB_HP_ON
+        qhp::shutdown();
+        { uint64_t hb, fb; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin);
+          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d\n",
+                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin); }
+#endif
         g_stop_polled = 0;
 #else
 #if QSB_TABLE_L2_WINDOW
