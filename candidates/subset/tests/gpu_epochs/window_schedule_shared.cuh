@@ -5,7 +5,7 @@
 #ifndef QSB_950_PACK
 #define QSB_950_PACK 1
 #endif
-#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:8)
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
