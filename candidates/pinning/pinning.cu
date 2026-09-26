@@ -137,7 +137,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_TREE_N 128        /* leaves per candidate product tree = prepare/finish block size (256, 128 or 64) */
 #endif
 #ifndef QSB_S0_SHM
-#define QSB_S0_SHM 0          /* 1: keep the recode state and the y anchor in shared memory (register relief) */
+#define QSB_S0_SHM 1          /* 1: keep the recode state and the y anchor in shared memory (register relief) */
 #endif
 #if QSB_TREE_N != 256 && QSB_TREE_N != 128 && QSB_TREE_N != 64
 #error "QSB_TREE_N must be 256, 128 or 64"
