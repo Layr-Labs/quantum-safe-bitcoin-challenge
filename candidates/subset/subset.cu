@@ -5,6 +5,8 @@
 #ifndef QSB_REMEASURE_TAG_0921R3
 #define QSB_REMEASURE_TAG_0921R3 1 /* no-op: exact-source PR897 remeasurement */
 #endif
+/* inert retry tag: preserve the verified de5739 implementation with a fresh archive */
+#define QSB_REALADII_RETRY_0926A 1
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 1
