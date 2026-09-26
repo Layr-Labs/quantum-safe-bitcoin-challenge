@@ -333,9 +333,12 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* Default follows the prepare residency (QSB_S0_SM_THREADS, below): at the 96-register budget of
  * five blocks the two-add trip spills 332 B per lane (56 STL / 70 LDL in the chain loop) while the
- * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free. */
+ * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free.
+ * 1 with QSB_PMIX12: GLV11 lanes run the role pairs only; a GLV12-P warp's odd piped count ends
+ * with one one-add trip (see _FixedBaseSignedXYZZScalar). The carrier builds at 128 registers,
+ * no spill, and the loop body drops the eight-word swap of every addition. */
 #ifndef QSB_CHAIN_ROLES
-#define QSB_CHAIN_ROLES 0
+#define QSB_CHAIN_ROLES 1
 #endif
 #ifndef QSB_CHAIN_PEEL
 #define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
@@ -1569,8 +1572,8 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_Q_TERMS;
 #if QSB_PMIX12
-#if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP
-#error "QSB_PMIX12 runs the one-addition piped chain (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
+#if !QSB_CHAIN_PIPE || QSB_CHAIN_PP || (QSB_CHAIN_ROLES && (QSB_CHAIN_UNROLL || !QSB_PAIR_ORD))
+#error "QSB_PMIX12 runs the piped chain (QSB_CHAIN_PIPE=1): the one-add loop, or the rolled QSB_PAIR_ORD role loop"
 #endif
     /* A GLV12-P block: P's terms are slots GT_Q_TERMS..GT_GLV_TERMS, one more trip. */
     int last=GT_GLV_TERMS+(QSB_PMIX12_SEL()?1:0);
@@ -1666,8 +1669,20 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     QSB_CHAIN_TRIP(8)
 #undef QSB_CHAIN_TRIP
 #else
+#if QSB_PMIX12
+    /* The piped additions run terms first+2 .. last-2, last-first-3 of them. A GLV11 lane has
+     * an even count (the static_assert above), so the pairs cover them all, as before. A
+     * GLV12-P warp (last = GT_GLV_TERMS+1) has one more, an odd count: the pairs stop one term
+     * early and that warp takes the leftover as one piped addition plus the base's swap. Pairs
+     * open on first+2+2k, so phi (term GT_Q_TERMS, even) still opens a pair and never falls on
+     * the leftover. last is warp-uniform (QSB_PMIX12_SEL), so the branch does not diverge. */
+    static_assert((GT_Q_TERMS&1)==0, "QSB_CHAIN_ROLES+QSB_PMIX12: phi must open a pair");
+    const int pair_end=last-1-((last-first-3)&1);
+#else
+    const int pair_end=last-1;
+#endif
     #pragma unroll 1
-    for(int term=first+2;term<last-1;term+=2) {
+    for(int term=first+2;term<pair_end;term+=2) {
         if(term==GT_Q_TERMS) {
             const uint64_t beta[4]={
                 0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
@@ -1678,6 +1693,14 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(term+1));
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code(term+2));
     }
+#if QSB_PMIX12
+    if(pair_end!=last-1) {
+        /* term pair_end == last-2: the one-add loop's trip, statement for statement */
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(pair_end+1));
+        #pragma unroll
+        for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
+    }
+#endif
 #endif
     qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
     Load256(y0,y1);
