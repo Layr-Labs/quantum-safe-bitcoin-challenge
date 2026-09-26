@@ -1,3 +1,5 @@
+/* fk2g part polpred: TBL_POL_PRED alone */
+#define QSB_PHI_HOIST 0
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -336,6 +338,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free. */
 #ifndef QSB_CHAIN_ROLES
 #define QSB_CHAIN_ROLES 0
+#endif
+#ifndef QSB_PHI_HOIST
+#define QSB_PHI_HOIST 1       /* 1: phi between two passes of the peeled one-add trip loop, not inside it */
 #endif
 #ifndef QSB_CHAIN_PEEL
 #define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
@@ -1292,6 +1297,9 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #error "QSB_TBL_L2POL takes the hot/cold split from the QSB_FOUR_HOT bank order"
 #endif
 #define QSB_HOT_RECS 786432u   /* q9_bigtbl_offset(4): segments 0..3, 48 MiB */
+#ifndef QSB_TBL_POL_PRED
+#define QSB_TBL_POL_PRED 1
+#endif
 #if QSB_TBL_L2POL && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define QSB_TBL_L2POL_ON 1
 __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
@@ -1303,6 +1311,19 @@ __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
     asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
 #endif
     return (code&0x7fffffffu)>=QSB_HOT_RECS ? cold : hot;
+}
+/* QSB_TBL_POL_PRED (default 1): the piped gathers issue each 16 B load twice under a
+ * complementary predicate (record >= QSB_HOT_RECS), one carrying the cold policy and one the
+ * hot policy, so both descriptors stay compile-time constants in uniform registers instead of a
+ * per-lane select copied into uniform registers for every load. Each lane issues exactly one load
+ * of each pair, with the same policy qsb_tbl_policy returns; the bytes are unchanged. */
+__device__ __forceinline__ void qsb_tbl_policies(uint64_t &cold,uint64_t &hot) {
+    asm("createpolicy.fractional.L2::evict_first.b64 %0, 1.0;" : "=l"(cold));
+#if QSB_TBL_L2POL == 2
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(hot));
+#else
+    asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
+#endif
 }
 #else
 #define QSB_TBL_L2POL_ON 0
@@ -1342,7 +1363,18 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
     /* Native carrier: the Y half is gathered first, so it carries the 64 B L2 fetch
      * that brings the record's X sector along for qsb_load_glv_x_code. */
     ulonglong2 y0;
-#if QSB_TBL_L2POL_ON
+#if QSB_TBL_L2POL_ON && QSB_TBL_POL_PRED
+    ulonglong2 y1;
+    uint64_t pc,ph;
+    qsb_tbl_policies(pc,ph);
+    asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %6;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+        : "=l"(y0.x), "=l"(y0.y), "=l"(y1.x), "=l"(y1.y)
+        : "l"(ty), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+#elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 y1;
 #if QSB_GATHER_V4
@@ -1375,7 +1407,18 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
 __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
                                                      uint64_t *x) {
     const ulonglong2 *tx=qsb_pipe_half(table,code,0u);
-#if QSB_TBL_L2POL_ON
+#if QSB_TBL_L2POL_ON && QSB_TBL_POL_PRED
+    ulonglong2 x0,x1;
+    uint64_t pc,ph;
+    qsb_tbl_policies(pc,ph);
+    asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %6;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+        : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y)
+        : "l"(tx), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+#elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 x0,x1;
 #if QSB_GATHER_V4
@@ -1689,6 +1732,19 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
      * statement sequence, and every value, is the rolled loop's for every input. The loop
      * body holds one addition instead of two. */
     static_assert(GT_Q_TERMS < GT_GLV_TERMS-1, "QSB_CHAIN_PEEL: phi must precede the last trip");
+#if QSB_PHI_HOIST
+    /* QSB_PHI_HOIST: phi runs between two passes of the same trip loop instead of behind a
+     * per-trip test inside it. The first pass stops at term GT_Q_TERMS, phi scales X, and the
+     * second pass continues from there, so phi still runs exactly before trip GT_Q_TERMS, and
+     * only when the chain passes that term (first == 0). The trip body is emitted once and no
+     * longer carries the multiply, which keeps the hot loop's instruction footprint smaller. */
+    int term=first+2;
+    #pragma unroll 1
+    for(;;) {
+        const int stop=(term<GT_Q_TERMS)?GT_Q_TERMS:last-1;
+        #pragma unroll 1
+        for(;term<stop;term++) {
+#else
     #pragma unroll 1
     for(int term=first+2;term<last-1;term++) {
         if(term==GT_Q_TERMS) {
@@ -1698,6 +1754,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
             };
             _ModMult(X,X,(uint64_t*)beta);
         }
+#endif
         const uint32_t next_code=qsb_glv_code(term+1);
 #if QSB_CHAIN_L2PF & 1
         qsb_pf_rec(table,qsb_glv_code(term+2<last?term+2:term+1));
@@ -1710,6 +1767,17 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         #pragma unroll
         for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
     }
+#if QSB_PHI_HOIST
+        if(term!=GT_Q_TERMS) break;
+        {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+    }
+#endif
 #if QSB_PAIR_ORD
     qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
 #else
@@ -4443,17 +4511,6 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 }
 #endif
 
-/* QSB_CPU_GRIND (kill switch, host only): 1 = idle host cores grind sequences counting down
- * from 0xFFFFFFFE (disjoint from the GPU's upward walk from 0x80000000) and publish only
- * hits the exact OpenSSL gate re-derives (cpu_cogrind.h); 0 = GPU only. */
-#ifndef QSB_CPU_GRIND
-#define QSB_CPU_GRIND 1
-#endif
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-#include <fcntl.h>
-#include <unistd.h>
-#include "cpu_cogrind.h"
-#endif
 
 
 int main(int argc, char **argv) {
@@ -5152,10 +5209,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-    if (!easy && effective_total == 1 && !seq_start_override && single_hash)
-        qcg::start(&pp, LT_MIN, LT_MAX);
-#endif
 #if QSB_SLOTPIPE
     /* Slotted batch loop.  Nothing here changes what the device computes: the
      * same five kernels receive the same arguments for the same batches in the
@@ -5186,9 +5239,6 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
-#endif
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
         const uint32_t *hits = slot_readback[s].indices();
@@ -5261,9 +5311,6 @@ int main(int argc, char **argv) {
         const uint32_t *source = h_hit_idx + (size_t)s*64;
 #endif
         if (count > 64) count = 64;
-#if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
-#endif
         /* Copy before reuse: the next D2H is allowed to overwrite the pinned
          * report while OpenSSL checks this ordinary host-stack snapshot. */
         if (count) memcpy(hits, source, count*sizeof(uint32_t));
