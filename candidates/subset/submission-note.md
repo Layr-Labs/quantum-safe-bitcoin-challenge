@@ -1,10 +1,37 @@
-# Subset: 40c989e2 plus fkiene's exact half-width scalar walk on the GPU (+0.14% locally) and a much faster host-CPU co-grinder (8-lane AVX-512 IFMA elliptic-curve path, 4-lane SHA-NI; ~4.4x its scalar rate here, bit-exact)
+# Subset: our promoted de5739c9 (634.72) plus host-built epoch producers (+0.93% GPU rate, −0.93% GPU energy per candidate, bit-identical) and a co-grinder that does half the CPU work per candidate
+
+**What changed against our promoted `de5739c9`:**
+1. **Host-built epoch producers (`QSB_HOST_PRODUCERS`, new `tests/gpu_epochs/host_producers.h`).** The three small per-epoch producer kernels (`kernel_epoch_groups`, `kernel_build_epochs_inc`, `kernel_build_first_flat`) now run on 3 host threads with SHA-NI; the GPU only runs the digest kernel. Locally **+0.930% ± 0.011 rate and −0.927% energy per candidate** (paired A/B, 5 warm rounds), bit-identical outputs, self-checked at start-up.
+2. **A leaner co-grinder (`CpuGrindSubset.h`).** Same candidates, same gate, bit-identical results, **about half the CPU instructions per candidate** (7,269 → 3,674; 960 → 668 ns per candidate on one core). On the ranked host the co-grinder's hits cost GPU rate through chassis heat, so work per candidate is what matters.
+3. **The warp-uniform root inverse on the GPU** (`QSB_ROOT_UNIFORM_WARP`, +0.06%, described below).
+4. The co-grinder now sizes itself and its workers from the process's CPU set as it was before `main()`, because the host producers pin the GPU's host thread to its own core; the co-grinder's workers run on every other CPU at `SCHED_IDLE`, below the producers.
+
+The GPU digest kernel is unchanged from `de5739c9` apart from item 3: cubin sha256 `4e1b6d4c8fc9f8ed…`, default-build PTX prefix `c19c9c840e1c`.
+
+## Host-built epoch producers
+
+Before each digest batch (2^20 epochs × 128 candidates), three small kernels built the batch's epoch descriptors (the SHA-256 midstate of each epoch's fixed prefix: every push below the window except the epoch's 6 early omissions) and the 8 first-block states per epoch that the digest kernel's window hashing starts from. That work is 145–228 instructions per candidate on the GPU (0.6–0.9% of the digest's), and on the thermally limited ranked card GPU energy per candidate is effectively the score.
+
+- **Measured ceiling first.** A probe that skipped the producers (wrong math, measurement only) gave +0.98% rate / −0.98% energy per candidate; adding back the realistic host→GPU copies (320 MiB per batch from pinned memory) still gave +0.96% / −0.95%.
+- **Host algorithm.** Epochs are walked in lexicographic order with one SHA-256 stream context per omission level, so each epoch hashes only its own suffix (3.6 blocks per epoch instead of 7.0 for the GPU kernel), four epochs in lockstep with 4-lane SHA-NI (`qsha_x4`); first-block states share the first `sha256rnds2` across classes. Outputs are written with non-temporal stores into 4 pinned slots and uploaded on the slot's stream before its digest launch. Without SHA-NI an OpenSSL path produces the same bytes.
+- **Exactness.** Batch 0 is built on both host and GPU and compared in full at start-up (1,048,576 descriptors and 8,388,608 first-block states, bit-identical); host batches are used only after that check passes. A deliberately corrupted word is caught and the run falls back to the GPU producers. If a host batch is not ready within 40 ms the GPU producers build that batch instead; 16 consecutive fallbacks turn the host path off. Fixed-problem runs reproduced the reference hit set exactly (2,800 of 2,800, 0 missing, 0 extra) in every mode: normal, 1 thread, OpenSSL-only, 2 CPUs, corrupted self-check.
+- **Host cost.** 3 threads at roughly 55–65% busy at the ranked rate, 1.28 GiB of pinned host memory, 320 MiB of extra GPU memory; start-up is unchanged (first launch ~0.75 s), exit ~0.3 s longer.
+
+## Co-grinder: half the CPU work per candidate
+
+The co-grinder's candidates, gate and outputs are unchanged; its per-candidate work is not:
+- The tail message is no longer rebuilt byte by byte per candidate (~1,700 instructions saved). Tail blocks 1–5 never depend on the epoch, so their message schedules are precomputed once; of the 158 CPU window patterns, 77 share their first tail block, which is hashed once per group per epoch. SHA-256 compressions per candidate 9.13 → 8.56, of which only 3.05 still expand a message schedule.
+- A slimmer field reduction, spill-free hashing, and a vectorised final canonicalisation (x and y-parity for both recids from a mask test instead of per-lane scalar loops).
+- Counted with a ptrace single-step tracer over a steady 4,096-candidate batch: **7,269 → 3,674 instructions per candidate (−49.5%)**; thread CPU time **960 → 668 ns per candidate (−30%)**, median of 7 alternating pairs on one core.
+- Exactness: records (digits, x and y-parity for both recids, both key-hash words) identical over 253,952 candidates in 6 configurations including epoch ranks up to 2.5e8, the scalar-EC and non-SHA-NI builds included; field and canonicalisation stress tests at limb extremes and around p gave 0 mismatches.
+
+
 
 Effort: max. Prepared with Claude Opus 5.5 in Claude Code on an RTX 4090 host (driver 595.71, CUDA 12.8.93 toolchain). The ranked build line and argv are unchanged.
 
-## What this is
+## The lineage: what `de5739c9` itself was
 
-The parent is our `40c989e2` ("GLV12xc"). It combines:
+(The rest of this note, up to "Ranked evidence", is `de5739c9`'s own description, kept for reference; the changes above are on top of it.) `de5739c9`'s parent is our `40c989e2` ("GLV12xc"). It combines:
 - newjordan's `d1ddefca` GLV12 native-carrier tree;
 - our no-JIT startup, the warp root inverse and `QSB_SHA_FMA_ADD=1`;
 - i34-9's lean GLV split;
@@ -12,7 +39,7 @@ The parent is our `40c989e2` ("GLV12xc"). It combines:
 - host-CPU co-grinding on a disjoint candidate set (`CpuGrindSubset.h`, after Ryun1's pinning `CpuGrind.h`).
 
 **Changes against `40c989e2`:**
-1. **GPU (`tests/gpu_epochs/tree.cu`):** fkiene's `QSB_S3_HALF_WALK` (from `73224391`), ported to the GLV12 tree. It is exact and adds no memory traffic. The native image was regenerated (cubin sha256 `29739128a257ba62…`, default-build PTX prefix `c2008e587f47`).
+1. **GPU (`tests/gpu_epochs/tree.cu`):** fkiene's `QSB_S3_HALF_WALK` (from `73224391`), ported to the GLV12 tree. It is exact and adds no memory traffic. The native image was regenerated (cubin sha256 `4e1b6d4c8fc9f8ed…`, default-build PTX prefix `c19c9c840e1c`).
 2. **Host (`CpuGrindSubset.h`):** an 8-lane AVX-512 IFMA path for the co-grinder's elliptic-curve work, selected at run time.
 3. **Host:** a 4-lane SHA-256 path using the x86 SHA extensions for the co-grinder's three hashes per candidate, selected at run time.
 4. **Host:** a 64 B-aligned host table.
@@ -31,6 +58,19 @@ The digest kernel extracts each candidate's GLV table digits by walking a 256-bi
 | `kernel_digest` | 0 bytes stack, 0 spill; 2 `LTC64B` cold-record loads, as before |
 
 Instruction cuts like this one showed up in the ranked self rate about 1:1 in this lineage, so we expect roughly +0.13% on the runner.
+
+## GPU: warp-uniform root inverse (`QSB_ROOT_UNIFORM_WARP`)
+
+The batch-inversion tree's root (two field elements, `tree_inverse.cuh`) runs on warp 0 only, behind `if (tid < 32)`. ptxas cannot prove that branch warp-uniform, so every `shfl`/`ballot` inside it was compiled into a per-operation WARPSYNC wrapper subroutine (CALL/RET plus argument moves; 56 static CALLs). The guard is now `if (__all_sync(0xffffffffu, tid < 32))`: the same threads take the same path (the vote is true exactly for warp 0), but a warp vote is uniform by construction, so ptxas drops the wrappers (static CALLs 56 → 14, −440 SASS instructions; ~13 CALLs per candidate dynamically).
+
+| check (local RTX 4090, paired ABBA, warm rounds) | result |
+|---|---|
+| steady rate vs the same tree without it | **+0.061% ± 0.021** (7 of 8 rounds positive) |
+| energy per candidate | −0.04 to −0.10% |
+| fixed problem | all 2,816 reference hits reproduced; start-up self-check and GTable spot check pass |
+| `kernel_digest` | 0 bytes stack, 0 spill |
+
+It is small, exact and free, so it rides along. (Method note: the first round of our A/B script runs on a colder card, about +0.35% for whichever arm goes first, so rounds are pooled from the second one on.)
 
 ## Why the CPU side
 
@@ -154,10 +194,10 @@ All inherited source, GPLv3 notices (`COPYING`, `COPYING-secp256k1`, VanitySearc
 
 ## Packaging
 
-Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are untouched, and no binary or build stamp is included. There are no includes outside `candidates/subset/`. The native image was regenerated with `build_carrier.sh` and CUDA 12.8.93: cubin sha256 `29739128a257ba62…` (476,704 B), 0 spills in every function; default-build PTX sha256 prefix `c2008e587f47`. At start-up the run prints `Native sm_89 carrier: on` and the GTable spot check passes.
+Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are untouched, and no binary or build stamp is included. There are no includes outside `candidates/subset/`. The native image was regenerated with `build_carrier.sh` and CUDA 12.8.93: cubin sha256 `4e1b6d4c8fc9f8ed…` (468,128 B), 0 spills in every function; default-build PTX sha256 prefix `c19c9c840e1c`. At start-up the run prints `Native sm_89 carrier: on` and the GTable spot check passes.
 
-**Validation of this exact package:** the unmodified harness (`benchmark.sh subset`, 90 s, fresh problem seed) verified 8,976 of 8,976 hits, 32 of them from the CPU file: `RESULT: PASS`. The same package without the half-width walk also passed a full-length 1,200 s run of the unmodified harness: 118,027 of 118,027 hits verified, 327 from the CPU file, GPU at 449 W / 73 °C, steady throughout. (The CPU share of a local run is small because our shared development host gives the `SCHED_IDLE` workers little time.)
+**Validation of this exact package:** the unmodified harness (`benchmark.sh subset`, 90 s, fresh problem seed) verified 8,947 of 8,947 hits, 23 of them from the CPU file: `RESULT: PASS` (self-reported rate 841.4 M/s against ~833 M/s for `de5739c9`'s bytes on the same host). `QSB_ZEROS_N=16`, 60 s, with host producers and co-grinder running together: 13,694 CPU hits, all 13,694 verified, 3.01e-5 hits per candidate. A full-length 1,200 s run of the unmodified harness on this package verified **120,080 of 120,080** hits (319 from the CPU file), `RESULT: PASS`, self-reported 838.6 M/s (the same run with `de5739c9`'s co-grinder and without host producers: 118,027 hits at 832.8 M/s). The same package without the half-width walk also passed a full-length 1,200 s run of the unmodified harness: 118,027 of 118,027 hits verified, 327 from the CPU file, GPU at 449 W / 73 °C, steady throughout. (The CPU share of a local run is small because our shared development host gives the `SCHED_IDLE` workers little time.)
 
-## Ranked result of the parent `40c989e2`
+## Ranked evidence behind this package
 
-`40c989e2` scored **617.04** (status rejected; peak self rate 796.3, ratio 0.7749).
+Our `de5739c9` (these bytes minus the warp-uniform root inverse) was promoted at **634.72**. Its public hit list splits into GPU 608.51 M/s and CPU 26.20 M/s (self 797.7, GPU-only score/self 0.7629). The GPU-only GLV12-lineage draws scored just before it (`d4c1abc4` 0.7855, `5c324621` 0.7849, `5c2ab83e` 0.7849, `68f1fc1c` 0.7770) give an anchor ratio of 0.7849, so the co-grinder cost the GPU about 17.6 M/s (chassis heat on the thermally limited card) and added 26.2 M/s of its own: net +8.6 M/s. That is why this package keeps the full-width co-grinder (30 workers on the 32-CPU ranked host, now below the 3 producer threads) and cuts its work per candidate instead of its width.
