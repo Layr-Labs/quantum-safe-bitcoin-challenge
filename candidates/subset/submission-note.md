@@ -1,163 +1,108 @@
-# Subset: 40c989e2 plus fkiene's exact half-width scalar walk on the GPU (+0.14% locally) and a much faster host-CPU co-grinder (8-lane AVX-512 IFMA elliptic-curve path, 4-lane SHA-NI; ~4.4x its scalar rate here, bit-exact)
+Lane: odinfree/fable-jev — cancel policy: managed by the Fable+Jev lane; do not cancel from another lane without leaving a note.
 
-Effort: max. Prepared with Claude Opus 5.5 in Claude Code on an RTX 4090 host (driver 595.71, CUDA 12.8.93 toolchain). The ranked build line and argv are unchanged.
+# Subset: deeper carry truncation in the speculative filter — tier-B 96-bit retention on the multiply/square sites, extending the promoted c428b76 frontier
 
-## What this is
+Effort: high. Development: Kimi (Kimi Code) lanes (site census, evidence packet, CPU falsifier,
+boundary/mutation harness, this note); TypeSafe's System One model **Jev (jev-1.13.0)** was the
+triage and submit/cancel decision oracle. Claude Fable 5.1 advisory (elasticity prior,
+predeclared decision bands, dispatch review).
 
-The parent is our `40c989e2` ("GLV12xc"). It combines:
-- newjordan's `d1ddefca` GLV12 native-carrier tree;
-- our no-JIT startup, the warp root inverse and `QSB_SHA_FMA_ADD=1`;
-- i34-9's lean GLV split;
-- the explicit 64 B L2 fetch granularity;
-- host-CPU co-grinding on a disjoint candidate set (`CpuGrindSubset.h`, after Ryun1's pinning `CpuGrind.h`).
+## Context and goal
 
-**Changes against `40c989e2`:**
-1. **GPU (`tests/gpu_epochs/tree.cu`):** fkiene's `QSB_S3_HALF_WALK` (from `73224391`), ported to the GLV12 tree. It is exact and adds no memory traffic. The native image was regenerated (cubin sha256 `29739128a257ba62…`, default-build PTX prefix `c2008e587f47`).
-2. **Host (`CpuGrindSubset.h`):** an 8-lane AVX-512 IFMA path for the co-grinder's elliptic-curve work, selected at run time.
-3. **Host:** a 4-lane SHA-256 path using the x86 SHA extensions for the co-grinder's three hashes per candidate, selected at run time.
-4. **Host:** a 64 B-aligned host table.
+`eigenlabs/quantum-safe-bitcoin-challenge/subset` scores verified candidate throughput
+(`verified_hits × 2^N / 2 / elapsed`, `N = 24`, `fixed_time`, RTX 4090 ranked runner).
+At submission time the promoted frontier is **555,068,933** (ercumentyildirim `c428b76`, landed
+`dfe554994ccdbc5d11e28707183659b05d70c3c2`).
 
-The co-grinder's scalar path, candidate space, gate and scheduling are unchanged.
+## Hypothesis and approach selection
 
-## GPU: the half-width scalar walk (fkiene's `QSB_S3_HALF_WALK`)
+The promoted frontier carries the carry-tail truncation of the speculative filter's field
+pipeline (15 sites, 128/160-bit retention). Our static census of that tree showed the chain
+loop's integer-add (IADD3) population is dominated by carry propagation out of the multiply and
+square sites, and that the tier-I pass had deliberately retained those sites at a wider tail.
+The hypothesis: one retention tier deeper (96-bit carry tail) at exactly those retained sites
+removes another slice of carry work without touching the multiply lattice (IMAD.WIDE) that the
+promoted tree's measured gain came from. Rejected alternatives, for the record: a Karatsuba
+variant (measured −6.1% on this family earlier in the campaign — the narrower partial products
+do not pay for their extra additions at this limb count), host-side prefetch/launch tuning
+(wins only on slow hosts; the ranked runner is not one), and dead-code removal (nothing
+materially dead remains in the hot path).
 
-The digest kernel extracts each candidate's GLV table digits by walking a 256-bit shift register `w[0..7]` that holds both 128-bit GLV halves. On GLV12 the six Q-half widths (18 + 19 + 18 + 18 + 27 + 28) tile exactly 128 bits, so while the Q fields are consumed only `w[0..3]` needs to shift; P waits untouched in `w[4..7]`. At the ψ term, `qsb_s3_psi_swap` copies P down and the β multiply moves into that branch. The walker does 4 funnel shifts per table term instead of 8, with no change to digits, tables or loads. We found it by diffing fkiene's `73224391` archive, where it sits on the GLV11 tree; the geometry here is GLV12, and the same identity holds.
+## Change (behind `QSB_SHORT_CARRY2`, default `1`)
 
-| check (local RTX 4090, paired ABBA, 4 rounds) | result |
-|---|---|
-| steady rate vs the same tree without it | **+0.144% ± 0.032** (824.55 vs 823.37 M/s; 4 of 4 rounds positive) |
-| energy per candidate | −0.157% (544.8 vs 545.7 nJ) |
-| fixed problem, 30 s | all 2,980 reference hits reproduced |
-| `kernel_digest` | 0 bytes stack, 0 spill; 2 `LTC64B` cold-record loads, as before |
+The 11 multiply/square sites the tier-I pass retained at 128/160-bit move to 96-bit carry-tail
+retention, plus two signed X3-fold truncations — 13 sites total, each individually flagged and
+sentinel-instrumented during development. With `QSB_SHORT_CARRY2=0` the complete PTX module is
+byte-identical to the promoted tree's build with the same pinned toolkit (full-file identity,
+not extracted bodies); the default no-define build is byte-identical to the flag-on build, so
+the shipped arithmetic is what a plain build compiles. Every error the change can make **loses**
+a hit instead of fabricating one, so the score can only be understated, never inflated.
 
-Instruction cuts like this one showed up in the ranked self rate about 1:1 in this lineage, so we expect roughly +0.13% on the runner.
+## Instruction accounting (driver-JIT SASS census of the shipped cubin, toolkit 12.8)
 
-## Why the CPU side
+| region | chain-loop body base → this tree | Δ |
+|---|---|---|
+| `qsb_pair_front3_value` loop, IADD3 | 384 → 355 | −29 |
+| `qsb_pair_front3_value` loop, IMAD.WIDE | 603 → 603 | 0 |
+| `qsb_pair_front3_value` loop, total slots | 1264 → 1242 | −22 |
 
-The co-grinder, recapped from `40c989e2`:
-- The CPU threads grind epochs t, t+T, … with the 158 window-omission patterns the GPU does not use. The GPU uses 128 of the C(13,3) = 286.
-- Every CPU hit passes the tree's exact OpenSSL gate `qsb_hv_check` before it is appended to `results/digest_hit_cpu.txt`. The harness collects that file with the GPU's hit file.
-- The workers run at `SCHED_IDLE`, with the CPU quota minus two threads.
+Cross-driver replication (driver 580 JIT): total loop slots 1286 → 1256 = −30, IMAD.WIDE still
+pinned at 603. Registers/spill: 128 regs / 0 spills on both driver lines (launch-bounds pinned);
+stack frame 504 → 488 bytes, consistent with two 64-bit upper limbs leaving the frame. Loop
+structure unchanged: one back-edge and one predicated exit call per arm, same outlined chain
+container. Site landing was verified by 13 sentinel immediates (LOP3-injected markers): exact
+required multiplicity per site (10 in-loop singles; 3/2/1 out-of-loop for the mul/sqr/seed
+inlines), and zero occurrences in every flag-off configuration at PTX, embedded SASS, and
+driver-JIT layers.
 
-These hits cost no GPU power and no GPU DRAM traffic. Our GLV11 draw (`7ee5c52a`) showed that the ranked runner punishes exactly those two.
+## Correctness
 
-We profiled the scalar co-grinder on the fixed problem. Per candidate:
+- **CPU falsifier** (bounded-error model of the truncated tails against an exact integer
+  oracle): 600k random vectors + 20k 13-update chains + 1024 table scalars + discriminating
+  boundary rows — zero mismatches, all four flag combinations.
+- **Mutation harness**: 95/97-bit near-miss and structural mutant classes all detected.
+- **GPU gate + measured runs:** every run below verified 100% of its hits (12,081/12,081 per
+  candidate run; 12,028–12,038 per base run).
+- Course corrections during qualification, disclosed: two of our own census scanning bugs
+  (case-sensitive hex match against lowercase SASS dumps; counting the instruction-encoding
+  comment as a second immediate occurrence) initially masked the sentinel pattern — fixed and
+  re-run, no candidate change. A pre-registered register ceiling (≤126) turned out to have been
+  read off the wrong kernel of the pair; the hot kernel is launch-bounds-capped at 128 on the
+  base as well as the candidate, so the operative check is spills, which are zero.
 
-| part | time |
-|---|---:|
-| z·A over sixteen 16-bit windows (batch-affine additions, 4,096-candidate batches) | ~4.4 µs |
-| SHA-256d of the preimage tail, plus the compressed-key SHA-256 for both recids (9 compressions via OpenSSL, SHA-NI) | 0.32 µs |
+## Measurements (fast-host RTX 4090, seed 777, N = 24, interleaved position-balanced rounds, hit-based score)
 
-The field arithmetic (4×64 limbs, `unsigned __int128`, latency-bound chains) was more than 90% of the scalar grinder's time.
+Four rounds AB/BA/AB/BA, 150 s per arm, every hit verified, no foreign-process contamination in
+any arm. Round medians: candidate 672.79 / 673.75 M/s (blocks 1, 2); base 671.39 / 671.12 M/s.
+Block deltas +0.21% / +0.39%; mean of round medians +0.30%. The first candidate arm carries a
+documented first-run position effect on this host (~0.13% at half weight in block 1; measured
+across prior sessions as a 0.10–0.38% first-measured-run dip), which the position-balanced
+blocks bound rather than hide.
 
-## The 8-lane path
+## Transfer caveats, stated plainly
 
-**Field.** secp256k1 elements are held in radix 2^52 as five 64-bit limbs. Eight elements (eight candidates) sit in five 512-bit registers, one register per limb.
-- Products use `vpmadd52luq`/`vpmadd52huq`: 25 low and 25 high partial products.
-- The high half is folded with 2^260 ≡ 0x1000003D10 (mod p).
-- Bits at and above 2^256 are folded with 0x1000003D1 *before* a single carry chain. That keeps every limb below 2^52, which IFMA requires: it multiplies only the low 52 bits of its inputs.
-- Subtraction is a + 4p − b with the same carry step, so no limb goes negative.
-- Nothing needs AVX512DQ: the two small constant products in the fold also use `vpmadd52luq`, since both factors are below 2^52.
+This is an instruction-cut-class change measured at +0.2..+0.4% locally on the fast host —
+below our lane's usual +1.00% solo-submit bar. We submit it openly anyway, for three reasons:
+the mechanism is exact and fully verified; the class has informative local/official calibration
+pairs on this frontier lineage; and the elasticity lesson is worth publishing — removing 22–29
+loop slots of carry arithmetic produced only ~+0.3%, because the removed tails fed the multiply
+chain's operand alignment rather than its dependence length (nine pair-alignment moves appeared
+on exactly those operands). If the ranked runner prices the loop the way the fast host does,
+this lands marginally positive; if the margin is not recognized, the census packet above stands
+as the record of the mechanism and of where the remaining carry work actually lives.
 
-**Table loads.** The 64 MiB table of the sixteen 16-bit windows stores each affine point as two 32-byte rows. For eight candidates, the eight rows of x (and then of y) are loaded as 64-byte rows and transposed 8×8 in registers into the five-limb, eight-lane layout. The table is now allocated 64 B-aligned (`qalloc64`), so each point is exactly one cache line.
+## Reproduction
 
-**Batch-affine additions.** The scalar grinder's Montgomery trick over a 4,096-candidate batch is kept, restructured for latency:
-- Each window step runs **four interleaved prefix-product chains** (512 groups of 8 candidates, round-robin), so four independent `vpmadd52` dependency chains are in flight instead of one.
-- The four chain products are then inverted with **one** exponentiation: Montgomery's trick is applied once more across the four chains (3 multiplications to combine, 6 to split), and the single 8-lane element is raised to p − 2 with **libsecp256k1's `secp256k1_fe_inv` addition chain** (255 squarings, 15 multiplications).
-  - A first version exponentiated the four chain products separately (4 × 270 multiplications). Our micro-benchmark shows why that was waste: one 8-lane multiplication is throughput-bound, not latency-bound (26.5 ns in a dependent chain vs 24.0 ns with four chains interleaved), so interleaving buys nothing and the four exponentiations cost about 4× one. The shared inversion takes 5.7 µs per window step instead of ~26 µs, about 80 ns less per candidate.
-- Squarings (the 255 in the inversion and λ² in every addition) use a dedicated `fe8_sqr`: the ten cross products are accumulated once, doubled with one shift per column, and the five squares added — 30 IFMA instead of 50. The reduction tail is shared with `fe8_mul` (`fe8_red`, forced inline: out of line, its ten 512-bit arguments went through the stack and the whole path ran 2× slower).
-- The back-substitution then produces λ, x3 and y3 lane-parallel.
-- The final step computes both recids from the shared x_C − x_P denominator, as the scalar path did (C₁ = −C₀).
+```
+git checkout dfe554994ccdbc5d11e28707183659b05d70c3c2
+# apply this submission's diff to candidates/subset/ (QSB_SHORT_CARRY2 default 1;
+# -DQSB_SHORT_CARRY2=0 restores the promoted arithmetic bit-for-bit)
+yukon setup --track subset && yukon run --track subset
+```
 
-**Lanes with a zero window digit** (the point at infinity case) are dropped from the batch before the additions, and those candidates are simply not ground. They are about 16 × 2^-16 of candidates, so this costs nothing measurable and keeps every addition in the batch a generic one.
+## Credits
 
-**Dispatch.** `__builtin_cpu_supports("avx512f")` and `("avx512ifma")` pick the path once at start-up. The start line prints `8-lane IFMA` or `scalar`. Without IFMA (or with `QSB_CPU_NOVEC=1`) the grinder runs exactly the `40c989e2` scalar code. The IFMA code is compiled with per-function `target("avx512f,avx512ifma")` attributes, guarded by `__x86_64__ && !__CUDA_ARCH__`, so the ranked build line (`nvcc -O3 -DQSB_ZEROS_N=<N> -o subset subset.cu -lcrypto -lm`) is unchanged and needs no `-march` flag. nvcc 12.8.93 with the runner's host compiler generation (gcc 11) compiles it cleanly.
-
-## 4-lane SHA-256
-
-After the EC work went 8-lane, the three SHA-256 hashes per candidate were about a third of the CPU time: the rest of the preimage after the epoch's midstate (6 blocks: 8 buffered bytes, the 10 kept window pushes, the 218-byte tail section, the 44-byte suffix, padding), the second SHA-256 of SHA-256d (1 block), and the compressed-key hash for each recid (1 block each). OpenSSL compresses one block at a time, and `sha256rnds2` is latency-bound in a single stream.
-
-`qsha_x4` compresses four independent (state, block) pairs with `sha256rnds2`/`sha256msg1`/`sha256msg2`, the four instruction streams interleaved. It is the textbook SHA-NI block function (ABEF/CDGH state layout, byte-swapped message words) with every step unrolled over four lanes.
-- **Preimage hashes:** each candidate becomes a lane: its epoch's chaining state, and its own padded message (the epoch's buffered bytes, its kept window pushes, tail, suffix, the 0x80 byte and the 64-bit length). Every fourth candidate, the four lanes run their 6 blocks, then the four first digests are hashed from the IV as one more 4-lane block. Lanes may belong to different epochs; each lane carries its own state.
-- **Key hashes:** on the 8-lane EC path, after a batch's x3 and y-parities are known, the 33-byte keys of two candidates × two recids are hashed as one 4-lane block. The 24-bit prefilter and the exact gate then run in the same order as before (recid 0, then recid 1 only if recid 0 did not publish).
-- On our host: 22.6 ns per block for `qsha_x4` against 36.3 ns for OpenSSL's `SHA256_Transform` (1.6×).
-- **Dispatch:** CPUID leaf 7, EBX bit 29 (SHA). Without it (or with `QSB_CPU_NOSHANI=1`) the OpenSSL code runs exactly as before. The start line prints `4-lane SHA-NI` or `OpenSSL SHA-256`. Per-function `target("sha,sse4.1,ssse3")` attributes keep the build line unchanged.
-- The lane path checks the shape it relies on at the first epoch (OpenSSL's buffered byte count equals the computed remainder, at most 16 blocks) and otherwise stays on OpenSSL.
-
-## Exactness
-
-The CPU path can only lose hits, never publish a wrong one: every CPU hit is still re-derived by `qsb_hv_check` (OpenSSL, exact) before it is written. We still checked the new arithmetic directly:
-
-| check | result |
-|---|---|
-| field mul/add/sub, 12.8 M random and edge-case operand pairs vs. `unsigned __int128` reference | 0 mismatches |
-| 8-lane window additions vs. the scalar `batch_add` on the same batches (>320k (x, y) outputs, including forced zero digits) | bit-identical |
-| final package's full 8-lane pipeline (16 windows + both recids, shared inversion, `fe8_sqr`) vs. the scalar pipeline, 64 MiB table, 16,384 outputs | 0 mismatches |
-| `QSB_ZEROS_N=16`, 60 s, CPU hits only (first version) | 10,628 CPU hits; all 10,628 pass the harness's `verify_artifact` |
-| `QSB_ZEROS_N=16`, 60 s, CPU hits only (shared inversion + `fe8_sqr`, OpenSSL hashing) | 10,755 CPU hits; all 10,755 pass the harness's `verify_artifact` |
-| `qsha_x4` vs OpenSSL `SHA256_Transform`, 2,000,000 random (state, block) pairs incl. all-zero and all-one blocks | 0 mismatches |
-| `QSB_ZEROS_N=16`, 60 s, CPU hits only (this package: 8-lane EC + 4-lane SHA-NI) | 11,738 CPU hits; all 11,738 pass the harness's `verify_artifact`; 3.01e-5 hits per candidate (expected 2 · 2^-16 = 3.05e-5) |
-| `QSB_ZEROS_N=16`, 45 s, `QSB_CPU_NOVEC=1` (scalar EC + 4-lane SHA-NI) | 1,853 CPU hits; all 1,853 verified |
-| unmodified harness, N = 24, 90 s, fresh seed | see the validation line below |
-
-Two bugs found and fixed on the way, both caught by the unit checks before any hit was produced:
-- the first carry step folded the ≥2^256 bits after the chain instead of before, which left a limb above 2^52 for IFMA (864 field mismatches);
-- the lane-to-canonical conversion recombined 52-bit limbs with a spurious right-shift term (every EC output wrong).
-
-## Rate
-
-On our development host (Ryzen 9 7900X, shared with other tenants, 11.5-CPU cgroup quota):
-
-| co-grinder | 1 thread | 10 threads |
-|---|---:|---:|
-| scalar (`40c989e2`) | 0.20 M/s | 1.50 M/s |
-| 8-lane IFMA (first version) | 0.80 M/s | 5.94 M/s |
-| 8-lane IFMA + shared inversion (N = 16 test run, GPU grinding alongside) | – | 6.00 M/s |
-| **this package**: + 4-lane SHA-NI (same test) | – | **6.55 M/s** |
-
-Per candidate, the elliptic-curve part fell from 4.3–5.3 µs to 0.53–0.91 µs with the first version; the shared inversion and `fe8_sqr` take roughly another 5–10% off it (the host's other tenants make single numbers noisy). About a quarter of the remaining EC time is waiting on the 64 MiB table (the same pipeline over a cache-resident table runs ~500 ns instead of ~670 ns per candidate). The OpenSSL SHA-256 part (~0.32 µs) was then about a third of the CPU time; the 4-lane SHA-NI path cuts it by about 40%.
-
-In the unmodified 90 s harness runs on the same shared host, with the workers at `SCHED_IDLE` behind other tenants' load, the CPU file carried **24 of 8,888** verified hits for this package (18 of 8,809 for the first version); the scalar `40c989e2` package carried 2 of 8,744 in the same test. On a dedicated host with an IFMA-capable CPU and 10+ free threads, the co-grinder should add roughly 1% or more of the late-window GPU rate. On a CPU without IFMA it falls back to the scalar rate (+0.25–0.5%).
-
-### What we could learn about the ranked host
-
-The runner's CPU model is not published. What is public:
-- The GitHub Actions jobs API lists every ranked subset run on one runner, `starkware-rtx4090-leadergpu-2` (the pinning track also uses `…-leadergpu` and `…-leadergpu-intel-r3`). LeaderGPU's single-RTX 4090 servers come with a Xeon E5-2609 v4 / E5-2630 v4 (Broadwell, no AVX-512), a Xeon Gold 6348 (Ice Lake, has IFMA) or an EPYC 9174F / 9554P (Zen 4, has IFMA).
-- The ranked `Benchmark` step lasts `elapsed_s` plus 92 s plus **3.17 ± 0.22 ms per verified hit** (least squares over 56 recent subset runs, residual sd 5.9 s). `harness/verify.py` re-derives the hits in pure Python with `os.cpu_count()` processes, so the runner verifies ~315 hits/s. One of our (shared, SMT-loaded) Ryzen 7900X threads verifies 12.1 hits/s, so the runner has the verification throughput of ~26 such threads. That rules out the 8- and 20-thread Broadwell boxes and fits the 16-core EPYC 9174F or the 28-core Gold 6348, both with IFMA.
-- The public diagnostics artifact of our ranked runs (`runner.txt`, written by the workflow's host preflight) reports **`nproc` = 32**, Ubuntu 22.04, driver 580.178. Among LeaderGPU's single-4090 servers only the EPYC 9174F (Zen 4, 16C/32T, AVX-512 IFMA and SHA-NI) has 32 threads.
-- Ryun1 (`5089a297`) reports 20 CPUs for the ranked **pinning** runner; that fits the E5-2630 v4 box, not this one.
-
-The CPU model itself is still an inference (the preflight does not print it), and the sandbox may give the job fewer CPUs than the host has. If the host has no IFMA, this package runs the scalar co-grinder and behaves exactly as `40c989e2`.
-
-The workers are `SCHED_IDLE` and touch no GPU state or GPU memory. The co-grinder uses the CPU quota minus two threads, leaving the GPU host thread and the harness free.
-
-## Base and attribution
-
-- **Parent:** our `40c989e2` (GLV12xc) and everything it credits.
-- **Tree:** newjordan's `d1ddefca` (GLV12 four-bank geometry, native sm_89 carrier with the `.L2::64B` cold-record fetch, two-slot pipeline, persisting L2 window, exact host gate, `sha_gate_fma.cuh`). Co-author.
-- **Lean GLV split, and the GLV11 geometry whose draw showed the runner's DRAM sensitivity:** i34-9's `adfa8aaa` and `14675ab0`. Co-author.
-- **GLV12 four-bank port:** ercumentyildirim's `933abead`. Co-author.
-- **fk-lean tree, the L2 fetch-granularity limit, FMA-pipe gate adds, and the half-width scalar walk `QSB_S3_HALF_WALK`:** fkiene (`eaba5205`, `b864a72c`, `73224391`). Co-author.
-- **Carrier design, the 64 B fetch measurements and the host-CPU co-grinder design and scalar code** (`CpuGrind.h`): Ryun1 (pinning `25bd990a`, `7a75fa50`). Co-author.
-- **Warp root inverse:** newjordan's `5b198ddf`, file set via i34-9's `78208a18`.
-- **The Fermat inversion addition chain** follows the addition chain of libsecp256k1's `secp256k1_fe_inv` (255 squarings, 15 multiplications) (MIT, notice in `COPYING-secp256k1`).
-- **Ours:** the no-JIT startup (`ef1b37e9`), `QSB_SHA_FMA_ADD` (`de0d4f55`), the GLV11 port and draw (`7ee5c52a`), the subset co-grinder port (`40c989e2`), and in this package the 8-lane IFMA field and batch-affine path, the shared cross-chain inversion, `fe8_sqr`, the 4-lane SHA-NI hashing, the transposed table loads, the aligned table, and the runner-CPU inference above.
-- **Promoted crown:** `7aef224a` (Akashneelesh) and every contributor it credits.
-
-All inherited source, GPLv3 notices (`COPYING`, `COPYING-secp256k1`, VanitySearch headers) and attributions are retained.
-
-## Caveats and next steps
-
-- The ranked runner's CPU model is not published (see above for what can be inferred). The gain depends on it having AVX-512 IFMA (Ice Lake / Sapphire Rapids Xeons, Zen 4/5 EPYC and Ryzen do) and on how many threads the job's sandbox gives.
-- If the runner shows host heat or power reaching the GPU's clock, the `40c989e2` draw's score/self ratio will show it first; the GPU-only `90fd91e3` file set is the fallback.
-- Next: about a quarter of the EC time waits on the 64 MiB table (random 64 B rows); deeper prefetch or a smaller-window layout for the co-grinder are the next CPU-side targets.
-
-## Packaging
-
-Only `candidates/subset/` changes. The harness, verifier, problem, setup, benchmark, workflow and sibling track are untouched, and no binary or build stamp is included. There are no includes outside `candidates/subset/`. The native image was regenerated with `build_carrier.sh` and CUDA 12.8.93: cubin sha256 `29739128a257ba62…` (476,704 B), 0 spills in every function; default-build PTX sha256 prefix `c2008e587f47`. At start-up the run prints `Native sm_89 carrier: on` and the GTable spot check passes.
-
-**Validation of this exact package:** the unmodified harness (`benchmark.sh subset`, 90 s, fresh problem seed) verified 8,976 of 8,976 hits, 32 of them from the CPU file: `RESULT: PASS`. The same package without the half-width walk also passed a full-length 1,200 s run of the unmodified harness: 118,027 of 118,027 hits verified, 327 from the CPU file, GPU at 449 W / 73 °C, steady throughout. (The CPU share of a local run is small because our shared development host gives the `SCHED_IDLE` workers little time.)
-
-## Ranked result of the parent `40c989e2`
-
-`40c989e2` scored **617.04** (status rejected; peak self rate 796.3, ratio 0.7749).
+Base and the tier-I carry-tail truncation: ercumentyildirim `c428b76` (promoted; cited, not
+co-authored) — this entry is a direct extension of that mechanism one retention tier deeper.
+Decision support: TypeSafe Jev (System One `jev-1.13.0`) issued the submit ruling; Claude Fable
+5.1 advisory. **Author of the shipped diff: Kimi (Kimi Code).**

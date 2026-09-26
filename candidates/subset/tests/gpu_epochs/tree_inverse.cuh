@@ -4,19 +4,10 @@
 // One work-efficient binary product tree per block. The caller supplies
 // a power-of-two block size at most 256 and identity factors for inactive lanes.
 #pragma once
-#ifndef QSB_ISO_FUSED_ROOT_SCALE
-#define QSB_ISO_FUSED_ROOT_SCALE 1
-#endif
 #include "hm39_pair_inverse.cuh"
 #include "hm41_quad_inverse.cuh"
 #include "hm43_warp_inverse.cuh"
 #include "zinv32.cuh"
-#ifndef QSB_INVERSE_LIMBS
-#define QSB_INVERSE_LIMBS 1
-#endif
-#if QSB_INVERSE_LIMBS
-#include "inverse_limbs.cuh"
-#endif
 /* ZLAB_TREE (kill switch):
  *  0 = promoted heap tree: every product canonical, 18 barriers.
  *  1 = same heap layout, lazy canonicalization (internal nodes stay exact but
@@ -34,18 +25,6 @@
  * every _ModMult output that feeds the finish. */
 #ifndef ZLAB_TREE
 #define ZLAB_TREE 2  /* measured best on gpu2: +0.7% alone, part of the +1.85% bundle */
-#endif
-#ifndef QSB_ISO_ROOT_SCALE
-#define QSB_ISO_ROOT_SCALE 1
-#endif
-#if QSB_ISO_ROOT_SCALE && !QSB_ISO_FUSED_ROOT_SCALE
-__device__ __noinline__ void qsb_iso_scale_tree_inverse(uint64_t *value){
-    uint64_t invu[5]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3],0};
-    QSB_TREE_MUL(value,value,invu);
-}
-#define QSB_ISO_SCALE_ROOT(value) qsb_iso_scale_tree_inverse(value)
-#else
-#define QSB_ISO_SCALE_ROOT(value) ((void)0)
 #endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
@@ -72,7 +51,6 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         #pragma unroll
         for(int k=0;k<4;k++)root[k]=tree[k][1];
         _ModInv(root);
-        QSB_ISO_SCALE_ROOT(root);
         #pragma unroll
         for(int k=0;k<4;k++)tree[k][1]=root[k];
     }
@@ -133,7 +111,6 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         qsb_field_normalize(root);
         _ModInv(root);
         root[4]=0;
-        QSB_ISO_SCALE_ROOT(root);
         qsb_field_mul_raw(a,root,a);   /* 1/right */
         qsb_field_mul_raw(b,root,b);   /* 1/left  */
         #pragma unroll
@@ -193,7 +170,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
             #pragma unroll
             for(int k=0;k<4;k++){a[k]=products[k][offset+tid];b[k]=products[k][offset+half+tid];}
             a[4]=b[4]=0;
-            QSB_TREE_MUL(out,a,b);
+            qsb_field_mul_raw(out,a,b);
             #pragma unroll
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
@@ -202,25 +179,17 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     // offset == 2n-4: the two root children.
 #if HM43_WARP_ROOT
-    if(tid<(QSB_INVERSE_LIMBS?32:4)){
+    if(tid<4){
         uint64_t a[5],b[5],root[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
-        a[4]=b[4]=0;__syncwarp(QSB_INVERSE_LIMBS?0xffffffffu:0x0000000fu);QSB_TREE_MUL(root,a,b);qsb_field_normalize(root);
-        root[4]=0;
-#if QSB_INVERSE_LIMBS
-        zi_inverse_limbs(root,tid);
-#else
-        zi_inverse_quad(root,tid);
-#endif
-        if(tid==0)QSB_ISO_SCALE_ROOT(root);
-        #pragma unroll
-        for(int k=0;k<4;k++)root[k]=__shfl_sync(QSB_INVERSE_LIMBS?0xffffffffu:0x0000000fu,root[k],0);
+        a[4]=b[4]=0;__syncwarp(0x0000000f);qsb_field_mul_raw(root,a,b);qsb_field_normalize(root);
+        root[4]=0;zi_inverse_quad(root,tid);
         if(tid<2){
             uint64_t child[5];
             #pragma unroll
             for(int k=0;k<4;k++)child[k]=tid?a[k]:b[k];
-            child[4]=0;QSB_TREE_MUL(child,root,child);
+            child[4]=0;qsb_field_mul_raw(child,root,child);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
         }
@@ -230,16 +199,13 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         uint64_t a[5],b[5],root[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
-        a[4]=b[4]=0;__syncwarp(0x0000000f);QSB_TREE_MUL(root,a,b);qsb_field_normalize(root);
+        a[4]=b[4]=0;__syncwarp(0x0000000f);qsb_field_mul_raw(root,a,b);qsb_field_normalize(root);
         root[4]=0;hm41_quad_inverse(root,tid);
-        if(tid==0)QSB_ISO_SCALE_ROOT(root);
-        #pragma unroll
-        for(int k=0;k<4;k++)root[k]=__shfl_sync(0x0000000f,root[k],0);
         if(tid<2){
             uint64_t child[5];
             #pragma unroll
             for(int k=0;k<4;k++)child[k]=tid?a[k]:b[k];
-            child[4]=0;QSB_TREE_MUL(child,root,child);
+            child[4]=0;qsb_field_mul_raw(child,root,child);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
         }
@@ -249,15 +215,12 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         uint64_t a[5],b[5],root[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
-        a[4]=b[4]=0;__syncwarp(0x00000003);QSB_TREE_MUL(root,a,b);qsb_field_normalize(root);
+        a[4]=b[4]=0;__syncwarp(0x00000003);qsb_field_mul_raw(root,a,b);qsb_field_normalize(root);
         root[4]=0;hm39_pair_inverse(root,tid);
-        if(tid==0)QSB_ISO_SCALE_ROOT(root);
-        #pragma unroll
-        for(int k=0;k<4;k++)root[k]=__shfl_sync(0x00000003,root[k],0);
         uint64_t child[5];
         #pragma unroll
         for(int k=0;k<4;k++)child[k]=tid? a[k]:b[k];
-        child[4]=0;QSB_TREE_MUL(child,root,child);
+        child[4]=0;qsb_field_mul_raw(child,root,child);
         #pragma unroll
         for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
     }
@@ -267,13 +230,12 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
         a[4]=b[4]=0;
-        QSB_TREE_MUL(root,a,b);
+        qsb_field_mul_raw(root,a,b);
         qsb_field_normalize(root);
         _ModInv(root);
         root[4]=0;
-        QSB_ISO_SCALE_ROOT(root);
-        QSB_TREE_MUL(a,root,a);   /* 1/b */
-        QSB_TREE_MUL(b,root,b);   /* 1/a */
+        qsb_field_mul_raw(a,root,a);   /* 1/b */
+        qsb_field_mul_raw(b,root,b);   /* 1/a */
         // inverse index = product index - n
         #pragma unroll
         for(int k=0;k<4;k++){inverses[k][offset-n]=b[k];inverses[k][offset-n+1]=a[k];}
@@ -294,7 +256,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
                 sibling[k]=products[k][offset+(tid^half)];
             }
             parent_inv[4]=sibling[4]=0;
-            QSB_TREE_MUL(child_inv,parent_inv,sibling);
+            qsb_field_mul_raw(child_inv,parent_inv,sibling);
             #pragma unroll
             for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child_inv[k];
         }
@@ -311,7 +273,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
             sibling[k]=products[k][tid^half];
         }
         parent_inv[4]=sibling[4]=0;
-        QSB_TREE_MUL(value,parent_inv,sibling);
+        qsb_field_mul_raw(value,parent_inv,sibling);
     }
     value[4]=0;
 }
