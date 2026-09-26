@@ -1,0 +1,285 @@
+{
+  "status": "PASS_SOURCE_ADDRESS_BANK_DEMAND_MODEL",
+  "cooperative_cases": 12,
+  "dense_cases": 768,
+  "compact_unique_64bit_slots": 1344,
+  "shared_bytes_old": 12288,
+  "shared_bytes_new": 11008,
+  "padding_bytes": 256,
+  "shared_unique_bytes_saved_per_warp": 832,
+  "shared_unique_bytes_saved_per_CTA": 3328,
+  "warp_sync_rounds_old": 11,
+  "warp_sync_rounds_new": 6,
+  "CTA_barriers": 0,
+  "extra_source_live_words_across_inverse": 2,
+  "actual_SASS_width_unknown": true,
+  "hardware_wavefronts_measured": false,
+  "GPU_performance_predicted": false,
+  "rows": [
+    {
+      "warp": 0,
+      "label": "upper_a_ld64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 0,
+      "label": "upper_a_ld32",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 0,
+      "label": "v4_st64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 1,
+      "label": "upper_a_ld64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 1,
+      "label": "upper_a_ld32",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 1,
+      "label": "v4_st64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 2,
+      "label": "upper_a_ld64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 2,
+      "label": "upper_a_ld32",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 2,
+      "label": "v4_st64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 3,
+      "label": "upper_a_ld64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 3,
+      "label": "upper_a_ld32",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    },
+    {
+      "warp": 3,
+      "label": "v4_st64",
+      "old": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 4,
+        "halfwarp_max": [
+          4,
+          4
+        ],
+        "bandwidth_min_rounds": 1
+      },
+      "new": {
+        "unique_words": 32,
+        "max_distinct_words_per_bank": 1,
+        "halfwarp_max": [
+          1,
+          1
+        ],
+        "bandwidth_min_rounds": 1
+      }
+    }
+  ],
+  "primary_source": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html"
+}
