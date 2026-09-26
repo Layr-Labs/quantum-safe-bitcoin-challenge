@@ -2,9 +2,9 @@
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
-#define QSB_L2STATE 1
-#define QSB_GREEN 20
-#define QSB_GREEN_SHARED 8
+#define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last, after DPZZxlz 8c480417) | 1024 (finish discards consumed state lines at once) */
+#define QSB_GREEN 16
+#define QSB_GREEN_SHARED 16
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -168,7 +168,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 16
+#define QSB_PMIX12 0
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -196,7 +196,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 1
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
@@ -340,9 +340,15 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* Default follows the prepare residency (QSB_S0_SM_THREADS, below): at the 96-register budget of
  * five blocks the two-add trip spills 332 B per lane (56 STL / 70 LDL in the chain loop) while the
- * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free. */
+ * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free.
+ * With QSB_PMIX12 the GLV11 lanes run the role pairs only and a GLV12-P warp's odd piped count
+ * ends with one one-add trip (see _FixedBaseSignedXYZZScalar); the loop body carries no
+ * eight-word ordinate swap. Role loop after dukemawex 2f2d285a. */
+#ifndef QSB_ROLE_PHI_OUT
+#define QSB_ROLE_PHI_OUT 1
+#endif
 #ifndef QSB_CHAIN_ROLES
-#define QSB_CHAIN_ROLES 0
+#define QSB_CHAIN_ROLES 0     /* 1 measured -28 % on the 4090 (GREENSUB16 + PMIX12 32/N1) */
 #endif
 #ifndef QSB_PHI_HOIST
 #define QSB_PHI_HOIST 1       /* 1: phi between two passes of the peeled one-add trip loop, not inside it */
@@ -560,7 +566,16 @@ __device__ __forceinline__ uint64_t qsb_ld_u64(const uint64_t *p) {
 
 /* Pipeline-state stores (prepare) and the finish-side discard (QSB_L2STATE). */
 __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
-#if QSB_L2STATE & 1
+#if (QSB_L2STATE & 8) && QSB_SM80_PTX
+    /* QSB_L2STATE bit 8 (DPZZxlz 8c480417): state stores carry an L2::evict_last policy, so the
+     * evict_first cold-bank gathers cannot push a dirty state line out of L2 before finish reads
+     * it; bit 1024 then drops it with no DRAM write-back. A cache policy picks which line leaves
+     * L2, never the stored bytes, so every value finish reads is unchanged. */
+    uint64_t pol;
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.L2::cache_hint.u64 [g], %1, %2; }"
+                 :: "l"(p), "l"(a), "l"(pol) : "memory");
+#elif QSB_L2STATE & 1
     asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.u64 [g], %1; }"
                  :: "l"(p), "l"(a) : "memory");
 #else
@@ -1592,6 +1607,37 @@ __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
     _ModSub256(Qy,T,Q);
     Load256(X3,T);
 }
+/* QSB_SEED_GATHER (default 1): the chain's first piped record (term first+2) is gathered into
+ * (X2,Y2) inside the seed addition, right after its two differences, instead of after it. Those
+ * two subtractions are the only reads of X2 and Y2 in the seed add, so the registers are dead
+ * when the load writes them; the remaining statements read X1, P and Ry only. The empty barrier
+ * keeps the load above the seed's squarings, so the cold DRAM fetch overlaps them. Every
+ * value, and every record read, is the one the unswitched order produces. */
+#ifndef QSB_SEED_GATHER
+#define QSB_SEED_GATHER 1
+#endif
+__device__ __forceinline__ void qsb_pointadd_mm_pair_gather(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
+                                     uint64_t *ZZ3,uint64_t *ZZZ3,
+                                     const uint64_t *X1,const uint64_t *Y1,
+                                     uint64_t *X2,uint64_t *Y2,
+                                     const uint8_t *table,unsigned term,bool gather) {
+    uint64_t P[4],Q[4],T[4];
+    _ModSub256(P,X2,(uint64_t *)X1);
+    _ModSub256(Ry,Y2,(uint64_t *)Y1);
+    if(gather) {
+        qsb_load_glv(table,term,X2,Y2);
+        asm volatile("" ::: "memory");
+    }
+    _ModSqr(ZZ3,P);
+    _ModMult(ZZZ3,ZZ3,P);
+    _ModMult(Q,(uint64_t *)X1,ZZ3);
+    _ModSqr(T,Ry);
+    _ModSub256(T,T,ZZZ3);
+    _ModSub256(T,T,Q);
+    _ModSub256(T,T,Q);
+    _ModSub256(Qy,T,Q);
+    Load256(X3,T);
+}
 #endif
 #endif
 
@@ -1680,8 +1726,8 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     uint64_t x0[4],y0[4],x1[4],y1[4];
     int first=(nonzero&1u)?0:GT_Q_TERMS;
 #if QSB_PMIX12
-#if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP
-#error "QSB_PMIX12 runs the one-addition piped chain (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
+#if !QSB_CHAIN_PIPE || QSB_CHAIN_PP || (QSB_CHAIN_ROLES && (QSB_CHAIN_UNROLL || !QSB_PAIR_ORD))
+#error "QSB_PMIX12 runs the piped chain (QSB_CHAIN_PIPE=1): the one-add loop, or the rolled QSB_PAIR_ORD role loop"
 #endif
     /* A GLV12-P block: P's terms are slots GT_Q_TERMS..GT_GLV_TERMS, one more trip. */
     int last=GT_GLV_TERMS+(QSB_PMIX12_SEL()?1:0);
@@ -1739,12 +1785,18 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     _PointAddXYZZ_mm_pair(X,Y,Rp,U,V,x0,y0,x1,y1);
 #elif QSB_PAIR_ORD
     uint64_t Ry[4];   /* Y holds Qy; the deferred ordinate is Qy*Ry until the final MAC */
+#if QSB_SEED_GATHER && QSB_CHAIN_PIPE
+    qsb_pointadd_mm_pair_gather(X,Y,Ry,U,V,x0,y0,x1,y1,table,first+2,first+2<last);
+#else
     qsb_pointadd_mm_pair(X,Y,Ry,U,V,x0,y0,x1,y1);
+#endif
 #else
     _PointAddXYZZ_mm(X,Y,U,V,x0,y0,x1,y1);
 #endif
 #if QSB_CHAIN_PIPE
+#if !(QSB_SEED_GATHER && QSB_PAIR_ORD && !QSB_Y_PAIR)
     if(first+2<last) qsb_load_glv(table,first+2,x1,y1);
+#endif
 #if QSB_PAIR_ORD && QSB_CHAIN_ROLES
     /* Two additions per trip with the Y2/Yoff roles of y1/y0 alternating, so the
      * gathered next ordinate is consumed where it landed and no loop-carried swap
@@ -1777,8 +1829,45 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     QSB_CHAIN_TRIP(8)
 #undef QSB_CHAIN_TRIP
 #else
+#if QSB_PMIX12
+    /* The piped additions run terms first+2 .. last-2, last-first-3 of them: even on a GLV11
+     * lane (static_assert above), odd on a GLV12-P warp (last = GT_GLV_TERMS+1). The pairs stop
+     * one term early there and the leftover runs as one piped addition plus the swap, exactly
+     * the one-add loop's trip. Pairs open on first+2+2k, so phi (term GT_Q_TERMS, even) still
+     * opens a pair. last is warp-uniform (QSB_PMIX12_SEL), so the branch does not diverge. */
+    static_assert((GT_Q_TERMS&1)==0, "QSB_CHAIN_ROLES+QSB_PMIX12: phi must open a pair");
+    const int pair_end=last-1-((last-first-3)&1);
+#else
+    const int pair_end=last-1;
+#endif
+#if QSB_ROLE_PHI_OUT
+    /* QSB_ROLE_PHI_OUT: phi between two passes of the same pair loop instead of behind a
+     * per-trip test. Pairs open on first+2+2k and GT_Q_TERMS is even, so a pass that stops at
+     * GT_Q_TERMS stops exactly on the trip the in-loop test fired on. That trip exists iff
+     * first+2 <= GT_Q_TERMS < pair_end; phi then runs once before it, else never. */
+    bool phi=(first+2<=GT_Q_TERMS && GT_Q_TERMS<pair_end);
+    int term=first+2;
     #pragma unroll 1
-    for(int term=first+2;term<last-1;term+=2) {
+    for(;;) {
+        const int stop=phi?GT_Q_TERMS:pair_end;
+        #pragma unroll 1
+        for(;term<stop;term+=2) {
+            qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(term+1));
+            qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code(term+2));
+        }
+        if(!phi) break;
+        phi=false;
+        {
+            const uint64_t beta[4]={
+                0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+                0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
+            };
+            _ModMult(X,X,(uint64_t*)beta);
+        }
+    }
+#else
+    #pragma unroll 1
+    for(int term=first+2;term<pair_end;term+=2) {
         if(term==GT_Q_TERMS) {
             const uint64_t beta[4]={
                 0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
@@ -1789,6 +1878,14 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(term+1));
         qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y0,y1,table,qsb_glv_code(term+2));
     }
+#endif
+#if QSB_PMIX12
+    if(pair_end!=last-1) {
+        qsb_pointadd_pair<true>(X,Y,Ry,U,V,x1,y1,y0,table,qsb_glv_code(pair_end+1));
+        #pragma unroll
+        for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
+    }
+#endif
 #endif
     qsb_pointadd_pair<false>(X,Y,Ry,U,V,x1,y1,y0,table,0u);
     Load256(y0,y1);
@@ -3139,6 +3236,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #ifndef QSB_ROOT_FUSED
 #define QSB_ROOT_FUSED 0
 #endif
+#ifndef QSB_RROOT_TREES
+#define QSB_RROOT_TREES 1  /* 1: register-tree root inverse (jacklightChen a6e67fd4), OpenSSL-checked at startup, else qsb_root_fused */
+#endif
 #ifndef QSB_RF_LANES
 #define QSB_RF_LANES 128   /* one prepare-block slot: 128 threads x <= 128 registers */
 #endif
@@ -3298,6 +3398,13 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         }
     }
 }
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream);
 #endif
 
 /* Shared-denominator recovery directly from XYZZ coordinates.
@@ -3975,11 +4082,30 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
+#endif
 #include "QsbCarrier.h"
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
 #define QSB_LAUNCH_ST 0
+#endif
+#if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    constexpr int K=QSB_RF_K;
+    if(g_qsb_register_roots){
+        if(qsb_carrier_has(QK_RR))
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,roots,count);
+        else qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    } else if(qsb_carrier_has(QK_RF))
+        qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+}
 #endif
 
 template<bool FAST_TAIL>
@@ -4119,7 +4245,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, int nShared, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4145,7 +4271,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
     }
     if (sr != CUDA_SUCCESS || ng != (unsigned)nB / 2u) return 0;
     int na = 0; partA[na++] = rem;
-    for (int i = 0; i < QSB_GREEN_SHARED / 2 && i < (int)ng; i++) partA[na++] = grp[i];
+    for (int i = 0; i < nShared / 2 && i < (int)ng; i++) partA[na++] = grp[i];
     CUdevResourceDesc dA, dB; CUgreenCtx gA, gB;
     if (qsb_cuDevResourceGenerateDesc(&dB, grp, ng) != CUDA_SUCCESS) return 0;
     if (qsb_cuDevResourceGenerateDesc(&dA, partA, na) != CUDA_SUCCESS) return 0;
@@ -4180,9 +4306,28 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
  * Every kernel gets exactly the arguments the monolithic launch would give it for the same
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
+#ifndef QSB_GREEN_TUNE
+#define QSB_GREEN_TUNE 1   /* finish partitions QSB_GREEN, +2, -2 SMs; the fastest over sequences 2-7 is kept */
+#endif
+/* QSB_GREEN_WIDE (default 1): the startup check also tries finish partitions of QSB_GREEN+4
+ * and QSB_GREEN-4 SMs, over sequences 2-11 in the palindromic order ABCDEEDCBA, so each size
+ * is timed once early and once late and a linear clock drift cancels in its mean. Only the
+ * SM split between the two streams changes; every kernel, argument and hit is the same. 0
+ * restores the three-size check over sequences 2-7. */
+#ifndef QSB_GREEN_WIDE
+#define QSB_GREEN_WIDE 1
+#endif
+#if QSB_GREEN_WIDE
+#define QSB_GREEN_NCFG 5
+#else
+#define QSB_GREEN_NCFG 3
+#endif
+#define QSB_GREEN_NSCHED (2 * QSB_GREEN_NCFG)
 struct QsbSubPipe {
     int ready;
     cudaStream_t s0[2], rt, s2, s2b[2];
+    int ncfg, cfg, cfg_sms[QSB_GREEN_NCFG];
+    cudaStream_t c_s0[QSB_GREEN_NCFG][2], c_rt[QSB_GREEN_NCFG], c_s2b[QSB_GREEN_NCFG][2];
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
@@ -4217,13 +4362,38 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
-        if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
-            printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
-            return 0;
+        /* config 0 is the tuned default; the others are the neighbouring finish sizes, tried
+         * over a few whole sequences at startup (qsb_green_tune_seq) */
+        /* finish SMs / shared SMs: at 22 a wider shared band costs less than more own SMs
+         * (local: 12+10 -0.22%, 14+8 -0.55% vs 12+8) */
+#if QSB_GREEN_WIDE
+        static const int want[QSB_GREEN_NCFG] = {QSB_GREEN, QSB_GREEN + 2, QSB_GREEN - 2, QSB_GREEN + 4, QSB_GREEN - 4};
+        static const int wsh[QSB_GREEN_NCFG] = {QSB_GREEN_SHARED, QSB_GREEN_SHARED + 2, QSB_GREEN_SHARED,
+                                                QSB_GREEN_SHARED + 4, QSB_GREEN_SHARED};
+#else
+        static const int want[QSB_GREEN_NCFG] = {QSB_GREEN, QSB_GREEN + 2, QSB_GREEN - 2};
+        static const int wsh[QSB_GREEN_NCFG] = {QSB_GREEN_SHARED, QSB_GREEN_SHARED + 2, QSB_GREEN_SHARED};
+#endif
+        P.ncfg = 0;
+        for (int c = 0; c < (QSB_GREEN_TUNE ? QSB_GREEN_NCFG : 1); c++) {
+            cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
+            if (!qsb_green_streams(dev, want[c], wsh[c], sA, sB, least, greatest, &nA, &nB)) {
+                (void)cudaGetLastError();
+                if (c == 0) {
+                    printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
+                    return 0;
+                }
+                break;
+            }
+            const int k = P.ncfg++;
+            P.cfg_sms[k] = (int)nB;
+            P.c_s0[k][0] = sA[0]; P.c_s0[k][1] = sA[1]; P.c_rt[k] = sA[2];
+            P.c_s2b[k][0] = sB[0]; P.c_s2b[k][1] = sB[1];
+            if (c == 0) printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
         }
-        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
-        printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
+        P.cfg = 0;
+        P.s0[0] = P.c_s0[0][0]; P.s0[1] = P.c_s0[0][1]; P.rt = P.c_rt[0];
+        P.s2b[0] = P.c_s2b[0][0]; P.s2b[1] = P.c_s2b[0][1]; P.s2 = P.s2b[0];
     }
 #else
     for (int i = 0; i < 2 && e == cudaSuccess; i++)
@@ -4239,6 +4409,12 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
         cudaStream_t all[5] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1]};
         for (int i = 0; i < 5; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+#if QSB_GREEN
+        for (int c = 1; c < P.ncfg; c++) {
+            cudaStream_t more[5] = {P.c_s0[c][0], P.c_s0[c][1], P.c_rt[c], P.c_s2b[c][0], P.c_s2b[c][1]};
+            for (int i = 0; i < 5; i++) cudaStreamSetAttribute(more[i], cudaStreamAttributeAccessPolicyWindow, &av);
+        }
+#endif
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -4259,6 +4435,13 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=QSB_RROOT_TREES &&
+        qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted prefix / scalar fallback");
+    fflush(stdout);
+#endif
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4268,7 +4451,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            qsb_launch_selected_roots(P.roots[0],nb,P.rt);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4330,7 +4513,7 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,P.rt);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
@@ -4378,6 +4561,51 @@ static void qsb_subpipe_launch(
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(st, P.ev_out2, 0);
     if (e != cudaSuccess) qsb_subpipe_die("output ordering", e);
 }
+#if QSB_GREEN
+/* Startup partition choice.  Called by the host loop once per sequence, after the
+ * sequence's last batch is enqueued; selects the partition for the next sequence.
+ * Sequences 2..7 run the configs in the order 0,1,2,2,1,0 (a linear drift cancels);
+ * afterwards the config with the least mean sequence time is kept (the default
+ * unless another is faster by more than 0.1%).  Only stream placement changes:
+ * every sub-batch still runs the same kernels on the same arguments. */
+static void qsb_green_tune_seq(uint32_t seqs_done) {
+    QsbSubPipe &P = g_qsb_sub;
+    static double t_last = 0, dur[QSB_GREEN_NSCHED];
+    static int done = 0;
+    if (!P.ready || P.ncfg < 2 || done) return;
+#if QSB_GREEN_WIDE
+    static const int sched[QSB_GREEN_NSCHED] = {0, 1, 2, 3, 4, 4, 3, 2, 1, 0};
+#else
+    static const int sched[QSB_GREEN_NSCHED] = {0, 1, 2, 2, 1, 0};
+#endif
+    const uint32_t S0 = 2;
+    timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    const double now = ts.tv_sec + ts.tv_nsec * 1e-9;
+    const uint32_t fin = seqs_done - 1;              /* 0-based index of the sequence just enqueued */
+    if (fin >= S0 && fin < S0 + QSB_GREEN_NSCHED) dur[fin - S0] = now - t_last;
+    t_last = now;
+    int c = -1;
+    if (seqs_done >= S0 && seqs_done < S0 + QSB_GREEN_NSCHED)
+        c = sched[seqs_done - S0] < P.ncfg ? sched[seqs_done - S0] : 0;
+    else if (seqs_done == S0 + QSB_GREEN_NSCHED) {
+        double m[QSB_GREEN_NCFG] = {0}; int n[QSB_GREEN_NCFG] = {0};
+        for (int i = 0; i < QSB_GREEN_NSCHED; i++) if (sched[i] < P.ncfg) { m[sched[i]] += dur[i]; n[sched[i]]++; }
+        c = 0;
+        for (int k = 1; k < P.ncfg; k++)
+            if (n[k] && m[k] / n[k] < (m[c] / n[c]) * (c == 0 ? 0.999 : 1.0)) c = k;
+        printf("  Partition check:");
+        for (int k = 0; k < P.ncfg; k++) printf(" finish %d SMs %.4f s/seq%s", P.cfg_sms[k], n[k] ? m[k] / n[k] : 0.0,
+                                               k + 1 < P.ncfg ? "," : "");
+        printf(" -> finish on %d SMs\n", P.cfg_sms[c]); fflush(stdout);
+        done = 1;
+    }
+    if (c >= 0 && c != P.cfg) {
+        P.cfg = c;
+        P.s0[0] = P.c_s0[c][0]; P.s0[1] = P.c_s0[c][1]; P.rt = P.c_rt[c];
+        P.s2b[0] = P.c_s2b[c][0]; P.s2b[1] = P.c_s2b[c][1]; P.s2 = P.s2b[0];
+    }
+}
+#endif
 #endif
 
 /* ============================================================
@@ -4454,6 +4682,9 @@ extern "C" {
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
 }
+#if QSB_SUBPIPE && QSB_ROOT_FUSED && QSB_SLOTPIPE
+#include "RegisterRootCheck.h"
+#endif
 
 /* Affine (x,y) of a point, as the 4+4 little-endian limbs the table uses. */
 static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
@@ -5193,6 +5424,9 @@ int main(int argc, char **argv) {
 #endif
             (const void*)kernel_pinning_pipeline<true,2>,
         };
+        /* QSB_NOJIT: with the carrier on, the compute_52 kernels are never launched, so
+         * preloading them would only JIT their module; leave it unloaded. */
+        if (!g_qsb_carrier.nojit)
         for (size_t q = 0; q < sizeof(fs_k)/sizeof(fs_k[0]); q++) {
             cudaFuncAttributes fa;
             if (cudaFuncGetAttributes(&fa, fs_k[q]) == cudaSuccess) fs_loaded++;
@@ -6053,6 +6287,9 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
+#if QSB_SUBPIPE && QSB_GREEN
+        if (g_qsb_sub_ok) qsb_green_tune_seq(seqs_done);
+#endif
         if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
