@@ -223,9 +223,9 @@ Independent arithmetic and synchronization checks:
 export PATH=/usr/local/cuda/bin:$PATH
 nvcc -O3 -w -DQSB_ZEROS_N=24 \
   candidates/subset/tests/gpu_epochs/tree_audit.cu \
-  -o /tmp/qsb-tree-audit -lcrypto -lm
-/tmp/qsb-tree-audit
-compute-sanitizer --tool synccheck --error-exitcode 9 /tmp/qsb-tree-audit
+  -o ./qsb-tree-audit -lcrypto -lm
+./qsb-tree-audit
+compute-sanitizer --tool synccheck --error-exitcode 9 ./qsb-tree-audit
 ```
 
 Local command-grinder measurement with the unmodified wrapper:
