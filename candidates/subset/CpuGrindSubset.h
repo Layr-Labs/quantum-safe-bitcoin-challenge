@@ -51,7 +51,7 @@
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 4096
+#define QSB_CPU_BATCH 1024
 #endif
 /* Wide host table: z*A takes L lookups of signed ~257/L-bit digits (L-1 batch-affine additions).
  * The fewest lookups whose table fits the memory budget are chosen at start-up; 16 windows (34 MiB)
@@ -174,6 +174,17 @@ static void fe_inv(fe &r, const fe &a) {               /* a^(p-2) */
     }
     r = acc;
 }
+/* Host-only: scalar inversion from the eligible completed 97f347a8 route.
+ * Pinning cc75e3b's cross-lane batch tree is the structural reference. */
+#ifndef QSB_CPU_SCALAR_INV
+#define QSB_CPU_SCALAR_INV 1
+#endif
+#if QSB_CPU_SCALAR_INV
+#include "CpuSafegcd.h"
+#endif
+#ifndef QSB_CPU_SCA_SINGLE_READ
+#define QSB_CPU_SCA_SINGLE_READ 1
+#endif
 static void fe_from_le32(fe &r, const uint8_t b[32]) {
     for (int i = 0; i < 4; i++) { uint64_t w = 0; for (int k = 7; k >= 0; k--) w = (w << 8) | b[i * 8 + k]; r.v[i] = w; }
 }
@@ -375,25 +386,29 @@ static void f52_inv(fe52 &x) {                              /* x^(p-2), libsecp2
 static void f52_inv4(fe52 *x) {                             /* four chain products, one exponentiation */
     fe52 a01, a23, a, i01, i23;
     f52_mul(a01, x[0], x[1]); f52_mul(a23, x[2], x[3]); f52_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe ca, ia; f52_words(ca.v, a); fe_inv_var(ia, ca); f52_from(a, ia);
+#else
     f52_inv(a);
+#endif
     f52_mul(i01, a, a23); f52_mul(i23, a, a01);
     const fe52 x0 = x[0], x2 = x[2];
     f52_mul(x[0], i01, x[1]); f52_mul(x[1], i01, x0);
     f52_mul(x[2], i23, x[3]); f52_mul(x[3], i23, x2);
 }
-struct ScaBuf { fe52 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
+struct ScaBuf { fe52 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
 static bool scabuf_alloc(ScaBuf &v, int B) {
-    void *q[7] = {nullptr};
-    const size_t sz[7] = {sizeof(fe52) * B, sizeof(fe52) * B, sizeof(fe52) * 2 * B, sizeof(fe52) * 2 * B, sizeof(fe) * 2 * (size_t)B, 2 * (size_t)B, (size_t)B};
-    for (int i = 0; i < 7; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
-    v.X = (fe52 *)q[0]; v.Y = (fe52 *)q[1]; v.D = (fe52 *)q[2]; v.P = (fe52 *)q[3]; v.qx = (fe *)q[4]; v.qp = (uint8_t *)q[5]; v.bad = (uint8_t *)q[6];
+    void *q[8] = {nullptr};
+    const size_t sz[8] = {sizeof(fe52) * B, sizeof(fe52) * B, sizeof(fe52) * 2 * B, sizeof(fe52) * 2 * B, sizeof(fe) * 2 * (size_t)B, 2 * (size_t)B, (size_t)B, QSB_CPU_SCA_SINGLE_READ ? sizeof(fe52) * 2 * B : 64};
+    for (int i = 0; i < 8; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
+    v.X = (fe52 *)q[0]; v.Y = (fe52 *)q[1]; v.D = (fe52 *)q[2]; v.P = (fe52 *)q[3]; v.qx = (fe *)q[4]; v.qp = (uint8_t *)q[5]; v.bad = (uint8_t *)q[6]; v.TY = (fe52 *)q[7];
     return true;
 }
 /* Batch-affine additions Q_e = X[k(e)] + R_e over the elements e < E whose candidate is not bad;
  * rowfn(e, &neg) gives R_e's table row (y negated when neg). Four chains (e & 3) share one inversion.
  * out(e, lam, x3, y3...) is handled by the caller through the two modes below. */
 template <class RowFn, class Out>
-static void sca_add(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, int E, int kshift, const uint8_t *bad, RowFn rowfn, Out out) {
+static void sca_add_reread(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, int E, int kshift, const uint8_t *bad, RowFn rowfn, Out out) {
     /* E % 4 == 0 (the batch size is a multiple of 8) */
     fe52 run[4]; for (int c = 0; c < 4; c++) { memset(&run[c], 0, sizeof(fe52)); run[c].n[0] = 1; }
     for (int e = 0; e < E; e++) {
@@ -421,6 +436,53 @@ static void sca_add(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, int E, int
         for (int c = 0; c < 4; c++) if (ok[c]) { f52_sub(t[c], X[kk[c]], x3[c]); f52_mul(t[c], lam[c], t[c]); f52_sub(t[c], t[c], Y[kk[c]]); f52_nweak(t[c]); }
         for (int c = 0; c < 4; c++) if (ok[c]) out(e0 + c, kk[c], x3[c], t[c]);
     }
+}
+
+/* Scalar twin of the vector single-read addition: D=rx-X and TY=sign*ry-Y
+ * survive the forward pass, so the backward pass never asks rowfn for a point.
+ * x3=lambda^2-D-2X combines its three subtractions in one limb pass. */
+template <class RowFn, class Out>
+static void sca_add(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, fe52 *TY,
+                    int E, int kshift, const uint8_t *bad, RowFn rowfn, Out out) {
+#if QSB_CPU_SCA_SINGLE_READ
+    const uint64_t pp[5] = {0xFFFFEFFFFFC2FULL, 0xFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFULL,
+                            0xFFFFFFFFFFFFFULL, 0x0FFFFFFFFFFFFULL};
+    fe52 run[4]; for (int c = 0; c < 4; c++) { memset(&run[c], 0, sizeof(fe52)); run[c].n[0] = 1; }
+    for (int e = 0; e < E; e++) {
+        const int k = e >> kshift; if (bad[k]) continue;
+        if (e + 16 < E) { bool ng; __builtin_prefetch(rowfn(e + 16, ng)); }
+        bool ng; const pt *r = rowfn(e, ng); fe52 rx, ry;
+        f52_from(rx, r->x); f52_from(ry, r->y);
+        f52_sub(D[e], rx, X[k]); f52_nweak(D[e]);
+        for (int j = 0; j < 5; j++)
+            TY[e].n[j] = 8 * pp[j] - Y[k].n[j] + (ng ? 0 : ry.n[j]) - (ng ? ry.n[j] : 0);
+        f52_nweak(TY[e]);
+        PRE[e] = run[e & 3]; f52_mul(run[e & 3], run[e & 3], D[e]);
+    }
+    f52_inv4(run);
+    for (int e0 = E - 4; e0 >= 0; e0 -= 4) {
+        fe52 dinv[4], lam[4], x3[4], t[4]; int kk[4]; bool ok[4];
+        for (int c = 3; c >= 0; c--) {
+            const int e = e0 + c; kk[c] = e >> kshift; ok[c] = !bad[kk[c]];
+            if (!ok[c]) continue;
+            f52_mul(dinv[c], run[c], PRE[e]); f52_mul(run[c], run[c], D[e]);
+        }
+        for (int c = 0; c < 4; c++) if (ok[c]) f52_mul(lam[c], TY[e0 + c], dinv[c]);
+        for (int c = 0; c < 4; c++) if (ok[c]) {
+            f52_sqr(x3[c], lam[c]);
+            for (int j = 0; j < 5; j++)
+                x3[c].n[j] += 12 * pp[j] - D[e0 + c].n[j] - 2 * X[kk[c]].n[j];
+            f52_nweak(x3[c]);
+        }
+        for (int c = 0; c < 4; c++) if (ok[c]) {
+            f52_sub(t[c], X[kk[c]], x3[c]); f52_mul(t[c], lam[c], t[c]);
+            f52_sub(t[c], t[c], Y[kk[c]]); f52_nweak(t[c]);
+        }
+        for (int c = 0; c < 4; c++) if (ok[c]) out(e0 + c, kk[c], x3[c], t[c]);
+    }
+#else
+    sca_add_reread(X, Y, D, PRE, E, kshift, bad, rowfn, out);
+#endif
 }
 
 
@@ -804,10 +866,40 @@ Q8T static void fe8_inv1(fe8 &x) {
 /* Invert the 4 interleaved chain products with ONE exponentiation (Montgomery's trick across the
  * chains: 3 + 6 extra multiplications). The chain is latency-bound either way, so this replaces
  * 4 x 270 multiplications of issue slots by 279. */
+#if QSB_CPU_SCALAR_INV
+Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
+Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
+Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
+Q8T static void fe8_inv_lanes(fe8 &x) {
+    /* Preserve the old lane-wise zero behaviour: a zero chain must not
+     * poison any of the other seven lanes of the new horizontal tree. */
+    __m512i cw[4]; fe8_canon_words(cw, x);
+    const __m512i nz = _mm512_or_si512(_mm512_or_si512(cw[0], cw[1]),
+                                      _mm512_or_si512(cw[2], cw[3]));
+    const __mmask8 zero = _mm512_cmpeq_epi64_mask(nz, _mm512_setzero_si512());
+    for (int i = 0; i < 5; i++) x.l[i] = _mm512_mask_mov_epi64(x.l[i], zero, _mm512_set1_epi64(i == 0 ? 1 : 0));
+    fe8 a1, p1, p2, t, i2;
+    fe8_swap1(a1, x); fe8_mul(p1, x, a1);                 /* lanes 2k, 2k+1: a_2k * a_2k+1 */
+    fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
+    fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
+    alignas(64) uint64_t w[4][8]; fe8_canon_words(cw, t);
+    for (int i = 0; i < 4; i++) _mm512_store_si512((void *)w[i], cw[i]);
+    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    fe8 I; fe8_bcast(I, pi);
+    fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
+    fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
+    fe8_mul(x, i2, a1);                                   /* 1/a_k */
+    for (int i = 0; i < 5; i++) x.l[i] = _mm512_mask_mov_epi64(x.l[i], zero, _mm512_setzero_si512());
+}
+#endif
 Q8T static void fe8_inv4(fe8 *x) {
     fe8 a01, a23, a, i01, i23;
     fe8_mul(a01, x[0], x[1]); fe8_mul(a23, x[2], x[3]); fe8_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe8_inv_lanes(a);
+#else
     fe8_inv1(a);
+#endif
     fe8_mul(i01, a, a23); fe8_mul(i23, a, a01);
     const fe8 x0 = x[0], x2 = x[2];
     fe8_mul(x[0], i01, x[1]); fe8_mul(x[1], i01, x0);
@@ -1444,7 +1536,7 @@ static void sca_batch(const Ctx *c, const uint32_t *dig, const uint8_t *zdig, in
     const bool fold = c->cfold != nullptr;
     for (int i = 1; i < (fold ? nw - 1 : nw); i++) {
         const pt *T = c->table + c->woff[i];
-        sca_add(v.X, v.Y, v.D, v.P, B, 0, v.bad, [&](int e, bool &ng) { return entry(e, i, T, ng); },
+        sca_add(v.X, v.Y, v.D, v.P, v.TY, B, 0, v.bad, [&](int e, bool &ng) { return entry(e, i, T, ng); },
                 [&](int, int k, const fe52 &x3, const fe52 &y3) { v.X[k] = x3; v.Y[k] = y3; });
     }
     auto emit = [&](int k, int ri, const fe52 &x3, const fe52 &y3) {
@@ -1454,14 +1546,14 @@ static void sca_batch(const Ctx *c, const uint32_t *dig, const uint8_t *zdig, in
     };
     if (fold) {                                          /* last window with C folded in: element e = 2k + ri */
         const int i = nw - 1; const pt *TP = c->cfold, *TM = c->cfold + c->went[i];
-        sca_add(v.X, v.Y, v.D, v.P, 2 * B, 1, v.bad, [&](int e, bool &ng) {
+        sca_add(v.X, v.Y, v.D, v.P, v.TY, 2 * B, 1, v.bad, [&](int e, bool &ng) {
                     const int k = e >> 1, ri = e & 1; const pt *r = entry(k, i, TP, ng);
                     return (ng ^ (ri != 0)) ? TM + (r - TP) : r; },
                 [&](int e, int k, const fe52 &x3, const fe52 &y3) { emit(k, e & 1, x3, y3); });
     } else {                                              /* Q_ri = X + (+-C): element e = 2k + ri */
         pt cps[2]; cps[0].x = c->cx; cps[0].y = c->cy; cps[1] = cps[0];
         const fe z0 = {{0, 0, 0, 0}}; fe_sub(cps[1].y, z0, c->cy);
-        sca_add(v.X, v.Y, v.D, v.P, 2 * B, 1, v.bad, [&](int e, bool &ng) { ng = false; return &cps[e & 1]; },
+        sca_add(v.X, v.Y, v.D, v.P, v.TY, 2 * B, 1, v.bad, [&](int e, bool &ng) { ng = false; return &cps[e & 1]; },
                 [&](int e, int k, const fe52 &x3, const fe52 &y3) { emit(k, e & 1, x3, y3); });
     }
 }
