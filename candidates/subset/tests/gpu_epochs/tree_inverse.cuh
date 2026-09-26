@@ -202,7 +202,17 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     // offset == 2n-4: the two root children.
 #if HM43_WARP_ROOT
+#ifndef QSB_ROOT_UNIFORM_WARP
+#define QSB_ROOT_UNIFORM_WARP 1
+#endif
+#if QSB_ROOT_UNIFORM_WARP && QSB_INVERSE_LIMBS
+    /* Exact: the root runs on warp 0 only. A warp vote is warp-uniform to ptxas, so the branch
+     * below is uniform and the root's shfl/ballot need no per-op WARPSYNC subroutine
+     * (CALL/RET wrappers). The same threads execute the same code as before. */
+    if(__all_sync(0xffffffffu,tid<32)){
+#else
     if(tid<(QSB_INVERSE_LIMBS?32:4)){
+#endif
         uint64_t a[5],b[5],root[5];
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset];b[k]=products[k][offset+1];}
