@@ -1,8 +1,8 @@
-/* l2state variant fkF20c8 + split retry */
-#define QSB_SUBPIPE 131072
+/* l2state variant fkF20c8 + split retry; 64Ki sub-batches (16 MiB state ring beside the 50 MiB persisting window) + finish L2 discard */
+#define QSB_SUBPIPE 65536
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
-#define QSB_L2STATE 1
+#define QSB_L2STATE 3
 #define QSB_GREEN 20
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
