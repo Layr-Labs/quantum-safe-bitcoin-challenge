@@ -1,5 +1,12 @@
 # Pinning experiment ledger
 
+## Draw 1 on GLV11 P18 frontier (2026-09-26 ~00:10Z)
+
+**Synchronized to promoted world-record frontier `4f0f50e` by `fkiene` (official 948,943,797).**
+- Frontier architecture: GLV11 P18 five-term decomposition (11 DRAM gathers instead of 12), gather pipelining (`QSB_CHAIN_PIPE`), role-alternating trips (`QSB_CHAIN_ROLES`), and native `sm_89` cubin carrier image.
+- Target floor: $\ge 958,433,235$ (+1.00% over 948.94M).
+- Action: Dispatched Draw 1 on the 948.94M frontier to evaluate worker performance and hit distribution.
+
 ## v25 verdict + v26 submitted (2026-09-24 ~09:11Z)
 
 **v25 `62651c13`: REJECTED — official 878,283,220.** self 902.0M/s,
