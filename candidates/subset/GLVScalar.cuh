@@ -642,10 +642,24 @@ __device__ __forceinline__ void q9_glv_residual129(
     q9_abs129(r1,s1,z1);q9_abs129(r2,s2,z2);
 }
 
+/* QSB_GLV_NO_KRED (kill switch): q9_glv_split's only caller is the subset filter chain, whose scalar
+ * is the SHA-256d message digest z, uniform on [0,2^256). z >= n needs z[3] == 2^64-1 and
+ * z[2] >= 2^64-2, probability (2^256-n)/2^256 < 2^-127 per candidate; on such a z the split may
+ * leave the walker's 128-bit fields and that one candidate recovers a wrong key, which the host's
+ * exact publication gate (OpenSSL re-derivation of every hit) rejects: a lost candidate, never a
+ * false hit. 1 drops the conditional subtraction; 0 keeps it. */
+#ifndef QSB_GLV_NO_KRED
+#define QSB_GLV_NO_KRED 1
+#endif
+#if QSB_GLV_NO_KRED != 0 && QSB_GLV_NO_KRED != 1
+#error "QSB_GLV_NO_KRED must be 0 or 1"
+#endif
 __device__ __forceinline__ void q9_glv_split(const uint64_t input[4],uint64_t r1[2],uint64_t r2[2],unsigned *s1,unsigned *s2){
-    const uint64_t n[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
     uint64_t k[4]={input[0],input[1],input[2],input[3]};
+#if !QSB_GLV_NO_KRED
+    const uint64_t n[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
     if(k[3]==n[3]&&(k[2]>n[2]||(k[2]==n[2]&&(k[1]>n[1]||(k[1]==n[1]&&k[0]>=n[0])))))q9_sub4(k,k,n);
+#endif
     const uint64_t g1[4]={0xE893209A45DBB031ULL,0x3DAA8A1471E8CA7FULL,0xE86C90E49284EB15ULL,0x3086D221A7D46BCDULL};
     const uint64_t g2[4]={0x1571B4AE8AC47F71ULL,0x221208AC9DF506C6ULL,0x6F547FA90ABFE4C4ULL,0xE4437ED6010E8828ULL};
     const uint32_t a1[4]={0x9284eb15,0xe86c90e4,0xa7d46bcd,0x3086d221};

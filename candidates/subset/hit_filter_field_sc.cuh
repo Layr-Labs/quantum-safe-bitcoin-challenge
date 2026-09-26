@@ -17,6 +17,34 @@
 #ifndef QSB_K32
 #define QSB_K32 1   /* 1: 32-bit-halves limb-0 K corrections in the filter chain (bit-identical); 0: previous form */
 #endif
+/* QSB_K32_BGLUE (kill switch; after our pinning field-core carry glue): the three K32 borrow
+ * corrections of the chain point-add (D = U2 - X1, R = S2 - Y1, Q - T) subtract b*(2^32+977)
+ * from limb 0 as 32-bit halves, b the 256-bit borrow and m = -b = 0 or 2^32-1. The high-half
+ * constant kh = m & 1 = b is folded as h += m (h - b == h + m mod 2^32) before the low
+ * subtraction, and the low borrow is then taken by subc h,h,0: the same 64-bit value
+ * {l,h} - b*977 - b*2^32 for both b, so the output is bit-identical to 0. The fold no longer
+ * waits on the and.b32 that produced kh; one fewer live u32 per site.
+ * 0 = the K32 text byte for byte. */
+#ifndef QSB_K32_BGLUE
+#define QSB_K32_BGLUE 1
+#endif
+#if QSB_K32_BGLUE != 0 && QSB_K32_BGLUE != 1
+#error "QSB_K32_BGLUE must be 0 or 1"
+#endif
+/* QSB_SQR_X0_GLUE (kill switch; the squaring item of our pinning field-core carry glue): the
+ * three filter squarings (qsb_filter_sqr and the point add's PP = D^2 and R^2) build the doubled
+ * cross product with x0 = 0 (mov.u32 x0, 0; the lowest cross word lives at bit 32). Hence the
+ * doubled x1 is shf.l.wrap(x0, x1, 1) = x1 << 1, and d0 = {x0, x1} = x1 * 2^32, so
+ * d0 + a0^2 has low word lo(a0^2) + 0 (no carry) and high word hi(a0^2) + x1 with the carry out
+ * of that 32-bit add, which is the carry out of the 64-bit add.cc that feeds addc d1. 1 forms d0
+ * straight from mul.wide a0*a0 and adds x1 into its high word (add.cc, same CC chain); every
+ * output word and the carry into d1 are bit-identical to 0, which keeps the text byte for byte. */
+#ifndef QSB_SQR_X0_GLUE
+#define QSB_SQR_X0_GLUE 1
+#endif
+#if QSB_SQR_X0_GLUE != 0 && QSB_SQR_X0_GLUE != 1
+#error "QSB_SQR_X0_GLUE must be 0 or 1"
+#endif
 
 /* Exact loop-carried-anchor deletion.  The deferred point-add already has the
  * current affine Y in AY0..AY3; publish those registers as the next iteration's
@@ -197,11 +225,23 @@ __device__ __forceinline__ void qsb_filter_sqr(uint64_t r[4], const uint64_t a[4
         "shf.l.wrap.b32 x7, x6, x7, 1; shf.l.wrap.b32 x6, x5, x6, 1;\n\t"
         "shf.l.wrap.b32 x5, x4, x5, 1; shf.l.wrap.b32 x4, x3, x4, 1;\n\t"
         "shf.l.wrap.b32 x3, x2, x3, 1; shf.l.wrap.b32 x2, x1, x2, 1;\n\t"
+#if QSB_SQR_X0_GLUE
+        "shl.b32 x1, x1, 1;\n\t"
+#else
         "shf.l.wrap.b32 x1, x0, x1, 1;\n\t"
+#endif
         /* Add A[i]^2 at each 64-bit word 2*i. */
+#if QSB_SQR_X0_GLUE
+        "mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n\t"
+#else
         "mov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n\t"
+#endif
         "mov.b64 d4, {x8,x9}; mov.b64 d5, {x10,x11}; mov.b64 d6, {x12,x13}; mov.b64 d7, {x14,x15};\n\t"
+#if QSB_SQR_X0_GLUE
+        "mul.wide.u32 d0, a0, a0; { .reg .u32 q0l, q0h; mov.b64 {q0l,q0h}, d0; add.cc.u32 q0h, q0h, x1; mov.b64 d0, {q0l,q0h}; }\n\t"
+#else
         "mul.wide.u32 t, a0, a0; add.cc.u64 d0, d0, t;\n\t"
+#endif
         "mul.wide.u32 t, a1, a1; addc.cc.u64 d1, d1, t;\n\t"
         "mul.wide.u32 t, a2, a2; addc.cc.u64 d2, d2, t;\n\t"
         "mul.wide.u32 t, a3, a3; addc.cc.u64 d3, d3, t;\n\t"
@@ -966,10 +1006,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         ".reg .u32 sub3_m,sub3_kl,sub3_kh,sub3_l,sub3_h;\n"
         "subc.u32 sub3_m,0,0;\n"
         "and.b32 sub3_kl,sub3_m,0x3D1;\n"
-        "and.b32 sub3_kh,sub3_m,1;\n"
         "mov.b64 {sub3_l,sub3_h},D0;\n"
+#if QSB_K32_BGLUE
+        "add.u32 sub3_h,sub3_h,sub3_m;\n"
+        "sub.cc.u32 sub3_l,sub3_l,sub3_kl;\n"
+        "subc.u32 sub3_h,sub3_h,0;\n"
+#else
+        "and.b32 sub3_kh,sub3_m,1;\n"
         "sub.cc.u32 sub3_l,sub3_l,sub3_kl;\n"
         "subc.u32 sub3_h,sub3_h,sub3_kh;\n"
+#endif
         "mov.b64 D0,{sub3_l,sub3_h};\n"
 #else
         "subc.u64 sub3_borrow,0,0;\n"
@@ -990,10 +1036,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         ".reg .u32 sub4_m,sub4_kl,sub4_kh,sub4_l,sub4_h;\n"
         "subc.u32 sub4_m,0,0;\n"
         "and.b32 sub4_kl,sub4_m,0x3D1;\n"
-        "and.b32 sub4_kh,sub4_m,1;\n"
         "mov.b64 {sub4_l,sub4_h},R0;\n"
+#if QSB_K32_BGLUE
+        "add.u32 sub4_h,sub4_h,sub4_m;\n"
+        "sub.cc.u32 sub4_l,sub4_l,sub4_kl;\n"
+        "subc.u32 sub4_h,sub4_h,0;\n"
+#else
+        "and.b32 sub4_kh,sub4_m,1;\n"
         "sub.cc.u32 sub4_l,sub4_l,sub4_kl;\n"
         "subc.u32 sub4_h,sub4_h,sub4_kh;\n"
+#endif
         "mov.b64 R0,{sub4_l,sub4_h};\n"
 #else
         "subc.u64 sub4_borrow,0,0;\n"
@@ -1172,10 +1224,19 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tshf.l.wrap.b32 f5_x7, f5_x6, f5_x7, 1; shf.l.wrap.b32 f5_x6, f5_x5, f5_x6, 1;\n"
         "\tshf.l.wrap.b32 f5_x5, f5_x4, f5_x5, 1; shf.l.wrap.b32 f5_x4, f5_x3, f5_x4, 1;\n"
         "\tshf.l.wrap.b32 f5_x3, f5_x2, f5_x3, 1; shf.l.wrap.b32 f5_x2, f5_x1, f5_x2, 1;\n"
+#if QSB_SQR_X0_GLUE
+        "\tshl.b32 f5_x1, f5_x1, 1;\n"
+        "\tmov.b64 f5_d1, {f5_x2,f5_x3}; mov.b64 f5_d2, {f5_x4,f5_x5}; mov.b64 f5_d3, {f5_x6,f5_x7};\n"
+#else
         "\tshf.l.wrap.b32 f5_x1, f5_x0, f5_x1, 1;\n"
         "\tmov.b64 f5_d0, {f5_x0,f5_x1}; mov.b64 f5_d1, {f5_x2,f5_x3}; mov.b64 f5_d2, {f5_x4,f5_x5}; mov.b64 f5_d3, {f5_x6,f5_x7};\n"
+#endif
         "\tmov.b64 f5_d4, {f5_x8,f5_x9}; mov.b64 f5_d5, {f5_x10,f5_x11}; mov.b64 f5_d6, {f5_x12,f5_x13}; mov.b64 f5_d7, {f5_x14,f5_x15};\n"
+#if QSB_SQR_X0_GLUE
+        "\tmul.wide.u32 f5_d0, f5_a0, f5_a0; { .reg .u32 f5_q0l, f5_q0h; mov.b64 {f5_q0l,f5_q0h}, f5_d0; add.cc.u32 f5_q0h, f5_q0h, f5_x1; mov.b64 f5_d0, {f5_q0l,f5_q0h}; }\n"
+#else
         "\tmul.wide.u32 f5_t, f5_a0, f5_a0; add.cc.u64 f5_d0, f5_d0, f5_t;\n"
+#endif
         "\tmul.wide.u32 f5_t, f5_a1, f5_a1; addc.cc.u64 f5_d1, f5_d1, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_a2, f5_a2; addc.cc.u64 f5_d2, f5_d2, f5_t;\n"
         "\tmul.wide.u32 f5_t, f5_a3, f5_a3; addc.cc.u64 f5_d3, f5_d3, f5_t;\n"
@@ -2287,10 +2348,19 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tshf.l.wrap.b32 f9_x7, f9_x6, f9_x7, 1; shf.l.wrap.b32 f9_x6, f9_x5, f9_x6, 1;\n"
         "\tshf.l.wrap.b32 f9_x5, f9_x4, f9_x5, 1; shf.l.wrap.b32 f9_x4, f9_x3, f9_x4, 1;\n"
         "\tshf.l.wrap.b32 f9_x3, f9_x2, f9_x3, 1; shf.l.wrap.b32 f9_x2, f9_x1, f9_x2, 1;\n"
+#if QSB_SQR_X0_GLUE
+        "\tshl.b32 f9_x1, f9_x1, 1;\n"
+        "\tmov.b64 f9_d1, {f9_x2,f9_x3}; mov.b64 f9_d2, {f9_x4,f9_x5}; mov.b64 f9_d3, {f9_x6,f9_x7};\n"
+#else
         "\tshf.l.wrap.b32 f9_x1, f9_x0, f9_x1, 1;\n"
         "\tmov.b64 f9_d0, {f9_x0,f9_x1}; mov.b64 f9_d1, {f9_x2,f9_x3}; mov.b64 f9_d2, {f9_x4,f9_x5}; mov.b64 f9_d3, {f9_x6,f9_x7};\n"
+#endif
         "\tmov.b64 f9_d4, {f9_x8,f9_x9}; mov.b64 f9_d5, {f9_x10,f9_x11}; mov.b64 f9_d6, {f9_x12,f9_x13}; mov.b64 f9_d7, {f9_x14,f9_x15};\n"
+#if QSB_SQR_X0_GLUE
+        "\tmul.wide.u32 f9_d0, f9_a0, f9_a0; { .reg .u32 f9_q0l, f9_q0h; mov.b64 {f9_q0l,f9_q0h}, f9_d0; add.cc.u32 f9_q0h, f9_q0h, f9_x1; mov.b64 f9_d0, {f9_q0l,f9_q0h}; }\n"
+#else
         "\tmul.wide.u32 f9_t, f9_a0, f9_a0; add.cc.u64 f9_d0, f9_d0, f9_t;\n"
+#endif
         "\tmul.wide.u32 f9_t, f9_a1, f9_a1; addc.cc.u64 f9_d1, f9_d1, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_a2, f9_a2; addc.cc.u64 f9_d2, f9_d2, f9_t;\n"
         "\tmul.wide.u32 f9_t, f9_a3, f9_a3; addc.cc.u64 f9_d3, f9_d3, f9_t;\n"
@@ -2783,10 +2853,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
         ".reg .u32 sub14_m,sub14_kl,sub14_kh,sub14_l,sub14_h;\n"
         "subc.u32 sub14_m,0,0;\n"
         "and.b32 sub14_kl,sub14_m,0x3D1;\n"
-        "and.b32 sub14_kh,sub14_m,1;\n"
         "mov.b64 {sub14_l,sub14_h},Q0;\n"
+#if QSB_K32_BGLUE
+        "add.u32 sub14_h,sub14_h,sub14_m;\n"
+        "sub.cc.u32 sub14_l,sub14_l,sub14_kl;\n"
+        "subc.u32 sub14_h,sub14_h,0;\n"
+#else
+        "and.b32 sub14_kh,sub14_m,1;\n"
         "sub.cc.u32 sub14_l,sub14_l,sub14_kl;\n"
         "subc.u32 sub14_h,sub14_h,sub14_kh;\n"
+#endif
         "mov.b64 Q0,{sub14_l,sub14_h};\n"
 #else
         "subc.u64 sub14_borrow,0,0;\n"

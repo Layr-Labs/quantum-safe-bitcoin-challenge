@@ -8,7 +8,13 @@
  * (T threads) with the other 158 of the C(13,3)=286 window patterns. Every CPU hit passes the same
  * exact OpenSSL gate as the GPU's tentatives (qsb_hv_check) before it is appended to
  * results/digest_hit_cpu.txt, which the harness collects with the GPU's hit file. Workers run at
- * SCHED_IDLE, so they never delay the GPU host thread; QSB_CPU_GRIND=0 compiles it out. */
+ * SCHED_IDLE, so they never delay the GPU host thread; QSB_CPU_GRIND=0 compiles it out.
+ *
+ * On a host with AVX-512 IFMA and the SHA extensions, the workers run the fast 16-lane pipeline
+ * (worker16, below): the same candidates, table, field arithmetic and exact gate, with the recoding,
+ * row addressing, key-message construction, key hashing and prefilter in vector code and no
+ * per-candidate scalar bookkeeping. -DQSB_CPU_F16=0 (or QSB_CPU_NOF16 in the environment) restores
+ * the previous per-batch path. */
 #include <openssl/sha.h>
 #include <openssl/bn.h>
 #include <openssl/ec.h>
@@ -17,6 +23,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <array>
 #include <sched.h>
 #include <pthread.h>
 #include <sys/syscall.h>
@@ -47,48 +54,36 @@
 #define QCPU_SHANI 0
 #endif
 
+#ifndef QSB_CPU_PFNEXT
+#define QSB_CPU_PFNEXT 1           /* allow the next-window row prefetch (after terrapinelf's 97f347a8); used when the calibration picks it */
+#endif
+#ifndef QSB_CPU_SHA2X
+#define QSB_CPU_SHA2X 1            /* 16-lane SHA-256: two pattern chunks interleaved */
+#endif
+#ifndef QSB_CPU_F16
+#define QSB_CPU_F16 1              /* the fast 16-lane pipeline when the host has AVX-512 IFMA and SHA */
+#endif
 #ifndef QSB_CPU_RESERVE
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 4096
+#define QSB_CPU_BATCH 1024
 #endif
 /* Wide host table: z*A takes L lookups of signed ~257/L-bit digits (L-1 batch-affine additions).
  * The fewest lookups whose table fits the memory budget are chosen at start-up; 16 windows (34 MiB)
  * is the floor. The budget is a third of the smaller of MemAvailable and the cgroup headroom,
  * capped at QSB_CPU_TABLE_CAP_MB. */
 #ifndef QSB_CPU_TABLE_CAP_MB
-#define QSB_CPU_TABLE_CAP_MB 6144         /* 11 lookups (4.3 GiB with the folded copies) at most */
+#define QSB_CPU_TABLE_CAP_MB 20480        /* 10 lookups (19 GiB with the folded copies) at most */
 #endif
 #ifndef QSB_CPU_LMIN
 #define QSB_CPU_LMIN 10
 #endif
 
 #include <sys/mman.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <string>
 #include <time.h>
 namespace qcpu {
 static const int NWMAX = 16;
-/* Memory probe (see mem_probe below). The co-grinder re-executes this binary with QSB_CPU_PROBE_MB set; this static
- * initializer then runs before main(), touches no CUDA state, takes the highest OOM score, faults in that many MiB and
- * exits. If a memory limit the process cannot see is below that, only this child is killed. */
-static const int g_probe_child = [] {
-    const char *e = getenv("QSB_CPU_PROBE_MB");
-    if (!e) return 0;
-    if (FILE *f = fopen("/proc/self/oom_score_adj", "w")) { fputs("1000", f); fclose(f); }
-    const size_t n = (size_t)atoll(e) << 20;
-    void *m = n ? mmap(nullptr, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) : MAP_FAILED;
-    if (m == MAP_FAILED) _exit(3);
-#ifdef MADV_HUGEPAGE
-    madvise(m, n, MADV_HUGEPAGE);
-#endif
-    const char *kf = getenv("QSB_CPU_PROBE_SELFKILL");                /* dev: behave like an OOM kill halfway */
-    for (size_t o = 0; o < n; o += 4096) { ((volatile char *)m)[o] = 1; if (kf && o == (n / 2 & ~(size_t)4095)) raise(SIGKILL); }
-    _exit(0);
-}();
 #ifdef CPU_SET
 /* The process's CPU set as it was before main(): a GPU host path may pin the main thread to one core
  * later, and the co-grinder must size and place itself from the whole set, not from that core. */
@@ -174,6 +169,17 @@ static void fe_inv(fe &r, const fe &a) {               /* a^(p-2) */
     }
     r = acc;
 }
+/* Host-only: scalar inversion from the eligible completed 97f347a8 route.
+ * Pinning cc75e3b's cross-lane batch tree is the structural reference. */
+#ifndef QSB_CPU_SCALAR_INV
+#define QSB_CPU_SCALAR_INV 1
+#endif
+#if QSB_CPU_SCALAR_INV
+#include "CpuSafegcd.h"
+#endif
+#ifndef QSB_CPU_SCA_SINGLE_READ
+#define QSB_CPU_SCA_SINGLE_READ 1
+#endif
 static void fe_from_le32(fe &r, const uint8_t b[32]) {
     for (int i = 0; i < 4; i++) { uint64_t w = 0; for (int k = 7; k >= 0; k--) w = (w << 8) | b[i * 8 + k]; r.v[i] = w; }
 }
@@ -375,25 +381,29 @@ static void f52_inv(fe52 &x) {                              /* x^(p-2), libsecp2
 static void f52_inv4(fe52 *x) {                             /* four chain products, one exponentiation */
     fe52 a01, a23, a, i01, i23;
     f52_mul(a01, x[0], x[1]); f52_mul(a23, x[2], x[3]); f52_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe ca, ia; f52_words(ca.v, a); fe_inv_var(ia, ca); f52_from(a, ia);
+#else
     f52_inv(a);
+#endif
     f52_mul(i01, a, a23); f52_mul(i23, a, a01);
     const fe52 x0 = x[0], x2 = x[2];
     f52_mul(x[0], i01, x[1]); f52_mul(x[1], i01, x0);
     f52_mul(x[2], i23, x[3]); f52_mul(x[3], i23, x2);
 }
-struct ScaBuf { fe52 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
+struct ScaBuf { fe52 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
 static bool scabuf_alloc(ScaBuf &v, int B) {
-    void *q[7] = {nullptr};
-    const size_t sz[7] = {sizeof(fe52) * B, sizeof(fe52) * B, sizeof(fe52) * 2 * B, sizeof(fe52) * 2 * B, sizeof(fe) * 2 * (size_t)B, 2 * (size_t)B, (size_t)B};
-    for (int i = 0; i < 7; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
-    v.X = (fe52 *)q[0]; v.Y = (fe52 *)q[1]; v.D = (fe52 *)q[2]; v.P = (fe52 *)q[3]; v.qx = (fe *)q[4]; v.qp = (uint8_t *)q[5]; v.bad = (uint8_t *)q[6];
+    void *q[8] = {nullptr};
+    const size_t sz[8] = {sizeof(fe52) * B, sizeof(fe52) * B, sizeof(fe52) * 2 * B, sizeof(fe52) * 2 * B, sizeof(fe) * 2 * (size_t)B, 2 * (size_t)B, (size_t)B, QSB_CPU_SCA_SINGLE_READ ? sizeof(fe52) * 2 * B : 64};
+    for (int i = 0; i < 8; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
+    v.X = (fe52 *)q[0]; v.Y = (fe52 *)q[1]; v.D = (fe52 *)q[2]; v.P = (fe52 *)q[3]; v.qx = (fe *)q[4]; v.qp = (uint8_t *)q[5]; v.bad = (uint8_t *)q[6]; v.TY = (fe52 *)q[7];
     return true;
 }
 /* Batch-affine additions Q_e = X[k(e)] + R_e over the elements e < E whose candidate is not bad;
  * rowfn(e, &neg) gives R_e's table row (y negated when neg). Four chains (e & 3) share one inversion.
  * out(e, lam, x3, y3...) is handled by the caller through the two modes below. */
 template <class RowFn, class Out>
-static void sca_add(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, int E, int kshift, const uint8_t *bad, RowFn rowfn, Out out) {
+static void sca_add_reread(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, int E, int kshift, const uint8_t *bad, RowFn rowfn, Out out) {
     /* E % 4 == 0 (the batch size is a multiple of 8) */
     fe52 run[4]; for (int c = 0; c < 4; c++) { memset(&run[c], 0, sizeof(fe52)); run[c].n[0] = 1; }
     for (int e = 0; e < E; e++) {
@@ -421,6 +431,53 @@ static void sca_add(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, int E, int
         for (int c = 0; c < 4; c++) if (ok[c]) { f52_sub(t[c], X[kk[c]], x3[c]); f52_mul(t[c], lam[c], t[c]); f52_sub(t[c], t[c], Y[kk[c]]); f52_nweak(t[c]); }
         for (int c = 0; c < 4; c++) if (ok[c]) out(e0 + c, kk[c], x3[c], t[c]);
     }
+}
+
+/* Scalar twin of the vector single-read addition: D=rx-X and TY=sign*ry-Y
+ * survive the forward pass, so the backward pass never asks rowfn for a point.
+ * x3=lambda^2-D-2X combines its three subtractions in one limb pass. */
+template <class RowFn, class Out>
+static void sca_add(const fe52 *X, const fe52 *Y, fe52 *D, fe52 *PRE, fe52 *TY,
+                    int E, int kshift, const uint8_t *bad, RowFn rowfn, Out out) {
+#if QSB_CPU_SCA_SINGLE_READ
+    const uint64_t pp[5] = {0xFFFFEFFFFFC2FULL, 0xFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFULL,
+                            0xFFFFFFFFFFFFFULL, 0x0FFFFFFFFFFFFULL};
+    fe52 run[4]; for (int c = 0; c < 4; c++) { memset(&run[c], 0, sizeof(fe52)); run[c].n[0] = 1; }
+    for (int e = 0; e < E; e++) {
+        const int k = e >> kshift; if (bad[k]) continue;
+        if (e + 16 < E) { bool ng; __builtin_prefetch(rowfn(e + 16, ng)); }
+        bool ng; const pt *r = rowfn(e, ng); fe52 rx, ry;
+        f52_from(rx, r->x); f52_from(ry, r->y);
+        f52_sub(D[e], rx, X[k]); f52_nweak(D[e]);
+        for (int j = 0; j < 5; j++)
+            TY[e].n[j] = 8 * pp[j] - Y[k].n[j] + (ng ? 0 : ry.n[j]) - (ng ? ry.n[j] : 0);
+        f52_nweak(TY[e]);
+        PRE[e] = run[e & 3]; f52_mul(run[e & 3], run[e & 3], D[e]);
+    }
+    f52_inv4(run);
+    for (int e0 = E - 4; e0 >= 0; e0 -= 4) {
+        fe52 dinv[4], lam[4], x3[4], t[4]; int kk[4]; bool ok[4];
+        for (int c = 3; c >= 0; c--) {
+            const int e = e0 + c; kk[c] = e >> kshift; ok[c] = !bad[kk[c]];
+            if (!ok[c]) continue;
+            f52_mul(dinv[c], run[c], PRE[e]); f52_mul(run[c], run[c], D[e]);
+        }
+        for (int c = 0; c < 4; c++) if (ok[c]) f52_mul(lam[c], TY[e0 + c], dinv[c]);
+        for (int c = 0; c < 4; c++) if (ok[c]) {
+            f52_sqr(x3[c], lam[c]);
+            for (int j = 0; j < 5; j++)
+                x3[c].n[j] += 12 * pp[j] - D[e0 + c].n[j] - 2 * X[kk[c]].n[j];
+            f52_nweak(x3[c]);
+        }
+        for (int c = 0; c < 4; c++) if (ok[c]) {
+            f52_sub(t[c], X[kk[c]], x3[c]); f52_mul(t[c], lam[c], t[c]);
+            f52_sub(t[c], t[c], Y[kk[c]]); f52_nweak(t[c]);
+        }
+        for (int c = 0; c < 4; c++) if (ok[c]) out(e0 + c, kk[c], x3[c], t[c]);
+    }
+#else
+    sca_add_reread(X, Y, D, PRE, E, kshift, bad, rowfn, out);
+#endif
 }
 
 
@@ -569,104 +626,6 @@ void fe8_sub3(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
         r.l[i] = _mm512_sub_epi64(_mm512_add_epi64(a.l[i], Pl[i]), _mm512_add_epi64(b.l[i], _mm512_add_epi64(c.l[i], c.l[i])));
     fe8_carry(r);
 }
-/* Carry chain without the fold of limb 4's bits >= 48: limbs 0..3 end < 2^52 and limb 4 stays below 2^52
- * (it enters below 2^51.3 here). Enough for values that only feed multiplications (IFMA reads 52 bits per
- * limb, and fe8_red's column bounds depend only on the limbs being < 2^52), not for canonicalization. */
-static inline __attribute__((target("avx512f,avx512ifma")))
-void fe8_carry_m(fe8 &r) {
-    const __m512i M = F8_M52;
-    __m512i c;
-    c = _mm512_srli_epi64(r.l[0], 52); r.l[0] = _mm512_and_si512(r.l[0], M); r.l[1] = _mm512_add_epi64(r.l[1], c);
-    c = _mm512_srli_epi64(r.l[1], 52); r.l[1] = _mm512_and_si512(r.l[1], M); r.l[2] = _mm512_add_epi64(r.l[2], c);
-    c = _mm512_srli_epi64(r.l[2], 52); r.l[2] = _mm512_and_si512(r.l[2], M); r.l[3] = _mm512_add_epi64(r.l[3], c);
-    c = _mm512_srli_epi64(r.l[3], 52); r.l[3] = _mm512_and_si512(r.l[3], M); r.l[4] = _mm512_add_epi64(r.l[4], c);
-}
-/* r = a - b (inputs normalized) for multiplication inputs only: a + 4p - b, fe8_carry_m (limb 4 < 2^50.2) */
-static inline __attribute__((target("avx512f,avx512ifma")))
-void fe8_sub_m(fe8 &r, const fe8 &a, const fe8 &b) {
-    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
-                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
-    r.l[0] = _mm512_sub_epi64(_mm512_add_epi64(a.l[0], P0), b.l[0]);
-    r.l[1] = _mm512_sub_epi64(_mm512_add_epi64(a.l[1], P1), b.l[1]);
-    r.l[2] = _mm512_sub_epi64(_mm512_add_epi64(a.l[2], P1), b.l[2]);
-    r.l[3] = _mm512_sub_epi64(_mm512_add_epi64(a.l[3], P1), b.l[3]);
-    r.l[4] = _mm512_sub_epi64(_mm512_add_epi64(a.l[4], P4), b.l[4]);
-    fe8_carry_m(r);
-}
-/* r = a*b - s (a, b, s normalized) with one reduction: the product columns 0..4 start at 4p - s instead
- * of zero (every limb of 4p exceeds a normalized limb, so they stay non-negative and below 2^54; column 4
- * ends below 13 * 2^52 < 2^57), which replaces a separate subtraction and its carry pass. */
-static inline __attribute__((target("avx512f,avx512ifma")))
-void fe8_mul_sub(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &s) {
-#define LO(acc, x, y) acc = _mm512_madd52lo_epu64(acc, x, y)
-#define HI(acc, x, y) acc = _mm512_madd52hi_epu64(acc, x, y)
-    const __m512i Z = _mm512_setzero_si512();
-    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
-                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
-    __m512i c0 = _mm512_sub_epi64(P0, s.l[0]), c1 = _mm512_sub_epi64(P1, s.l[1]), c2 = _mm512_sub_epi64(P1, s.l[2]),
-            c3 = _mm512_sub_epi64(P1, s.l[3]), c4 = _mm512_sub_epi64(P4, s.l[4]), c5 = Z, c6 = Z, c7 = Z, c8 = Z, c9 = Z;
-    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
-    const __m512i b0 = b.l[0], b1 = b.l[1], b2 = b.l[2], b3 = b.l[3], b4 = b.l[4];
-    LO(c0,a0,b0); HI(c1,a0,b0);
-    LO(c1,a0,b1); LO(c1,a1,b0); HI(c2,a0,b1); HI(c2,a1,b0);
-    LO(c2,a0,b2); LO(c2,a1,b1); LO(c2,a2,b0); HI(c3,a0,b2); HI(c3,a1,b1); HI(c3,a2,b0);
-    LO(c3,a0,b3); LO(c3,a1,b2); LO(c3,a2,b1); LO(c3,a3,b0); HI(c4,a0,b3); HI(c4,a1,b2); HI(c4,a2,b1); HI(c4,a3,b0);
-    LO(c4,a0,b4); LO(c4,a1,b3); LO(c4,a2,b2); LO(c4,a3,b1); LO(c4,a4,b0);
-    HI(c5,a0,b4); HI(c5,a1,b3); HI(c5,a2,b2); HI(c5,a3,b1); HI(c5,a4,b0);
-    LO(c5,a1,b4); LO(c5,a2,b3); LO(c5,a3,b2); LO(c5,a4,b1); HI(c6,a1,b4); HI(c6,a2,b3); HI(c6,a3,b2); HI(c6,a4,b1);
-    LO(c6,a2,b4); LO(c6,a3,b3); LO(c6,a4,b2); HI(c7,a2,b4); HI(c7,a3,b3); HI(c7,a4,b2);
-    LO(c7,a3,b4); LO(c7,a4,b3); HI(c8,a3,b4); HI(c8,a4,b3);
-    LO(c8,a4,b4); HI(c9,a4,b4);
-    fe8_red(r, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9);
-}
-/* r = a^2 - d - 2x (a, x normalized; d normalized or from fe8_sub_m, limb 4 < 2^50.2) with one reduction:
- * 12p - d - 2x (limbs non-negative: d4 + 2x4 < 2^51.1 < 12p4; all below 2^55.6)
- * is added to the square's columns 0..4 (which then stay below 2^56.4 < 2^57), replacing fe8_sub3's
- * separate subtraction and carry pass. */
-static inline __attribute__((target("avx512f,avx512ifma")))
-void fe8_sqr_sub3(fe8 &r, const fe8 &a, const fe8 &d, const fe8 &x) {
-    const __m512i Z = _mm512_setzero_si512();
-    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 12), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 12),
-                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 12);
-    __m512i x1 = Z, x2 = Z, x3 = Z, x4 = Z, x5 = Z, x6 = Z, x7 = Z, x8 = Z;
-    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
-    LO(x1,a0,a1); HI(x2,a0,a1);
-    LO(x2,a0,a2); HI(x3,a0,a2);
-    LO(x3,a0,a3); LO(x3,a1,a2); HI(x4,a0,a3); HI(x4,a1,a2);
-    LO(x4,a0,a4); LO(x4,a1,a3); HI(x5,a0,a4); HI(x5,a1,a3);
-    LO(x5,a1,a4); LO(x5,a2,a3); HI(x6,a1,a4); HI(x6,a2,a3);
-    LO(x6,a2,a4); HI(x7,a2,a4);
-    LO(x7,a3,a4); HI(x8,a3,a4);
-    __m512i s0 = _mm512_sub_epi64(P0, _mm512_add_epi64(d.l[0], _mm512_add_epi64(x.l[0], x.l[0]))),
-            s1 = _mm512_sub_epi64(P1, _mm512_add_epi64(d.l[1], _mm512_add_epi64(x.l[1], x.l[1]))),
-            s2 = _mm512_sub_epi64(P1, _mm512_add_epi64(d.l[2], _mm512_add_epi64(x.l[2], x.l[2]))),
-            s3 = _mm512_sub_epi64(P1, _mm512_add_epi64(d.l[3], _mm512_add_epi64(x.l[3], x.l[3]))),
-            s4 = _mm512_sub_epi64(P4, _mm512_add_epi64(d.l[4], _mm512_add_epi64(x.l[4], x.l[4])));
-    __m512i c0 = s0, c1 = _mm512_add_epi64(_mm512_slli_epi64(x1, 1), s1), c2 = _mm512_add_epi64(_mm512_slli_epi64(x2, 1), s2),
-            c3 = _mm512_add_epi64(_mm512_slli_epi64(x3, 1), s3), c4 = _mm512_add_epi64(_mm512_slli_epi64(x4, 1), s4),
-            c5 = _mm512_slli_epi64(x5, 1), c6 = _mm512_slli_epi64(x6, 1), c7 = _mm512_slli_epi64(x7, 1), c8 = _mm512_slli_epi64(x8, 1), c9 = Z;
-    LO(c0,a0,a0); HI(c1,a0,a0);
-    LO(c2,a1,a1); HI(c3,a1,a1);
-    LO(c4,a2,a2); HI(c5,a2,a2);
-    LO(c6,a3,a3); HI(c7,a3,a3);
-    LO(c8,a4,a4); HI(c9,a4,a4);
-    fe8_red(r, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9);
-#undef LO
-#undef HI
-}
-/* r = (m ? -t : t) - y (t, y normalized) with one carry pass: 8p + t - y, or 8p - t - y in the lanes of m
- * (8p's limbs exceed the sum of two normalized limbs, so every limb stays non-negative and below 2^55.2).
- * Replaces fe8_cneg followed by fe8_sub for the signed table rows. Output: limbs 0..3 < 2^52, limb 4 < 2^51.3
- * (multiplication input only). */
-static inline __attribute__((target("avx512f,avx512ifma")))
-void fe8_sub_sgn(fe8 &r, const fe8 &t, const fe8 &y, __mmask8 m) {
-    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 8), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 8),
-                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 8);
-    const __m512i Pl[5] = {P0, P1, P1, P1, P4};
-    for (int i = 0; i < 5; i++)
-        r.l[i] = _mm512_sub_epi64(_mm512_mask_sub_epi64(_mm512_add_epi64(Pl[i], t.l[i]), m, Pl[i], t.l[i]), y.l[i]);
-    fe8_carry_m(r);                                    /* the result only feeds a multiplication (limb 4 < 2^51.3) */
-}
 static inline __attribute__((target("avx512f,avx512ifma")))
 void fe8_mov(fe8 &r, const fe8 &a) {                 /* explicit vector copy (a struct copy became rep movsq) */
     for (int i = 0; i < 5; i++) _mm512_store_si512((void *)&r.l[i], _mm512_load_si512((const void *)&a.l[i]));
@@ -804,34 +763,61 @@ Q8T static void fe8_inv1(fe8 &x) {
 /* Invert the 4 interleaved chain products with ONE exponentiation (Montgomery's trick across the
  * chains: 3 + 6 extra multiplications). The chain is latency-bound either way, so this replaces
  * 4 x 270 multiplications of issue slots by 279. */
+#if QSB_CPU_SCALAR_INV
+Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
+Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
+Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
+Q8T static void fe8_inv_lanes(fe8 &x) {
+    /* Preserve the old lane-wise zero behaviour: a zero chain must not
+     * poison any of the other seven lanes of the new horizontal tree. */
+    __m512i cw[4]; fe8_canon_words(cw, x);
+    const __m512i nz = _mm512_or_si512(_mm512_or_si512(cw[0], cw[1]),
+                                      _mm512_or_si512(cw[2], cw[3]));
+    const __mmask8 zero = _mm512_cmpeq_epi64_mask(nz, _mm512_setzero_si512());
+    for (int i = 0; i < 5; i++) x.l[i] = _mm512_mask_mov_epi64(x.l[i], zero, _mm512_set1_epi64(i == 0 ? 1 : 0));
+    fe8 a1, p1, p2, t, i2;
+    fe8_swap1(a1, x); fe8_mul(p1, x, a1);                 /* lanes 2k, 2k+1: a_2k * a_2k+1 */
+    fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
+    fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
+    alignas(64) uint64_t w[4][8]; fe8_canon_words(cw, t);
+    for (int i = 0; i < 4; i++) _mm512_store_si512((void *)w[i], cw[i]);
+    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    fe8 I; fe8_bcast(I, pi);
+    fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
+    fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
+    fe8_mul(x, i2, a1);                                   /* 1/a_k */
+    for (int i = 0; i < 5; i++) x.l[i] = _mm512_mask_mov_epi64(x.l[i], zero, _mm512_setzero_si512());
+}
+#endif
 Q8T static void fe8_inv4(fe8 *x) {
     fe8 a01, a23, a, i01, i23;
     fe8_mul(a01, x[0], x[1]); fe8_mul(a23, x[2], x[3]); fe8_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe8_inv_lanes(a);
+#else
     fe8_inv1(a);
+#endif
     fe8_mul(i01, a, a23); fe8_mul(i23, a, a01);
     const fe8 x0 = x[0], x2 = x[2];
     fe8_mul(x[0], i01, x[1]); fe8_mul(x[1], i01, x0);
     fe8_mul(x[2], i23, x[3]); fe8_mul(x[3], i23, x2);
 }
-/* One batch-affine window step over G groups of 8 (G % 4 == 0): acc[g] += sign * T[|dig| - 1].
- * rp/ng hold this window's table rows (8 per group) and lane sign masks, filled and prefetched by the previous pass.
- * nxt(hn, &rows) fills the NEXT window's rows of group hn and returns how many to prefetch (8, 16 for the C-folded
- * last window, or 0): the backward pass calls it for group G-1-h, so the next forward pass finds its first groups
- * first, and prefetches half before and half after the group's two chain multiplications. The table misses then
- * spread over this long backward pass instead of bunching in the short forward pass (after terrapinelf's 97f347a8,
- * which measured ~11% of SMT-loaded time waiting on rows with the in-pass prefetch alone). The forward pass keeps a
- * short prefetch pf groups ahead as a backstop. The forward pass keeps D = tx - X and the signed TY = +-ty - Y,
- * so the backward pass never re-reads the table: x3 = lam^2 - D - 2X (after Meganpark980320's bb2a3eb7). */
-template <class NxtFn>
-Q8T static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, int pf, const pt *const *rp, const __mmask8 *ng, NxtFn &nxt) {
+/* One batch-affine window step over G groups of 8 (G % 4 == 0): acc[g] += T[dig-1].
+ * rows(g, j) gives the table row for lane j of group g (never a digit-0 row) and returns the lanes whose
+ * y is negated. The forward pass keeps tx - X (D) and the signed ty - Y (TY), so the backward pass never
+ * re-reads the table: x3 = lam^2 - D - 2X (after Meganpark980320's bb2a3eb7). */
+template <class RowFn>
+Q8T static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, RowFn rowfn) {
     fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
+    const pt *rows[8];
     for (int g = 0; g < G; g += 4) {
         for (int c = 0; c < 4; c++) {
             const int h = g + c;
-            if (h + pf < G) { const pt *const *pr = rp + (size_t)(h + pf) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
-            fe8 tx, ty; pt8_load(tx, ty, rp + (size_t)h * 8);
-            fe8_sub_m(D[h], tx, X[h]);
-            fe8_sub_sgn(TY[h], ty, Y[h], ng[h]);
+            if (h + QSB_CPU_PF < G) { const pt *pr[8]; rowfn(h + QSB_CPU_PF, pr); for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            const __mmask8 ng = rowfn(h, rows);
+            fe8 tx, ty; pt8_load(tx, ty, rows); fe8_cneg(ty, ng);
+            fe8_sub(D[h], tx, X[h]);
+            fe8_sub(TY[h], ty, Y[h]);
             fe8_mov(PRE[h], run[c]);
             fe8_mul(run[c], run[c], D[h]);
         }
@@ -841,14 +827,11 @@ Q8T static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, int
         fe8 dinv[4], lam[4], t[4], x3[4];
         for (int c = 3; c >= 0; c--) {
             const int h = g + c;
-            const pt *const *npr = nullptr; const int nn = nxt(G - 1 - h, &npr);
-            for (int j = 0; j < nn / 2; j++) _mm_prefetch((const char *)npr[j], _MM_HINT_T0);
             fe8_mul(dinv[c], run[c], PRE[h]); fe8_mul(run[c], run[c], D[h]);
-            for (int j = nn / 2; j < nn; j++) _mm_prefetch((const char *)npr[j], _MM_HINT_T0);
         }
         for (int c = 0; c < 4; c++) fe8_mul(lam[c], TY[g + c], dinv[c]);
-        for (int c = 0; c < 4; c++) fe8_sqr_sub3(x3[c], lam[c], D[g + c], X[g + c]);
-        for (int c = 0; c < 4; c++) { fe8_sub_m(t[c], X[g + c], x3[c]); fe8_mul_sub(Y[g + c], lam[c], t[c], Y[g + c]); fe8_mov(X[g + c], x3[c]); }
+        for (int c = 0; c < 4; c++) { fe8_sqr(x3[c], lam[c]); fe8_sub3(x3[c], x3[c], D[g + c], X[g + c]); }
+        for (int c = 0; c < 4; c++) { fe8_sub(t[c], X[g + c], x3[c]); fe8_mul(t[c], lam[c], t[c]); fe8_sub(Y[g + c], t[c], Y[g + c]); fe8_mov(X[g + c], x3[c]); }
     }
 }
 /* Final step for both recovery ids: Q_ri = C_ri + acc, C_1 = -C_0. Writes the canonical x and the
@@ -888,17 +871,20 @@ Q8T static void ec8_final(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, c
  * from the precomputed tables T+C and T-C (for s < 0: R_0 = -(T-C)[a], R_1 = -(T+C)[a]). Both
  * recids go through one batch inversion (element e = 2h + ri). rowfn(h, ri, rows) gives the rows
  * and returns the lanes whose y is negated. Writes the canonical x and the y parity. */
-Q8T static void ec8_final_fold(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, int pf, const pt *const *rp, const __mmask8 *ngv,
+template <class RowFn2>
+Q8T static void ec8_final_fold(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, RowFn2 rowfn,
                                fe *qx /* [G*8][2] */, uint8_t *qp) {
     fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
-    const int E = 2 * G;                                 /* element e = 2 h + ri: rows rp[8 e ..], filled by the previous pass */
+    const pt *rows[8];
+    const int E = 2 * G;
     for (int e0 = 0; e0 < E; e0 += 4) {
         for (int c = 0; c < 4; c++) {
-            const int e = e0 + c, h = e >> 1;
-            if (e + 2 * pf < E) { const pt *const *pr = rp + (size_t)(e + 2 * pf) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
-            fe8 rx, ry; pt8_load(rx, ry, rp + (size_t)e * 8);
-            fe8_sub_m(D[e], rx, X[h]);
-            fe8_sub_sgn(TY[e], ry, Y[h], ngv[e]);
+            const int e = e0 + c, h = e >> 1, ri = e & 1;
+            if (e + 2 * QSB_CPU_PF < E) { const int f = e + 2 * QSB_CPU_PF; const pt *pr[8]; rowfn(f >> 1, f & 1, pr); for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            const __mmask8 ng = rowfn(h, ri, rows);
+            fe8 rx, ry; pt8_load(rx, ry, rows); fe8_cneg(ry, ng);
+            fe8_sub(D[e], rx, X[h]);
+            fe8_sub(TY[e], ry, Y[h]);
             fe8_mov(PRE[e], run[c]);
             fe8_mul(run[c], run[c], D[e]);
         }
@@ -910,8 +896,8 @@ Q8T static void ec8_final_fold(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, fe8
             fe8 dinv; fe8_mul(dinv, run[c], PRE[e]); fe8_mul(run[c], run[c], D[e]);
             fe8 t, lam, x3, y3;
             fe8_mul(lam, TY[e], dinv);
-            fe8_sqr_sub3(x3, lam, D[e], X[h]);
-            fe8_sub_m(t, X[h], x3); fe8_mul_sub(y3, lam, t, Y[h]);
+            fe8_sqr(x3, lam); fe8_sub3(x3, x3, D[e], X[h]);
+            fe8_sub(t, X[h], x3); fe8_mul(y3, lam, t); fe8_sub(y3, y3, Y[h]);
             __m512i xw[4], yw[4]; fe8_canon_words(xw, x3); fe8_canon_words(yw, y3);
             alignas(64) uint64_t XW[4][8], YP[8];
             for (int i = 0; i < 4; i++) _mm512_store_si512(XW[i], xw[i]);
@@ -925,15 +911,53 @@ Q8T static void ec8_final_fold(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, fe8
     }
 }
 /* Window 0: acc = T0[d0 - 1] (digit-0 lanes load row 0 and are dropped by the caller). */
-template <class RowFn, class NxtFn>
-Q8T static void ec8_first(fe8 *X, fe8 *Y, int G, int pf, RowFn rowfn, NxtFn &nxt) {
+template <class RowFn>
+Q8T static void ec8_first(fe8 *X, fe8 *Y, int G, RowFn rowfn) {
     const pt *rows[8];
     for (int h = 0; h < G; h++) {
-        if (h + pf < G) { const pt *pr[8]; rowfn(h + pf, pr); for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+        if (h + QSB_CPU_PF < G) { const pt *pr[8]; rowfn(h + QSB_CPU_PF, pr); for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
         const __mmask8 ng = rowfn(h, rows); pt8_load(X[h], Y[h], rows); fe8_cneg(Y[h], ng);
-        const pt *const *npr = nullptr; const int nn = nxt(h, &npr);   /* window 1's rows, in its forward order */
-        for (int j = 0; j < nn; j++) _mm_prefetch((const char *)npr[j], _MM_HINT_T0);
     }
+}
+/* Table builder, 8 lanes: out[k] = in[k] + Q for k < n (n % 32 == 0), batch-affine with four
+ * interleaved inversion chains; canonical 4x64 output rows. A lane with in[k].x == Q.x is left to the
+ * caller (flag[k] = 1; its output row is not written). Buffers: 4 arrays of n/8 fe8. */
+Q8T static void vadd_fixed(pt *out, const pt *in, size_t n, const pt &Q, fe8 *D, fe8 *PRE, fe8 *PX, fe8 *PY, uint8_t *flag) {
+    const int G = (int)(n / 8);
+    fe8 QX, QY; fe8_bcast(QX, Q.x); fe8_bcast(QY, Q.y);
+    fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
+    const pt *rows[8];
+    for (int g = 0; g < G; g += 4)
+        for (int c = 0; c < 4; c++) {
+            const int h = g + c; unsigned eq = 0;
+            for (int j = 0; j < 8; j++) { rows[j] = &in[(size_t)h * 8 + j]; const bool e = fe_eq(rows[j]->x, Q.x); flag[h * 8 + j] = e; eq |= (unsigned)e << j; }
+            pt8_load(PX[h], PY[h], rows);
+            fe8_sub(D[h], QX, PX[h]);
+            if (eq) {                                   /* keep the chain product nonzero: D = 1 there */
+                D[h].l[0] = _mm512_mask_mov_epi64(D[h].l[0], (__mmask8)eq, _mm512_set1_epi64(1));
+                for (int i = 1; i < 5; i++) D[h].l[i] = _mm512_mask_mov_epi64(D[h].l[i], (__mmask8)eq, _mm512_setzero_si512());
+            }
+            fe8_mov(PRE[h], run[c]);
+            fe8_mul(run[c], run[c], D[h]);
+        }
+    fe8_inv4(run);
+    for (int g = G - 4; g >= 0; g -= 4)
+        for (int c = 3; c >= 0; c--) {
+            const int h = g + c;
+            fe8 dinv, t, lam, x3, y3;
+            fe8_mul(dinv, run[c], PRE[h]); fe8_mul(run[c], run[c], D[h]);
+            fe8_sub(t, QY, PY[h]); fe8_mul(lam, t, dinv);
+            fe8_sqr(x3, lam); fe8_sub2(x3, x3, PX[h], QX);
+            fe8_sub(t, PX[h], x3); fe8_mul(y3, lam, t); fe8_sub(y3, y3, PY[h]);
+            __m512i xw[4], yw[4]; fe8_canon_words(xw, x3); fe8_canon_words(yw, y3);
+            alignas(64) uint64_t XW[4][8], YW[4][8];
+            for (int i = 0; i < 4; i++) { _mm512_store_si512(XW[i], xw[i]); _mm512_store_si512(YW[i], yw[i]); }
+            for (int j = 0; j < 8; j++) {
+                if (flag[h * 8 + j]) continue;
+                pt &o = out[(size_t)h * 8 + j];
+                for (int i = 0; i < 4; i++) { o.x.v[i] = XW[i][j]; o.y.v[i] = YW[i][j]; }
+            }
+        }
 }
 #endif  /* QCPU_VEC */
 
@@ -1067,6 +1091,36 @@ QSHA static void qsha_x4_run(uint32_t (*st)[8], const uint32_t *const *wk, int n
     } \
     s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d); \
     s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h); } while (0)
+/* Two independent 16-lane streams per round (more independent work in flight). */
+#define SHA16_BODY2(WKA, WKB2) do { \
+    __m512i a = s[0], b = s[1], c = s[2], d = s[3], e = s[4], f = s[5], g = s[6], h = s[7]; \
+    __m512i a2 = u[0], b2 = u[1], c2 = u[2], d2 = u[3], e2 = u[4], f2 = u[5], g2 = u[6], h2 = u[7]; \
+    for (int t = 0; t < 64; t += 8) { \
+        SHA16_ROUND(a, b, c, d, e, f, g, h, WKA(t + 0)); SHA16_ROUND(a2, b2, c2, d2, e2, f2, g2, h2, WKB2(t + 0)); \
+        SHA16_ROUND(h, a, b, c, d, e, f, g, WKA(t + 1)); SHA16_ROUND(h2, a2, b2, c2, d2, e2, f2, g2, WKB2(t + 1)); \
+        SHA16_ROUND(g, h, a, b, c, d, e, f, WKA(t + 2)); SHA16_ROUND(g2, h2, a2, b2, c2, d2, e2, f2, WKB2(t + 2)); \
+        SHA16_ROUND(f, g, h, a, b, c, d, e, WKA(t + 3)); SHA16_ROUND(f2, g2, h2, a2, b2, c2, d2, e2, WKB2(t + 3)); \
+        SHA16_ROUND(e, f, g, h, a, b, c, d, WKA(t + 4)); SHA16_ROUND(e2, f2, g2, h2, a2, b2, c2, d2, WKB2(t + 4)); \
+        SHA16_ROUND(d, e, f, g, h, a, b, c, WKA(t + 5)); SHA16_ROUND(d2, e2, f2, g2, h2, a2, b2, c2, WKB2(t + 5)); \
+        SHA16_ROUND(c, d, e, f, g, h, a, b, WKA(t + 6)); SHA16_ROUND(c2, d2, e2, f2, g2, h2, a2, b2, WKB2(t + 6)); \
+        SHA16_ROUND(b, c, d, e, f, g, h, a, WKA(t + 7)); SHA16_ROUND(b2, c2, d2, e2, f2, g2, h2, a2, WKB2(t + 7)); \
+    } \
+    s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d); \
+    s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h); \
+    u[0] = _mm512_add_epi32(u[0], a2); u[1] = _mm512_add_epi32(u[1], b2); u[2] = _mm512_add_epi32(u[2], c2); u[3] = _mm512_add_epi32(u[3], d2); \
+    u[4] = _mm512_add_epi32(u[4], e2); u[5] = _mm512_add_epi32(u[5], f2); u[6] = _mm512_add_epi32(u[6], g2); u[7] = _mm512_add_epi32(u[7], h2); } while (0)
+S16T static void sha16x2_bcast(__m512i s[8], __m512i u[8], const uint32_t *wk) {
+#define WKB(t) _mm512_set1_epi32((int)wk[t])
+    SHA16_BODY2(WKB, WKB);
+#undef WKB
+}
+S16T static void sha16x2_soa(__m512i s[8], __m512i u[8], const __m512i *wk, const __m512i *wk2) {
+#define WKS(t) _mm512_load_si512((const void *)&wk[t])
+#define WKS2(t) _mm512_load_si512((const void *)&wk2[t])
+    SHA16_BODY2(WKS, WKS2);
+#undef WKS
+#undef WKS2
+}
 S16T static void sha16_bcast(__m512i s[8], const uint32_t *wk) {        /* the same W+K for every lane */
 #define WKB(t) _mm512_set1_epi32((int)wk[t])
     SHA16_BODY(WKB);
@@ -1082,8 +1136,19 @@ S16T static void sha16_sched(__m512i *wk, const __m512i *w) {
     __m512i W[16];
 #pragma GCC unroll 16
     for (int i = 0; i < 16; i++) { W[i] = w[i]; _mm512_store_si512((void *)&wk[i], _mm512_add_epi32(W[i], _mm512_set1_epi32((int)qsha_k[i]))); }
-    /* fully unrolled: the ring indices become constants, so W stays in registers (the rolled loop kept W on the
-     * stack and spent 34 instructions per word instead of 13) */
+#pragma GCC unroll 48
+    for (int t = 16; t < 64; t++) {
+        const __m512i w15 = W[(t - 15) & 15], w2 = W[(t - 2) & 15];
+        const __m512i s0 = _mm512_ternarylogic_epi32(ROR16(w15, 7), ROR16(w15, 18), _mm512_srli_epi32(w15, 3), 0x96);
+        const __m512i s1 = _mm512_ternarylogic_epi32(ROR16(w2, 17), ROR16(w2, 19), _mm512_srli_epi32(w2, 10), 0x96);
+        W[t & 15] = _mm512_add_epi32(_mm512_add_epi32(W[t & 15], s0), _mm512_add_epi32(W[(t - 7) & 15], s1));
+        _mm512_store_si512((void *)&wk[t], _mm512_add_epi32(W[t & 15], _mm512_set1_epi32((int)qsha_k[t])));
+    }
+}
+static inline __attribute__((always_inline, target("avx512f"))) void sha16_sched_inl(__m512i *wk, const __m512i *w) {
+    __m512i W[16];
+#pragma GCC unroll 16
+    for (int i = 0; i < 16; i++) { W[i] = w[i]; _mm512_store_si512((void *)&wk[i], _mm512_add_epi32(W[i], _mm512_set1_epi32((int)qsha_k[i]))); }
 #pragma GCC unroll 48
     for (int t = 16; t < 64; t++) {
         const __m512i w15 = W[(t - 15) & 15], w2 = W[(t - 2) & 15];
@@ -1113,7 +1178,6 @@ struct Ctx {
     /* SMT hybrid: workers are pinned by core; in mode 1 the second thread of each core runs the scalar
      * (integer-multiplier) EC path next to the first thread's 8-lane IFMA path. Chosen at run time. */
     std::atomic<int> mode{0};
-    std::atomic<int> pf{QSB_CPU_PF};  /* table-row prefetch distance in 8-lane groups (calibrated: QSB_CPU_PF or 8) */
     int wcpu[512];                  /* logical CPU of worker t, or -1 (unpinned) */
     uint8_t wscalar[512];           /* 1: worker t runs the scalar path in mode 1 */
     bool hybrid_ok = false;
@@ -1123,8 +1187,6 @@ struct Ctx {
     cpu_set_t host_mask;            /* the GPU host thread's affinity, read when the workers are placed */
     bool host_mask_ok = false;
     pid_t host_tid = 0;             /* the GPU host thread (start() runs on it) */
-    int host_cpu = -1;              /* its CPU at start() when the host producers pinned it to one core (then the core's
-                                     * other CPU gets one more worker), else -1 */
 #endif
     size_t budget = 0;              /* table memory budget chosen at start-up */
     fe cx, cy;                      /* C = u2*R */
@@ -1163,36 +1225,14 @@ struct Ctx {
     uint32_t e16mask[16];                   /* per word: bits that come from the epoch bytes */
     uint32_t *p16 = nullptr;                /* [npc][nblk][64][16]: W+K of pattern-specific blocks (lane-transposed) */
     std::vector<uint8_t> blk_const;         /* per block after block 0: 1 when every pattern has the same W+K */
+    bool f16 = false;                       /* the fast 16-lane pipeline (worker16) */
+    std::atomic<int> pfn{0};                /* worker16: prefetch the next window's rows (calibrated on the host) */
 };
 
 static double now_s() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 /* Window layout for L lookups of signed digits: widths floor/ceil(257/L) (the wider ones first),
  * covering 257 bits so the top window absorbs the recoding carry; window i holds the 2^(w-1)
  * multiples 1..2^(w-1) of 2^sh[i] * A. */
-/* The window layout as compile-time functions of L (the same widths and offsets as layout() below), so the
- * per-candidate digit recoding can be specialized for each table size with constant shifts and masks. */
-static constexpr int win_w(int L, int i) { return 257 / L + (i < 257 % L ? 1 : 0); }
-static constexpr int win_s(int L, int i) { int s = 0; for (int j = 0; j < i; j++) s += win_w(L, j); return s; }
-/* Signed recoding of z (zl[0..3] little-endian, zl[4] = 0) into L digits, as the generic loop in worker_body:
- * d in (-2^(w-1), 2^(w-1)], stored as |d| | sign << 31; returns 1 when some digit is 0. */
-template <int L> static inline unsigned digits_L(uint32_t *dg, const uint64_t zl[5]) {
-    unsigned z = 0; uint32_t carry = 0;
-#pragma GCC unroll 16
-    for (int i = 0; i < L; i++) {
-        const int w = win_w(L, i), bit = win_s(L, i), li = bit >> 6, sh = bit & 63;
-        uint64_t v = zl[li] >> sh;
-        if (sh + w > 64) v |= zl[li + 1] << (64 - sh);
-        const uint32_t half = (uint32_t)1 << (w - 1), mask = ((uint32_t)1 << w) - 1;
-        const uint32_t d = ((uint32_t)v & mask) + carry;
-        if (i + 1 < L) {
-            const uint32_t m = 0u - (uint32_t)(d > half);
-            const uint32_t e = (d & ~m) | ((((half << 1) - d) | 0x80000000u) & m);
-            carry = m & 1;
-            dg[i] = e; z |= ((e & 0x7FFFFFFFu) == 0);
-        } else { dg[i] = d; z |= (d == 0); }                /* the top window's value never exceeds 2^(w-1) */
-    }
-    return z;
-}
 static size_t layout(int L, int *bits, int *sh, size_t *off, size_t *ent) {
     size_t tot = 0; int s = 0;
     for (int i = 0; i < L; i++) {
@@ -1207,9 +1247,6 @@ static long long read_ll(const char *path) {
     return v;
 }
 /* Bytes the table may take: a third of the smaller of MemAvailable and the cgroup headroom. */
-static long long g_avail = -1;     /* MemAvailable clamped by every visible cgroup limit (set by mem_budget) */
-static bool g_oom_group = false;   /* some visible cgroup kills its whole group on OOM (memory.oom.group = 1) */
-static bool g_thp_never = false;   /* transparent huge pages disabled */
 static size_t mem_budget() {
     long long avail = -1;
     if (FILE *f = fopen("/proc/meminfo", "r")) {
@@ -1235,8 +1272,7 @@ static size_t mem_budget() {
             const char *base = v2 ? "/sys/fs/cgroup" : "/sys/fs/cgroup/memory";
             for (;;) {                                   /* walk up to the mount root */
                 char dir[640]; snprintf(dir, sizeof dir, "%s%s", base, rel);
-                if (v2) { clamp(dir, "memory.max", "memory.current"); clamp(dir, "memory.high", "memory.current");
-                          char g[700]; snprintf(g, sizeof g, "%s/memory.oom.group", dir); if (read_ll(g) == 1) g_oom_group = true; }
+                if (v2) { clamp(dir, "memory.max", "memory.current"); clamp(dir, "memory.high", "memory.current"); }
                 else clamp(dir, "memory.limit_in_bytes", "memory.usage_in_bytes");
                 char *sl = strrchr(rel, '/'); if (!sl || sl == rel) { if (rel[0] && strcmp(rel, "/")) { rel[0] = 0; continue; } break; }
                 *sl = 0;
@@ -1246,46 +1282,19 @@ static size_t mem_budget() {
     }
     clamp("/sys/fs/cgroup", "memory.max", "memory.current");
     clamp("/sys/fs/cgroup/memory", "memory.limit_in_bytes", "memory.usage_in_bytes");
-    { char g[64] = "/sys/fs/cgroup/memory.oom.group"; if (read_ll(g) == 1) g_oom_group = true; }
-    g_avail = avail;
     if (avail <= 0) return 0;
     size_t b = (size_t)avail / 3, cap = (size_t)QSB_CPU_TABLE_CAP_MB << 20;
+    {   /* beyond 6 GiB (the 10-lookup table) the table may take only a quarter of what is available */
+        const size_t six = (size_t)6144 << 20, q = (size_t)avail / 4;
+        if (b > six) b = q > six ? q : six;
+    }
     if (FILE *f = fopen("/sys/kernel/mm/transparent_hugepage/enabled", "r")) {   /* no huge pages: 4 KiB pages make a huge table */
-        char t[128] = {0}; if (fgets(t, sizeof t, f) && strstr(t, "[never]")) { g_thp_never = true; if (cap > ((size_t)8192 << 20)) cap = (size_t)8192 << 20; }   /* slow to fault in and to free */
+        char t[128] = {0}; if (fgets(t, sizeof t, f) && strstr(t, "[never]") && cap > ((size_t)8192 << 20)) cap = (size_t)8192 << 20;   /* slow to fault in and to free */
         fclose(f);
     }
     if (const char *e = getenv("QSB_CPU_TABLE_MB")) cap = (size_t)atoll(e) << 20;   /* dev override */
     if (const char *e = getenv("QSB_CPU_BUDGET_MB")) return (size_t)atoll(e) << 20;  /* dev override: exact budget */
     return b < cap ? b : cap;
-}
-/* Can this process fault in `bytes` more without being OOM-killed? Spawns this binary as a sacrificial child (see
- * g_probe_child) and waits for it, at most 40 s. Any failure (spawn, kill, timeout) answers no. */
-static bool mem_probe(size_t bytes) {
-    char exe[4096]; const ssize_t k = readlink("/proc/self/exe", exe, sizeof exe - 1);
-    if (k <= 0) return false;
-    exe[k] = 0;
-    std::vector<std::string> env;
-    for (char **e = environ; e && *e; e++) if (strncmp(*e, "QSB_CPU_PROBE_MB=", 17)) env.push_back(*e);
-    env.push_back("QSB_CPU_PROBE_MB=" + std::to_string((unsigned long long)((bytes >> 20) + 256)));
-    std::vector<char *> envp; for (auto &x : env) envp.push_back((char *)x.c_str()); envp.push_back(nullptr);
-    char *argv[] = {exe, nullptr};
-    pid_t pid = 0;   /* the child inherits this (SCHED_IDLE) thread's policy; no worker runs yet, so the CPUs are free */
-    const int rc = posix_spawn(&pid, exe, nullptr, nullptr, argv, envp.data());
-    const bool dbg = getenv("QSB_CPU_PROBE_DEBUG") != nullptr;
-    if (dbg) fprintf(stderr, "probe: spawn rc %d pid %d exe %s\n", rc, (int)pid, exe);
-    if (rc != 0 || pid <= 0) return false;
-    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
-    int st = 0;
-    for (;;) {
-        const pid_t r = waitpid(pid, &st, WNOHANG);
-        if (r == pid) break;
-        if (r < 0) { if (dbg) fprintf(stderr, "probe: waitpid errno %d\n", errno); return false; }
-        struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
-        if ((t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9 > 40) { kill(pid, SIGKILL); waitpid(pid, &st, 0); return false; }
-        usleep(20000);
-    }
-    if (dbg) fprintf(stderr, "probe: status 0x%x exited %d code %d signaled %d sig %d\n", st, WIFEXITED(st), WEXITSTATUS(st), WIFSIGNALED(st), WTERMSIG(st));
-    return WIFEXITED(st) && WEXITSTATUS(st) == 0;
 }
 static pt *table_alloc(size_t bytes) {
     const size_t HP = (size_t)2 << 20, len = (bytes + HP - 1) / HP * HP + HP;
@@ -1297,26 +1306,35 @@ static pt *table_alloc(size_t bytes) {
 #endif
     return (pt *)a;
 }
+struct VBuild {                                         /* per-thread buffers of the 8-lane table builder */
+#if QCPU_VEC
+    fe8 *D = nullptr, *P = nullptr, *X = nullptr, *Y = nullptr;
+#else
+    void *D = nullptr, *P = nullptr, *X = nullptr, *Y = nullptr;
+#endif
+    uint8_t *flag = nullptr;
+    bool alloc(size_t n) {
+#if QCPU_VEC
+        void *q[5] = {nullptr};
+        const size_t sz[5] = {sizeof(fe8) * (n / 8), sizeof(fe8) * (n / 8), sizeof(fe8) * (n / 8), sizeof(fe8) * (n / 8), n};
+        for (int i = 0; i < 5; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
+        D = (fe8 *)q[0]; P = (fe8 *)q[1]; X = (fe8 *)q[2]; Y = (fe8 *)q[3]; flag = (uint8_t *)q[4];
+        return true;
+#else
+        (void)n; return false;
+#endif
+    }
+    VBuild() = default;
+    VBuild(const VBuild &) = delete;
+    VBuild &operator=(VBuild &&o) { std::swap(D, o.D); std::swap(P, o.P); std::swap(X, o.X); std::swap(Y, o.Y); std::swap(flag, o.flag); return *this; }
+    ~VBuild() { free(D); free(P); free(X); free(Y); free(flag); }
+};
 /* Choose the layout, allocate, and build T_i[j] = (j+1) * 2^sh[i] * A. All windows advance
  * together in doubling rounds (T[have+k] = T[k] + T[have-1]); each round's additions are split
  * into batches of <= 4096 that the threads take from a shared counter. */
 static bool build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
     size_t budget = mem_budget();
-    /* The 10-lookup table (19 GiB with the folded copies) only when memory is plentiful: at most a quarter of what is
-     * available under every visible limit, no visible cgroup that kills its whole group on OOM, and a sacrificial
-     * child has just faulted that much in without being killed. Otherwise the capped budget above (11 lookups). */
-    if (!getenv("QSB_CPU_TABLE_MB") && !getenv("QSB_CPU_BUDGET_MB") && !getenv("QSB_CPU_NOPROBE") && QSB_CPU_LMIN <= 10) {
-        int b[NWMAX], s[NWMAX]; size_t o[NWMAX], e[NWMAX];
-        const size_t t10 = layout(10, b, s, o, e), need = (t10 + 2 * e[9]) * sizeof(pt);
-        const bool test = getenv("QSB_CPU_PROBE_TEST") != nullptr;     /* dev: skip the 4x rule */
-        if (budget < need && g_avail > 0 && !g_oom_group && !g_thp_never && need <= ((size_t)24 << 30) &&
-            (test || (size_t)g_avail >= 4 * need)) {
-            const bool ok = mem_probe(need);
-            printf("  CPU co-grind: memory probe for %zu MiB (available %lld MiB): %s\n", need >> 20, g_avail >> 20, ok ? "passed" : "failed");
-            fflush(stdout);
-            if (ok) budget = need;
-        }
-    }
+    if (!c.vec && !getenv("QSB_CPU_BUDGET_MB") && budget > ((size_t)6144 << 20)) budget = (size_t)6144 << 20;   /* scalar builder: 11 lookups at most */
     c.budget = budget;
     int L = 16; size_t tot = 0;
     for (int l = QSB_CPU_LMIN; l <= 16; l++) {             /* the table plus the two C-folded copies of its last window */
@@ -1359,9 +1377,20 @@ static bool build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
             std::vector<fe> d(CH), pre(CH);
             std::vector<uint8_t> inf(CH), bad(CH);
             std::vector<const pt *> tp(CH);
+            VBuild vbd; if (c.vec && !getenv("QSB_CPU_NOVBUILD") && !vbd.alloc(CH)) vbd = VBuild();
             for (size_t q; (q = next.fetch_add(1)) < tasks.size();) {
                 const Task &t = tasks[q];
                 pt *T = c.table + c.woff[t.i];
+#if QCPU_VEC
+                if (vbd.D && t.n % 32 == 0) {               /* 8-lane builder */
+                    vadd_fixed(&T[have + t.k0], &T[t.k0], t.n, T[have - 1], vbd.D, vbd.P, vbd.X, vbd.Y, vbd.flag);
+                    for (size_t k = 0; k < t.n; k++) if (vbd.flag[k]) {
+                        const pt &a = T[t.k0 + k], &b = T[have - 1];
+                        T[have + t.k0 + k] = fe_eq(a.y, b.y) ? pt_double(b) : a;   /* as the scalar path: doubling, or left unchanged */
+                    }
+                    continue;
+                }
+#endif
                 for (size_t k = 0; k < t.n; k++) { T[have + t.k0 + k] = T[t.k0 + k]; tp[k] = &T[have - 1]; inf[k] = 0; bad[k] = 0; }
                 batch_add(&T[have + t.k0], tp.data(), inf.data(), bad.data(), (int)t.n, d.data(), pre.data());
                 /* k = have-1 adds T[have-1] to itself: equal x, so batch_add flags it; double it. */
@@ -1380,9 +1409,18 @@ static bool build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
         std::atomic<size_t> next{0}; const size_t nt = (nl + CH - 1) / CH;
         auto work = [&]() { try {
             std::vector<fe> d(CH), pre(CH); std::vector<uint8_t> inf(CH), bad(CH); std::vector<const pt *> tp(CH);
+            VBuild vbd; if (c.vec && !getenv("QSB_CPU_NOVBUILD") && !vbd.alloc(CH)) vbd = VBuild();
             for (size_t q; (q = next.fetch_add(1)) < 2 * nt;) {
                 const size_t k0 = (q % nt) * CH, n = nl - k0 < CH ? nl - k0 : CH; const int m = (int)(q / nt);
                 pt *O = c.cfold + (size_t)m * nl + k0;
+#if QCPU_VEC
+                if (vbd.D && n % 32 == 0) {
+                    const pt &Q = m ? cm : cp;
+                    vadd_fixed(O, &TL[k0], n, Q, vbd.D, vbd.P, vbd.X, vbd.Y, vbd.flag);
+                    for (size_t k = 0; k < n; k++) if (vbd.flag[k]) O[k] = TL[k0 + k];   /* x equal to C's (~2^-230): as the scalar path */
+                    continue;
+                }
+#endif
                 for (size_t k = 0; k < n; k++) { O[k] = TL[k0 + k]; tp[k] = m ? &cm : &cp; inf[k] = 0; bad[k] = 0; }
                 batch_add(O, tp.data(), inf.data(), bad.data(), (int)n, d.data(), pre.data());
             }                                           /* an entry equal to -+C (probability ~2^-230) stays wrong: its hits are lost, never published */
@@ -1444,7 +1482,7 @@ static void sca_batch(const Ctx *c, const uint32_t *dig, const uint8_t *zdig, in
     const bool fold = c->cfold != nullptr;
     for (int i = 1; i < (fold ? nw - 1 : nw); i++) {
         const pt *T = c->table + c->woff[i];
-        sca_add(v.X, v.Y, v.D, v.P, B, 0, v.bad, [&](int e, bool &ng) { return entry(e, i, T, ng); },
+        sca_add(v.X, v.Y, v.D, v.P, v.TY, B, 0, v.bad, [&](int e, bool &ng) { return entry(e, i, T, ng); },
                 [&](int, int k, const fe52 &x3, const fe52 &y3) { v.X[k] = x3; v.Y[k] = y3; });
     }
     auto emit = [&](int k, int ri, const fe52 &x3, const fe52 &y3) {
@@ -1454,83 +1492,59 @@ static void sca_batch(const Ctx *c, const uint32_t *dig, const uint8_t *zdig, in
     };
     if (fold) {                                          /* last window with C folded in: element e = 2k + ri */
         const int i = nw - 1; const pt *TP = c->cfold, *TM = c->cfold + c->went[i];
-        sca_add(v.X, v.Y, v.D, v.P, 2 * B, 1, v.bad, [&](int e, bool &ng) {
+        sca_add(v.X, v.Y, v.D, v.P, v.TY, 2 * B, 1, v.bad, [&](int e, bool &ng) {
                     const int k = e >> 1, ri = e & 1; const pt *r = entry(k, i, TP, ng);
                     return (ng ^ (ri != 0)) ? TM + (r - TP) : r; },
                 [&](int e, int k, const fe52 &x3, const fe52 &y3) { emit(k, e & 1, x3, y3); });
     } else {                                              /* Q_ri = X + (+-C): element e = 2k + ri */
         pt cps[2]; cps[0].x = c->cx; cps[0].y = c->cy; cps[1] = cps[0];
         const fe z0 = {{0, 0, 0, 0}}; fe_sub(cps[1].y, z0, c->cy);
-        sca_add(v.X, v.Y, v.D, v.P, 2 * B, 1, v.bad, [&](int e, bool &ng) { ng = false; return &cps[e & 1]; },
+        sca_add(v.X, v.Y, v.D, v.P, v.TY, 2 * B, 1, v.bad, [&](int e, bool &ng) { ng = false; return &cps[e & 1]; },
                 [&](int e, int k, const fe52 &x3, const fe52 &y3) { emit(k, e & 1, x3, y3); });
     }
 }
 
 #if QCPU_VEC
-struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr;
-                const pt **rb[2] = {nullptr, nullptr}; __mmask8 *nb[2] = {nullptr, nullptr}; };   /* row buffers: 2G groups of 8 each */
+struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
 static bool vecbuf_alloc(VecBuf &v, int B) {
-    const int G = B / 8; void *q[12] = {nullptr};
-    const size_t sz[12] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * 2 * G, sizeof(fe8) * 2 * G, sizeof(fe8) * 2 * G,
-                           sizeof(fe) * 2 * (size_t)B, 2 * (size_t)B, (size_t)B,
-                           sizeof(pt *) * 16 * (size_t)G, sizeof(pt *) * 16 * (size_t)G, 2 * (size_t)G, 2 * (size_t)G};
-    for (int i = 0; i < 12; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
+    const int G = B / 8; void *q[8] = {nullptr};
+    const size_t sz[8] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * 2 * G, sizeof(fe8) * 2 * G, sizeof(fe8) * 2 * G,
+                          sizeof(fe) * 2 * (size_t)B, 2 * (size_t)B, (size_t)B};
+    for (int i = 0; i < 8; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
     v.X = (fe8 *)q[0]; v.Y = (fe8 *)q[1]; v.D = (fe8 *)q[2]; v.P = (fe8 *)q[3]; v.TY = (fe8 *)q[4];
     v.qx = (fe *)q[5]; v.qp = (uint8_t *)q[6]; v.bad = (uint8_t *)q[7];
-    v.rb[0] = (const pt **)q[8]; v.rb[1] = (const pt **)q[9]; v.nb[0] = (__mmask8 *)q[10]; v.nb[1] = (__mmask8 *)q[11];
     return true;
 }
 /* The EC part of one batch on the 8-lane path: z*A for every candidate (c->nw table windows), then
  * both recovery ids against C. dig is candidate-major (B x NWMAX). */
 Q8T static void vec_batch(const Ctx *c, const uint32_t *dig, const uint8_t *zdig, int B, VecBuf &v) {
-    const int G = B / 8, nw = c->nw, pf = c->pf.load(std::memory_order_relaxed);
+    const int G = B / 8, nw = c->nw;
     memcpy(v.bad, zdig, (size_t)B);
-    const bool fold = c->cfold != nullptr;
-    /* digit = |d| | sign << 31; |d| = 0 only in dropped lanes (they load entry 0). Window i's rows go to buffer i & 1. */
-    auto fill = [&](int i, int hn, const pt *const **out) -> int {      /* rows of window i, group hn */
-        if (i >= nw) return 0;
-        const int b = i & 1;
-        if (fold && i == nw - 1) {                                       /* C-folded last window: elements 2 hn + ri */
-            const pt *TP = c->cfold, *TM = c->cfold + c->went[nw - 1];
-            for (int ri = 0; ri < 2; ri++) {
-                const pt **rows = v.rb[b] + (size_t)(2 * hn + ri) * 8; unsigned ng = 0;
-                for (int j = 0; j < 8; j++) {
-                    const uint32_t di = dig[(size_t)(hn * 8 + j) * NWMAX + i], a = di & 0x7FFFFFFFu, sg = di >> 31;
-                    rows[j] = &((sg ^ (unsigned)ri) ? TM : TP)[(a ? a : 1) - 1]; ng |= sg << j;
-                }
-                v.nb[b][2 * hn + ri] = (__mmask8)ng;
-            }
-            *out = v.rb[b] + (size_t)(2 * hn) * 8; return 16;
-        }
-        const pt *T = c->table + c->woff[i]; const pt **rows = v.rb[b] + (size_t)hn * 8; unsigned ng = 0;
-        for (int j = 0; j < 8; j++) {
-            const uint32_t di = dig[(size_t)(hn * 8 + j) * NWMAX + i], a = di & 0x7FFFFFFFu;
-            rows[j] = &T[(a ? a : 1) - 1]; ng |= (di >> 31) << j;
-        }
-        v.nb[b][hn] = (__mmask8)ng;
-        *out = rows; return 8;
-    };
-    {
-        const pt *T0 = c->table + c->woff[0];
-        auto rowfn0 = [&](int h, const pt **rows) -> __mmask8 {
+    /* digit = |d| | sign << 31; |d| = 0 only in dropped lanes (they load entry 0) */
+    for (int i = 0; i < nw; i++) {
+        const pt *T = c->table + c->woff[i];
+        auto rowfn = [&](int h, const pt **rows) -> __mmask8 {
             unsigned ng = 0;
             for (int j = 0; j < 8; j++) {
-                const uint32_t di = dig[(size_t)(h * 8 + j) * NWMAX], a = di & 0x7FFFFFFFu;
-                rows[j] = &T0[(a ? a : 1) - 1]; ng |= (di >> 31) << j;
+                const uint32_t di = dig[(size_t)(h * 8 + j) * NWMAX + i], a = di & 0x7FFFFFFFu;
+                rows[j] = &T[(a ? a : 1) - 1]; ng |= (di >> 31) << j;
             }
             return (__mmask8)ng;
         };
-        auto nxt1 = [&](int hn, const pt *const **out) -> int { return fill(1, hn, out); };
-        ec8_first(v.X, v.Y, G, pf, rowfn0, nxt1);
-    }
-    for (int i = 1; i < nw; i++) {
-        const int b = i & 1;
-        if (fold && i == nw - 1) {                                       /* last window with C folded in: both recids at once */
-            ec8_final_fold(v.X, v.Y, v.D, v.P, v.TY, G, pf, v.rb[b], v.nb[b], v.qx, v.qp);
+        if (i == 0) ec8_first(v.X, v.Y, G, rowfn);
+        else if (i + 1 < nw || !c->cfold) ec8_window(v.X, v.Y, v.D, v.P, v.TY, G, rowfn);
+        else {                                           /* last window with C folded in: both recids at once */
+            const pt *TP = c->cfold, *TM = c->cfold + c->went[nw - 1];
+            ec8_final_fold(v.X, v.Y, v.D, v.P, v.TY, G, [&](int h, int ri, const pt **rows) -> __mmask8 {
+                unsigned ng = 0;
+                for (int j = 0; j < 8; j++) {
+                    const uint32_t di = dig[(size_t)(h * 8 + j) * NWMAX + i], a = di & 0x7FFFFFFFu, s = di >> 31;
+                    rows[j] = &((s ^ (unsigned)ri) ? TM : TP)[(a ? a : 1) - 1]; ng |= s << j;
+                }
+                return (__mmask8)ng;
+            }, v.qx, v.qp);
             return;
         }
-        auto nxt = [&](int hn, const pt *const **out) -> int { return fill(i + 1, hn, out); };
-        ec8_window(v.X, v.Y, v.D, v.P, v.TY, G, pf, v.rb[b], v.nb[b], nxt);
     }
     ec8_final(v.X, v.Y, v.D, v.P, G, c->cx, c->cy, v.qx, v.qp);
 }
@@ -1647,7 +1661,35 @@ S16T static void epoch16(const Ctx *c, const uint32_t est[8], const uint8_t *ere
         sha16_soa(st, wk);
         for (int i = 0; i < 8; i++) _mm512_store_si512((void *)&vs[((size_t)ch * 8 + i) * 16], st[i]);
     }
-    for (int ch = 0; ch < c->npc; ch++) {
+    int ch = 0;
+#if QSB_CPU_SHA2X
+    for (; ch + 1 < c->npc; ch += 2) {                  /* two pattern chunks at a time */
+        alignas(64) uint32_t tmp[2][8][16];
+        for (int z = 0; z < 2; z++)
+            for (int l = 0; l < 16; l++) {
+                const int p = (ch + z) * 16 + l < c->ncwin ? (ch + z) * 16 + l : c->ncwin - 1, v = c->pvar[p];
+                for (int i = 0; i < 8; i++) tmp[z][i][l] = vs[((size_t)(v >> 4) * 8 + i) * 16 + (v & 15)];
+            }
+        __m512i st[8], su[8];
+        for (int i = 0; i < 8; i++) { st[i] = _mm512_load_si512((const void *)tmp[0][i]); su[i] = _mm512_load_si512((const void *)tmp[1][i]); }
+        for (int b = 0; b < nblk; b++) {
+            if (c->blk_const[b]) sha16x2_bcast(st, su, c->pwk[b]);
+            else sha16x2_soa(st, su, (const __m512i *)&c->p16[((size_t)ch * nblk + b) * 64 * 16], (const __m512i *)&c->p16[((size_t)(ch + 1) * nblk + b) * 64 * 16]);
+        }
+        alignas(64) __m512i wk2[64];
+        __m512i w[16];
+        for (int i = 0; i < 8; i++) w[i] = st[i];
+        w[8] = _mm512_set1_epi32((int)0x80000000u); for (int i = 9; i < 15; i++) w[i] = _mm512_setzero_si512(); w[15] = _mm512_set1_epi32(256);
+        sha16_sched(wk, w);
+        for (int i = 0; i < 8; i++) w[i] = su[i];
+        sha16_sched(wk2, w);
+        sha16_iv(st); sha16_iv(su); sha16x2_soa(st, su, wk, wk2);
+        for (int i = 0; i < 8; i++) { _mm512_store_si512((void *)tmp[0][i], st[i]); _mm512_store_si512((void *)tmp[1][i], su[i]); }
+        for (int z = 0; z < 2; z++)
+            for (int l = 0; l < 16 && (ch + z) * 16 + l < c->ncwin; l++) for (int i = 0; i < 8; i++) dg[(ch + z) * 16 + l][i] = tmp[z][i][l];
+    }
+#endif
+    for (; ch < c->npc; ch++) {
         alignas(64) uint32_t tmp[8][16];
         for (int l = 0; l < 16; l++) {
             const int p = ch * 16 + l < c->ncwin ? ch * 16 + l : c->ncwin - 1, v = c->pvar[p];
@@ -1700,20 +1742,8 @@ static void worker_body(Ctx *c, int tid) {
     std::vector<uint8_t> pbuf((size_t)dp->n * SIG_PUSH_SIZE + 64);
     std::vector<uint8_t> zdig(B);                      /* 1 when some table digit of the candidate is 0 */
     auto put_digits = [&](int kk, const uint32_t *h) {    /* table digits of z = h[0] (MSW) .. h[7] */
-        uint64_t zl[5];
+        uint64_t zl[4];
         for (int i = 0; i < 4; i++) zl[i] = ((uint64_t)h[6 - 2 * i] << 32) | h[7 - 2 * i];
-        zl[4] = 0;
-        uint32_t *dg = &dig[(size_t)kk * NWMAX];
-        switch (nw) {                                   /* constant shifts and masks for the usual table sizes */
-            case 10: zdig[kk] = (uint8_t)digits_L<10>(dg, zl); return;
-            case 11: zdig[kk] = (uint8_t)digits_L<11>(dg, zl); return;
-            case 12: zdig[kk] = (uint8_t)digits_L<12>(dg, zl); return;
-            case 13: zdig[kk] = (uint8_t)digits_L<13>(dg, zl); return;
-            case 14: zdig[kk] = (uint8_t)digits_L<14>(dg, zl); return;
-            case 15: zdig[kk] = (uint8_t)digits_L<15>(dg, zl); return;
-            case 16: zdig[kk] = (uint8_t)digits_L<16>(dg, zl); return;
-            default: break;
-        }
         unsigned z = 0; uint32_t carry = 0;
         for (int i = 0; i < nw; i++) {                  /* signed recoding: d in (-2^(w-1), 2^(w-1)], z = sum d_i 2^sh_i */
             const int bit = c->wsh[i], w = c->wbits[i], li = bit >> 6, sh = bit & 63;
@@ -1759,6 +1789,10 @@ static void worker_body(Ctx *c, int tid) {
     for (;;) {
 #ifdef QSB_CPU_DEVBENCH
         if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
+#endif
+#if defined(QSB_HP_ON) && QSB_HP_CPU_YIELD
+        if (tid & 1)                                     /* smt_plan order: odd workers are the second CPU of a core */
+            while (now_s() < qhp::g_lag_until.load(std::memory_order_relaxed)) { struct timespec ts = {0, 2000000}; nanosleep(&ts, nullptr); }
 #endif
         int k = 0;
         const int md = c->mode.load(std::memory_order_relaxed);
@@ -2001,6 +2035,400 @@ static void worker_body(Ctx *c, int tid) {
     }
 }
 
+#if QCPU_VEC && QCPU_SHANI
+/* ---- Fast 16-lane pipeline (AVX-512 IFMA + 16-lane AVX-512 SHA-256), used whenever the host has both ----
+ * Same candidates, same arithmetic and the same exact gate as the path above; only the glue moves into
+ * vector code and the per-candidate scalar work goes away:
+ *  - the batch keeps each candidate's SHA-256d digest, its epoch slot and its pattern (no per-candidate
+ *    index copy; the 9 indices are rebuilt only for a key hash that passes the prefilter);
+ *  - the signed-digit recoding runs 16 candidates per vector and writes, per window, the table row
+ *    offsets (window-major) and the per-group sign masks: the row loads need no scalar address
+ *    arithmetic, and the prefetch reuses the same offsets;
+ *  - a negated table y is folded into the forward subtraction (TY = -+ty - Y in one pass);
+ *  - the last (C-folded) window emits the compressed-key message words of both recids straight from
+ *    the canonical vector words, hashes them 16 at a time right away and tests the prefilter as a mask. */
+static inline __attribute__((target("avx512f,avx512ifma")))
+void fe8_subsgn(fe8 &r, const fe8 &t, const fe8 &y, __mmask8 m) {
+    /* r = (m ? -t : t) - y for normalized t (limb 4 < 2^48, a canonical table value) and y:
+     * t + 4p - y, or 8p - t - y in the lanes of m; limbs stay in [0, 2^56), one carry pass */
+    const __m512i A0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), A1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
+                  A4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
+    const __m512i N0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 8), N1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 8),
+                  N4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 8);
+    const __m512i Al[5] = {A0, A1, A1, A1, A4}, Nl[5] = {N0, N1, N1, N1, N4};
+    for (int i = 0; i < 5; i++) {
+        __m512i u = _mm512_add_epi64(t.l[i], Al[i]);
+        u = _mm512_mask_sub_epi64(u, m, Nl[i], t.l[i]);
+        r.l[i] = _mm512_sub_epi64(u, y.l[i]);
+    }
+    fe8_carry(r);
+}
+/* ---- fused field operations for the fast pipeline (after ercumentyildirim's 9f8a33d8 description) ---- */
+/* carry chain without the limb-4 fold: for values that only feed multiplications (limb 4 stays < 2^52) */
+static inline __attribute__((target("avx512f,avx512ifma")))
+void fe8_carry_nf(fe8 &r) {
+    const __m512i M = F8_M52; __m512i c;
+    c = _mm512_srli_epi64(r.l[0], 52); r.l[0] = _mm512_and_si512(r.l[0], M); r.l[1] = _mm512_add_epi64(r.l[1], c);
+    c = _mm512_srli_epi64(r.l[1], 52); r.l[1] = _mm512_and_si512(r.l[1], M); r.l[2] = _mm512_add_epi64(r.l[2], c);
+    c = _mm512_srli_epi64(r.l[2], 52); r.l[2] = _mm512_and_si512(r.l[2], M); r.l[3] = _mm512_add_epi64(r.l[3], c);
+    c = _mm512_srli_epi64(r.l[3], 52); r.l[3] = _mm512_and_si512(r.l[3], M); r.l[4] = _mm512_add_epi64(r.l[4], c);
+}
+/* a - b = a + 4p - b (a, b normalized): limbs 0..3 < 2^52, limb 4 < 2^50.4 (unfolded) -- multiplication input only */
+static inline __attribute__((target("avx512f,avx512ifma")))
+void fe8_sub_nf(fe8 &r, const fe8 &a, const fe8 &b) {
+    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
+                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
+    r.l[0] = _mm512_sub_epi64(_mm512_add_epi64(a.l[0], P0), b.l[0]);
+    r.l[1] = _mm512_sub_epi64(_mm512_add_epi64(a.l[1], P1), b.l[1]);
+    r.l[2] = _mm512_sub_epi64(_mm512_add_epi64(a.l[2], P1), b.l[2]);
+    r.l[3] = _mm512_sub_epi64(_mm512_add_epi64(a.l[3], P1), b.l[3]);
+    r.l[4] = _mm512_sub_epi64(_mm512_add_epi64(a.l[4], P4), b.l[4]);
+    fe8_carry_nf(r);
+}
+/* (m ? -t : t) - y, unfolded (limb 4 < 2^51.1) -- multiplication input only */
+static inline __attribute__((target("avx512f,avx512ifma")))
+void fe8_subsgn_nf(fe8 &r, const fe8 &t, const fe8 &y, __mmask8 m) {
+    const __m512i A0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), A1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
+                  A4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
+    const __m512i N0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 8), N1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 8),
+                  N4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 8);
+    const __m512i Al[5] = {A0, A1, A1, A1, A4}, Nl[5] = {N0, N1, N1, N1, N4};
+    for (int i = 0; i < 5; i++) {
+        __m512i u = _mm512_add_epi64(t.l[i], Al[i]);
+        u = _mm512_mask_sub_epi64(u, m, Nl[i], t.l[i]);
+        r.l[i] = _mm512_sub_epi64(u, y.l[i]);
+    }
+    fe8_carry_nf(r);
+}
+#define LO(acc, x, y) acc = _mm512_madd52lo_epu64(acc, x, y)
+#define HI(acc, x, y) acc = _mm512_madd52hi_epu64(acc, x, y)
+/* r = a*b - y: product columns 0..4 start at 4p - y (y normalized); normalized output */
+static inline __attribute__((target("avx512f,avx512ifma")))
+void fe8_mul_sub(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &y) {
+    const __m512i Z = _mm512_setzero_si512();
+    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
+                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
+    __m512i c0 = _mm512_sub_epi64(P0, y.l[0]), c1 = _mm512_sub_epi64(P1, y.l[1]), c2 = _mm512_sub_epi64(P1, y.l[2]),
+            c3 = _mm512_sub_epi64(P1, y.l[3]), c4 = _mm512_sub_epi64(P4, y.l[4]), c5 = Z, c6 = Z, c7 = Z, c8 = Z, c9 = Z;
+    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
+    const __m512i b0 = b.l[0], b1 = b.l[1], b2 = b.l[2], b3 = b.l[3], b4 = b.l[4];
+    LO(c0,a0,b0); HI(c1,a0,b0);
+    LO(c1,a0,b1); LO(c1,a1,b0); HI(c2,a0,b1); HI(c2,a1,b0);
+    LO(c2,a0,b2); LO(c2,a1,b1); LO(c2,a2,b0); HI(c3,a0,b2); HI(c3,a1,b1); HI(c3,a2,b0);
+    LO(c3,a0,b3); LO(c3,a1,b2); LO(c3,a2,b1); LO(c3,a3,b0); HI(c4,a0,b3); HI(c4,a1,b2); HI(c4,a2,b1); HI(c4,a3,b0);
+    LO(c4,a0,b4); LO(c4,a1,b3); LO(c4,a2,b2); LO(c4,a3,b1); LO(c4,a4,b0);
+    HI(c5,a0,b4); HI(c5,a1,b3); HI(c5,a2,b2); HI(c5,a3,b1); HI(c5,a4,b0);
+    LO(c5,a1,b4); LO(c5,a2,b3); LO(c5,a3,b2); LO(c5,a4,b1); HI(c6,a1,b4); HI(c6,a2,b3); HI(c6,a3,b2); HI(c6,a4,b1);
+    LO(c6,a2,b4); LO(c6,a3,b3); LO(c6,a4,b2); HI(c7,a2,b4); HI(c7,a3,b3); HI(c7,a4,b2);
+    LO(c7,a3,b4); LO(c7,a4,b3); HI(c8,a3,b4); HI(c8,a4,b3);
+    LO(c8,a4,b4); HI(c9,a4,b4);
+    fe8_red(r, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9);
+}
+/* r = a^2 - D - 2X: columns 0..4 start at 12p - D - 2X (D limb 4 < 2^50.4 unfolded, X normalized); normalized output */
+static inline __attribute__((target("avx512f,avx512ifma")))
+void fe8_sqr_sub3(fe8 &r, const fe8 &a, const fe8 &D, const fe8 &X) {
+    const __m512i Z = _mm512_setzero_si512();
+    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 12), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 12),
+                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 12);
+    const __m512i Pl[5] = {P0, P1, P1, P1, P4};
+    __m512i s0[5];
+    for (int i = 0; i < 5; i++) s0[i] = _mm512_sub_epi64(Pl[i], _mm512_add_epi64(D.l[i], _mm512_add_epi64(X.l[i], X.l[i])));
+    __m512i x1 = Z, x2 = Z, x3 = Z, x4 = Z, x5 = Z, x6 = Z, x7 = Z, x8 = Z;
+    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
+    LO(x1,a0,a1); HI(x2,a0,a1);
+    LO(x2,a0,a2); HI(x3,a0,a2);
+    LO(x3,a0,a3); LO(x3,a1,a2); HI(x4,a0,a3); HI(x4,a1,a2);
+    LO(x4,a0,a4); LO(x4,a1,a3); HI(x5,a0,a4); HI(x5,a1,a3);
+    LO(x5,a1,a4); LO(x5,a2,a3); HI(x6,a1,a4); HI(x6,a2,a3);
+    LO(x6,a2,a4); HI(x7,a2,a4);
+    LO(x7,a3,a4); HI(x8,a3,a4);
+    __m512i c0 = s0[0], c1 = _mm512_add_epi64(s0[1], _mm512_slli_epi64(x1, 1)), c2 = _mm512_add_epi64(s0[2], _mm512_slli_epi64(x2, 1)),
+            c3 = _mm512_add_epi64(s0[3], _mm512_slli_epi64(x3, 1)), c4 = _mm512_add_epi64(s0[4], _mm512_slli_epi64(x4, 1)),
+            c5 = _mm512_slli_epi64(x5, 1), c6 = _mm512_slli_epi64(x6, 1), c7 = _mm512_slli_epi64(x7, 1), c8 = _mm512_slli_epi64(x8, 1), c9 = Z;
+    LO(c0,a0,a0); HI(c1,a0,a0);
+    LO(c2,a1,a1); HI(c3,a1,a1);
+    LO(c4,a2,a2); HI(c5,a2,a2);
+    LO(c6,a3,a3); HI(c7,a3,a3);
+    LO(c8,a4,a4); HI(c9,a4,a4);
+    fe8_red(r, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9);
+}
+#undef LO
+#undef HI
+#ifndef QSB_CPU_FUSE
+#define QSB_CPU_FUSE 1
+#endif
+/* Load 8 table rows at T + off[j] * 8 bytes and transpose. */
+Q8T static inline void pt8_load_off(fe8 &x, fe8 &y, const char *T, const uint32_t *off) {
+    const pt *rows[8];
+    for (int j = 0; j < 8; j++) rows[j] = (const pt *)(T + (size_t)off[j] * 8);
+    pt8_load(x, y, rows);
+}
+#define PF8(T, off) do { for (int j_ = 0; j_ < 8; j_++) _mm_prefetch((T) + (size_t)(off)[j_] * 8, _MM_HINT_T0); } while (0)
+/* Window 0: X, Y = the first digit's row (sign applied). */
+#define PF8N(T, off) do { for (int j_ = 0; j_ < 8; j_++) _mm_prefetch((T) + (size_t)(off)[j_] * 8, _MM_HINT_T1); } while (0)
+Q8T static void f16_first(fe8 *X, fe8 *Y, int G, const char *T, const uint32_t *off, const uint8_t *sg, const char *NT, const uint32_t *noff) {
+    for (int h = 0; h < G; h++) {
+        if (h + QSB_CPU_PF < G) PF8(T, off + (size_t)(h + QSB_CPU_PF) * 8);
+        if (QSB_CPU_PFNEXT && noff) PF8N(NT, noff + (size_t)h * 8);
+        pt8_load_off(X[h], Y[h], T, off + (size_t)h * 8); fe8_cneg(Y[h], (__mmask8)sg[h]);
+    }
+}
+/* One batch-affine window step, as ec8_window, with precomputed row offsets and the sign folded into TY. */
+Q8T static void f16_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, const char *T, const uint32_t *off, const uint8_t *sg,
+                           const char *NT, const uint32_t *noff0, const uint32_t *noff1) {
+    fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
+    for (int g = 0; g < G; g += 4) {
+        for (int c = 0; c < 4; c++) {
+            const int h = g + c;
+            if (h + QSB_CPU_PF < G) PF8(T, off + (size_t)(h + QSB_CPU_PF) * 8);
+            fe8 tx, ty; pt8_load_off(tx, ty, T, off + (size_t)h * 8);
+            if (QSB_CPU_FUSE) { fe8_sub_nf(D[h], tx, X[h]); fe8_subsgn_nf(TY[h], ty, Y[h], (__mmask8)sg[h]); }
+            else { fe8_sub(D[h], tx, X[h]); fe8_subsgn(TY[h], ty, Y[h], (__mmask8)sg[h]); }
+            fe8_mov(PRE[h], run[c]);
+            fe8_mul(run[c], run[c], D[h]);
+        }
+    }
+    fe8_inv4(run);
+    for (int g = G - 4; g >= 0; g -= 4) {
+        fe8 dinv[4], lam[4], t[4], x3[4];
+        for (int c = 3; c >= 0; c--) {
+            const int h = g + c;
+            fe8_mul(dinv[c], run[c], PRE[h]); fe8_mul(run[c], run[c], D[h]);
+            if (QSB_CPU_PFNEXT && noff0) {              /* next window, group G-1-h: its first groups come first */
+                PF8N(NT, noff0 + (size_t)(G - 1 - h) * 8);
+                if (noff1) PF8N(NT, noff1 + (size_t)(G - 1 - h) * 8);
+            }
+        }
+        for (int c = 0; c < 4; c++) fe8_mul(lam[c], TY[g + c], dinv[c]);
+        if (QSB_CPU_FUSE) {
+            for (int c = 0; c < 4; c++) fe8_sqr_sub3(x3[c], lam[c], D[g + c], X[g + c]);
+            for (int c = 0; c < 4; c++) { fe8_sub_nf(t[c], X[g + c], x3[c]); fe8_mul_sub(Y[g + c], lam[c], t[c], Y[g + c]); fe8_mov(X[g + c], x3[c]); }
+        } else {
+            for (int c = 0; c < 4; c++) { fe8_sqr(x3[c], lam[c]); fe8_sub3(x3[c], x3[c], D[g + c], X[g + c]); }
+            for (int c = 0; c < 4; c++) { fe8_sub(t[c], X[g + c], x3[c]); fe8_mul(t[c], lam[c], t[c]); fe8_sub(Y[g + c], t[c], Y[g + c]); fe8_mov(X[g + c], x3[c]); }
+        }
+    }
+}
+/* Compressed-key message words 0..8 of 8 lanes (canonical x words, y parity), as 32-bit lanes. */
+Q8T static inline void pk8_words(__m256i w[9], const __m512i xw[4], __m512i yw0) {
+    const __m512i v0 = xw[0], v1 = xw[1], v2 = xw[2], v3 = xw[3];
+    const __m512i pre = _mm512_slli_epi64(_mm512_or_si512(_mm512_and_si512(yw0, _mm512_set1_epi64(1)), _mm512_set1_epi64(2)), 24);
+    w[0] = _mm512_cvtepi64_epi32(_mm512_or_si512(pre, _mm512_srli_epi64(v3, 40)));
+    w[1] = _mm512_cvtepi64_epi32(_mm512_srli_epi64(v3, 8));
+    w[2] = _mm512_cvtepi64_epi32(_mm512_or_si512(_mm512_slli_epi64(v3, 24), _mm512_srli_epi64(v2, 40)));
+    w[3] = _mm512_cvtepi64_epi32(_mm512_srli_epi64(v2, 8));
+    w[4] = _mm512_cvtepi64_epi32(_mm512_or_si512(_mm512_slli_epi64(v2, 24), _mm512_srli_epi64(v1, 40)));
+    w[5] = _mm512_cvtepi64_epi32(_mm512_srli_epi64(v1, 8));
+    w[6] = _mm512_cvtepi64_epi32(_mm512_or_si512(_mm512_slli_epi64(v1, 24), _mm512_srli_epi64(v0, 40)));
+    w[7] = _mm512_cvtepi64_epi32(_mm512_srli_epi64(v0, 8));
+    w[8] = _mm512_cvtepi64_epi32(_mm512_or_si512(_mm512_slli_epi64(v0, 24), _mm512_set1_epi64(0x800000)));
+}
+/* First digest word of SHA-256 over 16 compressed keys (message words 0..8; 9..14 zero; 15 = 264 bits). */
+S16T static __m512i keyhash16_w(const __m512i m[9]) {
+    alignas(64) __m512i wk[64]; __m512i w[16], st[8];
+    for (int i = 0; i < 9; i++) w[i] = m[i];
+    for (int i = 9; i < 15; i++) w[i] = _mm512_setzero_si512();
+    w[15] = _mm512_set1_epi32(264);
+    sha16_sched_inl(wk, w); sha16_iv(st); sha16_soa(st, wk);   /* inlined: the zero and constant words fold */
+    return st[0];
+}
+struct F16Hit { uint32_t k; uint8_t m; };             /* candidate, bit ri: key hash passed the prefilter */
+/* Last window with C folded in (as ec8_final_fold) plus the key hashes and the prefilter. off0/off1:
+ * row offsets (relative to TP) for recid 0 / 1; sg: the digit signs. */
+Q8T static void f16_final(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TY, int G, const char *TP,
+                          const uint32_t *off0, const uint32_t *off1, const uint8_t *sg, std::vector<F16Hit> &hits) {
+    fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
+    const int E = 2 * G;
+    for (int e0 = 0; e0 < E; e0 += 4) {
+        for (int c = 0; c < 4; c++) {
+            const int e = e0 + c, h = e >> 1, ri = e & 1;
+            {
+                const int f = e + 2 * QSB_CPU_PF;
+                if (f < E) PF8(TP, ((f & 1) ? off1 : off0) + (size_t)(f >> 1) * 8);
+            }
+            fe8 rx, ry; pt8_load_off(rx, ry, TP, (ri ? off1 : off0) + (size_t)h * 8);
+            if (QSB_CPU_FUSE) { fe8_sub_nf(D[e], rx, X[h]); fe8_subsgn_nf(TY[e], ry, Y[h], (__mmask8)sg[h]); }
+            else { fe8_sub(D[e], rx, X[h]); fe8_subsgn(TY[e], ry, Y[h], (__mmask8)sg[h]); }
+            fe8_mov(PRE[e], run[c]);
+            fe8_mul(run[c], run[c], D[e]);
+        }
+    }
+    fe8_inv4(run);
+    const __m512i zmask = _mm512_set1_epi32((int)(QSB_ZEROS_N >= 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> QSB_ZEROS_N)));
+    for (int e0 = E - 4; e0 >= 0; e0 -= 4) {
+        __m256i km[4][9];
+        for (int c = 3; c >= 0; c--) {
+            const int e = e0 + c, h = e >> 1;
+            fe8 dinv; fe8_mul(dinv, run[c], PRE[e]); fe8_mul(run[c], run[c], D[e]);
+            fe8 t, lam, x3, y3;
+            fe8_mul(lam, TY[e], dinv);
+            if (QSB_CPU_FUSE) { fe8_sqr_sub3(x3, lam, D[e], X[h]); fe8_sub_nf(t, X[h], x3); fe8_mul_sub(y3, lam, t, Y[h]); }
+            else { fe8_sqr(x3, lam); fe8_sub3(x3, x3, D[e], X[h]); fe8_sub(t, X[h], x3); fe8_mul(y3, lam, t); fe8_sub(y3, y3, Y[h]); }
+            __m512i xw[4], yw[4]; fe8_canon_words(xw, x3); fe8_canon_words(yw, y3);
+            pk8_words(km[c], xw, yw[0]);
+        }
+        for (int q = 0; q < 2; q++) {                   /* group h = e0/2 + q: lanes 0..7 recid 0, 8..15 recid 1 */
+            __m512i m[9];
+            for (int i = 0; i < 9; i++) m[i] = _mm512_inserti64x4(_mm512_castsi256_si512(km[2 * q][i]), km[2 * q + 1][i], 1);
+            const __m512i h0 = keyhash16_w(m);
+            const __mmask16 pass = _mm512_testn_epi32_mask(h0, zmask);
+            if (pass) {
+                const int h = (e0 >> 1) + q;
+                for (int j = 0; j < 8; j++) {
+                    const uint8_t b = (uint8_t)(((pass >> j) & 1) | (((pass >> (8 + j)) & 1) << 1));
+                    if (b) hits.push_back({(uint32_t)(h * 8 + j), b});
+                }
+            }
+        }
+    }
+}
+/* Signed-digit recoding of 16 candidates per vector (the same recoding as put_digits): per window i the
+ * row offset (entry index * 8, in 8-byte units) window-major at off[i * B + k], the sign masks per
+ * group of 8 at sg[i * G + g], and bad[k] = 1 when a digit is 0. For the last (folded) window the
+ * offsets are relative to TP, for recid 0 at off[(nw-1) * B + k] and recid 1 at off[nw * B + k]. */
+Q8T static void f16_digits(const Ctx *c, const uint32_t *dgb, int B, uint32_t *off, uint8_t *sg, uint8_t *bad) {
+    const int nw = c->nw, G = B / 8;
+    const __m512i gidx = _mm512_setr_epi32(0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120);
+    const __m512i one = _mm512_set1_epi32(1);
+    const uint32_t wlast = (uint32_t)(c->went[nw - 1] * 8);
+    for (int q = 0; q < B; q += 16) {
+        __m512i W[8];                                   /* W[j] = digest word j of the 16 candidates (word 0 = MSW) */
+        for (int j = 0; j < 8; j++) W[j] = _mm512_i32gather_epi32(gidx, (const void *)(dgb + (size_t)q * 8 + j), 4);
+        __m512i carry = _mm512_setzero_si512(); __mmask16 zero = 0;
+        for (int i = 0; i < nw; i++) {
+            const int bit = c->wsh[i], w = c->wbits[i], wi = bit >> 5, sh = bit & 31;
+            __m512i v = wi < 8 ? _mm512_srl_epi32(W[7 - wi], _mm_cvtsi32_si128(sh)) : _mm512_setzero_si512();
+            if (sh + w > 32 && wi + 1 < 8) v = _mm512_or_si512(v, _mm512_sll_epi32(W[6 - wi], _mm_cvtsi32_si128(32 - sh)));
+            v = _mm512_and_si512(v, _mm512_set1_epi32((int)((1u << w) - 1)));
+            const __m512i d = _mm512_add_epi32(v, carry);
+            const __mmask16 gt = (i + 1 < nw) ? _mm512_cmpgt_epu32_mask(d, _mm512_set1_epi32((int)(1u << (w - 1)))) : (__mmask16)0;
+            const __m512i mag = _mm512_mask_sub_epi32(d, gt, _mm512_set1_epi32((int)(1u << w)), d);
+            carry = _mm512_maskz_mov_epi32(gt, one);
+            zero |= _mm512_cmpeq_epi32_mask(mag, _mm512_setzero_si512());
+            const __m512i o = _mm512_slli_epi32(_mm512_sub_epi32(_mm512_max_epu32(mag, one), one), 3);
+            if (i + 1 < nw) _mm512_store_si512((void *)&off[(size_t)i * B + q], o);
+            else {                                      /* recid 0: s ? TM : TP; recid 1: s ? TP : TM (TM = TP + went) */
+                const __m512i wl = _mm512_set1_epi32((int)wlast);
+                _mm512_store_si512((void *)&off[(size_t)i * B + q], _mm512_mask_add_epi32(o, gt, o, wl));
+                _mm512_store_si512((void *)&off[(size_t)(i + 1) * B + q], _mm512_mask_add_epi32(o, (__mmask16)~gt, o, wl));
+            }
+            sg[(size_t)i * G + q / 8] = (uint8_t)gt; sg[(size_t)i * G + q / 8 + 1] = (uint8_t)(gt >> 8);
+        }
+        for (int l = 0; l < 16; l++) bad[q + l] = (uint8_t)((zero >> l) & 1);
+    }
+}
+struct F16Buf {
+    fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TY = nullptr;
+    uint32_t *dgb = nullptr, *off = nullptr; uint8_t *sg = nullptr, *bad = nullptr, *cpat = nullptr; uint16_t *cep = nullptr;
+    void *blk[11] = {nullptr};
+    bool alloc(int B, int nw) {
+        const int G = B / 8;
+        const size_t sz[11] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * 2 * G, sizeof(fe8) * 2 * G, sizeof(fe8) * 2 * G,
+                               (size_t)B * 32, (size_t)(nw + 1) * B * 4, (size_t)nw * G + 64, (size_t)B + 64, (size_t)B + 64, (size_t)B * 2 + 64};
+        for (int i = 0; i < 11; i++) if (posix_memalign(&blk[i], 64, sz[i])) { blk[i] = nullptr; return false; }
+        X = (fe8 *)blk[0]; Y = (fe8 *)blk[1]; D = (fe8 *)blk[2]; P = (fe8 *)blk[3]; TY = (fe8 *)blk[4];
+        dgb = (uint32_t *)blk[5]; off = (uint32_t *)blk[6]; sg = (uint8_t *)blk[7]; bad = (uint8_t *)blk[8]; cpat = (uint8_t *)blk[9]; cep = (uint16_t *)blk[10];
+        return true;
+    }
+    ~F16Buf() { for (auto *b : blk) free(b); }
+};
+/* The worker on the fast 16-lane pipeline. Returns false (before any candidate) if the problem shape
+ * does not fit it; the caller then runs worker_body. */
+static bool worker16(Ctx *c, int tid) {
+    const digest_params_t *dp = c->dp;
+    const int B = QSB_CPU_BATCH, G = B / 8, nw = c->nw;
+    F16Buf fb; if (!fb.alloc(B, nw)) return false;
+    std::vector<uint32_t> dg16((size_t)c->ncwin * 8 + 8);
+    std::vector<uint32_t, qalloc64<uint32_t> > vs16((size_t)(c->nvc > 0 ? c->nvc : 1) * 128);
+    std::vector<std::array<uint8_t, 6> > eps; eps.reserve((size_t)B / (c->ncwin > 0 ? c->ncwin : 1) + 4);
+    std::vector<F16Hit> hits; hits.reserve(256);
+    std::vector<uint8_t> pbuf((size_t)dp->n * SIG_PUSH_SIZE + 64);
+    const size_t tl = dp->tail_section_len, sl = dp->tx_suffix_len;
+    uint64_t epoch = (uint64_t)tid; int wi = c->ncwin; bool first = true;
+    uint8_t early[16]; uint32_t est[8]; uint8_t erem[64];
+    const char *T0 = (const char *)c->table;
+#ifdef QSB_CPU_DEVBENCH
+    uint64_t qdev_t = (uint64_t)(now_s() * 1e9);
+#endif
+    for (;;) {
+#ifdef QSB_CPU_DEVBENCH
+        if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return true; }
+#endif
+        int k = 0; eps.clear();
+        if (wi < c->ncwin) { std::array<uint8_t, 6> ea; for (int q = 0; q < 6; q++) ea[q] = early[q]; eps.push_back(ea); }   /* the epoch continues */
+        while (k < B) {
+            if (wi == c->ncwin) {                       /* next epoch: its prefix state, then all its digests */
+                if (epoch >= c->n_epochs) return true;
+                qsb_host_unrank(epoch, c->cut, c->early, early);
+                SHA256_CTX ectx; SHA256_Init(&ectx);
+                for (int i = 0; i < 8; i++) ectx.h[i] = dp->midstate[i];
+                const uint64_t bits = c->mid_bytes * 8;
+                ectx.Nl = (SHA_LONG)bits; ectx.Nh = (SHA_LONG)(bits >> 32); ectx.num = 0;
+                if (dp->prefix_remainder_len) SHA256_Update(&ectx, dp->prefix_remainder, dp->prefix_remainder_len);
+                size_t pl = 0; int e = 0;
+                for (int i = 0; i < c->cut; i++) {
+                    if (e < c->early && early[e] == i) { e++; continue; }
+                    memcpy(pbuf.data() + pl, dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pl += SIG_PUSH_SIZE;
+                }
+                SHA256_Update(&ectx, pbuf.data(), pl);
+                const size_t prl = dp->prefix_remainder_len, wlen = (size_t)(dp->n - c->cut - 3) * SIG_PUSH_SIZE;
+                const size_t remlen = (prl + pl) % 64;
+                const int nb = (int)((remlen + wlen + tl + sl + 9 + 63) / 64);
+                if (ectx.num != remlen || remlen != (size_t)c->remlen || nb != c->nblk + 1) {
+                    if (first) return false;            /* not this pipeline's shape: the generic path */
+                    printf("  CPU co-grind: worker %d stopped (epoch shape)\n", tid); fflush(stdout); return true;
+                }
+                for (size_t q = 0; q < remlen; q++) { const size_t pos = prl + pl - remlen + q; erem[q] = pos < prl ? dp->prefix_remainder[pos] : pbuf[pos - prl]; }
+                for (int i = 0; i < 8; i++) est[i] = (uint32_t)ectx.h[i];
+                first = false;
+                epoch16(c, est, erem, (uint32_t (*)[8])dg16.data(), vs16.data());
+                std::array<uint8_t, 6> ea; for (int q = 0; q < 6; q++) ea[q] = early[q];
+                eps.push_back(ea);
+                epoch += (uint64_t)c->nthreads; wi = 0;
+            }
+            const int n = (c->ncwin - wi) < (B - k) ? (c->ncwin - wi) : (B - k);
+            memcpy(fb.dgb + (size_t)k * 8, dg16.data() + (size_t)wi * 8, (size_t)n * 32);
+            const uint16_t es = (uint16_t)(eps.size() - 1);
+            for (int j = 0; j < n; j++) { fb.cep[k + j] = es; fb.cpat[k + j] = (uint8_t)(wi + j); }
+            k += n; wi += n;
+        }
+        f16_digits(c, fb.dgb, B, fb.off, fb.sg, fb.bad);
+#ifdef QSB_CPU_DEVBENCH
+        { const uint64_t _t = (uint64_t)(now_s() * 1e9); c->tsc[0] += _t - qdev_t; qdev_t = _t; }
+#endif
+        const bool pfn = c->pfn.load(std::memory_order_relaxed) != 0;
+        {
+            const char *NT1 = nw > 2 ? T0 + c->woff[1] * sizeof(pt) : (const char *)c->cfold;
+            f16_first(fb.X, fb.Y, G, T0 + c->woff[0] * sizeof(pt), fb.off, fb.sg, NT1, pfn ? fb.off + (size_t)B : nullptr);
+        }
+        for (int i = 1; i + 1 < nw; i++) {
+            const bool nf = i + 2 == nw;                /* the next window is the C-folded one: both recids' rows */
+            const char *NT = nf ? (const char *)c->cfold : T0 + c->woff[i + 1] * sizeof(pt);
+            f16_window(fb.X, fb.Y, fb.D, fb.P, fb.TY, G, T0 + c->woff[i] * sizeof(pt), fb.off + (size_t)i * B, fb.sg + (size_t)i * G,
+                       NT, pfn ? fb.off + (size_t)(i + 1) * B : nullptr, nf ? fb.off + (size_t)(i + 2) * B : nullptr);
+        }
+#ifdef QSB_CPU_DEVBENCH
+        { const uint64_t _t = (uint64_t)(now_s() * 1e9); c->tsc[1] += _t - qdev_t; qdev_t = _t; }
+#endif
+        hits.clear();
+        f16_final(fb.X, fb.Y, fb.D, fb.P, fb.TY, G, (const char *)c->cfold, fb.off + (size_t)(nw - 1) * B, fb.off + (size_t)nw * B,
+                  fb.sg + (size_t)(nw - 1) * G, hits);
+        for (const F16Hit &hh : hits) {                 /* prefilter passes: the exact gate, one recid per candidate */
+            const uint32_t q = hh.k;
+            if (fb.bad[q]) continue;
+            uint8_t sk[9]; const std::array<uint8_t, 6> &ea = eps[fb.cep[q]]; const uint8_t *w3 = c->cwin[fb.cpat[q]];
+            for (int j = 0; j < 6; j++) sk[j] = ea[j];
+            sk[6] = w3[0]; sk[7] = w3[1]; sk[8] = w3[2];
+            for (int ri = 0; ri < 2; ri++) if (((hh.m >> ri) & 1) && gate_publish_exact(c, sk, ri)) break;
+        }
+#ifdef QSB_CPU_DEVBENCH
+        { const uint64_t _t = (uint64_t)(now_s() * 1e9); c->tsc[2] += _t - qdev_t; qdev_t = _t; }
+#endif
+        c->cand += B;
+    }
+}
+#endif
+
 /* Pin the workers core by core (thread_siblings_list, within this process's affinity mask), leaving
  * one core free for the GPU host thread; the second worker of each core is the hybrid's scalar one. */
 static void smt_plan(Ctx *c, int nth) {
@@ -2036,23 +2464,31 @@ static void smt_plan(Ctx *c, int nth) {
         for (int i = 0; i < (int)cores.size() && rsv < 0; i++) for (int x : cores[i]) if (CPU_ISSET(x, &host)) { rsv = i; break; }
     for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
     if (rsv < 0 || cores.size() < 2) return;
-    int extra = -1;                                     /* the host core's other CPU, when start() planned a worker for it */
-    if (host_pinned && c->host_cpu >= 0 && CPU_ISSET(c->host_cpu, &host))
-        for (int x : cores[rsv]) if (x != c->host_cpu && CPU_ISSET(x, &host)) { extra = x; break; }
-    c->mask0 = cs;                                      /* unpinned workers: every CPU but the reserved core (or but the host CPU) */
-    if (extra >= 0) CPU_CLR(c->host_cpu, &c->mask0);
-    else for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
+    c->mask0 = cs;                                      /* unpinned workers: every CPU but the reserved core */
+    for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
     int t = 0; bool pair = false;
     for (int i = 0; i < (int)cores.size() && t < nth; i++) {
         if (i == rsv) continue;
         for (size_t k = 0; k < cores[i].size() && t < nth; k++) { c->wcpu[t] = cores[i][k]; c->wscalar[t] = k == 1; pair |= k == 1; t++; }
     }
-    if (extra >= 0 && t < nth) { c->wcpu[t] = extra; c->wscalar[t] = 0; t++; }   /* IFMA: its sibling is the spinning host thread */
     c->hybrid_ok = pair;
 #endif
 }
 static void worker(Ctx *c, int tid) {
-    try { worker_body(c, tid); }                       /* a failed allocation ends this worker, never the process */
+    try {
+#if QCPU_VEC && QCPU_SHANI
+        if (c->f16) {
+#ifdef CPU_SET
+            if (tid < 512 && c->wcpu[tid] >= 0) pthread_setaffinity_np(pthread_self(), sizeof c->mask0, &c->mask0);
+#endif
+#ifdef SCHED_IDLE
+            struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
+#endif
+            if (worker16(c, tid)) return;
+        }
+#endif
+        worker_body(c, tid);
+    }                       /* a failed allocation ends this worker, never the process */
     catch (const std::exception &e) { printf("  CPU co-grind: worker %d stopped (%s)\n", tid, e.what()); fflush(stdout); }
     catch (...) { printf("  CPU co-grind: worker %d stopped\n", tid); fflush(stdout); }
 }
@@ -2080,22 +2516,9 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #else
     int nth = (int)ncpu - QSB_CPU_RESERVE;
 #endif
-    int host_cpu = -1;
-#ifdef CPU_SET
-    {   /* The host producers pin this (GPU host) thread to one core before start(). It spins on one CPU of that core;
-         * the other CPU gets one more worker (placed there by smt_plan), instead of staying idle. */
-        cpu_set_t cur; CPU_ZERO(&cur); __builtin_cpu_init();
-        if (g_mask0_ok && sched_getaffinity(0, sizeof cur, &cur) == 0 && CPU_COUNT(&cur) == 2 && CPU_COUNT(&g_mask0) > 2 &&
-            nth == (int)CPU_COUNT(&g_mask0) - QSB_CPU_RESERVE && !getenv("QSB_CPU_NOEXTRA") && !getenv("QSB_CPU_NOPIN") &&
-            __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma") && !getenv("QSB_CPU_NOVEC")) {   /* only smt_plan places it */
-            const int cpu = sched_getcpu();
-            if (cpu >= 0 && CPU_ISSET(cpu, &cur)) { host_cpu = cpu; nth += 1; }
-        }
-    }
-#endif
-    if (const char *e = getenv("QSB_CPU_THREADS_ENV")) { nth = atoi(e); host_cpu = -1; }   /* dev override */
+    if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
-    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early; c->host_cpu = host_cpu;
+    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early;
 #ifdef CPU_SET
     c->host_tid = (pid_t)syscall(SYS_gettid);           /* start() runs on the GPU host thread */
 #endif
@@ -2158,14 +2581,40 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
           c->dev_live = nth;
   #endif
           c->t_ready = now_s();
+  #ifdef QSB_CPU_DEVBENCH
+          if (getenv("QSB_CPU_TABLEHASH")) {             /* dev: digest of the whole table */
+              uint64_t hsh = 1469598103934665603ULL; const uint64_t *w = (const uint64_t *)c->table; const size_t nwd = (c->table_bytes - (c->cfold ? 2 * c->went[c->nw - 1] * sizeof(pt) : 0)) / 8;
+              for (size_t i = 0; i < nwd; i++) hsh = (hsh ^ w[i]) * 1099511628211ULL;
+              if (c->cfold) { const uint64_t *f = (const uint64_t *)c->cfold; for (size_t i = 0; i < 2 * c->went[c->nw - 1] * sizeof(pt) / 8; i++) hsh = (hsh ^ f[i]) * 1099511628211ULL; }
+              printf("TABLEHASH %016llx\n", (unsigned long long)hsh); fflush(stdout);
+          }
+  #endif
           printf("  CPU co-grind: table %d lookups (%d..%d-bit signed digits%s), %zu MiB (budget %zu MiB), built in %.2fs\n", c->nw,
                  c->wbits[c->nw - 1], c->wbits[0], c->cfold ? ", C folded into the last window" : "", c->table_bytes >> 20, c->budget >> 20,
                  c->t_ready - t0);
           fflush(stdout);
+          c->f16 = QSB_CPU_F16 && c->vec && c->s16 && c->fast && c->cfold && !getenv("QSB_CPU_NOF16");
+          if (c->f16) { c->mode = 2; printf("  CPU co-grind: 16-lane AVX-512 pipeline (IFMA windows, 16-lane SHA-256, vector recoding and key hashes)\n"); fflush(stdout); }
           if (c->vec && !getenv("QSB_CPU_NOPIN")) smt_plan(c, nth);
           else for (int t = 0; t < 512; t++) { c->wcpu[t] = -1; c->wscalar[t] = 0; }
           for (int t = 0; t < nth; t++) { try { std::thread(worker, c, t).detach(); } catch (...) { break; } }
-          if (c->vec && (c->s16 || c->hybrid_ok)) {       /* choose the hashing and the hybrid on this host (ABBA, 3 s each) */
+          if (c->f16 && QSB_CPU_PFNEXT) {                   /* next-window row prefetch: on or off, measured on this host (ABBA, 3 s each) */
+              if (const char *fp = getenv("QSB_CPU_PFN")) { c->pfn = atoi(fp) ? 1 : 0; return; }
+              usleep(1500000);
+              double r[2] = {0, 0};
+              for (int round = 0; round < 2; round++)
+                  for (int k = 0; k < 2; k++) {
+                      const int w = round ? 1 - k : k;
+                      c->pfn = w; usleep(300000);
+                      const uint64_t c0 = c->cand.load(); const double s0 = now_s();
+                      usleep(3000000);
+                      r[w] += (double)(c->cand.load() - c0) / (now_s() - s0) / 2;
+                  }
+              c->pfn = r[1] > 1.01 * r[0] ? 1 : 0;
+              printf("  CPU co-grind: calibration next-window prefetch off %.2f M/s, on %.2f M/s: %s\n", r[0] / 1e6, r[1] / 1e6, c->pfn.load() ? "on" : "off");
+              fflush(stdout);
+          }
+          if (!c->f16 && c->vec && (c->s16 || c->hybrid_ok)) {       /* choose the hashing and the hybrid on this host (ABBA, 3 s each) */
               if (const char *fm = getenv("QSB_CPU_MODE")) { c->mode = atoi(fm) & 3; if (!(c->mode & 1) && c->hybrid_ok) c->unpin = true; return; }
               auto ab = [&](int m0, int m1, double r[2]) {
                   r[0] = r[1] = 0;
@@ -2190,20 +2639,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
               }
               c->mode = best;
               if (!(best & 1) && c->hybrid_ok) c->unpin = true;   /* no hybrid: back to the unpinned scheduling */
-              {   /* then the table-row prefetch distance in the chosen mode: memory latency differs between hosts */
-                  const int p0 = QSB_CPU_PF, p1 = 8; double rp[2] = {0, 0};
-                  for (int round = 0; round < 2; round++)
-                      for (int k = 0; k < 2; k++) {
-                          const int w = round ? 1 - k : k;
-                          c->pf = w ? p1 : p0; usleep(300000);
-                          const uint64_t c0 = c->cand.load(); const double s0 = now_s();
-                          usleep(3000000);
-                          rp[w] += (double)(c->cand.load() - c0) / (now_s() - s0) / 2;
-                      }
-                  c->pf = rp[1] > 1.02 * rp[0] ? p1 : p0;
-                  printf("  CPU co-grind: calibration prefetch %d groups %.2f M/s, %d groups %.2f M/s\n", p0, rp[0] / 1e6, p1, rp[1] / 1e6);
-              }
-              printf("  CPU co-grind: using %s hashing, %s, prefetch %d groups\n", best & 2 ? "16-lane AVX-512" : "4-lane SHA-NI", best & 1 ? "SMT hybrid" : "all-IFMA", c->pf.load());
+              printf("  CPU co-grind: using %s hashing, %s\n", best & 2 ? "16-lane AVX-512" : "4-lane SHA-NI", best & 1 ? "SMT hybrid" : "all-IFMA");
               fflush(stdout);
           }
       } catch (...) { printf("  CPU co-grind: off (builder)\n"); fflush(stdout); }
