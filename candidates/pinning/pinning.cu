@@ -5187,7 +5187,18 @@ int main(int argc, char **argv) {
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
+        {   /* Pipeline starvation probe for the co-grind controller: the most recently queued
+             * in-flight batch has already finished, so the GPU is (or was) idle waiting for the
+             * host. A not-ready answer is cleared at once so the tree's own error checks never
+             * see it. */
+            int qsb_starved = 0;
+            const int qn = (s + QSB_SLOTS - 1) % QSB_SLOTS;
+            if (qn != s && slot_busy[qn]) {
+                const cudaError_t q = cudaEventQuery(slot_done[qn]);
+                if (q == cudaSuccess) qsb_starved = 1; else (void)cudaGetLastError();
+            }
+            qcg::tick(qcg::mono_s(), (double)BATCH, qsb_starved);
+        }
 #endif
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
@@ -5262,7 +5273,18 @@ int main(int argc, char **argv) {
 #endif
         if (count > 64) count = 64;
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
+        {   /* Pipeline starvation probe for the co-grind controller: the most recently queued
+             * in-flight batch has already finished, so the GPU is (or was) idle waiting for the
+             * host. A not-ready answer is cleared at once so the tree's own error checks never
+             * see it. */
+            int qsb_starved = 0;
+            const int qn = (s + QSB_SLOTS - 1) % QSB_SLOTS;
+            if (qn != s && slot_busy[qn]) {
+                const cudaError_t q = cudaEventQuery(slot_done[qn]);
+                if (q == cudaSuccess) qsb_starved = 1; else (void)cudaGetLastError();
+            }
+            qcg::tick(qcg::mono_s(), (double)BATCH, qsb_starved);
+        }
 #endif
         /* Copy before reuse: the next D2H is allowed to overwrite the pinned
          * report while OpenSSL checks this ordinary host-stack snapshot. */
