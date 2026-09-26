@@ -64,6 +64,17 @@
 #define QSB_ROOT_V2 1      /* P11: finish loads the two block-root limbs sets as 16-byte vectors */
 #endif
 #include "GPUMath.h"
+/* QSB_PK_OFFLOAD (default 1): a runtime-sized leading share of each batch's finish blocks
+ * hands its two recovered x-coordinates and y-parities to idle host CPU cores, which compute
+ * the compressed-key SHA-256 word 0 there (pk_offload.h) instead of on the ALU-bound finish
+ * kernel. Every CPU nomination passes the unchanged exact OpenSSL gate before it is written.
+ * 0 compiles the kernels and host loop exactly as before. */
+#ifndef QSB_PK_OFFLOAD
+#define QSB_PK_OFFLOAD 1
+#endif
+#if QSB_PK_OFFLOAD && !(QSB_FIN_BAL2 & 2)
+#error "QSB_PK_OFFLOAD reads the prefix-byte y_parities layout of QSB_FIN_BAL2 bit 2"
+#endif
 #include "SlotReadback.h"
 #include "PriorityPipeline.h"
 /* Keep independent slots live across sequence boundaries. */
@@ -3253,7 +3264,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint8_t *d_gt,
     uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
-    ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
+    ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp,
+    ulonglong2 *pk_out, uint32_t pk_blocks, uint32_t pk_cap, uint32_t pk_verify
 ) {
 #if QSB_UNIF_DP & 1
     /* QSB_UNIF_DP bit 1 (prepare only): the prologue's uses of blockIdx.x (the active bound and
@@ -3493,6 +3505,28 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
 
+#if QSB_PK_OFFLOAD
+    /* QSB_PK_OFFLOAD: the first pk_blocks finish blocks of a batch hand both recovered
+     * x-coordinates and their y-parities to the host, which hashes the two compressed keys on
+     * idle CPU cores (pk_offload.h). The planes are block-major, so each warp stores 512
+     * contiguous bytes per plane. The two prefix bytes of y_parities are 2 + parity (the
+     * QSB_FIN_BAL2 bit-2 layout, asserted below), so bit 0 of each byte is the parity. A block
+     * handed to the host never reports a GPU hit (the host publishes those candidates), unless
+     * pk_verify is set: then the block also stores its own H0 words and keeps the normal hit
+     * path, and the host only compares. */
+    const bool pk_blk = FAST_TAIL && blockIdx.x < pk_blocks;
+    const uint32_t pi = blockIdx.x*(uint32_t)QSB_S2_THREADS + threadIdx.x;
+    if (pk_blk) {
+        pk_out[pi]            = make_ulonglong2(q1x[0], q1x[1]);
+        pk_out[pk_cap + pi]   = make_ulonglong2(q1x[2], q1x[3]);
+        pk_out[2*pk_cap + pi] = make_ulonglong2(q2x[0], q2x[1]);
+        pk_out[3*pk_cap + pi] = make_ulonglong2(q2x[2], q2x[3]);
+        ((uint8_t *)(pk_out + 4*(size_t)pk_cap))[pi] =
+            (uint8_t)((y_parities & 1u) | ((y_parities >> 7) & 2u));
+        if (!pk_verify) return;
+    }
+#endif
+
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
     #pragma unroll
@@ -3530,7 +3564,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
         if (FAST_TAIL) {
             /* ranked gate: only digest word 0 is read */
-            if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
+            const uint32_t pk_h0 = _SHA256Pubkey33H0(pb);
+#if QSB_PK_OFFLOAD
+            if (pk_blk)   /* pk_verify: the GPU's own word for the host's comparison */
+                ((uint32_t *)((uint8_t *)(pk_out + 4*(size_t)pk_cap) + pk_cap))[2*pi + ri] = pk_h0;
+#endif
+            if (gpu_bench_valid_h0(pk_h0)) {
                 uint32_t pos=atomicAdd(d_hit_cnt,1);
                 if(pos<1024)d_hit_idx[pos]=((uint32_t)idx)|(ri<<30);
                 return;
@@ -3653,7 +3692,8 @@ static void launch_pinning_pipeline(
     uint8_t *d_gt, uint32_t *d_hit_cnt, uint32_t *d_hit_idx,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree,
-    uint64_t *super_roots, uint64_t *root_checkpoint, const qsb_tail_pre &tp QSB_STREAM_PARM
+    uint64_t *super_roots, uint64_t *root_checkpoint, const qsb_tail_pre &tp,
+    ulonglong2 *pk_out, uint32_t pk_blocks, uint32_t pk_cap, uint32_t pk_verify QSB_STREAM_PARM
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
@@ -3662,13 +3702,13 @@ static void launch_pinning_pipeline(
             d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
             seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
             d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-            saved,roots,tree,tp);
+            saved,roots,tree,tp,(ulonglong2*)nullptr,0u,0u,0u);
     else
     kernel_pinning_pipeline<FAST_TAIL,0><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-        saved,roots,tree,tp);
+        saved,roots,tree,tp,(ulonglong2*)nullptr,0u,0u,0u);
     cudaError_t err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline prepare launch failed: %s\n",cudaGetErrorString(err));
@@ -3747,13 +3787,13 @@ static void launch_pinning_pipeline(
             d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
             seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
             d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-            saved,roots,tree,tp);
+            saved,roots,tree,tp,pk_out,pk_blocks,pk_cap,pk_verify);
     else
     kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
-        saved,roots,tree,tp);
+        saved,roots,tree,tp,pk_out,pk_blocks,pk_cap,pk_verify);
     err=cudaGetLastError();
     if(err!=cudaSuccess){
         fprintf(stderr,"Pipeline finish launch failed: %s\n",cudaGetErrorString(err));
@@ -4440,6 +4480,39 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
     return -1;
+}
+#endif
+
+#if QSB_PK_OFFLOAD
+#if !QSB_HOST_GATE
+#error "QSB_PK_OFFLOAD publishes only through the exact host gate"
+#endif
+#include "pk_offload.h"
+/* Per-worker OpenSSL objects for the exact gate (OpenSSL contexts are not shared). */
+struct pk_gate_tls {
+    EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order, *nri, *rx, *ry; EC_POINT *R; int ok;
+};
+static const pinning2_params_t *g_pk_pp = nullptr;
+static void *pk_gate_tls_new() {
+    pk_gate_tls *t = new pk_gate_tls();
+    t->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
+    t->ctx = BN_CTX_new();
+    t->order = BN_new(); t->nri = BN_new(); t->rx = BN_new(); t->ry = BN_new();
+    t->R = t->grp ? EC_POINT_new(t->grp) : nullptr;
+    t->ok = t->grp && t->ctx && t->order && t->nri && t->rx && t->ry && t->R &&
+            EC_GROUP_get_order(t->grp, t->order, t->ctx) &&
+            BN_lebin2bn(g_pk_pp->neg_r_inv, 32, t->nri) &&
+            BN_lebin2bn(g_pk_pp->u2r_x, 32, t->rx) &&
+            BN_lebin2bn(g_pk_pp->u2r_y, 32, t->ry) &&
+            EC_POINT_set_affine_coordinates_GFp(t->grp, t->R, t->rx, t->ry, t->ctx);
+    return t;
+}
+/* Only the nominated recid is checked: every (candidate, recid) pair is nominated at most
+ * once, so a published record can never repeat. */
+static int pk_gate(uint32_t seq, uint32_t lt, int recid, void *p) {
+    pk_gate_tls *t = (pk_gate_tls *)p;
+    if (!t || !t->ok) return 0;
+    return qsb_host_exact_hit(g_pk_pp, seq, lt, recid, t->grp, t->ctx, t->order, t->nri, t->R);
 }
 #endif
 
@@ -5152,8 +5225,129 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
+    const bool cogrind_ok = !easy && effective_total == 1 && !seq_start_override && single_hash;
+#if QSB_PK_OFFLOAD && QSB_SLOTPIPE
+    /* QSB_PK_OFFLOAD host state. Buffers are allocated on a helper thread while the first
+     * batches already run; until pk_ready is set every launch passes pk_blocks = 0. */
+    static pko::Pool pk_pool;
+    const uint32_t PK_BLK = QSB_S2_THREADS;                /* candidates per finish block */
+    const size_t PK_REC = 64 + 1 + 8;                      /* planes, parity byte, verify words */
+    static ulonglong2 *d_pk[QSB_SLOTS];
+    static uint8_t *h_pk[QSB_SLOTS][2];
+    static std::atomic<int> pk_busy[QSB_SLOTS][2];
+    static pko::Item pk_item[QSB_SLOTS][2];
+    static std::atomic<int> pk_ready{0};
+    static uint32_t pk_cap = 0;
+    static double pk_pcie = 0;                             /* measured D2H bytes/s */
+    uint32_t pk_launch_n[QSB_SLOTS] = {0}; int pk_launch_j[QSB_SLOTS] = {0}, pk_launch_v[QSB_SLOTS] = {0};
+    int pk_gen[QSB_SLOTS] = {0};
+    int pk_mode = 0;                                       /* 0 off, 1 self-test, 2 on */
+    int pk_verify_sent = 0; pko::Item *pk_verify_it[2] = {nullptr, nullptr};
+    double pk_target = 0;                                  /* offloaded blocks per batch */
+    double pk_t_last = 0; uint64_t pk_cd_last = 0, pk_bn_last = 0, pk_skips = 0;
+    uint64_t pk_searched_last = 0;
+    double pk_per = 0, pk_t_skip = 0;                      /* last per-worker rate; last skip decay */
+    /* A/B guard: every 30 s, windows on / off / on of about 1 s each, the first four batches
+     * of each window dropped. Offload must raise candidates/s by more than 0.2 %; two failed
+     * checks in a row switch it off and start the co-grinder. */
+    int pk_ab = 0, pk_ab_drop = 0, pk_ab_strikes = 0; double pk_ab_next = 0, pk_ab_t0 = 0;
+    double pk_ab_c[3] = {0, 0, 0}, pk_ab_s[3] = {0, 0, 0}; double pk_ab_last_gain = 0; int pk_ab_checks = 0;
+    std::thread pk_setup;
+    for (int s = 0; s < QSB_SLOTS; s++) for (int j = 0; j < 2; j++) pk_busy[s][j].store(0);
+    if (cogrind_ok && !getenv("QSB_PK_OFFLOAD_OFF")) {
+        int ncpu = 0;
+        { cpu_set_t cs; CPU_ZERO(&cs); if (sched_getaffinity(0, sizeof cs, &cs) == 0) ncpu = CPU_COUNT(&cs); }
+        if (ncpu <= 0) ncpu = (int)sysconf(_SC_NPROCESSORS_ONLN);
+#if QSB_CPU_GRIND
+        const double quota = qcg::cgroup_quota_cpus();
+#else
+        const double quota = 0;
+#endif
+        int nw = (quota > 0 && quota < ncpu) ? (int)ceil(quota) - 2 : ncpu - 2;
+        if (getenv("QSB_PK_THREADS")) nw = atoi(getenv("QSB_PK_THREADS"));
+        if (nw > 64) nw = 64;
+        double one = 0;
+        const int eng = pko::pick_engine(&one);
+        if (nw >= 2) {
+            g_pk_pp = &pp;
+            pk_pool.eng = eng; pk_pool.zeros = QSB_ZEROS_N;
+            pk_pool.gate = pk_gate; pk_pool.tls_new = pk_gate_tls_new;
+            mkdir("results", 0755);
+            pk_pool.hit_fd = open("results/pinning_hit_pk.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (pk_pool.hit_fd >= 0 && pko::start(&pk_pool, nw) >= 2) {
+                pk_mode = 1;
+                pk_target = 0.5 * one * pk_pool.nworkers * ((double)BATCH / 1.0e9) / PK_BLK;
+                printf("  Pubkey-hash offload: %d CPU workers (%d CPUs, quota %.2f), engine %s, %.1f M cand/s per thread\n",
+                       pk_pool.nworkers, ncpu, quota, pko::engine_name(eng), one / 1e6);
+                pk_setup = std::thread([BATCH, PK_REC, PK_BLK, gpu_index] {
+                    cudaSetDevice(gpu_index);
+                    size_t fr = 0, tot = 0;
+                    if (cudaMemGetInfo(&fr, &tot) != cudaSuccess) { cudaGetLastError(); pk_ready.store(-1); return; }
+                    const size_t keep = (size_t)384 << 20;
+                    size_t per = fr > keep ? (fr - keep) / ((size_t)QSB_SLOTS * PK_REC) : 0;
+                    size_t cap = (size_t)BATCH * 3 / 8;
+                    if (per < cap) cap = per;
+                    cap -= cap % (256 * PK_BLK);
+                    if (cap < (size_t)256 * PK_BLK) {
+                        printf("  Pubkey-hash offload: no device memory, disabled\n"); fflush(stdout);
+                        pk_ready.store(-1, std::memory_order_release);
+                        return;
+                    }
+                    auto release_all = [] {
+                        for (int s = 0; s < QSB_SLOTS; s++) {
+                            if (d_pk[s]) cudaFree(d_pk[s]);
+                            d_pk[s] = nullptr;
+                            for (int j = 0; j < 2; j++) { if (h_pk[s][j]) cudaFreeHost(h_pk[s][j]); h_pk[s][j] = nullptr; }
+                        }
+                        cudaGetLastError();
+                    };
+                    bool got = false;
+                    for (; cap >= (size_t)256 * PK_BLK && !got; cap = (cap / 2) - (cap / 2) % (256 * PK_BLK)) {
+                        got = true;
+                        for (int s = 0; s < QSB_SLOTS && got; s++) {
+                            if (cudaMalloc(&d_pk[s], cap * PK_REC) != cudaSuccess) { d_pk[s] = nullptr; got = false; break; }
+                            for (int j = 0; j < 2 && got; j++)
+                                if (cudaHostAlloc((void **)&h_pk[s][j], cap * PK_REC, cudaHostAllocDefault) != cudaSuccess) {
+                                    h_pk[s][j] = nullptr; got = false;
+                                }
+                        }
+                        if (!got) release_all();
+                        else break;
+                    }
+                    if (!got) {
+                        printf("  Pubkey-hash offload: buffers unavailable, disabled\n"); fflush(stdout);
+                        pk_ready.store(-1, std::memory_order_release);
+                        return;
+                    }
+                    cudaStream_t ps; double bw = 0;
+                    if (cudaStreamCreateWithFlags(&ps, cudaStreamNonBlocking) == cudaSuccess) {
+                        const size_t nb = cap * 64 < ((size_t)64 << 20) ? cap * 64 : ((size_t)64 << 20);
+                        cudaMemcpyAsync(h_pk[0][0], d_pk[0], nb, cudaMemcpyDeviceToHost, ps);
+                        cudaStreamSynchronize(ps);
+                        const double t0 = pko::mono_s();
+                        cudaMemcpyAsync(h_pk[0][0], d_pk[0], nb, cudaMemcpyDeviceToHost, ps);
+                        cudaStreamSynchronize(ps);
+                        bw = nb / (pko::mono_s() - t0);
+                        cudaStreamDestroy(ps);
+                    }
+                    cudaGetLastError();
+                    pk_cap = (uint32_t)cap; pk_pcie = bw;
+                    printf("  Pubkey-hash offload: %u candidates per slot buffer, D2H %.1f GB/s\n",
+                           pk_cap, bw / 1e9);
+                    fflush(stdout);
+                    pk_ready.store(1, std::memory_order_release);
+                });
+                pk_setup.detach();
+            }
+        }
+    }
+#endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-    if (!easy && effective_total == 1 && !seq_start_override && single_hash)
+#if QSB_PK_OFFLOAD && QSB_SLOTPIPE
+    if (cogrind_ok && pk_mode == 0)
+#else
+    if (cogrind_ok)
+#endif
         qcg::start(&pp, LT_MIN, LT_MAX);
 #endif
 #if QSB_SLOTPIPE
@@ -5175,6 +5369,21 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_PK_OFFLOAD
+    /* A completed batch's offloaded planes are in h_pk[s][j]: hand them to the workers,
+     * attributed to the batch's own sequence and locktime base. */
+    auto pk_on_complete = [&](int s) {
+        if (!pk_launch_n[s]) return;
+        const int j = pk_launch_j[s];
+        pko::Item *it = &pk_item[s][j];
+        it->buf = h_pk[s][j]; it->cap = pk_cap; it->n = pk_launch_n[s];
+        it->seq = slot_seq[s]; it->lt = slot_lt[s]; it->verify = pk_launch_v[s] != 0;
+        it->release = &pk_busy[s][j];
+        if (pk_launch_v[s] == 1 || pk_launch_v[s] == 2) pk_verify_it[pk_launch_v[s] - 1] = it;
+        pk_launch_n[s] = 0;
+        pko::submit(&pk_pool, it);
+    };
+#endif
 #if QSB_REFILL_BEFORE_GATE
     auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
                             uint32_t h_hit, const uint32_t *hits) -> int {
@@ -5186,6 +5395,9 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_PK_OFFLOAD
+        pk_on_complete(s);
+#endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
         qcg::tick(qcg::mono_s(), (double)BATCH);
 #endif
@@ -5253,6 +5465,9 @@ int main(int argc, char **argv) {
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_PK_OFFLOAD
+        pk_on_complete(s);
+#endif
 #if QSB_COMPACT_READBACK
         count = slot_readback[s].count();
         const uint32_t *source = slot_readback[s].indices();
@@ -5333,6 +5548,116 @@ int main(int argc, char **argv) {
                 return 1;
             }
 
+#if QSB_PK_OFFLOAD
+            /* Offload share for this launch: self-test batches first, then the controller's
+             * target; a slot buffer the workers still read is never overwritten (the batch
+             * then runs entirely on the GPU and the target shrinks). */
+            uint32_t pk_b = 0; int pk_v = 0; const int pk_j = pk_gen[s] & 1;
+            if (pk_mode && pk_ready.load(std::memory_order_acquire) < 0) {
+                pk_mode = 0;
+                pk_pool.stop.store(1); pk_pool.cv.notify_all();
+#if QSB_CPU_GRIND
+                if (cogrind_ok) qcg::start(&pp, LT_MIN, LT_MAX);
+#endif
+            }
+            if (pk_mode && pk_ready.load(std::memory_order_acquire) > 0) {
+                const double now = pko::mono_s();
+                if (pk_mode == 1 && pk_verify_sent == 2 && pk_verify_it[0] && pk_verify_it[1] &&
+                    !pk_verify_it[0]->release->load(std::memory_order_acquire) &&
+                    !pk_verify_it[1]->release->load(std::memory_order_acquire)) {
+                    const uint64_t bad = pk_pool.mismatches.load(), words = pk_pool.verified_words.load();
+                    if (bad == 0 && words >= (uint64_t)2 * 512 * PK_BLK) {
+                        pk_mode = 2; pk_ab_next = now + 10.0;
+                        printf("  Pubkey-hash offload: self-test passed (%llu words), enabled\n",
+                               (unsigned long long)words);
+                    } else {
+                        pk_mode = 0;
+                        printf("  Pubkey-hash offload: self-test FAILED (%llu of %llu words differ), disabled\n",
+                               (unsigned long long)bad, (unsigned long long)words);
+#if QSB_CPU_GRIND
+                        pk_pool.stop.store(1); pk_pool.cv.notify_all();
+                        if (cogrind_ok) qcg::start(&pp, LT_MIN, LT_MAX);
+#endif
+                    }
+                    fflush(stdout);
+                }
+                if (pk_mode == 2 && now - pk_t_last > 0.5) {
+                    const uint64_t cd = pk_pool.cand_done.load(), bn = pk_pool.busy_ns.load();
+                    if (pk_t_last > 0) {
+                        const double dt = now - pk_t_last;
+                        const double gpu_rate = (double)(total_searched - pk_searched_last) / dt;
+                        const double dbn = (double)(bn - pk_bn_last) * 1e-9;
+                        double lim = 0.375;
+                        if (pk_pcie > 0 && gpu_rate > 0) {
+                            const double pf = 0.5 * pk_pcie / (65.0 * gpu_rate);
+                            if (pf < lim) lim = pf;
+                        }
+                        if (dbn > 0.02) pk_per = (double)(cd - pk_cd_last) / dbn;
+                        double want = pk_target;
+                        if (pk_per > 0 && gpu_rate > 0) {   /* the last good per-worker rate, even when idle */
+                            double frac = 0.85 * pk_per * pk_pool.nworkers / gpu_rate;
+                            if (frac > lim) frac = lim;
+                            want = frac * BATCH / PK_BLK;
+                        }
+                        if (want > pk_target) pk_target = want < pk_target * 1.10 + 64 ? want : pk_target * 1.10 + 64;
+                        else pk_target = 0.5 * (pk_target + want);
+                        if (pk_target > lim * BATCH / PK_BLK) pk_target = lim * BATCH / PK_BLK;
+                        if (pk_target < 256) pk_target = 256;          /* probe floor: never decays to zero */
+                    }
+                    pk_t_last = now; pk_cd_last = cd; pk_bn_last = bn; pk_searched_last = total_searched;
+                }
+                /* A/B guard state machine (mode 2). Rates are candidates launched per second; the
+                 * loop launches a slot only after collecting it, so this is the GPU's throughput. */
+                if (pk_mode == 2) {
+                    if (pk_ab == 0 && now >= pk_ab_next) { pk_ab = 1; pk_ab_drop = 4; pk_ab_c[0] = pk_ab_c[1] = pk_ab_c[2] = 0; }
+                    if (pk_ab) {
+                        const int w = pk_ab - 1;
+                        if (pk_ab_drop > 0) { if (--pk_ab_drop == 0) pk_ab_t0 = now; }
+                        else if (now - pk_ab_t0 >= 1.0) {
+                            pk_ab_s[w] = now - pk_ab_t0;
+                            if (pk_ab < 3) { pk_ab++; pk_ab_drop = 4; }
+                            else {
+                                const double on = (pk_ab_c[0] + pk_ab_c[2]) / (pk_ab_s[0] + pk_ab_s[2]);
+                                const double off = pk_ab_c[1] / pk_ab_s[1];
+                                pk_ab_last_gain = off > 0 ? on / off - 1.0 : 0; pk_ab_checks++;
+                                pk_ab_strikes = pk_ab_last_gain > 0.002 ? 0 : pk_ab_strikes + 1;
+                                printf("  [PK] A/B: on %.1f off %.1f M/s (%+.2f%%), strikes %d\n",
+                                       on / 1e6, off / 1e6, 100 * pk_ab_last_gain, pk_ab_strikes);
+                                fflush(stdout);
+                                pk_ab = 0; pk_ab_next = now + 30.0;
+                                if (pk_ab_strikes >= 2) {
+                                    pk_mode = 0;
+                                    printf("  Pubkey-hash offload: no measured gain, disabled\n"); fflush(stdout);
+                                    pk_pool.stop.store(1); pk_pool.cv.notify_all();
+#if QSB_CPU_GRIND
+                                    if (cogrind_ok) qcg::start(&pp, LT_MIN, LT_MAX);
+#endif
+                                }
+                            }
+                        }
+                        if (pk_ab && pk_ab_drop == 0) pk_ab_c[pk_ab - 1] += (double)batch_sz;
+                    }
+                }
+                if (pk_mode && !pk_busy[s][pk_j].load(std::memory_order_acquire)) {
+                    uint32_t want = 0;
+                    if (pk_mode == 1 && pk_verify_sent < 2) want = 512;
+                    else if (pk_mode == 2 && pk_ab != 2) want = (uint32_t)pk_target;
+                    uint32_t lim = (uint32_t)batch_sz / PK_BLK;
+                    if (pk_cap / PK_BLK < lim) lim = pk_cap / PK_BLK;
+                    pk_b = want < lim ? want : lim;
+                    if (pk_b && pk_mode == 1) pk_v = ++pk_verify_sent;
+                } else if (pk_mode == 2 && pk_ab != 2) {
+                    pk_skips++;
+                    if (now - pk_t_skip > 0.1) { pk_target *= 0.85; pk_t_skip = now; }   /* one decay per 0.1 s */
+                    if (pk_target < 256) pk_target = 256;
+                }
+                if (pk_b) { pk_busy[s][pk_j].store(1, std::memory_order_release); pk_gen[s]++; }
+            }
+            pk_launch_n[s] = pk_b * PK_BLK; pk_launch_j[s] = pk_j; pk_launch_v[s] = pk_v;
+#define PK_LAUNCH_ARGS(s) d_pk[s], pk_b, pk_cap, (uint32_t)(pk_v != 0)
+#else
+#define PK_LAUNCH_ARGS(s) (ulonglong2*)nullptr, 0u, 0u, 0u
+#endif
             launch_pinning_pipeline<true>(
                 d_mid_slot[s], d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
@@ -5343,8 +5668,25 @@ int main(int argc, char **argv) {
                 d_hit_cnt_s[s], d_hit_idx_s[s],
                 batch_sz, easy, single_hash,
                 d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
-                d_super_roots[s],d_root_checkpoint[s], cur_tp, st, &slot_flow[s]);
+                d_super_roots[s],d_root_checkpoint[s], cur_tp,
+                PK_LAUNCH_ARGS(s), st, &slot_flow[s]);
             st = slot_flow[s].completion_stream();
+#if QSB_PK_OFFLOAD
+            if (pk_b) {   /* the planes follow the finish kernel on the completion stream */
+                uint8_t *hb = h_pk[s][pk_j];
+                const uint8_t *db = (const uint8_t *)d_pk[s];
+                const size_t n = (size_t)pk_b * PK_BLK, c = pk_cap;
+                slot_error = cudaMemcpy2DAsync(hb, c * 16, db, c * 16, n * 16, 4, cudaMemcpyDeviceToHost, st);
+                if (slot_error == cudaSuccess)
+                    slot_error = cudaMemcpyAsync(hb + 64 * c, db + 64 * c, n, cudaMemcpyDeviceToHost, st);
+                if (slot_error == cudaSuccess && pk_v)
+                    slot_error = cudaMemcpyAsync(hb + 65 * c, db + 65 * c, 8 * n, cudaMemcpyDeviceToHost, st);
+                if (slot_error != cudaSuccess) {
+                    fprintf(stderr, "Offload copy enqueue failed: %s\n", cudaGetErrorString(slot_error));
+                    return 1;
+                }
+            }
+#endif
 #if QSB_COMPACT_READBACK
             slot_error = slot_readback[s].enqueue(st, slot_done[s]);
 #else
@@ -5399,6 +5741,14 @@ int main(int argc, char **argv) {
             double rate = total_searched / elapsed;
             printf("  [GPU %d] seq #%u (0x%08X), %luM total, %.1fM/s, %.0fs\n",
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
+#if QSB_PK_OFFLOAD
+            if (pk_mode)
+                printf("  [PK] mode %d, target %.0f blocks, cpu %lluM cand, tentative %llu, published %llu, gate rejects %llu, skips %llu, A/B %d checks last %+.2f%%\n",
+                       pk_mode, pk_target, (unsigned long long)(pk_pool.cand_done.load() / 1000000),
+                       (unsigned long long)pk_pool.tentative.load(), (unsigned long long)pk_pool.published.load(),
+                       (unsigned long long)pk_pool.gate_rejects.load(), (unsigned long long)pk_skips,
+                       pk_ab_checks, 100 * pk_ab_last_gain);
+#endif
         }
     }
 #else
@@ -5449,7 +5799,7 @@ int main(int argc, char **argv) {
                 d_hit_cnt, d_hit_idx,
                 batch_sz, easy, single_hash,
                 d_pipeline_state,d_pipeline_roots,d_pipeline_tree,
-                d_super_roots,d_root_checkpoint, cur_tp);
+                d_super_roots,d_root_checkpoint, cur_tp, (ulonglong2*)nullptr, 0u, 0u, 0u);
 #if QSB_HOST_READBACK
             /* The blocking default-stream copy waits for all kernels and
              * returns the counter plus the same first 64 indices reported below. */
