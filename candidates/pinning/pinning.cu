@@ -2,7 +2,7 @@
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
-#define QSB_L2STATE 1
+#define QSB_L2STATE 1033 /* splane: 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines at once) */
 #define QSB_GREEN 20
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
@@ -560,7 +560,17 @@ __device__ __forceinline__ uint64_t qsb_ld_u64(const uint64_t *p) {
 
 /* Pipeline-state stores (prepare) and the finish-side discard (QSB_L2STATE). */
 __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
-#if QSB_L2STATE & 1
+#if (QSB_L2STATE & 8) && QSB_SM80_PTX
+    /* QSB_L2STATE bit 8 (splane, carrier image only): state stores carry an L2::evict_last
+     * cache policy, so the cold-bank gathers (evict_first) and the next sub-batch's state
+     * cannot displace a dirty state line before finish has consumed it (bit 1024 then drops
+     * the line without a DRAM write-back). A cache policy changes which line leaves L2,
+     * never the bytes stored: every value finish reads is unchanged. */
+    uint64_t pol;
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.L2::cache_hint.u64 [g], %1, %2; }"
+                 :: "l"(p), "l"(a), "l"(pol) : "memory");
+#elif QSB_L2STATE & 1
     asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.u64 [g], %1; }"
                  :: "l"(p), "l"(a) : "memory");
 #else
