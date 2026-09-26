@@ -1,0 +1,17 @@
+{
+  "status": "PASS_FINAL_SOURCE_COMPOSITION_AND_ORACLE_MODEL",
+  "base": "e892e6e5590b6277a8b1f00473645ce0615bf596",
+  "unchanged_baseline_files": 486,
+  "original_pinning_cu_reconstructed": true,
+  "register_kernel_matches_validated_prototype": true,
+  "inverse_byte_identical_to_previous": true,
+  "carrier_sha256": "b0453a45f11e40802b5b7c5b772414c86a8ab6a60d9a3084da68d4569c5d186a",
+  "include_closure": 30,
+  "native_oracle_product_cases": 256,
+  "native_oracle_root_cases": 29,
+  "device_check_unique_32bit_reads": 4096,
+  "device_check_unique_32bit_writes": 2048,
+  "native_compile": false,
+  "GPU_execution": false,
+  "performance_claim": false
+}

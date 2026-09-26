@@ -1,0 +1,21 @@
+{
+  "status": "PASS_PYTHON_SOURCE_MODEL_ONLY",
+  "lut_cases": 43008,
+  "inverses": 1117,
+  "lane_row_checks": 80184,
+  "forced_fallback_checks": 118,
+  "max_batches": 19,
+  "max_abs_signed_top_word": 1,
+  "max_rs_multiple_p": 1,
+  "canon_cases": 402,
+  "negative_dropped_final_carry": 39163,
+  "exact_ISO_initialization": true,
+  "only_one_scale": true,
+  "full_warp_entry": true,
+  "native_compilation": false,
+  "GPU_execution": false,
+  "production_inclusion": true,
+  "source_commit": "a137e289b236c3622eba80f1ad5e9a0c8a91eb67",
+  "header_sha256": "dc37af7f709c9c65c2cd8c359af7631e0886ad99131006087ba0e98e1b39dffe",
+  "adapter_sha256": "0c5737179c970a5487cab0cdc064e836a54bc046f28a6a10072ccd6d2f77cd59"
+}
