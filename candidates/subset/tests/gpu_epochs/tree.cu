@@ -3313,6 +3313,14 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "host_producers.h"
 #define QSB_HP_ON 1
 #endif
+/* QSB_HOST_BLOCKING (host-only): the slot completion events are created with cudaEventBlockingSync, so the GPU
+ * host thread sleeps in cudaEventSynchronize instead of spinning a CPU while two batches are in flight (after
+ * newjordan's QSB_ASYNC_BLOCKING in 212237f4, which measured the unstarved rate unchanged on a 4090). The host
+ * thread's core is then free for co-grinder workers (QSB_CPU_HOST_CORE in CpuGrindSubset.h). Kernels, arguments
+ * and batch order are unchanged. 0 = the spin wait. */
+#ifndef QSB_HOST_BLOCKING
+#define QSB_HOST_BLOCKING 1
+#endif
 /* QSB_CPU_GRIND: host-CPU co-grinding on candidates disjoint from the GPU's (CpuGrindSubset.h). */
 #ifndef QSB_CPU_GRIND
 #define QSB_CPU_GRIND 1
@@ -4344,7 +4352,7 @@ int main(int argc, char **argv) {
             cudaError_t se = cudaSuccess;
             for (int s = 0; s < 2 && se == cudaSuccess; s++) {
                 se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
-                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (QSB_HOST_BLOCKING ? cudaEventBlockingSync : 0));
             }
             if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
             if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_tent, 2 * (size_t)SP_HOST_BYTES, cudaHostAllocDefault);
