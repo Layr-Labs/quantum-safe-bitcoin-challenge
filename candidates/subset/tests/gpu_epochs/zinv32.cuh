@@ -233,35 +233,6 @@ ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
     return delta;
 }
 
-#ifndef QSB_INVERSE_COLUMNS
-#define QSB_INVERSE_COLUMNS 1
-#endif
-/* M <- D*M is independent by column. Lanes 0/1 keep column zero,
- * lanes 2/3 column one, cutting four matrix multiplies per six-step group.
- * Each lane selects its row before two shuffles reconstruct (ka,kb).
- * f,g and delta remain identical in all four lanes; arithmetic is unchanged. */
-ZI_DEV int32_t zi_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
-                                  uint32_t column,int32_t *top,int32_t *bottom){
-    int32_t u=1-(int32_t)column,q=(int32_t)column;
-    #pragma unroll
-    for(int k=0;k<5;k++){
-        const int32_t dc=delta<-6?-6:(delta>6?6:delta);
-        const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
-        const uint64_t packed=ZI_BY_LUT[((uint32_t)(dc+6)<<6)|ratio];
-        const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
-        const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
-        const int32_t c=zi_by_signed_byte<2>(e),d=zi_by_signed_byte<3>(e);
-        const uint32_t nf=((uint32_t)a*f+(uint32_t)b*g)>>6;
-        g=((uint32_t)c*f+(uint32_t)d*g)>>6;f=nf;
-        const int32_t nu=a*u+b*q;
-        q=c*u+d*q;u=nu;
-        const int32_t sm=(int32_t)flags>>31;
-        delta=((delta^sm)-sm)+zi_by_signed_byte<0>(flags);
-    }
-    *top=u;*bottom=q;
-    return delta;
-}
-
 /* ======================= 4-lane cooperative form =======================
  * Lanes 0..3 of one warp run the SAME instruction stream except the decision loop
  * (lanes 0,1 only; they hold identical u,v so they take identical branches).
@@ -327,15 +298,7 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     #pragma unroll
     for(int i=0;i<9;i++){
         const uint32_t xl=i<8?(uint32_t)(R[i>>1]>>(32*(i&1))):0u;
-#if defined(QSB_ISO_FUSED_ROOT_SCALE) && QSB_ISO_FUSED_ROOT_SCALE
-        /* Coefficients are linear in their initial values.  Initialize s to
-         * inv(u), rather than one, so the root result is inv(u)/x without a
-         * separate field multiplication after the cooperative inverse. */
-        const uint32_t scaled=i<8?(uint32_t)(QSB_ISO_INVU[i>>1]>>(32*(i&1))):0u;
-        const uint32_t own=rs?scaled:xl;                   /* s=inv(u) / x */
-#else
-        const uint32_t own=rs?(uint32_t)(i==0):xl;         /* s=1 / x */
-#endif
+        const uint32_t own=rs?(uint32_t)(i==0):xl;        /* s=1 / x */
         const uint32_t oth=rs?0u:ZI_PL[i];                 /* r=0 / p */
         P[i]=odd?own:oth; Q[i]=odd?oth:own;
     }
@@ -345,14 +308,6 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
         // Uniform across all four lanes; original R is still unchanged.
         if(batches==ZI_ROOT_MAX_BATCHES)return false;
         ++batches;
-#if QSB_INVERSE_COLUMNS
-        const uint32_t f0=zi_x(P[0],0),g0=zi_x(P[0],1);
-        int32_t top,bottom;
-        delta=zi_divstep30_column(delta,f0,g0,rs,&top,&bottom);
-        const uint32_t row=(uint32_t)(odd?bottom:top);
-        const int32_t ka=(int32_t)zi_x(row,odd?3:0);
-        const int32_t kb=(int32_t)zi_x(row,odd?1:2);
-#else
         int32_t a=0,b=0,c=0,d=0;
         if(lane<2){
             const uint32_t f0=odd?Q[0]:P[0],g0=odd?P[0]:Q[0];
@@ -361,7 +316,6 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
         int32_t ka=odd?d:a,kb=odd?c:b;
         ka=(int32_t)zi_x((uint32_t)ka,lane&1);
         kb=(int32_t)zi_x((uint32_t)kb,lane&1);
-#endif
         zi_row_ip(P,Q,ka,kb,rs);
         uint32_t nz=0;
         for(int i=0;i<9;i++)nz|=P[i];

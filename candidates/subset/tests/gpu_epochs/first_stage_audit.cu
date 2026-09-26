@@ -23,10 +23,11 @@ int main() {
     CUDA_CHECK(cudaMalloc(&device_epochs,input.size()*sizeof(epoch_desc_t)));
     CUDA_CHECK(cudaMalloc(&device_first,actual.size()*sizeof(uint32_t)));
     uint64_t states=0,words=0,padding=0,errors=0;
-    const int counts[]={1,31,32,33,54,63,64};
+    const int counts[]={1,QSB_FIRST_SLOTS-1,QSB_FIRST_SLOTS};
     for(int fixture=0;fixture<2;fixture++) {
-        uint32_t table[14][256];
-        for(int j=0;j<14;j++)for(int c=0;c<256;c++)table[j][c]=audit_word();
+        constexpr int table_slots=QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS;
+        uint32_t table[14][table_slots];
+        for(int j=0;j<14;j++)for(int c=0;c<table_slots;c++)table[j][c]=audit_word();
         for(auto &ep:input) {
             for(auto &v:ep.mid)v=audit_word();
             ep.remW[0]=audit_word();ep.remW[1]=audit_word();
@@ -35,7 +36,7 @@ int main() {
         CUDA_CHECK(cudaMemcpy(device_epochs,input.data(),input.size()*sizeof(epoch_desc_t),cudaMemcpyHostToDevice));
         for(int count:counts) {
             CUDA_CHECK(cudaMemset(device_first,0xa5,actual.size()*sizeof(uint32_t)));
-            kernel_build_first<<<epochs,count>>>(device_epochs,device_first);
+            kernel_build_first_flat<<<(epochs*count+255)/256,256>>>(device_epochs,device_first,epochs,count);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaMemcpy(actual.data(),device_first,actual.size()*sizeof(uint32_t),cudaMemcpyDeviceToHost));
             for(int e=0;e<epochs;e++)for(int c=0;c<QSB_FIRST_SLOTS;c++) {
@@ -57,7 +58,7 @@ int main() {
                     padding+=8;
                 }
                 for(int j=0;j<8;j++) {
-                    uint32_t got=actual[((size_t)e*QSB_FIRST_SLOTS+c)*8+j];
+                    uint32_t got=actual[(size_t)e*QSB_FIRST_SLOTS*8+j*QSB_FIRST_SLOTS+c];
                     if(got!=expected[j]) {
                         if(errors<8)fprintf(stderr,"mismatch fixture=%d classes=%d epoch=%d class=%d word=%d\n",fixture,count,e,c,j);
                         errors++;
