@@ -11,7 +11,7 @@
  * is compressed once per sequence), SHA256s the digest, and recovers
  *     Q = z * B +- A,   B = neg_r_inv * G,  A = u2 * R
  * with a 16-bit fixed-window table of B multiples (16 windows x 65535 affine points, 64 MiB,
- * built at startup) and affine additions whose inversions are batched over the 1024 candidates
+ * built at startup) and affine additions whose inversions are batched over the 2048 candidates
  * of a batch (Montgomery's trick); both recids share the denominator of the last addition. The
  * elliptic-curve stage runs 8 (AVX-512F) or 4 (AVX2) candidates per vector in libsecp256k1's 10x26
  * field (cpu_cogrind_vec.h), the faster of the two as timed at startup, else libsecp256k1's
@@ -197,7 +197,7 @@ static void fe_inv(fe *r, const fe *a) {
 #define QSB_CG_NWIN ((256 + QSB_CG_W - 1) / QSB_CG_W)
 #define QSB_CG_TSIZE (1u << QSB_CG_W)     /* entries per window, index 0 unused */
 #ifndef QSB_CG_BATCH_MIN
-#define QSB_CG_BATCH_MIN 1024             /* candidates per inversion batch (lower bound) */
+#define QSB_CG_BATCH_MIN 2048             /* amortize inversions; 1024 restores the promoted batch */
 #endif
 #ifndef QSB_CG_MAXB
 #define QSB_CG_MAXB 2048
