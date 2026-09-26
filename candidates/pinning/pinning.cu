@@ -185,6 +185,10 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #undef QSB_S2_THREADS
 #define QSB_S2_THREADS QSB_TREE_N
 #undef QSB_S2_BLOCKS
+/* QSB_FIN_CAP_IMAD REVERTED: forcing 8 blocks/SM at 64 registers caused register spills
+ * to local memory on the GLV11 P18 schedule (official score 886M, -6.5% vs 948.94M baseline).
+ * The 7-block/72-register path trades one fewer concurrent block for spill-free execution;
+ * for the multiply-heavy finish kernel, spill-free is faster. Leave at 7 (default). */
 #if QSB_FIN_CAP_IMAD
 /* QSB_FIN_CAP_IMAD: ptxas spends the 72-register headroom of a 7-block bound on the new schedule
  * (70 to 72 registers, which drops the finish kernel from 8 to 7 resident blocks per SM). A bound
@@ -218,6 +222,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  *   0: untouched (base). 1: print the driver default only.
  *   32, 64, 128: print the default, request this value, print what the driver kept. */
 #ifndef QSB_L2_FETCH
+/* QSB_L2_FETCH=0: leave driver fetch granularity untouched (baseline). QSB_L2_FETCH=64
+ * was tested in v28 but produced 886M (-6.5%) alongside QSB_FIN_CAP_IMAD=1; impact
+ * isolated requires a separate draw. Restoring to 0 to match the 948.94M baseline. */
 #define QSB_L2_FETCH 0
 #endif
 #if QSB_L2_FETCH != 0 && QSB_L2_FETCH != 1 && QSB_L2_FETCH != 32 && QSB_L2_FETCH != 64 && QSB_L2_FETCH != 128
@@ -4085,6 +4092,16 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #endif
 
 
+static FILE *g_qsb_diag = NULL;
+#define QSB_DIAG_LOG(...) do { \
+    printf(__VA_ARGS__); \
+    if (g_qsb_diag) { fprintf(g_qsb_diag, __VA_ARGS__); fflush(g_qsb_diag); } \
+} while(0)
+#define QSB_DIAG_ERR(...) do { \
+    fprintf(stderr, __VA_ARGS__); \
+    if (g_qsb_diag) { fprintf(g_qsb_diag, "ERR: " __VA_ARGS__); fflush(g_qsb_diag); } \
+} while(0)
+
 int main(int argc, char **argv) {
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
     uint32_t tail_w0 = 0;   /* W0 of the static tail block with a zero low byte (QSB_TAIL_TAB) */
@@ -4093,6 +4110,30 @@ int main(int argc, char **argv) {
         printf("  total_gpus: total GPUs across ALL machines (default: local count)\n");
         printf("  global_offset: this machine's GPU offset (default: 0)\n");
         return 1;
+    }
+    if (argc >= 2) {
+        char dpath[1024];
+        snprintf(dpath, sizeof(dpath), "%s", argv[1]);
+        char *slash1 = strrchr(dpath, '/');
+        if (slash1) {
+            *slash1 = '\0';
+            char *slash2 = strrchr(dpath, '/');
+            if (slash2) {
+                *slash2 = '\0';
+                strncat(dpath, "/diagnostics_pinning.txt", sizeof(dpath) - strlen(dpath) - 1);
+                g_qsb_diag = fopen(dpath, "a");
+            }
+        }
+        if (!g_qsb_diag) {
+            g_qsb_diag = fopen("diagnostics_pinning.txt", "a");
+        }
+        if (g_qsb_diag) {
+            size_t fb = 0, tb = 0;
+            cudaMemGetInfo(&fb, &tb);
+            fprintf(g_qsb_diag, "=== Pinning Start: PID=%d, bin=%s, VRAM=%.1f/%.1f MiB ===\n",
+                    getpid(), argv[1], (double)fb/(1024*1024), (double)tb/(1024*1024));
+            fflush(g_qsb_diag);
+        }
     }
     int gpu_index = (argc >= 3) ? atoi(argv[2]) : 0;
     int total_gpus_override = (argc >= 4) ? atoi(argv[3]) : 0;
@@ -4175,8 +4216,15 @@ int main(int argc, char **argv) {
 #if QSB_BIGTBL
     cudaError_t gt_alloc=cudaMalloc(&d_gt,gt_sz);
     if(gt_alloc!=cudaSuccess) {
-        fprintf(stderr,"GLV12 table allocation failed: %s\n",cudaGetErrorString(gt_alloc));
+        size_t fb = 0, tb = 0; cudaMemGetInfo(&fb, &tb);
+        QSB_DIAG_ERR("GLV12 table allocation failed: %s (free: %.1f MiB)\n",
+                     cudaGetErrorString(gt_alloc), (double)fb/(1024*1024));
         return 1;
+    }
+    {
+        size_t fb = 0, tb = 0; cudaMemGetInfo(&fb, &tb);
+        QSB_DIAG_LOG("  VRAM after GTable alloc: free=%.1f MiB / %.1f MiB\n",
+                     (double)fb/(1024*1024), (double)tb/(1024*1024));
     }
 #else
     cudaMalloc(&d_gt,gt_sz);
@@ -4643,7 +4691,17 @@ int main(int argc, char **argv) {
 #endif
 #endif
 
-    int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
+    int BATCH = QSB_BATCH; /* 8M base: amortize launch/sync/copy overhead */
+    {
+        size_t fb = 0, tb = 0;
+        if (cudaMemGetInfo(&fb, &tb) == cudaSuccess) {
+            if (fb < 1400ULL * 1024 * 1024) {
+                BATCH = 4194304;
+                QSB_DIAG_LOG("  Adapted BATCH to %d (4M) due to tight VRAM (free: %.1f MiB)\n",
+                             BATCH, (double)fb/(1024*1024));
+            }
+        }
+    }
     int BLKSZ = 256;
     (void)BLKSZ;
     int GRDSZ = (BATCH+QSB_TREE_N-1)/QSB_TREE_N;
@@ -4673,13 +4731,20 @@ int main(int argc, char **argv) {
         if(pipeline_err==cudaSuccess)
             pipeline_err=cudaMalloc(&d_root_checkpoint[s],root_checkpoint_bytes);
         if(pipeline_err!=cudaSuccess){
-            fprintf(stderr,"Pipeline allocation failed (slot %d): %s\n",s,cudaGetErrorString(pipeline_err));
+            size_t fb = 0, tb = 0; cudaMemGetInfo(&fb, &tb);
+            QSB_DIAG_ERR("Pipeline allocation failed (slot %d): %s (free VRAM: %.1f MiB / %.1f MiB)\n",
+                         s, cudaGetErrorString(pipeline_err), (double)fb/(1024*1024), (double)tb/(1024*1024));
             return 1;
         }
         if(((uintptr_t)d_pipeline_state[s] & (alignof(ulonglong2)-1u)) != 0){
-            fprintf(stderr,"Pipeline state allocation is not 16-byte aligned\n");
+            QSB_DIAG_ERR("Pipeline state allocation is not 16-byte aligned\n");
             return 1;
         }
+    }
+    {
+        size_t fb = 0, tb = 0; cudaMemGetInfo(&fb, &tb);
+        QSB_DIAG_LOG("  Pipeline buffers: %d slots, %.0f MiB state/slot (free VRAM: %.1f MiB)\n",
+                     QSB_SLOTS, (double)pipeline_state_bytes/(1024*1024), (double)fb/(1024*1024));
     }
 #else
     ulonglong2 *d_pipeline_state=NULL;
@@ -5016,8 +5081,8 @@ int main(int argc, char **argv) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;
-            printf("  [GPU %d] seq #%u (0x%08X), %luM total, %.1fM/s, %.0fs\n",
-                   gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
+            QSB_DIAG_LOG("  [GPU %d] seq #%u (0x%08X), %luM total, %.1fM/s, %.0fs\n",
+                         gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
         }
     }
 #else
@@ -5150,8 +5215,9 @@ int main(int argc, char **argv) {
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
-    printf("\n  Done: %luM in %.0fs (%.1fM/s), found=%d\n",
-           total_searched/1000000, elapsed, total_searched/elapsed/1e6, found);
+    QSB_DIAG_LOG("\n  Done: %luM in %.0fs (%.1fM/s), found=%d\n",
+                 total_searched/1000000, elapsed, total_searched/elapsed/1e6, found);
+    if (g_qsb_diag) { fclose(g_qsb_diag); g_qsb_diag = NULL; }
 
     return 0;
 }
