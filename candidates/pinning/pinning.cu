@@ -5014,7 +5014,24 @@ int main(int argc, char **argv) {
 #endif
 #endif
 
-    int BATCH = QSB_BATCH; /* 16M: amortize launch/sync/copy overhead */
+    int BATCH = QSB_BATCH; /* default 4M; keep whole tree-aligned batches */
+#if QSB_SLOTPIPE
+    /* The GLV11 table takes 21.1 GiB. Choose a smaller batch before the four
+     * slot allocations when less VRAM is free than their state plus a reserve
+     * for roots, checkpoints, hit buffers and CUDA runtime bookkeeping. The
+     * kernel reads BATCH as a parameter; the scalar, points and hit rules stay
+     * unchanged. Every fallback size remains divisible by QSB_TREE_N. */
+    size_t adaptive_free = 0, adaptive_total = 0;
+    if (cudaMemGetInfo(&adaptive_free, &adaptive_total) == cudaSuccess) {
+        const size_t reserve = 192ull << 20;
+        while (BATCH > (1 << 20) &&
+               adaptive_free < (size_t)QSB_SLOTS * (size_t)BATCH *
+                               QSB_STATE_PLANES * sizeof(ulonglong2) + reserve)
+            BATCH >>= 1;
+        printf("  Adaptive batch: %d candidates (free %zu MiB)\n",
+               BATCH, adaptive_free >> 20);
+    }
+#endif
     int BLKSZ = 256;
     (void)BLKSZ;
     int GRDSZ = (BATCH+QSB_TREE_N-1)/QSB_TREE_N;
