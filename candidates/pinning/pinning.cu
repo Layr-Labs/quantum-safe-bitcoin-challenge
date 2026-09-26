@@ -351,7 +351,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
 #endif
 #ifndef QSB_CHAIN_UNROLL
-#define QSB_CHAIN_UNROLL 0    /* 1: the GLV11 role-alternating chain trips written out (phi and code slots compile-time) */
+#define QSB_CHAIN_UNROLL 1    /* 1: the GLV11 role-alternating chain trips written out (phi and code slots compile-time) */
 #endif
 #ifndef QSB_SPARSE_TAIL
 #define QSB_SPARSE_TAIL 1     /* delta B (scarletbright 7f965b4d): sparse-schedule transform for the 11-byte tail block */
