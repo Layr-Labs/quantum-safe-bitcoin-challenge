@@ -342,7 +342,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * five blocks the two-add trip spills 332 B per lane (56 STL / 70 LDL in the chain loop) while the
  * one-add trip with its swap spills 96 B (16 / 25); at four blocks both build spill-free. */
 #ifndef QSB_CHAIN_ROLES
-#define QSB_CHAIN_ROLES 0
+#define QSB_CHAIN_ROLES 1
 #endif
 #ifndef QSB_PHI_HOIST
 #define QSB_PHI_HOIST 1       /* 1: phi between two passes of the peeled one-add trip loop, not inside it */
@@ -6327,3 +6327,6 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+
+// Yukon reuse package v1; original inventory SHA-256: 3ceb83515a3d26e534fbcd5bf99ffffe7617c8bc2cebe135ec16822ba4a23582
