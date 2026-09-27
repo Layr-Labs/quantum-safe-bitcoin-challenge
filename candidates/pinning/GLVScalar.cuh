@@ -68,7 +68,7 @@
 #error QSB_GLV11 extends the four-hot GLV12 table (QSB_BIGTBL=1, QSB_FOUR_HOT=1)
 #endif
 #ifndef QSB_QGLV5
-#define QSB_QGLV5 0
+#define QSB_QGLV5 1
 #endif
 #if QSB_QGLV5 != 0 && QSB_QGLV5 != 1
 #error QSB_QGLV5 must be 0 or 1
