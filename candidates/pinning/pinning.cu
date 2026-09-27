@@ -1,3 +1,6 @@
+#ifndef QSB_REMEASURE_TAG_092700003012
+#define QSB_REMEASURE_TAG_092700003012 1 /* no-op: exact-source re-draw identity */
+#endif
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
@@ -168,7 +171,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 16
+#define QSB_PMIX12 32
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -186,7 +189,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * value, and a lane's digit-arena slots are indexed by its own threadIdx.x, so the codes
  * written and the trips taken always agree. 0: blockIdx.x mod K == 0, block-uniform. */
 #ifndef QSB_PMIX12_WARP
-#define QSB_PMIX12_WARP 1
+#define QSB_PMIX12_WARP 0
 #endif
 /* QSB_PMIX12_N (1 <= N < K, default 2): N of every K consecutive global warps decode P with
  * GLV12, spread evenly: warp g is chosen when (g*N) mod K < N. For N = 1 that is g mod K == 0,
@@ -196,7 +199,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 1
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
@@ -4330,6 +4333,10 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
+        if (qsb_carrier_has(QK_RF))
+            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
+        else
         qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
 #else
         if (qsb_carrier_has(QK_RGP))
@@ -5193,6 +5200,9 @@ int main(int argc, char **argv) {
 #endif
             (const void*)kernel_pinning_pipeline<true,2>,
         };
+        /* QSB_NOJIT: with the carrier on, the compute_52 kernels are never launched, so
+         * preloading them would only JIT their module; leave it unloaded. */
+        if (!(QSB_NOJIT && g_qsb_carrier.on))
         for (size_t q = 0; q < sizeof(fs_k)/sizeof(fs_k[0]); q++) {
             cudaFuncAttributes fa;
             if (cudaFuncGetAttributes(&fa, fs_k[q]) == cudaSuccess) fs_loaded++;
