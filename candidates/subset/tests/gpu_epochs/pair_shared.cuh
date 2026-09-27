@@ -13,7 +13,7 @@
  * the digest kernel holds live across both fronts, the tree inverse and both tails.
  * Same __constant__ words, same field operations: bit-identical results. 0 = arguments. */
 #ifndef QSB_R_CBANK
-#define QSB_R_CBANK 0
+#define QSB_R_CBANK 1
 #endif
 #if QSB_R_CBANK
 #define QSB_R_PASS(rx,ry)
