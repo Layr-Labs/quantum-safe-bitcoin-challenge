@@ -3133,8 +3133,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #endif
         };
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
+        uint64_t *wroot_out=roots+((size_t)count+i)*4u;
+        qsb_st_v2((ulonglong2*)wroot_out,weighted[0],weighted[1]);
+        qsb_st_v2((ulonglong2*)(wroot_out+2),weighted[2],weighted[3]);
     }
 }
 
