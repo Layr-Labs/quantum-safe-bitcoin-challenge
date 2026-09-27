@@ -3,7 +3,7 @@
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
-#define QSB_GREEN 20
+#define QSB_GREEN 24 /* finish partition 24 SMs (8 shared); DPZZxlz #1891 measured 18/22/24 = -1.9/0.0/+0.4% vs 20 */
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
