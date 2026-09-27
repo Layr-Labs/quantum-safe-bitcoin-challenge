@@ -3007,8 +3007,9 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
     }
 
     if(tid==0){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        uint64_t *root_out=roots+(size_t)blockIdx.x*4u;
+        qsb_st_v2((ulonglong2*)root_out,products[0][2*N-2],products[1][2*N-2]);
+        qsb_st_v2((ulonglong2*)(root_out+2),products[2][2*N-2],products[3][2*N-2]);
     }
 }
 template<int N>
