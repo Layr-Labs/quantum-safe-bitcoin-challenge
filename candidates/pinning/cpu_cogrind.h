@@ -324,7 +324,7 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
     for (int k = 9; k < 15; k++) W[k] = _mm256_setzero_si256();
     W[15] = _mm256_set1_epi32(256);
     for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)IV256[k]);
-    s8_compress_full(st, W);
+    s8_compress_padded<8, 256>(st, W);
     /* zq[k] for lanes: word k (LE 64-bit) = Z[7-2k-1] << 32 | Z[7-2k] (Z0 most significant) */
     for (int k = 0; k < 4; k++) {
         const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];

@@ -339,7 +339,7 @@ static QV_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
     } else {
         v8u st[8];
         for (int j = 0; j < 8; j++) st[j] = _mm256_set1_epi32((int)IV256[j]);
-        s8_compress_full(st, W);
+        s8_compress_padded<9, 264>(st, W);
         h0 = st[0];
     }
 #if QSB_ZEROS_N >= 32

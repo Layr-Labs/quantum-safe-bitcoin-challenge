@@ -131,6 +131,45 @@ static QSB_SHA_AVX2 void s8_compress_full(v8u st[8], const v8u w_in[16]) {
     st[4] = s8_add(st[4], e); st[5] = s8_add(st[5], f); st[6] = s8_add(st[6], g); st[7] = s8_add(st[7], h);
 }
 
+/* Exact 32-byte digest / 33-byte compressed-key padding, for the AVX2 CPU
+ * co-grinder only. W0..W7 (digest) or W0..W8 (key, including its padding byte)
+ * are variable. Splitting rounds 16..31 out of the generic recurrence loop
+ * lets the compiler fold the known-zero schedule terms before the ring has
+ * been overwritten. All 64 rounds and all requested digest words are retained. */
+template<int MessageWords, int LengthBits>
+static QSB_SHA_AVX2 void s8_compress_padded(v8u st[8], const v8u w_in[16]) {
+    static_assert((MessageWords == 8 && LengthBits == 256) ||
+                  (MessageWords == 9 && LengthBits == 264), "supported padded block shape");
+    v8u w[16];
+    for (int i = 0; i < MessageWords; i++) w[i] = w_in[i];
+    if (MessageWords == 8) w[8] = s8_set1(0x80000000u);
+    for (int i = 9; i < 15; i++) w[i] = _mm256_setzero_si256();
+    w[15] = s8_set1(LengthBits);
+    v8u a = st[0], b = st[1], c = st[2], d = st[3], e = st[4], f = st[5], g = st[6], h = st[7];
+    v8u bc = s8_xor(b, c);
+
+#define WLOAD0(k) w[(k)]
+#define WLOAD8(k) w[8 + (k)]
+    S8_R8(0, WLOAD0)
+    S8_R8(8, WLOAD8)
+#define WEXP0(k) WEXP(k)
+#define WEXP8(k) WEXP(8 + (k))
+    /* Expand the first generated words while W9..W14 are still known zero.
+     * The generic loop treats the same ring positions as later nonzero words. */
+    S8_R8(16, WEXP0)
+    S8_R8(24, WEXP8)
+    for (int r = 32; r < 64; r += 16) {
+        S8_R8(r, WEXP0)
+        S8_R8(r + 8, WEXP8)
+    }
+#undef WLOAD0
+#undef WLOAD8
+#undef WEXP0
+#undef WEXP8
+    st[0] = s8_add(st[0], a); st[1] = s8_add(st[1], b); st[2] = s8_add(st[2], c); st[3] = s8_add(st[3], d);
+    st[4] = s8_add(st[4], e); st[5] = s8_add(st[5], f); st[6] = s8_add(st[6], g); st[7] = s8_add(st[7], h);
+}
+
 /* byte-swap of each 32-bit lane */
 static QSB_SHA_AVX2 v8u s8_bswap(v8u x) {
     const v8u m = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,

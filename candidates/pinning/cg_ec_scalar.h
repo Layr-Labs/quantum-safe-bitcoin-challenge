@@ -173,7 +173,7 @@ __attribute__((target("avx2"), noinline)) static void pub_hash8_avx2(const uint3
     for (int j = 9; j < 15; j++) W[j] = _mm256_setzero_si256();
     W[15] = _mm256_set1_epi32(264);
     for (int j = 0; j < 8; j++) st[j] = _mm256_set1_epi32((int)IV256[j]);
-    s8_compress_full(st, W);
+    s8_compress_padded<9, 264>(st, W);
     _mm256_storeu_si256((__m256i *)h0, st[0]);
 }
 __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani(const uint32_t W9[8][9], uint32_t h0[8]) {
