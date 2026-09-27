@@ -112,6 +112,10 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
+/* QSB_TABLE_L2_WINDOW_MIB: cap (MiB) on the persisting table window; 0 keeps the full dense table. */
+#ifndef QSB_TABLE_L2_WINDOW_MIB
+#define QSB_TABLE_L2_WINDOW_MIB 24
+#endif
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
@@ -3599,6 +3603,12 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "host_producers.h"
 #define QSB_HP_ON 1
 #endif
+/* QSB_HOST_BLOCKING (host-only): the slot completion events use cudaEventBlockingSync, so the GPU host
+ * thread sleeps in cudaEventSynchronize instead of spinning while two batches are in flight. Kernels,
+ * arguments and batch order are unchanged. 0 = the spin wait. */
+#ifndef QSB_HOST_BLOCKING
+#define QSB_HOST_BLOCKING 1
+#endif
 /* QSB_CPU_GRIND: host-CPU co-grinding on candidates disjoint from the GPU's (CpuGrindSubset.h). */
 #ifndef QSB_CPU_GRIND
 #define QSB_CPU_GRIND 1
@@ -3699,6 +3709,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
             /* Exactly the 48 MiB of segments 0-3; the 4 GiB segment after them gains nothing from a
              * sliver of persisting lines (and is read evict-first). */
             if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
+#endif
+#if QSB_TABLE_L2_WINDOW_MIB > 0
+            /* Keep the persisting set below the dense table so the per-launch epoch state, group
+             * buffers and streamed hit records retain normal L2 capacity. Cache policy only; every
+             * loaded value is unchanged. */
+            if (want > ((size_t)QSB_TABLE_L2_WINDOW_MIB << 20)) want = (size_t)QSB_TABLE_L2_WINDOW_MIB << 20;
 #endif
             if (want > limit) want = limit;
             if (want > (size_t)max_window) want = (size_t)max_window;
@@ -4633,7 +4649,7 @@ int main(int argc, char **argv) {
             cudaError_t se = cudaSuccess;
             for (int s = 0; s < 2 && se == cudaSuccess; s++) {
                 se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
-                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (QSB_HOST_BLOCKING ? cudaEventBlockingSync : 0));
             }
             if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
             if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_tent, 2 * (size_t)SP_HOST_BYTES, cudaHostAllocDefault);
@@ -4846,9 +4862,9 @@ int main(int argc, char **argv) {
         }
 #ifdef QSB_HP_ON
         qhp::shutdown();
-        { uint64_t hb, fb; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin);
-          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d\n",
-                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin); }
+        { uint64_t hb, fb, hc; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin, &hc);
+          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d; helper chunks %llu\n",
+                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin, (unsigned long long)hc); }
 #endif
         g_stop_polled = 0;
 #else
