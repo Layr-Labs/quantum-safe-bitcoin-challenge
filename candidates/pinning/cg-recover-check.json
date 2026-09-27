@@ -1,0 +1,7 @@
+{
+  "source_reverse_exact": true,
+  "unchanged_blobs": 485,
+  "controller_transition_cases": 25600,
+  "scope": "source-linked host-state model; no thread scheduling, CUDA or performance measurement",
+  "device_carrier_unchanged": true
+}

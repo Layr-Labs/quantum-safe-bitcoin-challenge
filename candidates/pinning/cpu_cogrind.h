@@ -566,6 +566,7 @@ static double mem_available_mib() {
 /* ---------------- controller (called from the GPU host loop) ---------------- */
 struct ctl_t {
     int wmax, cur;
+    int ceiling, recover;
     int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
     double t_phase;
     double last_done;
@@ -625,11 +626,18 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
             }
         }
     }
+    const int hardware_workers = guard_ok ? CPU_COUNT(&g_worker_set) : ncpu - 1;
     if (quota > 0 && quota < ncpu) nw = (int)ceil(quota) - 2;
     else nw = guard_ok ? CPU_COUNT(&g_worker_set) : ncpu - 1;
     if (nw < 0) nw = 0;
     if (env) nw = atoi(env);
     if (nw > QSB_CG_MAXW) nw = QSB_CG_MAXW;
+    const int initial_workers = nw;
+    const char *recover_env = getenv("QSB_CG_RECOVER");
+    const int recover = !recover_env || atoi(recover_env) != 0;
+    int spawn_workers = nw;
+    if (recover && !env && hardware_workers > spawn_workers) spawn_workers = hardware_workers;
+    if (spawn_workers > QSB_CG_MAXW) spawn_workers = QSB_CG_MAXW;
     const int has_avx2 = __builtin_cpu_supports("avx2"), has_bmi2 = __builtin_cpu_supports("bmi2");
     int has_adx = 0;
     { unsigned r[4] = {0, 0, 0, 0}; __cpuid_count(7, 0, r[0], r[1], r[2], r[3]); has_adx = (r[1] >> 19) & 1; }
@@ -693,14 +701,16 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     if (table_start(S, nw) != 0) { g_cg = NULL; return 0; }
     recode_init(S->lay);
     S->allowed.store(0);
-    S->nworkers = nw;
-    for (int i = 0; i < nw; i++) {
+    S->nworkers = spawn_workers;
+    for (int i = 0; i < spawn_workers; i++) {
         pthread_t t;
         if (pthread_create(&t, NULL, worker_main, (void *)(intptr_t)i) != 0) { S->nworkers = i; break; }
         pthread_detach(t);
     }
     memset(&g_ctl, 0, sizeof g_ctl);
-    g_ctl.wmax = S->nworkers; g_ctl.cur = 0;
+    g_ctl.ceiling = S->nworkers; g_ctl.recover = recover;
+    g_ctl.wmax = initial_workers < S->nworkers ? initial_workers : S->nworkers;
+    g_ctl.cur = 0;
     g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
     return S->nworkers;
 }
@@ -739,6 +749,11 @@ static void tick(double now, double gpu_batch) {
         C.phase = 2; C.t_phase = now;
         return;
     }
+    if (C.phase == 2 && now >= C.next_ab && C.cur == 0 && C.recover && C.ceiling > 0) {
+        // A bounded one-worker trial; the exact-gate shutdown above takes priority.
+        C.wmax = 1; set_allowed(1); C.next_ab = now + 5.0;
+        return;
+    }
     if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
         C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
         C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
@@ -768,9 +783,16 @@ static void tick(double now, double gpu_batch) {
             int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
             C.wmax = nw; set_allowed(nw); C.strikes = 0;
             printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
-            C.next_ab = now + 5.0;
+            C.next_ab = now + ((C.recover && nw == 0) ? 60.0 : 5.0);
         } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
-        else { C.strikes = 0; C.next_ab = now + 60.0; }
+        else {
+            C.strikes = 0;
+            // Grow only after a completed clean A/B window, never on a bad window.
+            if (C.recover && loss <= 0.005 && C.wmax < C.ceiling) {
+                C.wmax++; set_allowed(C.wmax);
+            }
+            C.next_ab = now + 60.0;
+        }
         C.phase = 2;
         return;
     }
