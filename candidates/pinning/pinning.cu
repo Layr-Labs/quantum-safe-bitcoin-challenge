@@ -5949,6 +5949,7 @@ int main(int argc, char **argv) {
         if (se != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(se)); return 1; }
     }
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
+    int slot_candidates[QSB_SLOTS]={0};
     int slot_busy[QSB_SLOTS];
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
@@ -5965,7 +5966,7 @@ int main(int argc, char **argv) {
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
+        qcg::tick(qcg::mono_s(), (double)slot_candidates[s]);
 #endif
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
@@ -6040,7 +6041,7 @@ int main(int argc, char **argv) {
 #endif
         if (count > 64) count = 64;
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
+        qcg::tick(qcg::mono_s(), (double)slot_candidates[s]);
 #endif
         /* Copy before reuse: the next D2H is allowed to overwrite the pinned
          * report while OpenSSL checks this ordinary host-stack snapshot. */
@@ -6095,7 +6096,7 @@ int main(int argc, char **argv) {
             if (drain_slot(s)) return 1;
 #endif
             cudaStream_t st = slot_stream[s];
-            slot_seq[s] = seq; slot_lt[s] = batch_lt;
+            slot_seq[s] = seq; slot_lt[s] = batch_lt; slot_candidates[s] = batch_sz;
 
 #if !QSB_TAIL_PRE || !QSB_SKIP_UNUSED_MIDSTATE
             memcpy(h_mid + (size_t)s*8, cur_mid, 32);

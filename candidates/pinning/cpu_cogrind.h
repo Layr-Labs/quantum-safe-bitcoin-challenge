@@ -570,8 +570,9 @@ struct ctl_t {
     double t_phase;
     double last_done;
     int ab_left;
-    double ab_on_sum; int ab_on_n;
-    double ab_off_sum; int ab_off_n;
+    double on_seconds, off_seconds, on_gpu, off_gpu, on_cpu;
+    uint64_t sample_cpu0;
+    double settle_until;
     double next_ab;
     uint64_t busy0; double busy_t0;
     uint64_t cand0; double cand_t0;
@@ -708,7 +709,10 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
 static void set_allowed(int n) { if (g_cg) g_cg->allowed.store(n, std::memory_order_relaxed); g_ctl.cur = n; }
 
 /* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates.
- * (Unchanged logic from the v1 co-grinder.) */
+ * The ABBA comparison counts actual drained GPU work and CPU work from
+ * the same measured on-windows. It does not compare unequal batch durations
+ * or dilute the CPU rate with the off-windows. Two losses are still required. */
+/* */
 static void tick(double now, double gpu_batch) {
     shared_t *S = g_cg;
     if (!S) return;
@@ -740,34 +744,46 @@ static void tick(double now, double gpu_batch) {
         return;
     }
     if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
-        C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
+        C.phase = 3; C.ab_left = 4;
+        C.on_seconds = C.off_seconds = C.on_gpu = C.off_gpu = C.on_cpu = 0;
+        C.sample_cpu0 = S->cand_done.load(); C.settle_until = now + 0.25;
         C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
         return;
     }
     if (C.phase == 3) {
-        const int on = (C.ab_left & 1) == 0;
-        if (C.win_skip) C.win_skip = 0;
-        else { if (on) { C.ab_on_sum += dt; C.ab_on_n++; } else { C.ab_off_sum += dt; C.ab_off_n++; } C.win_n++; }
+        const uint64_t cd = S->cand_done.load();
+        if (now < C.settle_until || C.win_skip) {
+            C.sample_cpu0 = cd;
+            if (now >= C.settle_until) { C.win_skip = 0; C.win_t0 = now; }
+            return;
+        }
+        const int on = C.ab_left == 4 || C.ab_left == 1; // on, off, off, on
+        if (dt > 0 && gpu_batch > 0) {
+            if (on) {
+                C.on_seconds += dt; C.on_gpu += gpu_batch;
+                if (cd >= C.sample_cpu0) C.on_cpu += (double)(cd - C.sample_cpu0);
+            } else { C.off_seconds += dt; C.off_gpu += gpu_batch; }
+            C.win_n++;
+        }
+        C.sample_cpu0 = cd;
         if (C.win_n < 3 || now - C.win_t0 < 1.0) return;
         C.ab_left--;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
-        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.wmax : 0); return; }
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1; C.settle_until = now + 0.25;
+        if (C.ab_left > 0) { set_allowed((C.ab_left == 4 || C.ab_left == 1) ? C.wmax : 0); return; }
         set_allowed(C.wmax);
-        const double on_t = C.ab_on_sum / (C.ab_on_n ? C.ab_on_n : 1);
-        const double off_t = C.ab_off_sum / (C.ab_off_n ? C.ab_off_n : 1);
-        const double loss = on_t / off_t - 1.0;
-        const uint64_t cd = S->cand_done.load();
-        const double cpu_rate = C.cand_t0 > 0 && now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
-        C.cand0 = cd; C.cand_t0 = now;
-        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
-                              on_t, off_t, 100 * loss, cpu_rate, C.wmax,
-                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
-        const double cpu_frac = on_t > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
-        const int bad = loss > 0.015 && loss > cpu_frac;
+        const double gpu_on = C.on_seconds > 0 ? C.on_gpu / C.on_seconds : 0;
+        const double gpu_off = C.off_seconds > 0 ? C.off_gpu / C.off_seconds : 0;
+        const double cpu_rate = C.on_seconds > 0 ? C.on_cpu / C.on_seconds : 0;
+        const double loss = gpu_off > 0 ? 1.0 - (gpu_on + cpu_rate) / gpu_off : 0;
+        if (C.verbose) printf("  [CPU] ABBA: GPU on %.0f off %.0f cand/s, CPU-on %.0f, net loss %+.3f%%, %d workers\n",
+                              gpu_on, gpu_off, cpu_rate, 100 * loss, C.wmax);
+        // A 0.5% net margin avoids acting on a tiny rate difference. Hardware
+        // timing remains noisy; two complete comparisons must agree to shed.
+        const int bad = gpu_on > 0 && gpu_off > 0 && loss > 0.005;
         if (bad && C.strikes >= 1) {
             int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
             C.wmax = nw; set_allowed(nw); C.strikes = 0;
-            printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
+            printf("  CPU co-grind: combined rate loss %.2f%% with workers; using %d\n", 100 * loss, nw);
             C.next_ab = now + 5.0;
         } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
         else { C.strikes = 0; C.next_ab = now + 60.0; }
