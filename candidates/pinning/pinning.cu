@@ -4414,7 +4414,7 @@ static void qsb_subpipe_launch(
  * ============================================================ */
 
 /* QSB_GT_BATCH (hybridnoise ab642ec8, PR #1505; startup only): each thread builds
- * QSB_GT_BATCH consecutive records and shares one field inversion between them
+ * QSB_GT_BATCH records in warp-striped columns and shares one field inversion between them
  * (Montgomery's simultaneous inversion). The projective sums are those of the
  * one-record-per-thread builder below; each record's projective X,Y are parked in its own
  * table slot and rewritten in place as affine coordinates after the shared inverse.
@@ -4423,7 +4423,7 @@ static void qsb_subpipe_launch(
  * and the host-builder fallback are unchanged. 1 restores the one-inversion-per-record
  * kernel. */
 #ifndef QSB_GT_BATCH
-#define QSB_GT_BATCH 12
+#define QSB_GT_BATCH 24
 #endif
 static_assert(QSB_GT_BATCH >= 1 && QSB_GT_BATCH <= 32, "QSB_GT_BATCH range");
 #if QSB_GT_BATCH > 1
@@ -4496,15 +4496,19 @@ __global__ void kernel_build_gtable(
     uint8_t * __restrict__ gTable)
 {
 #if QSB_GT_BATCH > 1
-    const uint64_t t0 = ((uint64_t)blockIdx.x * blockDim.x + threadIdx.x) * QSB_GT_BATCH;
+    /* A warp owns 32*B records. Each lane's inversion batch walks columns
+     * spaced by 32, so a warp's j-th writes touch 32 adjacent table records.
+     * The unchanged 256-thread launch rounds up to whole warps. */
+    const uint64_t tid = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const uint64_t t0 = (tid >> 5) * (32u * QSB_GT_BATCH) + (tid & 31u);
     if (t0 >= GT_TOTAL_ENTRIES) return;
-    const int n = (GT_TOTAL_ENTRIES - t0) < (uint64_t)QSB_GT_BATCH ?
-                  (int)(GT_TOTAL_ENTRIES - t0) : QSB_GT_BATCH;
+    const uint64_t remaining = (GT_TOTAL_ENTRIES - t0 + 31u) / 32u;
+    const int n = remaining < (uint64_t)QSB_GT_BATCH ? (int)remaining : QSB_GT_BATCH;
     uint64_t zs[QSB_GT_BATCH][4], pref[QSB_GT_BATCH][4];
     uint64_t acc[5] = {1, 0, 0, 0, 0};   /* _ModInv works on five limbs; acc[4] stays 0 */
     uint32_t fix = 0;                    /* bit j: record j is projective (hi != 0) */
     for (int j = 0; j < n; j++) {
-        const uint64_t t = t0 + j;
+        const uint64_t t = t0 + (uint64_t)j * 32u;
         const int ch = gt_build_segment(t);
         if (ch < 0) continue;
         const int d = (int)(t - gt_offset(ch));
@@ -4551,7 +4555,8 @@ __global__ void kernel_build_gtable(
         } else {
             for (int k = 0; k < 4; k++) zinv[k] = acc[k];
         }
-        uint64_t *rec = (uint64_t *)(gTable + (t0 + j) * 64);
+        const uint64_t t = t0 + (uint64_t)j * 32u;
+        uint64_t *rec = (uint64_t *)(gTable + t * 64);
         for (int k = 0; k < 4; k++) { px[k] = rec[k]; py[k] = rec[4 + k]; }
         _ModMult(px, zinv); _ModMult(py, zinv);
         /* The shared chain runs on the approximate field products (C31 tails), which err
@@ -4561,7 +4566,7 @@ __global__ void kernel_build_gtable(
         if (gt_on_curve(px, py, bc)) {
             for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
         } else {
-            gt_build_one(t0 + j, d_L, d_H, gTable);
+            gt_build_one(t, d_L, d_H, gTable);
         }
     }
 #else
