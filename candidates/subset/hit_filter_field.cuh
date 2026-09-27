@@ -8,7 +8,18 @@
 #define QSB_SHORT_CARRY 1
 #endif
 #if QSB_SHORT_CARRY
+/* QSB_SC_ALUZ (lane R, default 0): the chain loop's register-plus-carry adds with the constant-bank zero
+ * as addend (IADD3.X on the ALU pipe instead of IMAD.X on the multiply pipe); the generated file is the
+ * same source with those addends behind macros (tools/exp/N-rb/work/gen_aluz.py). */
+#ifndef QSB_SC_ALUZ
+#define QSB_SC_ALUZ 0   /* N-ry merge: explicit default so the carrier knob string records a value */
+#endif
+#if QSB_SC_ALUZ
+__device__ __constant__ uint32_t qsb_sc_zero = 0;   /* read by ld.const inside the chain add */
+#include "hit_filter_field_sc_aluz.cuh"
+#else
 #include "hit_filter_field_sc.cuh"
+#endif
 #else
 // Speculative filter only: these raw point results are never trusted for output.
 // Every proposed hit is recomputed with the unchanged guarded/exact recovery
