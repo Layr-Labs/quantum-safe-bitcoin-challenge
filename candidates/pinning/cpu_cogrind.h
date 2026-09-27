@@ -106,6 +106,15 @@ static int layout_by_name(layout_t *L, const char *nm) {
 }
 
 /* ---------------- shared state ---------------- */
+/* One single-writer counter per cache-line-sized slot. Only value is accessed
+ * after construction, so adjacent workers do not invalidate each other's line
+ * even if the allocation itself is only naturally aligned. */
+struct busy_counter_t {
+    std::atomic<uint64_t> value;
+    unsigned char padding[64 - sizeof(std::atomic<uint64_t>)];
+};
+static_assert(sizeof(busy_counter_t) == 64, "worker busy-counter stride");
+
 struct shared_t {
     const pinning2_params_t *pp;
     uint32_t lt_min, lt_range, chunks_per_seq;
@@ -132,7 +141,7 @@ struct shared_t {
     int ec_env, sha_env;                  /* overrides, -1 = auto */
     std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
-    std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
+    busy_counter_t busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
     double t_build;
 };
@@ -498,17 +507,23 @@ static void *worker_main(void *arg) {
     }
     while (S->ec_mode.load() < 0) { if (S->stop.load()) return NULL; usleep(1000); }
     const int ecm = S->ec_mode.load();
+    const bool profile = g_ctl_verbose != 0;
+    uint64_t busy_acc = 0;               /* this worker is the counter's only writer */
     while (!S->stop.load(std::memory_order_relaxed)) {
         if (id >= S->allowed.load(std::memory_order_relaxed)) { usleep(5000); continue; }
         S->running.fetch_add(1);
         const uint64_t c0 = thread_cpu_ns();
-        const uint64_t r0 = __rdtsc();
+        const uint64_t r0 = profile ? __rdtsc() : 0;
         int n = fill_batch(w);
-        const uint64_t r1 = __rdtsc();
+        const uint64_t r1 = profile ? __rdtsc() : 0;
         if (n) run_ec(w, ecm, vs, ss);
-        const uint64_t r2 = __rdtsc();
-        S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
-        S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
+        if (profile) {
+            const uint64_t r2 = __rdtsc();
+            S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed);
+            S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
+        }
+        busy_acc += thread_cpu_ns() - c0;
+        S->busy_ns[id].value.store(busy_acc, std::memory_order_relaxed);
         S->running.fetch_sub(1);
         if (!n) break;
         S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
@@ -580,7 +595,7 @@ struct ctl_t {
 };
 static ctl_t g_ctl;
 
-static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].load(std::memory_order_relaxed); return s; }
+static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].value.load(std::memory_order_relaxed); return s; }
 
 /* Start: pick the table layout, build it in the background and spawn the (paused) workers. */
 static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) {
@@ -690,6 +705,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     mkdir("results", 0755);
     S->hit_fd = open("results/pinning_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (S->hit_fd < 0) { g_cg = NULL; return 0; }
+    g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
     if (table_start(S, nw) != 0) { g_cg = NULL; return 0; }
     recode_init(S->lay);
     S->allowed.store(0);
@@ -701,7 +717,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     }
     memset(&g_ctl, 0, sizeof g_ctl);
     g_ctl.wmax = S->nworkers; g_ctl.cur = 0;
-    g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
+    g_ctl.verbose = g_ctl_verbose;
     return S->nworkers;
 }
 
