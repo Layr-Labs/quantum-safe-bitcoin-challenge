@@ -28,7 +28,10 @@ fi
 "$NVCC" -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin ${QSB_CARRIER_NVCC_FLAGS:-} \
      -Xptxas -v -o "$W/c.cubin" subset.cu 2> "$W/ptxas.log"
 "$CUOBJDUMP" -symbols "$W/c.cubin" > "$W/symbols.txt"
-"$CUOBJDUMP" -sass "$W/c.cubin" > "$W/sass.txt"
+if ! "$CUOBJDUMP" -sass "$W/c.cubin" > "$W/sass.txt"; then
+    echo "cuobjdump failed; inspecting the same image with nvdisasm" >&2
+    nvdisasm "$W/c.cubin" > "$W/sass.txt"
+fi
 python3 - "$Z" "$W" <<'PY'
 import base64, glob, hashlib, re, sys
 zeros = int(sys.argv[1]); W = sys.argv[2]
@@ -57,8 +60,12 @@ for g in ("qsb_carrier_knobs", "QSB_CONST_SCHEDULE", "QSB_U2R", "QSB_U2R_ISO", "
         sys.exit(f"build_carrier: global {g} missing from image")
 # The hint must be present in the digest kernel (the only table reader on the search path).
 sass = open(W + "/sass.txt").read()
-fn = re.split(r"\n\s*Function : ", sass)
-dig = [b for b in fn if b.startswith(names[3])]
+if "Function : " in sass:
+    fn = re.split(r"\n\s*Function : ", sass)
+    dig = [b for b in fn if b.startswith(names[3] + "\n") or b.startswith(names[3] + " ")]
+else:
+    sections = re.split(r'(?m)^\s*\.section\s+\.text\.([^,\s]+),[^\n]*\n', sass)
+    dig = [sections[i + 1] for i in range(1, len(sections) - 1, 2) if sections[i] == names[3]]
 if not dig or "LTC64B" not in dig[0]:
     sys.exit("build_carrier: digest kernel has no LTC64B load")
 n_hint = dig[0].count("LTC64B")
