@@ -244,7 +244,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
                                * that every candidate reads 15 times. */
 #endif
 #ifndef QSB_TREE_OFFLOAD
-#define QSB_TREE_OFFLOAD 0    /* 1: build the leaf product tree in a dense kernel, not in prepare */
+#define QSB_TREE_OFFLOAD 1    /* 1: build the leaf product tree in a dense kernel, not in prepare */
 #endif
 #ifndef QSB_S0_THREADS
 #define QSB_S0_THREADS 256    /* prepare-kernel block size (only free when the tree is offloaded) */
@@ -6327,3 +6327,6 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+
+// Yukon reuse package v1; original inventory SHA-256: c10c63e992b4a756df0d658d82ff6a95c03cef2ef5b9499225f875ee8f3e04c6
