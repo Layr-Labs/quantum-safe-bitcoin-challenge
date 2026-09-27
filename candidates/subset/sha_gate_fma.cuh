@@ -44,7 +44,7 @@ __host__ __device__ __forceinline__ constexpr uint32_t qsb_klit(int i)
  * the compiler cannot fold, so ptxas must use IMAD on the FMA-heavy pipe). Exact: a*1 + b = a + b
  * mod 2^32. Costs +3 instructions per round (three-input IADD3 -> two-input IMADs). */
 #ifndef QSB_SHA_FMA_ADD
-#define QSB_SHA_FMA_ADD 0     /* pubkey-hash adds on the FMA-heavy pipe (stage 2 is ALU-bound) */
+#define QSB_SHA_FMA_ADD 1     /* pubkey-hash adds on the FMA-heavy pipe (stage 2 is ALU-bound) */
 #endif
 __device__ __constant__ uint32_t pin_one_mul = 1;   /* 1; also re-uploaded by the host */
 __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t b) {
