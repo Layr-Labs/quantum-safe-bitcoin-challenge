@@ -32,11 +32,8 @@
 /* QSB_NOJIT (host only): while the carrier is on, every launch site takes the carrier
  * kernel, so the compute_52 image is never needed. Its module is then never touched:
  * no preload, no constant uploads into it. Under the CUDA 12 default of lazy module
- * loading its PTX is therefore never JIT-compiled inside the timed window (on a cold
- * JIT cache that compile is seconds; terrapinelf measured 4.2 s for the subset module).
- * The carrier is only ever switched off during qsb_carrier_init, before any upload,
- * so the compute_52 image still receives every upload whenever it is the one in use.
- * 0 restores the double upload and the preload. */
+ * loading its PTX is therefore never JIT-compiled inside the timed window. 0 restores
+ * the double upload. */
 #ifndef QSB_NOJIT
 #define QSB_NOJIT 1
 #endif
@@ -49,7 +46,9 @@ enum QsbCarrierKernel {
     QK_RGF,      /* qsb_root_group_finish  */
     QK_BUILD,    /* kernel_build_gtable    */
     QK_YOFF,     /* qsb_table_offset_y     */
-    QK_RF,       /* qsb_root_fused<N> (optional: empty name when QSB_ROOT_FUSED=0) */
+    QK_RF,       /* qsb_root_fused<N>      */
+    QK_RR,       /* qsb_root_register      */
+    QK_PFC,      /* qsb_prefix_field_check_kernel */
     QK_N
 };
 
@@ -112,7 +111,6 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     free(img);
     if (e != cudaSuccess) { qsb_carrier_off(cudaGetErrorString(e)); return; }
     for (int i = 0; i < QK_N; i++) {
-        if (!qsb_carrier_kernel_names[i][0]) { g_qsb_carrier.k[i] = nullptr; continue; }  /* optional, absent */
         e = cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, qsb_carrier_kernel_names[i]);
         if (e != cudaSuccess) { qsb_carrier_off("kernel missing from image"); return; }
     }
@@ -158,7 +156,7 @@ static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, c
 
 /* cudaMemcpyToSymbol into the carrier image's copy of the symbol when it is on, and into
  * the compute_52 image's copy unless QSB_NOJIT keeps that image untouched (see above):
- * with the carrier on, no compute_52 kernel is ever launched. */
+ * with the carrier on, every launched kernel lives in the carrier image. */
 template <class T>
 static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src, size_t n) {
     if (g_qsb_carrier.on) {
