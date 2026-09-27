@@ -23,15 +23,13 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_RGF",   r"_Z21qsb_root_group_finish\w+"),
     ("QK_BUILD", r"_Z19kernel_build_gtable\w+"),
     ("QK_YOFF",  r"_Z18qsb_table_offset_y\w+"),
-    ("QK_RF",    r"_Z14qsb_root_fusedILi\d+EE\w+"),   # optional: absent when QSB_ROOT_FUSED=0
+    ("QK_RF",    r"_Z\d+qsb_root_fusedILi\d+EE\w+"),
+    ("QK_RR",    r"_Z\d+qsb_root_register\w+"),
+    ("QK_PFC",   r"_Z\d+qsb_prefix_field_check_kernel\w+"),
 ]
-optional = {"QK_RF"}
 names = []
 for kid, pat in want:
     hits = sorted(set(re.findall(pat, syms)))
-    if len(hits) == 0 and kid in optional:
-        names.append("")
-        continue
     if len(hits) != 1:
         sys.exit(f"build_carrier: {kid} matched {hits}")
     names.append(hits[0])
