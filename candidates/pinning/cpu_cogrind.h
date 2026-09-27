@@ -55,6 +55,9 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
+#ifndef QSB_CG_RECOVER
+#define QSB_CG_RECOVER 1                  /* 1: a clean A/B window restores one shed worker */
+#endif
 #if (QSB_CG_B % 8) != 0
 #error "QSB_CG_B must be a multiple of 8"
 #endif
@@ -106,6 +109,15 @@ static int layout_by_name(layout_t *L, const char *nm) {
 }
 
 /* ---------------- shared state ---------------- */
+/* One single-writer counter per cache-line-sized slot. Only value is accessed
+ * after construction, so adjacent workers do not invalidate each other's line
+ * even if the allocation itself is only naturally aligned. */
+struct busy_counter_t {
+    std::atomic<uint64_t> value;
+    unsigned char padding[64 - sizeof(std::atomic<uint64_t>)];
+};
+static_assert(sizeof(busy_counter_t) == 64, "worker busy-counter stride");
+
 struct shared_t {
     const pinning2_params_t *pp;
     uint32_t lt_min, lt_range, chunks_per_seq;
@@ -132,7 +144,7 @@ struct shared_t {
     int ec_env, sha_env;                  /* overrides, -1 = auto */
     std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
-    std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
+    busy_counter_t busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
     double t_build;
 };
@@ -498,17 +510,23 @@ static void *worker_main(void *arg) {
     }
     while (S->ec_mode.load() < 0) { if (S->stop.load()) return NULL; usleep(1000); }
     const int ecm = S->ec_mode.load();
+    const bool profile = g_ctl_verbose != 0;
+    uint64_t busy_acc = 0;               /* this worker is the counter's only writer */
     while (!S->stop.load(std::memory_order_relaxed)) {
         if (id >= S->allowed.load(std::memory_order_relaxed)) { usleep(5000); continue; }
         S->running.fetch_add(1);
         const uint64_t c0 = thread_cpu_ns();
-        const uint64_t r0 = __rdtsc();
+        const uint64_t r0 = profile ? __rdtsc() : 0;
         int n = fill_batch(w);
-        const uint64_t r1 = __rdtsc();
+        const uint64_t r1 = profile ? __rdtsc() : 0;
         if (n) run_ec(w, ecm, vs, ss);
-        const uint64_t r2 = __rdtsc();
-        S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
-        S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
+        if (profile) {
+            const uint64_t r2 = __rdtsc();
+            S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed);
+            S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
+        }
+        busy_acc += thread_cpu_ns() - c0;
+        S->busy_ns[id].value.store(busy_acc, std::memory_order_relaxed);
         S->running.fetch_sub(1);
         if (!n) break;
         S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
@@ -565,13 +583,14 @@ static double mem_available_mib() {
 
 /* ---------------- controller (called from the GPU host loop) ---------------- */
 struct ctl_t {
-    int wmax, cur;
+    int wmax, cur, wcap, whw;   /* whw = hardware ceiling, independent of the quota guess */
     int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
     double t_phase;
     double last_done;
     int ab_left;
-    double ab_on_sum; int ab_on_n;
-    double ab_off_sum; int ab_off_n;
+    double on_seconds, off_seconds, on_gpu, off_gpu, on_cpu;
+    uint64_t sample_cpu0;
+    double settle_until;
     double next_ab;
     uint64_t busy0; double busy_t0;
     uint64_t cand0; double cand_t0;
@@ -580,7 +599,7 @@ struct ctl_t {
 };
 static ctl_t g_ctl;
 
-static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].load(std::memory_order_relaxed); return s; }
+static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].value.load(std::memory_order_relaxed); return s; }
 
 /* Start: pick the table layout, build it in the background and spawn the (paused) workers. */
 static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) {
@@ -690,25 +709,48 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     mkdir("results", 0755);
     S->hit_fd = open("results/pinning_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (S->hit_fd < 0) { g_cg = NULL; return 0; }
+    g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
+    /* nw is only the STARTUP ALLOWANCE. Under a cgroup quota it is
+     * ceil(quota)-2, which on the ranked 20-CPU host leaves the co-grinder at
+     * roughly 4-5 effective workers and ~2.7 M cand/s, while the identical code
+     * reaches 19-25 M/s on 32-CPU hosts with no measurable GPU cost. Spawn up
+     * to the hardware ceiling instead and let the A/B controller raise
+     * `allowed` toward it; a thread with id >= allowed just parks on a 5 ms
+     * poll, so the spare threads cost nothing until they are switched on. */
+    int nw_hw = guard_ok ? CPU_COUNT(&g_worker_set) : ncpu - 1;
+    if (nw_hw > QSB_CG_MAXW) nw_hw = QSB_CG_MAXW;
+    if (nw_hw < nw) nw_hw = nw;
+    if (env || !QSB_CG_RECOVER) nw_hw = nw;        /* explicit override or switch off */
     if (table_start(S, nw) != 0) { g_cg = NULL; return 0; }
     recode_init(S->lay);
     S->allowed.store(0);
-    S->nworkers = nw;
-    for (int i = 0; i < nw; i++) {
+    S->nworkers = nw_hw;
+    for (int i = 0; i < nw_hw; i++) {
         pthread_t t;
         if (pthread_create(&t, NULL, worker_main, (void *)(intptr_t)i) != 0) { S->nworkers = i; break; }
         pthread_detach(t);
     }
+    if (nw > S->nworkers) nw = S->nworkers;
     memset(&g_ctl, 0, sizeof g_ctl);
-    g_ctl.wmax = S->nworkers; g_ctl.cur = 0;
-    g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
+    g_ctl.wmax = nw; g_ctl.cur = 0; g_ctl.wcap = nw;
+    /* The startup worker count is a GUESS: under a cgroup quota it is
+     * ceil(quota)-2, which on the ranked 20-CPU host leaves the co-grinder at
+     * roughly 4-5 effective workers and about 2.7 M cand/s, against 19-25 M/s
+     * that the same code reaches on 32-CPU hosts. Record the real hardware
+     * ceiling so the A/B controller can climb toward it instead of treating
+     * the guess as a maximum. Climbing only ever happens on a measured-clean
+     * window, and the existing shedding rule still backs off on real loss. */
+    g_ctl.whw = S->nworkers;
+    g_ctl.verbose = g_ctl_verbose;
     return S->nworkers;
 }
 
 static void set_allowed(int n) { if (g_cg) g_cg->allowed.store(n, std::memory_order_relaxed); g_ctl.cur = n; }
 
 /* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates.
- * (Unchanged logic from the v1 co-grinder.) */
+ * The ABBA comparison counts actual drained GPU work and CPU work from the same
+ * measured on-windows. It avoids unequal batch durations and excludes the
+ * worker-off windows from the CPU rate. */
 static void tick(double now, double gpu_batch) {
     shared_t *S = g_cg;
     if (!S) return;
@@ -733,6 +775,17 @@ static void tick(double now, double gpu_batch) {
         if (C.verbose) printf("  [CPU] share check: %d workers received %.2f CPUs\n", C.cur, got);
         if (got < 0.8 * C.cur) {
             int nw = (int)got - 2; if (nw < 0) nw = 0;
+            /* Floor the clamp. This check fires 2 s after the first drained
+             * batch, i.e. inside start-up turbulence (table builds, first
+             * page faults), so a single unlucky sample used to strand the
+             * workers for the remaining ~1190 s. Harvested runs show the
+             * co-grinder reaching 19-25 M cand/s on 32-CPU hosts but only
+             * 2.7-5.6 on 20-CPU hosts, with no measurable GPU cost either
+             * way, so an over-tight clamp is the expensive failure, not an
+             * over-generous one. The A/B guard below still sheds on a real,
+             * sustained loss. */
+            const int floor_w = QSB_CG_RECOVER ? (C.wcap + 1) / 2 : 0;
+            if (nw < floor_w) nw = floor_w;
             C.wmax = nw; set_allowed(nw);
             printf("  CPU co-grind: workers received %.1f CPUs; using %d\n", got, nw);
         }
@@ -740,36 +793,61 @@ static void tick(double now, double gpu_batch) {
         return;
     }
     if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
-        C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
+        C.phase = 3; C.ab_left = 4;
+        C.on_seconds = C.off_seconds = C.on_gpu = C.off_gpu = C.on_cpu = 0;
+        C.sample_cpu0 = S->cand_done.load(); C.settle_until = now + 0.25;
         C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
         return;
     }
     if (C.phase == 3) {
-        const int on = (C.ab_left & 1) == 0;
-        if (C.win_skip) C.win_skip = 0;
-        else { if (on) { C.ab_on_sum += dt; C.ab_on_n++; } else { C.ab_off_sum += dt; C.ab_off_n++; } C.win_n++; }
+        const uint64_t cd = S->cand_done.load();
+        if (now < C.settle_until || C.win_skip) {
+            C.sample_cpu0 = cd;
+            if (now >= C.settle_until) { C.win_skip = 0; C.win_t0 = now; }
+            return;
+        }
+        const int on = C.ab_left == 4 || C.ab_left == 1; /* on, off, off, on */
+        if (dt > 0 && gpu_batch > 0) {
+            if (on) {
+                C.on_seconds += dt; C.on_gpu += gpu_batch;
+                if (cd >= C.sample_cpu0) C.on_cpu += (double)(cd - C.sample_cpu0);
+            } else {
+                C.off_seconds += dt; C.off_gpu += gpu_batch;
+            }
+            C.win_n++;
+        }
+        C.sample_cpu0 = cd;
         if (C.win_n < 3 || now - C.win_t0 < 1.0) return;
         C.ab_left--;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
-        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.wmax : 0); return; }
+        C.win_t0 = now; C.win_n = 0; C.win_skip = 1; C.settle_until = now + 0.25;
+        if (C.ab_left > 0) { set_allowed((C.ab_left == 4 || C.ab_left == 1) ? C.wmax : 0); return; }
         set_allowed(C.wmax);
-        const double on_t = C.ab_on_sum / (C.ab_on_n ? C.ab_on_n : 1);
-        const double off_t = C.ab_off_sum / (C.ab_off_n ? C.ab_off_n : 1);
-        const double loss = on_t / off_t - 1.0;
-        const uint64_t cd = S->cand_done.load();
-        const double cpu_rate = C.cand_t0 > 0 && now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
-        C.cand0 = cd; C.cand_t0 = now;
-        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
-                              on_t, off_t, 100 * loss, cpu_rate, C.wmax,
-                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
-        const double cpu_frac = on_t > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
-        const int bad = loss > 0.015 && loss > cpu_frac;
+        const double gpu_on = C.on_seconds > 0 ? C.on_gpu / C.on_seconds : 0;
+        const double gpu_off = C.off_seconds > 0 ? C.off_gpu / C.off_seconds : 0;
+        const double cpu_rate = C.on_seconds > 0 ? C.on_cpu / C.on_seconds : 0;
+        const double loss = gpu_off > 0 ? 1.0 - (gpu_on + cpu_rate) / gpu_off : 0;
+        if (C.verbose) printf("  [CPU] ABBA: GPU on %.0f off %.0f cand/s, CPU-on %.0f, net loss %+.3f%%, %d workers\n",
+                              gpu_on, gpu_off, cpu_rate, 100 * loss, C.wmax);
+        /* Two complete comparisons must agree before shedding. */
+        const int bad = gpu_on > 0 && gpu_off > 0 && loss > 0.005;
         if (bad && C.strikes >= 1) {
             int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
+            const int floor_w = QSB_CG_RECOVER ? (C.wcap + 3) / 4 : 0;
+            if (nw < floor_w) nw = floor_w;
             C.wmax = nw; set_allowed(nw); C.strikes = 0;
-            printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
+            printf("  CPU co-grind: combined rate loss %.2f%% with workers; using %d\n", 100 * loss, nw);
             C.next_ab = now + 5.0;
         } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
+        else if (QSB_CG_RECOVER && C.wmax < C.whw && loss < 0.005) {
+            /* Both shedding paths only ever lower wmax, so without this a single
+             * transient stall (a slow first table build, a thermal dip, one noisy
+             * A/B pair) strands those workers for the rest of the run. A window
+             * that measures clean hands one worker back and re-checks sooner than
+             * the steady-state interval, until we are up at the starting count
+             * again. Shedding is unchanged, so a real sustained loss still wins. */
+            C.strikes = 0; C.wmax++; set_allowed(C.wmax); C.next_ab = now + 10.0;
+            if (C.verbose) printf("  [CPU] worker ramp -> %d (cap %d, hw %d, loss %+.3f%%)\n", C.wmax, C.wcap, C.whw, 100 * loss);
+        }
         else { C.strikes = 0; C.next_ab = now + 60.0; }
         C.phase = 2;
         return;
