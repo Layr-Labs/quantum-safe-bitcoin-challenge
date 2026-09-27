@@ -1,4 +1,8 @@
+#ifndef QSB_REMEASURE_TAG_0927234515457
+#define QSB_REMEASURE_TAG_0927234515457 1 /* no-op: exact-source re-draw identity */
+#endif
 /* l2state variant fkF20c8 + split retry */
+#define QSB_CHAIN_ALU 1     /* chain-end carry adds on the ALU pipe; x + 0 == x (fkiene, via DPZZxlz) */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
@@ -954,11 +958,22 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
  * sum subtracts 2c = K-1 (_ModAddLazyOff in GPUMath.h), and the last anchor is converted
  * back here. The borrow is kept through limb 1: dropped only if y'0 < c (2^-33) and y'1 == 0
  * (2^-64), i.e. <= 2^-97 once per candidate. */
+/* QSB_YOFF_Y1_CUT (kill switch, default 1): the conversion subtracts c from limb 0 only. */
+#ifndef QSB_YOFF_Y1_CUT
+#define QSB_YOFF_Y1_CUT 1
+#endif
+#if QSB_YOFF_Y1_CUT != 0 && QSB_YOFF_Y1_CUT != 1
+#error "QSB_YOFF_Y1_CUT must be 0 or 1"
+#endif
 __device__ __forceinline__ void qsb_yoff_to_y(uint64_t *y) {
+#if QSB_YOFF_Y1_CUT
+    y[0] = y[0] - 0x800001E8ULL;
+#else
     uint64_t r0, r1;
     asm("{\n.reg .u64 t;\nsub.cc.u64 %0, %2, 0x800001E8;\nsubc.u64 %1, %3, 0;\n}"
         : "=l"(r0), "=l"(r1) : "l"(y[0]), "l"(y[1]));
     y[0] = r0; y[1] = r1;
+#endif
 }
 /* Table post-pass: y += c for every entry (exact: y < p so y + c < 2^256). */
 __global__ void qsb_table_offset_y(uint8_t *gTable) {
@@ -1575,14 +1590,14 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #endif
     _ModMult(U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
-    _ModSub256(P,U2,X1);
+    QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
     _ModMult(PPP,PP,P);
     _ModMult(Q,U2,PP);
     _ModSqrAddSub2(X1,Ry,PPP,Q);
     _ModMult(ZZZ1,PPP);
     _ModMult(ZZ1,PP);
-    _ModSub256(Qy,X1,Q);
+    QSB_SUB_CHAIN_QY(Qy,X1,Q);
 }
 /* _PointAddXYZZ_mm with its deferred ordinate returned as the pair (T-Q, R). */
 __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
@@ -1590,16 +1605,16 @@ __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
                                      const uint64_t *X1,const uint64_t *Y1,
                                      const uint64_t *X2,const uint64_t *Y2) {
     uint64_t P[4],Q[4],T[4];
-    _ModSub256(P,(uint64_t *)X2,(uint64_t *)X1);
-    _ModSub256(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
+    QSB_SUB_SEED(P,(uint64_t *)X2,(uint64_t *)X1);
+    QSB_SUB_SEED(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
     _ModSqr(ZZ3,P);
     _ModMult(ZZZ3,ZZ3,P);
     _ModMult(Q,(uint64_t *)X1,ZZ3);
     _ModSqr(T,Ry);
-    _ModSub256(T,T,ZZZ3);
-    _ModSub256(T,T,Q);
-    _ModSub256(T,T,Q);
-    _ModSub256(Qy,T,Q);
+    QSB_SUB_SEED(T,T,ZZZ3);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(Qy,T,Q);
     Load256(X3,T);
 }
 #endif
@@ -3007,8 +3022,9 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
     }
 
     if(tid==0){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        uint64_t *root_out = roots + (size_t)blockIdx.x * 4u;
+        qsb_st_v2((ulonglong2*)root_out, products[0][2*N-2], products[1][2*N-2]);
+        qsb_st_v2((ulonglong2*)(root_out+2), products[2][2*N-2], products[3][2*N-2]);
     }
 }
 template<int N>
@@ -3148,6 +3164,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
  * normalized the same way, so roots[i] and the weighted roots[count+i] are bit-identical. */
 #ifndef QSB_ROOT_FUSED
 #define QSB_ROOT_FUSED 0
+#endif
+#ifndef QSB_RROOT_TREES
+#define QSB_RROOT_TREES 1  /* register-tree root inverse, checked at startup */
 #endif
 #ifndef QSB_RF_LANES
 #define QSB_RF_LANES 128   /* one prepare-block slot: 128 threads x <= 128 registers */
@@ -3308,6 +3327,13 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         }
     }
 }
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream);
 #endif
 
 /* Shared-denominator recovery directly from XYZZ coordinates.
@@ -3985,7 +4011,27 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
+#endif
 #include "QsbCarrier.h"
+#if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    constexpr int K=QSB_RF_K;
+    if(g_qsb_register_roots){
+        if(qsb_carrier_has(QK_RR))
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,roots,count);
+        else qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    } else if(qsb_carrier_has(QK_RF))
+        qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+}
+#endif
+
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4204,6 +4250,7 @@ static void qsb_subpipe_die(const char *what, cudaError_t e) {
     fprintf(stderr, "Sub-batch pipeline %s failed: %s\n", what, cudaGetErrorString(e));
     exit(2);
 }
+#include "RegisterRootCheck.h"
 static int g_qsb_sub_ok = 0;
 static int qsb_subpipe_init(cudaStream_t like) {
     QsbSubPipe &P = g_qsb_sub;
@@ -4269,6 +4316,13 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=QSB_RROOT_TREES &&
+        qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted prefix / scalar fallback");
+    fflush(stdout);
+#endif
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4278,7 +4332,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            qsb_launch_selected_roots(P.roots[0],nb,P.rt);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4340,11 +4394,7 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        if (qsb_carrier_has(QK_RF))
-            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
-        else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,P.rt);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
