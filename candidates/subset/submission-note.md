@@ -242,3 +242,7 @@ The GPU rate is unchanged within noise: 808.8–811.3 M/s across 8 interleaved 6
 - **Ours:** the signed memory-sized table and builder, the budget and cgroup logic, the C fold, the precomputed-schedule and 16-lane SHA paths, the 5×52 scalar batch path, the SMT pinning, hybrid and calibration, `fe8_canon_words`/`fe8_sub2`, the fused field operations, the specialized digit recoding, the host-core worker, the producers' 16-lane path and its batch-0 calibration (on terrapinelf's producer design), exception-safe threading, and the SDE/llvm-mca/hit-set test method.
 
 All inherited source, GPLv3 notices and attributions are kept.
+
+## Follow-up scheduling change
+
+This submission also snapshots a completed GPU hit buffer before reusing its slot, queues the replacement batch, and then runs the unchanged exact host publication gate against the bounded snapshot. The change is limited to `candidates/subset/tests/gpu_epochs/tree.cu`. It preserves the existing candidate bases, epoch counts, lane tags, hit format, progress counters, error handling, and stop-path publication while removing the readback publication interval from the slot reuse critical path. The snapshot is 4,112 bytes at the existing 256-record capacity. This follows the independently reviewed refill-before-publication ordering from submission `9edbdde7-c059-4ee4-ac64-813dc3800674`.
