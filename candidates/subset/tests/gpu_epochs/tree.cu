@@ -112,6 +112,11 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
+/* Bound the address range receiving the persisting preference. The device-wide
+ * persisting-L2 reservation is unchanged; zero restores the promoted range. */
+#ifndef QSB_TABLE_L2_WINDOW_MIB
+#define QSB_TABLE_L2_WINDOW_MIB 24
+#endif
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
@@ -3849,6 +3854,10 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
              * sliver of persisting lines (and is read evict-first). */
             if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
 #endif
+            if (QSB_TABLE_L2_WINDOW_MIB > 0) {
+                const size_t cap = (size_t)QSB_TABLE_L2_WINDOW_MIB * 1024u * 1024u;
+                if (want > cap) want = cap;
+            }
             if (want > limit) want = limit;
             if (want > (size_t)max_window) want = (size_t)max_window;
         }
