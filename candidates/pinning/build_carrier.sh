@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 Z=${1:-24}
 W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
 nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
-     -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
+     -Xptxas -v -Xptxas --register-usage-level=6 -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
 cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
 python3 - "$Z" "$W" <<'PY'
@@ -23,9 +23,11 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_RGF",   r"_Z21qsb_root_group_finish\w+"),
     ("QK_BUILD", r"_Z19kernel_build_gtable\w+"),
     ("QK_YOFF",  r"_Z18qsb_table_offset_y\w+"),
-    ("QK_RF",    r"_Z14qsb_root_fusedILi\d+EE\w+"),   # optional: absent when QSB_ROOT_FUSED=0
+    ("QK_RF",    r"_Z14qsb_root_fusedILi\d+EE\w+"),        # optional: absent when QSB_ROOT_FUSED=0
+    ("QK_RR",    r"_Z17qsb_root_register\w+"),             # optional
+    ("QK_PFC",   r"_Z29qsb_prefix_field_check_kernel\w+"),  # optional
 ]
-optional = {"QK_RF"}
+optional = {"QK_RF", "QK_RR", "QK_PFC"}
 names = []
 for kid, pat in want:
     hits = sorted(set(re.findall(pat, syms)))
