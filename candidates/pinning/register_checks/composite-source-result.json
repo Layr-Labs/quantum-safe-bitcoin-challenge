@@ -1,0 +1,368 @@
+{
+  "status": "PASS_COMPOSITE_SOURCE_AND_HOST_TOPOLOGY",
+  "official_base": "f0e453daaf8b1af848e0bf4afd42fb730018c041",
+  "reversible_pinning_patch": true,
+  "unchanged_promoted_files": 484,
+  "byte_identical_own_headers": [
+    "RegisterRoots.cuh",
+    "WarpInverse.cuh",
+    "CyclicField.cuh",
+    "PrefixCyclicField.cuh",
+    "RegisterRootCheck.h"
+  ],
+  "math_dependencies_unchanged": true,
+  "ordinary_constant_upload_before_startup": true,
+  "carrier_fallback_preserved": true,
+  "partition_model_cases": 120,
+  "ad102_prepare_sms": 128,
+  "ad102_finish_sms": 16,
+  "ad102_shared_sms": 16,
+  "include_closure": 30,
+  "raw_bytes": 7913384,
+  "carrier_sha256": "45082ea80cb4c496ed92c81c5c1f1241f0ff7354018b534413a223a01bfc525e",
+  "prior_math_evidence_reused": {
+    "register-tree-result.json": {
+      "status": "PASS_PYTHON_REGISTER_ROUTING_COMPACT_LAYOUT_INTERLEAVING",
+      "batches": 77,
+      "roots": 25922,
+      "zero_or_p_roots": 9806,
+      "interleaving_events": 29876,
+      "shared_words_used": 1344,
+      "shared_bytes": 11008,
+      "warp_sync_rounds": 6,
+      "CTA_barriers": 0,
+      "extra_upper_words_retained_across_inverse": 2,
+      "stats": {
+        "cooperative_unique_calls": 5010,
+        "actual_subgroup_calls": 8720,
+        "shuffle_lanes": 97664,
+        "shared_accesses": 310464,
+        "negative_bad_route": 128
+      },
+      "native_compile": false,
+      "GPU_execution": false,
+      "included_in_candidate": true,
+      "sha256": "27acfffe52658e3a20fbe5a52d1a2a48b93eef20ed0439915d7f6abebd2e181b"
+    },
+    "prefix-ptx-result.json": {
+      "status": "PASS_LITERAL_PTX_PYTHON_INTERPRETER",
+      "cases": 24080,
+      "total_carry_cases": 24008,
+      "prefix_subtraction_borrow_cases": 10540,
+      "wrong_subc_negative_failures": 21869,
+      "interpreted_blocks": 2,
+      "native_compilation": false,
+      "GPU_execution": false,
+      "sha256": "c62446329fd56258e0c273249c4353e39950a6d33b893e59a79faefadf4fc8d5"
+    },
+    "shared-bank-result.json": {
+      "status": "PASS_SOURCE_ADDRESS_BANK_DEMAND_MODEL",
+      "cooperative_cases": 12,
+      "dense_cases": 768,
+      "compact_unique_64bit_slots": 1344,
+      "shared_bytes_old": 12288,
+      "shared_bytes_new": 11008,
+      "padding_bytes": 256,
+      "shared_unique_bytes_saved_per_warp": 832,
+      "shared_unique_bytes_saved_per_CTA": 3328,
+      "warp_sync_rounds_old": 11,
+      "warp_sync_rounds_new": 6,
+      "CTA_barriers": 0,
+      "extra_source_live_words_across_inverse": 2,
+      "actual_SASS_width_unknown": true,
+      "hardware_wavefronts_measured": false,
+      "GPU_performance_predicted": false,
+      "rows": [
+        {
+          "warp": 0,
+          "label": "upper_a_ld64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 0,
+          "label": "upper_a_ld32",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 0,
+          "label": "v4_st64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 1,
+          "label": "upper_a_ld64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 1,
+          "label": "upper_a_ld32",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 1,
+          "label": "v4_st64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 2,
+          "label": "upper_a_ld64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 2,
+          "label": "upper_a_ld32",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 2,
+          "label": "v4_st64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 3,
+          "label": "upper_a_ld64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 3,
+          "label": "upper_a_ld32",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        },
+        {
+          "warp": 3,
+          "label": "v4_st64",
+          "old": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 4,
+            "halfwarp_max": [
+              4,
+              4
+            ],
+            "bandwidth_min_rounds": 1
+          },
+          "new": {
+            "unique_words": 32,
+            "max_distinct_words_per_bank": 1,
+            "halfwarp_max": [
+              1,
+              1
+            ],
+            "bandwidth_min_rounds": 1
+          }
+        }
+      ],
+      "primary_source": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html"
+    },
+    "warp-inverse-result.json": {
+      "status": "PASS_PYTHON_SOURCE_MODEL_ONLY",
+      "lut_cases": 43008,
+      "inverses": 1117,
+      "lane_row_checks": 80184,
+      "forced_fallback_checks": 118,
+      "max_batches": 19,
+      "max_abs_signed_top_word": 1,
+      "max_rs_multiple_p": 1,
+      "canon_cases": 402,
+      "negative_dropped_final_carry": 39163,
+      "exact_ISO_initialization": true,
+      "only_one_scale": true,
+      "full_warp_entry": true,
+      "native_compilation": false,
+      "GPU_execution": false,
+      "production_inclusion": true,
+      "source_commit": "a137e289b236c3622eba80f1ad5e9a0c8a91eb67",
+      "header_sha256": "dc37af7f709c9c65c2cd8c359af7631e0886ad99131006087ba0e98e1b39dffe",
+      "adapter_sha256": "0c5737179c970a5487cab0cdc064e836a54bc046f28a6a10072ccd6d2f77cd59"
+    }
+  },
+  "native_compile": false,
+  "GPU_run": false,
+  "new_performance_unmeasured": true
+}

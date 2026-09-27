@@ -3,8 +3,8 @@
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
-#define QSB_GREEN 20
-#define QSB_GREEN_SHARED 8
+#define QSB_GREEN 16
+#define QSB_GREEN_SHARED 16
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -3310,6 +3310,14 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+static bool g_qsb_register_constants_ready=false;
+static void qsb_launch_selected_roots(uint64_t *,int,cudaStream_t);
+#endif
+
 /* Shared-denominator recovery directly from XYZZ coordinates.
  *
  * P has affine coordinates xP=X/ZZ and yP=Y/ZZZ, with ZZZ^2=ZZ^3.
@@ -3986,6 +3994,18 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #endif
 
 #include "QsbCarrier.h"
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    if(g_qsb_register_roots)
+        qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    else if(qsb_carrier_has(QK_RF))
+        qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+            dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    else
+        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>
+            <<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+}
+#endif
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4269,6 +4289,13 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=g_qsb_register_constants_ready &&
+        !getenv("QSB_REGISTER_ROOTS_OFF") && qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted carrier / scalar fallback");
+    fflush(stdout);
+#endif
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4278,7 +4305,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            qsb_launch_selected_roots(P.roots[0],nb,P.rt);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4340,11 +4367,7 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        if (qsb_carrier_has(QK_RF))
-            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
-        else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,P.rt);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
@@ -4582,6 +4605,9 @@ extern "C" {
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
 }
+#if QSB_SUBPIPE && QSB_ROOT_FUSED && QSB_SLOTPIPE
+#include "RegisterRootCheck.h"
+#endif
 
 /* Affine (x,y) of a point, as the 4+4 little-endian limbs the table uses. */
 static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
@@ -5329,6 +5355,20 @@ int main(int argc, char **argv) {
             if (cudaFuncGetAttributes(&fa, fs_k[q]) == cudaSuccess) fs_loaded++;
         }
         (void)cudaGetLastError();   /* advisory: a failed preload leaves the lazy load in place */
+#if QSB_SUBPIPE && QSB_ROOT_FUSED && QSB_SLOTPIPE
+        // Load only the ordinary register-root entry while host ladders are still
+        // being built. JIT remains necessary; overlap it rather than delaying it
+        // until ordinary root constants are uploaded after table setup.
+        if(!getenv("QSB_REGISTER_ROOTS_OFF")){
+            cudaFuncAttributes root_attr;
+            cudaError_t root_load=cudaFuncGetAttributes(&root_attr,(const void*)qsb_root_register);
+            if(root_load!=cudaSuccess){
+                fprintf(stderr,"Failed to load register-root module: %s\n",cudaGetErrorString(root_load));
+                return 1;
+            }
+            fs_loaded++;
+        }
+#endif
     }
 #endif
     {
@@ -5470,6 +5510,28 @@ int main(int argc, char **argv) {
        QSB_TO_SYMBOL(pin_iso_xneg,&iso.xneg,sizeof(iso.xneg))!=cudaSuccess){
         fprintf(stderr,"Failed to upload isomorphic recovery constants\n");
         return 1;
+    }
+#endif
+#if QSB_SUBPIPE && QSB_ROOT_FUSED && QSB_SLOTPIPE
+    /* QSB_NOJIT routes ordinary constant uploads to the native carrier only.
+     * The new checked root kernel is in the ordinary CUDA module: explicitly
+     * initialize its scale and weight without uploading unrelated constants.
+     * This necessarily loads/JITs that module. Native prepare/finish/table-build
+     * kernels and their carrier remain byte-identical to the promoted source. */
+    if(!getenv("QSB_REGISTER_ROOTS_OFF")){
+        cudaError_t root_upload;
+#if QSB_ISO_XR
+        root_upload=cudaMemcpyToSymbol(pin_iso_invu_words,iso.invu,sizeof(iso.invu));
+        if(root_upload==cudaSuccess)
+            root_upload=cudaMemcpyToSymbol(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t));
+#else
+        root_upload=cudaMemcpyToSymbol(pin_u2ry_words,pp.u2r_y,sizeof(pp.u2r_y));
+#endif
+        if(root_upload!=cudaSuccess){
+            fprintf(stderr,"Failed to upload register-root constants: %s\n",cudaGetErrorString(root_upload));
+            return 1;
+        }
+        g_qsb_register_constants_ready=true;
     }
 #endif
     {   /* c = 3*a^2/(2*b), invariant across the problem (LeafRecovery). */
