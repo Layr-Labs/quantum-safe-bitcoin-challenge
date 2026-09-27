@@ -24,8 +24,10 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_BUILD", r"_Z19kernel_build_gtable\w+"),
     ("QK_YOFF",  r"_Z18qsb_table_offset_y\w+"),
     ("QK_RF",    r"_Z14qsb_root_fusedILi\d+EE\w+"),   # optional: absent when QSB_ROOT_FUSED=0
+    ("QK_RR",    r"_Z17qsb_root_registerPmi"),        # optional
+    ("QK_PFC",   r"_Z29qsb_prefix_field_check_kernelPj"),  # optional
 ]
-optional = {"QK_RF"}
+optional = {"QK_RF", "QK_RR", "QK_PFC"}
 names = []
 for kid, pat in want:
     hits = sorted(set(re.findall(pat, syms)))
