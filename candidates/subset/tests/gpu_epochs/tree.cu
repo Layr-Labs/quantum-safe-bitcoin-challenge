@@ -405,7 +405,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 4
+#define QSB_Q_MIX 2
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -3600,6 +3600,13 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #define QSB_HP_ON 1
 #endif
 /* QSB_CPU_GRIND: host-CPU co-grinding on candidates disjoint from the GPU's (CpuGrindSubset.h). */
+/* QSB_HOST_BLOCKING (host-only): the slot completion events are created with cudaEventBlockingSync, so the GPU
+ * host thread sleeps in cudaEventSynchronize instead of spinning a CPU while two batches are in flight (after
+ * HyeokxC's 0735233a / 888f5fce and newjordan's 212237f4). Its core is then free for co-grinder workers. Kernels,
+ * arguments and batch order are unchanged. 0 = the spin wait. */
+#ifndef QSB_HOST_BLOCKING
+#define QSB_HOST_BLOCKING 1
+#endif
 #ifndef QSB_CPU_GRIND
 #define QSB_CPU_GRIND 1
 #endif
@@ -4633,7 +4640,7 @@ int main(int argc, char **argv) {
             cudaError_t se = cudaSuccess;
             for (int s = 0; s < 2 && se == cudaSuccess; s++) {
                 se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
-                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (QSB_HOST_BLOCKING ? cudaEventBlockingSync : 0));
             }
             if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
             if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_tent, 2 * (size_t)SP_HOST_BYTES, cudaHostAllocDefault);
