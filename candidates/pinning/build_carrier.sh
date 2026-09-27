@@ -10,7 +10,10 @@ W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
 nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
      -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
-cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
+if ! cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"; then
+    echo "cuobjdump disassembly failed; checking the same cubin with nvdisasm" >&2
+    nvdisasm "$W/c.cubin" > "$W/sass.txt"
+fi
 python3 - "$Z" "$W" <<'PY'
 import base64, hashlib, re, sys
 zeros = int(sys.argv[1]); W = sys.argv[2]
@@ -42,8 +45,15 @@ for g in ("qsb_carrier_zeros", "pin_u2rx_words", "pin_u2ry_words", "pin_iso_invu
         sys.exit(f"build_carrier: global {g} missing from image")
 # The hint must be present in the prepare kernel (the only table reader on the hot path).
 sass = open(W + "/sass.txt").read()
-fn = re.split(r"\n\s*Function : ", sass)
-s0 = [b for b in fn if b.startswith(names[0])]
+if "Function : " in sass:
+    fn = re.split(r"\n\s*Function : ", sass)
+    s0 = [b for b in fn if b.startswith(names[0] + "\n") or b.startswith(names[0] + " ")]
+else:
+    # nvdisasm emits ELF text sections. Match the exact entry symbol, and
+    # confine the load-policy check to that section, not unrelated kernels.
+    sections = re.split(r'(?m)^\s*\.section\s+\.text\.([^,\s]+),[^\n]*\n', sass)
+    s0 = [sections[i + 1] for i in range(1, len(sections) - 1, 2)
+          if sections[i] == names[0]]
 if not s0 or "LTC64B" not in s0[0]:
     sys.exit("build_carrier: prepare kernel has no LDG.E.LTC64B load")
 n_hint = s0[0].count("LTC64B")

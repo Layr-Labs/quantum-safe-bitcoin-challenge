@@ -106,6 +106,15 @@ static int layout_by_name(layout_t *L, const char *nm) {
 }
 
 /* ---------------- shared state ---------------- */
+/* pochita0's public accounting-isolation mechanism: one writer per counter.
+ * A 64-byte stride avoids adjacent workers sharing their active cache line
+ * without requiring over-aligned allocation of shared_t. */
+struct busy_counter_t {
+    std::atomic<uint64_t> value;
+    unsigned char padding[64 - sizeof(std::atomic<uint64_t>)];
+};
+static_assert(sizeof(busy_counter_t) == 64, "busy counter stride");
+
 struct shared_t {
     const pinning2_params_t *pp;
     uint32_t lt_min, lt_range, chunks_per_seq;
@@ -132,7 +141,7 @@ struct shared_t {
     int ec_env, sha_env;                  /* overrides, -1 = auto */
     std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
-    std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
+    busy_counter_t busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
     double t_build;
 };
@@ -498,6 +507,7 @@ static void *worker_main(void *arg) {
     }
     while (S->ec_mode.load() < 0) { if (S->stop.load()) return NULL; usleep(1000); }
     const int ecm = S->ec_mode.load();
+    uint64_t busy_acc = 0; // Only this worker writes busy_ns[id].
     while (!S->stop.load(std::memory_order_relaxed)) {
         if (id >= S->allowed.load(std::memory_order_relaxed)) { usleep(5000); continue; }
         S->running.fetch_add(1);
@@ -508,7 +518,8 @@ static void *worker_main(void *arg) {
         if (n) run_ec(w, ecm, vs, ss);
         const uint64_t r2 = __rdtsc();
         S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
-        S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
+        busy_acc += thread_cpu_ns() - c0;
+        S->busy_ns[id].value.store(busy_acc, std::memory_order_relaxed);
         S->running.fetch_sub(1);
         if (!n) break;
         S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
@@ -580,7 +591,7 @@ struct ctl_t {
 };
 static ctl_t g_ctl;
 
-static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].load(std::memory_order_relaxed); return s; }
+static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].value.load(std::memory_order_relaxed); return s; }
 
 /* Start: pick the table layout, build it in the background and spawn the (paused) workers. */
 static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) {
