@@ -3,8 +3,26 @@
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
+#ifndef QSB_GREEN
 #define QSB_GREEN 20
+#endif
+#ifndef QSB_GREEN_SHARED
 #define QSB_GREEN_SHARED 8
+#endif
+/* seq-measurement stack on the frontier: every item below has its own switch (1 = on),
+ * and each leaves every hit bit-identical (checked against the frontier on a fixed seed). */
+#ifndef QSB_RROOT_TREES
+#define QSB_RROOT_TREES 1   /* register-tree root inverse with a startup self-check (terrapinelf, after fkiene) */
+#endif
+#ifndef QSB_SLOTS
+#define QSB_SLOTS 3         /* three in-flight 4M batches instead of four (i34-9) */
+#endif
+#ifndef QSB_PO_STORE_V2
+#define QSB_PO_STORE_V2 1   /* prepare state stores as four 16-byte stores, same bytes and addresses (i34-9) */
+#endif
+#ifndef QSB_CHAIN_ALU
+#define QSB_CHAIN_ALU 1     /* chain-end carry adds on the ALU pipe; x + 0 == x (fkiene) */
+#endif
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -575,6 +593,22 @@ __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
                  :: "l"(p), "l"(a) : "memory");
 #else
     qsb_st_u64(p, a);
+#endif
+}
+/* 16-byte form of qsb_st_state_u64 (same L2 policy): one entry of a state plane. */
+__device__ __forceinline__ void qsb_st_state_v2(ulonglong2 *p, uint64_t a, uint64_t b) {
+#if (QSB_L2STATE & 8) && QSB_SM80_PTX
+    /* QSB_L2STATE bit 8 on the 16-byte form: the same L2::evict_last cache policy as
+     * qsb_st_state_u64, same bytes, same address. */
+    uint64_t pol;
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.L2::cache_hint.v2.u64 [g], {%1,%2}, %3; }"
+                 :: "l"(p), "l"(a), "l"(b), "l"(pol) : "memory");
+#elif QSB_L2STATE & 1
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(a), "l"(b) : "memory");
+#else
+    qsb_st_v2(p, a, b);
 #endif
 }
 __device__ __forceinline__ void qsb_discard_l2(const void *p) {
@@ -3149,6 +3183,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #ifndef QSB_ROOT_FUSED
 #define QSB_ROOT_FUSED 0
 #endif
+#ifndef QSB_RROOT_TREES
+#define QSB_RROOT_TREES 1  /* register-tree root inverse, checked at startup */
+#endif
 #ifndef QSB_RF_LANES
 #define QSB_RF_LANES 128   /* one prepare-block slot: 128 threads x <= 128 registers */
 #endif
@@ -3308,6 +3345,13 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         }
     }
 }
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream);
 #endif
 
 /* Shared-denominator recovery directly from XYZZ coordinates.
@@ -3525,14 +3569,21 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
     Load256(W,rw);
     W[4]=0;
 }
-/* The state stores of qsb_packed_prepare (QSB_PREP_STATE == 2): same bytes, same addresses. */
+/* The state stores of qsb_packed_prepare, as four 16-byte stores: same bytes, same addresses. */
 __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *vbar, const uint64_t *tbar) {
     ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
-    uint64_t *sw=(uint64_t *)st;
+#if QSB_PO_STORE_V2
+    qsb_st_state_v2(st,vbar[0],vbar[1]);
+    qsb_st_state_v2(st+QSB_TREE_N,vbar[2],vbar[3]);
+    qsb_st_state_v2(st+2*QSB_TREE_N,tbar[0],tbar[1]);
+    qsb_st_state_v2(st+3*QSB_TREE_N,tbar[2],tbar[3]);
+#else
+    uint64_t *sw=(uint64_t *)st;   /* the frontier's eight 8-byte stores */
     qsb_st_state_u64(sw,vbar[0]); qsb_st_state_u64(sw+1,vbar[1]);
     qsb_st_state_u64(sw+2*QSB_TREE_N,vbar[2]); qsb_st_state_u64(sw+2*QSB_TREE_N+1,vbar[3]);
     qsb_st_state_u64(sw+4*QSB_TREE_N,tbar[0]); qsb_st_state_u64(sw+4*QSB_TREE_N+1,tbar[1]);
     qsb_st_state_u64(sw+6*QSB_TREE_N,tbar[2]); qsb_st_state_u64(sw+6*QSB_TREE_N+1,tbar[3]);
+#endif
 }
 #if QSB_POST_GLUE & 4
 /* QSB_POST_GLUE bit 4: an unusable lane (W == 0, or inactive) also enters the tree with U = 0.
@@ -3985,7 +4036,27 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
+#endif
 #include "QsbCarrier.h"
+#if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    constexpr int K=QSB_RF_K;
+    if(g_qsb_register_roots){
+        if(qsb_carrier_has(QK_RR))
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,roots,count);
+        else qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    } else if(qsb_carrier_has(QK_RF))
+        qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+}
+#endif
+
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4204,6 +4275,7 @@ static void qsb_subpipe_die(const char *what, cudaError_t e) {
     fprintf(stderr, "Sub-batch pipeline %s failed: %s\n", what, cudaGetErrorString(e));
     exit(2);
 }
+#include "RegisterRootCheck.h"
 static int g_qsb_sub_ok = 0;
 static int qsb_subpipe_init(cudaStream_t like) {
     QsbSubPipe &P = g_qsb_sub;
@@ -4269,6 +4341,13 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=QSB_RROOT_TREES &&
+        qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted prefix / scalar fallback");
+    fflush(stdout);
+#endif
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4278,7 +4357,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            qsb_launch_selected_roots(P.roots[0],nb,P.rt);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4340,11 +4419,7 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        if (qsb_carrier_has(QK_RF))
-            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
-        else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,P.rt);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
