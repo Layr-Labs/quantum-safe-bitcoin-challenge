@@ -3120,8 +3120,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
                    active?roots[(size_t)i*4u+3]:0ULL,0};
     qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+        uint64_t *root_out=roots+(size_t)i*4u;
+        qsb_st_v2((ulonglong2*)root_out,r[0],r[1]);
+        qsb_st_v2((ulonglong2*)(root_out+2),r[2],r[3]);
         // One fixed-ordinate multiplication per128-leaf tree, instead of
         // one per leaf in finish. Keep both inverse representatives.
         uint64_t b[5]={
