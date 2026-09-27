@@ -447,11 +447,18 @@ static inline void produce_any(const Params &P, uint64_t base, uint64_t e0, uint
  * and a worker compares the two. */
 enum { NPIECE = 8 };
 enum { S_FREE = 0, S_PROD, S_READY, S_UPLOAD, S_INFLIGHT };   /* UPLOAD: taken by main, copy event not yet recorded */
+// Per-source-slot cache. Main CUDA thread is the only accessor.
+struct UploadGraph {
+    void *ep = nullptr; uint32_t *fi = nullptr;
+    size_t pitch = 0; int n = 0;
+    cudaGraphExec_t exec = nullptr;
+};
 struct Slot {
     uint8_t *ep[NPIECE] = {}; uint32_t *fi[NPIECE] = {}; int npieces_ok = 0;
     int64_t batch = -1; int state = S_FREE;
     int nchunks = 0, next_chunk = 0, done_chunks = 0; bool abandoned = false;
     cudaEvent_t copied = nullptr;
+    UploadGraph upload_graph[2];
 };
 struct Hp {
     Params P;
@@ -792,7 +799,7 @@ static Slot *acquire(int64_t k) {
 }
 
 /* Main thread: enqueue a host batch's upload on the slot stream (then the digest follows on it). */
-static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, size_t fi_pitch, int n) {
+static cudaError_t upload_copies(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, size_t fi_pitch, int n) {
     Hp *h = g_hp;
     const size_t w = (size_t)h->P.ncls * 32;
     cudaError_t e = cudaSuccess;
@@ -804,6 +811,50 @@ static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, 
         if (e == cudaSuccess)
             e = cudaMemcpy2DAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, fi_pitch, s->fi[p], w, w, np, cudaMemcpyHostToDevice, st);
     }
+    return e;
+}
+
+// Host upload graph experiment; kernel, copied event and publication stay outside capture.
+#ifndef QSB_HP_UPLOAD_GRAPH
+#define QSB_HP_UPLOAD_GRAPH 1
+#endif
+static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, size_t fi_pitch, int n) {
+    Hp *h = g_hp;
+    cudaError_t e = cudaSuccess;
+    bool replayed = false;
+#if QSB_HP_UPLOAD_GRAPH
+    // Only full, stable-shape uploads. Tail and disabled paths use original calls.
+    if (n == (int)h->P.cap && !getenv("QSB_HP_NOUPLOAD_GRAPH")) {
+        UploadGraph *entry = nullptr, *empty = nullptr;
+        for (auto &g : s->upload_graph) {
+            if (!g.exec) { if (!empty) empty = &g; continue; }
+            if (g.ep == d_ep && g.fi == d_fi && g.pitch == fi_pitch && g.n == n) entry = &g;
+        }
+        if (!entry && empty) {
+            cudaGraph_t graph = nullptr;
+            e = cudaStreamBeginCapture(st, cudaStreamCaptureModeThreadLocal);
+            if (e != cudaSuccess) return e; // Unexpected preexisting capture/async failure: do not hide.
+            cudaError_t copies = upload_copies(s, st, d_ep, d_fi, fi_pitch, n);
+            cudaError_t ended = cudaStreamEndCapture(st, &graph); // Always leave capture mode.
+            if (copies != cudaSuccess || ended != cudaSuccess) {
+                if (graph) cudaGraphDestroy(graph);
+                return copies != cudaSuccess ? copies : ended;
+            }
+            cudaGraphExec_t exec = nullptr;
+            e = cudaGraphInstantiate(&exec, graph, nullptr, nullptr, 0);
+            cudaGraphDestroy(graph);
+            if (e != cudaSuccess) return e;
+            empty->ep = d_ep; empty->fi = d_fi; empty->pitch = fi_pitch; empty->n = n;
+            empty->exec = exec; entry = empty;
+        }
+        if (entry) {
+            e = cudaGraphLaunch(entry->exec, st);
+            if (e != cudaSuccess) return e; // Never replay an ambiguous failed launch.
+            replayed = true;
+        }
+    }
+#endif
+    if (!replayed) e = upload_copies(s, st, d_ep, d_fi, fi_pitch, n);
     if (e == cudaSuccess) e = cudaEventRecord(s->copied, st);
     /* Only now may the slot be released on its event (a stale event would read as complete). On an
      * error the run stops; the slot stays taken. */
@@ -825,6 +876,10 @@ static void shutdown() {
     { std::lock_guard<std::mutex> g(h->m); h->stop = true; h->cv_work.notify_all(); h->cv_ready.notify_all(); }
     for (auto &t : h->th) if (t.joinable()) t.join();
     h->th.clear();
+    // Caller drained GPU slot completion events before shutdown.
+    for (auto &slot : h->slot) for (auto &g : slot.upload_graph) {
+        if (g.exec) { cudaGraphExecDestroy(g.exec); g.exec = nullptr; }
+    }
 }
 
 }  // namespace qhp
