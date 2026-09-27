@@ -112,6 +112,11 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
+/* QSB_TABLE_L2_WINDOW_MIB: cap (MiB) on the persisting table window; 0 keeps the full dense table
+ * (after AvinashNayak27's cd33f1b6 and fkiene's 8009bfb9). Host-only cache policy. */
+#ifndef QSB_TABLE_L2_WINDOW_MIB
+#define QSB_TABLE_L2_WINDOW_MIB 24
+#endif
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
@@ -405,7 +410,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 4
+#define QSB_Q_MIX 2
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -3849,6 +3854,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
              * sliver of persisting lines (and is read evict-first). */
             if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
 #endif
+#if QSB_TABLE_L2_WINDOW_MIB > 0
+            /* Keep the persisting set below the dense table so the per-launch epoch state, group
+             * buffers and streamed hit records retain normal L2 capacity. Cache policy only; every
+             * loaded value is unchanged. */
+            if (want > ((size_t)QSB_TABLE_L2_WINDOW_MIB << 20)) want = (size_t)QSB_TABLE_L2_WINDOW_MIB << 20;
+#endif
             if (want > limit) want = limit;
             if (want > (size_t)max_window) want = (size_t)max_window;
         }
@@ -5022,9 +5033,9 @@ int main(int argc, char **argv) {
         }
 #ifdef QSB_HP_ON
         qhp::shutdown();
-        { uint64_t hb, fb; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin);
-          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d\n",
-                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin); }
+        { uint64_t hb, fb, hc; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin, &hc);
+          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d; helper chunks %llu\n",
+                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin, (unsigned long long)hc); }
 #endif
         g_stop_polled = 0;
 #else
