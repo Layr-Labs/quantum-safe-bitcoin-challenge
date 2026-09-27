@@ -3185,7 +3185,10 @@ __device__ __forceinline__ void qsb_block_inverse_n(uint64_t *value) {
             for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
         }
         offset+=count;
-        if(count>2)__syncthreads();
+        /* The next level consumes only lanes [0, half). When half<=32,
+         * both producers and consumers are in warp 0; the other warps do
+         * no work until the down-tree crosses a warp boundary again. */
+        if(count>2){if(N<32 || half>32)__syncthreads();else __syncwarp();}
     }
     if(tid==0){
         uint64_t root[5];
@@ -3206,7 +3209,9 @@ __device__ __forceinline__ void qsb_block_inverse_n(uint64_t *value) {
         #pragma unroll
         for(int k=0;k<4;k++)inverses[k][N-2]=root[k];
     }
-    __syncthreads();
+    /* Only warp 0 reads the inverted root; the down-tree below rejoins
+     * the CTA before any other warp can consume one of its descendants. */
+    if(N<32)__syncthreads();else __syncwarp();
     offset=2*N-4;
     #pragma unroll 1
     for(int count=2;count<N;count<<=1){
@@ -3225,7 +3230,9 @@ __device__ __forceinline__ void qsb_block_inverse_n(uint64_t *value) {
             for(int k=0;k<4;k++)inverses[k][offset-N+tid]=child_inv[k];
         }
         offset-=count<<1;
-        __syncthreads();
+        /* A level with <32 children feeds only warp 0. The 32-child
+         * level must publish to warp 1 before the next expansion. */
+        if(N<32 || (count<<1)>32)__syncthreads();else __syncwarp();
     }
     uint64_t parent_inv[5],sibling[5];
     #pragma unroll
