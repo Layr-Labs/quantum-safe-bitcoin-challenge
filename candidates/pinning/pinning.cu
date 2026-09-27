@@ -5633,6 +5633,8 @@ int main(int argc, char **argv) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            if (av.accessPolicyWindow.num_bytes > 42ull * 1024 * 1024)
+                av.accessPolicyWindow.num_bytes = 42ull * 1024 * 1024;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
@@ -5731,6 +5733,8 @@ int main(int argc, char **argv) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            if (av.accessPolicyWindow.num_bytes > 42ull * 1024 * 1024)
+                av.accessPolicyWindow.num_bytes = 42ull * 1024 * 1024;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
