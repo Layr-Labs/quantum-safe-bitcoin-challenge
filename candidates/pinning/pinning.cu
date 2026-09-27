@@ -1,3 +1,4 @@
+/* Per-warp GLV12-P mix at the frontier's own 1/32 ratio (WARP 0->1), instead of block-uniform -- never cleanly tested on fast-class hardware (my only prior try, cf6ce87a, landed slow-class) */
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
@@ -186,7 +187,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * value, and a lane's digit-arena slots are indexed by its own threadIdx.x, so the codes
  * written and the trips taken always agree. 0: blockIdx.x mod K == 0, block-uniform. */
 #ifndef QSB_PMIX12_WARP
-#define QSB_PMIX12_WARP 0
+#define QSB_PMIX12_WARP 1
 #endif
 /* QSB_PMIX12_N (1 <= N < K, default 2): N of every K consecutive global warps decode P with
  * GLV12, spread evenly: warp g is chosen when (g*N) mod K < N. For N = 1 that is g mod K == 0,
