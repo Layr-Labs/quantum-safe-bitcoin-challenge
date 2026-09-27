@@ -66,6 +66,13 @@
 #ifndef QSB_CPU_RESERVE
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
+#ifndef QSB_CPU_HOST_CORE
+#ifdef QSB_HOST_BLOCKING
+#define QSB_CPU_HOST_CORE QSB_HOST_BLOCKING  /* SCHED_IDLE workers share the sleeping host core */
+#else
+#define QSB_CPU_HOST_CORE 0
+#endif
+#endif
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 4096
 #endif
@@ -2368,11 +2375,11 @@ static void smt_plan(Ctx *c, int nth) {
         for (int i = 0; i < (int)cores.size() && rsv < 0; i++) for (int x : cores[i]) if (CPU_ISSET(x, &host)) { rsv = i; break; }
     for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
     if (rsv < 0 || cores.size() < 2) return;
-    c->mask0 = cs;                                      /* unpinned workers: every CPU but the reserved core */
-    for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
+    c->mask0 = cs;
+    if (!QSB_CPU_HOST_CORE) for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
     int t = 0; bool pair = false;
     for (int i = 0; i < (int)cores.size() && t < nth; i++) {
-        if (i == rsv) continue;
+        if (i == rsv && !QSB_CPU_HOST_CORE) continue;
         for (size_t k = 0; k < cores[i].size() && t < nth; k++) { c->wcpu[t] = cores[i][k]; c->wscalar[t] = k == 1; pair |= k == 1; t++; }
     }
     c->hybrid_ok = pair;
@@ -2418,7 +2425,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #ifdef QSB_CPU_THREADS
     int nth = QSB_CPU_THREADS;
 #else
-    int nth = (int)ncpu - QSB_CPU_RESERVE;
+    int nth = (int)ncpu - (QSB_CPU_HOST_CORE ? 0 : QSB_CPU_RESERVE);
 #endif
     if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
@@ -2465,12 +2472,11 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
           struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
   #endif
   #ifdef CPU_SET
-          /* This thread inherits the GPU host thread's CPU mask, which a host path may have pinned to one
-           * core: widen it to the pre-main() set minus that core, so the table build and the workers
-           * (which inherit it) use every other CPU. */
+          /* The host producer may pin main to one core. Widen the workers' mask
+           * to the original CPU set, optionally leaving the host core free. */
           if (g_mask0_ok) {
               cpu_set_t m = g_mask0, h; CPU_ZERO(&h);
-              if (c->host_tid > 0 && sched_getaffinity(c->host_tid, sizeof h, &h) == 0 && CPU_COUNT(&h) < CPU_COUNT(&m)) {
+              if (!QSB_CPU_HOST_CORE && c->host_tid > 0 && sched_getaffinity(c->host_tid, sizeof h, &h) == 0 && CPU_COUNT(&h) < CPU_COUNT(&m)) {
                   cpu_set_t t = m;
                   for (int x = 0; x < CPU_SETSIZE; x++) if (CPU_ISSET(x, &h)) CPU_CLR(x, &t);
                   if (CPU_COUNT(&t) > 0) m = t;
