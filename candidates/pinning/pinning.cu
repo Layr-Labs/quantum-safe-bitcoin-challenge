@@ -1489,10 +1489,14 @@ __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_
     ulonglong2 x0,x1;
     uint64_t pc,ph;
     qsb_tbl_policies(pc,ph);
+    /* This cold record is fully gathered after the last X load. Give only that
+     * terminal cold load low L1 retention priority; keep the initial Y/X loads
+     * and every hot load unchanged so intra-record cache reuse is preserved.
+     * Addresses, predicates, L2 policy and values are unchanged. */
     asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %6;\n\t"
-        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@c  ld.global.nc.L1::evict_first.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
         : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y)
         : "l"(tx), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
