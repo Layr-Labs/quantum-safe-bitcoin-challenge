@@ -230,10 +230,10 @@ static void *table_helper(void *arg) {
 /* allocate, compute constants, start the builders (returns at once) */
 static int table_start(shared_t *S, int nw) {
     /* allocation with fall back to smaller layouts */
-    const char *order_nm[5] = {"xlarge", "large", "medium", "small", "tiny"};
-    int li = 0; while (li < 5 && strcmp(order_nm[li], S->lay.name)) li++;
+    const char *order_nm[6] = {"xxlarge", "xlarge", "large", "medium", "small", "tiny"};
+    int li = 0; while (li < 6 && strcmp(order_nm[li], S->lay.name)) li++;
     void *mem = NULL;
-    for (; li < 5; li++) {
+    for (; li < 6; li++) {
         layout_t L; layout_by_name(&L, order_nm[li]);
         const size_t bytes = (size_t)L.total * sizeof(tentry);
         const size_t al = 2u << 20;
