@@ -112,6 +112,11 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
+/* QSB_TABLE_L2_WINDOW_MIB: cap (MiB) on the persisting-L2 set-aside and access-policy window;
+ * 0 keeps the device's full persisting limit over the dense table. Cache policy only. */
+#ifndef QSB_TABLE_L2_WINDOW_MIB
+#define QSB_TABLE_L2_WINDOW_MIB 24
+#endif
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
@@ -3840,7 +3845,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     if (we == cudaSuccess) we = cudaDeviceGetAttribute(&max_persist, cudaDevAttrMaxPersistingL2CacheSize, dev);
     if (we == cudaSuccess) we = cudaDeviceGetAttribute(&max_window, cudaDevAttrMaxAccessPolicyWindowSize, dev);
     if (we == cudaSuccess && max_persist > 0 && max_window > 0) {
-        we = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, (size_t)max_persist);
+        size_t set_aside = (size_t)max_persist;
+#if QSB_TABLE_L2_WINDOW_MIB > 0
+        const size_t policy_bytes = (size_t)QSB_TABLE_L2_WINDOW_MIB << 20;
+        if (set_aside > policy_bytes) set_aside = policy_bytes;
+#endif
+        we = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, set_aside);
         if (we == cudaSuccess) we = cudaDeviceGetLimit(&limit, cudaLimitPersistingL2CacheSize);
         if (we == cudaSuccess) {
             want = gt_sz;
@@ -3848,6 +3858,10 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
             /* Exactly the 48 MiB of segments 0-3; the 4 GiB segment after them gains nothing from a
              * sliver of persisting lines (and is read evict-first). */
             if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
+#endif
+#if QSB_TABLE_L2_WINDOW_MIB > 0
+            /* Leave the unreserved L2 to epoch state, group buffers and streamed hit records. */
+            if (want > policy_bytes) want = policy_bytes;
 #endif
             if (want > limit) want = limit;
             if (want > (size_t)max_window) want = (size_t)max_window;
