@@ -96,7 +96,7 @@ __device__ __forceinline__ uint32_t qsb_shrf(uint32_t x, int k) {
  * FMA-heavy pipe (IMAD.IADD) spends the scarce pipe there. Adding a constant-bank zero makes them
  * three-input adds, which only IADD3 (ALU pipe) can do - same instruction count, exact. */
 #ifndef QSB_SHA_ALU_ADD
-#define QSB_SHA_ALU_ADD 0     /* stage-0 adds forced onto the ALU pipe (piece G); measured separately */
+#define QSB_SHA_ALU_ADD 1     /* stage-0 adds forced onto the ALU pipe (piece G); measured separately */
 #endif
 #if QSB_SHA_ALU_ADD
 __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by the host */
