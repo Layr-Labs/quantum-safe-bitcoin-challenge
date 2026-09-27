@@ -1,5 +1,6 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
+#define QSB_DRAW_TAG 0x6ab94d4bu 
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
