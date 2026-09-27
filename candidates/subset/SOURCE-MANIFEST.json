@@ -3,6 +3,8 @@
   "direct_base_public_submission": "d052bc3d-a3fd-4953-b931-82a6a374b36e",
   "direct_base_public_commit": "61cb94ffcba432b41a698ec26e36f3711416f8af",
   "added_from": [
+    "claude/sub-qmixab: QSB_Q_MIX_AB=1 (Q layout per front call: candidate A P18, candidate B GLV12, so every warp of a block runs the same chain trips before the tree barrier; QSB_Q_MIX 2 balance of cold records against additions)",
+    "ercumentyildirim a141df2b (src 3b4fce1213): CpuGrindSubset.h (terrapinelf 2d1631b0 r7 lane with host-core workers under blocking waits and the memory-gated 9-window table) with the record's QSB_CPU_PFD 3, and tests/gpu_epochs/host_producers.h (terrapinelf v3 producers, QSB_HP_PLACE 0)",
     "this package: QSB_Y_PAIR pair form (the chain carries (X3 - V, R) and forms R = red(S ZZZ + Q R) with one reduction; f15 dropped) and QSB_SC_PARK (the first candidate Z product parked in the idle tree arena across the front call); new",
     "2d1631b0 (co-grinder engine in CpuGrindSubset.h; footprint items switched to the record behaviour: QSB_CPU_HP_SHARE 0, QSB_CPU_NTH_RAISE 0, QSB_CPU_RSV_CORE 1, QSB_CPU_DIAG_EPOCH 0)",
     "888f5fce after 212237f4 (QSB_HOST_BLOCKING: cudaEventBlockingSync slot events)",
@@ -21,7 +23,7 @@
   "model": "Claude Fable 5.1 and Claude Opus 5.5",
   "harness": "Claude Code",
   "ptx_sha256_prefix_default_build": null,
-  "source_bytes": 2620567,
+  "source_bytes": 2628101,
   "files": {
     "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
     "BY_NORMALIZED6.md": "c3ba57bdf16ea0275b68e7bcd912f402b7acb6c9919aa6ae1336f3efaf5c8384",
@@ -30,7 +32,7 @@
     "COMPLETE-POINT.md": "095d328d7c9d2debe51378706356d9ba3f87a28dcd388ecabb0a50ccf01eb500",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
-    "CpuGrindSubset.h": "562a35f7e201d9241388cdfc9d709a1b1a38715ad633afd8f8a46d2ff605faa2",
+    "CpuGrindSubset.h": "1f8857e3343c05f0c7bdc0ddb7897d3ea7afde5143eefa8203ac45400fc19750",
     "GLVScalar.cuh": "96efe62eb4361bf038d01fa821adb19931552609878b7eb1c3c0bef360f3cd35",
     "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
     "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
@@ -48,7 +50,7 @@
     "hit_filter_field.cuh": "b9640d8c4db125f82697ae5bb84182f72c8d22a0dac5567527620dff21659937",
     "hit_filter_field_sc.cuh": "d5b1ac66e1a8f62f17779e39c4244f873080f4864dda9966710c2f5a9f2a6d0e",
     "hit_filter_field_sc_aluz.cuh": "047329878bb74a5ba1e07c00ca1ce1b40a4e96129e9d3016c00dbc7af9fdacb4",
-    "qsb_carrier_sm89.h": "d51f71cfd738e98a5186d2fb9b481616a3abbf72742f6a7be913df810ff068e3",
+    "qsb_carrier_sm89.h": "117f21ce06344e87203316930320a76565fd4d3c2c06dc103e70000e0bab1d81",
     "sha_gate_fma.cuh": "2233afa68f4909a7932732379fce3815729ec6fb384af63fa111683ebf37819b",
     "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
     "submission-note.md": "ed69ee10eb2ec40fe758ed7e875c0c9604bd16c826f9cf7b410e3649ee3e61df",
@@ -64,10 +66,10 @@
     "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
     "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
     "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
-    "tests/gpu_epochs/host_producers.h": "c6a8fb64ccead7f1398bbd5f8895fc35aaaba9735daccf332dc8dbad99cab021",
+    "tests/gpu_epochs/host_producers.h": "4d4fa388941eadaed54a3e553141a9ef74b80774dd5319f313058d4dff29db01",
     "tests/gpu_epochs/inverse_limbs.cuh": "3a41eddc68eec089a716852c54fd99c6ac29a1fa49a46e90e578e9b74a3060df",
     "tests/gpu_epochs/pair_finish_audit.cu": "ce76d53a0ae76bfaaca1bbd12ff87d7f268ca7dea187c1f733da14cebb9b261a",
-    "tests/gpu_epochs/pair_shared.cuh": "e171dfacf1aa467928d8613d1cc5c0dcab72539d67cdaca7c0fb3b521781b848",
+    "tests/gpu_epochs/pair_shared.cuh": "3b39cc6e89c496ff885edacf21440fae54ebac6555fa3b40b0d730bb2fc7c577",
     "tests/gpu_epochs/parity_window_subset.cuh": "482e6e05ff134a82b48f32b27b32524cb7139c7daa0f0d877a9512315c021e0c",
     "tests/gpu_epochs/point_audit.cu": "abc998ea5fc4f2180fc4690b209fc6ecb27a1189a8f884ead4607f06e82b315e",
     "tests/gpu_epochs/point_predicate_audit.cu": "b8427c62a23c55070839548f28ce89c8309a47a6dc38d33ba594d3a120cc5c63",
@@ -75,7 +77,7 @@
     "tests/gpu_epochs/qsb_host_verify.h": "3f521f09af243a022a3ee836a2b5559460e70bda9e52e3542a4a3d6f928a7111",
     "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
     "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
-    "tests/gpu_epochs/tree.cu": "51fbe4d425e5d9a72b265b040476ed76d67b72b79d2f83064a225b0cf2f06113",
+    "tests/gpu_epochs/tree.cu": "5e1febbaf3b8279d85414a7e27fbd41805d9eb5832d5ce395eb68fe5b490d47c",
     "tests/gpu_epochs/tree.cu.orig": "811dc0dd3e8b22f70a801c959f24e7c0837a57c586af5c52a3c5ed7d28db12cb",
     "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
     "tests/gpu_epochs/tree_inverse.cuh": "d315aac099f615090d1c7b51ba7a9de5e9a8e62863ede7fe11be52acbe5a8466",
@@ -83,5 +85,5 @@
     "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8",
     "y_pair_sc.cuh": "923061f27e02bed6e78c352abdb1285c108650b699bb35668615ae0ef782a4cb"
   },
-  "carrier_cubin_sha256_prefix": "003e3d39b7a6"
+  "carrier_cubin_sha256_prefix": "2ce960cfd730"
 }
