@@ -4190,6 +4190,8 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
  * Every kernel gets exactly the arguments the monolithic launch would give it for the same
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
+#include "QsbSubGraph.h"
+
 struct QsbSubPipe {
     int ready;
     cudaStream_t s0[2], rt, s2, s2b[2];
@@ -4269,6 +4271,10 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    qsb_sg::enabled = qsb_sg::init(P.s0[0], P.rt, P.s2b[0]);
+#endif
+
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4310,13 +4316,46 @@ static void qsb_subpipe_launch(
     if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2b[0], P.ev_in, 0);
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(P.s2b[1], P.ev_in, 0);
     if (e != cudaSuccess) qsb_subpipe_die("input ordering", e);
+
+    if (qsb_sg::enabled)
+        for (int r = 0; r < QSB_SUBRING; r++)
+            qsb_sg::check(cudaStreamWaitEvent(qsb_sg::rings[r].stream, P.ev_in, 0), "input ordering");
     for (int off = 0; off < batch_size; off += QSB_SUBPIPE) {
         const int n = batch_size - off < QSB_SUBPIPE ? batch_size - off : QSB_SUBPIPE;
         const int r = (int)(P.g % (unsigned long long)QSB_SUBRING);
         cudaStream_t s0 = P.s0[P.g & 1ull];
         const uint32_t lt0 = start_lt + (uint32_t)off;
         uint64_t *hit_base = (uint64_t *)(uintptr_t)(uint32_t)off;   /* finish: QSB_HIT_BASE */
-        if (P.used[r]) {
+
+#if QSB_ROOT_FUSED
+        qsb_sg::Ring &graph = qsb_sg::rings[r];
+        if (qsb_sg::enabled && graph.exec) {
+            const int blocks = (n + QSB_TREE_N - 1) / QSB_TREE_N;
+            qsb_sg::update(kernel_pinning_pipeline<true,0>, graph.exec, graph.prepare, graph.pp, dim3(blocks),
+                d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+            // The root buffer and full sub-batch count stay fixed for each ring.
+            // Update the count on a short tail and restore it on the next full batch.
+            if (graph.root_count != blocks) {
+                qsb_sg::update(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,
+                    graph.exec, graph.root, graph.rp, dim3(1), P.roots[r], blocks);
+                graph.root_count = blocks;
+            }
+            qsb_sg::update(kernel_pinning_pipeline<true,2>, graph.exec, graph.finish, graph.fp, dim3(blocks),
+                d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                P.state[r],P.roots[r],hit_base,tp);
+            qsb_sg::check(cudaGraphLaunch(graph.exec, graph.stream), "launch");
+            P.g++;
+            continue;
+        }
+        if (qsb_sg::enabled)
+            qsb_sg::check(cudaStreamBeginCapture(s0, cudaStreamCaptureModeRelaxed), "begin capture");
+#endif
+        if (P.used[r] && !qsb_sg::enabled) {
             e = cudaStreamWaitEvent(s0, P.ev_s2[r], 0);
             if (e != cudaSuccess) qsb_subpipe_die("ring wait", e);
         }
@@ -4382,8 +4421,28 @@ static void qsb_subpipe_launch(
         e = cudaGetLastError();
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_s2[r], P.s2);
         if (e != cudaSuccess) qsb_subpipe_die("finish", e);
+
+#if QSB_ROOT_FUSED
+        if (qsb_sg::enabled) {
+            qsb_sg::check(cudaStreamWaitEvent(s0, P.ev_s2[r], 0), "capture join");
+            qsb_sg::check(cudaStreamEndCapture(s0, &graph.graph), "end capture");
+            qsb_sg::instantiate(graph, blocks);
+            qsb_sg::check(cudaGraphLaunch(graph.exec, graph.stream), "first launch");
+        }
+#endif
         P.used[r] = 1;
         P.g++;
+    }
+
+    if (qsb_sg::enabled) {
+        // Each ring stream orders all its graph launches, including reuse across
+        // host batches. Readback waits for every ring's last finish before the
+        // host reuses this slot's hit counter, hit buffer, sequence or locktime.
+        for (int r = 0; r < QSB_SUBRING; r++) {
+            qsb_sg::check(cudaEventRecord(qsb_sg::rings[r].done, qsb_sg::rings[r].stream), "completion");
+            qsb_sg::check(cudaStreamWaitEvent(st, qsb_sg::rings[r].done, 0), "output ordering");
+        }
+        return;
     }
     /* the slot's readback (on st) follows the last finish of this host batch */
     e = cudaEventRecord(P.ev_out, P.s2b[0]);
