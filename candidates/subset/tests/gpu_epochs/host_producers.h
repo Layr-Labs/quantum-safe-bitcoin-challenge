@@ -44,6 +44,8 @@
 #include <openssl/sha.h>
 
 namespace qhp {
+static int g_share_cpu = -1;   /* the producer v3 of terrapinelf's 2d1631b0 shares one CPU with the co-grinder; these producers do not */
+
 
 enum { MAXK = 8, NCLS = 16, CHUNK = 16384, NSLOT = 4 };
 
