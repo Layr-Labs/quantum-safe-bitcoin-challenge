@@ -1366,7 +1366,7 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
  * on this tree (RTX 4090, ABBA): cold lines are the preferred victims and hot
  * gathers stay evict_normal. 2 also marks hot gathers evict_last. */
 #ifndef QSB_TBL_L2POL
-#define QSB_TBL_L2POL 1
+#define QSB_TBL_L2POL 2
 #endif
 #if QSB_TBL_L2POL < 0 || QSB_TBL_L2POL > 2
 #error "QSB_TBL_L2POL must be 0, 1 or 2"
