@@ -256,7 +256,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #define QSB_TREE_BLOCKS 4     /* dense tree kernel resident blocks per SM */
 #endif
 #ifndef QSB_TREE_OFFLOAD2
-#define QSB_TREE_OFFLOAD2 0   /* 1: expand the leaf inverses in a dense kernel, not in finish */
+#define QSB_TREE_OFFLOAD2 1   /* 1: expand the leaf inverses in a dense kernel, not in finish */
 #endif
 #ifndef QSB_S2_THREADS
 #define QSB_S2_THREADS 256    /* finish-kernel block size (only free when the down-tree is offloaded) */
