@@ -112,6 +112,11 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
+/* Bound the address range receiving the persisting preference. The device-wide
+ * persisting-L2 reservation is unchanged; zero restores the promoted range. */
+#ifndef QSB_TABLE_L2_WINDOW_MIB
+#define QSB_TABLE_L2_WINDOW_MIB 24
+#endif
 #ifndef ZLAB_TRIM
 #define ZLAB_TRIM 1
 #endif
@@ -412,6 +417,36 @@ __device__ uint64_t BINOM_C[151][10];
 #endif
 #if QSB_Q_MIX && !QSB_Q_P18
 #error "QSB_Q_MIX mixes the GLV12 Q layout into the QSB_Q_P18 chain"
+#endif
+/* QSB_Q_MIX_AB (needs QSB_Q_MIX): the Q layout is chosen per front call instead of per warp. Under the
+ * per-warp rule the GLV12 warps run one more chain trip per candidate (8 instead of 7, for both of their
+ * candidates) and the block's other warps wait for them at the tree's first __syncthreads. Here every
+ * warp of a block runs the same trips: 1 = candidate A decodes Q with P18 and candidate B with GLV12 in
+ * every block (half the candidates on GLV12, the QSB_Q_MIX 2 balance of cold records against additions);
+ * 2 = candidate B takes GLV12 in odd blocks only (a quarter, the QSB_Q_MIX 4 balance). The choice is
+ * uniform per call and per block, both layouts sum Q to the same point, so z*A and the hit set are
+ * unchanged, and qsb_s3_selfcheck already replays both rows. 0 = the per-warp rule byte for byte. */
+#ifndef QSB_Q_MIX_AB
+#if QSB_Q_MIX
+#define QSB_Q_MIX_AB 1
+#else
+#define QSB_Q_MIX_AB 0
+#endif
+#endif
+#if QSB_Q_MIX_AB < 0 || QSB_Q_MIX_AB > 2
+#error "QSB_Q_MIX_AB must be 0, 1 or 2"
+#endif
+#if QSB_Q_MIX_AB && !QSB_Q_MIX
+#error "QSB_Q_MIX_AB chooses between the two QSB_Q_MIX layouts"
+#endif
+#if QSB_Q_MIX_AB
+#define QSB_QSEL_PARAM , unsigned qsel
+#define QSB_QSEL_PASS(v) , (v)
+#define QSB_QSEL_B (QSB_Q_MIX_AB == 1 ? 1u : (blockIdx.x & 1u))
+#define QSB_QSEL_WARP ((((blockIdx.x * blockDim.x + threadIdx.x) >> 5) & (QSB_Q_MIX - 1u)) == 0u)
+#else
+#define QSB_QSEL_PARAM
+#define QSB_QSEL_PASS(v)
 #endif
 #include "../../GLVScalar.cuh"
 #if QSB_GLV11
@@ -1222,7 +1257,8 @@ __device__ __forceinline__ void qsb_s3_load(const uint8_t *__restrict__ gTable, 
  * |r1| = 0, probability ~2^-127 for a SHA256d scalar) degenerates that half's last addition and the
  * candidate is simply dropped: this is the filter; every hit is re-derived exactly on the host. */
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
-                                       const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+                                       const uint64_t k[4], const uint8_t *gTable, uint32_t &bad
+                                       QSB_QSEL_PARAM) {
     uint64_t mag[2][2]; unsigned sgn[2];
     q9_glv_split(k, mag[0], mag[1], &sgn[0], &sgn[1]);   /* k mod n = (+-mag0) + lambda*(+-mag1) */
     qsb_s3_walker w;
@@ -1236,7 +1272,11 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
      * reads QSB_S3_DESC_MXF from index 5g; P's segment 0 (offset 0, the only offset-0 entry the loop
      * meets) swaps the walker and moves the index to the shared P tail at 11 (a no-op for g = 1). One
      * loop index, as in the fixed chain; qsb_s3_selfcheck replays this schedule for both rows. */
+#if QSB_Q_MIX_AB
+    const unsigned g = qsel;
+#else
     const unsigned g = (((blockIdx.x * blockDim.x + threadIdx.x) >> 5) & (QSB_Q_MIX - 1u)) == 0u;
+#endif
     uint32_t code = QSB_S3_CODE(w, 0, QSB_S3_DESC[0]);   /* segment 0 heads both Q layouts */
     qsb_s3_load(gTable, code, false, x0, y0);
     const qsb_s3_desc_t d1 = QSB_S3_DESC_MXF[5u * g + 1u];
@@ -2281,7 +2321,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     {
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt QSB_R_PASS(u2rx,u2ry));
+        QsbPairFront3 fa=qsb_pair_front3_z_value(zpair.a[0],zpair.a[1],zpair.a[2],zpair.a[3],d_gt QSB_R_PASS(u2rx,u2ry) QSB_QSEL_PASS(0u));
 #else
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -2318,7 +2358,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Both first-state tables are read-only; the odd tail aliases A safely.
 #if ZLAB_K2S3M
 #if ZLAB_DUAL_EPOCH_SHA
-    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt QSB_R_PASS(u2rx,u2ry));
+    QsbPairFront3 fb=qsb_pair_front3_z_value(zB[0],zB[1],zB[2],zB[3],d_gt QSB_R_PASS(u2rx,u2ry) QSB_QSEL_PASS(QSB_QSEL_B));
 #else
     QsbPairFront3 fb=qsb_pair_front3_value(e1,f1,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
@@ -3849,6 +3889,10 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
              * sliver of persisting lines (and is read evict-first). */
             if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
 #endif
+            if (QSB_TABLE_L2_WINDOW_MIB > 0) {
+                const size_t cap = (size_t)QSB_TABLE_L2_WINDOW_MIB * 1024u * 1024u;
+                if (want > cap) want = cap;
+            }
             if (want > limit) want = limit;
             if (want > (size_t)max_window) want = (size_t)max_window;
         }
@@ -3900,7 +3944,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_K2S_PARITY_NARROW) QSB_CARRIER_KV(QSB_K2S_PARITY_WINDOW) QSB_CARRIER_KV(QSB_K32) QSB_CARRIER_KV(QSB_K32_BGLUE) QSB_CARRIER_KV(QSB_SQR_X0_GLUE) \
     QSB_CARRIER_KV(QSB_NEGFOLD_PARITY) QSB_CARRIER_KV(QSB_NEG_SHORT) QSB_CARRIER_KV(QSB_PAIR_SHARED) \
     QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_CONST) QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_CONST_INNER) \
-    QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_WINDOW) QSB_CARRIER_KV(QSB_GLV11) QSB_CARRIER_KV(QSB_GLV11_P18) QSB_CARRIER_KV(QSB_Q_P18) QSB_CARRIER_KV(QSB_Q_MIX) QSB_CARRIER_KV(QSB_Y_PAIR) QSB_CARRIER_KV(QSB_GLV_LEAN) QSB_CARRIER_KV(QSB_GLV_NO_KRED) QSB_CARRIER_KV(QSB_GLV_ROUND_CC) QSB_CARRIER_KV(QSB_GLV_HIGH15_HI) QSB_CARRIER_KV(QSB_GROUP_CAP_EXACT) QSB_CARRIER_KV(QSB_PREFIX_BLOCKS) \
+    QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_WINDOW) QSB_CARRIER_KV(QSB_GLV11) QSB_CARRIER_KV(QSB_GLV11_P18) QSB_CARRIER_KV(QSB_Q_P18) QSB_CARRIER_KV(QSB_Q_MIX) QSB_CARRIER_KV(QSB_Q_MIX_AB) QSB_CARRIER_KV(QSB_Y_PAIR) QSB_CARRIER_KV(QSB_GLV_LEAN) QSB_CARRIER_KV(QSB_GLV_NO_KRED) QSB_CARRIER_KV(QSB_GLV_ROUND_CC) QSB_CARRIER_KV(QSB_GLV_HIGH15_HI) QSB_CARRIER_KV(QSB_GROUP_CAP_EXACT) QSB_CARRIER_KV(QSB_PREFIX_BLOCKS) \
     QSB_CARRIER_KV(QSB_R_CBANK) QSB_CARRIER_KV(QSB_S3_HALF_WALK) QSB_CARRIER_KV(QSB_S3_SIGN_SHIFT) QSB_CARRIER_KV(QSB_S3_ODD_FOLD) QSB_CARRIER_KV(QSB_ROOT_MAX_BATCHES) QSB_CARRIER_KV(QSB_SHA_ALU_ADD) \
     QSB_CARRIER_KV(QSB_SHA_FMA_ADD) QSB_CARRIER_KV(QSB_SHA_FMA_ROT) QSB_CARRIER_KV(QSB_SHA_UNROLL_CONST) \
     QSB_CARRIER_KV(QSB_SHORT_CARRY) QSB_CARRIER_KV(QSB_SHORT_CARRY2) \
@@ -5022,9 +5066,9 @@ int main(int argc, char **argv) {
         }
 #ifdef QSB_HP_ON
         qhp::shutdown();
-        { uint64_t hb, fb; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin);
-          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d\n",
-                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin); }
+        { uint64_t hb, fb, hc; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin, &hc);
+          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d; helper chunks %llu\n",
+                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin, (unsigned long long)hc); }
 #endif
         g_stop_polled = 0;
 #else
