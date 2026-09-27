@@ -1,0 +1,16 @@
+{
+  "status": "PASS_HOST_ONLY_COMPOSITION",
+  "official_base": "f0e453daaf8b1af848e0bf4afd42fb730018c041",
+  "reconstructed_official_pinning_blob": true,
+  "unchanged_other_official_blobs": 484,
+  "device_functions_unchanged": true,
+  "carrier_and_CPU_unchanged": true,
+  "noJIT_policy_unchanged": true,
+  "old_negative_composite_removed": true,
+  "green_partition_restored": "20/shared8",
+  "include_closure": 25,
+  "carrier_sha256": "45082ea80cb4c496ed92c81c5c1f1241f0ff7354018b534413a223a01bfc525e",
+  "payload_bytes": 7742531,
+  "native_compile": false,
+  "GPU_run": false
+}

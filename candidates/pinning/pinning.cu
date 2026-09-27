@@ -1,6 +1,6 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 4
+#define QSB_SUBRING 6
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #define QSB_GREEN 20
@@ -4129,7 +4129,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t sB[2], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4169,8 +4169,10 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
 #ifndef QSB_GREEN_RT_B
 #define QSB_GREEN_RT_B 0   /* 1: the root kernel runs on the finish partition */
 #endif
-    if (qsb_cuGreenCtxStreamCreate(&t, QSB_GREEN_RT_B ? gB : gA, CU_STREAM_NON_BLOCKING, greatest) != CUDA_SUCCESS) return 0;
-    sA[2] = (cudaStream_t)t;
+    for (int i = 0; i < 2; i++) {
+        if (qsb_cuGreenCtxStreamCreate(&t, QSB_GREEN_RT_B ? gB : gA, CU_STREAM_NON_BLOCKING, greatest) != CUDA_SUCCESS) return 0;
+        sA[2+i] = (cudaStream_t)t;
+    }
 #ifndef QSB_GREEN_S2_LEAST
 #define QSB_GREEN_S2_LEAST 0   /* 1: finish streams at the least priority (the root kernel then outranks them) */
 #endif
@@ -4185,14 +4187,15 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
 /* QSB_SUBPIPE: one host batch as a sequence of QSB_SUBPIPE-candidate sub-batches.
  * Sub-batch g uses ring entry g % QSB_SUBRING (state, roots, super roots, checkpoint).
  *   prepare(g)  on sp.s0[g&1]  (least priority; waits for finish(g-QSB_SUBRING): ring reuse)
- *   roots(g)    on sp.rt       (greatest priority; waits for prepare(g))
+ *   roots(g)    on sp.rtb[g&1] (greatest priority; waits for its own prepare(g))
  *   finish(g)   on sp.s2       (QSB_SUB_S2PRIO; waits for roots(g))
  * Every kernel gets exactly the arguments the monolithic launch would give it for the same
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
 struct QsbSubPipe {
     int ready;
-    cudaStream_t s0[2], rt, s2, s2b[2];
+    cudaStream_t s0[2], rt, rtb[2], s2, s2b[2];
+    int root_serial; // correctness/diagnostic rollback only; no timing-based selection
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
@@ -4227,28 +4230,35 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
+        cudaStream_t sA[4], sB[2]; unsigned nA = 0, nB = 0;
         if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
             printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
             return 0;
         }
-        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
+        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2];
+        P.rtb[0] = sA[2]; P.rtb[1] = sA[3];
+        P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
         printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
     }
 #else
     for (int i = 0; i < 2 && e == cudaSuccess; i++)
         e = cudaStreamCreateWithPriority(&P.s0[i], cudaStreamNonBlocking, least);
-    if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.rt, cudaStreamNonBlocking, greatest);
+    for (int i = 0; i < 2 && e == cudaSuccess; i++)
+        e = cudaStreamCreateWithPriority(&P.rtb[i], cudaStreamNonBlocking, greatest);
+    P.rt = P.rtb[0];
     if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.s2, cudaStreamNonBlocking,
                                                            QSB_SUB_S2PRIO ? greatest : least);
     P.s2b[0] = P.s2b[1] = P.s2;
     if (e != cudaSuccess) qsb_subpipe_die("stream setup", e);
 #endif
+    const char *root_serial = getenv("QSB_ROOT_SERIAL");
+    P.root_serial = root_serial && atoi(root_serial) != 0;
+    printf("  Root queues: %s\n", P.root_serial ? "serial diagnostic" : "two independent prepare lanes");
     /* The persisting-L2 window is a per-stream attribute: copy the slot stream's. */
     cudaStreamAttrValue av = {};
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
-        cudaStream_t all[5] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1]};
-        for (int i = 0; i < 5; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+        cudaStream_t all[6] = {P.s0[0], P.s0[1], P.rtb[0], P.rtb[1], P.s2b[0], P.s2b[1]};
+        for (int i = 0; i < 6; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -4314,6 +4324,7 @@ static void qsb_subpipe_launch(
         const int n = batch_size - off < QSB_SUBPIPE ? batch_size - off : QSB_SUBPIPE;
         const int r = (int)(P.g % (unsigned long long)QSB_SUBRING);
         cudaStream_t s0 = P.s0[P.g & 1ull];
+        cudaStream_t root_st = P.rtb[P.root_serial ? 0 : (P.g & 1ull)];
         const uint32_t lt0 = start_lt + (uint32_t)off;
         uint64_t *hit_base = (uint64_t *)(uintptr_t)(uint32_t)off;   /* finish: QSB_HIT_BASE */
         if (P.used[r]) {
@@ -4336,35 +4347,35 @@ static void qsb_subpipe_launch(
                 P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
         e = cudaGetLastError();
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_s0[r], s0);
-        if (e == cudaSuccess) e = cudaStreamWaitEvent(P.rt, P.ev_s0[r], 0);
+        if (e == cudaSuccess) e = cudaStreamWaitEvent(root_st, P.ev_s0[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
         if (qsb_carrier_has(QK_RF))
             qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
+                dim3(1),dim3(QSB_RF_LANES),root_st,P.roots[r],blocks);
         else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,root_st>>>(P.roots[r],blocks);
 #else
         if (qsb_carrier_has(QK_RGP))
-            qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
+            qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),root_st,
                 P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
         else
-            qsb_root_group_prepare<<<groups,256,0,P.rt>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
+            qsb_root_group_prepare<<<groups,256,0,root_st>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
         if (qsb_carrier_has(QK_ISR))
-            qsb_carrier_launch(qsb_invert_super_roots,QK_ISR,dim3((groups+255)/256),dim3(256),P.rt,
+            qsb_carrier_launch(qsb_invert_super_roots,QK_ISR,dim3((groups+255)/256),dim3(256),root_st,
                 P.super_roots[r],groups);
         else
-            qsb_invert_super_roots<<<(groups+255)/256,256,0,P.rt>>>(P.super_roots[r],groups);
+            qsb_invert_super_roots<<<(groups+255)/256,256,0,root_st>>>(P.super_roots[r],groups);
         if (qsb_carrier_has(QK_RGF))
-            qsb_carrier_launch(qsb_root_group_finish,QK_RGF,dim3(groups),dim3(256),P.rt,
+            qsb_carrier_launch(qsb_root_group_finish,QK_RGF,dim3(groups),dim3(256),root_st,
                 P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
         else
-            qsb_root_group_finish<<<groups,256,0,P.rt>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
+            qsb_root_group_finish<<<groups,256,0,root_st>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
 #endif
         e = cudaGetLastError();
         P.s2 = P.s2b[P.g & 1ull];
-        if (e == cudaSuccess) e = cudaEventRecord(P.ev_rt[r], P.rt);
+        if (e == cudaSuccess) e = cudaEventRecord(P.ev_rt[r], root_st);
         if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2, P.ev_rt[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("roots", e);
         if (qsb_carrier_has(QK_S2))

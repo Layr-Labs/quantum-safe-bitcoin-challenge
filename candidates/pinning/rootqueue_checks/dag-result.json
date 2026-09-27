@@ -1,0 +1,32 @@
+{
+  "status": "PASS_SOURCE_LINKED_EVENT_DAG",
+  "cases": 240,
+  "microbatches": 6216,
+  "graph_nodes": 59952,
+  "negative_omitted_reuse_caught": 4,
+  "tail_sizes": [
+    1,
+    127,
+    128,
+    129,
+    131071,
+    131072
+  ],
+  "root_queues": 2,
+  "ring": 6,
+  "per_entry_bytes": 8487040,
+  "added_buffer_bytes": 16974080,
+  "head_of_line_dependency_witness": {
+    "serial_root_completions": [
+      102,
+      104
+    ],
+    "parallel_root_completions": [
+      102,
+      3
+    ]
+  },
+  "native_compile": false,
+  "GPU_run": false,
+  "throughput_prediction": false
+}
