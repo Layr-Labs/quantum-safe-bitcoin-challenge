@@ -1,4 +1,7 @@
-/* l2state variant fkF20c8 + split retry */
+/* l2state variant fkF20c8 + split retry + partition check + PMIX12 32/1 */
+#ifndef QSB_DRAW_TAG
+#define QSB_DRAW_TAG 0x6ab85f40u /* no runtime effect; identifies this ranked draw (redraws need distinct content) */
+#endif
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
@@ -168,7 +171,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 16
+#define QSB_PMIX12 32
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -186,7 +189,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * value, and a lane's digit-arena slots are indexed by its own threadIdx.x, so the codes
  * written and the trips taken always agree. 0: blockIdx.x mod K == 0, block-uniform. */
 #ifndef QSB_PMIX12_WARP
-#define QSB_PMIX12_WARP 1
+#define QSB_PMIX12_WARP 0
 #endif
 /* QSB_PMIX12_N (1 <= N < K, default 2): N of every K consecutive global warps decode P with
  * GLV12, spread evenly: warp g is chosen when (g*N) mod K < N. For N = 1 that is g mod K == 0,
@@ -196,7 +199,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * predicate is still warp-uniform and a pure function of blockIdx/threadIdx, so decode and
  * chain agree lane by lane and every candidate's point is the one either decoder yields. */
 #ifndef QSB_PMIX12_N
-#define QSB_PMIX12_N 2
+#define QSB_PMIX12_N 1
 #endif
 #if QSB_PMIX12 && (QSB_PMIX12_N < 1 || QSB_PMIX12_N >= QSB_PMIX12)
 #error "QSB_PMIX12_N must satisfy 1 <= N < QSB_PMIX12"
@@ -4119,7 +4122,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, int nShared, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4145,7 +4148,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
     }
     if (sr != CUDA_SUCCESS || ng != (unsigned)nB / 2u) return 0;
     int na = 0; partA[na++] = rem;
-    for (int i = 0; i < QSB_GREEN_SHARED / 2 && i < (int)ng; i++) partA[na++] = grp[i];
+    for (int i = 0; i < nShared / 2 && i < (int)ng; i++) partA[na++] = grp[i];
     CUdevResourceDesc dA, dB; CUgreenCtx gA, gB;
     if (qsb_cuDevResourceGenerateDesc(&dB, grp, ng) != CUDA_SUCCESS) return 0;
     if (qsb_cuDevResourceGenerateDesc(&dA, partA, na) != CUDA_SUCCESS) return 0;
@@ -4180,9 +4183,15 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
  * Every kernel gets exactly the arguments the monolithic launch would give it for the same
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
+#ifndef QSB_GREEN_TUNE
+#define QSB_GREEN_TUNE 1   /* finish partitions QSB_GREEN, +2, -2 SMs; the fastest over sequences 2-7 is kept */
+#endif
+#define QSB_GREEN_NCFG 3
 struct QsbSubPipe {
     int ready;
     cudaStream_t s0[2], rt, s2, s2b[2];
+    int ncfg, cfg, cfg_sms[QSB_GREEN_NCFG];
+    cudaStream_t c_s0[QSB_GREEN_NCFG][2], c_rt[QSB_GREEN_NCFG], c_s2b[QSB_GREEN_NCFG][2];
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
@@ -4217,13 +4226,32 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
-        if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
-            printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
-            return 0;
+        /* config 0 is the tuned default; the others are the neighbouring finish sizes, tried
+         * over a few whole sequences at startup (qsb_green_tune_seq) */
+        /* finish SMs / shared SMs: at 22 a wider shared band costs less than more own SMs
+         * (local: 12+10 -0.22%, 14+8 -0.55% vs 12+8) */
+        static const int want[QSB_GREEN_NCFG] = {QSB_GREEN, QSB_GREEN + 2, QSB_GREEN - 2};
+        static const int wsh[QSB_GREEN_NCFG] = {QSB_GREEN_SHARED, QSB_GREEN_SHARED + 2, QSB_GREEN_SHARED};
+        P.ncfg = 0;
+        for (int c = 0; c < (QSB_GREEN_TUNE ? QSB_GREEN_NCFG : 1); c++) {
+            cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
+            if (!qsb_green_streams(dev, want[c], wsh[c], sA, sB, least, greatest, &nA, &nB)) {
+                (void)cudaGetLastError();
+                if (c == 0) {
+                    printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
+                    return 0;
+                }
+                break;
+            }
+            const int k = P.ncfg++;
+            P.cfg_sms[k] = (int)nB;
+            P.c_s0[k][0] = sA[0]; P.c_s0[k][1] = sA[1]; P.c_rt[k] = sA[2];
+            P.c_s2b[k][0] = sB[0]; P.c_s2b[k][1] = sB[1];
+            if (c == 0) printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
         }
-        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
-        printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
+        P.cfg = 0;
+        P.s0[0] = P.c_s0[0][0]; P.s0[1] = P.c_s0[0][1]; P.rt = P.c_rt[0];
+        P.s2b[0] = P.c_s2b[0][0]; P.s2b[1] = P.c_s2b[0][1]; P.s2 = P.s2b[0];
     }
 #else
     for (int i = 0; i < 2 && e == cudaSuccess; i++)
@@ -4239,6 +4267,12 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
         cudaStream_t all[5] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1]};
         for (int i = 0; i < 5; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+#if QSB_GREEN
+        for (int c = 1; c < P.ncfg; c++) {
+            cudaStream_t more[5] = {P.c_s0[c][0], P.c_s0[c][1], P.c_rt[c], P.c_s2b[c][0], P.c_s2b[c][1]};
+            for (int i = 0; i < 5; i++) cudaStreamSetAttribute(more[i], cudaStreamAttributeAccessPolicyWindow, &av);
+        }
+#endif
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -4268,6 +4302,10 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
+            if (qsb_carrier_has(QK_RF))
+                qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+                    dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[0],nb);
+            else
             qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
@@ -4330,6 +4368,10 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
+        if (qsb_carrier_has(QK_RF))
+            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
+        else
         qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
 #else
         if (qsb_carrier_has(QK_RGP))
@@ -4378,6 +4420,46 @@ static void qsb_subpipe_launch(
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(st, P.ev_out2, 0);
     if (e != cudaSuccess) qsb_subpipe_die("output ordering", e);
 }
+#if QSB_GREEN
+/* Startup partition choice.  Called by the host loop once per sequence, after the
+ * sequence's last batch is enqueued; selects the partition for the next sequence.
+ * Sequences 2..7 run the configs in the order 0,1,2,2,1,0 (a linear drift cancels);
+ * afterwards the config with the least mean sequence time is kept (the default
+ * unless another is faster by more than 0.1%).  Only stream placement changes:
+ * every sub-batch still runs the same kernels on the same arguments. */
+static void qsb_green_tune_seq(uint32_t seqs_done) {
+    QsbSubPipe &P = g_qsb_sub;
+    static double t_last = 0, dur[6];
+    static int done = 0;
+    if (!P.ready || P.ncfg < 2 || done) return;
+    static const int sched[6] = {0, 1, 2, 2, 1, 0};
+    const uint32_t S0 = 2;
+    timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    const double now = ts.tv_sec + ts.tv_nsec * 1e-9;
+    const uint32_t fin = seqs_done - 1;              /* 0-based index of the sequence just enqueued */
+    if (fin >= S0 && fin < S0 + 6) dur[fin - S0] = now - t_last;
+    t_last = now;
+    int c = -1;
+    if (seqs_done >= S0 && seqs_done < S0 + 6) c = sched[seqs_done - S0] < P.ncfg ? sched[seqs_done - S0] : 0;
+    else if (seqs_done == S0 + 6) {
+        double m[QSB_GREEN_NCFG] = {0}; int n[QSB_GREEN_NCFG] = {0};
+        for (int i = 0; i < 6; i++) if (sched[i] < P.ncfg) { m[sched[i]] += dur[i]; n[sched[i]]++; }
+        c = 0;
+        for (int k = 1; k < P.ncfg; k++)
+            if (n[k] && m[k] / n[k] < (m[c] / n[c]) * (c == 0 ? 0.999 : 1.0)) c = k;
+        printf("  Partition check:");
+        for (int k = 0; k < P.ncfg; k++) printf(" finish %d SMs %.4f s/seq%s", P.cfg_sms[k], n[k] ? m[k] / n[k] : 0.0,
+                                               k + 1 < P.ncfg ? "," : "");
+        printf(" -> finish on %d SMs\n", P.cfg_sms[c]); fflush(stdout);
+        done = 1;
+    }
+    if (c >= 0 && c != P.cfg) {
+        P.cfg = c;
+        P.s0[0] = P.c_s0[c][0]; P.s0[1] = P.c_s0[c][1]; P.rt = P.c_rt[c];
+        P.s2b[0] = P.c_s2b[c][0]; P.s2b[1] = P.c_s2b[c][1]; P.s2 = P.s2b[0];
+    }
+}
+#endif
 #endif
 
 /* ============================================================
@@ -4399,13 +4481,35 @@ static void qsb_subpipe_launch(
  * m=2d+1.  H[hi]=hi*256*base in both cases.
  * ============================================================ */
 
-__global__ void kernel_build_gtable(
-    const uint64_t * __restrict__ d_L,   /* [GT_SEGMENTS][GT_LO][8] : x[4] then y[4] */
-    const uint64_t * __restrict__ d_H,   /* [GT_SEGMENTS][GT_HI][8] */
+/* QSB_GT_BATCH (hybridnoise ab642ec8, PR #1505; startup only): each thread builds
+ * QSB_GT_BATCH consecutive records and shares one field inversion between them
+ * (Montgomery's simultaneous inversion). The projective sums are those of the
+ * one-record-per-thread builder below; each record's projective X,Y are parked in its own
+ * table slot and rewritten in place as affine coordinates after the shared inverse.
+ * Records with hi == 0 are the host's affine L-ladder point, stored as a plain copy and
+ * left out of the product exactly as the one-record builder copies them. The spot check
+ * and the host-builder fallback are unchanged. 1 restores the one-inversion-per-record
+ * kernel. */
+#ifndef QSB_GT_BATCH
+#define QSB_GT_BATCH 12
+#endif
+static_assert(QSB_GT_BATCH >= 1 && QSB_GT_BATCH <= 32, "QSB_GT_BATCH range");
+#if QSB_GT_BATCH > 1
+__device__ __forceinline__ int gt_build_segment(uint64_t t) {
+    int ch=-1;
+    #pragma unroll
+    for(int c=0;c<GT_SEGMENTS;c++)
+        if(t>=gt_offset(c) && t<(uint64_t)gt_offset(c)+gt_entries(c)) ch=c;
+    return ch;
+}
+#endif
+
+/* One record exactly as the one-inversion-per-record builder makes it (QSB_GT_BATCH=1 path;
+ * also the batched builder's repair path, so a repaired record has the base's bytes). */
+__device__ __noinline__ void gt_build_one(uint64_t t,
+    const uint64_t * __restrict__ d_L, const uint64_t * __restrict__ d_H,
     uint8_t * __restrict__ gTable)
 {
-    uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= GT_TOTAL_ENTRIES) return;
     int ch=-1;
     #pragma unroll
     for(int c=0;c<GT_SEGMENTS;c++)
@@ -4441,6 +4545,98 @@ __global__ void kernel_build_gtable(
     size_t off = ((size_t)gt_offset(ch) + d) * 64;
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
+}
+#if QSB_GT_BATCH > 1
+/* y^2 == x^3 + b (mod p) on the table's scaled curve, b taken from a host ladder point.
+ * The difference is in [0, 2^256): zero mod p means 0 or p. */
+__device__ __forceinline__ bool gt_on_curve(const uint64_t x[4], const uint64_t y[4], const uint64_t b[4]) {
+    uint64_t x2[4], x3[4], y2[4], dd[4];
+    _ModSqr(x2, x); _ModMult(x3, x2, (uint64_t *)x); _ModSqr(y2, y);
+    _ModSub256(dd, y2, x3); _ModSub256(dd, dd, b);
+    return ((dd[0] | dd[1] | dd[2] | dd[3]) == 0) ||
+           (dd[0] == 0xFFFFFFFEFFFFFC2FULL && dd[1] == ~0ULL && dd[2] == ~0ULL && dd[3] == ~0ULL);
+}
+#endif
+
+__global__ void kernel_build_gtable(
+    const uint64_t * __restrict__ d_L,   /* [GT_SEGMENTS][GT_LO][8] : x[4] then y[4] */
+    const uint64_t * __restrict__ d_H,   /* [GT_SEGMENTS][GT_HI][8] */
+    uint8_t * __restrict__ gTable)
+{
+#if QSB_GT_BATCH > 1
+    const uint64_t t0 = ((uint64_t)blockIdx.x * blockDim.x + threadIdx.x) * QSB_GT_BATCH;
+    if (t0 >= GT_TOTAL_ENTRIES) return;
+    const int n = (GT_TOTAL_ENTRIES - t0) < (uint64_t)QSB_GT_BATCH ?
+                  (int)(GT_TOTAL_ENTRIES - t0) : QSB_GT_BATCH;
+    uint64_t zs[QSB_GT_BATCH][4], pref[QSB_GT_BATCH][4];
+    uint64_t acc[5] = {1, 0, 0, 0, 0};   /* _ModInv works on five limbs; acc[4] stays 0 */
+    uint32_t fix = 0;                    /* bit j: record j is projective (hi != 0) */
+    for (int j = 0; j < n; j++) {
+        const uint64_t t = t0 + j;
+        const int ch = gt_build_segment(t);
+        if (ch < 0) continue;
+        const int d = (int)(t - gt_offset(ch));
+        const int m = ch==0 ? d : 2*d+1;
+#if QSB_BIGTBL
+        const int hi = m >> QSB_GT_RADIX_BITS, lo = m & (GT_LO-1);
+#else
+        const int hi = m >> 8, lo = m & 255;
+#endif
+        const uint64_t *Hp = d_H + ((size_t)ch * GT_HI + hi) * 8;
+        const uint64_t *Lp = d_L + ((size_t)ch * GT_LO + lo) * 8;
+        uint64_t *rec = (uint64_t *)(gTable + ((size_t)gt_offset(ch) + d) * 64);
+        if (hi == 0) {
+            for (int k = 0; k < 4; k++) { rec[k] = Lp[k]; rec[4 + k] = Lp[4 + k]; }
+            continue;
+        }
+        uint64_t px[4], py[4], pz[5] = {1, 0, 0, 0, 0}, qx[4], qy[4];
+        for (int k = 0; k < 4; k++) {
+            px[k] = Hp[k]; py[k] = Hp[4 + k];
+            qx[k] = Lp[k]; qy[k] = Lp[4 + k];
+        }
+        _PointAddSecp256k1(px, py, pz, qx, qy);
+        for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
+        for (int k = 0; k < 4; k++) { zs[j][k] = pz[k]; pref[j][k] = acc[k]; }
+        if (!fix) { for (int k = 0; k < 4; k++) acc[k] = pz[k]; }
+        else _ModMult(acc, pz);
+        fix |= 1u << j;
+    }
+    if (!fix) return;
+    uint64_t bc[4];                                 /* curve constant of the scaled table */
+    {
+        uint64_t x0[4], y0[4], x2[4], x3[4];
+        for (int k = 0; k < 4; k++) { x0[k] = d_L[k]; y0[k] = d_L[4 + k]; }   /* segment 0, lo 0: (K)A */
+        _ModSqr(x2, x0); _ModMult(x3, x2, x0); _ModSqr(bc, y0); _ModSub256(bc, bc, x3);
+    }
+    _ModInv(acc);                                   /* 1/(product of the projective z) */
+    const int first = __ffs(fix) - 1;
+    for (int j = n - 1; j >= first; j--) {
+        if (!((fix >> j) & 1u)) continue;
+        uint64_t zinv[4], px[4], py[4];
+        if (j > first) {
+            _ModMult(zinv, acc, pref[j]);           /* 1/z_j */
+            _ModMult(acc, zs[j]);                   /* 1/(z_first..z_{j-1}) */
+        } else {
+            for (int k = 0; k < 4; k++) zinv[k] = acc[k];
+        }
+        uint64_t *rec = (uint64_t *)(gTable + (t0 + j) * 64);
+        for (int k = 0; k < 4; k++) { px[k] = rec[k]; py[k] = rec[4 + k]; }
+        _ModMult(px, zinv); _ModMult(py, zinv);
+        /* The shared chain runs on the approximate field products (C31 tails), which err
+         * far more often over a 16-deep product chain than in one normalization; any record
+         * not on the curve is rebuilt by the one-record path, so every record has the
+         * base's bytes. */
+        if (gt_on_curve(px, py, bc)) {
+            for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
+        } else {
+            gt_build_one(t0 + j, d_L, d_H, gTable);
+        }
+    }
+#else
+    uint64_t t = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= GT_TOTAL_ENTRIES) return;
+    gt_build_one(t, d_L, d_H, gTable);
+#endif
 }
 
 
@@ -5158,6 +5354,10 @@ int main(int argc, char **argv) {
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 #endif
     qsb_carrier_init(prop);
+    /* Every kernel of this configuration is in the carrier (S0, roots, S2, build, YOFF; the
+     * leaf-tree pair is off), so with the carrier on the compute_52 image is never loaded. */
+    g_qsb_c52_skip = g_qsb_carrier.on && qsb_carrier_has(QK_RF) && QSB_ROOT_FUSED &&
+                     !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2;
 
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;
@@ -5193,7 +5393,7 @@ int main(int argc, char **argv) {
 #endif
             (const void*)kernel_pinning_pipeline<true,2>,
         };
-        for (size_t q = 0; q < sizeof(fs_k)/sizeof(fs_k[0]); q++) {
+        for (size_t q = 0; q < sizeof(fs_k)/sizeof(fs_k[0]) && !g_qsb_c52_skip; q++) {
             cudaFuncAttributes fa;
             if (cudaFuncGetAttributes(&fa, fs_k[q]) == cudaSuccess) fs_loaded++;
         }
@@ -5225,10 +5425,10 @@ int main(int argc, char **argv) {
         free(hL); free(hH);
         int gt_total = GT_TOTAL_ENTRIES;
         if(qsb_carrier_has(QK_BUILD))
-            qsb_carrier_launch(kernel_build_gtable,QK_BUILD,dim3((gt_total+255)/256),dim3(256),(cudaStream_t)0,
+            qsb_carrier_launch(kernel_build_gtable,QK_BUILD,dim3(((gt_total+QSB_GT_BATCH-1)/QSB_GT_BATCH+255)/256),dim3(256),(cudaStream_t)0,
                                (const uint64_t*)dL,(const uint64_t*)dH,d_gt);
         else
-        kernel_build_gtable<<<(gt_total+255)/256,256>>>(dL,dH,d_gt);
+        kernel_build_gtable<<<((gt_total+QSB_GT_BATCH-1)/QSB_GT_BATCH+255)/256,256>>>(dL,dH,d_gt);
 #if QSB_BIGTBL
         cudaError_t gerr = cudaDeviceSynchronize();
         if(gerr==cudaSuccess) gerr=cudaGetLastError();
@@ -5269,8 +5469,9 @@ int main(int argc, char **argv) {
                    gt_secs, gt_total, (double)gt_sz/(1024*1024));
 #if QSB_FAST_START
             printf("  Fast start: %d worker threads (%d tasks inline) ran the ladders and %d spot references "
-                   "during context creation; %d kernels preloaded\n",
-                   fs_work.spawned, fs_work.inline_runs, fs_samples, fs_loaded);
+                   "during context creation; %d kernels preloaded%s\n",
+                   fs_work.spawned, fs_work.inline_runs, fs_samples, fs_loaded,
+                   g_qsb_c52_skip ? " (compute_52 image not loaded: every kernel runs from the carrier)" : "");
 #endif
         } else {
             printf("  GTable GPU build rejected (%s); using the host builder\n",
@@ -6053,6 +6254,9 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
+#if QSB_SUBPIPE && QSB_GREEN
+        if (g_qsb_sub_ok) qsb_green_tune_seq(seqs_done);
+#endif
         if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
