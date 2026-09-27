@@ -4651,28 +4651,50 @@ int main(int argc, char **argv) {
         int sp_epochs[2] = {0, 0};
         uint64_t sp_base[2] = {0, 0};
         uint64_t sp_batch_no = 0;    /* next batch to launch; batch k uses slot k&1 */
-        auto sp_drain = [&](int s) -> int {
+        // Snapshot completed slot data before a replacement readback can overwrite it.
+        // The unchanged exact host gate runs only after the replacement GPU work is queued.
+        struct CompletedSubset {
+            uint8_t bytes[SP_HOST_BYTES];
+            uint64_t base;
+            int epochs;
+            bool valid;
+        };
+        auto sp_collect = [&](int s, CompletedSubset &completed) -> int {
+            completed.valid = false;
             if (!sp_busy[s]) return 0;
             cudaError_t err = cudaEventSynchronize(sp_done[s]);
             if (err == cudaSuccess) err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+            completed.base = sp_base[s];
+            completed.epochs = sp_epochs[s];
+            memcpy(completed.bytes, h_tent + (size_t)s * SP_HOST_BYTES, SP_HOST_BYTES);
+            completed.valid = true;
             sp_busy[s] = 0;
-            total_searched += (uint64_t)sp_epochs[s] * QSB_SE_PER_EPOCH;
-            g_total_searched = total_searched;   /* completed batches only */
-            const uint8_t *zh = h_tent + (size_t)s * SP_HOST_BYTES;
+            total_searched += (uint64_t)completed.epochs * QSB_SE_PER_EPOCH;
+            g_total_searched = total_searched;
+            return 0;
+        };
+        auto sp_publish = [&](const CompletedSubset &completed) -> int {
+            if (!completed.valid) return 0;
+            const uint8_t *zh = completed.bytes;
             uint32_t nt; memcpy(&nt, zh, 4);
             const uint32_t cap = (uint32_t)((SP_HOST_BYTES - 4) / ZLAB_HIT_REC);
             if (nt > cap) nt = cap;
             for (uint32_t i = 0; i < nt; i++) {
                 uint32_t tag; memcpy(&tag, zh + 4 + (size_t)i * ZLAB_HIT_REC, 4);
                 const uint32_t index = tag & 0x3fffffffu, ep = index / (uint32_t)QSB_SE_PER_EPOCH, lane = index % (uint32_t)QSB_SE_PER_EPOCH;
-                if (ep >= (uint32_t)sp_epochs[s]) continue;
-                if (qsb_hv_publish(&hv, sp_base[s] + ep, lane, (int)((tag >> 30) & 1u), zh_fd, &hit_counter) < 0) {
+                if (ep >= (uint32_t)completed.epochs) continue;
+                if (qsb_hv_publish(&hv, completed.base + ep, lane, (int)((tag >> 30) & 1u), zh_fd, &hit_counter) < 0) {
                     fprintf(stderr, "ERROR: hit write failed\n"); return 1;
                 }
             }
             g_hit_counter = hit_counter;
             return 0;
+        };
+        auto sp_drain = [&](int s) -> int {
+            CompletedSubset completed;
+            if (sp_collect(s, completed)) return 1;
+            return sp_publish(completed);
         };
         auto sp_launch = [&](int s, uint64_t base, int epochs_in_batch) -> int {
             cudaStream_t st = sp_stream[s];
@@ -4803,15 +4825,19 @@ int main(int argc, char **argv) {
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
         while (1) {
             const int s = (int)(sp_batch_no & 1);
-            if (sp_drain(s)) return 1;                       /* batch k-2: the slot about to be reused */
+            CompletedSubset completed;
+            if (sp_collect(s, completed)) return 1;          /* snapshot batch k-2 before slot reuse */
             if (g_stop_signal || epoch_base >= n_epochs) {
+                if (sp_publish(completed)) return 1;
                 if (sp_drain(s ^ 1)) return 1;               /* then batch k-1 */
                 break;
             }
             const uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
             const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
-            if (sp_launch(s, epoch_base, epochs_in_batch)) return 1;
+            const int launch_error = sp_launch(s, epoch_base, epochs_in_batch);
+            if (sp_publish(completed)) return 1;
+            if (launch_error) return 1;
             epoch_base += epochs_in_batch;
             sp_batch_no++;
             struct timespec t_now;
