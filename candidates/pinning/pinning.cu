@@ -1,3 +1,6 @@
+#ifndef QSB_REMEASURE_TAG_092702107278
+#define QSB_REMEASURE_TAG_092702107278 1 /* no-op: exact-source re-draw identity */
+#endif
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
