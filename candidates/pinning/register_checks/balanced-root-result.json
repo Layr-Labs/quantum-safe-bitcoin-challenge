@@ -1,0 +1,16 @@
+{
+  "status": "PASS_PYTHON_MODEL_ONLY",
+  "batches": 108,
+  "roots": 51460,
+  "zero_roots": 27464,
+  "tail_fixed_base_negative_control": true,
+  "random_lane_and_quartet_order": true,
+  "scratch_base": "logical root count",
+  "capacity_rows": 2048,
+  "max_scratch_end_row_exclusive": 1792,
+  "scratch_rows_per_CTA": 768,
+  "extra_allocation_bytes": 0,
+  "native_compilation": false,
+  "included_in_candidate": false,
+  "sha256": "0c5737179c970a5487cab0cdc064e836a54bc046f28a6a10072ccd6d2f77cd59"
+}

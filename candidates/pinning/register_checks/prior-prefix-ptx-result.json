@@ -1,0 +1,11 @@
+{
+  "status": "PASS_LITERAL_PTX_PYTHON_INTERPRETER",
+  "cases": 24080,
+  "total_carry_cases": 24008,
+  "prefix_subtraction_borrow_cases": 10540,
+  "wrong_subc_negative_failures": 21869,
+  "interpreted_blocks": 2,
+  "native_compilation": false,
+  "GPU_execution": false,
+  "sha256": "d06948de21522e5ebb2a46b7bae1b7334b3c83ab1f54f798f6b8b4525b6011fb"
+}
