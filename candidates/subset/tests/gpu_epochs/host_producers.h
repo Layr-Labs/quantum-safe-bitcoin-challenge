@@ -139,6 +139,13 @@ static inline void sc_push(SCtx &c, const uint8_t *row) {      /* append one SIG
     } else sc_bytes(c, row, SIG_PUSH_SIZE);
 }
 
+/* Immutable complete-suffix W+K cache, independently implemented from the
+ * completed-positive eb9ee8f3 schedule-reuse mechanism (i34-9, inheriting
+ * terrapinelf). Right-aligned AVX-512 broadcasts are this implementation.
+ * Cache words are message schedules, never chaining states or hash outputs. */
+#ifndef QSB_HP_TAILCACHE16
+#define QSB_HP_TAILCACHE16 1
+#endif
 /* ---- problem constants ---- */
 struct ClsVec { __m128i M1, M2, M3; uint32_t w2, w3; };   /* first-block words 4..15 (vectors), 2..3 */
 struct Params {
@@ -147,7 +154,34 @@ struct Params {
     int cut, K, ncls;
     uint64_t n_epochs, cap;     /* epoch space size, epochs per batch */
     ClsVec cv[NCLS];            /* first-block class words (QSB_FIRST_UNIQUE) */
+    int tail_count = 0;         /* zero selects the unchanged dynamic path */
+    uint32_t tail_wk[22][64];   /* problem-owned, immutable before workers start */
 };
+
+static inline uint32_t tail_rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+static void build_tail_cache(Params &P) {
+    P.tail_count = 0;
+    if (!QSB_HP_TAILCACHE16 || getenv("QSB_HP_NOTAILCACHE16")) return;
+    if (SIG_PUSH_SIZE != 10 || P.K < 2 || P.K > MAXK || P.cut < P.K || P.cut > 150 ||
+        P.c0.len < 0 || P.c0.len >= 64) return;
+    const int bytes = P.c0.len + SIG_PUSH_SIZE * (P.cut - P.K);
+    if ((bytes & 63) != 8) return;
+    const int count = (bytes >> 6) - 1;
+    if (count <= 0 || count > 22) return;
+    for (int j = 1; j <= count; ++j) {
+        const int offset = P.cut * SIG_PUSH_SIZE - 8 - 64 * j;
+        if (offset < 0 || offset + 64 > P.cut * SIG_PUSH_SIZE) return;
+        uint32_t w[64];
+        for (int t = 0; t < 16; ++t) w[t] = be32(P.rows + offset + 4 * t);
+        for (int t = 16; t < 64; ++t) {
+            const uint32_t a = w[t-15], b = w[t-2];
+            w[t] = w[t-16] + (tail_rotr(a,7) ^ tail_rotr(a,18) ^ (a >> 3)) + w[t-7] +
+                   (tail_rotr(b,17) ^ tail_rotr(b,19) ^ (b >> 10));
+        }
+        for (int t = 0; t < 64; ++t) P.tail_wk[j-1][t] = w[t] + k_[t];
+    }
+    P.tail_count = count;       /* publish only a completely constructed cache */
+}
 
 /* First-block states of 4 classes for one epoch: compress(mid, [w0 w1 | class words 2..15]).
  * Rounds 0-1 read only w0/w1, so the first sha256rnds2 is shared by all classes. */
@@ -327,6 +361,20 @@ QHP_S16 static void hp16_block(__m512i s[8], __m512i *W) {
     s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d);
     s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h);
 }
+#define HP16_CACHED(t) _mm512_set1_epi32((int)wk[(t)])
+QHP_S16 static void hp16_cached_block(__m512i s[8], const uint32_t *wk) {
+    __m512i a = s[0], b = s[1], c = s[2], d = s[3], e = s[4], f = s[5], g = s[6], h = s[7];
+#pragma GCC unroll 8
+    for (int t = 0; t < 64; t += 8) {
+        HP16_ROUND(a, b, c, d, e, f, g, h, HP16_CACHED(t + 0)); HP16_ROUND(h, a, b, c, d, e, f, g, HP16_CACHED(t + 1));
+        HP16_ROUND(g, h, a, b, c, d, e, f, HP16_CACHED(t + 2)); HP16_ROUND(f, g, h, a, b, c, d, e, HP16_CACHED(t + 3));
+        HP16_ROUND(e, f, g, h, a, b, c, d, HP16_CACHED(t + 4)); HP16_ROUND(d, e, f, g, h, a, b, c, HP16_CACHED(t + 5));
+        HP16_ROUND(c, d, e, f, g, h, a, b, HP16_CACHED(t + 6)); HP16_ROUND(b, c, d, e, f, g, h, a, HP16_CACHED(t + 7));
+    }
+    s[0] = _mm512_add_epi32(s[0], a); s[1] = _mm512_add_epi32(s[1], b); s[2] = _mm512_add_epi32(s[2], c); s[3] = _mm512_add_epi32(s[3], d);
+    s[4] = _mm512_add_epi32(s[4], e); s[5] = _mm512_add_epi32(s[5], f); s[6] = _mm512_add_epi32(s[6], g); s[7] = _mm512_add_epi32(s[7], h);
+}
+#undef HP16_CACHED
 #undef HP16_WK
 static std::atomic<bool> g_s16{false};   /* chosen path (after the batch-0 calibration) */
 static bool g_s16_ok = false;    /* the 16-lane path is available on this host */
@@ -356,7 +404,10 @@ QHP_S16 static void flush16(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, 
     }
     __m512i s[8];
     for (int j = 0; j < 8; j++) s[j] = _mm512_load_si512((const void *)S[j]);
-    for (int b = 0; b < maxnb; b++) {
+    const bool cached_tail = P.tail_count > 0 && maxnb - 1 <= P.tail_count;
+    /* First assembled block stays dynamic; fallback retains all original passes. */
+    const int dynamic_passes = cached_tail ? (maxnb > 0 ? 1 : 0) : maxnb;
+    for (int b = 0; b < dynamic_passes; b++) {
         __mmask16 act = 0;
         for (int l = 0; l < 16; l++) {
             const uint8_t *bp = b >= nb[l] ? dummy : b == 0 ? fb[l] : tail[l] + 64 * b;
@@ -368,6 +419,18 @@ QHP_S16 static void flush16(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, 
         for (int j = 0; j < 8; j++) ns[j] = s[j];
         hp16_block(ns, W);
         for (int j = 0; j < 8; j++) s[j] = _mm512_mask_mov_epi32(s[j], act, ns[j]);   /* finished lanes keep their state */
+    }
+    if (cached_tail) {
+        /* Lane with nb=m consumes keys m-1,...,1 in its original order.
+         * Shorter lanes wait; all active lanes share this pass's schedule. */
+        for (int key = maxnb - 1; key >= 1; --key) {
+            __mmask16 act = 0;
+            for (int l = 0; l < nl; ++l) if (nb[l] > key) act |= (__mmask16)(1u << l);
+            __m512i ns[8];
+            for (int j = 0; j < 8; ++j) ns[j] = s[j];
+            hp16_cached_block(ns, P.tail_wk[key-1]);
+            for (int j = 0; j < 8; ++j) s[j] = _mm512_mask_mov_epi32(s[j], act, ns[j]);
+        }
     }
     for (int j = 0; j < 8; j++) _mm512_store_si512((void *)S[j], s[j]);
     alignas(64) uint32_t w0a[16], w1a[16];
@@ -697,6 +760,7 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
     g_s16.store(false);                                       /* batch 0 decides (calibration below); SHA-NI x4 until then */
     memcpy(P.c0.st, dp->midstate, 32); P.c0.len = 0;
     sc_bytes(P.c0, dp->prefix_remainder, (int)dp->prefix_remainder_len);
+    build_tail_cache(P);
     for (int c = 0; c < ncls; c++) {
         const uint32_t *w = qsb_first_unique_host[c];         /* words 2..15 of the class block */
         P.cv[c].w2 = w[0]; P.cv[c].w3 = w[1];
