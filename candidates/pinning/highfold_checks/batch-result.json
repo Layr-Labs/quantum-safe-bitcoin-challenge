@@ -1,0 +1,25 @@
+{
+  "kg_points": 4096,
+  "afold_row_points": 4096,
+  "exception_cases": 3,
+  "cost": {
+    "256": {
+      "M_per_point": 5.046875,
+      "S_per_point": 1.99609375,
+      "scratch_bytes_per_builder": 73728,
+      "kg_bytes_10_windows": 163840
+    },
+    "4096": {
+      "M_per_point": 5.0029296875,
+      "S_per_point": 1.062255859375,
+      "scratch_bytes_per_builder": 1179648,
+      "kg_bytes_10_windows": 2621440
+    }
+  },
+  "highfold_vs_baseline_build_arithmetic_ratio": {
+    "0.5": 3.890826938610662,
+    "0.8": 3.743988123236124,
+    "1": 3.659967762063228
+  },
+  "scope": "independent Python curve+batch model; not native table construction, allocation or measured timing"
+}

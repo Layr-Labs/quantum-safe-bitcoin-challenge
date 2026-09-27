@@ -1,0 +1,13 @@
+{
+  "unmodified_official_blobs": 484,
+  "changed": [
+    "candidates/pinning/cg_table.h",
+    "candidates/pinning/cpu_cogrind.h"
+  ],
+  "segment_count": 4353,
+  "rows": 69633,
+  "recurrence_rows": 16,
+  "recurrence_boundary_checks": 60,
+  "native_compile": false,
+  "GPU_run": false
+}

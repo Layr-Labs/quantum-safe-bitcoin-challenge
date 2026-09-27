@@ -96,7 +96,18 @@ static const int LAY_M_W[] = {19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20};
 static const int LAY_S_W[] = {18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19};
 /* 72 MiB: 15 */
 static const int LAY_T_W[] = {17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18};
+static int layout_highfold(layout_t *L) {
+    static const int ws[9] = {25,25,25,26,26,26,26,26,26};
+    memset(L, 0, sizeof *L); L->name="highfold"; L->nwin=10;
+    L->w[0]=25; L->pos[0]=231; L->cnt[0]=(1ull<<25)+1;
+    uint64_t off=L->cnt[0]; int pos=0;
+    for(int j=1;j<10;j++) { L->w[j]=ws[j-1]; L->pos[j]=pos;
+        L->cnt[j]=1ull<<(ws[j-1]-1); L->off[j]=off;
+        pos+=ws[j-1]; off+=L->cnt[j]; }
+    L->total=off; return pos==231 ? 0 : -1;
+}
 static int layout_by_name(layout_t *L, const char *nm) {
+    if (!strcmp(nm,"highfold")) return layout_highfold(L);
     if (!strcmp(nm, "xlarge")) return layout_make(L, "xlarge", 22, LAY_XL_W, 10);
     if (!strcmp(nm, "large"))  return layout_make(L, "large", 22, LAY_L_W, 11);
     if (!strcmp(nm, "medium")) return layout_make(L, "medium", 20, LAY_M_W, 12);
@@ -202,13 +213,14 @@ static inline unsigned recode(worker_t *w, int i, const uint64_t *q) {
         uint64_t v = q[r.wi] >> r.sh;
         if (r.two_word) v |= q[r.wi + 1] << (64 - r.sh);      /* per-window constant: predictable */
         v = (v & r.mask) + carry;                              /* top window: mask covers all remaining bits */
-        const uint64_t neg = (uint64_t)(v > r.half) & (uint64_t)(j < k);
+        const uint64_t neg = (uint64_t)(v > r.half) & (uint64_t)(j < k || L.pos[0] != 0);
         const uint64_t m = neg ? r.full - v : v;              /* magnitude, 0 .. half */
         carry = neg;
         uint32_t code = (uint32_t)(m - 1) | (uint32_t)(neg << 31);
         if (__builtin_expect(m == 0, 0)) { code = QCG_ZCODE; zmask |= 1u << j; }
         w->dig[j][i] = code;
     }
+    if (L.pos[0] != 0) w->dig[0][i] = (uint32_t)((q[3] >> 39) + carry);
     return zmask;
 }
 static void recode_init(const layout_t &L) {
@@ -216,7 +228,7 @@ static void recode_init(const layout_t &L) {
     for (int j = 1; j < L.nwin; j++) {
         rwin &r = g_rw[j];
         const unsigned pos = (unsigned)L.pos[j], wd = (unsigned)L.w[j];
-        const int top = (j == L.nwin - 1);
+        const int top = (j == L.nwin - 1 && L.pos[0] == 0);
         const unsigned bits = top ? 256 - pos : wd;           /* the top window takes all remaining bits */
         r.wi = pos >> 6; r.sh = pos & 63;
         r.two_word = (r.sh + bits > 64 && r.wi < 3) ? 1 : 0;
@@ -245,13 +257,17 @@ static unsigned recode_avx2(worker_t *w, int np) {
             if (r.two_word) v = _mm256_or_si256(v, _mm256_sll_epi64(q[r.wi + 1], _mm_cvtsi32_si128((int)(64 - r.sh))));
             v = _mm256_add_epi64(_mm256_and_si256(v, _mm256_set1_epi64x((long long)r.mask)), carry);
             __m256i neg = _mm256_cmpgt_epi64(v, _mm256_set1_epi64x((long long)r.half));      /* values < 2^33: signed compare ok */
-            if (j == k) neg = _mm256_setzero_si256();
+            if (j == k && L.pos[0] == 0) neg = _mm256_setzero_si256();
             const __m256i m = _mm256_blendv_epi8(v, _mm256_sub_epi64(_mm256_set1_epi64x((long long)r.full), v), neg);
             carry = _mm256_and_si256(neg, one);
             __m256i code = _mm256_or_si256(_mm256_sub_epi64(m, one), _mm256_slli_epi64(_mm256_and_si256(neg, one), 31));
             const __m256i z = _mm256_cmpeq_epi64(m, _mm256_setzero_si256());
             if (__builtin_expect(!_mm256_testz_si256(z, z), 0)) { code = _mm256_blendv_epi8(code, zc, z); zmask |= 1u << j; }
             _mm_storeu_si128((__m128i *)&w->dig[j][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(code, idx)));
+        }
+        if (L.pos[0] != 0) {
+            const __m256i top = _mm256_add_epi64(_mm256_srli_epi64(q[3],39),carry);
+            _mm_storeu_si128((__m128i *)&w->dig[0][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(top,idx)));
         }
     }
     return zmask;
@@ -412,6 +428,7 @@ static int fill_batch(worker_t *w) {
 #endif
 
 /* ---------------- table build ---------------- */
+static double mem_available_mib();
 #include "cg_table.h"
 
 
@@ -641,7 +658,8 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     int lok = -1;
     if (lenv) lok = layout_by_name(&L, lenv);
     if (lok != 0) {
-        if (avail >= 16384) lok = layout_by_name(&L, "xlarge");
+        if (avail >= 32768) lok = layout_by_name(&L, "highfold");
+        else if (avail >= 16384) lok = layout_by_name(&L, "xlarge");
         else if (avail < 0 || avail >= 6144) lok = layout_by_name(&L, "large");
         else if (avail >= 2048) lok = layout_by_name(&L, "medium");
         else if (avail >= 900) lok = layout_by_name(&L, "small");

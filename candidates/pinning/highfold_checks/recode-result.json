@@ -1,0 +1,26 @@
+{
+  "cases": 50111,
+  "negative_last_signed_disabled_out_of_bounds": 25117,
+  "extra_top_record": 52,
+  "zero_cases": 111,
+  "bytes": 18253611072,
+  "tail_records": 1,
+  "sha256": {
+    "cofactor_checkpoint.h": "0fe1879b4da2490350ddc071625c2430673cef6d736790999d596dd5501977aa",
+    "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+    "cg_table.h": "f62364101364be5a048751063d140d72ad340640cdbe55af60249104410702c1",
+    "cg_sha.h": "f78312f46439ae95813ce5ffececf7968923f61453d8abfbac230c05f733a407",
+    "QsbCarrier.h": "0ee0ceb188efe263394ff08c4d27edb2c7e9a920be289ddb2122a503277c320d",
+    "cg_v26asm.h": "17cb5425ff23cc6e6a18ccc117eb1e6e5f8a4719f067017aa03d630d15166ea2",
+    "cg_ec_scalar.h": "8fe8a7916f6f87802b85d6cd0ac53c3661adea3a2f57cc02794009882298d2f4",
+    "cpu_cogrind.h": "2fd18c84b82d159afea2414c0cf907ef31aad67c6d0890a3f4941568e58af411",
+    "cg_fe4.h": "eb28ee9cd35920bc6799eb34004f9a1e653aec766c3a7b1fa0270cf411919c1e",
+    "qsb_carrier_sm89.h": "45082ea80cb4c496ed92c81c5c1f1241f0ff7354018b534413a223a01bfc525e",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+    "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+    "GPUMath.h": "ae565dc41a8abff17bee1c769503d0f23c2aa20e92396f217db7bf8838b8127d",
+    "cpu_cogrind_vec.h": "42c495a24dbc8fb83db17dbf072ff7d304b6fcf224e8bbc544ffe34e0a151a3d"
+  },
+  "scope": "Python word and packing model plus source anchors; no native compilation or timing"
+}
