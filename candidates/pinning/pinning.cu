@@ -3310,6 +3310,15 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+/* jacklightChen's independent per-warp register-tree root inverse (submission a6e67fd4, commit
+ * 73b24233...), used unmodified. The launch selector (qsb_launch_selected_roots) is defined
+ * after QsbCarrier.h below, since it also needs the carrier-dispatch path this frontier added. */
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+#endif
+
 /* Shared-denominator recovery directly from XYZZ coordinates.
  *
  * P has affine coordinates xP=X/ZZ and yP=Y/ZZZ, with ZZZ^2=ZZ^3.
@@ -3986,6 +3995,22 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #endif
 
 #include "QsbCarrier.h"
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+/* Selects, in priority order: jacklightChen's register-tree roots (if the startup check passed),
+ * else the promoted carrier-dispatched fused kernel (if the native image has it), else the raw
+ * templated fused kernel. Only the selection changes; the two non-register-tree branches are
+ * exactly this frontier's own existing choice, unmodified. */
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    if(g_qsb_register_roots){
+        qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    } else if(qsb_carrier_has(QK_RF)){
+        qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
+            dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    } else {
+        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+    }
+}
+#endif
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4269,6 +4294,11 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=!getenv("QSB_REGISTER_ROOTS_OFF") &&
+        qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted fused / carrier-dispatched");
+    fflush(stdout);
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4340,11 +4370,7 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        if (qsb_carrier_has(QK_RF))
-            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
-        else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,P.rt);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
@@ -4582,6 +4608,9 @@ extern "C" {
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
 }
+#if QSB_SUBPIPE && QSB_ROOT_FUSED && QSB_SLOTPIPE
+#include "RegisterRootCheck.h"
+#endif
 
 /* Affine (x,y) of a point, as the 4+4 little-endian limbs the table uses. */
 static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
