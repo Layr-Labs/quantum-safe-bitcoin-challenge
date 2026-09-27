@@ -1,5 +1,6 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
+#define QSB_DRAW_TAG 0x6ab8e11bu 
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
@@ -954,11 +955,22 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
  * sum subtracts 2c = K-1 (_ModAddLazyOff in GPUMath.h), and the last anchor is converted
  * back here. The borrow is kept through limb 1: dropped only if y'0 < c (2^-33) and y'1 == 0
  * (2^-64), i.e. <= 2^-97 once per candidate. */
+/* QSB_YOFF_Y1_CUT (kill switch, default 1): the conversion subtracts c from limb 0 only. */
+#ifndef QSB_YOFF_Y1_CUT
+#define QSB_YOFF_Y1_CUT 1
+#endif
+#if QSB_YOFF_Y1_CUT != 0 && QSB_YOFF_Y1_CUT != 1
+#error "QSB_YOFF_Y1_CUT must be 0 or 1"
+#endif
 __device__ __forceinline__ void qsb_yoff_to_y(uint64_t *y) {
+#if QSB_YOFF_Y1_CUT
+    y[0] = y[0] - 0x800001E8ULL;
+#else
     uint64_t r0, r1;
     asm("{\n.reg .u64 t;\nsub.cc.u64 %0, %2, 0x800001E8;\nsubc.u64 %1, %3, 0;\n}"
         : "=l"(r0), "=l"(r1) : "l"(y[0]), "l"(y[1]));
     y[0] = r0; y[1] = r1;
+#endif
 }
 /* Table post-pass: y += c for every entry (exact: y < p so y + c < 2^256). */
 __global__ void qsb_table_offset_y(uint8_t *gTable) {
@@ -1575,14 +1587,14 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #endif
     _ModMult(U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
-    _ModSub256(P,U2,X1);
+    QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
     _ModMult(PPP,PP,P);
     _ModMult(Q,U2,PP);
     _ModSqrAddSub2(X1,Ry,PPP,Q);
     _ModMult(ZZZ1,PPP);
     _ModMult(ZZ1,PP);
-    _ModSub256(Qy,X1,Q);
+    QSB_SUB_CHAIN_QY(Qy,X1,Q);
 }
 /* _PointAddXYZZ_mm with its deferred ordinate returned as the pair (T-Q, R). */
 __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
@@ -1590,16 +1602,16 @@ __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
                                      const uint64_t *X1,const uint64_t *Y1,
                                      const uint64_t *X2,const uint64_t *Y2) {
     uint64_t P[4],Q[4],T[4];
-    _ModSub256(P,(uint64_t *)X2,(uint64_t *)X1);
-    _ModSub256(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
+    QSB_SUB_SEED(P,(uint64_t *)X2,(uint64_t *)X1);
+    QSB_SUB_SEED(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
     _ModSqr(ZZ3,P);
     _ModMult(ZZZ3,ZZ3,P);
     _ModMult(Q,(uint64_t *)X1,ZZ3);
     _ModSqr(T,Ry);
-    _ModSub256(T,T,ZZZ3);
-    _ModSub256(T,T,Q);
-    _ModSub256(T,T,Q);
-    _ModSub256(Qy,T,Q);
+    QSB_SUB_SEED(T,T,ZZZ3);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(Qy,T,Q);
     Load256(X3,T);
 }
 #endif
