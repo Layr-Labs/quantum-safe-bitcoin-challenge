@@ -1,3 +1,4 @@
+/* QSB_SLOTS 4->3: isolating one piece of i34-9's near-miss bundle (f7470c17, 998,903,437, +0.36%) -- fewer, larger in-flight batches. Tested alone here since the bundle also included unfamiliar custom sub-chain macros I can't safely reproduce without seeing their full definitions. */
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
@@ -421,7 +422,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 4 x 4M holds the 2 x 8M state bytes: each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
