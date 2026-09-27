@@ -3599,6 +3599,19 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #include "host_producers.h"
 #define QSB_HP_ON 1
 #endif
+/* QSB_HOST_BLOCKING (host-only): the slot completion events are created with cudaEventBlockingSync, so the GPU
+ * host thread sleeps in cudaEventSynchronize instead of spinning a CPU while two batches are in flight (after
+ * newjordan's QSB_ASYNC_BLOCKING in 212237f4, which measured the unstarved rate unchanged on a 4090). The host
+ * thread's core is then free for co-grinder workers (QSB_CPU_HOST_CORE in CpuGrindSubset.h). Kernels, arguments
+ * and batch order are unchanged. 0 = the spin wait. */
+#ifndef QSB_HOST_BLOCKING
+#define QSB_HOST_BLOCKING 1
+#endif
+/* Host-only scheduling switch; no device knob or native-image fingerprint
+ * changes. Runtime QSB_NOREFILLFIRST restores publication before refill. */
+#ifndef QSB_REFILL_BEFORE_PUBLISH
+#define QSB_REFILL_BEFORE_PUBLISH 1
+#endif
 /* QSB_CPU_GRIND: host-CPU co-grinding on candidates disjoint from the GPU's (CpuGrindSubset.h). */
 #ifndef QSB_CPU_GRIND
 #define QSB_CPU_GRIND 1
@@ -4617,13 +4630,11 @@ int main(int argc, char **argv) {
 #if !QSB_HOST_VERIFY || !QSB_EPOCH_GROUPS
 #error "QSB_SLOT_PIPELINE=1 needs QSB_HOST_VERIFY=1 and QSB_EPOCH_GROUPS=1"
 #endif
-        /* Two-slot loop. Per batch, the slot's stream carries producers ->
-         * digest -> async D2H of the tentative records -> event. Batch k is
-         * drained (tentatives re-derived by the host gate and written,
-         * candidates counted) exactly once, in batch order, before batch k+2
-         * reuses its slot; exhaustion or a stop signal drains the two
-         * in-flight batches oldest first. Each slot's tentative count is zeroed
-         * by that slot's producer on that slot's stream, as before. */
+        /* Two-slot loop. After a completed batch is copied into an owned
+         * snapshot, its slot can be refilled before the exact host gate runs.
+         * Publication and completed-candidate accounting stay in batch order;
+         * terminal drainage publishes both launched batches oldest first.
+         * Each producer still zeroes its own tentative count on its stream. */
         enum { SP_HOST_BYTES = 4 + 256 * ZLAB_HIT_REC };  /* tentatives: mean ~16 per batch; 256 is > 15 sigma */
         cudaStream_t sp_stream[2];
         cudaEvent_t sp_done[2];
@@ -4633,7 +4644,7 @@ int main(int argc, char **argv) {
             cudaError_t se = cudaSuccess;
             for (int s = 0; s < 2 && se == cudaSuccess; s++) {
                 se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
-                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming);
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (QSB_HOST_BLOCKING ? cudaEventBlockingSync : 0));
             }
             if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
             if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_tent, 2 * (size_t)SP_HOST_BYTES, cudaHostAllocDefault);
@@ -4651,23 +4662,43 @@ int main(int argc, char **argv) {
         int sp_epochs[2] = {0, 0};
         uint64_t sp_base[2] = {0, 0};
         uint64_t sp_batch_no = 0;    /* next batch to launch; batch k uses slot k&1 */
-        auto sp_drain = [&](int s) -> int {
+        struct SpSnapshot {
+            uint64_t base;
+            int epochs;
+            uint32_t count;
+            uint8_t records[SP_HOST_BYTES - 4];
+        };
+        const bool sp_refill_first = QSB_REFILL_BEFORE_PUBLISH && !getenv("QSB_NOREFILLFIRST");
+        auto sp_collect = [&](int s, SpSnapshot &done) -> int {
+            done.epochs = 0;   /* an idle slot has no completed result to publish */
             if (!sp_busy[s]) return 0;
             cudaError_t err = cudaEventSynchronize(sp_done[s]);
             if (err == cudaSuccess) err = cudaGetLastError();
             if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
-            sp_busy[s] = 0;
-            total_searched += (uint64_t)sp_epochs[s] * QSB_SE_PER_EPOCH;
-            g_total_searched = total_searched;   /* completed batches only */
             const uint8_t *zh = h_tent + (size_t)s * SP_HOST_BYTES;
-            uint32_t nt; memcpy(&nt, zh, 4);
-            const uint32_t cap = (uint32_t)((SP_HOST_BYTES - 4) / ZLAB_HIT_REC);
+            done.base = sp_base[s];
+            done.epochs = sp_epochs[s];
+            memcpy(&done.count, zh, 4);
+            const uint32_t cap = (uint32_t)(sizeof(done.records) / ZLAB_HIT_REC);
+            const uint32_t ncopy = done.count < cap ? done.count : cap;
+            memcpy(done.records, zh + 4, (size_t)ncopy * ZLAB_HIT_REC);
+            /* New D2H may overwrite the pinned report and slot metadata as
+             * soon as launch begins; publication reads only this snapshot. */
+            sp_busy[s] = 0;
+            total_searched += (uint64_t)done.epochs * QSB_SE_PER_EPOCH;
+            g_total_searched = total_searched;   /* completed batches only */
+            return 0;
+        };
+        auto sp_publish = [&](const SpSnapshot &done) -> int {
+            if (!done.epochs) return 0;
+            uint32_t nt = done.count;
+            const uint32_t cap = (uint32_t)(sizeof(done.records) / ZLAB_HIT_REC);
             if (nt > cap) nt = cap;
             for (uint32_t i = 0; i < nt; i++) {
-                uint32_t tag; memcpy(&tag, zh + 4 + (size_t)i * ZLAB_HIT_REC, 4);
+                uint32_t tag; memcpy(&tag, done.records + (size_t)i * ZLAB_HIT_REC, 4);
                 const uint32_t index = tag & 0x3fffffffu, ep = index / (uint32_t)QSB_SE_PER_EPOCH, lane = index % (uint32_t)QSB_SE_PER_EPOCH;
-                if (ep >= (uint32_t)sp_epochs[s]) continue;
-                if (qsb_hv_publish(&hv, sp_base[s] + ep, lane, (int)((tag >> 30) & 1u), zh_fd, &hit_counter) < 0) {
+                if (ep >= (uint32_t)done.epochs) continue;
+                if (qsb_hv_publish(&hv, done.base + ep, lane, (int)((tag >> 30) & 1u), zh_fd, &hit_counter) < 0) {
                     fprintf(stderr, "ERROR: hit write failed\n"); return 1;
                 }
             }
@@ -4803,15 +4834,22 @@ int main(int argc, char **argv) {
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
         while (1) {
             const int s = (int)(sp_batch_no & 1);
-            if (sp_drain(s)) return 1;                       /* batch k-2: the slot about to be reused */
+            SpSnapshot completed;
+            if (sp_collect(s, completed)) return 1;         /* batch k-2: the slot about to be reused */
+            if (!sp_refill_first && sp_publish(completed)) return 1;
             if (g_stop_signal || epoch_base >= n_epochs) {
-                if (sp_drain(s ^ 1)) return 1;               /* then batch k-1 */
+                if (sp_refill_first && sp_publish(completed)) return 1;
+                if (sp_collect(s ^ 1, completed) || sp_publish(completed)) return 1; /* then batch k-1 */
                 break;
             }
             const uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
             const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
-            if (sp_launch(s, epoch_base, epochs_in_batch)) return 1;
+            const int launch_error = sp_launch(s, epoch_base, epochs_in_batch);
+            /* Even a failed replacement enqueue must not discard the result
+             * already collected. Preserve the original exact-gate failure. */
+            if (sp_refill_first && sp_publish(completed)) return 1;
+            if (launch_error) return 1;
             epoch_base += epochs_in_batch;
             sp_batch_no++;
             struct timespec t_now;
