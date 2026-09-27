@@ -302,7 +302,7 @@ __device__ __forceinline__ void q9_coeff_reference(uint64_t out[2],const uint64_
  * call, which makes ptxas keep the return address on the stack (STACK 16, spills around both front
  * calls). 0 = pinning's out-of-line form. */
 #ifndef QSB_GLV_FALLBACK_INLINE
-#define QSB_GLV_FALLBACK_INLINE 0
+#define QSB_GLV_FALLBACK_INLINE 1
 #endif
 #if QSB_GLV_FALLBACK_INLINE
 #define QSB_GLV_FALLBACK_ATTR __forceinline__
