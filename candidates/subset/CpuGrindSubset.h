@@ -63,11 +63,24 @@
 #ifndef QSB_CPU_F16
 #define QSB_CPU_F16 1              /* the fast 16-lane pipeline when the host has AVX-512 IFMA and SHA */
 #endif
+/* QSB_CPU_HOST_CORE: with the GPU host thread sleeping on its events (QSB_HOST_BLOCKING in tree.cu), its core is
+ * idle between batches, so the workers (SCHED_IDLE: the host thread and the producers always run first) may use
+ * it too: one worker per logical CPU instead of leaving 2 reserved. 0 = the reserved host core. */
+#ifndef QSB_CPU_HOST_CORE
+#if defined(QSB_HOST_BLOCKING) && QSB_HOST_BLOCKING
+#define QSB_CPU_HOST_CORE 1
+#else
+#define QSB_CPU_HOST_CORE 0
+#endif
+#endif
 #ifndef QSB_CPU_RESERVE
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
+#ifndef QSB_CPU_FOLD9
+#define QSB_CPU_FOLD9 1            /* fe8_red: column 9 folded without a split (after terrapinelf's QSB_CPU_FOLD3 in 18c9afa8, as in ercumentyildirim's cfe9f377) */
+#endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 4096
+#define QSB_CPU_BATCH 1024         /* L2-sized batches (terrapinelf's 97f347a8; as in 3ca8bbb6 / cfe9f377): viable with the safegcd roots */
 #endif
 /* Wide host table: z*A takes L lookups of signed ~257/L-bit digits (L-1 batch-affine additions).
  * The fewest lookups whose table fits the memory budget are chosen at start-up; 16 windows (34 MiB)
@@ -169,6 +182,16 @@ static void fe_inv(fe &r, const fe &a) {               /* a^(p-2) */
     }
     r = acc;
 }
+/* QSB_CPU_SCALAR_INV (host-only): the batch-inversion roots use one scalar variable-time safegcd inverse
+ * (terrapinelf's 97f347a8 core, libsecp256k1 modinv64_var, via jacklightChen's 3ca8bbb6 CpuSafegcd.h) instead
+ * of the 255-squaring Fermat chain on the vector pipes; the 8 lanes meet in one horizontal product with
+ * 3ca8bbb6's zero-lane isolation. 0 = the Fermat chains, as before. */
+#ifndef QSB_CPU_SCALAR_INV
+#define QSB_CPU_SCALAR_INV 1
+#endif
+#if QSB_CPU_SCALAR_INV
+#include "CpuSafegcd.h"
+#endif
 static void fe_from_le32(fe &r, const uint8_t b[32]) {
     for (int i = 0; i < 4; i++) { uint64_t w = 0; for (int k = 7; k >= 0; k--) w = (w << 8) | b[i * 8 + k]; r.v[i] = w; }
 }
@@ -370,7 +393,11 @@ static void f52_inv(fe52 &x) {                              /* x^(p-2), libsecp2
 static void f52_inv4(fe52 *x) {                             /* four chain products, one exponentiation */
     fe52 a01, a23, a, i01, i23;
     f52_mul(a01, x[0], x[1]); f52_mul(a23, x[2], x[3]); f52_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe ca, ia; f52_words(ca.v, a); fe_inv_var(ia, ca); f52_from(a, ia);
+#else
     f52_inv(a);
+#endif
     f52_mul(i01, a, a23); f52_mul(i23, a, a01);
     const fe52 x0 = x[0], x2 = x[2];
     f52_mul(x[0], i01, x[1]); f52_mul(x[1], i01, x0);
@@ -458,18 +485,28 @@ void fe8_red(fe8 &r, __m512i c0, __m512i c1, __m512i c2, __m512i c3, __m512i c4,
 #define HI(acc, x, y) acc = _mm512_madd52hi_epu64(acc, x, y)
     const __m512i M = F8_M52, M48 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL);
     const __m512i R = _mm512_set1_epi64(0x1000003D10ULL), K = _mm512_set1_epi64(0x1000003D1ULL);
+#if QSB_CPU_FOLD9
+    /* Column 9 is a single high partial product (< 2^52: IFMA reads 52 bits of each factor), at 2^468 = R * 2^208:
+     * lo(c9*R) goes into column 4 and hi(c9*R) (< 2^37) into column 5 before column 5 is split (h5 < 2^4 still),
+     * so column 9 needs no split and no second fold. 15 IFMA instead of 18. */
+    HI(c5, c9, R); LO(c4, c9, R);
+#endif
     const __m512i l5 = _mm512_and_si512(c5, M), h5 = _mm512_srli_epi64(c5, 52);
     const __m512i l6 = _mm512_and_si512(c6, M), h6 = _mm512_srli_epi64(c6, 52);
     const __m512i l7 = _mm512_and_si512(c7, M), h7 = _mm512_srli_epi64(c7, 52);
     const __m512i l8 = _mm512_and_si512(c8, M), h8 = _mm512_srli_epi64(c8, 52);
+#if !QSB_CPU_FOLD9
     const __m512i l9 = _mm512_and_si512(c9, M), h9 = _mm512_srli_epi64(c9, 52);
+#endif
     LO(c0, l5, R); HI(c1, l5, R); LO(c1, h5, R);
     LO(c1, l6, R); HI(c2, l6, R); LO(c2, h6, R);
     LO(c2, l7, R); HI(c3, l7, R); LO(c3, h7, R);
     LO(c3, l8, R); HI(c4, l8, R); LO(c4, h8, R);
+#if !QSB_CPU_FOLD9
     LO(c4, l9, R);
     __m512i t5 = _mm512_setzero_si512(); HI(t5, l9, R); LO(t5, h9, R);   /* weight 2^260, < 2^42 */
     LO(c0, t5, R); HI(c1, t5, R);
+#endif
     const __m512i x = _mm512_srli_epi64(c4, 48); c4 = _mm512_and_si512(c4, M48);   /* bits >= 2^256 */
     LO(c0, x, K);
     __m512i t;
@@ -701,10 +738,41 @@ Q8T static void fe8_inv1(fe8 &x) {
 /* Invert the 4 interleaved chain products with ONE exponentiation (Montgomery's trick across the
  * chains: 3 + 6 extra multiplications). The chain is latency-bound either way, so this replaces
  * 4 x 270 multiplications of issue slots by 279. */
+#if QSB_CPU_SCALAR_INV
+/* jacklightChen's 3ca8bbb6 lane tree: the eight lanes' products meet in one scalar inverse; zero lanes are
+ * set to one before the product and back to zero after it, so a zero chain product still poisons only its
+ * own lane (as with the lane-wise exponentiation). */
+Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
+Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
+Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
+Q8T static void fe8_inv_lanes(fe8 &x) {
+    __m512i cw[4]; fe8_canon_words(cw, x);
+    const __m512i nz = _mm512_or_si512(_mm512_or_si512(cw[0], cw[1]),
+                                      _mm512_or_si512(cw[2], cw[3]));
+    const __mmask8 zero = _mm512_cmpeq_epi64_mask(nz, _mm512_setzero_si512());
+    for (int i = 0; i < 5; i++) x.l[i] = _mm512_mask_mov_epi64(x.l[i], zero, _mm512_set1_epi64(i == 0 ? 1 : 0));
+    fe8 a1, p1, p2, t, i2;
+    fe8_swap1(a1, x); fe8_mul(p1, x, a1);                 /* lanes 2k, 2k+1: a_2k * a_2k+1 */
+    fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
+    fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
+    alignas(64) uint64_t w[4][8]; fe8_canon_words(cw, t);
+    for (int i = 0; i < 4; i++) _mm512_store_si512((void *)w[i], cw[i]);
+    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    fe8 I; fe8_bcast(I, pi);
+    fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
+    fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
+    fe8_mul(x, i2, a1);                                   /* 1/a_k */
+    for (int i = 0; i < 5; i++) x.l[i] = _mm512_mask_mov_epi64(x.l[i], zero, _mm512_setzero_si512());
+}
+#endif
 Q8T static void fe8_inv4(fe8 *x) {
     fe8 a01, a23, a, i01, i23;
     fe8_mul(a01, x[0], x[1]); fe8_mul(a23, x[2], x[3]); fe8_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe8_inv_lanes(a);
+#else
     fe8_inv1(a);
+#endif
     fe8_mul(i01, a, a23); fe8_mul(i23, a, a01);
     const fe8 x0 = x[0], x2 = x[2];
     fe8_mul(x[0], i01, x[1]); fe8_mul(x[1], i01, x0);
@@ -2369,10 +2437,10 @@ static void smt_plan(Ctx *c, int nth) {
     for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
     if (rsv < 0 || cores.size() < 2) return;
     c->mask0 = cs;                                      /* unpinned workers: every CPU but the reserved core */
-    for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
+    if (!QSB_CPU_HOST_CORE) for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
     int t = 0; bool pair = false;
     for (int i = 0; i < (int)cores.size() && t < nth; i++) {
-        if (i == rsv) continue;
+        if (i == rsv && !QSB_CPU_HOST_CORE) continue;
         for (size_t k = 0; k < cores[i].size() && t < nth; k++) { c->wcpu[t] = cores[i][k]; c->wscalar[t] = k == 1; pair |= k == 1; t++; }
     }
     c->hybrid_ok = pair;
@@ -2418,7 +2486,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #ifdef QSB_CPU_THREADS
     int nth = QSB_CPU_THREADS;
 #else
-    int nth = (int)ncpu - QSB_CPU_RESERVE;
+    int nth = (int)ncpu - (QSB_CPU_HOST_CORE ? 0 : QSB_CPU_RESERVE);
 #endif
     if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
@@ -2470,7 +2538,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
            * (which inherit it) use every other CPU. */
           if (g_mask0_ok) {
               cpu_set_t m = g_mask0, h; CPU_ZERO(&h);
-              if (c->host_tid > 0 && sched_getaffinity(c->host_tid, sizeof h, &h) == 0 && CPU_COUNT(&h) < CPU_COUNT(&m)) {
+              if (!QSB_CPU_HOST_CORE && c->host_tid > 0 && sched_getaffinity(c->host_tid, sizeof h, &h) == 0 && CPU_COUNT(&h) < CPU_COUNT(&m)) {
                   cpu_set_t t = m;
                   for (int x = 0; x < CPU_SETSIZE; x++) if (CPU_ISSET(x, &h)) CPU_CLR(x, &t);
                   if (CPU_COUNT(&t) > 0) m = t;
