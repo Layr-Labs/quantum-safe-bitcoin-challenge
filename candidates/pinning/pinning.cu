@@ -3238,14 +3238,18 @@ __device__ __forceinline__ void qsb_block_inverse_n(uint64_t *value) {
     qsb_field_normalize(value);
 }
 /* The whole root chain of one sub-batch in one CTA of QSB_RF_LANES threads. Lane t owns roots
- * i = k*N + t, k < K (missing roots enter as 1). The prefix product P_{k-1} of lane t is parked
- * in root i_k's weighted-output slot roots[count+i_k] (L2-resident, 12 KB of shared memory in
- * total), read back before that slot receives its final value. u^-1/P_{K-1} comes from
+ * i = k*N + t, k < K (missing roots enter as 1). The prefix product P_{k-1} of lane t stays
+ * in shared memory until back-substitution, avoiding a temporary global store/load pair.
+ * Each lane owns prefixes[k-1][j][t]; no other lane reads that scratch. u^-1/P_{K-1} comes from
  * qsb_block_inverse_n and Montgomery back-substitution gives u^-1/r_i: the field elements of
  * the root_group chain, normalized the same way, so the outputs are bit-identical. */
 template<int K>
 __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots, int count) {
     constexpr int N=QSB_RF_LANES;
+    /* Limb-major planes give adjacent lanes adjacent 64-bit shared words.
+     * Ranked N=128,K=8 adds 28 KiB to the existing 12 KiB inverse tree.
+     * K=1 does not access the scratch (keep the declaration standard C++). */
+    __shared__ uint64_t prefixes[K>1?K-1:1][4][N];
     const int tid=(int)threadIdx.x;
     uint64_t acc[5];
     #pragma unroll 1
@@ -3259,7 +3263,7 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
             for(int j=0;j<5;j++)acc[j]=r[j];
         } else if(a) {
             #pragma unroll
-            for(int j=0;j<4;j++)roots[((size_t)count+i)*4u+j]=acc[j];     /* park P_{k-1} */
+            for(int j=0;j<4;j++)prefixes[k-1][j][tid]=acc[j];           /* retain P_{k-1} */
             uint64_t t[5];
             acc[4]=0;
             QSB_RF_MUL(t,acc,r);
@@ -3282,8 +3286,8 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         if(i>=count) continue;             /* r_k = 1: 1/P_{k-1} = 1/P_k, nothing to write */
         uint64_t inv[5];
         if(k>0){
-            uint64_t p[5]={roots[((size_t)count+i)*4u],roots[((size_t)count+i)*4u+1],
-                           roots[((size_t)count+i)*4u+2],roots[((size_t)count+i)*4u+3],0};
+            uint64_t p[5]={prefixes[k-1][0][tid],prefixes[k-1][1][tid],
+                           prefixes[k-1][2][tid],prefixes[k-1][3][tid],0};
             acc[4]=0;
             QSB_RF_MUL(inv,acc,p);          /* 1/r_k = (1/P_k) * P_{k-1} */
             uint64_t r[5]={roots[(size_t)i*4u],roots[(size_t)i*4u+1],
