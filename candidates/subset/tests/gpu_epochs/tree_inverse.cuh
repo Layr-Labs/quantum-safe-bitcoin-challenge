@@ -175,18 +175,8 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     value[4]=0;
 }
 #else
-#ifndef QSB_SC_PARK
-#define QSB_SC_PARK 1   /* lane R: 1 = the product arena is a file-scope array that kernel_digest also uses to park prodA across B's front call; baked on in N-ry (merge, 2026-09-27: with QSB_Y_PAIR=1), 0 = the record's arena */
-#endif
-#if QSB_SC_PARK
-__shared__ uint64_t qsb_sc_products[4][512];
-#endif
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
-#if QSB_SC_PARK
-    uint64_t (&products)[4][512] = qsb_sc_products;
-#else
     __shared__ uint64_t products[4][512];
-#endif
     __shared__ uint64_t inverses[4][256];
     const int tid=threadIdx.x,n=blockDim.x;
     #pragma unroll
