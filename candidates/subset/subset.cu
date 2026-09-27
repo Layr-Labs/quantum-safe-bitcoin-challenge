@@ -9,3 +9,6 @@
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
 #include "tests/gpu_epochs/tree.cu"
+
+
+// Yukon reuse package v1; original inventory SHA-256: 9580f0a43aeb809461edc4c4c2cfcdd6945b203166bba2c599a1692303148ce4
