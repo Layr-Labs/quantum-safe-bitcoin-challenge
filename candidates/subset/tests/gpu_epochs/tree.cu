@@ -5022,9 +5022,9 @@ int main(int argc, char **argv) {
         }
 #ifdef QSB_HP_ON
         qhp::shutdown();
-        { uint64_t hb, fb; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin);
-          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d\n",
-                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin); }
+        { uint64_t hb, fb, hc; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin, &hc);
+          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d; helper chunks %llu\n",
+                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin, (unsigned long long)hc); }
 #endif
         g_stop_polled = 0;
 #else
