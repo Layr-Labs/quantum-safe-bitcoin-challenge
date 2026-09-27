@@ -577,6 +577,22 @@ __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
     qsb_st_u64(p, a);
 #endif
 }
+/* i34-9: pair adjacent state words, retaining the promoted cache policy. */
+__device__ __forceinline__ void qsb_st_state_v2(ulonglong2 *p, uint64_t a, uint64_t b) {
+#if (QSB_L2STATE & 8) && QSB_SM80_PTX
+    /* QSB_L2STATE bit 8 on the 16-byte form: the same L2::evict_last cache policy as
+     * qsb_st_state_u64, same bytes, same address. */
+    uint64_t pol;
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.L2::cache_hint.v2.u64 [g], {%1,%2}, %3; }"
+                 :: "l"(p), "l"(a), "l"(b), "l"(pol) : "memory");
+#elif QSB_L2STATE & 1
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(a), "l"(b) : "memory");
+#else
+    qsb_st_v2(p, a, b);
+#endif
+}
 __device__ __forceinline__ void qsb_discard_l2(const void *p) {
 #if (QSB_L2STATE & (2|1024)) && QSB_SM80_PTX
     asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; discard.global.L2 [g], 128; }"
@@ -3528,11 +3544,10 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
 /* The state stores of qsb_packed_prepare (QSB_PREP_STATE == 2): same bytes, same addresses. */
 __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *vbar, const uint64_t *tbar) {
     ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
-    uint64_t *sw=(uint64_t *)st;
-    qsb_st_state_u64(sw,vbar[0]); qsb_st_state_u64(sw+1,vbar[1]);
-    qsb_st_state_u64(sw+2*QSB_TREE_N,vbar[2]); qsb_st_state_u64(sw+2*QSB_TREE_N+1,vbar[3]);
-    qsb_st_state_u64(sw+4*QSB_TREE_N,tbar[0]); qsb_st_state_u64(sw+4*QSB_TREE_N+1,tbar[1]);
-    qsb_st_state_u64(sw+6*QSB_TREE_N,tbar[2]); qsb_st_state_u64(sw+6*QSB_TREE_N+1,tbar[3]);
+    qsb_st_state_v2(st,vbar[0],vbar[1]);
+    qsb_st_state_v2(st+QSB_TREE_N,vbar[2],vbar[3]);
+    qsb_st_state_v2(st+2*QSB_TREE_N,tbar[0],tbar[1]);
+    qsb_st_state_v2(st+3*QSB_TREE_N,tbar[2],tbar[3]);
 }
 #if QSB_POST_GLUE & 4
 /* QSB_POST_GLUE bit 4: an unusable lane (W == 0, or inactive) also enters the tree with U = 0.
