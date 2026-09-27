@@ -3849,6 +3849,13 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
              * sliver of persisting lines (and is read evict-first). */
             if (want > (size_t)GT_DENSE_ENTRIES * 64u) want = (size_t)GT_DENSE_ENTRIES * 64u;
 #endif
+            // Independent host-policy experiment from public cd33f1b6 notes.
+            // This bounds the address window, not the device's persisting set-aside.
+#ifndef QSB_TABLE_L2_WINDOW_MIB
+#define QSB_TABLE_L2_WINDOW_MIB 24
+#endif
+            if (QSB_TABLE_L2_WINDOW_MIB > 0 && want > (size_t)QSB_TABLE_L2_WINDOW_MIB * 1048576u)
+                want = (size_t)QSB_TABLE_L2_WINDOW_MIB * 1048576u;
             if (want > limit) want = limit;
             if (want > (size_t)max_window) want = (size_t)max_window;
         }
