@@ -4125,6 +4125,8 @@ static decltype(&cuDeviceGetDevResource) qsb_cuDeviceGetDevResource;
 static decltype(&cuDevSmResourceSplitByCount) qsb_cuDevSmResourceSplitByCount;
 static decltype(&cuDevResourceGenerateDesc) qsb_cuDevResourceGenerateDesc;
 static decltype(&cuGreenCtxCreate) qsb_cuGreenCtxCreate;
+static decltype(&cuCtxFromGreenCtx) qsb_cuCtxFromGreenCtx;
+static CUcontext qsb_graph_ctxA = nullptr, qsb_graph_ctxB = nullptr;
 static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
@@ -4161,6 +4163,16 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
     if (qsb_cuDevResourceGenerateDesc(&dA, partA, na) != CUDA_SUCCESS) return 0;
     if (qsb_cuGreenCtxCreate(&gA, dA, (CUdevice)dev, CU_GREEN_CTX_DEFAULT_STREAM) != CUDA_SUCCESS) return 0;
     if (qsb_cuGreenCtxCreate(&gB, dB, (CUdevice)dev, CU_GREEN_CTX_DEFAULT_STREAM) != CUDA_SUCCESS) return 0;
+    {   /* Optional graph support must not disable the promoted green stream path. */
+        cudaDriverEntryPointQueryResult qr;
+        if (cudaGetDriverEntryPoint("cuCtxFromGreenCtx",(void**)&qsb_cuCtxFromGreenCtx,
+                                    cudaEnableDefault,&qr)==cudaSuccess && qsb_cuCtxFromGreenCtx) {
+            if (qsb_cuCtxFromGreenCtx(&qsb_graph_ctxA,gA)!=CUDA_SUCCESS ||
+                qsb_cuCtxFromGreenCtx(&qsb_graph_ctxB,gB)!=CUDA_SUCCESS)
+                qsb_graph_ctxA=qsb_graph_ctxB=nullptr;
+        }
+        (void)cudaGetLastError();
+    }
     CUstream t;
     for (int i = 0; i < 2; i++) {
         if (qsb_cuGreenCtxStreamCreate(&t, gA, CU_STREAM_NON_BLOCKING, least) != CUDA_SUCCESS) return 0;
@@ -4200,6 +4212,7 @@ struct QsbSubPipe {
     unsigned long long g;
 };
 static QsbSubPipe g_qsb_sub = {};
+#include "QsbSubGraph.h"
 static void qsb_subpipe_die(const char *what, cudaError_t e) {
     fprintf(stderr, "Sub-batch pipeline %s failed: %s\n", what, cudaGetErrorString(e));
     exit(2);
@@ -4322,6 +4335,23 @@ static void qsb_subpipe_launch(
         }
         const int blocks = (n + QSB_TREE_N - 1) / QSB_TREE_N;
         const int groups = (blocks + 255) / 256;
+#if QSB_GREEN && QSB_ROOT_FUSED
+        if (qsb_subgraph_available()) {
+            auto pa = std::make_tuple(d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+            auto fa = pa; std::get<21>(fa) = hit_base;
+            auto ra = std::make_tuple(P.roots[r],blocks);
+            if (qsb_subgraph_run(r,blocks,s0,pa,ra,fa)) {
+                P.s2 = P.s2b[P.g & 1ull];
+                e = cudaEventRecord(P.ev_s2[r],s0);
+                if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2,P.ev_s2[r],0);
+                if (e != cudaSuccess) qsb_subpipe_die("graph completion",e);
+                P.used[r] = 1; P.g++; continue;
+            }
+        }
+#endif
+
         if (qsb_carrier_has(QK_S0))
             qsb_carrier_launch(kernel_pinning_pipeline<true,0>,QK_S0,dim3(blocks),dim3(QSB_S0_THREADS),s0,
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
