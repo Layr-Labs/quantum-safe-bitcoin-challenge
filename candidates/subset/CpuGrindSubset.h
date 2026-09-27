@@ -67,7 +67,10 @@
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 4096
+#ifndef QSB_CPU_FOLD9
+#define QSB_CPU_FOLD9 1            /* fe8_red: column 9 folded without a split (a single high partial product) */
+#endif
+#define QSB_CPU_BATCH 1024   /* L2-sized batches (after terrapinelf's 97f347a8): both SMT threads' EC state fits the 1 MB L2 */
 #endif
 /* Wide host table: z*A takes L lookups of signed ~257/L-bit digits (L-1 batch-affine additions).
  * The fewest lookups whose table fits the memory budget are chosen at start-up; 16 windows (34 MiB)
@@ -169,6 +172,146 @@ static void fe_inv(fe &r, const fe &a) {               /* a^(p-2) */
     }
     r = acc;
 }
+#ifndef QSB_CPU_SCALAR_INV
+#define QSB_CPU_SCALAR_INV 1       /* batch inversions: one scalar safegcd inverse instead of 255 vector squarings */
+#endif
+#if QSB_CPU_SCALAR_INV
+/* ---- Variable-time scalar inverse mod p for the batch inversions: Bernstein-Yang "safegcd" divsteps in
+ * 62-bit batches, after libsecp256k1's secp256k1_modinv64_var (MIT; notice in COPYING-secp256k1), as ported by
+ * terrapinelf in 97f347a8. It runs on the integer pipes, so the inversion no longer occupies the vector pipes
+ * with 255 dependent squarings. */
+struct s62 { int64_t v[5]; };                         /* signed, 62-bit limbs (the top one carries the sign) */
+struct trans2x2 { int64_t u, v, q, r; };
+static const s62 S62_P = {{-0x1000003D1LL, 0, 0, 0, 256}};   /* p = 2^256 - 0x1000003D1 */
+static const uint64_t S62_PINV = 0x27C7F6E22DDACACFULL;      /* p^-1 mod 2^62 */
+/* 62 divsteps on the low limbs (f0, g0) of (f, g); the transition matrix t and the new eta. */
+static inline int64_t divsteps_62_var(int64_t eta, uint64_t f0, uint64_t g0, trans2x2 *t) {
+    uint64_t u = 1, v = 0, q = 0, r = 1, f = f0, g = g0, m; uint32_t w; int i = 62, limit, zeros;
+    for (;;) {
+        zeros = __builtin_ctzll(g | (~0ULL << i));    /* a sentinel bit counts zeros only up to i */
+        g >>= zeros; u <<= zeros; v <<= zeros; eta -= zeros; i -= zeros;
+        if (i == 0) break;
+        if (eta < 0) {
+            uint64_t tmp;
+            eta = -eta;
+            tmp = f; f = g; g = -tmp;
+            tmp = u; u = q; q = -tmp;
+            tmp = v; v = r; r = -tmp;
+            limit = ((int)eta + 1) > i ? i : ((int)eta + 1);
+            m = (~0ULL >> (64 - limit)) & 63U;
+            w = (uint32_t)((f * g * (f * f - 2)) & m);   /* -g/f mod 2^6 (f odd: f*(2-f^2) = f^-1 mod 64) */
+        } else {
+            limit = ((int)eta + 1) > i ? i : ((int)eta + 1);
+            m = (~0ULL >> (64 - limit)) & 15U;
+            w = (uint32_t)(f + (((f + 1) & 4) << 1));      /* f^-1 mod 16 */
+            w = (uint32_t)((-(uint64_t)w * g) & m);
+        }
+        g += f * w; q += u * w; r += v * w;
+    }
+    t->u = (int64_t)u; t->v = (int64_t)v; t->q = (int64_t)q; t->r = (int64_t)r;
+    return eta;
+}
+/* (d, e) = t * (d, e) / 2^62 mod p, keeping them in (-2p, p) */
+static inline void update_de_62(s62 *d, s62 *e, const trans2x2 *t) {
+    const uint64_t M62 = ~0ULL >> 2;
+    const int64_t d0 = d->v[0], d1 = d->v[1], d2 = d->v[2], d3 = d->v[3], d4 = d->v[4];
+    const int64_t e0 = e->v[0], e1 = e->v[1], e2 = e->v[2], e3 = e->v[3], e4 = e->v[4];
+    const int64_t u = t->u, v = t->v, q = t->q, r = t->r;
+    int64_t md, me, sd, se; __int128 cd, ce;
+    sd = d4 >> 63; se = e4 >> 63;
+    md = (u & sd) + (v & se);
+    me = (q & sd) + (r & se);
+    cd = (__int128)u * d0 + (__int128)v * e0;
+    ce = (__int128)q * d0 + (__int128)r * e0;
+    md -= (int64_t)((S62_PINV * (uint64_t)cd + (uint64_t)md) & M62);
+    me -= (int64_t)((S62_PINV * (uint64_t)ce + (uint64_t)me) & M62);
+    cd += (__int128)S62_P.v[0] * md;
+    ce += (__int128)S62_P.v[0] * me;
+    cd >>= 62; ce >>= 62;                             /* the low 62 bits are zero by construction */
+    cd += (__int128)u * d1 + (__int128)v * e1;
+    ce += (__int128)q * d1 + (__int128)r * e1;
+    d->v[0] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    e->v[0] = (int64_t)((uint64_t)(int64_t)ce & M62); ce >>= 62;
+    cd += (__int128)u * d2 + (__int128)v * e2;
+    ce += (__int128)q * d2 + (__int128)r * e2;
+    d->v[1] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    e->v[1] = (int64_t)((uint64_t)(int64_t)ce & M62); ce >>= 62;
+    cd += (__int128)u * d3 + (__int128)v * e3;
+    ce += (__int128)q * d3 + (__int128)r * e3;
+    d->v[2] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    e->v[2] = (int64_t)((uint64_t)(int64_t)ce & M62); ce >>= 62;
+    cd += (__int128)u * d4 + (__int128)v * e4;
+    ce += (__int128)q * d4 + (__int128)r * e4;
+    cd += (__int128)S62_P.v[4] * md;                  /* p's limbs 1..3 are zero */
+    ce += (__int128)S62_P.v[4] * me;
+    d->v[3] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    e->v[3] = (int64_t)((uint64_t)(int64_t)ce & M62); ce >>= 62;
+    d->v[4] = (int64_t)cd;
+    e->v[4] = (int64_t)ce;
+}
+/* (f, g) = t * (f, g) / 2^62 over the low len limbs */
+static inline void update_fg_62_var(int len, s62 *f, s62 *g, const trans2x2 *t) {
+    const uint64_t M62 = ~0ULL >> 2;
+    const int64_t u = t->u, v = t->v, q = t->q, r = t->r;
+    int64_t fi = f->v[0], gi = g->v[0];
+    __int128 cf = (__int128)u * fi + (__int128)v * gi;
+    __int128 cg = (__int128)q * fi + (__int128)r * gi;
+    cf >>= 62; cg >>= 62;
+    for (int i = 1; i < len; ++i) {
+        fi = f->v[i]; gi = g->v[i];
+        cf += (__int128)u * fi + (__int128)v * gi;
+        cg += (__int128)q * fi + (__int128)r * gi;
+        f->v[i - 1] = (int64_t)((uint64_t)(int64_t)cf & M62); cf >>= 62;
+        g->v[i - 1] = (int64_t)((uint64_t)(int64_t)cg & M62); cg >>= 62;
+    }
+    f->v[len - 1] = (int64_t)cf;
+    g->v[len - 1] = (int64_t)cg;
+}
+/* r in (-2p, p) -> [0, p), negated first when sign < 0 */
+static inline void normalize_62(s62 *r, int64_t sign) {
+    const int64_t M62 = (int64_t)(~0ULL >> 2);
+    int64_t r0 = r->v[0], r1 = r->v[1], r2 = r->v[2], r3 = r->v[3], r4 = r->v[4];
+    int64_t cond_add = r4 >> 63;
+    r0 += S62_P.v[0] & cond_add; r4 += S62_P.v[4] & cond_add;
+    const int64_t cond_negate = sign >> 63;
+    r0 = (r0 ^ cond_negate) - cond_negate; r1 = (r1 ^ cond_negate) - cond_negate; r2 = (r2 ^ cond_negate) - cond_negate;
+    r3 = (r3 ^ cond_negate) - cond_negate; r4 = (r4 ^ cond_negate) - cond_negate;
+    r1 += r0 >> 62; r0 &= M62; r2 += r1 >> 62; r1 &= M62; r3 += r2 >> 62; r2 &= M62; r4 += r3 >> 62; r3 &= M62;
+    cond_add = r4 >> 63;
+    r0 += S62_P.v[0] & cond_add; r4 += S62_P.v[4] & cond_add;
+    r1 += r0 >> 62; r0 &= M62; r2 += r1 >> 62; r1 &= M62; r3 += r2 >> 62; r2 &= M62; r4 += r3 >> 62; r3 &= M62;
+    r->v[0] = r0; r->v[1] = r1; r->v[2] = r2; r->v[3] = r3; r->v[4] = r4;
+}
+/* x = x^-1 mod p for x in [0, p) (0 -> 0); false if the divstep loop did not settle within 24 batches. */
+static bool modinv_var(s62 *x) {
+    s62 d = {{0, 0, 0, 0, 0}}, e = {{1, 0, 0, 0, 0}}, f = S62_P, g = *x;
+    int len = 5; int64_t eta = -1;
+    for (int it = 0; it < 24; it++) {
+        trans2x2 t;
+        eta = divsteps_62_var(eta, (uint64_t)f.v[0], (uint64_t)g.v[0], &t);
+        update_de_62(&d, &e, &t);
+        update_fg_62_var(len, &f, &g, &t);
+        if (g.v[0] == 0) {
+            int64_t cond = 0; for (int j = 1; j < len; ++j) cond |= g.v[j];
+            if (cond == 0) { normalize_62(&d, f.v[len - 1]); *x = d; return true; }
+        }
+        const int64_t fn = f.v[len - 1], gn = g.v[len - 1];
+        int64_t cond = ((int64_t)len - 2) >> 63; cond |= fn ^ (fn >> 63); cond |= gn ^ (gn >> 63);
+        if (cond == 0) { f.v[len - 2] |= (int64_t)((uint64_t)fn << 62); g.v[len - 2] |= (int64_t)((uint64_t)gn << 62); --len; }
+    }
+    return false;
+}
+/* r = a^-1 (canonical a; 0 -> 0), canonical. Falls back to the Fermat inversion if the loop did not settle. */
+static void fe_inv_var(fe &r, const fe &a) {
+    const uint64_t M = ~0ULL >> 2; s62 x;
+    x.v[0] = (int64_t)(a.v[0] & M); x.v[1] = (int64_t)((a.v[0] >> 62 | a.v[1] << 2) & M);
+    x.v[2] = (int64_t)((a.v[1] >> 60 | a.v[2] << 4) & M); x.v[3] = (int64_t)((a.v[2] >> 58 | a.v[3] << 6) & M);
+    x.v[4] = (int64_t)(a.v[3] >> 56);
+    if (!modinv_var(&x)) { fe_inv(r, a); return; }
+    r.v[0] = (uint64_t)x.v[0] | (uint64_t)x.v[1] << 62; r.v[1] = (uint64_t)x.v[1] >> 2 | (uint64_t)x.v[2] << 60;
+    r.v[2] = (uint64_t)x.v[2] >> 4 | (uint64_t)x.v[3] << 58; r.v[3] = (uint64_t)x.v[3] >> 6 | (uint64_t)x.v[4] << 56;
+}
+#endif
 static void fe_from_le32(fe &r, const uint8_t b[32]) {
     for (int i = 0; i < 4; i++) { uint64_t w = 0; for (int k = 7; k >= 0; k--) w = (w << 8) | b[i * 8 + k]; r.v[i] = w; }
 }
@@ -458,18 +601,28 @@ void fe8_red(fe8 &r, __m512i c0, __m512i c1, __m512i c2, __m512i c3, __m512i c4,
 #define HI(acc, x, y) acc = _mm512_madd52hi_epu64(acc, x, y)
     const __m512i M = F8_M52, M48 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL);
     const __m512i R = _mm512_set1_epi64(0x1000003D10ULL), K = _mm512_set1_epi64(0x1000003D1ULL);
+#if QSB_CPU_FOLD9
+    /* Column 9 is a single high partial product (< 2^52: IFMA reads 52 bits of each factor), at 2^468 = R * 2^208:
+     * lo(c9*R) goes into column 4 and hi(c9*R) (< 2^37) into column 5 before column 5 is split (h5 < 2^4 still),
+     * so column 9 needs no split and no second fold (after terrapinelf's QSB_CPU_FOLD3 in 18c9afa8). 15 IFMA. */
+    HI(c5, c9, R); LO(c4, c9, R);
+#endif
     const __m512i l5 = _mm512_and_si512(c5, M), h5 = _mm512_srli_epi64(c5, 52);
     const __m512i l6 = _mm512_and_si512(c6, M), h6 = _mm512_srli_epi64(c6, 52);
     const __m512i l7 = _mm512_and_si512(c7, M), h7 = _mm512_srli_epi64(c7, 52);
     const __m512i l8 = _mm512_and_si512(c8, M), h8 = _mm512_srli_epi64(c8, 52);
+#if !QSB_CPU_FOLD9
     const __m512i l9 = _mm512_and_si512(c9, M), h9 = _mm512_srli_epi64(c9, 52);
+#endif
     LO(c0, l5, R); HI(c1, l5, R); LO(c1, h5, R);
     LO(c1, l6, R); HI(c2, l6, R); LO(c2, h6, R);
     LO(c2, l7, R); HI(c3, l7, R); LO(c3, h7, R);
     LO(c3, l8, R); HI(c4, l8, R); LO(c4, h8, R);
+#if !QSB_CPU_FOLD9
     LO(c4, l9, R);
     __m512i t5 = _mm512_setzero_si512(); HI(t5, l9, R); LO(t5, h9, R);   /* weight 2^260, < 2^42 */
     LO(c0, t5, R); HI(c1, t5, R);
+#endif
     const __m512i x = _mm512_srli_epi64(c4, 48); c4 = _mm512_and_si512(c4, M48);   /* bits >= 2^256 */
     LO(c0, x, K);
     __m512i t;
@@ -698,13 +851,37 @@ Q8T static void fe8_inv1(fe8 &x) {
     SQN(t, t, 2); fe8_mul(x, t, x);
 #undef SQN
 }
+#if QSB_CPU_SCALAR_INV
+/* x = x^-1 lane-wise: Montgomery's trick across the 8 lanes (a 3-level tree of permuted multiplications:
+ * 3 to combine, 3 to split), one scalar inversion of the lanes' product. A zero lane zeroes every lane's
+ * result, as the Fermat inversion did (x-collisions, probability 2^-240; the exact gate absorbs them). */
+Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
+Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
+Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
+Q8T static void fe8_inv_lanes(fe8 &x) {
+    fe8 a1, p1, p2, t, i2;
+    fe8_swap1(a1, x); fe8_mul(p1, x, a1);                 /* lanes 2k, 2k+1: a_2k * a_2k+1 */
+    fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
+    fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
+    alignas(64) uint64_t w[4][8]; { __m512i cw[4]; fe8_canon_words(cw, t); for (int q = 0; q < 4; q++) _mm512_store_si512(w[q], cw[q]); }
+    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    fe8 I; fe8_bcast(I, pi);
+    fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
+    fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
+    fe8_mul(x, i2, a1);                                   /* 1/a_k */
+}
+#endif
 /* Invert the 4 interleaved chain products with ONE exponentiation (Montgomery's trick across the
  * chains: 3 + 6 extra multiplications). The chain is latency-bound either way, so this replaces
  * 4 x 270 multiplications of issue slots by 279. */
 Q8T static void fe8_inv4(fe8 *x) {
     fe8 a01, a23, a, i01, i23;
     fe8_mul(a01, x[0], x[1]); fe8_mul(a23, x[2], x[3]); fe8_mul(a, a01, a23);
+#if QSB_CPU_SCALAR_INV
+    fe8_inv_lanes(a);
+#else
     fe8_inv1(a);
+#endif
     fe8_mul(i01, a, a23); fe8_mul(i23, a, a01);
     const fe8 x0 = x[0], x2 = x[2];
     fe8_mul(x[0], i01, x[1]); fe8_mul(x[1], i01, x0);
@@ -1095,6 +1272,8 @@ struct Ctx {
     cpu_set_t host_mask;            /* the GPU host thread's affinity, read when the workers are placed */
     bool host_mask_ok = false;
     pid_t host_tid = 0;             /* the GPU host thread (start() runs on it) */
+    int host_cpu = -1;              /* its CPU at start() when the host producers pinned it to one core (then the core's
+                                     * other CPU gets one more worker, after ercumentyildirim's 9f8a33d8), else -1 */
 #endif
     size_t budget = 0;              /* table memory budget chosen at start-up */
     fe cx, cy;                      /* C = u2*R */
@@ -2368,9 +2547,14 @@ static void smt_plan(Ctx *c, int nth) {
         for (int i = 0; i < (int)cores.size() && rsv < 0; i++) for (int x : cores[i]) if (CPU_ISSET(x, &host)) { rsv = i; break; }
     for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
     if (rsv < 0 || cores.size() < 2) return;
-    c->mask0 = cs;                                      /* unpinned workers: every CPU but the reserved core */
-    for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
+    int extra = -1;                                     /* the host core's other CPU, when start() planned a worker for it */
+    if (host_pinned && c->host_cpu >= 0 && CPU_ISSET(c->host_cpu, &host))
+        for (int x : cores[rsv]) if (x != c->host_cpu && CPU_ISSET(x, &host)) { extra = x; break; }
+    c->mask0 = cs;                                      /* unpinned workers: every CPU but the reserved core (or but the host CPU) */
+    if (extra >= 0) CPU_CLR(c->host_cpu, &c->mask0);
+    else for (int x : cores[rsv]) CPU_CLR(x, &c->mask0);
     int t = 0; bool pair = false;
+    if (extra >= 0 && t < nth) { c->wcpu[t] = extra; c->wscalar[t] = 0; t++; }   /* IFMA: its sibling is the spinning host thread */
     for (int i = 0; i < (int)cores.size() && t < nth; i++) {
         if (i == rsv) continue;
         for (size_t k = 0; k < cores[i].size() && t < nth; k++) { c->wcpu[t] = cores[i][k]; c->wscalar[t] = k == 1; pair |= k == 1; t++; }
@@ -2420,9 +2604,22 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #else
     int nth = (int)ncpu - QSB_CPU_RESERVE;
 #endif
-    if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
+    int host_cpu = -1;
+#ifdef CPU_SET
+    {   /* The host producers pin this (GPU host) thread to one core before start(). It spins on one CPU of that core;
+         * the other CPU gets one more worker (placed there by smt_plan), instead of staying idle. */
+        cpu_set_t cur; CPU_ZERO(&cur); __builtin_cpu_init();
+        if (g_mask0_ok && sched_getaffinity(0, sizeof cur, &cur) == 0 && CPU_COUNT(&cur) == 2 && CPU_COUNT(&g_mask0) > 2 &&
+            nth == (int)CPU_COUNT(&g_mask0) - QSB_CPU_RESERVE && !getenv("QSB_CPU_NOEXTRA") && !getenv("QSB_CPU_NOPIN") &&
+            __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma") && !getenv("QSB_CPU_NOVEC")) {   /* only smt_plan places it */
+            const int cpu = sched_getcpu();
+            if (cpu >= 0 && CPU_ISSET(cpu, &cur)) { host_cpu = cpu; nth += 1; }
+        }
+    }
+#endif
+    if (const char *e = getenv("QSB_CPU_THREADS_ENV")) { nth = atoi(e); host_cpu = -1; }   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
-    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early;
+    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early; c->host_cpu = host_cpu;
 #ifdef CPU_SET
     c->host_tid = (pid_t)syscall(SYS_gettid);           /* start() runs on the GPU host thread */
 #endif
