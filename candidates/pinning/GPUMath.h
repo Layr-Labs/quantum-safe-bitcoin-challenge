@@ -185,6 +185,19 @@
 #if QSB_CARRY_GLUE && !(QSB_C31 && QSB_SHORT_CARRY && QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL)
 #error "QSB_CARRY_GLUE is written for C31 + SHORT_CARRY + SAS_SPLIT3P + SAS_Z9SUB_ALL"
 #endif
+/* _ModSqrAddSub2's second fold can add the carry from z8*977 directly into
+ * z2 before unpacking the low product.  The following add of sfh then adds
+ * its own carry into the same word.  This is the same two carry bits as the
+ * reference form, but avoids keeping the first one in a separate register. */
+#ifndef QSB_SAS2_GLUE
+#define QSB_SAS2_GLUE 1
+#endif
+#if QSB_SAS2_GLUE != 0 && QSB_SAS2_GLUE != 1
+#error "QSB_SAS2_GLUE must be 0 or 1"
+#endif
+#if QSB_SAS2_GLUE && !(QSB_C31 && QSB_SHORT_CARRY && QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL)
+#error "QSB_SAS2_GLUE needs the C31 short-carry SAS split/fold form"
+#endif
 #ifndef QSB_MUL_FOLD8_CUT
 #define QSB_MUL_FOLD8_CUT 1
 #endif
@@ -2009,7 +2022,11 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z3, z3, 0; subc.u32 z4, z4, " QZ ";\n"
 #endif
 #endif
+#if QSB_SAS2_GLUE
+        "\t{ .reg .u64 sfz, sft; .reg .u32 sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\naddc.u32 z2, z2, 0;\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, 0; }\n\n"
+#else
         "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\n" QSB_SAS_SFC "\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, sfc; }\n\n"
+#endif
 #if QSB_SHORT_CARRY
         QSB_SECOND_FOLD_TAIL
 #else
