@@ -3258,8 +3258,9 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
             #pragma unroll
             for(int j=0;j<5;j++)acc[j]=r[j];
         } else if(a) {
-            #pragma unroll
-            for(int j=0;j<4;j++)roots[((size_t)count+i)*4u+j]=acc[j];     /* park P_{k-1} */
+            uint64_t *park_out=roots+((size_t)count+i)*4u;
+            qsb_st_v2((ulonglong2*)park_out,acc[0],acc[1]);     /* park P_{k-1} */
+            qsb_st_v2((ulonglong2*)(park_out+2),acc[2],acc[3]);
             uint64_t t[5];
             acc[4]=0;
             QSB_RF_MUL(t,acc,r);
