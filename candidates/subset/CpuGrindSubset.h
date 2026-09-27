@@ -59,11 +59,21 @@
  * and evicted the backward pass's own lines; the forward pass still pulls its rows into L1 QSB_CPU_PFD groups ahead. Same candidates,
  * gate and records.
  *
- * 2026-09-27 (package y2d): this engine (terrapinelf's 2d1631b0, with jacklightChen's weighted-prefix idea from 55757d4d) at the
- * thread footprint of Meganpark980320's 296e5e53 co-grinder: ncpu - QSB_CPU_RESERVE workers, none on the GPU host thread's core
- * or its SMT sibling, the tree's own host producers unchanged. 2d1631b0's footprint items are switches below, each off by default
- * (QSB_CPU_HP_SHARE, QSB_CPU_NTH_RAISE, QSB_CPU_RSV_CORE=0); QSB_CPU_DIAG_EPOCH (its walk-start diagnostic) is off as well, so the
- * walk starts at epoch 0. Same candidates, gate and records. */
+ * 2026-09-26 (r9): the first SHA-256's tail blocks (every block after the per-pattern one holds the same bytes for all candidates) load
+ * each W+K pair once for the four lanes (QSB_CPU_X4PS: 2 loads per round pair instead of 8). The key hashes and the second SHA-256 skip
+ * the message-schedule steps that are identities for their padding (W9..W14 = 0: step r = 4 has no W[t-7] term, step r = 6's
+ * sha256msg1 returns its first operand), and the second SHA-256 takes its padding words as constants (QSB_CPU_SHC): fewer sha256msg1
+ * ops, which on Zen 4 issue to the pipes the lane's IFMA multiplications use. Same candidates, gate and records.
+ *
+ * 2026-09-27 (w9): a 9-window table (114,688 MiB, signed digits of 29/28/27 bits: 8 additions per candidate instead of 9) when the
+ * process sees >= 235.5 GiB (table <= 0.50 x (avail - 11.5 GiB), QSB_CPU_TAB9_FRAC; was 0.40 / 291.5 GiB until the 09-27 composite,
+ * aligned with the rule of ercumentyildirim's bfe57794 / a141df2b, whose 9-window table fired on the ranked host) and >= 95 % of it gets transparent huge pages
+ * (a 1/32 sample, then all 57,344 regions; the sample's first touch must also project below QSB_CPU_TOUCH9_MAX_S); else the 10-window
+ * rule, then 11, then 12 as before. An mmap failure, a failed huge-page check, a slow first touch, or a failed build/table check at 9
+ * goes to 10 (and a failed one at 10 to 11). The C fold of the top window now runs in place, chunk by chunk, after a scan for an entry
+ * with C's x (the old window-sized copy would be 8 GiB at 9 windows). Diagnostic walk start: 9 windows = geometry 3 with the
+ * huge-page flag and bit 28 (both impossible together before); bit 19 = the 9-window rule held but 9 windows were dropped. Same
+ * candidates, gate and records. */
 #include <openssl/sha.h>
 #include <openssl/bn.h>
 #include <openssl/ec.h>
@@ -134,7 +144,11 @@
  * QSB_CPU_TRY10: 10 windows (17,408 MiB) under the same rule as 11 (table <= QSB_CPU_TAB_FRAC x (avail -
  * QSB_CPU_TAB_RESERVE_MB), i.e. avail >= 79.5 GiB, at most QSB_CPU_TAB10_CAP_MB) and the same huge-page guard (a 272-region
  * sample, then all 8,704 regions); else the 11-window rule, then 12. An mmap failure at 10 goes to 11, and so does a
- * failed table check of the built 10-window table. */
+ * failed table check of the built 10-window table.
+ * QSB_CPU_TRY9: 9 windows (114,688 MiB) when the table <= QSB_CPU_TAB9_FRAC x (avail - QSB_CPU_TAB_RESERVE_MB), i.e. avail >= 235.5 GiB
+ * (after it the process still leaves >= 50 % of what it saw), at most QSB_CPU_TAB9_CAP_MB, with the same huge-page guard (a 1,792-region
+ * sample, then all 57,344) and the sample's first touch projecting (x 32) at most QSB_CPU_TOUCH9_MAX_S seconds; else the 10-window rule
+ * (which the 9-window one implies). An mmap failure or a failed build/table check at 9 goes to 10. */
 #ifndef QSB_CPU_NW_MIN
 #define QSB_CPU_NW_MIN 12
 #endif
@@ -146,6 +160,18 @@
 #endif
 #ifndef QSB_CPU_TAB10_CAP_MB
 #define QSB_CPU_TAB10_CAP_MB 20480
+#endif
+#ifndef QSB_CPU_TRY9
+#define QSB_CPU_TRY9 1
+#endif
+#ifndef QSB_CPU_TAB9_FRAC
+#define QSB_CPU_TAB9_FRAC 0.50
+#endif
+#ifndef QSB_CPU_TAB9_CAP_MB
+#define QSB_CPU_TAB9_CAP_MB 117760
+#endif
+#ifndef QSB_CPU_TOUCH9_MAX_S
+#define QSB_CPU_TOUCH9_MAX_S 20.0
 #endif
 #ifndef QSB_CPU_FALL13
 #define QSB_CPU_FALL13 0
@@ -172,7 +198,7 @@
 #define QSB_CPU_PFD1 8             /* prefetch distance of the first window's loop (window 0 loads), in groups */
 #endif
 #ifndef QSB_CPU_PFD
-#define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
+#define QSB_CPU_PFD 8              /* table-row prefetch distance, in groups of 8 candidates */
 #endif
 #ifndef QSB_CPU_HPF
 #define QSB_CPU_HPF 2              /* 8-lane path: rows of windows 0 (and 1 with 2) prefetched from the hashing phase as each z is computed */
@@ -193,28 +219,14 @@
 #define QSB_CPU_PFNX 1             /* next window's rows (backward-pass prefetch) into L2 (prefetcht1) instead of L1 (prefetcht0) */
 #endif
 #define QCPU_NXT_HINT (QSB_CPU_PFNX ? _MM_HINT_T1 : _MM_HINT_T0)
+#ifndef QSB_CPU_X4PS
+#define QSB_CPU_X4PS 1             /* qsha_x4p: one load of a block's W+K words for all four lanes when they hash the same fixed block */
+#endif
+#ifndef QSB_CPU_SHC
+#define QSB_CPU_SHC 1              /* key hashes and second SHA-256: schedule steps of the constant padding words skipped (identities) */
+#endif
 #ifndef QSB_CPU_F1N
 #define QSB_CPU_F1N (QSB_CPU_HPF < 2)   /* ec8_first prefetches window 1's rows (unless the hashing phase did) */
-#endif
-/* Footprint switches (package y2d). The defaults live here, at file scope and outside every conditional block, so the nvcc
- * device pass (which parses start() with QCPU_VEC and QCPU_SHANI at 0) and the host pass both see them. */
-#ifndef QSB_CPU_HP_SHARE
-#define QSB_CPU_HP_SHARE 0         /* 1 (2d1631b0): the GPU host thread's own CPU also hosts a worker when the host producers publish
-                                    * qhp::g_share_cpu (2d1631b0's host_producers.h with blocking event waits; this tree's producers have
-                                    * no such symbol). 0: no worker there, as 296e5e53 */
-#endif
-#ifndef QSB_CPU_NTH_RAISE
-#define QSB_CPU_NTH_RAISE 0        /* 1 (2d1631b0): one worker per CPU the main thread left when that exceeds ncpu - QSB_CPU_RESERVE (32 of 32
-                                    * on the runner with 2d1631b0's producers). 0: ncpu - QSB_CPU_RESERVE workers, as 296e5e53 */
-#endif
-#ifndef QSB_CPU_RSV_CORE
-#define QSB_CPU_RSV_CORE 1         /* 1 (296e5e53's rule): the workers never run on the GPU host thread's core (both SMT siblings, from
-                                    * thread_siblings_list) when that thread is pinned at start(), else the last 2-thread core stays free.
-                                    * 0: 2d1631b0's rule (every CPU the main thread no longer uses; every CPU when it is not pinned) */
-#endif
-#ifndef QSB_CPU_DIAG_EPOCH
-#define QSB_CPU_DIAG_EPOCH 0       /* 1 (2d1631b0): the walk starts at a diagnostic code x 2^29 (geometry, huge pages, workers, memory);
-                                    * 0: at epoch 0, as 296e5e53. Enumeration only: disjoint from the GPU's candidates either way */
 #endif
 
 namespace qcpu {
@@ -1423,6 +1435,20 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
         __m128i I0[4], I1[4];
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { I0[l] = S0[l]; I1[l] = S1[l]; }
+        if (QSB_CPU_X4PS && w[0] == w[1] && w[0] == w[2] && w[0] == w[3]) {   /* the same fixed block in all four lanes (the tail
+                                                                                blocks): each W+K pair is loaded once, into xmm0, for four rounds */
+            const uint32_t *ws = w[0];
+            __asm__("" : "+r"(ws));                     /* opaque copy: keeps the compiler from hoisting (and spilling) lane 0's loads */
+#pragma GCC unroll 16
+            for (int r = 0; r < 16; r++) {
+                const __m128i m0 = _mm_loadl_epi64((const __m128i *)(ws + 4 * r));
+#pragma GCC unroll 4
+                for (int l = 0; l < 4; l++) S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m0);
+                const __m128i m1 = _mm_loadl_epi64((const __m128i *)(ws + 4 * r + 2));
+#pragma GCC unroll 4
+                for (int l = 0; l < 4; l++) S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m1);
+            }
+        } else {
 #pragma GCC unroll 16
         for (int r = 0; r < 16; r++) {
 #pragma GCC unroll 4
@@ -1430,6 +1456,7 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
                 S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
                 S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
             }
+        }
         }
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { S0[l] = _mm_add_epi32(S0[l], I0[l]); S1[l] = _mm_add_epi32(S1[l], I1[l]); }
@@ -1527,6 +1554,51 @@ QSHA static inline void qsha_xw_iv(uint32_t (*st)[8], const uint32_t (*wd)[16]) 
 QSHA static void qsha_x4w_iv(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
     qsha_xw_iv<2>(st, wd); qsha_xw_iv<2>(st + 2, wd + 2);
 }
+#if QSB_CPU_SHC
+/* qsha_xw_iv for a 32-byte message (the second SHA-256): only words 0..7 are read from wd; the padding words W8 = 0x80000000,
+ * W9..W14 = 0, W15 = 256 are constants, r = 4's W[t-7] term (W9..W12) is zero and r = 6's sha256msg1(W8..11, W12..15) is W8..11.
+ * The same round values as qsha_xw_iv with wd[l][8..15] set to that padding. */
+template <int L>
+QSHA static inline void qsha_xw_iv32(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+    const __m128i P2 = _mm_set_epi32(0, 0, 0, (int)0x80000000u), P3 = _mm_set_epi32(256, 0, 0, 0);
+    __m128i S0[L], S1[L], M[L][4];
+#pragma GCC unroll 4
+    for (int l = 0; l < L; l++) {
+        S0[l] = IV0; S1[l] = IV1;
+        M[l][0] = _mm_loadu_si128((const __m128i *)(wd[l] + 0)); M[l][1] = _mm_loadu_si128((const __m128i *)(wd[l] + 4));
+        M[l][2] = P2; M[l][3] = P3;
+    }
+#pragma GCC unroll 16
+    for (int r = 0; r < 16; r++) {
+        const __m128i K = _mm_load_si128((const __m128i *)&qsha_k[4 * r]);
+#pragma GCC unroll 4
+        for (int l = 0; l < L; l++) {
+            if (r >= 4) {
+                __m128i t = r == 6 ? M[l][2] : _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+                if (r != 4) t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
+                M[l][r & 3] = _mm_sha256msg2_epu32(t, M[l][(r + 3) & 3]);
+            }
+            __m128i m = _mm_add_epi32(M[l][r & 3], K);
+            S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m);
+            m = _mm_shuffle_epi32(m, 0x0E);
+            S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m);
+        }
+    }
+#pragma GCC unroll 4
+    for (int l = 0; l < L; l++) {
+        __m128i a = _mm_add_epi32(S0[l], IV0), b = _mm_add_epi32(S1[l], IV1);
+        __m128i t = _mm_shuffle_epi32(a, 0x1B);
+        b = _mm_shuffle_epi32(b, 0xB1);
+        _mm_storeu_si128((__m128i *)&st[l][0], _mm_blend_epi16(t, b, 0xF0));
+        _mm_storeu_si128((__m128i *)&st[l][4], _mm_alignr_epi8(b, t, 8));
+    }
+}
+QSHA static void qsha_x4w_iv32(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+    qsha_xw_iv32<2>(st, wd); qsha_xw_iv32<2>(st + 2, wd + 2);
+}
+#endif
 /* The key hashes need only h0, the prefilter's input: h0 of SHA-256(compressed key) for the 4 keys (x = qx[l], parity of y
  * = qp[l]) as one vector, lane l = key l. The message words (as native words: word k = key bytes 4k..4k+3 big-endian, key
  * byte 0 = 0x02 | parity, bytes 1..32 = x big-endian, then 0x80 and the 264-bit length in word 15) are built in registers
@@ -1556,8 +1628,9 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 #pragma GCC unroll 2
             for (int l = 0; l < 2; l++) {
                 if (r >= 4) {
-                    __m128i t = _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
-                    t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
+                    /* W9..W14 = 0: r = 4's W[t-7] words (W9..W12) are zero, r = 6's msg1(W8..11, W12..15) = W8..11 */
+                    __m128i t = (QSB_CPU_SHC && r == 6) ? M[l][2] : _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+                    if (!(QSB_CPU_SHC && r == 4)) t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
                     M[l][r & 3] = _mm_sha256msg2_epu32(t, M[l][(r + 3) & 3]);
                 }
                 __m128i m = _mm_add_epi32(M[l][r & 3], K);
@@ -1594,6 +1667,7 @@ struct Ctx {
     const pt *tw[NWMAX] = {nullptr};   /* first entry of window i */
     fe cx, cy;                      /* C = u2*R */
     bool cfold = false;             /* top window holds (j + 1) * B_top + C; mx, my = -2C (8-lane path) */
+    bool drop9 = false;             /* the 9-window rule held but 9 windows were dropped (diagnostic bit 19) */
     fe mx, my;
     uint8_t cwin[286][3];           /* CPU window patterns: the complement of the GPU's */
     int ncwin = 0;
@@ -1607,10 +1681,6 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
-#ifdef QSB_CPU_DEVBENCH
-    uint64_t dev_limit = 0;         /* dev only (never in a ranked build): each worker stops once this many candidates are done */
-    std::atomic<int> dev_live{0};
-#endif
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
 #if QCPU_SHANI
@@ -1691,7 +1761,7 @@ static pt pt_mul_small(const pt &q, uint64_t k) {      /* k * q, 1 <= k << n (no
 }
 /* Window i: T[j] = (j + 1) * B_i, B_i = 2^off[i] * A. The first S entries by doubling rounds; entries
  * cS..cS+S-1 (c >= 1) as T[k] + cS * B_i. The (window, chunk) tasks are shared by nth threads. */
-static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
+static bool build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
     const Geo &g = c.g;
     const uint32_t S = 1u << 16;
     std::vector<pt> base(g.nw);
@@ -1758,12 +1828,20 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
         for (auto &t : ts) t.join();
     }
     c.cfold = false;
-    if (QSB_CPU_CFOLD && c.vec) {                       /* top window T[j] += C, in chunks; any equal-x entry (T[j] = +-C, a known
-                                                           discrete log: never) keeps the plain table */
+    bool ok = true;
+    if (QSB_CPU_CFOLD && c.vec) {                       /* top window T[j] += C, in place, in chunks. First a scan: an entry with C's x
+                                                           (T[j] = +-C, a known discrete log: never) keeps the plain table, as before;
+                                                           after it no step can meet an equal x (no window-sized copy: 8 GiB at 9 windows) */
         const int top = g.nw - 1; pt *T = c.table + g.base[top]; const uint32_t n = g.ent[top], CH = 1u << 16;
         const pt C = {c.cx, c.cy};
-        std::atomic<uint32_t> next{0}; std::atomic<int> anybad{0};
-        std::vector<pt> tmp(n);
+        std::atomic<uint32_t> next{0}; std::atomic<int> anyeq{0}, anybad{0};
+        auto scan = [&]() {
+            for (uint32_t o; (o = next.fetch_add(CH)) < n;) {
+                const uint32_t m = n - o < CH ? n - o : CH; int e = 0;
+                for (uint32_t k = 0; k < m; k++) e |= fe_eq(T[o + k].x, C.x);
+                if (e) anyeq = 1;
+            }
+        };
         auto work = [&]() {
             std::vector<fe> d(CH), pre(CH); std::vector<uint8_t> inf(CH), bad(CH); std::vector<const pt *> tp(CH, &C);
             Build8 b8; bool okb = false;
@@ -1773,31 +1851,36 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
             for (uint32_t o; (o = next.fetch_add(CH)) < n;) {
                 uint32_t m = n - o < CH ? n - o : CH;
 #if QCPU_VEC
-                if (okb) {                              /* 8-lane blocks (a point with C's x: anybad, as below); the tail scalar */
+                if (okb) {                              /* 8-lane blocks, in place (dst == src); the tail scalar */
                     uint32_t k = 0;
-                    for (; k + VB8 <= m; k += VB8) if (!build8_block(&tmp[o + k], &T[o + k], C, b8)) anybad = 1;
+                    for (; k + VB8 <= m; k += VB8) if (!build8_block(&T[o + k], &T[o + k], C, b8)) anybad = 1;
                     if (k == m) continue;
                     o += k; m -= k;
                 }
 #endif
-                for (uint32_t k = 0; k < m; k++) { tmp[o + k] = T[o + k]; inf[k] = 0; bad[k] = 0; }
-                batch_add(&tmp[o], tp.data(), inf.data(), bad.data(), (int)m, d.data(), pre.data());
+                for (uint32_t k = 0; k < m; k++) { inf[k] = 0; bad[k] = 0; }
+                batch_add(&T[o], tp.data(), inf.data(), bad.data(), (int)m, d.data(), pre.data());
                 for (uint32_t k = 0; k < m; k++) if (bad[k] || inf[k]) anybad = 1;
             }
 #if QCPU_VEC
             if (okb) build8_free(b8);
 #endif
         };
-        std::vector<std::thread> ts;
-        for (int t = 0; t < nth; t++) ts.emplace_back(work);
-        for (auto &t : ts) t.join();
-        if (!anybad) {
-            memcpy(T, tmp.data(), (size_t)n * sizeof(pt));
+        for (int pass = 0; pass < 2; pass++) {
+            next = 0;
+            std::vector<std::thread> ts;
+            for (int t = 0; t < nth; t++) { if (pass) ts.emplace_back(work); else ts.emplace_back(scan); }
+            for (auto &t : ts) t.join();
+            if (anyeq) break;
+        }
+        if (!anyeq) {
+            if (anybad) ok = false;                     /* cannot happen after the scan; a partly folded window fails the build */
             const pt C2 = pt_double(C);                 /* (mx, my) = -2C */
             c.mx = C2.x; fe z0 = {{0, 0, 0, 0}}; fe_sub(c.my, z0, C2.y);
-            c.cfold = true;
+            c.cfold = ok;
         }
     }
+    return ok;
 }
 /* Spot-check the table against OpenSSL: in every window the first, the last and a middle entry, and both
  * sides of the first, a middle and the last 65,536-entry chunk boundary (the build's and the C fold's chunks). */
@@ -1879,7 +1962,7 @@ static double mem_avail() {
 }
 /* Geometry: QSB_CPU_NW / QSB_CPU_UNSIGNED (dev overrides), else the fewest windows (>= QSB_CPU_NW_MIN) whose
  * table fits the budget, else 15 (68 MiB, the size of the old 16 x 16-bit table). */
-static Geo geo_choose(bool try11 = false, bool try10 = false) {
+static Geo geo_choose(bool try11 = false, bool try10 = false, bool try9 = false) {
     const double avail = mem_avail(), capb = (double)QSB_CPU_TAB_CAP_MB * 1048576.0;
     double budget = avail * QSB_CPU_TAB_FRAC;
     if (budget > capb) budget = capb;
@@ -1895,10 +1978,17 @@ static Geo geo_choose(bool try11 = false, bool try10 = false) {
         if (b10 > (double)QSB_CPU_TAB10_CAP_MB * 1048576.0) b10 = (double)QSB_CPU_TAB10_CAP_MB * 1048576.0;
         if ((double)geo_make(10, true).total * sizeof(pt) <= b10) nw = 10;
     }
+    if (try9 && nw == 10) {                            /* 9 windows: a larger fraction of the same budget, its own cap */
+        double b9 = (avail - (double)QSB_CPU_TAB_RESERVE_MB * 1048576.0) * QSB_CPU_TAB9_FRAC;
+        if (b9 > (double)QSB_CPU_TAB9_CAP_MB * 1048576.0) b9 = (double)QSB_CPU_TAB9_CAP_MB * 1048576.0;
+        if ((double)geo_make(9, true).total * sizeof(pt) <= b9) nw = 9;
+    }
     if (const char *e = getenv("QSB_CPU_NW")) nw = atoi(e);
     return geo_make(nw, !getenv("QSB_CPU_UNSIGNED"));
 }
 /* Table memory: geo_choose, 2 MiB-aligned THP mapping, first touch, measured huge-page fraction (hp; -1 = unknown).
+ * A 9-window table below QSB_CPU_HP_MIN (a 1,792-region sample first, then all regions) or whose sample touch projects above
+ * QSB_CPU_TOUCH9_MAX_S is freed for 10 windows (c.drop9), a 10-window one for 11 (272-region sample).
  * An 11-window table below QSB_CPU_HP_MIN (a 60-region sample first, then all regions) is freed for 12 windows; a
  * 12-window table below it is replaced by 13 windows if QSB_CPU_FALL13 and those come at QSB_CPU_HP_MIN or 25 points
  * better backed, else 12 stays (as before). QSB_CPU_NW (dev) forces the geometry. note: what was tried and dropped.
@@ -1910,7 +2000,7 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
         char b[128] = {0}; if (fgets(b, sizeof b, f) && strstr(b, "[never]")) thp = false; fclose(f);
     }
     const bool forced = getenv("QSB_CPU_NW") != nullptr;
-    c.g = geo_choose(QSB_CPU_TRY11 && thp && !forced, QSB_CPU_TRY10 && thp && !forced);
+    c.g = geo_choose(QSB_CPU_TRY11 && thp && !forced, QSB_CPU_TRY10 && thp && !forced, QSB_CPU_TRY9 && thp && !forced);
     if (!forced && c.g.nw < nw_floor) c.g = geo_make(nw_floor, true);
     const char *fail = getenv("QSB_CPU_HP_FAIL");       /* dev: windows whose measured fraction is taken as 0 */
     auto failed = [&](int nw) {
@@ -1926,6 +2016,22 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
         if (f < 0) at += snprintf(note + at, nn - at, "; %d windows: %s", nw, f < -1.5 ? "no memory" : "no smaps");
         else at += snprintf(note + at, nn - at, "; %d windows: %.1f%% huge pages", nw, 100.0 * f);
     };
+    if (c.g.nw == 9 && c.g.sgn && !forced) {
+        if (table_alloc(c)) {
+            struct timespec s0, s1; clock_gettime(CLOCK_MONOTONIC, &s0);
+            double f = measure(32);                      /* 1,792 of 57,344 regions */
+            clock_gettime(CLOCK_MONOTONIC, &s1);
+            const double ts = (s1.tv_sec - s0.tv_sec) + 1e-9 * (s1.tv_nsec - s0.tv_nsec);
+            if (f >= QSB_CPU_HP_MIN && ts * 32 > QSB_CPU_TOUCH9_MAX_S) {
+                if (at < nn) at += snprintf(note + at, nn - at, "; 9 windows: slow first touch (%.2f s for 1/32)", ts);
+                table_free(c); f = -3;
+            } else if (f >= QSB_CPU_HP_MIN) f = measure(1);
+            if (f >= QSB_CPU_HP_MIN) { hp = f; return true; }
+            if (f > -2.5) { add(9, f); table_free(c); }
+        } else add(9, -2);
+        c.drop9 = true;
+        c.g = geo_make(10, true);                        /* the 9-window rule implies the 10-window one */
+    }
     if (c.g.nw == 10 && c.g.sgn && !forced) {
         if (table_alloc(c)) {
             double f = measure(32);                      /* 272 of 8,704 regions */
@@ -2179,9 +2285,6 @@ static void worker(Ctx *c, int tid) {
         if (hpf) for (int q = kl - cnt + 1; q <= kl; q++) hpf_rows(q);
     };
     for (;;) {
-#ifdef QSB_CPU_DEVBENCH
-        if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
-#endif
         int k = 0;
         while (k < B) {
             if (wi == c->ncwin) {                       /* next epoch: hash its fixed prefix once */
@@ -2274,7 +2377,11 @@ static void worker(Ctx *c, int tid) {
                     if (j == 3) {                           /* four candidates ready: blocks 1..nb-1 (digests straight into the second
                                                                SHA-256's message words), then the second SHA-256 into z = h0 (MSW) .. h7 */
                         qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin);
+#if QSB_CPU_SHC
+                        qsha_x4w_iv32((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);   /* w2[l][8..15]: the constant padding */
+#else
                         qsha_x4w_iv((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);
+#endif
 #if QCPU_VEC
                         if (hpf && (kq & 7) == 7) hpf_rows8(zb.data(), kq - 7, ht0, ht1, hw0, hw1, hsg);   /* B % 8 == 0 */
 #endif
@@ -2406,47 +2513,6 @@ static Ctx *g_ctx = nullptr;
 static cpu_set_t g_initial_cpus;
 static int g_initial_ok = [] { CPU_ZERO(&g_initial_cpus); return sched_getaffinity(0, sizeof g_initial_cpus, &g_initial_cpus) == 0 ? 1 : 0; }();
 #endif
-#if defined(CPU_COUNT) && QSB_CPU_RSV_CORE
-/* 296e5e53's worker CPUs (package y2d): the pre-main() set minus the core of the GPU host thread (start() runs on it) when that
- * thread is pinned to fewer CPUs; when it is not, minus the last core with two or more CPUs (plan_cores: as 296e5e53's
- * smt_plan). Without a core to reserve: the pre-main() set minus the host thread's CPUs if it is pinned (296e5e53's table-builder
- * mask), else false (no mask: the workers inherit, as in 296e5e53). */
-static bool rsv_core_mask(bool plan_cores, cpu_set_t *out) {
-    cpu_set_t cs; CPU_ZERO(&cs);
-    if (g_initial_ok) cs = g_initial_cpus; else if (sched_getaffinity(0, sizeof cs, &cs) != 0) return false;
-    cpu_set_t host; CPU_ZERO(&host);
-    const bool host_pinned = sched_getaffinity(0, sizeof host, &host) == 0 && CPU_COUNT(&host) < CPU_COUNT(&cs);
-    std::vector<std::vector<int> > cores; std::vector<uint8_t> seen(CPU_SETSIZE, 0);
-    bool topo = plan_cores;
-    for (int cpu = 0; cpu < CPU_SETSIZE && topo; cpu++) {
-        if (!CPU_ISSET(cpu, &cs) || seen[cpu]) continue;
-        char path[128]; snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
-        FILE *f = fopen(path, "r"); if (!f) { topo = false; break; }
-        char buf[256] = {0}; const bool ok = fgets(buf, sizeof buf, f) != nullptr; fclose(f); if (!ok) { topo = false; break; }
-        std::vector<int> core;
-        for (char *q = buf; *q;) {                      /* "a-b,c,..." */
-            char *e; long a = strtol(q, &e, 10); if (e == q) break; long b = a;
-            if (*e == '-') { q = e + 1; b = strtol(q, &e, 10); }
-            for (long x = a; x <= b && x < CPU_SETSIZE; x++) if (x >= 0 && CPU_ISSET(x, &cs) && !seen[x]) { core.push_back((int)x); seen[x] = 1; }
-            q = e; if (*q == ',') q++; else break;
-        }
-        if (core.empty()) { core.push_back(cpu); seen[cpu] = 1; }
-        cores.push_back(core);
-    }
-    int rsv = -1;
-    if (topo) {
-        if (host_pinned)
-            for (int i = 0; i < (int)cores.size() && rsv < 0; i++) for (int x : cores[i]) if (CPU_ISSET(x, &host)) { rsv = i; break; }
-        for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
-        if (cores.size() < 2) rsv = -1;
-    }
-    *out = cs;
-    if (rsv >= 0) { for (int x : cores[rsv]) CPU_CLR(x, out); return CPU_COUNT(out) > 0; }
-    if (!host_pinned) return false;
-    for (int x = 0; x < CPU_SETSIZE; x++) if (CPU_ISSET(x, &host)) CPU_CLR(x, out);
-    return CPU_COUNT(out) > 0;
-}
-#endif
 static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, int cut, int early) {
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 #ifdef CPU_COUNT
@@ -2458,9 +2524,10 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         cpu_set_t now; CPU_ZERO(&now);                    /* the main thread's current set (maybe narrowed) */
         if (g_initial_ok && sched_getaffinity(0, sizeof now, &now) == 0 && CPU_COUNT(&now) < CPU_COUNT(&cs)) {
             for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &cs) && !CPU_ISSET(c, &now)) CPU_SET(c, &work_cpus);
-#if defined(QSB_HP_ON) && QSB_CPU_HP_SHARE
+#ifdef QSB_HP_ON
             /* the main thread sleeps between launches (blocking event waits): its CPU may host a worker too */
             if (qhp::g_share_cpu >= 0 && CPU_ISSET(qhp::g_share_cpu, &cs)) CPU_SET(qhp::g_share_cpu, &work_cpus);
+            if (qhp::g_share_core_n > 0) for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &qhp::g_share_core) && CPU_ISSET(c, &cs)) CPU_SET(c, &work_cpus);
 #endif
             work_mask = CPU_COUNT(&work_cpus) >= 1;       /* workers: every CPU the main thread no longer uses */
         }
@@ -2482,7 +2549,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     int nth = QSB_CPU_THREADS;
 #else
     int nth = (int)ncpu - QSB_CPU_RESERVE;
-#if defined(CPU_COUNT) && QSB_CPU_NTH_RAISE
+#ifdef CPU_COUNT
     /* The host producers may have narrowed the main thread to one logical CPU (its SMT sibling then runs
      * the pinned producer): one worker per CPU the main thread left, within the CPU quota. */
     if (work_mask && CPU_COUNT(&work_cpus) > nth) nth = CPU_COUNT(&work_cpus) < (int)ncpu ? CPU_COUNT(&work_cpus) : (int)ncpu;
@@ -2500,16 +2567,6 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QCPU_SHANI
     c->shani = qsha_supported() && !getenv("QSB_CPU_NOSHANI");
-#endif
-#if defined(CPU_COUNT) && QSB_CPU_RSV_CORE
-    {   /* 296e5e53's placement (its smt_plan and table-builder mask): the fallback core rule applies where 296e5e53 plans cores */
-        cpu_set_t m;
-        if (rsv_core_mask(c->vec && !getenv("QSB_CPU_NOPIN"), &m)) { work_cpus = m; work_mask = true; }
-    }
-#endif
-#ifdef QSB_CPU_DEVBENCH
-    if (const char *e = getenv("QSB_CPU_DEVCAND")) c->dev_limit = strtoull(e, nullptr, 10);
-    c->dev_live = nth;
 #endif
     /* CPU window patterns: every 3-subset of {cut..n-1} not used by the GPU. */
     for (int a = cut; a < (int)dp->n; a++) for (int b = a + 1; b < (int)dp->n; b++) for (int d3 = b + 1; d3 < (int)dp->n; d3++) {
@@ -2557,31 +2614,38 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
                c->g.nw, c->g.sgn ? "signed" : "unsigned", c->g.wid[c->g.nw - 1], c->g.wid[0], c->g.total * sizeof(pt) / 1048576.0,
                hps, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec), note);
         fflush(stdout);
-        build_table(*c, fax, fay, nth);
-        bool tab_ok = table_check(*c);
-        if (!tab_ok && c->g.nw == 10 && !getenv("QSB_CPU_NW")) {   /* 10-window table failed its check: 11 (or 12) */
+        bool tab_ok = build_table(*c, fax, fay, nth) && table_check(*c);
+        while (!tab_ok && c->g.nw <= 10 && !getenv("QSB_CPU_NW")) {   /* a 9- or 10-window table failed its build or check: one window more */
+            const int nw0 = c->g.nw; const bool d9 = c->drop9 || nw0 == 9;
             table_free(*c);
-            if (!table_setup(*c, nth, hp, note, sizeof note, 11)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
-            printf("  CPU co-grind: 10-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
-                   c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
+            if (!table_setup(*c, nth, hp, note, sizeof note, nw0 + 1)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+            c->drop9 = d9;
+            printf("  CPU co-grind: %d-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
+                   nw0, c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
             fflush(stdout);
-            build_table(*c, fax, fay, nth);
-            tab_ok = table_check(*c);
+            tab_ok = build_table(*c, fax, fay, nth) && table_check(*c);
         }
         if (!tab_ok) { printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
-#if QSB_CPU_DIAG_EPOCH   /* default at file scope (package y2d: 0) */
+#ifndef QSB_CPU_DIAG_EPOCH
+#define QSB_CPU_DIAG_EPOCH 1
+#endif
+#if QSB_CPU_DIAG_EPOCH
         {   /* Zero-cost diagnostic. Every epoch of the co-grinder's walk is real work on patterns disjoint from
              * the GPU's, so where the walk starts is a free enumeration choice. Start it at code * 2^29, so the
              * public ranked hit list (the smallest CPU-hit epoch rank / 2^29) shows what this host chose:
              *   code = geometry (11 windows: 1, 12: 2, other: 3) + 3 * (huge pages below 95%) + 6 * (fewer than 28 workers)
  *   and, in bits 20..27, the GiB this process could use before the table (capped at 255)
  *   and (v3) bit 28 set for a 10-window table (geometry 3 then means 10 windows; without bit 28, 13 or more)
+ *   and (v4) a 9-window table as geometry 3 + the huge-page flag + bit 28 (hp >= 95 % is guaranteed at 9 and 10 windows,
+ *   so that combination never occurred before), bit 19 set when the 9-window rule held but 9 windows were dropped
+ *   (read from the smallest CPU-hit epoch: its offset from the start is below 2^19 with probability ~1 - e^-9 at the ranked host's ~9.6 hits per 2^19 epochs)
              * i.e. 1..12; the walk (about 3.6e8 epochs in 1,200 s) stays below C(137,6). */
+            const bool w9 = c->g.nw == 9;
             const int cg = c->g.nw == 11 ? 1 : c->g.nw == 12 ? 2 : 3;
-            const int ch = (hp >= 0.95) ? 0 : 1;
+            const int ch = (hp >= 0.95 && !w9) ? 0 : 1;
             const int ct = nth >= 28 ? 0 : 1;
-            uint64_t base = (uint64_t)(cg + 3 * ch + 6 * ct) << 29 | (uint64_t)(c->g.nw == 10) << 28;
+            uint64_t base = (uint64_t)(cg + 3 * ch + 6 * ct) << 29 | (uint64_t)(c->g.nw == 10 || w9) << 28 | (uint64_t)(c->drop9 && !w9) << 19;
             {   /* v2: + GiB this process could use before the table (MemAvailable / cgroup headroom), bits 20..27.
                  * The first co-grinder hit lands within 2^20 epochs of the start with probability 1 - e^-20. */
                 double av = mem_avail(); if (av >= 0) av += (double)c->g.total * sizeof(pt);
@@ -2589,8 +2653,9 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
                 base += (uint64_t)gib << 20;
             }
             if (base + (3ull << 29) <= c->n_epochs) c->epoch_base = base;
-            printf("  CPU co-grind: epoch walk starts at %llu (diagnostic code %d%s, memory %d GiB; table ready in %.2f s)\n", (unsigned long long)c->epoch_base,
-                   (int)(c->epoch_base >> 29), (c->epoch_base >> 28) & 1 ? ", 10 windows" : "", (int)((c->epoch_base >> 20) & 255),
+            printf("  CPU co-grind: epoch walk starts at %llu (diagnostic code %d%s%s, memory %d GiB; table ready in %.2f s)\n", (unsigned long long)c->epoch_base,
+                   (int)(c->epoch_base >> 29), (c->epoch_base >> 28) & 1 ? (w9 ? ", 9 windows" : ", 10 windows") : "",
+                   (c->epoch_base >> 19) & 1 ? ", 9 windows dropped" : "", (int)((c->epoch_base >> 20) & 255),
                    (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
             fflush(stdout);
         }
@@ -2598,14 +2663,6 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
     }).detach();
     g_ctx = c;
-#ifdef QSB_CPU_DEVBENCH
-    if (c->dev_limit) {                                  /* dev only (never in a ranked build): fixed work, then exit */
-        while (c->cand.load() == 0 || c->dev_live.load() > 0) usleep(10000);
-        { std::lock_guard<std::mutex> g(c->io); if (c->out) fflush(c->out); }
-        printf("DEVCAND %llu candidates, %u hits\n", (unsigned long long)c->cand.load(), c->hits.load());
-        fflush(stdout); _exit(0);
-    }
-#endif
 }
 static uint64_t candidates() { return g_ctx ? g_ctx->cand.load() : 0; }
 static uint32_t hits() { return g_ctx ? g_ctx->hits.load() : 0; }
