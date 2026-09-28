@@ -36,6 +36,10 @@ static QI_INL V vs1(uint64_t x) { return (V){x, x, x, x}; }
 #define QI_2P1 (2 * 0xFFFFFFFFFFFFFULL)
 #define QI_2P4 (2 * 0x0FFFFFFFFFFFFULL)
 
+#ifndef QSB_CG_SPLIT45
+#define QSB_CG_SPLIT45 1
+#endif
+
 /* r = a b mod p (W form in, W form out, n4 <= 2^48); r may alias a or b */
 static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     const V a0 = A->n[0], a1 = A->n[1], a2 = A->n[2], a3 = A->n[3], a4 = A->n[4];
@@ -46,10 +50,21 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     V c1 = QI_LO(QI_LO(QI_HI(z, a0, b0), a0, b1), a1, b0);
     V c2 = QI_LO(QI_LO(QI_LO(QI_HI(QI_HI(z, a0, b1), a1, b0), a0, b2), a1, b1), a2, b0);
     V c3 = QI_LO(QI_LO(QI_LO(QI_LO(QI_HI(QI_HI(QI_HI(z, a0, b2), a1, b1), a2, b0), a0, b3), a1, b2), a2, b1), a3, b0);
+#if QSB_CG_SPLIT45
+    /* Independent high/low sums shorten the two longest IFMA accumulator chains.
+     * Nine terms remain below 9*2^52, so regrouping is exact without overflow. */
+    const V c4h = QI_HI(QI_HI(QI_HI(QI_HI(z, a0, b3), a1, b2), a2, b1), a3, b0);
+    const V c4l = QI_LO(QI_LO(QI_LO(QI_LO(QI_LO(z, a0, b4), a1, b3), a2, b2), a3, b1), a4, b0);
+    V c4 = c4h + c4l;
+    const V c5h = QI_HI(QI_HI(QI_HI(QI_HI(QI_HI(z, a0, b4), a1, b3), a2, b2), a3, b1), a4, b0);
+    const V c5l = QI_LO(QI_LO(QI_LO(QI_LO(z, a1, b4), a2, b3), a3, b2), a4, b1);
+    V c5 = c5h + c5l;
+#else
     V c4 = QI_HI(QI_HI(QI_HI(QI_HI(z, a0, b3), a1, b2), a2, b1), a3, b0);
     c4 = QI_LO(QI_LO(QI_LO(QI_LO(QI_LO(c4, a0, b4), a1, b3), a2, b2), a3, b1), a4, b0);
     V c5 = QI_HI(QI_HI(QI_HI(QI_HI(QI_HI(z, a0, b4), a1, b3), a2, b2), a3, b1), a4, b0);
     c5 = QI_LO(QI_LO(QI_LO(QI_LO(c5, a1, b4), a2, b3), a3, b2), a4, b1);
+#endif
     V c6 = QI_HI(QI_HI(QI_HI(QI_HI(z, a1, b4), a2, b3), a3, b2), a4, b1);
     c6 = QI_LO(QI_LO(QI_LO(c6, a2, b4), a3, b3), a4, b2);
     V c7 = QI_HI(QI_HI(QI_HI(z, a2, b4), a3, b3), a4, b2);
