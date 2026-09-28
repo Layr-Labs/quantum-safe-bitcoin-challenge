@@ -329,8 +329,25 @@ def audit_x3_predicates():
 def audit_source():
     source = (HERE / "GPUMath.h").read_text()
     assert "#define QSB_CARRY62 1" in source
-    assert source.count("QSB_SECOND_FOLD_TAIL") == 6  # three definitions, three uses
-    assert "subc.u32 z2, z2, 0;\\n\"" in source
+    # Name the C31 second-fold sites rather than counting occurrences. The macro is
+    # defined in three #if arms and expanded in four field kernels, so the bare
+    # `== 6` ("three definitions, three uses") was a magic number that had already
+    # drifted and was failing before the current frontier (H80, same defect as the
+    # twin assertion in test_host_gate.py). A dropped expansion is a ~2^-31 field
+    # error that only the exact publication gate filters, so assert each site by
+    # name: a deleted expansion still fails, and a new kernel is a visible diff.
+    for fn in ("_ModMultCore", "_ModMultCoreFin", "_ModSqr", "_ModSqrAddSub2"):
+        # Slice on the full declaration: "_ModMultCore" prefixes "_ModMultCoreFin".
+        body = source[source.index(f"void {fn}("):].split("\n__device__", 1)[0]
+        assert "QSB_SECOND_FOLD_TAIL" in body, (
+            f"GPUMath.h: {fn} no longer expands QSB_SECOND_FOLD_TAIL -- a dropped carry "
+            f"propagation is a ~2^-31 field error the publication gate exists to catch")
+    # The CARRY62 second fold must still add a zero into z2 and carry on. The z2
+    # addend is spliced as " QZ " (QSB_CHAIN_ALU), which is 0 in the default build,
+    # so match the instruction rather than the pre-refactor literal `z2, z2, 0;` --
+    # the point of the check is that the carry chain continues past z2 at all.
+    assert "subc.u32 z2, z2, " in source, (
+        "GPUMath.h: the CARRY62 second fold no longer carries past z2")
     assert "-DQSB_CARRY62=0 restores" in source
     assert "#if QSB_C31 && QSB_SHORT_CARRY" in source
     assert "#define QSB_SECOND_FOLD_TAIL \"\"" in source

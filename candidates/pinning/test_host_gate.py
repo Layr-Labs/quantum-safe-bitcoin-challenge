@@ -152,7 +152,22 @@ def audit_source():
     assert cu.count("qsb_gate_accept(") >= 3  # definition + two writers
     assert "BN_lebin2bn(pp.neg_r_inv" in cu
     assert "EC_POINT_invert" in cu
-    assert mathh.count("QSB_SECOND_FOLD_TAIL") == 6
+    # The C31 second-fold tail must be expanded in every field kernel that carries the
+    # fold, and dropped nowhere. Assert the SITES by name, not a raw occurrence count:
+    # the macro is defined in three #if arms and expanded in four kernels, so a bare
+    # `== 6` was a magic number that drifted with the header and had been failing since
+    # before df1df15 (H80). Naming the functions keeps the audit's real intent -- a
+    # dropped carry propagation is a ~2^-31 field error that exists only because this
+    # exact publication gate filters it -- while a new kernel becomes a visible diff.
+    assert "#define QSB_SECOND_FOLD_TAIL" in mathh, "C31 second-fold tail macro is gone"
+    for fn in ("_ModMultCore", "_ModMultCoreFin", "_ModSqr", "_ModSqrAddSub2"):
+        # Slice on the full declaration, not the bare name: "_ModMultCore" is a
+        # prefix of "_ModMultCoreFin", so a plain split would read the wrong body.
+        decl = mathh.index(f"void {fn}(")
+        body = mathh[decl:].split("\n__device__", 1)[0]
+        assert "QSB_SECOND_FOLD_TAIL" in body, (
+            f"GPUMath.h: {fn} no longer expands QSB_SECOND_FOLD_TAIL -- a dropped carry "
+            f"propagation is a ~2^-31 field error the publication gate exists to catch")
     assert "sub.u64 t0,t0,k;" in mathh
     assert "add.u64 t0,t0,k;" in mathh
     assert "sub.cc.u32 z0, z0, 0xb73; subc.u32 z1, z1, 3;" in mathh
