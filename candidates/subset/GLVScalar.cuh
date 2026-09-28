@@ -404,6 +404,79 @@ __device__ __forceinline__ void q9_round_coeff(uint64_t out[2],uint64_t lo,uint6
 #error "QSB_GLV_HIGH15_HI must be 0 or 1"
 #endif
 
+#ifndef QSB_GLV_FP32_CARRY
+#define QSB_GLV_FP32_CARRY 0
+#endif
+#if QSB_GLV_FP32_CARRY != 0 && QSB_GLV_FP32_CARRY != 1
+#error "QSB_GLV_FP32_CARRY must be 0 or 1"
+#endif
+#if QSB_GLV_FP32_CARRY && QSB_GLV_HIGH15 && QSB_GLV_HIGH15_HI
+/* Diagonal10 carry estimates for the two fixed reciprocals. RN constants are
+ * b[7..3]/2^34; shared uint conversions and explicit RN FMA bound each carry
+ * error by 4096, including the omitted incoming lower-column carry. */
+__device__ __forceinline__ void q9_fp32_carries(const uint64_t k[4],uint64_t *c1,uint64_t *c2){
+    float s1=0.0f,s2=0.0f,a;
+    a=__uint2float_rn((uint32_t)(k[1]>>32));
+    s1=__fmaf_rn(a,__int_as_float(0x3d421b49),s1);
+    s2=__fmaf_rn(a,__int_as_float(0x3e64437f),s2);
+    a=__uint2float_rn((uint32_t)k[2]);
+    s1=__fmaf_rn(a,__int_as_float(0x3e27d46c),s1);
+    s2=__fmaf_rn(a,__int_as_float(0x3a874414),s2);
+    a=__uint2float_rn((uint32_t)(k[2]>>32));
+    s1=__fmaf_rn(a,__int_as_float(0x3e686c91),s1);
+    s2=__fmaf_rn(a,__int_as_float(0x3ddea8ff),s2);
+    a=__uint2float_rn((uint32_t)k[3]);
+    s1=__fmaf_rn(a,__int_as_float(0x3e1284eb),s1);
+    s2=__fmaf_rn(a,__int_as_float(0x3c2bfe4c),s2);
+    a=__uint2float_rn((uint32_t)(k[3]>>32));
+    s1=__fmaf_rn(a,__int_as_float(0x3d76aa28),s1);
+    s2=__fmaf_rn(a,__int_as_float(0x3d084823),s2);
+    *c1=(uint64_t)__float2uint_rz(s1)<<2;
+    *c2=(uint64_t)__float2uint_rz(s2)<<2;
+}
+/* Retain every integer diagonal11..14 and full quotient carry. The two-sided
+ * midpoint band certifies exact rounding; rejected estimates use the original
+ * full-product fallback. Word11 wrap needs no extra band because its quotient
+ * carry and rounding bit cancel, provided this complete propagation is kept. */
+template<int WHICH>
+__device__ __forceinline__ void q9_coeff_fp32(uint64_t out[2],const uint64_t k[4],const uint64_t g[4],uint64_t carry){
+    const uint32_t a4=(uint32_t)k[2],a5=(uint32_t)(k[2]>>32);
+    const uint32_t a6=(uint32_t)k[3],a7=(uint32_t)(k[3]>>32);
+    const uint32_t b4=(uint32_t)g[2],b5=(uint32_t)(g[2]>>32);
+    const uint32_t b6=(uint32_t)g[3],b7=(uint32_t)(g[3]>>32);
+    uint64_t acc;uint32_t overflow,w11,w12,w13,w14,w15;
+    q9_high15_begin(&acc,&overflow,carry,QSB_GLV_PRODUCT(a4,b7),QSB_GLV_PRODUCT(a5,b6));
+    q9_high15_add(&acc,&overflow,QSB_GLV_PRODUCT(a6,b5));
+    q9_high15_add(&acc,&overflow,QSB_GLV_PRODUCT(a7,b4));
+    w11=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+
+    q9_high15_begin(&acc,&overflow,carry,QSB_GLV_PRODUCT(a5,b7),QSB_GLV_PRODUCT(a6,b6));
+    q9_high15_add(&acc,&overflow,QSB_GLV_PRODUCT(a7,b5));
+    w12=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+
+    q9_high15_begin(&acc,&overflow,carry,QSB_GLV_PRODUCT(a6,b7),QSB_GLV_PRODUCT(a7,b6));
+    w13=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+
+    #if QSB_GLV_LEAN
+    acc=q9_madw(a7,b7,carry);
+#else
+    acc=carry+QSB_GLV_PRODUCT(a7,b7);
+#endif
+    w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
+
+    if((uint32_t)(w11-0x7ffff000U)>=0x2000U){
+        uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
+        uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
+        const uint64_t round=(uint64_t)(w11>>31);
+        q9_round_coeff(out,lo,hi,round);
+    }else{
+        ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
+        out[0]=r.x;out[1]=r.y;
+    }
+}
+
+#endif
+
 template<int WHICH,uint32_t FALLBACK_WORD>
 __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
     const uint32_t a3=(uint32_t)(k[1]>>32);
@@ -665,7 +738,12 @@ __device__ __forceinline__ void q9_glv_split(const uint64_t input[4],uint64_t r1
     const uint32_t a1[4]={0x9284eb15,0xe86c90e4,0xa7d46bcd,0x3086d221};
     const uint32_t a2[5]={0x9d44cfd8,0x57c1108d,0xa8e2f3f6,0x14ca50f7,1};
     const uint32_t b1[4]={0x0abfe4c3,0x6f547fa9,0x010e8828,0xe4437ed6};
+#if QSB_GLV_FP32_CARRY && QSB_GLV_HIGH15 && QSB_GLV_HIGH15_HI
+    uint64_t carry1,carry2,c1[2],c2[2];q9_fp32_carries(k,&carry1,&carry2);
+    q9_coeff_fp32<1>(c1,k,g1,carry1);q9_coeff_fp32<2>(c2,k,g2,carry2);
+#else
     uint64_t c1[2],c2[2];q9_coeff_g1(c1,k,g1);q9_coeff_g2(c2,k,g2);
+#endif
 #if QSB_GLV_RESIDUAL129
     q9_glv_residual129(k,c1,c2,a1,a2,b1,r1,r2,s1,s2);
 #elif QSB_GLV_RESIDUAL3

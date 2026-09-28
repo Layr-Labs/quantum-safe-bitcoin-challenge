@@ -1012,7 +1012,7 @@ __device__ void qsb_replay_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
  * centre 0 gives segment 0's d = 2f+1 >= 1, i.e. record off+f with no digit sign (the biased unsigned
  * field); centre 2^w gives the odd signed digit 2f+1-2^w of a w-bit field; centre T+1 gives the bounded top
  * digit 2f-T. Terms 0..5 are Q's segments 0..5 and terms 6..11 P's, i.e. the walker's field after term t
- * starts at the next segment's shift. The checker (/root/w/exp/s3/host/check_s3.py) compiles this block
+ * starts at the next segment's shift. The checker (the standalone host recoding checker) compiles this block
  * verbatim and requires qsb_s3_code == q9_bigtbl_code on every tested input. */
 // BEGIN QSB_S3_HOST_EXACT
 typedef struct { uint32_t mask, centre, off, width; } qsb_s3_desc_t;
@@ -3903,6 +3903,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_PAIR_SHA_UNROLL_WINDOW) QSB_CARRIER_KV(QSB_GLV11) QSB_CARRIER_KV(QSB_GLV11_P18) QSB_CARRIER_KV(QSB_Q_P18) QSB_CARRIER_KV(QSB_Q_MIX) QSB_CARRIER_KV(QSB_Y_PAIR) QSB_CARRIER_KV(QSB_GLV_LEAN) QSB_CARRIER_KV(QSB_GLV_NO_KRED) QSB_CARRIER_KV(QSB_GLV_ROUND_CC) QSB_CARRIER_KV(QSB_GLV_HIGH15_HI) QSB_CARRIER_KV(QSB_GROUP_CAP_EXACT) QSB_CARRIER_KV(QSB_PREFIX_BLOCKS) \
     QSB_CARRIER_KV(QSB_R_CBANK) QSB_CARRIER_KV(QSB_S3_HALF_WALK) QSB_CARRIER_KV(QSB_S3_SIGN_SHIFT) QSB_CARRIER_KV(QSB_S3_ODD_FOLD) QSB_CARRIER_KV(QSB_ROOT_MAX_BATCHES) QSB_CARRIER_KV(QSB_SHA_ALU_ADD) \
     QSB_CARRIER_KV(QSB_SHA_FMA_ADD) QSB_CARRIER_KV(QSB_SHA_FMA_ROT) QSB_CARRIER_KV(QSB_SHA_UNROLL_CONST) \
+    QSB_CARRIER_KV(QSB_PK_HEAD_FMA) QSB_CARRIER_KV(QSB_GLV_FP32_CARRY) QSB_CARRIER_KV(QSB_PK_OUTLINE) \
     QSB_CARRIER_KV(QSB_SHORT_CARRY) QSB_CARRIER_KV(QSB_SHORT_CARRY2) \
     QSB_CARRIER_KV(QSB_SHORT_CARRY2_SENTINEL) QSB_CARRIER_KV(QSB_SHORT_CARRY3) \
     QSB_CARRIER_KV(QSB_SHORT_CARRY4) QSB_CARRIER_KV(QSB_SHORT_CARRY6) QSB_CARRIER_KV(QSB_SLOT_PIPELINE) \
@@ -3917,6 +3918,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
+
+#include "../../QsbNativeSelector.h"
 
 int main(int argc, char **argv) {
     if (argc < 5) {
@@ -4632,6 +4635,11 @@ int main(int argc, char **argv) {
             (void)cudaGetLastError();
         }
     }
+    if(g_qsb_alternate.on) {
+        const cudaError_t rc=cudaFuncSetAttribute((const void *)g_qsb_alternate.k[QK_DIG],
+            cudaFuncAttributePreferredSharedMemoryCarveout,cudaSharedmemCarveoutMaxShared);
+        if(rc!=cudaSuccess)qsb_alternate_off("carveout_hint");
+    }
     clock_gettime(CLOCK_MONOTONIC, &t0);
     t_last_report = t0;
     uint64_t total_searched = 0;
@@ -4760,6 +4768,9 @@ int main(int argc, char **argv) {
         if (!qsb_hv_init(&hv, &dp, g_hv_win3, window_start, s_early)) { fprintf(stderr, "ERROR: host verify init failed\n"); return 1; }
 #if QSB_CPU_GRIND
         qcpu::start(&dp, g_hv_win3, QSB_SE_PER_EPOCH, window_start, s_early);
+#if QSB_CPU_COUPLED_WORKERS
+        qcpu::CoupledRunGuard coupled_run_guard;
+#endif
 #endif
         static uint8_t hv_pend[4 + 1024 * ZLAB_HIT_REC]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
 #endif
@@ -4971,9 +4982,59 @@ int main(int argc, char **argv) {
             sp_epochs[s] = epochs_in_batch;
             return 0;
         };
+        qsb_native_select::Selector native_selector;
+        // Called only with both slots empty. Every arm ends empty, with every
+        // collected batch published exactly once. The normal epoch/batch counters
+        // advance on these useful launches, including warmup and rejected series.
+        auto native_leg = [&](int arm,int batches,qsb_native_select::Sample &sample)->int {
+            (void)arm;
+            constexpr uint64_t epochs_per_batch=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
+            constexpr uint64_t candidates_per_batch=epochs_per_batch*QSB_SE_PER_EPOCH;
+            static_assert(QSB_SE_PER_EPOCH==QSB_SE_WINDOWS,"candidate/epoch conversion");
+            const uint64_t begin_epoch=epoch_base;
+            const double begin=qsb_native_select::now();
+            const uint64_t begin_gpu=total_searched,begin_cpu=qsb_native_select::cpu_count();
+            int launched=0,finished=0;bool valid=true;
+            while(finished<launched || launched<batches) {
+                const int slot=(int)(sp_batch_no&1);
+                CompletedSubset completed;
+                if(sp_collect(slot,completed))return -1;
+                if(completed.valid)++finished;
+                if(g_stop_signal || !native_selector.intact() ||
+                   epoch_base>=n_epochs || n_epochs-epoch_base<epochs_per_batch)valid=false;
+                if(valid && launched<batches) {
+                    const int launch_error=sp_launch(slot,epoch_base,(int)epochs_per_batch);
+                    if(sp_publish(completed))return -1;
+                    if(launch_error)return -1;
+                    epoch_base+=epochs_per_batch;++sp_batch_no;++launched;
+                } else {
+                    if(sp_publish(completed))return -1;
+                    // slot is now empty; the opposite slot is the only possible
+                    // outstanding batch (and is necessarily the next in order).
+                    CompletedSubset tail;
+                    if(sp_collect(slot^1,tail))return -1;
+                    if(tail.valid){if(sp_publish(tail))return -1;++finished;}
+                    break;
+                }
+            }
+            sample.cpu=qsb_native_select::cpu_count();
+            sample.seconds=qsb_native_select::now()-begin;
+            sample.gpu=total_searched-begin_gpu;
+            if(sample.cpu<begin_cpu)return 0;
+            sample.cpu-=begin_cpu;
+            return valid && launched==batches && finished==batches &&
+                sample.gpu==candidates_per_batch*(uint64_t)batches &&
+                epoch_base-begin_epoch==epochs_per_batch*(uint64_t)batches &&
+                sample.gpu==(epoch_base-begin_epoch)*QSB_SE_WINDOWS && !sp_busy[0] && !sp_busy[1];
+        };
         g_stop_polled = 1;
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
         while (1) {
+            if(!g_stop_signal && native_selector.ready()) {
+                const int oldest=(int)(sp_batch_no&1);
+                if(sp_drain(oldest) || sp_drain(oldest^1))return 1;
+                if(native_selector.calibrate(native_leg))return 1;
+            }
             const int s = (int)(sp_batch_no & 1);
             CompletedSubset completed;
             if (sp_collect(s, completed)) return 1;          /* snapshot batch k-2 before slot reuse */
@@ -4990,6 +5051,9 @@ int main(int argc, char **argv) {
             if (launch_error) return 1;
             epoch_base += epochs_in_batch;
             sp_batch_no++;
+#if QSB_CPU_GRIND && QSB_CPU_COUPLED_WORKERS
+            if(completed.valid)qcpu::coupled_tick(total_searched,(uint64_t)completed.epochs==capacity);
+#endif
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
@@ -5266,6 +5330,9 @@ int main(int argc, char **argv) {
         double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
 #if ZLAB_HITPATH && QSB_SLOT_PIPELINE
         if (g_stop_signal) {
+#if QSB_CPU_GRIND && QSB_CPU_COUPLED_WORKERS
+            qcpu::coupled_abort(); // _exit below deliberately bypasses destructors.
+#endif
             /* Every launched batch was drained above: report the final count in
              * the progress-line format, then the STATUS line the handler used
              * to write, and exit normally. */

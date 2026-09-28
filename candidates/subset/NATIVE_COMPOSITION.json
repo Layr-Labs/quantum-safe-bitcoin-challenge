@@ -1,0 +1,117 @@
+{
+  "base": "05b5250fb0caa9d44b878b326f996ca18cf2487a",
+  "reviewed_loader_control": "b8b621c572a3318dcee85c764abffd727c578d12",
+  "PK_source_commit": "52ee2b7ed0fc52c481b2d87256c4295eaa93ced5",
+  "alternate_source_commit": "009417a916b702e3b0460529504b828cb475324b",
+  "kind": "PK-MIX4/PK-MIX1 host composition; immutable native builds retain original provenance",
+  "source_files": {
+    "CpuCoupledWorkers.h": "02abc143b2f1b8b708ca2958bd9c0a5c6b8cbd96faae6454936eb252aa114d1b",
+    "CpuGrindSubset.h": "98e4178895e0f0454ea9f812750ba0dfd0ae22703459e9270767409c3f46cbf5",
+    "GLVScalar.cuh": "2eb625151212fa4ad02334f1b12c15671c05c9e5bedb310c3e371690c7ab8709",
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
+    "QsbCarrier.h": "c22f2a376b07c74ec3f488c8eb40c067058189ef061f5f991d58e1ca42b8f3bc",
+    "QsbNativeFingerprints.h": "6803440ae9f8168c5f1187882b09adcab96993963ed8a5c816a1d69f16e94717",
+    "QsbNativeGlobals.h": "159240ef3d6e3a7105ae2c1dc25fcbd45d1ab343ee0b2a172016d7ddd34c76b5",
+    "QsbNativeSelector.h": "9cc2396a410ee97c3e9a97c7f9b0a96e4823d668f726de72c4683daab09f967b",
+    "build_carrier.sh": "e45616fd96c5950a8dc94b62424eef863f0808db31a9f07e956aba231e44027d",
+    "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+    "hit_filter_field.cuh": "b9640d8c4db125f82697ae5bb84182f72c8d22a0dac5567527620dff21659937",
+    "hit_filter_field_sc.cuh": "d5b1ac66e1a8f62f17779e39c4244f873080f4864dda9966710c2f5a9f2a6d0e",
+    "hit_filter_field_sc_aluz.cuh": "047329878bb74a5ba1e07c00ca1ce1b40a4e96129e9d3016c00dbc7af9fdacb4",
+    "qsb_carrier_alt_sm89.h": "1977e138382cd65ae0bbabc83f0c6e16a9e22300b8f2622b5a91d0d445b1d9ad",
+    "qsb_carrier_sm89.h": "68d2b63aec178c3cfd21bd58e796e94d010c6811f8aba8463388366f52158383",
+    "sha_gate_fma.cuh": "8ee015f8754b0d3a771c45366ce2442bba0215fcd5f8c21c0d6327125d276f3e",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "e290d6b233b889487d1a716fd8c7ce9761da0875fba33af288756ac7465cd696",
+    "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
+    "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
+    "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
+    "tests/gpu_epochs/dirdig_audit.cu": "9b4a85157256cb32170ad26ab94ec09a80706b9219e956a82d4c83f40c02e69b",
+    "tests/gpu_epochs/epoch_groups.cuh": "ae0b03eae7d0c8036020a3af0d7965530372789ed4ee4bdbde7cc44be22a5c10",
+    "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "tests/gpu_epochs/first_stage_audit.cu": "c9405ec70d3dc3f2572a10c5831dd1137179b8182a3983009dbc660d54e472de",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
+    "tests/gpu_epochs/host_producers.h": "4d4fa388941eadaed54a3e553141a9ef74b80774dd5319f313058d4dff29db01",
+    "tests/gpu_epochs/inverse_limbs.cuh": "3a41eddc68eec089a716852c54fd99c6ac29a1fa49a46e90e578e9b74a3060df",
+    "tests/gpu_epochs/pair_finish_audit.cu": "ce76d53a0ae76bfaaca1bbd12ff87d7f268ca7dea187c1f733da14cebb9b261a",
+    "tests/gpu_epochs/pair_shared.cuh": "e171dfacf1aa467928d8613d1cc5c0dcab72539d67cdaca7c0fb3b521781b848",
+    "tests/gpu_epochs/parity_window_subset.cuh": "482e6e05ff134a82b48f32b27b32524cb7139c7daa0f0d877a9512315c021e0c",
+    "tests/gpu_epochs/point_audit.cu": "abc998ea5fc4f2180fc4690b209fc6ecb27a1189a8f884ead4607f06e82b315e",
+    "tests/gpu_epochs/point_predicate_audit.cu": "b8427c62a23c55070839548f28ce89c8309a47a6dc38d33ba594d3a120cc5c63",
+    "tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
+    "tests/gpu_epochs/qsb_host_verify.h": "3f521f09af243a022a3ee836a2b5559460e70bda9e52e3542a4a3d6f928a7111",
+    "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
+    "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
+    "tests/gpu_epochs/tree.cu": "1a6c015b6de6ed953971ddcb38795f96f93fe51abe3ddb7e3e44c1cbe2062ae9",
+    "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
+    "tests/gpu_epochs/tree_inverse.cuh": "d315aac099f615090d1c7b51ba7a9de5e9a8e62863ede7fe11be52acbe5a8466",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "ad256d03de4ecadf248e091a5ee37a028f1d1b127255044793e1f5ad31125652",
+    "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8",
+    "verify_native_composition.py": "db7abe8ab2c9db12b3a3f366c8022a96d6ab7e5bf0f51fc32a03c29f20646292",
+    "y_pair_sc.cuh": "923061f27e02bed6e78c352abdb1285c108650b699bb35668615ae0ef782a4cb"
+  },
+  "archives": {
+    "qsb_carrier_sm89.h": {
+      "cubin_sha256": "96ea66aad1f80feca26f060e0ebdf2c2e682a945eea7665162e3b4733a6050bc",
+      "bytes": 445344,
+      "original_source_sha256": "405a256a86079caa358417023ec94c8fb91ee3a1c95a3d3ff4f9631386659704",
+      "fingerprint": "QSB_ZEROS_N=24;QSB_S3=1;QSB_SE_WINDOWS=128;QSB_SE_BLOCK=256;MAX_T=16;QSB_950_PACK=1;QSB_BATCH_AFFINE_FALLBACK=QSB_BATCH_AFFINE_FALLBACK;QSB_BIGTBL=1;QSB_CHAIN_ANCHOR_UPDATE=1;QSB_CHAIN_MUL_LEAN=1;QSB_CHAIN_UNROLL=1;QSB_DIGIT_SHIFT=1;QSB_EPOCH_FAST=1;QSB_EPOCH_GROUPS=1;QSB_FINAL_CARRY=1;QSB_FUSE_X3=1;QSB_FX3_SIGNED=1;QSB_FX3_SPLIT3P=1;QSB_FX3_Z9=1;QSB_GATE_H0=1;QSB_GATE_H0_FMA=1;QSB_GATE_PAIR=1;QSB_GLV_COEFF_BOUNDS=1;QSB_GLV_FALLBACK_INLINE=1;QSB_GLV_HIGH15=1;QSB_GLV_RESIDUAL129=1;QSB_GLV_RESIDUAL3=1;QSB_GT_HEAL=1;QSB_HOST_VERIFY=1;QSB_HV_STATS=0;QSB_ISO_FAST_X=1;QSB_ISO_FUSED_ROOT_SCALE=1;QSB_ISO_RELOAD_R=1;QSB_ISO_ROOT_SCALE=1;QSB_K2S_PARITY_NARROW=1;QSB_K2S_PARITY_WINDOW=1;QSB_K32=1;QSB_K32_BGLUE=1;QSB_SQR_X0_GLUE=1;QSB_NEGFOLD_PARITY=1;QSB_NEG_SHORT=1;QSB_PAIR_SHARED=1;QSB_PAIR_SHA_UNROLL_CONST=0;QSB_PAIR_SHA_UNROLL_CONST_INNER=0;QSB_PAIR_SHA_UNROLL_WINDOW=1;QSB_GLV11=1;QSB_GLV11_P18=1;QSB_Q_P18=1;QSB_Q_MIX=4;QSB_Y_PAIR=1;QSB_GLV_LEAN=1;QSB_GLV_NO_KRED=1;QSB_GLV_ROUND_CC=1;QSB_GLV_HIGH15_HI=1;QSB_GROUP_CAP_EXACT=1;QSB_PREFIX_BLOCKS=2;QSB_R_CBANK=0;QSB_S3_HALF_WALK=1;QSB_S3_SIGN_SHIFT=1;QSB_S3_ODD_FOLD=1;QSB_ROOT_MAX_BATCHES=16;QSB_SHA_ALU_ADD=0;QSB_SHA_FMA_ADD=1;QSB_SHA_FMA_ROT=0;QSB_SHA_UNROLL_CONST=1;QSB_PK_HEAD_FMA=1;QSB_GLV_FP32_CARRY=1;QSB_PK_OUTLINE=1;QSB_SHORT_CARRY=1;QSB_SHORT_CARRY2=1;QSB_SHORT_CARRY2_SENTINEL=0;QSB_SHORT_CARRY3=1;QSB_SHORT_CARRY4=1;QSB_SHORT_CARRY6=1;QSB_SLOT_PIPELINE=1;QSB_SPEC_LAST_RESOLVE=1;QSB_SPEC_PREPARE_PAIR=1;QSB_STARTUP_TRIM=1;QSB_TABLE_BASE_A=1;QSB_TABLE_L2_WINDOW=1;QSB_TRIM_DIRECT_PRODUCER=1;QSB_Z2_SPEC_CUT=1;ZLAB_DIRDIG=1;ZLAB_DUAL_EPOCH_SHA=1;ZLAB_HITPATH=1;ZLAB_K2S3M=1;ZLAB_LAUNCH_BLOCKS=262144;ZLAB_MODSQR=1;ZLAB_PAIRSHA=0;ZLAB_T14=0;ZLAB_TREE=2;ZLAB_TRIM=1;QSB_FORCE_EXACT_HIT_CHECK=QSB_FORCE_EXACT_HIT_CHECK;QSB_SC_OPS=0;QSB_SC_PP=0;QSB_SC_ALUZ=0;QSB_SC_PARK=1;QSB_SC_LATE=0;",
+      "kernel_names": [
+        "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+        "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+        "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+        "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+        "_Z19kernel_build_gtablePKmS0_S0_Ph",
+        "_Z19kernel_gt_heal_scanPKhPKmPjj"
+      ]
+    },
+    "qsb_carrier_alt_sm89.h": {
+      "cubin_sha256": "d2f8160bc9303cf4a785036fac79b0846b820817eea0a3c6c2c53dbf3261d4b9",
+      "bytes": 445088,
+      "original_source_sha256": "fb5a141b58a880a375388a3c3c449ab35b5ed41b9799a904717e46b3b7b2d293",
+      "fingerprint": "QSB_ZEROS_N=24;QSB_S3=1;QSB_SE_WINDOWS=128;QSB_SE_BLOCK=256;MAX_T=16;QSB_950_PACK=1;QSB_BATCH_AFFINE_FALLBACK=QSB_BATCH_AFFINE_FALLBACK;QSB_BIGTBL=1;QSB_CHAIN_ANCHOR_UPDATE=1;QSB_CHAIN_MUL_LEAN=1;QSB_CHAIN_UNROLL=1;QSB_DIGIT_SHIFT=1;QSB_EPOCH_FAST=1;QSB_EPOCH_GROUPS=1;QSB_FINAL_CARRY=1;QSB_FUSE_X3=1;QSB_FX3_SIGNED=1;QSB_FX3_SPLIT3P=1;QSB_FX3_Z9=1;QSB_GATE_H0=1;QSB_GATE_H0_FMA=1;QSB_GATE_PAIR=1;QSB_GLV_COEFF_BOUNDS=1;QSB_GLV_FALLBACK_INLINE=1;QSB_GLV_HIGH15=1;QSB_GLV_RESIDUAL129=1;QSB_GLV_RESIDUAL3=1;QSB_GT_HEAL=1;QSB_HOST_VERIFY=1;QSB_HV_STATS=0;QSB_ISO_FAST_X=1;QSB_ISO_FUSED_ROOT_SCALE=1;QSB_ISO_RELOAD_R=1;QSB_ISO_ROOT_SCALE=1;QSB_K2S_PARITY_NARROW=1;QSB_K2S_PARITY_WINDOW=1;QSB_K32=1;QSB_K32_BGLUE=1;QSB_SQR_X0_GLUE=1;QSB_NEGFOLD_PARITY=1;QSB_NEG_SHORT=1;QSB_PAIR_SHARED=1;QSB_PAIR_SHA_UNROLL_CONST=0;QSB_PAIR_SHA_UNROLL_CONST_INNER=0;QSB_PAIR_SHA_UNROLL_WINDOW=1;QSB_GLV11=1;QSB_GLV11_P18=1;QSB_Q_P18=1;QSB_Q_MIX=1;QSB_Y_PAIR=1;QSB_GLV_LEAN=1;QSB_GLV_NO_KRED=1;QSB_GLV_ROUND_CC=1;QSB_GLV_HIGH15_HI=1;QSB_GROUP_CAP_EXACT=1;QSB_PREFIX_BLOCKS=2;QSB_R_CBANK=0;QSB_S3_HALF_WALK=1;QSB_S3_SIGN_SHIFT=1;QSB_S3_ODD_FOLD=1;QSB_ROOT_MAX_BATCHES=16;QSB_SHA_ALU_ADD=0;QSB_SHA_FMA_ADD=1;QSB_SHA_FMA_ROT=0;QSB_SHA_UNROLL_CONST=1;QSB_PK_HEAD_FMA=1;QSB_GLV_FP32_CARRY=1;QSB_PK_OUTLINE=1;QSB_SHORT_CARRY=1;QSB_SHORT_CARRY2=1;QSB_SHORT_CARRY2_SENTINEL=0;QSB_SHORT_CARRY3=1;QSB_SHORT_CARRY4=1;QSB_SHORT_CARRY6=1;QSB_SLOT_PIPELINE=1;QSB_SPEC_LAST_RESOLVE=1;QSB_SPEC_PREPARE_PAIR=1;QSB_STARTUP_TRIM=1;QSB_TABLE_BASE_A=1;QSB_TABLE_L2_WINDOW=1;QSB_TRIM_DIRECT_PRODUCER=1;QSB_Z2_SPEC_CUT=1;ZLAB_DIRDIG=1;ZLAB_DUAL_EPOCH_SHA=1;ZLAB_HITPATH=1;ZLAB_K2S3M=1;ZLAB_LAUNCH_BLOCKS=262144;ZLAB_MODSQR=1;ZLAB_PAIRSHA=0;ZLAB_T14=0;ZLAB_TREE=2;ZLAB_TRIM=1;QSB_FORCE_EXACT_HIT_CHECK=QSB_FORCE_EXACT_HIT_CHECK;QSB_SC_OPS=0;QSB_SC_PP=0;QSB_SC_ALUZ=0;QSB_SC_PARK=1;QSB_SC_LATE=0;",
+      "kernel_names": [
+        "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+        "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+        "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+        "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+        "_Z19kernel_build_gtablePKmS0_S0_Ph",
+        "_Z19kernel_gt_heal_scanPKhPKmPjj"
+      ]
+    }
+  },
+  "incumbent_compile": [
+    "nvcc",
+    "-O3",
+    "-DQSB_ZEROS_N=24",
+    "-DQSB_CARRIER_BUILD=1",
+    "-DQSB_PK_OUTLINE=1",
+    "-arch=sm_89",
+    "-cubin",
+    "-Xptxas",
+    "-v",
+    "subset.cu"
+  ],
+  "alternate_compile": [
+    "bash",
+    "build_carrier.sh",
+    "24"
+  ],
+  "alternate_entrypoint_defines": {
+    "QSB_PK_OUTLINE": 1,
+    "QSB_Q_MIX": 1
+  },
+  "compiler": "CUDA12.8.93",
+  "only_fingerprint_delta": {
+    "QSB_Q_MIX": [
+      "4",
+      "1"
+    ]
+  },
+  "CPU_source_exact_base": true,
+  "selector_policy_exact_reviewed_loader": true
+}

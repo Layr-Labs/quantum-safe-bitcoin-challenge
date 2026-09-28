@@ -57,13 +57,13 @@
  * final addition of -2C. The rows prefetched a pass ahead -- the next window's during the backward pass and windows 0/1's from the
  * hashing phase -- now go to L2 (prefetcht1) instead of L1 (QSB_CPU_PFNX): 64 KB of rows per window and thread do not fit the 32 KB L1
  * and evicted the backward pass's own lines; the forward pass still pulls its rows into L1 QSB_CPU_PFD groups ahead. Same candidates,
- * gate and records.
- *
- * 2026-09-27 (package y2d): this engine (terrapinelf's 2d1631b0, with jacklightChen's weighted-prefix idea from 55757d4d) at the
- * thread footprint of Meganpark980320's 296e5e53 co-grinder: ncpu - QSB_CPU_RESERVE workers, none on the GPU host thread's core
- * or its SMT sibling, the tree's own host producers unchanged. 2d1631b0's footprint items are switches below, each off by default
- * (QSB_CPU_HP_SHARE, QSB_CPU_NTH_RAISE, QSB_CPU_RSV_CORE=0); QSB_CPU_DIAG_EPOCH (its walk-start diagnostic) is off as well, so the
- * walk starts at epoch 0. Same candidates, gate and records. */
+ * gate and records. */
+#ifndef QSB_CPU_COUPLED_WORKERS
+#define QSB_CPU_COUPLED_WORKERS 1
+#endif
+#if QSB_CPU_COUPLED_WORKERS
+#include "CpuCoupledWorkers.h"
+#endif
 #include <openssl/sha.h>
 #include <openssl/bn.h>
 #include <openssl/ec.h>
@@ -144,6 +144,16 @@
 #ifndef QSB_CPU_TRY10
 #define QSB_CPU_TRY10 1
 #endif
+/* QSB_CPU_TRY9: 9 windows (114,688 MiB; 8 additions per candidate instead of 9) when the 10-window rule holds and that
+ * table fits in QSB_CPU_TAB9_FRAC of the memory left after QSB_CPU_TAB_RESERVE_MB (i.e. avail >= ~236 GiB), with the same
+ * huge-page guard; else 10 (an mmap failure, poor backing or a failed table check at 9 goes to 10). The ranked host offers
+ * >= 255 GiB (terrapinelf's 2d1631b0 diagnostic). */
+#ifndef QSB_CPU_TRY9
+#define QSB_CPU_TRY9 1
+#endif
+#ifndef QSB_CPU_TAB9_FRAC
+#define QSB_CPU_TAB9_FRAC 0.5
+#endif
 #ifndef QSB_CPU_TAB10_CAP_MB
 #define QSB_CPU_TAB10_CAP_MB 20480
 #endif
@@ -195,26 +205,6 @@
 #define QCPU_NXT_HINT (QSB_CPU_PFNX ? _MM_HINT_T1 : _MM_HINT_T0)
 #ifndef QSB_CPU_F1N
 #define QSB_CPU_F1N (QSB_CPU_HPF < 2)   /* ec8_first prefetches window 1's rows (unless the hashing phase did) */
-#endif
-/* Footprint switches (package y2d). The defaults live here, at file scope and outside every conditional block, so the nvcc
- * device pass (which parses start() with QCPU_VEC and QCPU_SHANI at 0) and the host pass both see them. */
-#ifndef QSB_CPU_HP_SHARE
-#define QSB_CPU_HP_SHARE 0         /* 1 (2d1631b0): the GPU host thread's own CPU also hosts a worker when the host producers publish
-                                    * qhp::g_share_cpu (2d1631b0's host_producers.h with blocking event waits; this tree's producers have
-                                    * no such symbol). 0: no worker there, as 296e5e53 */
-#endif
-#ifndef QSB_CPU_NTH_RAISE
-#define QSB_CPU_NTH_RAISE 0        /* 1 (2d1631b0): one worker per CPU the main thread left when that exceeds ncpu - QSB_CPU_RESERVE (32 of 32
-                                    * on the runner with 2d1631b0's producers). 0: ncpu - QSB_CPU_RESERVE workers, as 296e5e53 */
-#endif
-#ifndef QSB_CPU_RSV_CORE
-#define QSB_CPU_RSV_CORE 1         /* 1 (296e5e53's rule): the workers never run on the GPU host thread's core (both SMT siblings, from
-                                    * thread_siblings_list) when that thread is pinned at start(), else the last 2-thread core stays free.
-                                    * 0: 2d1631b0's rule (every CPU the main thread no longer uses; every CPU when it is not pinned) */
-#endif
-#ifndef QSB_CPU_DIAG_EPOCH
-#define QSB_CPU_DIAG_EPOCH 0       /* 1 (2d1631b0): the walk starts at a diagnostic code x 2^29 (geometry, huge pages, workers, memory);
-                                    * 0: at epoch 0, as 296e5e53. Enumeration only: disjoint from the GPU's candidates either way */
 #endif
 
 namespace qcpu {
@@ -1067,8 +1057,8 @@ static void fe_inv_var(fe &r, const fe &a) {
     r.v[2] = (uint64_t)x.v[2] >> 4 | (uint64_t)x.v[3] << 58; r.v[3] = (uint64_t)x.v[3] >> 6 | (uint64_t)x.v[4] << 56;
 }
 /* x = x^-1 lane-wise: Montgomery's trick across the 8 lanes (a 3-level tree of permuted multiplications:
- * 3 to combine, 3 to split), one scalar inversion of the lanes' product. A zero lane zeroes every lane's
- * result, as the Fermat inversion did (x-collisions, probability 2^-240; the exact gate absorbs them). */
+ * 3 to combine, 3 to split), one scalar inversion of the lanes' product. If the product
+ * is zero, retain independent-lane Fermat behavior on the unchanged input. */
 Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
 Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
 Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
@@ -1078,7 +1068,9 @@ Q8T static void fe8_inv_lanes(fe8 &x) {
     fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
     fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
     alignas(64) uint64_t w[4][8]; fe8_canon64(w, t);
-    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi;
+    if (!(pr.v[0] | pr.v[1] | pr.v[2] | pr.v[3])) { fe8_inv1(x); return; }
+    fe_inv_var(pi, pr);
     fe8 I; fe8_bcast(I, pi);
     fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
     fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
@@ -1607,9 +1599,8 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
-#ifdef QSB_CPU_DEVBENCH
-    uint64_t dev_limit = 0;         /* dev only (never in a ranked build): each worker stops once this many candidates are done */
-    std::atomic<int> dev_live{0};
+#if QSB_CPU_COUPLED_WORKERS
+    qcpu_coupled::Selector coupled;
 #endif
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
@@ -1895,6 +1886,10 @@ static Geo geo_choose(bool try11 = false, bool try10 = false) {
         if (b10 > (double)QSB_CPU_TAB10_CAP_MB * 1048576.0) b10 = (double)QSB_CPU_TAB10_CAP_MB * 1048576.0;
         if ((double)geo_make(10, true).total * sizeof(pt) <= b10) nw = 10;
     }
+    if (QSB_CPU_TRY9 && try10 && nw == 10) {            /* 9 windows: half of what is left after the reserve */
+        const double b9 = (avail - (double)QSB_CPU_TAB_RESERVE_MB * 1048576.0) * QSB_CPU_TAB9_FRAC;
+        if ((double)geo_make(9, true).total * sizeof(pt) <= b9) nw = 9;
+    }
     if (const char *e = getenv("QSB_CPU_NW")) nw = atoi(e);
     return geo_make(nw, !getenv("QSB_CPU_UNSIGNED"));
 }
@@ -1926,6 +1921,16 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
         if (f < 0) at += snprintf(note + at, nn - at, "; %d windows: %s", nw, f < -1.5 ? "no memory" : "no smaps");
         else at += snprintf(note + at, nn - at, "; %d windows: %.1f%% huge pages", nw, 100.0 * f);
     };
+    if (c.g.nw == 9 && c.g.sgn && !forced) {
+        if (table_alloc(c)) {
+            double f = measure(32);                      /* 1,792 of 57,344 regions */
+            if (f >= QSB_CPU_HP_MIN) f = measure(1);
+            if (f >= QSB_CPU_HP_MIN) { hp = f; return true; }
+            add(9, f);
+            table_free(c);
+        } else add(9, -2);
+        c.g = geo_make(10, true);                        /* the 9-window rule implies the 10-window one */
+    }
     if (c.g.nw == 10 && c.g.sgn && !forced) {
         if (table_alloc(c)) {
             double f = measure(32);                      /* 272 of 8,704 regions */
@@ -2008,6 +2013,45 @@ static void hash_plan(Ctx &c) {
     if (c.cut > 255 || c.early > 7) return;
     c.h_nb = nb; c.h_ng = ng; c.hplan = true;
 }
+
+#ifndef QSB_CPU_PREFIX100
+#define QSB_CPU_PREFIX100 1
+#endif
+/* cefika 4a197f06: retain complete CPU block-0 families to amortize that
+ * compression. This isolated variant requires the current 158/77 shape and
+ * selects all 20 five-pattern families; unexpected shapes keep baseline.
+ * SHA-NI uses four lanes: 100 is aligned without discarding four families
+ * merely for the donor's unrelated 16-lane SHA alignment. Planning and
+ * compaction finish before any worker can retain row pointers. */
+static void hash_plan_cpu_patterns(Ctx &c) {
+    hash_plan(c);
+#if QSB_CPU_PREFIX100
+    if (!c.hplan || c.ncwin != 158 || c.h_ng != 77) return;
+    int size[286] = {0}, order[20], count = 0;
+    bool seen[286] = {false};
+    for (int i = 0; i < c.ncwin; i++) size[c.h_g0[i]]++;
+    for (int i = 0; i < c.ncwin; i++) {
+        const int g = c.h_g0[i];
+        if (!seen[g] && size[g] == 5) {
+            seen[g] = true;
+            if (count == 20) return;
+            order[count++] = g;
+        }
+    }
+    if (count != 20) return;
+    bool take[286] = {false};
+    for (int i = 0; i < 20; i++) take[order[i]] = true;
+    uint8_t keep[100][3]; int n = 0;
+    for (int i = 0; i < c.ncwin; i++) if (take[c.h_g0[i]]) {
+        if (n == 100) return;
+        memcpy(keep[n++], c.cwin[i], 3);
+    }
+    if (n != 100) return;
+    memcpy(c.cwin, keep, sizeof keep); c.ncwin = n;
+    hash_plan(c);
+#endif
+}
+
 #endif
 /* Gate one recovered key (x, parity of y); true when it is an exact hit, which is then published. */
 static inline void pk_block(uint8_t *pk, const fe &x3, unsigned ypar) {    /* compressed key, bytes 0..32 */
@@ -2103,6 +2147,9 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 #endif
 
 static void worker(Ctx *c, int tid) {
+#if QSB_CPU_COUPLED_WORKERS
+    struct CoupledExit {qcpu_coupled::Selector *s;~CoupledExit(){s->exited.fetch_add(1);}} coupled_exit{&c->coupled};
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -2178,9 +2225,12 @@ static void worker(Ctx *c, int tid) {
     auto hpf_after = [&](int kl, int cnt) {          /* z of candidates kl - cnt + 1 .. kl is new in zb */
         if (hpf) for (int q = kl - cnt + 1; q <= kl; q++) hpf_rows(q);
     };
+#if QSB_CPU_COUPLED_WORKERS
+    uint64_t coupled_seen=~0ull,coupled_batches=0;
+#endif
     for (;;) {
-#ifdef QSB_CPU_DEVBENCH
-        if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
+#if QSB_CPU_COUPLED_WORKERS
+        c->coupled.boundary(tid,epoch,wi,coupled_batches++,coupled_seen);
 #endif
         int k = 0;
         while (k < B) {
@@ -2406,51 +2456,11 @@ static Ctx *g_ctx = nullptr;
 static cpu_set_t g_initial_cpus;
 static int g_initial_ok = [] { CPU_ZERO(&g_initial_cpus); return sched_getaffinity(0, sizeof g_initial_cpus, &g_initial_cpus) == 0 ? 1 : 0; }();
 #endif
-#if defined(CPU_COUNT) && QSB_CPU_RSV_CORE
-/* 296e5e53's worker CPUs (package y2d): the pre-main() set minus the core of the GPU host thread (start() runs on it) when that
- * thread is pinned to fewer CPUs; when it is not, minus the last core with two or more CPUs (plan_cores: as 296e5e53's
- * smt_plan). Without a core to reserve: the pre-main() set minus the host thread's CPUs if it is pinned (296e5e53's table-builder
- * mask), else false (no mask: the workers inherit, as in 296e5e53). */
-static bool rsv_core_mask(bool plan_cores, cpu_set_t *out) {
-    cpu_set_t cs; CPU_ZERO(&cs);
-    if (g_initial_ok) cs = g_initial_cpus; else if (sched_getaffinity(0, sizeof cs, &cs) != 0) return false;
-    cpu_set_t host; CPU_ZERO(&host);
-    const bool host_pinned = sched_getaffinity(0, sizeof host, &host) == 0 && CPU_COUNT(&host) < CPU_COUNT(&cs);
-    std::vector<std::vector<int> > cores; std::vector<uint8_t> seen(CPU_SETSIZE, 0);
-    bool topo = plan_cores;
-    for (int cpu = 0; cpu < CPU_SETSIZE && topo; cpu++) {
-        if (!CPU_ISSET(cpu, &cs) || seen[cpu]) continue;
-        char path[128]; snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
-        FILE *f = fopen(path, "r"); if (!f) { topo = false; break; }
-        char buf[256] = {0}; const bool ok = fgets(buf, sizeof buf, f) != nullptr; fclose(f); if (!ok) { topo = false; break; }
-        std::vector<int> core;
-        for (char *q = buf; *q;) {                      /* "a-b,c,..." */
-            char *e; long a = strtol(q, &e, 10); if (e == q) break; long b = a;
-            if (*e == '-') { q = e + 1; b = strtol(q, &e, 10); }
-            for (long x = a; x <= b && x < CPU_SETSIZE; x++) if (x >= 0 && CPU_ISSET(x, &cs) && !seen[x]) { core.push_back((int)x); seen[x] = 1; }
-            q = e; if (*q == ',') q++; else break;
-        }
-        if (core.empty()) { core.push_back(cpu); seen[cpu] = 1; }
-        cores.push_back(core);
-    }
-    int rsv = -1;
-    if (topo) {
-        if (host_pinned)
-            for (int i = 0; i < (int)cores.size() && rsv < 0; i++) for (int x : cores[i]) if (CPU_ISSET(x, &host)) { rsv = i; break; }
-        for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
-        if (cores.size() < 2) rsv = -1;
-    }
-    *out = cs;
-    if (rsv >= 0) { for (int x : cores[rsv]) CPU_CLR(x, out); return CPU_COUNT(out) > 0; }
-    if (!host_pinned) return false;
-    for (int x = 0; x < CPU_SETSIZE; x++) if (CPU_ISSET(x, &host)) CPU_CLR(x, out);
-    return CPU_COUNT(out) > 0;
-}
-#endif
 static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, int cut, int early) {
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 #ifdef CPU_COUNT
     cpu_set_t work_cpus; CPU_ZERO(&work_cpus); bool work_mask = false;
+    cpu_set_t host_cpus; CPU_ZERO(&host_cpus); int extra = 0;   /* one more worker beside the GPU host thread */
     {
         cpu_set_t cs; CPU_ZERO(&cs);
         if (g_initial_ok) cs = g_initial_cpus; else if (sched_getaffinity(0, sizeof cs, &cs) != 0) CPU_ZERO(&cs);
@@ -2458,11 +2468,23 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         cpu_set_t now; CPU_ZERO(&now);                    /* the main thread's current set (maybe narrowed) */
         if (g_initial_ok && sched_getaffinity(0, sizeof now, &now) == 0 && CPU_COUNT(&now) < CPU_COUNT(&cs)) {
             for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &cs) && !CPU_ISSET(c, &now)) CPU_SET(c, &work_cpus);
-#if defined(QSB_HP_ON) && QSB_CPU_HP_SHARE
+#ifdef QSB_HP_ON
             /* the main thread sleeps between launches (blocking event waits): its CPU may host a worker too */
             if (qhp::g_share_cpu >= 0 && CPU_ISSET(qhp::g_share_cpu, &cs)) CPU_SET(qhp::g_share_cpu, &work_cpus);
 #endif
+#if defined(QSB_HOST_BLOCKING) && QSB_HOST_BLOCKING
+            /* The GPU host thread sleeps in blocking event waits (QSB_HOST_BLOCKING in tree.cu), so its core is idle between
+             * launches: workers on every CPU, the host thread's included; they are SCHED_IDLE and yield to it and to the
+             * producers (after HyeokxC's 0735233a / 888f5fce). */
+            for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &now)) CPU_SET(c, &work_cpus);
+#endif
             work_mask = CPU_COUNT(&work_cpus) >= 1;       /* workers: every CPU the main thread no longer uses */
+            /* The main thread keeps its core (both SMT siblings) but spins on one CPU; a SCHED_IDLE worker on that core
+             * fills the idle sibling and yields to the main thread (ercumentyildirim's 990960b3 / cfe9f377). */
+            host_cpus = now; extra = (work_mask && CPU_COUNT(&now) >= 2 && qhp::g_share_cpu < 0 && !getenv("QSB_CPU_NOEXTRA")) ? 1 : 0;
+#if defined(QSB_HOST_BLOCKING) && QSB_HOST_BLOCKING
+            extra = 0;                                    /* the host core already has workers */
+#endif
         }
     }
 #endif
@@ -2482,7 +2504,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     int nth = QSB_CPU_THREADS;
 #else
     int nth = (int)ncpu - QSB_CPU_RESERVE;
-#if defined(CPU_COUNT) && QSB_CPU_NTH_RAISE
+#ifdef CPU_COUNT
     /* The host producers may have narrowed the main thread to one logical CPU (its SMT sibling then runs
      * the pinned producer): one worker per CPU the main thread left, within the CPU quota. */
     if (work_mask && CPU_COUNT(&work_cpus) > nth) nth = CPU_COUNT(&work_cpus) < (int)ncpu ? CPU_COUNT(&work_cpus) : (int)ncpu;
@@ -2490,7 +2512,13 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
     if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
-    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early;
+#ifndef CPU_COUNT
+    const int extra = 0;
+#endif
+    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth + extra; c->cut = cut; c->early = early;
+#if QSB_CPU_COUPLED_WORKERS
+    c->coupled.init(c->nthreads);
+#endif
 #if QCPU_VEC
     __builtin_cpu_init();
     c->vec = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma") && !getenv("QSB_CPU_NOVEC");
@@ -2500,16 +2528,6 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QCPU_SHANI
     c->shani = qsha_supported() && !getenv("QSB_CPU_NOSHANI");
-#endif
-#if defined(CPU_COUNT) && QSB_CPU_RSV_CORE
-    {   /* 296e5e53's placement (its smt_plan and table-builder mask): the fallback core rule applies where 296e5e53 plans cores */
-        cpu_set_t m;
-        if (rsv_core_mask(c->vec && !getenv("QSB_CPU_NOPIN"), &m)) { work_cpus = m; work_mask = true; }
-    }
-#endif
-#ifdef QSB_CPU_DEVBENCH
-    if (const char *e = getenv("QSB_CPU_DEVCAND")) c->dev_limit = strtoull(e, nullptr, 10);
-    c->dev_live = nth;
 #endif
     /* CPU window patterns: every 3-subset of {cut..n-1} not used by the GPU. */
     for (int a = cut; a < (int)dp->n; a++) for (int b = a + 1; b < (int)dp->n; b++) for (int d3 = b + 1; d3 < (int)dp->n; d3++) {
@@ -2525,7 +2543,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     c->mid_bytes = dp->total_preimage_len - unpadded;
     c->n_epochs = binom_u64(cut, early);
 #if QCPU_SHANI
-    if (c->shani) hash_plan(*c);
+    if (c->shani) hash_plan_cpu_patterns(*c);
 #endif
     if (!qsb_hv_init(&c->hv, dp, (const uint8_t (*)[QSB_SE_TWIN])win3, cut, early)) { printf("  CPU co-grind: off (gate)\n"); delete c; return; }
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
@@ -2538,7 +2556,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     fe_from_le32(c->cx, dp->u2r_x); fe_from_le32(c->cy, dp->u2r_y);
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
 #ifdef CPU_COUNT
-    std::thread([c, fax, fay, nth, work_mask, work_cpus, ncpu, nwin]() {
+    std::thread([c, fax, fay, nth, work_mask, work_cpus, ncpu, nwin, extra, host_cpus]() {
         if (work_mask) sched_setaffinity(0, sizeof work_cpus, &work_cpus);   /* table build + workers inherit */
 #else
     std::thread([c, fax, fay, nth, ncpu, nwin]() {
@@ -2551,14 +2569,23 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         if (!table_setup(*c, nth, hp, note, sizeof note)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         char hps[16]; if (hp < 0) snprintf(hps, sizeof hps, "n/a"); else snprintf(hps, sizeof hps, "%.1f%%", 100.0 * hp);
-        printf("  CPU co-grind: %d threads (of %ld CPUs), %s, %s, %d window patterns per epoch disjoint from the GPU's %d; "
+        printf("  CPU co-grind: %d threads%s (of %ld CPUs), %s, %s, %d window patterns per epoch disjoint from the GPU's %d; "
                "table %d %s windows of %d..%d bits, %.0f MiB, huge pages %s (%.2f s%s)\n",
-               nth, ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin,
+               nth, extra ? " + 1 on the host core" : "", ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin,
                c->g.nw, c->g.sgn ? "signed" : "unsigned", c->g.wid[c->g.nw - 1], c->g.wid[0], c->g.total * sizeof(pt) / 1048576.0,
                hps, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec), note);
         fflush(stdout);
         build_table(*c, fax, fay, nth);
         bool tab_ok = table_check(*c);
+        if (!tab_ok && c->g.nw == 9 && !getenv("QSB_CPU_NW")) {    /* 9-window table failed its check: 10 (or more) */
+            table_free(*c);
+            if (!table_setup(*c, nth, hp, note, sizeof note, 10)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+            printf("  CPU co-grind: 9-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
+                   c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
+            fflush(stdout);
+            build_table(*c, fax, fay, nth);
+            tab_ok = table_check(*c);
+        }
         if (!tab_ok && c->g.nw == 10 && !getenv("QSB_CPU_NW")) {   /* 10-window table failed its check: 11 (or 12) */
             table_free(*c);
             if (!table_setup(*c, nth, hp, note, sizeof note, 11)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
@@ -2570,7 +2597,10 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         }
         if (!tab_ok) { printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
-#if QSB_CPU_DIAG_EPOCH   /* default at file scope (package y2d: 0) */
+#ifndef QSB_CPU_DIAG_EPOCH
+#define QSB_CPU_DIAG_EPOCH 1
+#endif
+#if QSB_CPU_DIAG_EPOCH
         {   /* Zero-cost diagnostic. Every epoch of the co-grinder's walk is real work on patterns disjoint from
              * the GPU's, so where the walk starts is a free enumeration choice. Start it at code * 2^29, so the
              * public ranked hit list (the smallest CPU-hit epoch rank / 2^29) shows what this host chose:
@@ -2581,7 +2611,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
             const int cg = c->g.nw == 11 ? 1 : c->g.nw == 12 ? 2 : 3;
             const int ch = (hp >= 0.95) ? 0 : 1;
             const int ct = nth >= 28 ? 0 : 1;
-            uint64_t base = (uint64_t)(cg + 3 * ch + 6 * ct) << 29 | (uint64_t)(c->g.nw == 10) << 28;
+            uint64_t base = (uint64_t)(cg + 3 * ch + 6 * ct) << 29 | (uint64_t)(c->g.nw == 10 || c->g.nw == 9) << 28 | (uint64_t)(c->g.nw == 9) << 19;   /* bit 19: 9 windows */
             {   /* v2: + GiB this process could use before the table (MemAvailable / cgroup headroom), bits 20..27.
                  * The first co-grinder hit lands within 2^20 epochs of the start with probability 1 - e^-20. */
                 double av = mem_avail(); if (av >= 0) av += (double)c->g.total * sizeof(pt);
@@ -2596,17 +2626,21 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         }
 #endif
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
+#ifdef CPU_COUNT
+        if (extra) std::thread([c, nth, host_cpus]() { sched_setaffinity(0, sizeof host_cpus, &host_cpus); worker(c, nth); }).detach();
+#endif
     }).detach();
     g_ctx = c;
-#ifdef QSB_CPU_DEVBENCH
-    if (c->dev_limit) {                                  /* dev only (never in a ranked build): fixed work, then exit */
-        while (c->cand.load() == 0 || c->dev_live.load() > 0) usleep(10000);
-        { std::lock_guard<std::mutex> g(c->io); if (c->out) fflush(c->out); }
-        printf("DEVCAND %llu candidates, %u hits\n", (unsigned long long)c->cand.load(), c->hits.load());
-        fflush(stdout); _exit(0);
-    }
-#endif
 }
+#if QSB_CPU_COUPLED_WORKERS
+static void coupled_abort(){if(g_ctx)g_ctx->coupled.abort("pipeline_exit");}
+struct CoupledRunGuard {~CoupledRunGuard(){coupled_abort();}};
+static void coupled_tick(uint64_t gpu,bool full){
+    if(!g_ctx)return;
+    struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
+    g_ctx->coupled.tick(gpu,g_ctx->cand.load(),now.tv_sec+1e-9*now.tv_nsec,full);
+}
+#endif
 static uint64_t candidates() { return g_ctx ? g_ctx->cand.load() : 0; }
 static uint32_t hits() { return g_ctx ? g_ctx->hits.load() : 0; }
 }  // namespace qcpu

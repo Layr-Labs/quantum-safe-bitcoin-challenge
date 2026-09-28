@@ -11,6 +11,10 @@
 # (e.g. OpenSSL include paths) can be passed in QSB_CARRIER_NVCC_FLAGS.
 set -euo pipefail
 cd "$(dirname "$0")"
+if [ -f NATIVE_COMPOSITION.json ]; then
+    echo "This package binds two archived native images; validate with verify_native_composition.py. Rebuilding would require a new reviewed composition." >&2
+    exit 1
+fi
 Z=${1:-24}
 NVCC=${NVCC:-nvcc}
 if [ -z "${CUOBJDUMP:-}" ]; then
