@@ -1,0 +1,33 @@
+#pragma once
+// Complete exported data-symbol inventory, bound from both archived ELF images.
+struct QsbNativeGlobal { const char *name; size_t bytes; };
+static const QsbNativeGlobal qsb_native_globals[] = {
+    {"BINOM_C", 12080},
+    {"COMBO_SYMBOLS", 100},
+    {"GT_ORDER_N", 32},
+    {"I", 32},
+    {"K", 256},
+    {"MULTI_EIGHT", 260},
+    {"QSB_CONST_SCHEDULE", 1024},
+    {"QSB_FIRST_CLASS", 512},
+    {"QSB_FIRST_COUNT", 4},
+    {"QSB_FIRST_UNIQUE", 896},
+    {"QSB_ISO_INVU", 32},
+    {"QSB_ISO_XNEG", 4},
+    {"QSB_LANE_CLASS", 512},
+    {"QSB_PUSH_WORDS", 2416},
+    {"QSB_S3_DESC", 160},
+    {"QSB_S3_DESC_MXF", 256},
+    {"QSB_U2R", 64},
+    {"QSB_U2R_C", 32},
+    {"QSB_U2R_ISO", 64},
+    {"QSB_WINDOW_CLASS", 512},
+    {"QSB_WINDOW_FIRST", 7168},
+    {"QSB_WINDOW_SECOND", 32768},
+    {"WIN3", 384},
+    {"ZI_BY_LUT", 6656},
+    {"_KECCAKF_RNDC", 192},
+    {"pin_one_mul", 4},
+    {"pin_pow2", 128},
+    {"ripemd160_sizedesc_32", 8},
+};

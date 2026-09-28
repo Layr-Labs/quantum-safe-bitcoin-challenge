@@ -1,4 +1,9 @@
 #pragma once
+/* Dual-native host composition: exactf745 incumbent plus archived3280 digest only.
+ * Both complete fingerprints and every module data global are checked separately.
+ * See NATIVE_COMPOSITION.json and verify_native_composition.py for fresh source
+ * binding; archived headers retain their original device-build provenance.
+ */
 /* Native sm_89 carrier for the subset search.
  *
  * Design and most of this file are Ryun1's native sm_89 carrier from the pinning
@@ -54,6 +59,9 @@
 
 /* QSB_CARRIER (kill switch): 1 = use the embedded native sm_89 image when it loads;
  * 0 = no carrier code at all (every launch is the compute_52 <<<>>> launch). */
+#ifndef QSB_DUAL_NATIVE
+#define QSB_DUAL_NATIVE 1
+#endif
 #ifndef QSB_CARRIER
 #define QSB_CARRIER 1
 #endif
@@ -83,11 +91,11 @@ enum QsbCarrierKernel {
  * from the timed window. Each upload is logged; if the carrier is ever switched off,
  * qsb_carrier_off replays the log into the compute_52 image (JIT-compiling it then)
  * before any <<<>>> launch, so the fallback sees exactly the same data. */
-struct QsbUpload { const void *sym; void *data; size_t n; };
+struct QsbUpload { const void *sym; const char *name; void *data; size_t n; };
 static QsbUpload *g_qsb_uploads = nullptr;       /* grows as needed; uploads are startup-only */
 static int g_qsb_n_uploads = 0, g_qsb_cap_uploads = 0;
 static void (*g_qsb_jit_hook)(void) = nullptr;   /* JIT-image-only setup, run on fallback */
-static bool qsb_upload_log(const void *sym, const void *src, size_t n) {
+static bool qsb_upload_log(const void *sym, const char *name, const void *src, size_t n) {
     if (g_qsb_n_uploads == g_qsb_cap_uploads) {
         const int cap = g_qsb_cap_uploads ? 2 * g_qsb_cap_uploads : 32;
         QsbUpload *grown = (QsbUpload *)realloc(g_qsb_uploads, (size_t)cap * sizeof(QsbUpload));
@@ -97,7 +105,7 @@ static bool qsb_upload_log(const void *sym, const void *src, size_t n) {
     void *copy = malloc(n ? n : 1);
     if (!copy) return false;
     memcpy(copy, src, n);
-    g_qsb_uploads[g_qsb_n_uploads++] = {sym, copy, n};
+    g_qsb_uploads[g_qsb_n_uploads++] = {sym, name, copy, n};
     return true;
 }
 
@@ -108,8 +116,21 @@ struct QsbCarrierState {
     cudaKernel_t k[QK_N];
 };
 static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
+// Alternate is never unloaded in-process: even a rejected launch can follow
+// earlier outstanding work. Only QK_DIG may use it; all shared buffers persist.
+static QsbCarrierState g_qsb_alternate = {0, 0, nullptr, {}};
+static bool g_qsb_use_alternate = false;
+static unsigned g_qsb_native_faults = 0;
+static void qsb_alternate_off(const char *why) {
+    const bool was_on = g_qsb_alternate.on;
+    g_qsb_alternate.on = 0; g_qsb_use_alternate = false; ++g_qsb_native_faults;
+    cudaGetLastError();
+    if (was_on || g_qsb_alternate.lib) { printf("GPU_NATIVE alternate=off reason=%s\n", why); fflush(stdout); }
+}
+
 
 static void qsb_carrier_off(const char *why) {
+    qsb_alternate_off("incumbent_unavailable");
     /* Never unload an image whose kernels may still be in flight; just stop using it. */
     if (g_qsb_carrier.lib && !g_qsb_carrier.running) {
         cudaLibraryUnload(g_qsb_carrier.lib);
@@ -135,10 +156,18 @@ static void qsb_carrier_off(const char *why) {
     if (replayed)
         printf("  compute_52 image: %d upload(s) replayed%s\n", replayed, bad ? ", SOME FAILED" : "");
     fflush(stdout);
+    if (bad) { fprintf(stderr, "ERROR: JIT replay incomplete; refusing further launches\n"); exit(1); }
 }
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#if QSB_DUAL_NATIVE
+namespace qsb_archived {
+#include "qsb_carrier_alt_sm89.h"
+}
+#include "QsbNativeFingerprints.h"
+#include "QsbNativeGlobals.h"
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -150,26 +179,72 @@ static int qsb_b64_val(unsigned char c) {
 }
 
 /* Decode the line-split base64 image. Returns a malloc'd buffer or nullptr. */
-static unsigned char *qsb_carrier_decode(size_t *out_len) {
-    unsigned char *buf = (unsigned char *)malloc(qsb_carrier_cubin_bytes + 4);
+static unsigned char *qsb_carrier_decode(size_t *out_len, size_t bytes, unsigned lines, const char *const *encoded) {
+    unsigned char *buf = (unsigned char *)malloc(bytes + 4);
     if (!buf) return nullptr;
     size_t n = 0; unsigned acc = 0; int bits = 0;
-    for (unsigned li = 0; li < qsb_carrier_b64_lines; li++) {
-        for (const unsigned char *p = (const unsigned char *)qsb_carrier_b64[li]; *p; p++) {
+    for (unsigned li = 0; li < lines; li++) {
+        for (const unsigned char *p = (const unsigned char *)encoded[li]; *p; p++) {
             int v = qsb_b64_val(*p);
             if (v < 0) continue;              /* '=' padding */
             acc = (acc << 6) | (unsigned)v; bits += 6;
             if (bits >= 8) {
                 bits -= 8;
-                if (n >= qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
+                if (n >= bytes) { free(buf); return nullptr; }
                 buf[n++] = (unsigned char)(acc >> bits);
             }
         }
     }
-    if (n != qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
+    if (n != bytes) { free(buf); return nullptr; }
     *out_len = n;
     return buf;
 }
+
+#if QSB_DUAL_NATIVE
+static bool qsb_native_same_globals() {
+    // Compare every bound exported object except the separately checked fingerprint.
+    for (const auto &g : qsb_native_globals) {
+        void *a=nullptr,*b=nullptr; size_t an=0,bn=0;
+        if (cudaLibraryGetGlobal(&a,&an,g_qsb_carrier.lib,g.name)!=cudaSuccess ||
+            cudaLibraryGetGlobal(&b,&bn,g_qsb_alternate.lib,g.name)!=cudaSuccess ||
+            an!=g.bytes || bn!=g.bytes) return false;
+        void *ha=malloc(an),*hb=malloc(bn);
+        if (!ha || !hb) { free(ha);free(hb);return false; }
+        const bool same=cudaMemcpy(ha,a,an,cudaMemcpyDeviceToHost)==cudaSuccess &&
+            cudaMemcpy(hb,b,bn,cudaMemcpyDeviceToHost)==cudaSuccess && !memcmp(ha,hb,an);
+        free(ha);free(hb);if(!same)return false;
+    }
+    return true;
+}
+static void qsb_alternate_init(const char *host_knobs) {
+    if (strcmp(host_knobs,qsb_native_expected_current)) return;
+    const char *disabled=getenv("QSB_DUAL_NATIVE_DISABLE");
+    if(disabled && *disabled && strcmp(disabled,"0"))return;
+    size_t len=0;
+    unsigned char *img=qsb_carrier_decode(&len,qsb_archived::qsb_carrier_cubin_bytes,
+        qsb_archived::qsb_carrier_b64_lines,qsb_archived::qsb_carrier_b64);
+    if(!img)return;
+    cudaError_t e=cudaLibraryLoadData(&g_qsb_alternate.lib,img,nullptr,nullptr,0,nullptr,nullptr,0);
+    free(img);
+    if(e!=cudaSuccess){g_qsb_alternate.lib=nullptr;qsb_alternate_off("load");return;}
+    for(int i=0;i<QK_N;i++) {
+        if(strcmp(qsb_carrier_kernel_names[i],qsb_archived::qsb_carrier_kernel_names[i]) ||
+           cudaLibraryGetKernel(&g_qsb_alternate.k[i],g_qsb_alternate.lib,qsb_archived::qsb_carrier_kernel_names[i])!=cudaSuccess) {
+            qsb_alternate_off("kernel_abi");return;
+        }
+    }
+    void *dk=nullptr;size_t n=0;
+    char actual[sizeof(qsb_native_expected_alternate)];
+    if(cudaLibraryGetGlobal(&dk,&n,g_qsb_alternate.lib,"qsb_carrier_knobs")!=cudaSuccess ||
+       n!=sizeof(actual) || cudaMemcpy(actual,dk,n,cudaMemcpyDeviceToHost)!=cudaSuccess ||
+       memcmp(actual,qsb_native_expected_alternate,n) || !qsb_native_same_globals()) {
+        qsb_alternate_off("fingerprint_or_globals");return;
+    }
+    g_qsb_alternate.on=1;
+    printf("GPU_NATIVE resident current=%s alternate=%s globals=checked fingerprints=exact\n",
+        qsb_carrier_cubin_sha256,qsb_archived::qsb_carrier_cubin_sha256);fflush(stdout);
+}
+#endif
 
 /* `knobs` is this binary's QSB_CARRIER_KNOBS string (host pass, same macros). */
 static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
@@ -177,7 +252,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
     if (dis && *dis && strcmp(dis, "0") != 0) { qsb_carrier_off("disabled by QSB_CARRIER_DISABLE"); return; }
     if (prop.major != 8 || prop.minor != 9) { qsb_carrier_off("device is not sm_89"); return; }
     size_t len = 0;
-    unsigned char *img = qsb_carrier_decode(&len);
+    unsigned char *img = qsb_carrier_decode(&len, qsb_carrier_cubin_bytes, qsb_carrier_b64_lines, qsb_carrier_b64);
     if (!img) { qsb_carrier_off("embedded image failed to decode"); return; }
     cudaError_t e = cudaLibraryLoadData(&g_qsb_carrier.lib, img, nullptr, nullptr, 0,
                                         nullptr, nullptr, 0);
@@ -199,6 +274,9 @@ static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
     free(img_knobs);
     if (!same) { qsb_carrier_off("image built with other knobs"); return; }
     g_qsb_carrier.on = 1;
+#if QSB_DUAL_NATIVE
+    qsb_alternate_init(knobs);
+#endif
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B cold-record loads)\n",
            len, qsb_carrier_cubin_sha256);
     fflush(stdout);
@@ -213,17 +291,17 @@ static inline bool qsb_carrier_has(int kid) { return g_qsb_carrier.on && g_qsb_c
  * parameter types: every argument is converted to its declared parameter type before
  * its address goes to cudaLaunchKernel, exactly as a <<<>>> launch would. */
 template <typename... P, typename... A, size_t... I>
-static cudaError_t qsb_carrier_launch_impl(int kid, dim3 g, dim3 b, cudaStream_t st,
+static cudaError_t qsb_carrier_launch_impl(cudaKernel_t kernel, dim3 g, dim3 b, cudaStream_t st,
                                            std::index_sequence<I...>, A &&...a) {
     std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
     void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
-    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, 0, st);
+    return cudaLaunchKernel((const void *)kernel, g, b, argv, 0, st);
 }
 template <typename... P, typename... A>
 static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
                                       A &&...a) {
     static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
-    return qsb_carrier_launch_impl<P...>(kid, g, b, st, std::index_sequence_for<P...>{},
+    return qsb_carrier_launch_impl<P...>(g_qsb_carrier.k[kid], g, b, st, std::index_sequence_for<P...>{},
                                          std::forward<A>(a)...);
 }
 /* Try the carrier launch; on failure switch the carrier off (the caller then issues
@@ -232,6 +310,20 @@ template <typename... P, typename... A>
 static bool qsb_carrier_try(void (*kern)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
                             A &&...a) {
     if (!qsb_carrier_has(kid)) return false;
+    if(kid==QK_DIG && g_qsb_use_alternate && g_qsb_alternate.on) {
+        g_qsb_alternate.running=1;
+        const cudaError_t ae=qsb_carrier_launch_impl<P...>(g_qsb_alternate.k[kid],g,b,st,
+            std::index_sequence_for<P...>{},std::forward<A>(a)...);
+        if(ae==cudaSuccess)return true;
+        // Only errors that reject this launch before execution permit retry.
+        // CUDA may also return a prior asynchronous fault here: never replay it.
+        if(ae!=cudaErrorInvalidConfiguration && ae!=cudaErrorLaunchOutOfResources &&
+           ae!=cudaErrorInvalidDeviceFunction) {
+            fprintf(stderr,"ERROR: alternate launch failed without safe retry: %s\n",cudaGetErrorString(ae));
+            exit(1);
+        }
+        qsb_alternate_off("launch_rejected");
+    }
     cudaError_t e = qsb_carrier_launch(kern, kid, g, b, st, std::forward<A>(a)...);
     if (e == cudaSuccess) return true;
     char why[160];
@@ -248,19 +340,26 @@ template <class T>
 static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src, size_t n) {
     if (!g_qsb_carrier.on) return cudaMemcpyToSymbol(sym, src, n);
     /* Carrier on: write the image only and log the upload for a possible fallback. */
-    if (!qsb_upload_log((const void *)&sym, src, n)) {
+    if (!qsb_upload_log((const void *)&sym, name, src, n)) {
         qsb_carrier_off("out of host memory for the upload log");   /* replays the earlier uploads */
         return cudaMemcpyToSymbol(sym, src, n);
     }
     void *d = nullptr; size_t sz = 0;
     cudaError_t ce = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);
-    if (ce == cudaErrorSymbolNotFound || ce == cudaErrorInvalidSymbol) { cudaGetLastError(); return cudaSuccess; }
+    if (ce == cudaErrorSymbolNotFound || ce == cudaErrorInvalidSymbol) { qsb_alternate_off("incumbent_symbol_missing"); cudaGetLastError(); return cudaSuccess; }
     if (ce == cudaSuccess && n > sz) ce = cudaErrorInvalidValue;
     if (ce == cudaSuccess) ce = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
     if (ce != cudaSuccess) {
         char why[160];
         snprintf(why, sizeof(why), "upload of %s failed: %s", name, cudaGetErrorString(ce));
         qsb_carrier_off(why);                         /* replays this upload too */
+    }
+    if(g_qsb_alternate.on) {
+        void *ad=nullptr;size_t az=0;
+        cudaError_t ae=cudaLibraryGetGlobal(&ad,&az,g_qsb_alternate.lib,name);
+        if(ae==cudaSuccess && (az!=sz || n>az))ae=cudaErrorInvalidValue;
+        if(ae==cudaSuccess)ae=cudaMemcpy(ad,src,n,cudaMemcpyHostToDevice);
+        if(ae!=cudaSuccess)qsb_alternate_off("named_upload");
     }
     return cudaSuccess;
 }
