@@ -113,6 +113,10 @@
 #ifndef QSB_CPU_PSEED
 #define QSB_CPU_PSEED 1            /* fused subtractions: the 4p offset rides in the product columns' initial values */
 #endif
+/* terrapinelf a33e04c3: isolate 16-key schedule/packing, preserve promoted field arithmetic. */
+#ifndef QSB_CPU_KH16
+#define QSB_CPU_KH16 1
+#endif
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
 #endif
@@ -1237,6 +1241,67 @@ Q8T static void ec8_final_cf(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G
         }
     }
 }
+#if QSB_CPU_KH16 && QCPU_SHANI
+/* ---- QSB_CPU_KH16: key hashes from a 16-lane message schedule ----
+ * The 16 keys of a group (8 candidates x 2 recids; lane j = candidate j recid 0, lane 8 + j = recid 1) are hashed together:
+ * ec8_final_cf_kh writes their message words W0..W8 (the 33-byte compressed key 02|03 || x, then 0x80) straight from the canonical
+ * limbs in registers, kh16_h0 expands W16..W63 for all 16 keys with AVX-512 (W9..W14 = 0, W15 = 264), stores W + K pairwise
+ * interleaved (unpack of rounds 2p, 2p + 1) and runs the rounds with SHA-NI four keys at a time from those pairs (no sha256msg1/2,
+ * four independent sha256rnds2 chains). Same messages, same rounds, same h0 as qsha_keyhash4_h0. */
+Q8T static inline __attribute__((always_inline)) void kh16_canon(__m512i w[4], const fe8 &a) {   /* canonical 4 x 64-bit limbs of 8 lanes */
+    fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
+    __m512i r[5];
+    for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
+    w[0] = _mm512_or_si512(r[0], _mm512_slli_epi64(r[1], 52));
+    w[1] = _mm512_or_si512(_mm512_srli_epi64(r[1], 12), _mm512_slli_epi64(r[2], 40));
+    w[2] = _mm512_or_si512(_mm512_srli_epi64(r[2], 24), _mm512_slli_epi64(r[3], 28));
+    w[3] = _mm512_or_si512(_mm512_srli_epi64(r[3], 36), _mm512_slli_epi64(r[4], 16));
+}
+/* message words W0..W8 of one recid's 8 keys as 64-bit lanes (low 32 bits = the word): x = w3 w2 w1 w0, W0 = pfx << 24 | x >> 232,
+ * W_i = (x >> (232 - 32 i)) & 0xffffffff (i = 1..7), W8 = (x & 0xff) << 24 | 0x800000; pfx = 2 | parity of y */
+Q8T static inline __attribute__((always_inline)) void kh16_words8(__m512i W[9], const __m512i w[4], __mmask8 par) {
+    W[0] = _mm512_mask_or_epi64(_mm512_or_si512(_mm512_srli_epi64(w[3], 40), _mm512_set1_epi64(0x02000000)), par,
+                                _mm512_or_si512(_mm512_srli_epi64(w[3], 40), _mm512_set1_epi64(0x02000000)), _mm512_set1_epi64(0x01000000));
+    W[1] = _mm512_srli_epi64(w[3], 8);
+    W[2] = _mm512_or_si512(_mm512_slli_epi64(w[3], 24), _mm512_srli_epi64(w[2], 40));
+    W[3] = _mm512_srli_epi64(w[2], 8);
+    W[4] = _mm512_or_si512(_mm512_slli_epi64(w[2], 24), _mm512_srli_epi64(w[1], 40));
+    W[5] = _mm512_srli_epi64(w[1], 8);
+    W[6] = _mm512_or_si512(_mm512_slli_epi64(w[1], 24), _mm512_srli_epi64(w[0], 40));
+    W[7] = _mm512_srli_epi64(w[0], 8);
+    W[8] = _mm512_or_si512(_mm512_slli_epi64(w[0], 24), _mm512_set1_epi64(0x00800000));
+}
+/* m[0..8] (16 dwords each): recid 0's keys in lanes 0..7, recid 1's in lanes 8..15 */
+Q8T static inline __attribute__((always_inline)) void kh16_store(uint32_t *m, const fe8 &x0, __mmask8 p0, const fe8 &x1, __mmask8 p1) {
+    __m512i w[4], W0[9], W1[9];
+    kh16_canon(w, x0); kh16_words8(W0, w, p0);
+    kh16_canon(w, x1); kh16_words8(W1, w, p1);
+    for (int i = 0; i < 9; i++)
+        _mm512_store_si512((void *)(m + 16 * i), _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi64_epi32(W0[i])), _mm512_cvtepi64_epi32(W1[i]), 1));
+}
+/* ec8_final_cf with the key-hash message words as output (m16: 9 x 16 dwords per group) instead of qx/qp */
+Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, const fe &mx, const fe &my, uint32_t *m16) {
+    fe8 MX, MY; fe8_bcast(MX, mx); fe8_bcast(MY, my);
+    fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
+    for (int g = 0; g < G; g += 4)
+        for (int c = 0; c < 4; c++) {
+            const int h = g + c; fe8_sub_lz(D[h], MX, X[h]);
+            { fe8 t; fe8_sub_lz(t, MY, Y[h]); fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
+            fe8_mul_lz(run[c], run[c], D[h]);
+        }
+    fe8_inv4(run);
+    for (int g = G - 4; g >= 0; g -= 4) {
+        for (int c = 3; c >= 0; c--) {
+            const int h = g + c;
+            fe8 t, lam, x3, y3;
+            fe8_mul_lz(lam, run[c], PRE[h]); fe8_mul_lz(run[c], run[c], D[h]);
+            fe8_sqr_sub2(x3, lam, X[h], MX);
+            fe8_sub_lz(t, X[h], x3); fe8_mul_sub(y3, lam, t, Y[h]);
+            kh16_store(m16 + (size_t)h * 144, X[h], fe8_parity(Y[h]), x3, fe8_parity(y3));
+        }
+    }
+}
+#endif
 /* Window 0: acc = sign * T0[|d0| - 1] (digit-0 lanes load row 0 and are dropped by the caller); computes
  * and prefetches window 1's rows (nxt) into rpn/ngn. */
 template <class RowFn>
@@ -1554,6 +1619,68 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
     }
     return _mm_unpackhi_epi64(_mm_unpackhi_epi32(a[0], a[1]), _mm_unpackhi_epi32(a[2], a[3]));
 }
+#if QSB_CPU_KH16 && QCPU_VEC
+#define QSHA16 __attribute__((target("sha,sse4.1,ssse3,avx,avx2,avx512f,avx512vl")))
+/* h0 of SHA-256 of the 16 keys whose message words W0..W8 are m[0..8] (lane = key); wk: 32 x 32 dwords of scratch.
+ * Returns the 16 h0 values (lane = key). */
+QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk) {
+#define R16(x, n) _mm512_ror_epi32((x), (n))
+#define S0_16(x) _mm512_ternarylogic_epi32(R16(x, 7), R16(x, 18), _mm512_srli_epi32(x, 3), 0x96)
+#define S1_16(x) _mm512_ternarylogic_epi32(R16(x, 17), R16(x, 19), _mm512_srli_epi32(x, 10), 0x96)
+    __m512i W[16];
+#pragma GCC unroll 9
+    for (int i = 0; i < 9; i++) W[i] = _mm512_load_si512((const void *)(m + 16 * i));
+    for (int i = 9; i < 15; i++) W[i] = _mm512_setzero_si512();
+    W[15] = _mm512_set1_epi32(264);
+    __m512i prev = _mm512_setzero_si512();
+#pragma GCC unroll 64
+    for (int t = 0; t < 64; t++) {
+        __m512i wt;
+        if (t < 16) wt = W[t];
+        else {
+            /* W[t] = s1(W[t-2]) + W[t-7] + s0(W[t-15]) + W[t-16]; the zero words W9..W14 drop out at compile time */
+            const int a2 = (t - 2) & 15, a7 = (t - 7) & 15, a15 = (t - 15) & 15, a16 = t & 15;
+            const bool z2 = (t - 2) >= 9 && (t - 2) <= 14, z7 = (t - 7) >= 9 && (t - 7) <= 14, z15 = (t - 15) >= 9 && (t - 15) <= 14,
+                       z16 = (t - 16) >= 9 && (t - 16) <= 14;
+            wt = z16 ? _mm512_setzero_si512() : W[a16];
+            if (!z15) wt = _mm512_add_epi32(wt, S0_16(W[a15]));
+            if (!z7) wt = _mm512_add_epi32(wt, W[a7]);
+            if (!z2) wt = _mm512_add_epi32(wt, S1_16(W[a2]));
+            W[a16] = wt;
+        }
+        const __m512i wkt = _mm512_add_epi32(wt, _mm512_set1_epi32((int)qsha_k[t]));
+        if (t & 1) {                                     /* rounds t - 1, t as dword pairs, key-major within 128-bit lanes */
+            _mm512_store_si512((void *)(wk + 32 * (t >> 1)), _mm512_unpacklo_epi32(prev, wkt));
+            _mm512_store_si512((void *)(wk + 32 * (t >> 1) + 16), _mm512_unpackhi_epi32(prev, wkt));
+        } else prev = wkt;
+    }
+#undef S0_16
+#undef S1_16
+#undef R16
+    /* key 4L + e: pair p at wk + 32 p + (e >= 2 ? 16 : 0) + 4 L + 2 (e & 1) */
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+    alignas(64) uint32_t h0[16];
+#pragma GCC unroll 1
+    for (int L = 0; L < 4; L++) {
+        __m128i S0[4], S1[4];
+        const uint32_t *base[4] = {wk + 4 * L, wk + 4 * L + 2, wk + 16 + 4 * L, wk + 16 + 4 * L + 2};
+#pragma GCC unroll 4
+        for (int e = 0; e < 4; e++) { S0[e] = IV0; S1[e] = IV1; }
+#pragma GCC unroll 16
+        for (int r = 0; r < 16; r++) {
+#pragma GCC unroll 4
+            for (int e = 0; e < 4; e++) S1[e] = _mm_sha256rnds2_epu32(S1[e], S0[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r)));
+#pragma GCC unroll 4
+            for (int e = 0; e < 4; e++) S0[e] = _mm_sha256rnds2_epu32(S0[e], S1[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r + 32)));
+        }
+#pragma GCC unroll 4
+        for (int e = 0; e < 4; e++) h0[4 * L + e] = (uint32_t)_mm_extract_epi32(_mm_add_epi32(S0[e], IV0), 3);
+    }
+    const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
+    return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
+}
+#endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */
 QSHA static void qsha_schedule(uint32_t wk[64], const uint8_t *blk) {
     const __m128i BSWAP = _mm_set_epi64x(0x0c0d0e0f08090a0bULL, 0x0405060700010203ULL);
@@ -1593,6 +1720,7 @@ struct Ctx {
     int nthreads = 0;
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
+    bool kh16 = false;              /* QSB_CPU_KH16 key hashes (8-lane path with SHA-NI and the C fold) */
 #if QCPU_SHANI
     /* Hashing plan (hash_plan): the message after an epoch's state is block 0 (the epoch's buffered
      * bytes + the first window pushes) and blocks 1..nb-1, whose contents do not depend on the epoch.
@@ -2052,7 +2180,7 @@ Q8T static void hpf_rows8(const uint32_t *zb, int k0, const pt *t0, const pt *t1
     }
     for (int j = 0; j < (QSB_CPU_HPF > 1 ? 16 : 8); j++) _mm_prefetch((const char *)a[j], QCPU_NXT_HINT);
 }
-struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
+struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; uint32_t *m16 = nullptr, *wk16 = nullptr; };
 static bool vecbuf_alloc(VecBuf &v, int B) {
     const int G = B / 8; void *q[9] = {nullptr};
     const size_t sz[9] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G,
@@ -2060,6 +2188,11 @@ static bool vecbuf_alloc(VecBuf &v, int B) {
     for (int i = 0; i < 9; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
     v.X = (fe8 *)q[0]; v.Y = (fe8 *)q[1]; v.D = (fe8 *)q[2]; v.P = (fe8 *)q[3]; v.TX = (fe8 *)q[4]; v.TY = (fe8 *)q[5];
     v.qx = (fe *)q[6]; v.qp = (uint8_t *)q[7]; v.bad = (uint8_t *)q[8];
+#if QSB_CPU_KH16 && QCPU_SHANI
+    void *m = nullptr, *w = nullptr;
+    if (posix_memalign(&m, 64, (size_t)G * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
+    v.m16 = (uint32_t *)m; v.wk16 = (uint32_t *)w;
+#endif
     return true;
 }
 /* Row function of one window: the 8 lanes' rows T[|d| - 1] (row 0 for a zero digit) and their sign mask. */
@@ -2091,6 +2224,9 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
         else ec8_window<RowSgn>(v.X, v.Y, v.D, v.P, v.TX, v.TY, G, rp, ng, nullptr, nullptr, nullptr);
         std::swap(rp, rpn); std::swap(ng, ngn);
     }
+#if QSB_CPU_KH16 && QCPU_SHANI
+    if (c->cfold && c->kh16) ec8_final_cf_kh(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.m16); else
+#endif
     if (c->cfold) ec8_final_cf(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.qx, v.qp);
     else ec8_final(v.X, v.Y, v.D, v.P, G, c->cx, c->cy, v.qx, v.qp);
 }
@@ -2332,6 +2468,20 @@ static void worker(Ctx *c, int tid) {
         if (vb.X) {
             vec_batch(c, zb.data(), ds.data(), B, vb);
 #if QCPU_SHANI
+#if QSB_CPU_KH16
+            if (c->kh16 && c->cfold) {                  /* key hashes 16 at a time: the group's 8 candidates x 2 recids */
+                for (int h = 0; h < B / 8; h++) {
+                    const unsigned pass = kh16_pass(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
+                    if (!pass) continue;
+                    for (int j = 0; j < 8; j++) {
+                        const int q = h * 8 + j;
+                        if (vb.bad[q]) continue;
+                        for (int ri = 0; ri < 2; ri++)
+                            if (((pass >> (8 * ri + j)) & 1) && gate_publish_exact(c, &skips[(size_t)q * 9], ri)) break;   /* one recid per candidate */
+                    }
+                }
+            } else
+#endif
             if (c->shani) {                             /* key hashes 4 at a time: 2 candidates x 2 recids */
                 const __m128i zero = _mm_setzero_si128();
                 for (int kk = 0; kk < B; kk += 2) {
@@ -2466,6 +2616,9 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QCPU_SHANI
     c->shani = qsha_supported() && !getenv("QSB_CPU_NOSHANI");
+#if QSB_CPU_KH16 && QCPU_VEC
+    c->kh16 = c->shani && c->vec && __builtin_cpu_supports("avx512vl") && !getenv("QSB_CPU_NOKH16");
+#endif
 #endif
     /* CPU window patterns: every 3-subset of {cut..n-1} not used by the GPU. */
     for (int a = cut; a < (int)dp->n; a++) for (int b = a + 1; b < (int)dp->n; b++) for (int d3 = b + 1; d3 < (int)dp->n; d3++) {
