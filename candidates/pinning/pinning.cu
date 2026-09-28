@@ -5,7 +5,9 @@
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
+#ifndef QSB_L2STATE
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
+#endif
 #define QSB_GREEN 20
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
@@ -405,6 +407,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_PROBE_MASK
 #define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
+#endif
+/* QSB_ARMS (host only): the in-run multi-arm A/B probe (QsbCarrier.h,
+ * challenges/qsb-tools/PROBE-DESIGN.md). N > 1 (<= the header's QSB_CARRIER_ARMS) time-slices
+ * the first N carrier images of qsb_carrier_sm89.h (arm table: build_carrier.sh); 1 (default)
+ * is the base single-image search on image 0 (the control), with every probe line compiled out.
+ * The ranked build line passes no -D, so a probe submission sets the 1 below to 6. */
+#ifndef QSB_ARMS
+#define QSB_ARMS 7    /* probe run: the seven arms of build_carrier.sh (1 = the base single-image search) */
 #endif
 #ifndef QSB_SLOTPIPE
 #define QSB_SLOTPIPE 1        /* 1: slotted multi-stream batch pipeline (draheemking 11ba7e43 / PR 230,
@@ -6305,7 +6315,16 @@ int main(int argc, char **argv) {
         return publish_hits(slot_seq[s], slot_lt[s], count, hits);
     };
 #endif
+#if QSB_PROBE
+    /* Multi-arm probe (QsbCarrier.h): false keeps every line of the base loop below. */
+    const bool probe = qsb_probe_begin(effective_total, seq_start_override != 0, SEQ_MIN, BATCH);
+#endif
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+#if QSB_PROBE
+        /* Every slot was drained at the end of the previous slice: select the next arm and
+         * its fresh sequence SEQ_MIN + (arm << 26) + slice. */
+        if (probe) seq = qsb_probe_slice_begin(SEQ_MIN);
+#endif
         if (fast_tail) {
             uint8_t block[64];
             memcpy(block, pp.suffix, sizeof(block));
@@ -6334,6 +6353,9 @@ int main(int argc, char **argv) {
 
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
+#if QSB_PROBE
+            if (probe && qsb_probe_batch_stop()) break;   /* slice time is up */
+#endif
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
@@ -6432,9 +6454,23 @@ int main(int argc, char **argv) {
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
 #endif
+#if QSB_PROBE
+        if (probe) {
+#if QSB_OVERLAP_SEQUENCES && !QSB_TAIL_TAB
+            /* The base keeps slots in flight across sequences; a probe slice ends empty so the
+             * next arm starts on an idle GPU and every hit of this slice is published under
+             * its own slot_seq/slot_lt before the kernel table changes. */
+            for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#endif
+            qsb_probe_slice_end();
+        }
+#endif
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
+#if QSB_PROBE
+        if (probe) seqs_done = (uint32_t)g_qsb_probe.g;   /* slices completed */
+#endif
         if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
