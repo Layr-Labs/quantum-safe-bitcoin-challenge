@@ -144,7 +144,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
- * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 4 x 4M here, 2 x 8M before. */
+ * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 3 x 4M here (4 x 4M, 2 x 8M before). */
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
@@ -421,8 +421,8 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
-                               * 4 x 4M holds the 2 x 8M state bytes: each sequence's final drain and
+#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+                               * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
 #endif
@@ -575,6 +575,22 @@ __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
                  :: "l"(p), "l"(a) : "memory");
 #else
     qsb_st_u64(p, a);
+#endif
+}
+/* 16-byte form of qsb_st_state_u64 (same L2 policy): one entry of a state plane. */
+__device__ __forceinline__ void qsb_st_state_v2(ulonglong2 *p, uint64_t a, uint64_t b) {
+#if (QSB_L2STATE & 8) && QSB_SM80_PTX
+    /* QSB_L2STATE bit 8 on the 16-byte form: the same L2::evict_last cache policy as
+     * qsb_st_state_u64, same bytes, same address. */
+    uint64_t pol;
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.L2::cache_hint.v2.u64 [g], {%1,%2}, %3; }"
+                 :: "l"(p), "l"(a), "l"(b), "l"(pol) : "memory");
+#elif QSB_L2STATE & 1
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(a), "l"(b) : "memory");
+#else
+    qsb_st_v2(p, a, b);
 #endif
 }
 __device__ __forceinline__ void qsb_discard_l2(const void *p) {
@@ -954,11 +970,22 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
  * sum subtracts 2c = K-1 (_ModAddLazyOff in GPUMath.h), and the last anchor is converted
  * back here. The borrow is kept through limb 1: dropped only if y'0 < c (2^-33) and y'1 == 0
  * (2^-64), i.e. <= 2^-97 once per candidate. */
+/* QSB_YOFF_Y1_CUT (kill switch, default 1): the conversion subtracts c from limb 0 only. */
+#ifndef QSB_YOFF_Y1_CUT
+#define QSB_YOFF_Y1_CUT 1
+#endif
+#if QSB_YOFF_Y1_CUT != 0 && QSB_YOFF_Y1_CUT != 1
+#error "QSB_YOFF_Y1_CUT must be 0 or 1"
+#endif
 __device__ __forceinline__ void qsb_yoff_to_y(uint64_t *y) {
+#if QSB_YOFF_Y1_CUT
+    y[0] = y[0] - 0x800001E8ULL;
+#else
     uint64_t r0, r1;
     asm("{\n.reg .u64 t;\nsub.cc.u64 %0, %2, 0x800001E8;\nsubc.u64 %1, %3, 0;\n}"
         : "=l"(r0), "=l"(r1) : "l"(y[0]), "l"(y[1]));
     y[0] = r0; y[1] = r1;
+#endif
 }
 /* Table post-pass: y += c for every entry (exact: y < p so y + c < 2^256). */
 __global__ void qsb_table_offset_y(uint8_t *gTable) {
@@ -1575,14 +1602,14 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #endif
     _ModMult(U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
-    _ModSub256(P,U2,X1);
+    QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
     _ModMult(PPP,PP,P);
     _ModMult(Q,U2,PP);
     _ModSqrAddSub2(X1,Ry,PPP,Q);
     _ModMult(ZZZ1,PPP);
     _ModMult(ZZ1,PP);
-    _ModSub256(Qy,X1,Q);
+    QSB_SUB_CHAIN_QY(Qy,X1,Q);
 }
 /* _PointAddXYZZ_mm with its deferred ordinate returned as the pair (T-Q, R). */
 __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
@@ -1590,16 +1617,16 @@ __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
                                      const uint64_t *X1,const uint64_t *Y1,
                                      const uint64_t *X2,const uint64_t *Y2) {
     uint64_t P[4],Q[4],T[4];
-    _ModSub256(P,(uint64_t *)X2,(uint64_t *)X1);
-    _ModSub256(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
+    QSB_SUB_SEED(P,(uint64_t *)X2,(uint64_t *)X1);
+    QSB_SUB_SEED(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
     _ModSqr(ZZ3,P);
     _ModMult(ZZZ3,ZZ3,P);
     _ModMult(Q,(uint64_t *)X1,ZZ3);
     _ModSqr(T,Ry);
-    _ModSub256(T,T,ZZZ3);
-    _ModSub256(T,T,Q);
-    _ModSub256(T,T,Q);
-    _ModSub256(Qy,T,Q);
+    QSB_SUB_SEED(T,T,ZZZ3);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(Qy,T,Q);
     Load256(X3,T);
 }
 #endif
@@ -3525,14 +3552,13 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
     Load256(W,rw);
     W[4]=0;
 }
-/* The state stores of qsb_packed_prepare (QSB_PREP_STATE == 2): same bytes, same addresses. */
+/* The state stores of qsb_packed_prepare, as four 16-byte stores: same bytes, same addresses. */
 __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *vbar, const uint64_t *tbar) {
     ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
-    uint64_t *sw=(uint64_t *)st;
-    qsb_st_state_u64(sw,vbar[0]); qsb_st_state_u64(sw+1,vbar[1]);
-    qsb_st_state_u64(sw+2*QSB_TREE_N,vbar[2]); qsb_st_state_u64(sw+2*QSB_TREE_N+1,vbar[3]);
-    qsb_st_state_u64(sw+4*QSB_TREE_N,tbar[0]); qsb_st_state_u64(sw+4*QSB_TREE_N+1,tbar[1]);
-    qsb_st_state_u64(sw+6*QSB_TREE_N,tbar[2]); qsb_st_state_u64(sw+6*QSB_TREE_N+1,tbar[3]);
+    qsb_st_state_v2(st,vbar[0],vbar[1]);
+    qsb_st_state_v2(st+QSB_TREE_N,vbar[2],vbar[3]);
+    qsb_st_state_v2(st+2*QSB_TREE_N,tbar[0],tbar[1]);
+    qsb_st_state_v2(st+3*QSB_TREE_N,tbar[2],tbar[3]);
 }
 #if QSB_POST_GLUE & 4
 /* QSB_POST_GLUE bit 4: an unusable lane (W == 0, or inactive) also enters the tree with U = 0.
