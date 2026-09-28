@@ -185,54 +185,6 @@
 #if QSB_CARRY_GLUE && !(QSB_C31 && QSB_SHORT_CARRY && QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL)
 #error "QSB_CARRY_GLUE is written for C31 + SHORT_CARRY + SAS_SPLIT3P + SAS_Z9SUB_ALL"
 #endif
-/* Shortened carry forms of the prepare kernel's chain glue (kill switches; 0 = the forms above):
- *   QSB_ADDOFF_CUT (0/1): _ModAddLazyOff applies its correction to the low limb's two
- *     32-bit words only (one multiply-add with the 256-bit carry as carry-in, one add).
- *   QSB_SAS2_GLUE (0/1): _ModSqrAddSub2's second fold adds its two carries into z2 in
- *     place instead of capturing the first one in a register (same bits).
- *   QSB_SUB_CUT (mask): _ModSub256C, the K correction of a borrowing subtraction as one
- *     multiply-add on the low word and one add on the high word, at the chain's
- *     P = U2 - X1 (bit 1), Qy = X1 - Q (bit 2) and the six seed subtractions (bit 4).
- * A dropped inner carry perturbs only that candidate's point; every published hit is
- * re-derived by the exact host recover+hash (QSB_HOST_GATE). */
-#ifndef QSB_ADDOFF_CUT
-#define QSB_ADDOFF_CUT 1
-#endif
-#ifndef QSB_SAS2_GLUE
-#define QSB_SAS2_GLUE 1
-#endif
-#ifndef QSB_SUB_CUT
-#define QSB_SUB_CUT 7
-#endif
-#if QSB_ADDOFF_CUT != 0 && QSB_ADDOFF_CUT != 1
-#error "QSB_ADDOFF_CUT must be 0 or 1"
-#endif
-#if QSB_SAS2_GLUE != 0 && QSB_SAS2_GLUE != 1
-#error "QSB_SAS2_GLUE must be 0 or 1"
-#endif
-#if QSB_SUB_CUT < 0 || QSB_SUB_CUT > 7
-#error "QSB_SUB_CUT is a mask of bits 1, 2 and 4"
-#endif
-#if (QSB_ADDOFF_CUT || QSB_SUB_CUT) && !(QSB_CARRY_GLUE && QSB_HOST_GATE)
-#error "QSB_ADDOFF_CUT / QSB_SUB_CUT are written for the CARRY_GLUE forms behind the host gate"
-#endif
-#if QSB_SAS2_GLUE && !(QSB_C31 && QSB_SHORT_CARRY && QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL)
-#error "QSB_SAS2_GLUE needs the plain-carry sfc (SPLIT3P + Z9SUB_ALL) and the empty C31 second-fold tail"
-#endif
-/* QSB_SAS_PRESUB (kill switch, default 1): _ModSqrAddSub2 subtracts q once from the
- * undoubled cross-product sum C of r*r (before the doubling), so the doubling produces
- * 2C - 2q and the 512-bit value r*r - 2q is exact and non-negative before the first fold.
- * This replaces the two post-fold q subtractions, the +3*2^256 bias and the 3K correction
- * (about -10 SASS per call). The result is congruent to r*r + e - 2q in [0, 2^256).
- * Exposure: the borrow is propagated through x9, so it is wrong only if C mod 2^320 < q,
- * which needs C's words 8 and 9 both zero (<= 2^-63 per call for field-random r; C >= 2^256
- * unless r has zero top words, < 2^-64). Written for the SPLIT3P/Z9SUB_ALL/FRMOV square. */
-#ifndef QSB_SAS_PRESUB
-#define QSB_SAS_PRESUB 1
-#endif
-#if QSB_SAS_PRESUB != 0 && QSB_SAS_PRESUB != 1
-#error "QSB_SAS_PRESUB must be 0 or 1"
-#endif
 #ifndef QSB_MUL_FOLD8_CUT
 #define QSB_MUL_FOLD8_CUT 1
 #endif
@@ -342,9 +294,6 @@
 #endif
 #ifndef QSB_SAS_FRMOV
 #define QSB_SAS_FRMOV 1
-#endif
-#if QSB_SAS_PRESUB && !(QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL && QSB_SAS_FRMOV && QSB_FUSE_SQRADDSUB2)
-#error "QSB_SAS_PRESUB is written for the SPLIT3P + Z9SUB_ALL + FRMOV fused square"
 #endif
 #ifndef QSB_SQR_ROW
 #define QSB_SQR_ROW 1 /* plain _ModSqr fold reads d0..d7; same identity as QSB_SAS_FRMOV */
@@ -714,31 +663,6 @@ __device__ __forceinline__ void _ModSub256(uint64_t *r, const uint64_t *a, const
 
 #endif
 __device__ __forceinline__ void _ModSub256(uint64_t *r,uint64_t *b) { _ModSub256(r,r,b); }
-#if QSB_SUB_CUT
-/* QSB_SUB_CUT: r = a - b; on a borrow (m = -1) the low word adds m*977 and the high word adds m. */
-__device__ __forceinline__ void _ModSub256C(uint64_t *r, const uint64_t *a, const uint64_t *b) {
-    uint64_t r0,r1,r2,r3;
-    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 m,l0,h0;\nsub.cc.u64 t0,%4,%8;\nsubc.cc.u64 t1,%5,%9; subc.cc.u64 t2,%6,%10; subc.cc.u64 t3,%7,%11;\nsubc.u32 m,0,0;\nmov.b64 {l0,h0},t0;\nmad.lo.u32 l0,m,977,l0; add.u32 h0,h0,m;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
-        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
-    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
-}
-#endif
-#if QSB_SUB_CUT & 1
-#define QSB_SUB_CHAIN_P _ModSub256C
-#else
-#define QSB_SUB_CHAIN_P _ModSub256
-#endif
-#if QSB_SUB_CUT & 2
-#define QSB_SUB_CHAIN_QY _ModSub256C
-#else
-#define QSB_SUB_CHAIN_QY _ModSub256
-#endif
-#if QSB_SUB_CUT & 4
-#define QSB_SUB_SEED _ModSub256C
-#else
-#define QSB_SUB_SEED _ModSub256
-#endif
 
 // Lazy add: r = a + b reduced only by folding the 2^256 carry as K. The
 // result is in [0, 2^256) and congruent mod p, which every consumer in the
@@ -796,10 +720,7 @@ __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, cons
 #if QSB_K32_OFF
 __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
-#if QSB_CARRY_GLUE && QSB_ADDOFF_CUT
-    /* mk = k-1 without touching CF (still k): l0 + mk*0x3D0 + k, h0 + mk. */
-    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 mk,l0,h0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk,0xFFFFFFFF,0;\nmov.b64 {l0,h0},t0;\nmadc.lo.u32 l0,mk,0x3D0,l0; add.u32 h0,h0,mk;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
-#elif QSB_CARRY_GLUE
+#if QSB_CARRY_GLUE
     asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk,0xFFFFFFFF,0; and.b32 clo,mk,0xFFFFFC30; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\naddc.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
 #else
     asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 kk,0,0; sub.u32 mk,kk,1; and.b32 clo,mk,0xFFFFFC2F; add.u32 clo,clo,1; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\nadd.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
@@ -1973,28 +1894,14 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\taddc.cc.u32 x4, x4, y4; addc.cc.u32 x5, x5, y5; addc.cc.u32 x6, x6, y6;\n"
         "\taddc.cc.u32 x7, x7, y7; addc.cc.u32 x8, x8, y8; addc.cc.u32 x9, x9, y9;\n"
         "\taddc.cc.u32 x10, x10, y10; addc.cc.u32 x11, x11, y11; addc.cc.u32 x12, x12, y12;\n"
-        "\taddc.cc.u32 x13, x13, y13; addc.cc.u32 x14, x14, y14;\naddc.u32 x15, x15, " QZ ";\n"
-#if QSB_SAS_PRESUB
-        /* QSB_SAS_PRESUB: C - q on the undoubled cross sum (x0 = 0); the doubling below then
-         * yields 2C - 2q, so r*r - 2q is formed exactly before the first fold. The borrow is
-         * kept through x9: it leaves x9 only if C's words 8 and 9 are both zero (~2^-64). */
-        "\t{ .reg .u32 pv0,pv1,pv2,pv3,pv4,pv5,pv6,pv7;\n"
-        "\tmov.b64 {pv0,pv1}, %12; mov.b64 {pv2,pv3}, %13; mov.b64 {pv4,pv5}, %14; mov.b64 {pv6,pv7}, %15;\n"
-        "\tsub.cc.u32 x0, x0, pv0; subc.cc.u32 x1, x1, pv1; subc.cc.u32 x2, x2, pv2; subc.cc.u32 x3, x3, pv3;\n"
-        "\tsubc.cc.u32 x4, x4, pv4; subc.cc.u32 x5, x5, pv5; subc.cc.u32 x6, x6, pv6; subc.cc.u32 x7, x7, pv7;\n"
-        "\tsubc.cc.u32 x8, x8, 0; subc.u32 x9, x9, " QZ "; }\n"
-#endif
-        "shf.l.wrap.b32 x15, x14, x15, 1; shf.l.wrap.b32 x14, x13, x14, 1;\n"
+        "\taddc.cc.u32 x13, x13, y13; addc.cc.u32 x14, x14, y14;\naddc.u32 x15, x15, " QZ ";\nshf.l.wrap.b32 x15, x14, x15, 1; shf.l.wrap.b32 x14, x13, x14, 1;\n"
         "\tshf.l.wrap.b32 x13, x12, x13, 1; shf.l.wrap.b32 x12, x11, x12, 1;\n"
         "\tshf.l.wrap.b32 x11, x10, x11, 1; shf.l.wrap.b32 x10, x9, x10, 1;\n"
         "\tshf.l.wrap.b32 x9, x8, x9, 1; shf.l.wrap.b32 x8, x7, x8, 1;\n"
         "\tshf.l.wrap.b32 x7, x6, x7, 1; shf.l.wrap.b32 x6, x5, x6, 1;\n"
         "\tshf.l.wrap.b32 x5, x4, x5, 1; shf.l.wrap.b32 x4, x3, x4, 1;\n"
         "\tshf.l.wrap.b32 x3, x2, x3, 1; shf.l.wrap.b32 x2, x1, x2, 1;\n"
-#if QSB_SAS_PRESUB
-        "\tshf.l.wrap.b32 x1, x0, x1, 1; shl.b32 x0, x0, 1;\n"
-        "\tmov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
-#elif QSB_CARRY_GLUE
+#if QSB_CARRY_GLUE
         "\tshl.b32 x1, x1, 1;\n"
         "\t mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
 #else
@@ -2002,7 +1909,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
 #endif
         "\tmov.b64 d4, {x8,x9}; mov.b64 d5, {x10,x11}; mov.b64 d6, {x12,x13}; mov.b64 d7, {x14,x15};\n"
-#if QSB_CARRY_GLUE && !QSB_SAS_PRESUB
+#if QSB_CARRY_GLUE
         "\tmul.wide.u32 d0, a0, a0; { .reg .u32 q0l, q0h; mov.b64 {q0l,q0h}, d0; add.cc.u32 q0h, q0h, x1; mov.b64 d0, {q0l,q0h}; }\n"
 #else
         "\tmul.wide.u32 t, a0, a0; add.cc.u64 d0, d0, t;\n"
@@ -2059,15 +1966,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tmov.b64 {u4,u5}, %10; mov.b64 {u6,u7}, %11;\n"
         "\tmov.b64 {v0,v1}, %12; mov.b64 {v2,v3}, %13;\n"
         "\tmov.b64 {v4,v5}, %14; mov.b64 {v6,v7}, %15;\n"
-#if QSB_SAS_PRESUB
-        /* QSB_SAS_PRESUB: the fold already holds r*r - 2q >= 0 (exactly), so only +e remains;
-         * no 3p bias, no q subtractions and no 3K correction. */
-        "\tadd.cc.u32 z0, z0, u0; addc.cc.u32 z1, z1, u1;\n"
-        "\taddc.cc.u32 z2, z2, u2; addc.cc.u32 z3, z3, u3;\n"
-        "\taddc.cc.u32 z4, z4, u4; addc.cc.u32 z5, z5, u5;\n"
-        "\taddc.cc.u32 z6, z6, u6; addc.cc.u32 z7, z7, u7;\n"
-        "\taddc.u32 z8, z8, " QZ ";\n"
-#elif QSB_SAS_SPLIT3P
+#if QSB_SAS_SPLIT3P
         /* 3p = 3*2^256 - 3K: add the 3*2^256 inside the e-chain's z8 limb (free) and subtract
          * 3K = 0x3_00000B73 after the two q subtractions (the value never drops below 2^256
          * before that). QSB_CARRY62 keeps the borrow through z2 and differs only when low96
@@ -2089,7 +1988,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\taddc.cc.u32 z6, z6, u6; addc.cc.u32 z7, z7, u7;\n"
         "\taddc.cc.u32 z8, z8, 0; addc.u32 z9, z9, " QZ ";\n"
 #endif
-#if !QSB_SAS_PRESUB
+
         "\tsub.cc.u32 z0, z0, v0; subc.cc.u32 z1, z1, v1;\n"
         "\tsubc.cc.u32 z2, z2, v2; subc.cc.u32 z3, z3, v3;\n"
         "\tsubc.cc.u32 z4, z4, v4; subc.cc.u32 z5, z5, v5;\n"
@@ -2110,12 +2009,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z3, z3, 0; subc.u32 z4, z4, " QZ ";\n"
 #endif
 #endif
-#endif /* !QSB_SAS_PRESUB */
-#if QSB_SAS2_GLUE
-        "\t{ .reg .u64 sfz, sft; .reg .u32 sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\naddc.u32 z2, z2, 0;\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, 0; }\n\n"
-#else
         "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\n" QSB_SAS_SFC "\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, sfc; }\n\n"
-#endif
 #if QSB_SHORT_CARRY
         QSB_SECOND_FOLD_TAIL
 #else

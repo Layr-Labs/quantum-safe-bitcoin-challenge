@@ -9,17 +9,10 @@
  * Segments are shared out to SCHED_IDLE builder threads. The table is then spot-checked
  * against OpenSSL; any mismatch disables the co-grinder.
  */
-#if QSB_CG_HIGHFOLD
-#ifndef QSB_CG_SEG
-#define QSB_CG_SEG 65536
-#endif
-#define TB_R 4096
-#else
 #ifndef QSB_CG_SEG
 #define QSB_CG_SEG 4096
 #endif
 #define TB_R 256
-#endif
 
 typedef uint64_t fe4_t[4];
 
@@ -102,9 +95,6 @@ static int build_kg(int j, const uint64_t *gx, const uint64_t *gy) {
     /* kg[k] = (k+1) G, k = 0..TB_R-1, by doubling the known prefix: P[s+k] = P[k] + P[s] */
     fe4_t *X = (fe4_t *)malloc(sizeof(fe4_t) * TB_R), *Y = (fe4_t *)malloc(sizeof(fe4_t) * TB_R);
     fe4_t *tmp = (fe4_t *)malloc(sizeof(fe4_t) * 3 * TB_R), *qx = (fe4_t *)malloc(sizeof(fe4_t) * TB_R), *qy = (fe4_t *)malloc(sizeof(fe4_t) * TB_R);
-#if QSB_CG_HIGHFOLD
-    if (!X || !Y || !tmp || !qx || !qy) { free(X); free(Y); free(tmp); free(qx); free(qy); return -1; }
-#endif
     int rc = 0;
     memcpy(X[0], gx, 32); memcpy(Y[0], gy, 32);
     for (int s = 1; s < TB_R && rc == 0; s *= 2) {
@@ -113,13 +103,7 @@ static int build_kg(int j, const uint64_t *gx, const uint64_t *gy) {
         rc = batch_add<F>(qx, qy, X, Y, &X[s - 1], &Y[s - 1], 1, cnt, tmp);
         for (int k = 0; k < cnt && rc == 0; k++) { memcpy(X[s + k], qx[k], 32); memcpy(Y[s + k], qy[k], 32); }
     }
-#if QSB_CG_HIGHFOLD
-    if (rc) { free(X); free(Y); free(tmp); free(qx); free(qy); return rc; }
-#endif
     fe4_t *kg = (fe4_t *)malloc(sizeof(fe4_t) * 2 * TB_R);
-#if QSB_CG_HIGHFOLD
-    if (!kg) { free(X); free(Y); free(tmp); free(qx); free(qy); return -1; }
-#endif
     for (int k = 0; k < TB_R; k++) { memcpy(kg[2 * k], X[k], 32); memcpy(kg[2 * k + 1], Y[k], 32); }
     g_tb.kg[j] = kg;
     free(X); free(Y); free(tmp); free(qx); free(qy);
@@ -136,33 +120,19 @@ static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const 
     tentry *out = S->table + L.off[j] + e0;
     const fe4_t *kg = g_tb.kg[j];
     for (int k = 0; k < TB_R; k++) { memcpy(kx[k], kg[2 * k], 32); memcpy(ky[k], kg[2 * k + 1], 32); }
-#if QSB_CG_HIGHFOLD
-    const int row_count = (int)(ne < TB_R ? ne : TB_R);
-    /* Only construct required records, including the one-entry final high segment. */
-#else
     /* row 0: start + k G_j, k = 0..TB_R-1 */
-#endif
     uint64_t sx[4], sy[4];
     if (j >= 1 && seg == 0) {
         /* entries (k+1) G_j are kg itself */
-#if QSB_CG_HIGHFOLD
-        for (int k = 0; k < row_count; k++) { memcpy(rowx[k], kx[k], 32); memcpy(rowy[k], ky[k], 32); }
-#else
         for (int k = 0; k < TB_R; k++) { memcpy(rowx[k], kx[k], 32); memcpy(rowy[k], ky[k], 32); }
-#endif
     } else {
         entry_scalar(sc, j, e0, nri, order, ctx);
         if (!ossl_point(grp, ctx, sc, j == 0, sx, sy)) return -1;
         memcpy(rowx[0], sx, 32); memcpy(rowy[0], sy, 32);
         fe4_t px[1], py[1]; memcpy(px[0], sx, 32); memcpy(py[0], sy, 32);
         /* start + (k) G = start + kg[k-1], k = 1..TB_R-1 */
-#if QSB_CG_HIGHFOLD
-        for (int k = 1; k < row_count; k++) { memcpy(nx[k - 1], sx, 32); memcpy(ny[k - 1], sy, 32); }
-        if (row_count > 1 && batch_add<F>(rowx + 1, rowy + 1, nx, ny, kx, ky, 0, row_count - 1, tmp)) return -1;
-#else
         for (int k = 1; k < TB_R; k++) { memcpy(nx[k - 1], sx, 32); memcpy(ny[k - 1], sy, 32); }
         if (batch_add<F>(rowx + 1, rowy + 1, nx, ny, kx, ky, 0, TB_R - 1, tmp)) return -1;
-#endif
     }
     uint64_t done = 0;
     for (;;) {
@@ -260,24 +230,12 @@ static void *table_helper(void *arg) {
 /* allocate, compute constants, start the builders (returns at once) */
 static int table_start(shared_t *S, int nw) {
     /* allocation with fall back to smaller layouts */
-#if QSB_CG_HIGHFOLD
-    const char *order_nm[6] = {"highfold", "xlarge", "large", "medium", "small", "tiny"};
-    int li = 0; while (li < 6 && strcmp(order_nm[li], S->lay.name)) li++;
-    void *mem = NULL;
-    for (; li < 6; li++) {
-#else
     const char *order_nm[5] = {"xlarge", "large", "medium", "small", "tiny"};
     int li = 0; while (li < 5 && strcmp(order_nm[li], S->lay.name)) li++;
     void *mem = NULL;
     for (; li < 5; li++) {
-#endif
         layout_t L; layout_by_name(&L, order_nm[li]);
         const size_t bytes = (size_t)L.total * sizeof(tentry);
-#if QSB_CG_HIGHFOLD
-        /* the highfold tier needs known headroom; a virtual mmap success is not evidence that
-           resident pages fit the host/cgroup memory budget (fb1105b1) */
-        if (L.pos[0] != 0 && mem_available_mib() < 32768) continue;
-#endif
         const size_t al = 2u << 20;
         void *m = mmap(NULL, bytes + al, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
         if (m == MAP_FAILED) continue;

@@ -29,14 +29,14 @@
 #ifndef QSB_CARRIER
 #define QSB_CARRIER 1
 #endif
-
-/* QSB_NOJIT (host only; after cefika 6d9b1000): while the carrier is on, every launch
- * site takes a carrier kernel, including the register-root inverse and its startup
- * check, so the compute_52 image is never needed. Its module is then never touched: no
- * preload, no constant uploads or reads. Under the CUDA 12 default of lazy module loading
- * its PTX is therefore never JIT-compiled. The carrier is only switched off inside
- * qsb_carrier_init, before any upload, so the compute_52 image never misses a constant
- * that a later compute_52 launch would read. */
+/* QSB_NOJIT (host only): while the carrier is on, every launch site takes the carrier
+ * kernel, so the compute_52 image is never needed. Its module is then never touched:
+ * no preload, no constant uploads into it. Under the CUDA 12 default of lazy module
+ * loading its PTX is therefore never JIT-compiled inside the timed window (on a cold
+ * JIT cache that compile is seconds; terrapinelf measured 4.2 s for the subset module).
+ * The carrier is only ever switched off during qsb_carrier_init, before any upload,
+ * so the compute_52 image still receives every upload whenever it is the one in use.
+ * 0 restores the double upload and the preload. */
 #ifndef QSB_NOJIT
 #define QSB_NOJIT 1
 #endif
@@ -49,19 +49,16 @@ enum QsbCarrierKernel {
     QK_RGF,      /* qsb_root_group_finish  */
     QK_BUILD,    /* kernel_build_gtable    */
     QK_YOFF,     /* qsb_table_offset_y     */
-    QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
-    QK_RR,       /* qsb_root_register             (optional) */
-    QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
+    QK_RF,       /* qsb_root_fused<N> (optional: empty name when QSB_ROOT_FUSED=0) */
     QK_N
 };
 
 struct QsbCarrierState {
     int on;
-    int nojit;   /* QSB_NOJIT and every kernel any launch site may take resolved in the carrier */
     cudaLibrary_t lib;
     cudaKernel_t k[QK_N];
 };
-static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
+static QsbCarrierState g_qsb_carrier = {0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
@@ -99,7 +96,7 @@ static unsigned char *qsb_carrier_decode(size_t *out_len) {
 
 static void qsb_carrier_off(const char *why) {
     if (g_qsb_carrier.lib) cudaLibraryUnload(g_qsb_carrier.lib);
-    g_qsb_carrier.on = 0; g_qsb_carrier.nojit = 0; g_qsb_carrier.lib = nullptr;
+    g_qsb_carrier.on = 0; g_qsb_carrier.lib = nullptr;
     memset(g_qsb_carrier.k, 0, sizeof(g_qsb_carrier.k));
     cudaGetLastError();                        /* clear any sticky-free error from the attempt */
     printf("  Native sm_89 carrier: off (%s); using the compute_52 image\n", why);
@@ -114,32 +111,9 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
                                         nullptr, nullptr, 0);
     free(img);
     if (e != cudaSuccess) { qsb_carrier_off(cudaGetErrorString(e)); return; }
-    /* The generated name list may stop at QK_YOFF (an image generator that only knows the
-     * required kernels). The optional kernels past its end are then looked up by their
-     * fixed mangled names; one that does not resolve stays on the compute_52 image and
-     * turns QSB_NOJIT off, so its constants are still uploaded there. */
-    const int n_gen = (int)(sizeof(qsb_carrier_kernel_names) / sizeof(qsb_carrier_kernel_names[0]));
-    char rf_name[64] = "";
-#ifdef QSB_RF_K
-    snprintf(rf_name, sizeof(rf_name), "_Z14qsb_root_fusedILi%dEEvPmi", (int)(QSB_RF_K));
-#endif
-    const char *fixed[QK_N] = {};
-    fixed[QK_RF] = rf_name;
-    fixed[QK_RR] = "_Z17qsb_root_registerPmi";
-    fixed[QK_PFC] = "_Z29qsb_prefix_field_check_kernelPj";
-    int all = 1;
     for (int i = 0; i < QK_N; i++) {
-        g_qsb_carrier.k[i] = nullptr;
-        const char *name = i < n_gen ? qsb_carrier_kernel_names[i] : fixed[i];
-        if (i >= QK_RF) {
-            if (!name || !name[0]) name = fixed[i];
-            if (!name || !name[0]) { all = 0; continue; }
-            if (cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, name) != cudaSuccess) {
-                g_qsb_carrier.k[i] = nullptr; all = 0; cudaGetLastError();
-            }
-            continue;
-        }
-        e = cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, name);
+        if (!qsb_carrier_kernel_names[i][0]) { g_qsb_carrier.k[i] = nullptr; continue; }  /* optional, absent */
+        e = cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, qsb_carrier_kernel_names[i]);
         if (e != cudaSuccess) { qsb_carrier_off("kernel missing from image"); return; }
     }
     void *dz = nullptr; size_t zb = 0; int zeros = -1;
@@ -148,9 +122,8 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
         e = cudaMemcpy(&zeros, dz, sizeof(int), cudaMemcpyDeviceToHost);
     if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
-    g_qsb_carrier.nojit = QSB_NOJIT && all;
-    printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
-           len, qsb_carrier_cubin_sha256, g_qsb_carrier.nojit ? "no compute_52 JIT" : "root kernels partly compute_52");
+    printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads)\n",
+           len, qsb_carrier_cubin_sha256);
 }
 #else
 static void qsb_carrier_init(const cudaDeviceProp &) {}
@@ -195,22 +168,10 @@ static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src
         if (n > sz) return cudaErrorInvalidValue;
         e = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
         if (e != cudaSuccess) return e;
-        if (g_qsb_carrier.nojit) return cudaSuccess;
+#if QSB_NOJIT
+        return cudaSuccess;
+#endif
     }
     return cudaMemcpyToSymbol(sym, src, n);
 }
 #define QSB_TO_SYMBOL(sym, src, n) qsb_to_symbol(sym, #sym, src, n)
-
-/* Read back an uploaded constant from the image the kernels run from. */
-template <class T>
-static cudaError_t qsb_from_symbol(void *dst, const T &sym, const char *name, size_t n) {
-    if (g_qsb_carrier.on) {
-        void *d = nullptr; size_t sz = 0;
-        cudaError_t e = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);
-        if (e != cudaSuccess) return e;
-        if (n > sz) return cudaErrorInvalidValue;
-        return cudaMemcpy(dst, d, n, cudaMemcpyDeviceToHost);
-    }
-    return cudaMemcpyFromSymbol(dst, sym, n);
-}
-#define QSB_FROM_SYMBOL(dst, sym, n) qsb_from_symbol(dst, sym, #sym, n)
