@@ -1511,6 +1511,53 @@ QSHA static inline void qsha_xw_iv(uint32_t (*st)[8], const uint32_t (*wd)[16]) 
 QSHA static void qsha_x4w_iv(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
     qsha_xw_iv<2>(st, wd); qsha_xw_iv<2>(st + 2, wd + 2);
 }
+#ifndef QSB_CPU_SHA32PAD
+#define QSB_CPU_SHA32PAD 1
+#endif
+#if QSB_CPU_SHA32PAD
+/* From terrapinelf a33e04c3: isolate fixed 32-byte second-SHA padding only.
+ * W9..W14 are zero: r4's align/add term vanishes; r6's msg1 is identity. */
+template <int L>
+QSHA static inline void qsha_xw_iv32(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+    const __m128i P2 = _mm_set_epi32(0, 0, 0, (int)0x80000000u), P3 = _mm_set_epi32(256, 0, 0, 0);
+    __m128i S0[L], S1[L], M[L][4];
+#pragma GCC unroll 4
+    for (int l = 0; l < L; l++) {
+        S0[l] = IV0; S1[l] = IV1;
+        M[l][0] = _mm_loadu_si128((const __m128i *)(wd[l] + 0)); M[l][1] = _mm_loadu_si128((const __m128i *)(wd[l] + 4));
+        M[l][2] = P2; M[l][3] = P3;
+    }
+#pragma GCC unroll 16
+    for (int r = 0; r < 16; r++) {
+        const __m128i K = _mm_load_si128((const __m128i *)&qsha_k[4 * r]);
+#pragma GCC unroll 4
+        for (int l = 0; l < L; l++) {
+            if (r >= 4) {
+                __m128i t = r == 6 ? M[l][2] : _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+                if (r != 4) t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
+                M[l][r & 3] = _mm_sha256msg2_epu32(t, M[l][(r + 3) & 3]);
+            }
+            __m128i m = _mm_add_epi32(M[l][r & 3], K);
+            S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m);
+            m = _mm_shuffle_epi32(m, 0x0E);
+            S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m);
+        }
+    }
+#pragma GCC unroll 4
+    for (int l = 0; l < L; l++) {
+        __m128i a = _mm_add_epi32(S0[l], IV0), b = _mm_add_epi32(S1[l], IV1);
+        __m128i t = _mm_shuffle_epi32(a, 0x1B);
+        b = _mm_shuffle_epi32(b, 0xB1);
+        _mm_storeu_si128((__m128i *)&st[l][0], _mm_blend_epi16(t, b, 0xF0));
+        _mm_storeu_si128((__m128i *)&st[l][4], _mm_alignr_epi8(b, t, 8));
+    }
+}
+QSHA static void qsha_x4w_iv32(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+    qsha_xw_iv32<2>(st, wd); qsha_xw_iv32<2>(st + 2, wd + 2);
+}
+#endif
 /* The key hashes need only h0, the prefilter's input: h0 of SHA-256(compressed key) for the 4 keys (x = qx[l], parity of y
  * = qp[l]) as one vector, lane l = key l. The message words (as native words: word k = key bytes 4k..4k+3 big-endian, key
  * byte 0 = 0x02 | parity, bytes 1..32 = x big-endian, then 0x80 and the 264-bit length in word 15) are built in registers
@@ -2265,7 +2312,11 @@ static void worker(Ctx *c, int tid) {
                     if (j == 3) {                           /* four candidates ready: blocks 1..nb-1 (digests straight into the second
                                                                SHA-256's message words), then the second SHA-256 into z = h0 (MSW) .. h7 */
                         qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin);
+#if QSB_CPU_SHA32PAD
+                        qsha_x4w_iv32((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);
+#else
                         qsha_x4w_iv((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);
+#endif
 #if QCPU_VEC
                         if (hpf && (kq & 7) == 7) hpf_rows8(zb.data(), kq - 7, ht0, ht1, hw0, hw1, hsg);   /* B % 8 == 0 */
 #endif
