@@ -1,0 +1,329 @@
+{
+  "base": "6343a38d3dde830b079cb95b0e2e99c7f9a812e9",
+  "kind": "fixed-CPU host composition of two immutable archived device images; original build provenance preserved",
+  "reused_infrastructure": "b8b621c572a3318dcee85c764abffd727c578d12",
+  "alternate_source_ref": "0f93edac3f6eee9ef9dcf158378404a21cca092a",
+  "device_tree_prefix_exact_base": true,
+  "cpu_arithmetic_and_worker_loop_exact_base": false,
+  "source_files": {
+    "CpuGrindSubset.h": "2d42275e2e44ae639129891d4ff4280e0f87dc1b0a5cf587e9035e9501000609",
+    "GLVScalar.cuh": "96efe62eb4361bf038d01fa821adb19931552609878b7eb1c3c0bef360f3cd35",
+    "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
+    "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
+    "QsbCarrier.h": "a622f2cf41cfadcb09fea9aae6954b1e89a5559b9b7557646e901a4dba339c46",
+    "QsbNativeFingerprints.h": "efdf01a22f96d71a3a320c859e0c01d0779359c0e5f3fcdf131385913206bcef",
+    "QsbNativeGlobals.h": "159240ef3d6e3a7105ae2c1dc25fcbd45d1ab343ee0b2a172016d7ddd34c76b5",
+    "QsbNativeSelector.h": "d94a11a4f0f598e8443c0fd248f2a39952bbfdd7f8fb01ff1b48a6beb144e5e4",
+    "build_carrier.sh": "e45616fd96c5950a8dc94b62424eef863f0808db31a9f07e956aba231e44027d",
+    "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
+    "hit_filter_field.cuh": "b9640d8c4db125f82697ae5bb84182f72c8d22a0dac5567527620dff21659937",
+    "hit_filter_field_sc.cuh": "d5b1ac66e1a8f62f17779e39c4244f873080f4864dda9966710c2f5a9f2a6d0e",
+    "hit_filter_field_sc_aluz.cuh": "047329878bb74a5ba1e07c00ca1ce1b40a4e96129e9d3016c00dbc7af9fdacb4",
+    "qsb_carrier_alt_sm89.h": "96e397741ca6871c3cdfa4da42815bcd411b85341fbebdf0e88668a7097b7b3c",
+    "qsb_carrier_sm89.h": "c820151b7c350b1f7eae995f3214773a14aebe53e649b706c08344268dafcaa2",
+    "sha_gate_fma.cuh": "2233afa68f4909a7932732379fce3815729ec6fb384af63fa111683ebf37819b",
+    "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
+    "subset.cu": "bee876563b8c7234eefa658fe4bd2f2b484ee7ce5197df94d68802ce86e281f1",
+    "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
+    "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
+    "tests/gpu_epochs/chain_replay_audit.cu": "dd1e7aa486a4895e431ccefbabc064db8646bc2a202a83410f4850210f910a00",
+    "tests/gpu_epochs/dirdig_audit.cu": "9b4a85157256cb32170ad26ab94ec09a80706b9219e956a82d4c83f40c02e69b",
+    "tests/gpu_epochs/epoch_groups.cuh": "ae0b03eae7d0c8036020a3af0d7965530372789ed4ee4bdbde7cc44be22a5c10",
+    "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+    "tests/gpu_epochs/first_stage_audit.cu": "c9405ec70d3dc3f2572a10c5831dd1137179b8182a3983009dbc660d54e472de",
+    "tests/gpu_epochs/hm39_divstep.cuh": "59cb33f81db4605bde47377fd8b8381ea3102479df68c3223e83eca6427d9bc8",
+    "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
+    "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
+    "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
+    "tests/gpu_epochs/host_producers.h": "4d4fa388941eadaed54a3e553141a9ef74b80774dd5319f313058d4dff29db01",
+    "tests/gpu_epochs/inverse_limbs.cuh": "3a41eddc68eec089a716852c54fd99c6ac29a1fa49a46e90e578e9b74a3060df",
+    "tests/gpu_epochs/pair_finish_audit.cu": "ce76d53a0ae76bfaaca1bbd12ff87d7f268ca7dea187c1f733da14cebb9b261a",
+    "tests/gpu_epochs/pair_shared.cuh": "e171dfacf1aa467928d8613d1cc5c0dcab72539d67cdaca7c0fb3b521781b848",
+    "tests/gpu_epochs/parity_window_subset.cuh": "482e6e05ff134a82b48f32b27b32524cb7139c7daa0f0d877a9512315c021e0c",
+    "tests/gpu_epochs/point_audit.cu": "abc998ea5fc4f2180fc4690b209fc6ecb27a1189a8f884ead4607f06e82b315e",
+    "tests/gpu_epochs/point_predicate_audit.cu": "b8427c62a23c55070839548f28ce89c8309a47a6dc38d33ba594d3a120cc5c63",
+    "tests/gpu_epochs/prefix_cache.cuh": "8fbcb6bfa47ba4cdf79a4c65d4510b0cd1a2c7c57f9bd800e89c15dff1c43cb8",
+    "tests/gpu_epochs/qsb_host_verify.h": "3f521f09af243a022a3ee836a2b5559460e70bda9e52e3542a4a3d6f928a7111",
+    "tests/gpu_epochs/scalar_audit.cu": "439f21c09c9b4fbf8e199eece7b439774d701f26c955544f9de8f3f7156966c4",
+    "tests/gpu_epochs/seed_x3_audit.cu": "a8129be10bcf4435bdfb4fd34c1939a8f7c68a5b98429fd58b0dcb93e23f0764",
+    "tests/gpu_epochs/tree.cu": "184eea22f65e3ab52067df927f537af59c71c027a2e01c35367629cfd5de6c93",
+    "tests/gpu_epochs/tree_audit.cu": "f839ab3f24dca4e49ac4670044b6a2eaeabb2ea0a7e74741df8408ef7104d2de",
+    "tests/gpu_epochs/tree_inverse.cuh": "d315aac099f615090d1c7b51ba7a9de5e9a8e62863ede7fe11be52acbe5a8466",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "ad256d03de4ecadf248e091a5ee37a028f1d1b127255044793e1f5ad31125652",
+    "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8",
+    "verify_native_composition.py": "25fc06c3aa7cb1662ecf1a4ce295f1c890ed0a577826d9b372b61ac79f0a535b",
+    "y_pair_sc.cuh": "923061f27e02bed6e78c352abdb1285c108650b699bb35668615ae0ef782a4cb"
+  },
+  "archives": {
+    "qsb_carrier_sm89.h": {
+      "cubin_sha256": "f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc",
+      "bytes": 462496,
+      "original_source_sha256": "c1985d7491ad62a05cbabad78b9db3e9f5a5da33b9d62e81ec30a0b90da6538b",
+      "fingerprint": "QSB_ZEROS_N=24;QSB_S3=1;QSB_SE_WINDOWS=128;QSB_SE_BLOCK=256;MAX_T=16;QSB_950_PACK=1;QSB_BATCH_AFFINE_FALLBACK=QSB_BATCH_AFFINE_FALLBACK;QSB_BIGTBL=1;QSB_CHAIN_ANCHOR_UPDATE=1;QSB_CHAIN_MUL_LEAN=1;QSB_CHAIN_UNROLL=1;QSB_DIGIT_SHIFT=1;QSB_EPOCH_FAST=1;QSB_EPOCH_GROUPS=1;QSB_FINAL_CARRY=1;QSB_FUSE_X3=1;QSB_FX3_SIGNED=1;QSB_FX3_SPLIT3P=1;QSB_FX3_Z9=1;QSB_GATE_H0=1;QSB_GATE_H0_FMA=1;QSB_GATE_PAIR=1;QSB_GLV_COEFF_BOUNDS=1;QSB_GLV_FALLBACK_INLINE=1;QSB_GLV_HIGH15=1;QSB_GLV_RESIDUAL129=1;QSB_GLV_RESIDUAL3=1;QSB_GT_HEAL=1;QSB_HOST_VERIFY=1;QSB_HV_STATS=0;QSB_ISO_FAST_X=1;QSB_ISO_FUSED_ROOT_SCALE=1;QSB_ISO_RELOAD_R=1;QSB_ISO_ROOT_SCALE=1;QSB_K2S_PARITY_NARROW=1;QSB_K2S_PARITY_WINDOW=1;QSB_K32=1;QSB_K32_BGLUE=1;QSB_SQR_X0_GLUE=1;QSB_NEGFOLD_PARITY=1;QSB_NEG_SHORT=1;QSB_PAIR_SHARED=1;QSB_PAIR_SHA_UNROLL_CONST=0;QSB_PAIR_SHA_UNROLL_CONST_INNER=0;QSB_PAIR_SHA_UNROLL_WINDOW=1;QSB_GLV11=1;QSB_GLV11_P18=1;QSB_Q_P18=1;QSB_Q_MIX=2;QSB_Y_PAIR=1;QSB_GLV_LEAN=1;QSB_GLV_NO_KRED=1;QSB_GLV_ROUND_CC=1;QSB_GLV_HIGH15_HI=1;QSB_GROUP_CAP_EXACT=1;QSB_PREFIX_BLOCKS=2;QSB_R_CBANK=0;QSB_S3_HALF_WALK=1;QSB_S3_SIGN_SHIFT=1;QSB_S3_ODD_FOLD=1;QSB_ROOT_MAX_BATCHES=16;QSB_SHA_ALU_ADD=0;QSB_SHA_FMA_ADD=0;QSB_SHA_FMA_ROT=0;QSB_SHA_UNROLL_CONST=1;QSB_SHORT_CARRY=1;QSB_SHORT_CARRY2=1;QSB_SHORT_CARRY2_SENTINEL=0;QSB_SHORT_CARRY3=1;QSB_SHORT_CARRY4=1;QSB_SHORT_CARRY6=1;QSB_SLOT_PIPELINE=1;QSB_SPEC_LAST_RESOLVE=1;QSB_SPEC_PREPARE_PAIR=1;QSB_STARTUP_TRIM=1;QSB_TABLE_BASE_A=1;QSB_TABLE_L2_WINDOW=1;QSB_TRIM_DIRECT_PRODUCER=1;QSB_Z2_SPEC_CUT=1;ZLAB_DIRDIG=1;ZLAB_DUAL_EPOCH_SHA=1;ZLAB_HITPATH=1;ZLAB_K2S3M=1;ZLAB_LAUNCH_BLOCKS=262144;ZLAB_MODSQR=1;ZLAB_PAIRSHA=0;ZLAB_T14=0;ZLAB_TREE=2;ZLAB_TRIM=1;QSB_FORCE_EXACT_HIT_CHECK=QSB_FORCE_EXACT_HIT_CHECK;QSB_SC_OPS=0;QSB_SC_PP=0;QSB_SC_ALUZ=0;QSB_SC_PARK=1;QSB_SC_LATE=0;",
+      "kernel_names": [
+        "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+        "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+        "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+        "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+        "_Z19kernel_build_gtablePKmS0_S0_Ph",
+        "_Z19kernel_gt_heal_scanPKhPKmPjj"
+      ],
+      "globals": {
+        "MULTI_EIGHT": {
+          "bytes": 260,
+          "sha256": "49b9c4ee611fea783e952705fa5dc65e856d7750fabe386efc9141a75b21d30b"
+        },
+        "COMBO_SYMBOLS": {
+          "bytes": 100,
+          "sha256": "81a71fa64326021ed1e4dce3f35b7a703c30ea28d82225e8cf4f74a1c9b93b83"
+        },
+        "K": {
+          "bytes": 256,
+          "sha256": "74ef7306e7452d6859b6463ce496b8df30925f69e1b2969e1f3f34bbc9c6af04"
+        },
+        "I": {
+          "bytes": 32,
+          "sha256": "5a33fcfec23c49d91bcf58ce2472dc9f3662cd086bd29fc44af2e14567238a30"
+        },
+        "ripemd160_sizedesc_32": {
+          "bytes": 8,
+          "sha256": "2e22fd435060cd5d3cf5e3ef39f79e198b35bd2c4af31974db36601b3a2f4c91"
+        },
+        "_KECCAKF_RNDC": {
+          "bytes": 192,
+          "sha256": "f8e6964adffc257265537256d21e93496a17b9271dc5d64f40869eeeaaff6fbb"
+        },
+        "QSB_CONST_SCHEDULE": {
+          "bytes": 1024,
+          "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+        },
+        "QSB_U2R": {
+          "bytes": 64,
+          "sha256": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"
+        },
+        "QSB_U2R_ISO": {
+          "bytes": 64,
+          "sha256": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"
+        },
+        "QSB_ISO_INVU": {
+          "bytes": 32,
+          "sha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        },
+        "QSB_ISO_XNEG": {
+          "bytes": 4,
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        },
+        "QSB_U2R_C": {
+          "bytes": 32,
+          "sha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        },
+        "QSB_PUSH_WORDS": {
+          "bytes": 2416,
+          "sha256": "7e8fd724013868d6228184629c10df6163e6b259de1777fdfe3d8faf806cee79"
+        },
+        "BINOM_C": {
+          "bytes": 12080,
+          "sha256": "6347a57ec8e17983e9b9c05ca514e8be15ba615b8a0fc2964b3bebdee6820283"
+        },
+        "GT_ORDER_N": {
+          "bytes": 32,
+          "sha256": "86a1186e7a40bbfd306d66d18d72a6c9cc255def938a84d0735039ff0e126bfe"
+        },
+        "QSB_S3_DESC": {
+          "bytes": 160,
+          "sha256": "9dcffe90073b0cfea0e0f3191b6d9fb4409c1f700bc31efa75d4293dc8f7f06d"
+        },
+        "QSB_S3_DESC_MXF": {
+          "bytes": 256,
+          "sha256": "5925e9f25d4e05529d6f9d2c38881c2704711528b743d64f3454b7fe99dae152"
+        },
+        "WIN3": {
+          "bytes": 384,
+          "sha256": "a1a4f5721c1c4610af7f71078f3a68c330536d679803b0e0507ee8dc10c5dfca"
+        },
+        "QSB_WINDOW_FIRST": {
+          "bytes": 7168,
+          "sha256": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3"
+        },
+        "QSB_WINDOW_SECOND": {
+          "bytes": 32768,
+          "sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479"
+        },
+        "QSB_WINDOW_CLASS": {
+          "bytes": 512,
+          "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+        },
+        "QSB_FIRST_CLASS": {
+          "bytes": 512,
+          "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+        },
+        "QSB_LANE_CLASS": {
+          "bytes": 512,
+          "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+        },
+        "QSB_FIRST_UNIQUE": {
+          "bytes": 896,
+          "sha256": "d54f02b97ed5bc2a642756268b41d4b8f7a077e73224e1580d22436834a14db5"
+        },
+        "QSB_FIRST_COUNT": {
+          "bytes": 4,
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        },
+        "ZI_BY_LUT": {
+          "bytes": 6656,
+          "sha256": "566d8dd64a2a49a6534a23b4432edcc6ed518bc14fb02942ad7671470994cf0b"
+        },
+        "pin_one_mul": {
+          "bytes": 4,
+          "sha256": "67abdd721024f0ff4e0b3f4c2fc13bc5bad42d0b7851d456d88d203d15aaa450"
+        },
+        "pin_pow2": {
+          "bytes": 128,
+          "sha256": "0acec52616c2657143f3da95ca6e4996d4dfd173058b42beadcf92128a93ad09"
+        },
+        "qsb_carrier_knobs": {
+          "bytes": 1794,
+          "sha256": "6ff6ec8e3d51d49f92bf499c502904fbb5c9bdfa61c4129be1aff5a7a2a266e7"
+        }
+      }
+    },
+    "qsb_carrier_alt_sm89.h": {
+      "cubin_sha256": "3280df88b19baff3f234945b9be5ebf3859c8d731fe47aff4855fb09d5eea688",
+      "bytes": 445344,
+      "original_source_sha256": "83e698bf6affad16fe056521f3c9847ff15cff378a0ddf3e843e3ae03a393bf4",
+      "fingerprint": "QSB_ZEROS_N=24;QSB_PK_HEAD_FMA=1;QSB_GLV_FP32_CARRY=1;QSB_PK_OUTLINE=1;QSB_S3=1;QSB_SE_WINDOWS=128;QSB_SE_BLOCK=256;MAX_T=16;QSB_950_PACK=1;QSB_BATCH_AFFINE_FALLBACK=QSB_BATCH_AFFINE_FALLBACK;QSB_BIGTBL=1;QSB_CHAIN_ANCHOR_UPDATE=1;QSB_CHAIN_MUL_LEAN=1;QSB_CHAIN_UNROLL=1;QSB_DIGIT_SHIFT=1;QSB_EPOCH_FAST=1;QSB_EPOCH_GROUPS=1;QSB_FINAL_CARRY=1;QSB_FUSE_X3=1;QSB_FX3_SIGNED=1;QSB_FX3_SPLIT3P=1;QSB_FX3_Z9=1;QSB_GATE_H0=1;QSB_GATE_H0_FMA=1;QSB_GATE_PAIR=1;QSB_GLV_COEFF_BOUNDS=1;QSB_GLV_FALLBACK_INLINE=1;QSB_GLV_HIGH15=1;QSB_GLV_RESIDUAL129=1;QSB_GLV_RESIDUAL3=1;QSB_GT_HEAL=1;QSB_HOST_VERIFY=1;QSB_HV_STATS=0;QSB_ISO_FAST_X=1;QSB_ISO_FUSED_ROOT_SCALE=1;QSB_ISO_RELOAD_R=1;QSB_ISO_ROOT_SCALE=1;QSB_K2S_PARITY_NARROW=1;QSB_K2S_PARITY_WINDOW=1;QSB_K32=1;QSB_K32_BGLUE=1;QSB_SQR_X0_GLUE=1;QSB_NEGFOLD_PARITY=1;QSB_NEG_SHORT=1;QSB_PAIR_SHARED=1;QSB_PAIR_SHA_UNROLL_CONST=0;QSB_PAIR_SHA_UNROLL_CONST_INNER=0;QSB_PAIR_SHA_UNROLL_WINDOW=1;QSB_GLV11=1;QSB_GLV11_P18=1;QSB_Q_P18=1;QSB_Q_MIX=2;QSB_Y_PAIR=1;QSB_GLV_LEAN=1;QSB_GLV_NO_KRED=1;QSB_GLV_ROUND_CC=1;QSB_GLV_HIGH15_HI=1;QSB_GROUP_CAP_EXACT=1;QSB_PREFIX_BLOCKS=2;QSB_R_CBANK=0;QSB_S3_HALF_WALK=1;QSB_S3_SIGN_SHIFT=1;QSB_S3_ODD_FOLD=1;QSB_ROOT_MAX_BATCHES=16;QSB_SHA_ALU_ADD=0;QSB_SHA_FMA_ADD=1;QSB_SHA_FMA_ROT=0;QSB_SHA_UNROLL_CONST=1;QSB_SHORT_CARRY=1;QSB_SHORT_CARRY2=1;QSB_SHORT_CARRY2_SENTINEL=0;QSB_SHORT_CARRY3=1;QSB_SHORT_CARRY4=1;QSB_SHORT_CARRY6=1;QSB_SLOT_PIPELINE=1;QSB_SPEC_LAST_RESOLVE=1;QSB_SPEC_PREPARE_PAIR=1;QSB_STARTUP_TRIM=1;QSB_TABLE_BASE_A=1;QSB_TABLE_L2_WINDOW=1;QSB_TRIM_DIRECT_PRODUCER=1;QSB_Z2_SPEC_CUT=1;ZLAB_DIRDIG=1;ZLAB_DUAL_EPOCH_SHA=1;ZLAB_HITPATH=1;ZLAB_K2S3M=1;ZLAB_LAUNCH_BLOCKS=262144;ZLAB_MODSQR=1;ZLAB_PAIRSHA=0;ZLAB_T14=0;ZLAB_TREE=2;ZLAB_TRIM=1;QSB_FORCE_EXACT_HIT_CHECK=QSB_FORCE_EXACT_HIT_CHECK;QSB_SC_OPS=0;QSB_SC_PP=0;QSB_SC_ALUZ=0;QSB_SC_PARK=1;QSB_SC_LATE=0;",
+      "kernel_names": [
+        "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm",
+        "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj",
+        "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj",
+        "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i",
+        "_Z19kernel_build_gtablePKmS0_S0_Ph",
+        "_Z19kernel_gt_heal_scanPKhPKmPjj"
+      ],
+      "globals": {
+        "MULTI_EIGHT": {
+          "bytes": 260,
+          "sha256": "49b9c4ee611fea783e952705fa5dc65e856d7750fabe386efc9141a75b21d30b"
+        },
+        "COMBO_SYMBOLS": {
+          "bytes": 100,
+          "sha256": "81a71fa64326021ed1e4dce3f35b7a703c30ea28d82225e8cf4f74a1c9b93b83"
+        },
+        "K": {
+          "bytes": 256,
+          "sha256": "74ef7306e7452d6859b6463ce496b8df30925f69e1b2969e1f3f34bbc9c6af04"
+        },
+        "I": {
+          "bytes": 32,
+          "sha256": "5a33fcfec23c49d91bcf58ce2472dc9f3662cd086bd29fc44af2e14567238a30"
+        },
+        "ripemd160_sizedesc_32": {
+          "bytes": 8,
+          "sha256": "2e22fd435060cd5d3cf5e3ef39f79e198b35bd2c4af31974db36601b3a2f4c91"
+        },
+        "_KECCAKF_RNDC": {
+          "bytes": 192,
+          "sha256": "f8e6964adffc257265537256d21e93496a17b9271dc5d64f40869eeeaaff6fbb"
+        },
+        "QSB_CONST_SCHEDULE": {
+          "bytes": 1024,
+          "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+        },
+        "QSB_U2R": {
+          "bytes": 64,
+          "sha256": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"
+        },
+        "QSB_U2R_ISO": {
+          "bytes": 64,
+          "sha256": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"
+        },
+        "QSB_ISO_INVU": {
+          "bytes": 32,
+          "sha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        },
+        "QSB_ISO_XNEG": {
+          "bytes": 4,
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        },
+        "QSB_U2R_C": {
+          "bytes": 32,
+          "sha256": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        },
+        "QSB_PUSH_WORDS": {
+          "bytes": 2416,
+          "sha256": "7e8fd724013868d6228184629c10df6163e6b259de1777fdfe3d8faf806cee79"
+        },
+        "BINOM_C": {
+          "bytes": 12080,
+          "sha256": "6347a57ec8e17983e9b9c05ca514e8be15ba615b8a0fc2964b3bebdee6820283"
+        },
+        "GT_ORDER_N": {
+          "bytes": 32,
+          "sha256": "86a1186e7a40bbfd306d66d18d72a6c9cc255def938a84d0735039ff0e126bfe"
+        },
+        "QSB_S3_DESC": {
+          "bytes": 160,
+          "sha256": "9dcffe90073b0cfea0e0f3191b6d9fb4409c1f700bc31efa75d4293dc8f7f06d"
+        },
+        "QSB_S3_DESC_MXF": {
+          "bytes": 256,
+          "sha256": "5925e9f25d4e05529d6f9d2c38881c2704711528b743d64f3454b7fe99dae152"
+        },
+        "WIN3": {
+          "bytes": 384,
+          "sha256": "a1a4f5721c1c4610af7f71078f3a68c330536d679803b0e0507ee8dc10c5dfca"
+        },
+        "QSB_WINDOW_FIRST": {
+          "bytes": 7168,
+          "sha256": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3"
+        },
+        "QSB_WINDOW_SECOND": {
+          "bytes": 32768,
+          "sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479"
+        },
+        "QSB_WINDOW_CLASS": {
+          "bytes": 512,
+          "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+        },
+        "QSB_FIRST_CLASS": {
+          "bytes": 512,
+          "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+        },
+        "QSB_LANE_CLASS": {
+          "bytes": 512,
+          "sha256": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+        },
+        "QSB_FIRST_UNIQUE": {
+          "bytes": 896,
+          "sha256": "d54f02b97ed5bc2a642756268b41d4b8f7a077e73224e1580d22436834a14db5"
+        },
+        "QSB_FIRST_COUNT": {
+          "bytes": 4,
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        },
+        "ZI_BY_LUT": {
+          "bytes": 6656,
+          "sha256": "566d8dd64a2a49a6534a23b4432edcc6ed518bc14fb02942ad7671470994cf0b"
+        },
+        "pin_one_mul": {
+          "bytes": 4,
+          "sha256": "67abdd721024f0ff4e0b3f4c2fc13bc5bad42d0b7851d456d88d203d15aaa450"
+        },
+        "pin_pow2": {
+          "bytes": 128,
+          "sha256": "0acec52616c2657143f3da95ca6e4996d4dfd173058b42beadcf92128a93ad09"
+        },
+        "qsb_carrier_knobs": {
+          "bytes": 1850,
+          "sha256": "2296575ae26ca1fc54b79bf959b4c8cf734c3ead1095034f4dc2b3ede404c939"
+        }
+      }
+    }
+  },
+  "release_parent": "495aa604dad3dc7eff235f946bb9f8c0dcd005aa",
+  "cpu_arithmetic_exception": {
+    "kind": "exact zero-product lane-inversion guard; fixed-worker observers preserved",
+    "source_ref": "0f93edac3f6eee9ef9dcf158378404a21cca092a",
+    "helper_sha256": "65b4b68dc469d0c1826dd738161d427115a6d133f4b032bc5090bfe8025f1237"
+  }
+}

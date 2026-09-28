@@ -1051,8 +1051,8 @@ static void fe_inv_var(fe &r, const fe &a) {
     r.v[2] = (uint64_t)x.v[2] >> 4 | (uint64_t)x.v[3] << 58; r.v[3] = (uint64_t)x.v[3] >> 6 | (uint64_t)x.v[4] << 56;
 }
 /* x = x^-1 lane-wise: Montgomery's trick across the 8 lanes (a 3-level tree of permuted multiplications:
- * 3 to combine, 3 to split), one scalar inversion of the lanes' product. A zero lane zeroes every lane's
- * result, as the Fermat inversion did (x-collisions, probability 2^-240; the exact gate absorbs them). */
+ * 3 to combine, 3 to split), one scalar inversion of the lanes' product. If the product
+ * is zero, retain independent-lane Fermat behavior on the unchanged input. */
 Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
 Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
 Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
@@ -1062,7 +1062,9 @@ Q8T static void fe8_inv_lanes(fe8 &x) {
     fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
     fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
     alignas(64) uint64_t w[4][8]; fe8_canon64(w, t);
-    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi;
+    if (!(pr.v[0] | pr.v[1] | pr.v[2] | pr.v[3])) { fe8_inv1(x); return; }
+    fe_inv_var(pi, pr);
     fe8 I; fe8_bcast(I, pi);
     fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
     fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
@@ -1605,6 +1607,10 @@ struct Ctx {
     std::vector<uint8_t> h_gblk;    /* ng x 64: block 0 of each group, epoch bytes left zero */
     std::vector<uint32_t, qalloc64<uint32_t> > h_wk;   /* distinct fixed blocks x 64 words W[i]+K[i] */
 #endif
+    // Observation only: keep all existing Ctx offsets, arithmetic and worker ownership.
+    // The setup thread publishes the final immutable geometry before launching workers.
+    std::atomic<int> fixed_expected{0}, fixed_ready{0}, fixed_exited{0};
+    std::atomic<uint64_t> fixed_token{0};
 };
 
 /* The table as a 2 MiB-aligned anonymous mapping with transparent huge pages (it is read at random);
@@ -2097,6 +2103,10 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 #endif
 
 static void worker(Ctx *c, int tid) {
+    struct ExitObservation {
+        Ctx *c;
+        ~ExitObservation() { c->fixed_exited.fetch_add(1, std::memory_order_release); }
+    } exit_observation{c};
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -2172,6 +2182,7 @@ static void worker(Ctx *c, int tid) {
     auto hpf_after = [&](int kl, int cnt) {          /* z of candidates kl - cnt + 1 .. kl is new in zb */
         if (hpf) for (int q = kl - cnt + 1; q <= kl; q++) hpf_rows(q);
     };
+    c->fixed_ready.fetch_add(1, std::memory_order_release); // every worker, after all initialization
     for (;;) {
         int k = 0;
         while (k < B) {
@@ -2563,6 +2574,13 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
             fflush(stdout);
         }
 #endif
+        // geo_make deterministically fixes all widths/offsets from (nw, sgn).
+        // Token fields: workers[63:32], nw[31:24], patterns[23:8], sgn/vec/shani/cfold[3:0].
+        const uint64_t token = (uint64_t)(unsigned)c->nthreads << 32 | (uint64_t)c->g.nw << 24 |
+            (uint64_t)c->ncwin << 8 | (c->g.sgn ? 8u : 0u) | (c->vec ? 4u : 0u) |
+            (c->shani ? 2u : 0u) | (c->cfold ? 1u : 0u);
+        c->fixed_expected.store(c->nthreads, std::memory_order_relaxed);
+        c->fixed_token.store(token, std::memory_order_release);
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
 #ifdef CPU_COUNT
         if (extra) std::thread([c, nth, host_cpus]() { sched_setaffinity(0, sizeof host_cpus, &host_cpus); worker(c, nth); }).detach();
@@ -2572,4 +2590,13 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 }
 static uint64_t candidates() { return g_ctx ? g_ctx->cand.load() : 0; }
 static uint32_t hits() { return g_ctx ? g_ctx->hits.load() : 0; }
+static bool fixed_state(uint64_t &token) {
+    if (!g_ctx) return false;
+    token = g_ctx->fixed_token.load(std::memory_order_acquire);
+    const int expected = g_ctx->fixed_expected.load(std::memory_order_relaxed);
+    return token && expected > 0 && (uint32_t)(token >> 32) == (uint32_t)expected &&
+        g_ctx->fixed_ready.load(std::memory_order_acquire) == expected &&
+        g_ctx->fixed_exited.load(std::memory_order_acquire) == 0 &&
+        g_ctx->fixed_token.load(std::memory_order_acquire) == token;
+}
 }  // namespace qcpu
