@@ -1,9 +1,12 @@
+#ifndef QSB_SHA_SPLIT
+#define QSB_SHA_SPLIT 1
+#endif
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
-#define QSB_GREEN 20
+#define QSB_GREEN 28
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
@@ -3555,7 +3558,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #endif
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
-                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
+                                  STAGE == 0 ? QSB_S0_BLOCKS : (STAGE == 1 ? 8 : QSB_S2_BLOCKS)) kernel_pinning_pipeline(
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -3596,7 +3599,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
 
     uint64_t qx[4], qy[4], qzz[4], qzzz[4], prod[5];
-    if (STAGE==0) {
+    if (STAGE==0 || STAGE==1) {
+    uint64_t z[4];
+#if QSB_SHA_SPLIT
+    if (FAST_TAIL && STAGE==0) {
+        // SHA writes only active lanes. Same block/plane mapping as prepare output.
+        if (active) {
+            const ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+            ulonglong2 a=st[0], b=st[QSB_TREE_N];
+            z[0]=a.x;z[1]=a.y;z[2]=b.x;z[3]=b.y;
+        } else { z[0]=z[1]=z[2]=z[3]=0; }
+    } else
+#endif
+    {
     uint32_t state[8];
     if (FAST_TAIL) {
         // This specialization is selected only for single_hash, normal mode.
@@ -3705,11 +3720,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
 
     /* Scalar from the SHA-256 state words, in little-endian limbs. */
-    uint64_t z[4];
     z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
     z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
     z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
     z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+    } // digest computation
+    if (STAGE==1) {
+        if (active) {
+            ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+            st[0]=make_ulonglong2(z[0],z[1]);
+            st[QSB_TREE_N]=make_ulonglong2(z[2],z[3]);
+        }
+        return;
+    }
     /* neg_r_inv is folded into fixed base A = neg_r_inv*G. Recoding z
      * directly yields z*A = (neg_r_inv*z mod n)*G without a per-candidate
      * scalar multiplication. */
@@ -4007,6 +4030,22 @@ static void launch_pinning_pipeline(
 ) {
     int blocks=(batch_size+QSB_TREE_N-1)/QSB_TREE_N;
     int blocks0=(batch_size+QSB_S0_THREADS-1)/QSB_S0_THREADS;
+#if QSB_SHA_SPLIT
+    if (FAST_TAIL) {
+    if(FAST_TAIL && qsb_carrier_has(QK_SHA))
+        qsb_carrier_launch(kernel_pinning_pipeline<FAST_TAIL,1>,QK_SHA,dim3(blocks0),dim3(QSB_S0_THREADS),QSB_LAUNCH_ST,
+            d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+            seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+            d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+            saved,roots,tree,tp);
+    else
+    kernel_pinning_pipeline<FAST_TAIL,1><<<blocks0,QSB_S0_THREADS QSB_STREAM_ARG>>>(
+        d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+        seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+        d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
+        saved,roots,tree,tp);
+    }
+#endif
     if(FAST_TAIL && qsb_carrier_has(QK_S0))
         qsb_carrier_launch(kernel_pinning_pipeline<FAST_TAIL,0>,QK_S0,dim3(blocks0),dim3(QSB_S0_THREADS),QSB_LAUNCH_ST,
             d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
@@ -4129,7 +4168,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[3], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4178,6 +4217,9 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
         if (qsb_cuGreenCtxStreamCreate(&t, gB, CU_STREAM_NON_BLOCKING, QSB_GREEN_S2_LEAST ? least : greatest) != CUDA_SUCCESS) return 0;
         sB[i] = (cudaStream_t)t;
     }
+    // Independent producer stream; never queue behind a finish waiting for EC.
+    if (qsb_cuGreenCtxStreamCreate(&t, gB, CU_STREAM_NON_BLOCKING, least) != CUDA_SUCCESS) return 0;
+    sB[2] = (cudaStream_t)t;
     *gotA = rem.sm.smCount + (unsigned)(na - 1) * grp[0].sm.smCount; *gotB = ng * grp[0].sm.smCount;
     return 1;
 }
@@ -4192,8 +4234,8 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
 struct QsbSubPipe {
     int ready;
-    cudaStream_t s0[2], rt, s2, s2b[2];
-    cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
+    cudaStream_t s0[2], rt, s2, s2b[2], sha;
+    cudaEvent_t ev_sha[QSB_SUBRING], ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
     uint64_t *roots[QSB_SUBRING], *super_roots[QSB_SUBRING], *ckpt[QSB_SUBRING];
@@ -4227,12 +4269,12 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
+        cudaStream_t sA[3], sB[3]; unsigned nA = 0, nB = 0;
         if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
             printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
             return 0;
         }
-        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
+        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0]; P.sha = sB[2];
         printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
     }
 #else
@@ -4241,14 +4283,15 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.rt, cudaStreamNonBlocking, greatest);
     if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.s2, cudaStreamNonBlocking,
                                                            QSB_SUB_S2PRIO ? greatest : least);
+    if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.sha, cudaStreamNonBlocking, least);
     P.s2b[0] = P.s2b[1] = P.s2;
     if (e != cudaSuccess) qsb_subpipe_die("stream setup", e);
 #endif
     /* The persisting-L2 window is a per-stream attribute: copy the slot stream's. */
     cudaStreamAttrValue av = {};
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
-        cudaStream_t all[5] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1]};
-        for (int i = 0; i < 5; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+        cudaStream_t all[6] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1], P.sha};
+        for (int i = 0; i < 6; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -4258,6 +4301,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         if (e == cudaSuccess) e = cudaMalloc(&P.roots[r], (size_t)blocks * 8u * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaMalloc(&P.super_roots[r], (size_t)groups * 4u * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaMalloc(&P.ckpt[r], (size_t)groups * 4u * QSB_CHECKPOINT_STRIDE * sizeof(uint64_t));
+        if (e == cudaSuccess) e = cudaEventCreateWithFlags(&P.ev_sha[r], cudaEventDisableTiming);
         if (e == cudaSuccess) e = cudaEventCreateWithFlags(&P.ev_s0[r], cudaEventDisableTiming);
         if (e == cudaSuccess) e = cudaEventCreateWithFlags(&P.ev_rt[r], cudaEventDisableTiming);
         if (e == cudaSuccess) e = cudaEventCreateWithFlags(&P.ev_s2[r], cudaEventDisableTiming);
@@ -4317,11 +4361,31 @@ static void qsb_subpipe_launch(
         const uint32_t lt0 = start_lt + (uint32_t)off;
         uint64_t *hit_base = (uint64_t *)(uintptr_t)(uint32_t)off;   /* finish: QSB_HIT_BASE */
         if (P.used[r]) {
-            e = cudaStreamWaitEvent(s0, P.ev_s2[r], 0);
+            e = cudaStreamWaitEvent(P.sha, P.ev_s2[r], 0);
             if (e != cudaSuccess) qsb_subpipe_die("ring wait", e);
         }
         const int blocks = (n + QSB_TREE_N - 1) / QSB_TREE_N;
         const int groups = (blocks + 255) / 256;
+#if QSB_SHA_SPLIT
+    if (true) {
+        if (qsb_carrier_has(QK_SHA))
+            qsb_carrier_launch(kernel_pinning_pipeline<true,1>,QK_SHA,dim3(blocks),dim3(QSB_S0_THREADS),P.sha,
+                d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+        else
+            kernel_pinning_pipeline<true,1><<<blocks,QSB_S0_THREADS,0,P.sha>>>(
+                d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+    }
+#endif
+        e = cudaGetLastError();
+        if (e == cudaSuccess) e = cudaEventRecord(P.ev_sha[r], P.sha);
+        if (e == cudaSuccess) e = cudaStreamWaitEvent(s0, P.ev_sha[r], 0);
+        if (e != cudaSuccess) qsb_subpipe_die("SHA producer", e);
         if (qsb_carrier_has(QK_S0))
             qsb_carrier_launch(kernel_pinning_pipeline<true,0>,QK_S0,dim3(blocks),dim3(QSB_S0_THREADS),s0,
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,

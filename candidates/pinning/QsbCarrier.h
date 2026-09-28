@@ -50,6 +50,7 @@ enum QsbCarrierKernel {
     QK_BUILD,    /* kernel_build_gtable    */
     QK_YOFF,     /* qsb_table_offset_y     */
     QK_RF,       /* qsb_root_fused<N> (optional: empty name when QSB_ROOT_FUSED=0) */
+    QK_SHA,     /* kernel_pinning_pipeline<true,1>: digest only */
     QK_N
 };
 
