@@ -2215,6 +2215,17 @@ __global__ void kernel_verify_pair_hits(
 #endif /* !QSB_HOST_VERIFY */
 
 
+/* QSB_SM_SKEW_NS (device, ns; 0 = off): per-SM phase skew of kernel_digest. Every 128th block to arrive on an SM
+ * waits ~QSB_SM_SKEW_NS before it starts, so the SM's two co-resident blocks stop running their ALU-bound SHA phase
+ * and their IMAD.WIDE-bound EC phase in lockstep. Measured in-run on the ranked RTX 4090 (probe 24d785f0, same GPU,
+ * time-sliced against this tree's unmodified kernel): +3.05% +- 0.41% work per slice at 100000 ns. Timing only: every
+ * block does exactly the same work, so every candidate and hit is unchanged. */
+#ifndef QSB_SM_SKEW_NS
+#define QSB_SM_SKEW_NS 100000
+#endif
+#if QSB_SM_SKEW_NS
+__device__ unsigned qsb_sm_skew_ctr[256];   /* per-SM block arrival count */
+#endif
 __global__ void __launch_bounds__(256, 2) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
@@ -2242,6 +2253,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 , const uint32_t *d_first, int epochs_in_batch
 ) {
+#if QSB_SM_SKEW_NS && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    if(threadIdx.x==0){unsigned sm;asm volatile("mov.u32 %0, %%smid;":"=r"(sm));
+        if((atomicAdd(&qsb_sm_skew_ctr[sm&255u],1u)&127u)==1u)__nanosleep(QSB_SM_SKEW_NS);}
+    __syncthreads();
+#endif
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
@@ -3911,6 +3927,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_TABLE_L2_WINDOW) QSB_CARRIER_KV(QSB_TRIM_DIRECT_PRODUCER) \
     QSB_CARRIER_KV(QSB_Z2_SPEC_CUT) QSB_CARRIER_KV(ZLAB_DIRDIG) QSB_CARRIER_KV(ZLAB_DUAL_EPOCH_SHA) \
     QSB_CARRIER_KV(ZLAB_HITPATH) QSB_CARRIER_KV(ZLAB_K2S3M) QSB_CARRIER_KV(ZLAB_LAUNCH_BLOCKS) \
+    QSB_CARRIER_KV(QSB_SM_SKEW_NS) \
     QSB_CARRIER_KV(ZLAB_MODSQR) QSB_CARRIER_KV(ZLAB_PAIRSHA) QSB_CARRIER_KV(ZLAB_T14) \
     QSB_CARRIER_KV(ZLAB_TREE) QSB_CARRIER_KV(ZLAB_TRIM) QSB_CARRIER_KV(QSB_FORCE_EXACT_HIT_CHECK) \
     QSB_CARRIER_KV(QSB_SC_OPS) QSB_CARRIER_KV(QSB_SC_PP) QSB_CARRIER_KV(QSB_SC_ALUZ) QSB_CARRIER_KV(QSB_SC_PARK) QSB_CARRIER_KV(QSB_SC_LATE)
