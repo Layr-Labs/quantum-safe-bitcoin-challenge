@@ -192,6 +192,20 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
     using namespace qcg_sha;
     V wp[4], wm[4];
     to_w(wp, xp); to_w(wm, xm);
+#ifndef QSB_CG_PACK2
+#define QSB_CG_PACK2 1
+#endif
+#if QSB_CG_PACK2
+    /* IFMA dispatch already requires AVX512F/VL. Select each dword directly
+     * from the concatenated plus/minus vectors, keeping plus lanes first. */
+    const __m256i idx_lo = _mm256_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14), idx_hi = _mm256_setr_epi32(1, 3, 5, 7, 9, 11, 13, 15);
+    v8u X[8];
+    for (int k = 0; k < 4; k++) {
+        X[2*k] = _mm256_permutex2var_epi32((__m256i)wp[k], idx_lo, (__m256i)wm[k]);
+        X[2*k+1] = _mm256_permutex2var_epi32((__m256i)wp[k], idx_hi, (__m256i)wm[k]);
+    }
+    __m256i par = _mm256_permutex2var_epi32((__m256i)yp->n[0], idx_lo, (__m256i)ym->n[0]);
+#else
     const __m256i idx_lo = _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6), idx_hi = _mm256_setr_epi32(1, 3, 5, 7, 1, 3, 5, 7);
     v8u X[8];
     for (int k = 0; k < 4; k++) {
@@ -202,6 +216,7 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
     }
     __m256i par = _mm256_blend_epi32(_mm256_permutevar8x32_epi32((__m256i)yp->n[0], idx_lo),
                                      _mm256_permutevar8x32_epi32((__m256i)ym->n[0], idx_lo), 0xF0);
+#endif
     par = _mm256_and_si256(par, _mm256_set1_epi32(1));
     v8u W[16];
     W[0] = _mm256_or_si256(_mm256_slli_epi32(_mm256_or_si256(par, _mm256_set1_epi32(2)), 24), _mm256_srli_epi32(X[7], 8));
