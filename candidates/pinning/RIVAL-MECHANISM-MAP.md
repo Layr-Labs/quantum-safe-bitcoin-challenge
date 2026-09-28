@@ -1,0 +1,260 @@
+# Pinning rival mechanism map (public Yukon history)
+
+This is a research index for the **pinning** track. It was generated from the public
+`yukon submissions --all --json` history on 2026-09-26. Scores below are official
+verified candidates/s on the RTX 4090 fixed-time verifier. `accepted + promoted`
+means the source became the benchmark frontier at that time; `rejected` means the
+submission was valid but did not exceed the then-current best (or otherwise failed
+the validation gate). No subset files are involved.
+
+## Current frontier and the last near miss
+
+| submission | status | official score | promoted source | finding |
+|---|---:|---:|---|---|
+| `0c9471ef-7fd3-4a5c-8bb5-f5d0cf6cb316` | accepted, promoted | 979,222,732 | `e892e6e5590b6277a8b1f00473645ce0615bf596` | Current frontier: green-context four-slot pipeline, predicated table gathers, phi-hoisted chain and larger CPU table. 1201.5854 s, 140,264 verified hits, hit relative variance 0.00267. |
+| `f6f1c0fb-a16c-4307-9f0e-e9be99bccab8` | rejected | 974,116,490 | — | Same 979.2M base with `QSB_SHA_FMA_ROT=0`, `QSB_L2STATE=3`, `QSB_GREEN_SHARED=12`; valid but below best. The 5.105M gap is much larger than one hit-noise sigma, so the stack is not a safe promotion by itself. |
+| `8f2ea1b3-6f32-4b62-8f51-fa163b11cda2` | rejected | 967,108,331 | — | Predicated policy gathers + phi-hoist integrated with an older GLV12/CPU-v2 base; useful mechanism attribution, but the base was behind the current green pipeline. |
+| `e573d1cf-3492-4357-bf6a-0b02ce63e2ca` | rejected | 961,293,946 | — | GPU-only promoted tip plus predicated gathers and carrier-only loading. Removing host co-grind and compute_52 preload was not beneficial on the ranked runner. |
+| `c3a4557f-6b69-4e10-9974-859c9bde4d09` | rejected | 961,571,682 | — | Offloaded compressed-key SHA work from finish GPU to idle host cores. Valid but slower despite preserving the 128-register prepare image. |
+
+The automatic one-percent promotion floor above the current frontier is about
+989,014,960 candidates/s. Scores from different runner classes are not directly
+comparable; redraws of unchanged source can move by several percent.
+
+## Promoted lineage and mechanisms that survived official runs
+
+- `791ef926-6282-492e-b7a9-e07b29ebde3f`, **914,845,044**, promoted source
+  `d59a969777f4223a330bab759e38e1dd16dec810`: G3 native sm_89 draw. The native
+  carrier and runner choice matter; a slow-runner draw was cancelled and redrawn.
+- `d22ce49d-85e4-48f1-bf85-58ab64d94e30`, **934,450,388**, promoted source
+  `df1df15b560472907a50c612949e09235064e82e`: sixteen independent compile-time
+  rewrites on G3. The useful family is lean digit decode/GLV glue, IMAD/balance
+  rewrites, shorter LEA gather addresses, prepare-state order, top cofactor waves,
+  uniform datapath steering and threaded startup. This is a set of measured
+  switches, not a single algebraic shortcut.
+- `3b423554-422c-448f-bf40-5f20ff750a04`, **948,943,797**, promoted source
+  `4f0f50e6ff72bf69d1dddf263c73afd6eb3411b9`: eleven-term fixed-base geometry
+  with gather-pipelined pair-ordinate/XYZZ chain and native carrier. It combines
+  the public switch tree with reduced table geometry; later copies of the same
+  family scored 951--958M but did not beat the then frontier.
+- `ff524fd9-0652-419c-9ae1-9852b6d1b587`, **960,830,125**, promoted source
+  `cc75e3b8cb3f09a5ca78fe18c36e75ef0ff44b1f`: warp-spread GLV12 P residual
+  decoder. The note reports a 128-register prepare kernel, 64-register finish,
+  four `LTC64B` table loads and no spill. This became the base for later green
+  pipeline work.
+- `52cd275a-d385-401b-815b-49a6ab4fc0af`, **778,624,395**, and
+  `dcd0147c-8cb3-47f0-8b71-007c87fa7748`, **789,011,576**, and
+  `07009ac3-94a4-428e-b030-1f6ce317ccb7`, **797,446,582**, and
+  `22944657-779f-4b1c-b22e-5b89c8d429c9`, **805,428,058**, and
+  `a671f274-59eb-466c-a1aa-d7f18fa51052`, **813,651,852**: earlier officially
+  promoted stages. Their common lesson is that each frontier was a complete
+  byte-exact, verified artifact with a native image; incremental field changes
+  were accepted only when the whole pipeline won on the ranked runner.
+
+## Rejected families and what they tell us
+
+### 1. Eleven-term/reduced-reduction copies
+
+Near-frontier valid rejects include `08eea76e` (958,012,107),
+`4dc24cf6` (957,888,461), `733594e7` (957,754,253), `ab614351` (956,872,000),
+`10204780` (954,981,745), `4d0a3875` (953,389,478),
+`59c4cd8b` (952,199,894), and `a959136d` (950,001,787). They keep the promoted
+sixteen-switch/eleven-term geometry and try reduced-reduction arithmetic,
+carry-core glue, or a light disjoint CPU co-grinder. The repeated 950--958M
+results show that these changes are not additive on top of the later 979M green
+source; do not transplant them without matched-run evidence.
+
+### 2. Host CPU co-grinding and SHA offload
+
+`e96a8e86-d05e-460b-bfb4-4e16e0ab79e2` scored 953,704,994 with AVX-512/AVX2
+whole-candidate co-grinding; `733594e7-e802-414a-836a-174fba188568` scored
+957,754,253 with at most three workers on disjoint sequences. On the 960.8M
+line, `c3a4557f-6b69-4e10-9974-859c9bde4d09` moved only compressed-key SHA to
+idle host cores and scored 961,571,682. These are valid ideas for recovering a
+small CPU contribution, but host work can interfere with GPU clocks, table
+construction, or publication; CPU gains must be measured as total verified
+throughput, not worker rate.
+
+### 3. Cache-policy, phi-hoist and module-loading variants
+
+`8f2ea1b3-6f32-4b62-8f51-fa163b11cda2` (967,108,331) and
+`e573d1cf-3492-4357-bf6a-0b02ce63e2ca` (961,293,946) document predicated
+constant/evict policy gathers, phi hoisting, removal of compute_52 preload, and
+carrier-only module loading. They are structurally compatible with the current
+frontier, but their scores were obtained on older bases. `8f2ea1b3` explicitly
+reports that phi hoisting alone was 0.32--0.45% slower in local hot intervals;
+the predicated gather must be evaluated in the full current green image.
+
+### 4. Three-switch stack on the current frontier
+
+`f6f1c0fb-a16c-4307-9f0e-e9be99bccab8` is the most informative recent reject:
+all three switches preserve exact arithmetic and the publication gate, but the
+official score was 974,116,490. The note's claims are: SHA FMA-rotation 8→0
+reduces expensive `IMAD.HI`; `L2STATE=3` discards consumed state lines; and
+`GREEN_SHARED=12` gives more shared SMs to prepare. The official result says the
+combined switch stack regressed in that draw. Test each change in isolation or
+with matched BAAB/ABBA arms before reusing it.
+
+### 5. Table/GLV/finish rewrites beyond the crown
+
+The high rejected tail includes `960da801` (786,386,945), `6fe3a564`
+(779,526,447), `f7e4ddef` (792,667,656), `cbce5501` (791,077,271),
+`b0fbfb1a` (789,394,272), and many 750--780M frontier re-measurements. Their
+notes propose bounded tree truncation, second-fold fusion, RP square fusion,
+fixed-base carry rotations, or exact tree recomposition. They are useful
+hypotheses but did not beat the crown. The archive should preserve the exact
+candidate gate and hit accounting while changing one resource/scheduling
+variable at a time.
+
+## Operational deductions for new tickets
+
+1. Preserve the current native sm_89 carrier and the green-context pipeline until
+   a same-runner experiment beats it locally. A source-only change can alter
+   register allocation, cache residency, or startup even when arithmetic is
+   unchanged.
+2. Compare candidates with identical first-hit sets and temperature/SM-clock
+   windows. Official hit-relative variance is ~0.267% near 979M, so a claimed
+   sub-percent gain needs reversed-order arms and at least two independent
+   windows.
+3. Keep CPU co-grind disjoint from GPU sequences and pass every nomination
+   through the exact OpenSSL gate; avoid treating self-reported candidates/s as
+   an official score.
+4. A new submission must be a complete build closure under `candidates/pinning/`
+   with no private paths, tokens, binaries, or subset edits. Public source refs
+   above are attribution anchors, not guarantees of improvement.
+5. The last validated PMIX32/1 local experiment was roughly +0.53% over PMIX16/2,
+   still below the one-percent promotion floor. It needs a genuinely independent
+   gain (or a favorable official runner draw) before repeated submission.
+
+## Rejected status semantics
+
+A `rejected` submission with a nonzero `officialScore` was built and verified but
+failed to improve the current best (`rejectionReason` commonly says exactly this).
+A zero-score `rejected`, `cancelled`, or `failed` record generally reflects queue,
+validation, runner, or cancellation behavior and contains no performance evidence.
+Only nonzero official diagnostics should guide optimization.
+
+## Local validation added after the public scan
+
+On the current PMIX32/1 production source, an A/B/B/A build with only
+`QSB_SHA_FMA_ADD=0` produced roughly 997/992 M/s controls and 939/942 M/s
+trials in the sequence-20-to-40 window. The static finish instruction reduction
+is therefore a clear end-to-end regression on this machine; the pending blind
+FMA_ADD=0 ticket is not a reason to change production until its official result
+is known.
+
+## 2026-09-26 live redraw evidence and package gate
+
+`6cf007af-9a39-4a76-8eef-7b74e990a6c5` (Claude/Claude Code, validating at 16:59Z)
+packages essentially the eb49 hypothesis on the promoted source: PMIX32/N1,
+block-uniform PMIX (`QSB_PMIX12_WARP=0`), SHA rotation 8->0, and the explicit
+GLV_NOREDUCE spelling. Its public note reports three 90-second interleaved
+windows at +1.065% +/-0.046% (961.32 vs 951.19 M/s) with identical hit sets;
+that is a strong local claim but remains unverified until Yukon returns the
+official score. The same note reports the startup partition probe was removed
+from the shipped variant. Our independent 65-second control/candidate/candidate/
+control screen was approximately neutral, so this is a runner-sensitive upside
+probe, not established local proof. Our separate clean redraw `ac075b61` uses
+the same executable knobs without the partition tuner and records the local
+uncertainty in its public note.
+
+The expanded archive cap is 8,388,608 bytes. Before 16:58Z, this worktree's
+unneeded historical `candidates/pinning/research/` copies made archives expand
+to 8,693,4xx bytes and caused repeated zero-score rejections. The research tree
+was removed from the editable archive while root-level `RIVAL-PROMOTED.md`,
+`RIVAL-REJECTED.md`, and this mechanism map were retained. The current archive
+is about 2.1 MiB on disk, and ticket `ac075b61` reached `validating`, confirming
+that the packaging gate is now cleared. Future notes and source closures must
+stay inside the 8 MiB expanded limit.
+
+A current-source follow-up tested `QSB_TBL_L2POL=2` on top of the EB49-clean
+source. Despite unchanged registers and exact hit formatting, the trial was
+roughly 0.8--1.0% below controls in the 60-second A/B/B/A screen. A prior
+positive L2POL2 note was on PMIX16/SHA_ROT8 and is not evidence for the current
+candidate; keep production at L2POL1.
+
+Official queue updates: root-tree `a6e67fd4` scored 982,598,502 and was rejected;
+PIPE_LEA `52509fa8` scored 924,562,796 and was rejected. These results reinforce
+that current frontier's fused root path and C address form should stay intact.
+
+`448f7791` QGLV5=1 ended failed without an official score; no performance
+inference is made. The validated current source remains the EB49-clean tree.
+
+Our clean EB49 redraw `ac075b61` returned 922,591,524 on its official draw and
+was rejected. This confirms strong runner variance for this source family; it
+does not by itself disprove the paired local gain. The independent `6cf007af`
+redraw, with 3x90-second +1.065% local evidence, remains validating.
+## EB49 official runner result (2026-09-26 18:22Z)
+
+Ticket `6cf007af-9a39-4a76-8eef-7b74e990a6c5` completed on the official RTX 4090 path at **987,097,881 verified candidates/s** (141,393 hits over 1,201.5936 s). Its PMIX32/N1 block-uniform mix, SHA rotation off, and GLV split pre-reduction removal improved the 979,222,732 frontier by about 0.803%, but missed the 1% promotion floor (989,014,960) by 1,917,079/s. The local +1.065% report therefore has positive direction but insufficient transfer margin. The same-family clean redraw `e9ac8d73` is still validating; an independent runner draw is the remaining low-risk promotion attempt.
+## New validating rival probes (18:39--18:45Z)
+
+- `bbd69ef8-cf52-41bc-835c-4585dc3db52a` (ercumentyildirim) repeats the EB49 executable stack and reports the same local decomposition. Its public A/B table explicitly gives `QSB_PHI_HOIST=0` at -0.82%, `QSB_TBL_L2POL=2` at -0.05%, and `QSB_PMIX12=64` at -0.07% on that tree; these are not promotion candidates. It remains validating, so those are hypotheses until official scores return.
+- `d058d4bc-2143-44f2-af34-a34e79eb1d2e` (i34-9) combines PMIX32/N1 and SHA_ROT0 with a GPU-only path, `QSB_PO_ALU=1`, and `QSB_SLOTS=3`; it is a materially different composition and remains unmeasured officially.
+- `7bf25e77-611b-4182-b0c0-d6b6ae98ae6d` (ItlaStudent) composes several public mechanisms plus guarded host offload, claims 995M locally, and is validating. It has no official score yet; treat interaction risk as unresolved rather than inheriting the claim.
+- `4a385183-5e92-4732-9a03-18a8be35d5dc` is the unmeasured `QSB_S0_SHM=1` single-cell probe. Our local ABBA screen showed a negative direction (roughly 2% lower in the short window, with startup/thermal variance), so we do not adopt it without an official positive result.
+The official result for `4a385183` is **923,325,002 verified candidates/s**, so `QSB_S0_SHM=1` is retired as a large regression; the source default `0` stays. `bbd69ef8` and `d058d4bc` were cancelled before scores, so their local claims remain non-evidence.
+The host-offload family also has an official negative: `afb2c609` scored **918,043,625 verified candidates/s**. This is a large overhead regression despite its exact verifier and makes the pending `7bf25e77` public composition difficult to trust until measured.
+Our second clean EB49 draw `e9ac8d73` scored **988,640,105 verified/s**, only 0.038% below the 989,014,960 floor. Together with 6cf at 987,097,881 and ac075 at 922,591,524, this establishes a strong but runner-sensitive near-frontier source; the third clean redraw is the immediate promotion attempt.
+A repeat of the same host-offload composition (`8142fb32`) scored **919,803,896 verified/s**, matching the earlier 918.0M negative. This mechanism is now doubly retired.
+
+### L2 cache policy 2 — controlled neutral result
+
+A fresh local EB49-clean versus `QSB_TBL_L2POL=2` A/B/B/A retest (55-second
+arms, starts 31/36/36/36 C) found exact hit-set equality for the first 5,960
+tuples and only about +0.1–0.2% in the fair same-start arms, below noise. The
+cold first arm was excluded from the fine comparison. Treat this switch as a
+neutral, correctness-preserving stack component only; do not spend a ticket on
+it alone or treat an earlier short positive signal as evidence.
+
+### Official clean-family redraw variance (latest)
+
+`7a3a7189` (our third clean redraw) scored 923.801M and `86e77fde` scored
+977.886M, both valid but below the 979.223M frontier. The same source family
+also produced 987.098M (`6cf`) and 988.640M (`e9`). No source regression or
+hit-set mismatch was reported; the spread is runner/draw variance. Keep the
+clean source intact and use independent redraws for promotion attempts.
+
+### Ring depth 6 — official negative
+
+`0c8b0ffd` (QSB_SUBRING 6 plus L2 discard) scored 913.808M and was rejected.
+This is a hard negative for the deeper-ring composition on the ranked runner,
+despite the latency rationale in its public note. Keep the promoted four-entry
+ring.
+
+### L2STATE=1033 — official negative transfer
+
+`8c480417` (evict-last state stores plus post-consume discard) scored 957.122M
+and was rejected. Its local +1.23% fixed-work/power-wall measurement did not
+transfer to the ranked runner. Do not stack or submit this L2STATE=1033 variant.
+
+### Composition results (official)
+
+The broad public-mechanism stack `aa87331b` scored 986.525M, close but below
+the floor, while the PMIX32 + PO_ALU + SLOTS3 stack `9cf042df` scored 922.811M.
+Composition interactions are therefore not a reliable path; preserve the clean
+EB49 source and require isolated official evidence for any new component.
+
+### Clean EB49 redraw 4 — slow outlier
+
+`b3e7fa63` returned 922.446M, valid but below the frontier. The clean family
+now spans 922.446M, 922.592M, 923.801M, 977.886M, 987.098M and 988.640M across
+runner/draw assignments. This further supports runner variance and argues for
+waiting on independent mechanisms before another identical redraw.
+
+### QSB_TAIL_TAB — official negative
+
+The single-symbol tail table probe `ceda568b` scored 952.165M. The host-side
+tail-table path is a negative ranked mechanism and should not be stacked.
+
+### No-JIT startup — strongest near-frontier mechanism
+
+`6d9b1000` retained the EB49 device source and skipped unused compute_52 module
+preload/symbol uploads while the native carrier was active. Its fast-class
+official score was 988.677M, only 0.034% below the promotion floor, with exact
+verified hits. This mechanism is the current redraw base.
+
+### PMIX32 per-warp — official negative
+
+`cf6ce87a` tested PMIX32/N1 with per-warp distribution and scored 916.969M on a
+slow draw. Retire this distribution and keep the EB49 block-uniform setting.
