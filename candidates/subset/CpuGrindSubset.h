@@ -100,6 +100,9 @@
 #ifndef QSB_CPU_RESERVE
 #define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
 #endif
+#ifndef QSB_CG_HETERO
+#define QSB_CG_HETERO 1            /* alternate the 8-lane and scalar worker paths so SMT siblings contend less for the vector ports (mechanism from pinning cpu_cogrind3) */
+#endif
 #ifndef QSB_CPU_FOLD2
 #define QSB_CPU_FOLD2 1            /* fe8_fold: split the high columns (low 52 bits + rest) instead of a serial carry chain */
 #endif
@@ -1592,6 +1595,7 @@ struct Ctx {
     FILE *out = nullptr;
     int nthreads = 0;
     bool vec = false;               /* 8-lane IFMA path */
+    bool hetero = false;           /* alternate 8-lane/scalar workers: SMT vector-port spread */
     bool shani = false;             /* 4-lane SHA-NI hashing */
 #if QCPU_SHANI
     /* Hashing plan (hash_plan): the message after an epoch's state is block 0 (the epoch's buffered
@@ -1738,8 +1742,9 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
         for (auto &t : ts) t.join();
     }
     c.cfold = false;
-    if (QSB_CPU_CFOLD && c.vec) {                       /* top window T[j] += C, in chunks; any equal-x entry (T[j] = +-C, a known
-                                                           discrete log: never) keeps the plain table */
+    if (QSB_CPU_CFOLD && c.vec && !c.hetero) {           /* top window T[j] += C, in chunks; any equal-x entry (T[j] = +-C, a known
+                                                           discrete log: never) keeps the plain table. Hetero workers include the scalar
+                                                           path, and the folded table serves only the 8-lane path, so hetero keeps the plain table. */
         const int top = g.nw - 1; pt *T = c.table + g.base[top]; const uint32_t n = g.ent[top], CH = 1u << 16;
         const pt C = {c.cx, c.cy};
         std::atomic<uint32_t> next{0}; std::atomic<int> anybad{0};
@@ -2147,7 +2152,12 @@ static void worker(Ctx *c, int tid) {
 #endif
 #if QCPU_VEC
     VecBuf vb;
-    if (c->vec && !vecbuf_alloc(vb, B)) vb = VecBuf();
+#if QSB_CG_HETERO
+    const bool wvec = !c->hetero || (tid & 1) == 0;      /* hetero: even workers keep the 8-lane path, odd take scalar (SMT port spread) */
+#else
+    const bool wvec = true;
+#endif
+    if (c->vec && wvec && !vecbuf_alloc(vb, B)) vb = VecBuf();
     if (c->cfold && !vb.X) return;                    /* the C-folded table serves only the 8-lane path */
     const bool hpf = QSB_CPU_HPF > 0 && vb.X != nullptr && c->g.nw >= 3 && c->g.wid[0] + c->g.wid[1] <= 64;
 #else
@@ -2463,6 +2473,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #if QSB_CPU_VBMI2
     c->vec = c->vec && __builtin_cpu_supports("avx512vbmi2");
 #endif
+    c->hetero = QSB_CG_HETERO && c->vec && nth >= 4;      /* enough workers to be worth splitting the paths */
 #endif
 #if QCPU_SHANI
     c->shani = qsha_supported() && !getenv("QSB_CPU_NOSHANI");
@@ -2509,7 +2520,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         char hps[16]; if (hp < 0) snprintf(hps, sizeof hps, "n/a"); else snprintf(hps, sizeof hps, "%.1f%%", 100.0 * hp);
         printf("  CPU co-grind: %d threads%s (of %ld CPUs), %s, %s, %d window patterns per epoch disjoint from the GPU's %d; "
                "table %d %s windows of %d..%d bits, %.0f MiB, huge pages %s (%.2f s%s)\n",
-               nth, extra ? " + 1 on the host core" : "", ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin,
+               nth, extra ? " + 1 on the host core" : "", ncpu, c->hetero ? "hetero 8-lane/scalar" : (c->vec ? "8-lane IFMA" : "scalar"), c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin,
                c->g.nw, c->g.sgn ? "signed" : "unsigned", c->g.wid[c->g.nw - 1], c->g.wid[0], c->g.total * sizeof(pt) / 1048576.0,
                hps, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec), note);
         fflush(stdout);
