@@ -47,15 +47,16 @@
 #endif
 #if QSB_TOP16_SC
 #define QSB_TOP16_MUL qsb_field_mul_sc
-#else
-#define QSB_TOP16_MUL qsb_field_mul
-#endif
-/* QSB_T5V_SC (HY7 port of Anshumancanrock c74c763a, 27 Sep; 0 = the base): the two remaining
- * carry-complete products inside qsb_cofactor_top5v -- the wave product in qsb_t5v_wave and the hc
- * product -- use the short-carry twin the rest of the tree already uses. Both results are consumed
- * only by _ModMultCore-class multiplies (qsb_packed_raw_mul for hc, further tree products for the
- * wave), which reduce the full 512-bit product and so accept any congruent 256-bit representative.
- * Neither is a returned leaf inverse, and 0 maps to 0 under both forms (the unusable-lane path). */
+
+/* QSB_T5V_SC (default 1): the two remaining carry-complete products inside
+ * qsb_cofactor_top5v -- the wave product and the hc product -- use the
+ * short-carry twin the rest of the tree already uses. Both results are consumed
+ * only by _ModMultCore-class multiplies (qsb_packed_raw_mul for hc, further tree
+ * products for the wave), which reduce the full 512-bit product and therefore
+ * accept any congruent 256-bit representative. Neither is a returned leaf
+ * inverse, so the "normalize the root and the returned leaves" contract is
+ * unaffected, and 0 maps to 0 exactly under both forms, which is what the
+ * unusable-lane path relies on. */
 #ifndef QSB_T5V_SC
 #define QSB_T5V_SC 1
 #endif
@@ -63,6 +64,9 @@
 #define QSB_T5V_MUL qsb_field_mul_sc
 #else
 #define QSB_T5V_MUL qsb_field_mul
+#endif
+#else
+#define QSB_TOP16_MUL qsb_field_mul
 #endif
 
 template<int N> __device__ __forceinline__ void qsb_cofactor_top16(

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+// SPDX-License-Identifier: GPL-3.0-only
 // Four independent warp trees with register-resident upper nodes and full carries.
 #pragma once
 #include "WarpInverse.cuh"
@@ -78,7 +78,7 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
         }
         offset+=count;__syncwarp(0xffffffffu);
     }
-    /* Eight remaining nodes at [48,56). Four eight-lane fields live in registers. */
+    // Eight remaining nodes at [48,56). Four eight-lane fields live in registers.
     const uint32_t a=(uint32_t)(products[d>>1][pb+48+group]>>(32*(d&1u)));
     const uint32_t b=(uint32_t)(products[d>>1][pb+52+group]>>(32*(d&1u)));
     const uint32_t u4=qsb_prefix_cyclic_research::multiply8(a,b,lane);
@@ -129,7 +129,7 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     aa[4]=bb[4]=0;QSB_RF_MUL(value,aa,bb);qsb_field_normalize(value);
 }
 // Launch exactly <<<1,128>>> with 1<=count<=1024.
-/* Physical capacity is 2048 four-word rows even for a partial final tile. */
+// Physical capacity is 2048 four-word rows even for a partial final tile.
 __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int count) {
     if (count<=0 || count>1024) return; // uniform, before any block barrier
     const unsigned n=(unsigned)count;
@@ -147,7 +147,7 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
             qbw_root_load(a,roots,i+256u,n);
             qbw_root_load(b,roots,i+384u,n);
             qsb_field_mul(p23,a,b);p23[4]=0;
-            /* Slots 2,3 hold first quartet pairs; 4,5 hold second pairs. */
+            // Slots 2,3 hold first quartet pairs; 4,5 hold second pairs.
             qbw_scratch_put(roots,n,lane+(2u+2u*quartet)*128u,p01);
             qbw_scratch_put(roots,n,lane+(3u+2u*quartet)*128u,p23);
             qsb_field_mul(q[quartet],p01,p23);q[quartet][4]=0;
@@ -155,8 +155,8 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
         }
         qsb_field_mul(total,q[0],q[1]);total[4]=0;
     }
-    /* No local subtree field is needed across this collective. Volatile */
-    /* scratch accesses require reloading instead of forwarding old values. */
+    // No local subtree field is needed across this collective. Volatile
+    // scratch accesses require reloading instead of forwarding old values.
     qsb_block_inverse_register_n<128>(total);
     uint64_t iq0[5],iq1[5];
     {
@@ -166,8 +166,8 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
         qsb_field_mul(iq0,total,q1);iq0[4]=0;
         qsb_field_mul(iq1,total,q0);iq1[4]=0;
     }
-    /* Fetch BOTH pair products before writing a quartet's weighted outputs. */
-    /* Both quartet orders are safe with this rule. This descending order */
+    // Fetch BOTH pair products before writing a quartet's weighted outputs.
+    // Both quartet orders are safe with this rule. This descending order
     // consumes 4,5 before writing them, then consumes 2,3 before writing 0..3.
     #pragma unroll 1
     for(int quartet=1;quartet>=0;--quartet) {

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-/* Python-validated integration, no native compilation or GPU execution. Four fields per warp. */
-/* Include after CyclicField.cuh for its full-carry normalize8 helper. */
+// Python-validated integration, no native compilation or GPU execution. Four fields per warp.
+// Include after CyclicField.cuh for its full-carry normalize8 helper.
 #pragma once
 namespace qsb_prefix_cyclic_research {
 constexpr unsigned full=0xffffffffu;
 
-/* Exactly add cf*(2^32+977). cf<=1. When cf==1, the caller proves t<2^65, */
+// Exactly add cf*(2^32+977). cf<=1. When cf==1, the caller proves t<2^65,
 // so word2<=1 and no propagation beyond word2 is possible. cf==0 is identity.
 __device__ __forceinline__ uint32_t finish3(uint32_t t,uint32_t cf,unsigned lane){
     const unsigned d=lane&7u;
@@ -19,7 +19,7 @@ __device__ __forceinline__ uint32_t finish3(uint32_t t,uint32_t cf,unsigned lane
 __device__ __forceinline__ uint32_t multiply8(uint32_t a,uint32_t b,unsigned lane){
     const unsigned d=lane&7u;
     uint64_t total=0,prefix=0;
-    /* Low byte: total carry beyond bit63 (<=7). Next byte: captured prefix */
+    // Low byte: total carry beyond bit63 (<=7). Next byte: captured prefix
     // carry. The low byte cannot overflow into the snapshot byte.
     uint32_t counts=0;
     #pragma unroll
@@ -27,8 +27,8 @@ __device__ __forceinline__ uint32_t multiply8(uint32_t a,uint32_t b,unsigned lan
         const uint32_t av=__shfl_sync(full,a,i,8);
         const uint32_t bv=__shfl_sync(full,b,(d-i)&7u,8);
         const uint64_t product=(uint64_t)av*bv;
-        /* Read external predicate operands before changing outputs. Every lane */
-        /* executes the sum; lane d captures its prefix precisely at i==d. */
+        // Read external predicate operands before changing outputs. Every lane
+        // executes the sum; lane d captures its prefix precisely at i==d.
         asm("{ .reg .pred take;\n\t"
             "setp.eq.u32 take, %4, %5;\n\t"
             "add.cc.u64 %0, %0, %3;\n\t"
