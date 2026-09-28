@@ -6,12 +6,27 @@
 #include "PrefixCyclicField.cuh"
 static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE==131072,
               "register roots require promoted 128-lane / 1024-root shape");
+#ifndef QSB_RROOT_INPUT_V2
+#define QSB_RROOT_INPUT_V2 1 /* two ordinary 128-bit input reads instead of four scalar reads */
+#endif
+#if QSB_RROOT_INPUT_V2 != 0 && QSB_RROOT_INPUT_V2 != 1
+#error "QSB_RROOT_INPUT_V2 must be 0 or 1"
+#endif
 __device__ __forceinline__ bool qbw_root_load(
     uint64_t x[5],const uint64_t *roots,unsigned i,unsigned count) {
     x[0]=1;x[1]=x[2]=x[3]=x[4]=0;
     if(i>=count)return false;
+#if QSB_RROOT_INPUT_V2 && defined(__CUDA_ARCH__)
+    /* Valid inputs are 32-byte rows; preserve ordinary default-cache loads. */
+    const uint64_t *p=roots+(size_t)i*4u;
+    asm volatile("ld.global.v2.u64 {%0,%1}, [%4];\n\t"
+                 "ld.global.v2.u64 {%2,%3}, [%4+16];"
+                 : "=&l"(x[0]), "=&l"(x[1]), "=&l"(x[2]), "=&l"(x[3])
+                 : "l"(p) : "memory");
+#else
     #pragma unroll
     for(int k=0;k<4;++k)x[k]=roots[(size_t)i*4u+k];
+#endif
     qsb_field_normalize(x);
     const bool nz=(x[0]|x[1]|x[2]|x[3])!=0;
     if(!nz)x[0]=1;
