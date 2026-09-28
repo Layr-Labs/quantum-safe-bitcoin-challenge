@@ -1186,24 +1186,52 @@ __host__ __device__ __forceinline__ void qsb_s3_psi_swap(qsb_s3_walker &w) {
  * segments 4-5 (DRAM) with evict-first ld.global.cs so the 9 GiB stream does not displace the rest of
  * the kernel's L2 working set (S-P1 probe: plain loads at these footprints put subset in a stall regime).
  * Y negation exactly as gt_load_signed_flat_f. */
+#if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#define QSB_S3_L2POL_ON 1
+#else
+#define QSB_S3_L2POL_ON 0
+#endif
 __device__ __forceinline__ void qsb_s3_load(const uint8_t *__restrict__ gTable, uint32_t code, bool ef,
                                             uint64_t *__restrict__ gx, uint64_t *__restrict__ gy) {
     const ulonglong2 *tx = (const ulonglong2 *)(gTable + (size_t)(code & 0x7fffffffu) * 64);
     const ulonglong2 *ty = tx + 2;
     ulonglong2 x0, x1, y0, y1;
-#if defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
+#if QSB_S3_L2POL_ON
     /* Native carrier image only (QsbCarrier.h; after Ryun1's pinning carrier, 25bd990a): the
      * first load of a cold record carries the 64 B L2 prefetch-size hint, so a DRAM miss fetches
-     * both 32 B sectors of the record as one access. The table is read-only while kernels read it. */
+     * both 32 B sectors of the record as one access. The table is read-only while kernels read it.
+     *
+     * QSB_S3_L2POL (carrier image, sm_80+; mechanism ported from the pinning track's promoted
+     * QSB_TBL_L2POL fractional-policy scheme): the in-window (hot) records load with an explicit
+     * evict_last fraction so the 48 MiB bank the persisting-L2 window pins is not displaced by the
+     * interleaved cold stream, which allocates in L2 even though it carries an evict-first hint.
+     * createpolicy.fractional issues a 64-bit policy descriptor consumed by the cache_hint form of
+     * the load; the addresses, sizes and returned bytes are unchanged, so this is a pure cache
+     * priority hint with no effect on any loaded value. */
     if (ef) {
         asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
             : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
         x1 = __ldcs(tx + 1); y0 = __ldcs(ty); y1 = __ldcs(ty + 1);
+    } else {
+        uint64_t pol;
+        asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2;\n\t"
+            "ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %3; }"
+            : "=l"(x0.x), "=l"(x0.y) : "l"(tx), "l"(pol));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2;\n\t"
+            "ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %3; }"
+            : "=l"(x1.x), "=l"(x1.y) : "l"(tx + 1), "l"(pol));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2;\n\t"
+            "ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %3; }"
+            : "=l"(y0.x), "=l"(y0.y) : "l"(ty), "l"(pol));
+        asm("{ .reg .u64 g; cvta.to.global.u64 g, %2;\n\t"
+            "ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %3; }"
+            : "=l"(y1.x), "=l"(y1.y) : "l"(ty + 1), "l"(pol));
     }
 #else
     if (ef) { x0 = __ldcs(tx); x1 = __ldcs(tx + 1); y0 = __ldcs(ty); y1 = __ldcs(ty + 1); }
-#endif
     else    { x0 = __ldg(tx);  x1 = __ldg(tx + 1);  y0 = __ldg(ty);  y1 = __ldg(ty + 1);  }
+#endif
     gx[0] = x0.x; gx[1] = x0.y; gx[2] = x1.x; gx[3] = x1.y;
     const uint64_t m = 0ULL - (uint64_t)(code >> 31);
 #if QSB_NEG_SHORT
