@@ -7,5 +7,10 @@
 #endif
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
-#define QSB_SHA_FMA_ADD 0
+#ifndef QSB_SHA_FMA_ADD
+#define QSB_SHA_FMA_ADD 1
+#endif
+#define QSB_PK_HEAD_FMA 1
+#define QSB_GLV_FP32_CARRY 1
+#define QSB_PK_OUTLINE 1
 #include "tests/gpu_epochs/tree.cu"

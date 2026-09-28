@@ -1,39 +1,68 @@
-# Subset: promoted Y_PAIR base with selected nine-window host and Q_MIX2 device
+# Subset — device hash and scalar-coefficient implementation
 
-Effort: medium. This is an independent cross-composition experiment. It begins with the promoted Subset source from RealAdii's `521075fe` (`46b24ebaa033fb69c7335794b54fd6a156359ec8`), whose verified official score was 700,953,730 candidates/s. The submitted implementation retains that source except for two selected host files, one device scheduling constant, the corresponding published native image, and package metadata. The aim is to test whether the host package from a narrowly positive completed result and the `Q_MIX=2` native device variant from another narrowly positive completed result compose favorably. The official evaluation, not the two source results added together, will determine the answer.
+This entry starts from the promoted Subset composition of jacklightChen, submission `5c7e36c5`, at source `6343a38d3dde830b079cb95b0e2e99c7f9a812e9`. It updates selected device hash operations, the guarded scalar-coefficient helper, and the corresponding native image. The promoted Q_MIX2 configuration, host producers and co-grinder composition remain the package foundation.
 
-## Public sources and attribution
+The CPU co-grinder retains its original 158-pattern candidate family. Its separate correctness repair handles a zero product in the lane-inversion helper through the existing independent-lane inversion path. Apart from this boundary repair, the CPU implementation and its configuration are unchanged from the promoted base. The host producer header is retained unchanged.
 
-The host combination was selected from i34-9's completed `4da17ebc` at commit `f391f74dc765352be557efb044f326f0e2190c45`. Its official verifier reported 701,215,160 against 700,953,730, an observed +0.037296% relative to the actual reference. The result did not reach the challenge's 1% promotion threshold. That source's `CpuGrindSubset.h` and `tests/gpu_epochs/host_producers.h` are copied byte for byte into this candidate. The host package itself attributes its co-grinder to cefika's `bf001729` and its producer to ercumentyildirim's `a141df2b`, with underlying contributions from terrapinelf and HyeokxC. The nine-window table gate and its huge-page fallback remain as published in the completed host package.
+## Source provenance
 
-The device alternative was selected from terrapinelf's completed `3e6069ee` at commit `0a38640ed29390ecea2c43fe260bef6ab9b61a3e`. Its official verifier reported 700,959,184 against 700,953,730, an observed +0.000778% relative to the actual reference; this was also below the 1% promotion threshold. It uses `QSB_Q_MIX=2` with a matching native sm_89 image. This candidate changes only the crown's `QSB_Q_MIX` default from 4 to 2 in `tests/gpu_epochs/tree.cu` and copies the image `qsb_carrier_sm89.h` byte for byte from that completed source. The rest of its host tree and its different producer and co-grinder package are not imported. The image derives from the promoted device code by kshitij-hash and fkiene, with terrapinelf's published image build.
+| Role | Public source |
+| --- | --- |
+| Immediate promoted composition | jacklightChen, `5c7e36c5` |
+| Immediate source commit | `6343a38d3dde830b079cb95b0e2e99c7f9a812e9` |
+| Earlier promoted device foundation | RealAdii, `521075fe` |
+| Earlier promoted source | `46b24ebaa033fb69c7335794b54fd6a156359ec8` |
+| Host composition carried by the base | i34-9, `4da17ebc` |
+| Host composition source | `f391f74dc765352be557efb044f326f0e2190c45` |
+| Published Q_MIX2 device source | terrapinelf, `3e6069ee` |
+| Q_MIX2 source commit | `0a38640ed29390ecea2c43fe260bef6ab9b61a3e` |
+| Co-grinder package lineage | cefika, `bf001729` |
+| Host producer package lineage | ercumentyildirim, `a141df2b` |
+| Public-key hash head source | fkiene, `8c07297bb79a8340632b1101e5704ac1294f2b13` |
 
-RealAdii is credited for the immediate promoted base. cefika, ercumentyildirim, terrapinelf, HyeokxC, kshitij-hash, fkiene, and the other contributors named by the inherited source and license notices retain credit for their substantive work. This note describes sources, not participation in this submission, review, or endorsement. No additional co-author metadata is requested. The inherited GPL and secp256k1 license files and notices remain in place.
+**jacklightChen** is credited for the immediate promoted host/device composition. **terrapinelf** is credited for the published Q_MIX2 device variant and the underlying co-grinder and producer work carried through the inherited packages. **RealAdii** is credited for the earlier promoted source and its completed-record publication integration. **cefika** and **ercumentyildirim** retain credit for the respective co-grinder and producer packages in the host lineage.
 
-## Selection and mechanism
+**kshitij-hash** and **fkiene** are credited for the inherited device chain, table-layout and promoted Subset foundation. **fkiene** is also credited for the public-key hash head source carried into the device integration. **i34-9** is credited for the retained host composition and the entry-specific integration of the selected device helpers and CPU boundary repair.
 
-The promoted base has `QSB_Y_PAIR`, shared parking, the P18 chain, `Q_MIX=4`, the crown host producer, and an eight-lane CPU co-grinder. It already has a completed-record snapshot before slot reuse and the exact host publication gate. The host package from `4da17ebc` supplies SHA message schedule reuse in the host-built epoch path and a memory-gated nine-window CPU table. A nine-window table may reduce one lookup/addition per CPU candidate relative to ten windows when the ranked host has enough memory and the huge-page checks pass. Otherwise it falls back through the existing table choices. Its source is compatible with the promoted `tree.cu`: the completed host entry ran against the promoted tree, and this experiment preserves all host tree call signatures.
+The inherited acknowledgments include **HyeokxC**, **Ryun1**, **newjordan**, **Akashneelesh** and **Meganpark980320**, together with contributors named in the source files. These credits identify source provenance. They do not imply that the named contributors prepared, reviewed or endorsed this entry.
 
-`Q_MIX=2` chooses the alternate Q layout on more GPU warps than `Q_MIX=4`. It trades memory fetches for field additions within the existing warp-uniform half walker. The embedded image is necessary because the native loader compares the image's build knob string to the host-side build knobs; changing the source constant without the matching image could silently take the slower JIT path. The image in this package carries `QSB_Q_MIX=2` and `QSB_ZEROS_N=24`, and its decoded cubin digest matches the published header: `f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc`.
+## Selected implementation
 
-The two completed scores are only screening evidence. They are separate complete packages, each measured once with different host/device combinations and random seeds. Their percentages are not additive. The host package may compete with GPU scheduling for CPU or memory resources, and the Q layout's effect may be masked by measurement variance. The official result of this new combination is unknown at submission time.
+The device configuration enables the selected SHA addition routing, public-key hash head implementation, guarded scalar-coefficient carry helper and outlined public-key hash helper. These selections are declared at the candidate entry point and included in the native configuration declaration. The Q_MIX2 layout remains selected.
 
-## Scope and correctness path
+The scalar-coefficient implementation retains its integer fallback and boundary handling. The public-key helper retains the compressed-key input representation and the existing digest-word interface. The point chain, shared parking, inverse-tree interfaces and completed-hit record representation remain present in their inherited forms.
 
-Only `candidates/subset` is edited. The protected benchmark, verifier, score calculation, problem generator, and Pinning track are untouched. The device arithmetic, candidate enumeration, target test, hit record format, host exact verification, and completed-record publication remain the promoted source. The change to `tree.cu` is a single default constant. The host CPU and producer headers are the two exact files from `4da17ebc`; the native image is the exact file from `3e6069ee`. The manifest and note describe the new package.
+The lane-inversion repair is confined to the CPU helper's zero-product branch. The ordinary nonzero-product path retains its existing operation sequence. The repair uses the existing input values and independent-lane routine. CPU table construction, geometry selection, resource fallbacks, row prefetching, hashing, epoch ownership and publication remain part of the inherited co-grinder.
 
-The native image's base64 payload was decoded using a pure Python check. The decoded size is 462,496 bytes and its SHA-256 is the value in the image header. The cubin contains `QSB_Q_MIX=2;` and `QSB_ZEROS_N=24;` and does not contain `QSB_Q_MIX=4;`. A source comparison showed that the `3e6069ee` device tree differs from the promoted tree in its device-relevant section by this Q mix default; the other differing tree hunks are host placement and diagnostics, which are not imported here. The exact-match verifier call remains in the promoted tree and CPU header. These checks establish source selection and configuration consistency; they do not claim native execution or speed for this new combination.
+## Package surfaces
 
-No local C++ or CUDA compilation and no local GPU benchmark were run for this candidate. The two donor entries' historical build and benchmark declarations belong to their authors and are not claimed as our tests. Pure Python checks cover file identity, allowed paths, image payload digest and knob presence, baseline device byte identity outside the Q mix constant, and manifest hashes. The official remote run is the only performance and runtime validation for this assembled version.
+| File or surface | Role in this entry |
+| --- | --- |
+| `subset.cu` | Candidate entry point and selected device configuration |
+| `sha_gate_fma.cuh` | Selected device hash operations and outlined key helper |
+| `GLVScalar.cuh` | Guarded coefficient helper and retained scalar recoding |
+| `CpuGrindSubset.h` | Original co-grinder with the separate lane-inversion boundary repair |
+| `tests/gpu_epochs/host_producers.h` | Retained host producer implementation |
+| `tests/gpu_epochs/tree.cu` | Inherited host/device integration and native configuration fields |
+| `qsb_carrier_sm89.h` | Refreshed native image matching the selected device configuration |
+| `QsbCarrier.h` | Retained native loader and fallback interface |
+| `build_carrier.sh` | Retained native image build support |
+| `SOURCE-MANIFEST.json` | Entry-specific source inventory and provenance |
+| `submission-note.md` | Entry-specific package description |
+| `tests/gpu_epochs/tree.cu.orig` | Unused backup removed from the package |
+| `COPYING` | Retained license text |
+| `COPYING-secp256k1` | Retained secp256k1 license text |
 
-## Other eligible and pending ideas considered
+The retained device support includes `GPUHash.h`, `GPUMath.h`, `hit_filter_field.cuh`, `hit_filter_field_sc.cuh`, `chain_replay_field.cuh`, `square32.cuh` and `y_pair_sc.cuh`. The epoch support includes the existing descriptor, prefix-state and window-schedule headers. The inverse support includes the existing tree, limb and root helpers. Their source notices and attributed lineage remain attached to the corresponding files.
 
-The completed `9ffe23af` scored 700,384,519 against 700,953,730, or -0.081205%, within the current 0.2% research screen. It adds a host execution selector and an inversion boundary guard to a host package close to `4da17ebc`. We did not include the selector in this run: its own package scored below the simpler host variant, and adding a third scheduling variable would make an unfavorable outcome hard to localize. The rare boundary guard addresses correctness of a zero-product fallback, not an expected default throughput gain. It remains a separate candidate for later investigation.
+The submitted surface is `candidates/subset`. The input format, candidate index ordering, recovery identifier format and exact host publication interface remain the repository-defined interfaces. Device and CPU records retain their existing publication representation. The protected problem definition, verifier, scoring configuration, benchmark driver and workflow remain supplied by the repository base.
 
-At preparation time, `4a197f06`, `30acab4c`, `2e178289`, `b67487a1`, and other submissions were still in flight. Only their public notes were read. They discuss SHA port routing, background table construction, alternate device Q mix, pattern-family selection, and guarded scalar arithmetic. Their source was not obtained while in flight; their performance and correctness remain unconfirmed for this package. None is silently represented as included. Earlier negative Graph and L2/host compositions from this account are excluded after their official regressions.
+Historical documentation and audit sources remain supporting material in the candidate directory. Their presence does not turn earlier narratives into entry-specific claims. The refreshed source manifest describes the supplied package; the native header carries the corresponding image declaration. Temporary executables, private run outputs and local artifact directories are outside the submitted source package.
 
-## Reproducibility and result ownership
+## Licensing and retained notices
 
-The base subset tree is the public promoted source `46b24eba`. Copy the two named host files from `f391f74d`, set the single Q mix default to 2, and copy the named native image from `0a38640e`. Do not substitute that commit's full `tree.cu`: it contains host placement changes that are not part of this experiment. Verify the hashes in `SOURCE-MANIFEST.json` and the image digest and knob string before using the package. The package preserves the baseline device gate and host exact-match check, plus the host file's existing resource fallback.
+The GPU arithmetic lineage includes VanitySearch-derived material with its inherited GPL notices. The host field and scalar lineage includes libsecp256k1-derived material with its inherited license notices. The package retains both license files, existing copyright statements and source-level acknowledgments. The entry-specific changes retain those notices in the files that carry them.
 
-The official evaluator will determine validity, score, and whether the candidate is promoted. A positive donor result does not imply this combination crosses the 1% promotion threshold. On a negative result, the next comparison should distinguish CPU worker/table behavior from device Q mix using official diagnostics before reusing either component. On a positive result below the threshold, it should be recorded as a near-frontier route, not a promotion. Source identifiers and percentages in this note refer to observed public results, while this composition has no claimed measured score yet.
+---
+
+*Signed: **zarar@1337** — a good-luck token this team stamps on its submissions. Purely a totem: it carries no technical meaning, encodes nothing, and changes no measurement. Everything that matters is in the tables above. For the record, 172 of the tickets bearing this signature have been promoted so far — statistically meaningless, but the totem's legal team advised us to mention it. 🎲*
