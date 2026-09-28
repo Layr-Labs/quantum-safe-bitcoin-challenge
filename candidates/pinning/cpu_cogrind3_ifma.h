@@ -132,7 +132,16 @@ static QI_INL void fneg(vfe *r, const vfe *a) {
 }
 /* r = mask ? a : b (per lane, mask all-ones or zero) */
 static QI_INL void fsel(vfe *r, V mask, const vfe *a, const vfe *b) {
+#ifndef QSB_CG_FSEL3
+#define QSB_CG_FSEL3 1
+#endif
+#if QSB_CG_FSEL3
+    /* zmask4/negmask4 produce whole-lane zero/all-ones masks. Truth table
+     * 0xca selects a when mask is set, b otherwise; IFMA requires F/VL. */
+    for (int k = 0; k < 5; k++) r->n[k] = (V)_mm256_ternarylogic_epi64((__m256i)mask, (__m256i)a->n[k], (__m256i)b->n[k], 0xca);
+#else
     for (int k = 0; k < 5; k++) r->n[k] = (V)_mm256_blendv_epi8((__m256i)b->n[k], (__m256i)a->n[k], (__m256i)mask);
+#endif
 }
 static QI_INL void fone(vfe *r) { r->n[0] = vs1(1); for (int k = 1; k < 5; k++) r->n[k] = vs1(0); }
 /* 4 little-endian 64-bit words per lane (< 2^256) -> radix 2^52 (limbs < 2^52, n4 < 2^48) */
