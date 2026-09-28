@@ -1221,6 +1221,18 @@ __device__ __forceinline__ void qsb_s3_load(const uint8_t *__restrict__ gTable, 
  * +-its own addend; the P half's partial sums are offset by lambda*r2*A. A zero component (|r2| = 0 or
  * |r1| = 0, probability ~2^-127 for a SHA256d scalar) degenerates that half's last addition and the
  * candidate is simply dropped: this is the filter; every hit is re-derived exactly on the host. */
+/* QSB_CHAIN_PIPE (default 1): depth-1 gather software pipeline for the QSB_SC_PP=0 chain loop below.
+ * Each trip issues the NEXT term's table gather before the CURRENT term's point addition, so the
+ * gather's DRAM/L2 latency overlaps the add's ALU. This is legal because the walker advance
+ * (qsb_s3_code_half) for term i+1 depends only on the walker and descriptor, never on the point
+ * accumulator the add reads and writes. The single psi entry (off == 0, at a fixed index per Q
+ * layout) is handled unpiped between two piped runs; the operation sequence -- walker advances,
+ * loads, adds, beta mul -- is identical to the serial loop, only the issue timing moves. Costs one
+ * extra 8-register point buffer (nx, ny) live across the add. Ported from pinning's QSB_CHAIN_PIPE,
+ * measured +0.8-1.4% there on the official runner (ITERATIONS.md v6). 0 selects the original loop. */
+#ifndef QSB_CHAIN_PIPE
+#define QSB_CHAIN_PIPE 1
+#endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                        const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
     uint64_t mag[2][2]; unsigned sgn[2];
@@ -1338,6 +1350,82 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     }
 #endif
 #else
+#if QSB_CHAIN_PIPE
+    /* Piped form of the serial loop: prime, piped run, psi (unpiped), piped run, drain.
+     * The psi entry (off == 0) is at a fixed index per Q layout (5 for P18-Q, 11 for GLV12-Q);
+     * found dynamically so a descriptor-table edit cannot silently misplace it. */
+    {
+        uint64_t nx[4], ny[4];
+        unsigned psi_idx = 5u * g + 2u;
+        while (QSB_S3_DESC_MXF[psi_idx].off != 0u) psi_idx++;
+        unsigned i = 5u * g + 2u;
+        /* Run 1: terms [i, psi_idx). Prime the first gather, then overlap each next gather with
+         * the current addition. */
+        {
+            const qsb_s3_desc_t d = QSB_S3_DESC_MXF[i];
+            code = qsb_s3_code_half(w, 0, d);
+            qsb_s3_load(gTable, code, d.off >= GT_DENSE_ENTRIES, cx, cy);
+            i++;
+        }
+        #pragma unroll 1
+        for (; i < psi_idx; i++) {
+            const qsb_s3_desc_t dn = QSB_S3_DESC_MXF[i];
+            const uint32_t coden = qsb_s3_code_half(w, 0, dn);
+            qsb_s3_load(gTable, coden, dn.off >= GT_DENSE_ENTRIES, nx, ny);
+            qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+            Load256(y0, cy);                /* (cx,cy) still holds the added term */
+#endif
+            Load256(cx, nx);
+            Load256(cy, ny);
+        }
+        /* Drain run 1: the last primed term. */
+        qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+        Load256(y0, cy);
+#endif
+        /* Psi term, unpiped, in the original order: walker swap, beta multiply on the
+         * accumulator, then this term's own code/gather/add. */
+        {
+            const qsb_s3_desc_t d = QSB_S3_DESC_MXF[psi_idx];
+            qsb_s3_psi_swap(w);
+            const uint64_t beta[4] = {0xC1396C28719501EEULL, 0x9CF0497512F58995ULL,
+                                      0x6E64479EAC3434E9ULL, 0x7AE96A2B657C0710ULL};
+            qsb_filter_mul(X, X, beta, bad);
+            code = qsb_s3_code_half(w, 0, d);
+            qsb_s3_load(gTable, code, d.off >= GT_DENSE_ENTRIES, cx, cy);
+            qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+            Load256(y0, cy);
+#endif
+        }
+        /* Run 2: terms [QSB_S3_MXF_PTAIL + 1, QSB_S3_MXF_LAST). Same pipe shape as run 1. */
+        i = QSB_S3_MXF_PTAIL + 1u;
+        {
+            const qsb_s3_desc_t d = QSB_S3_DESC_MXF[i];
+            code = qsb_s3_code_half(w, 0, d);
+            qsb_s3_load(gTable, code, d.off >= GT_DENSE_ENTRIES, cx, cy);
+            i++;
+        }
+        #pragma unroll 1
+        for (; i < QSB_S3_MXF_LAST; i++) {
+            const qsb_s3_desc_t dn = QSB_S3_DESC_MXF[i];
+            const uint32_t coden = qsb_s3_code_half(w, 0, dn);
+            qsb_s3_load(gTable, coden, dn.off >= GT_DENSE_ENTRIES, nx, ny);
+            qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+            Load256(y0, cy);                /* (cx,cy) still holds the added term */
+#endif
+            Load256(cx, nx);
+            Load256(cy, ny);
+        }
+        /* Drain run 2. */
+        qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+        Load256(y0, cy);
+#endif
+    }
+#else
     #pragma unroll 1
     for (unsigned i = 5u * g + 2u; i < QSB_S3_MXF_LAST; i++) {
         const qsb_s3_desc_t d = QSB_S3_DESC_MXF[i];
@@ -1355,6 +1443,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
         Load256(y0, cy);                /* current affine y anchors next madd */
 #endif
     }
+#endif
 #endif
     code = QSB_S3_CODE(w, GT_GLV_TERMS - 1, QSB_S3_DESC[GT_GLV_TERMS - 1]);   /* = QSB_S3_DESC_MXF[15] */
     qsb_s3_load(gTable, code, true, cx, cy);
@@ -3913,7 +4002,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(ZLAB_HITPATH) QSB_CARRIER_KV(ZLAB_K2S3M) QSB_CARRIER_KV(ZLAB_LAUNCH_BLOCKS) \
     QSB_CARRIER_KV(ZLAB_MODSQR) QSB_CARRIER_KV(ZLAB_PAIRSHA) QSB_CARRIER_KV(ZLAB_T14) \
     QSB_CARRIER_KV(ZLAB_TREE) QSB_CARRIER_KV(ZLAB_TRIM) QSB_CARRIER_KV(QSB_FORCE_EXACT_HIT_CHECK) \
-    QSB_CARRIER_KV(QSB_SC_OPS) QSB_CARRIER_KV(QSB_SC_PP) QSB_CARRIER_KV(QSB_SC_ALUZ) QSB_CARRIER_KV(QSB_SC_PARK) QSB_CARRIER_KV(QSB_SC_LATE)
+    QSB_CARRIER_KV(QSB_SC_OPS) QSB_CARRIER_KV(QSB_SC_PP) QSB_CARRIER_KV(QSB_SC_ALUZ) QSB_CARRIER_KV(QSB_SC_PARK) QSB_CARRIER_KV(QSB_SC_LATE) \
+    QSB_CARRIER_KV(QSB_CHAIN_PIPE)
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
