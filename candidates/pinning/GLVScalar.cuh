@@ -84,6 +84,21 @@
 #if QSB_GLV11 != 0 && QSB_GLV11 != 1
 #error QSB_GLV11 must be 0 or 1
 #endif
+#ifndef QSB_GLV_SPLIT7
+#define QSB_GLV_SPLIT7 0
+#endif
+#if QSB_GLV_SPLIT7 != 0 && QSB_GLV_SPLIT7 != 1
+#error QSB_GLV_SPLIT7 must be 0 or 1
+#endif
+#if QSB_GLV_SPLIT7 && !QSB_GLV11
+#error QSB_GLV_SPLIT7 replaces the appended GLV11 width-28 segment
+#endif
+#ifndef QSB_GLV_SPLIT7_BALANCED
+#define QSB_GLV_SPLIT7_BALANCED 0
+#endif
+#if QSB_GLV_SPLIT7_BALANCED && !QSB_GLV_SPLIT7
+#error QSB_GLV_SPLIT7_BALANCED requires QSB_GLV_SPLIT7
+#endif
 #if QSB_GLV11 && !(QSB_BIGTBL && QSB_FOUR_HOT)
 #error QSB_GLV11 extends the four-hot GLV12 table (QSB_BIGTBL=1, QSB_FOUR_HOT=1)
 #endif
@@ -98,8 +113,18 @@
 #endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
 #if QSB_GLV11
+#if QSB_GLV_SPLIT7
+#if QSB_GLV_SPLIT7_BALANCED
+#define QSB_GT_TOTAL 220300429u
+#define QSB_GT_SEGMENTS 9
+#else
+#define QSB_GT_TOTAL 220284557u
+#define QSB_GT_SEGMENTS 8
+#endif
+#else
 #define QSB_GT_TOTAL 354501773u
 #define QSB_GT_SEGMENTS 8
+#endif
 #else
 #define QSB_GT_TOTAL 153175181u
 #define QSB_GT_SEGMENTS 6
@@ -129,7 +154,8 @@
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 #if QSB_GLV11
-    if(c>=6) return c==6?67108864u:134217728u;
+    if(c>=6) return c==6?67108864u:
+                   (QSB_GLV_SPLIT7_BALANCED?8192u:QSB_GLV_SPLIT7?512u:134217728u);
 #endif
 #if QSB_FOUR_HOT
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
@@ -139,11 +165,21 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #if QSB_GLV11
-    if(c>=6) return c==6?153175181u:220284045u;
+    if(c>=6) return c==6?(QSB_GLV_SPLIT7_BALANCED?153191565u:
+                          QSB_GLV_SPLIT7?153175693u:153175181u):
+                   c==7?(QSB_GLV_SPLIT7?786432u:220284045u):794624u;
 #endif
 #if QSB_FOUR_HOT
+#if QSB_GLV_SPLIT7_BALANCED
+    return c==0?0u:c==1?262144u:c==2?524288u:
+           c==3?655360u:c==4?802816u:67911680u;
+#elif QSB_GLV_SPLIT7
+    return c==0?0u:c==1?262144u:c==2?524288u:
+           c==3?655360u:c==4?786944u:67895808u;
+#else
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
+#endif
 #else
     return c==0?0u:c==1?262144u:c==2?524288u:c==3?6116425u:
            c==4?14505033u:786432u;
@@ -151,7 +187,7 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
 #if QSB_GLV11
-    if(c>=6) return c==6?18u:45u;
+    if(c>=6) return c==6?18u:c==7?45u:59u;
 #endif
 #if QSB_FOUR_HOT
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
@@ -191,9 +227,23 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
 /* P's five terms t=0..4 read segments 0,6,7,4,5. Shifts 0,18,45,73,100 keep the
  * signed chain 18->45->73->100 contiguous, so the digit biases telescope to the
  * same segment-0 bias K as GLV12 and the five digits sum exactly to the
- * magnitude. Segments 6 and 7 are plain signed fields of 27 and 28 bits. */
+ * magnitude. Segments 6 and 7 are plain signed fields of 27 and 28 bits.
+ * QSB_GLV_SPLIT7 replaces the width-28 term by two exact centered subdigits:
+ * width 10 at shift 45 in segment 7, then width 18 at shift 55 in segment 3. */
 __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
     const uint64_t mag[2],unsigned sign,int t) {
+#if QSB_GLV_SPLIT7
+    if(t==0) return q9_bigtbl_code(mag,sign,0);
+    if(t==3 && !QSB_GLV_SPLIT7_BALANCED) return q9_bigtbl_code(mag,sign,3);
+    if(t>=4) return q9_bigtbl_code(mag,sign,t);
+    const int c=t==1?6:t==2?7:8;
+    const unsigned shift=q9_bigtbl_shift(c),bits=t==1?27u:QSB_GLV_SPLIT7_BALANCED?14u:10u;
+    const uint64_t wide=(mag[0]>>shift)|(mag[1]<<(64u-shift));
+    const uint32_t f=(uint32_t)wide&((1u<<bits)-1u);
+    const uint32_t neg_digit=1u-(f>>(bits-1u));
+    const uint32_t idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
+    return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
+#else
     if(t==0) return q9_bigtbl_code(mag,sign,0);
     if(t>=3) return q9_bigtbl_code(mag,sign,t+1);
     const int c=t+5;
@@ -203,6 +253,7 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
     const uint32_t neg_digit=1u-(f>>(bits-1u));
     const uint32_t idx=(f^(0u-neg_digit))&((1u<<(bits-1u))-1u);
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
+#endif
 }
 #endif
 // END QSB_BIGTBL_HOST_EXACT
@@ -366,6 +417,16 @@ __host__ __device__ __forceinline__ uint32_t q11_radix_code_z(
 }
 __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_z(
     const uint64_t w[2],uint32_t top,uint32_t m32,int t) {
+#if QSB_GLV_SPLIT7
+    if(t==0) return q9_bigtbl_code_z(w,top,m32,0);
+    if(t==3 && !QSB_GLV_SPLIT7_BALANCED) return q9_bigtbl_code_z(w,top,m32,3);
+    if(t>=4) return q9_bigtbl_code_z(w,top,m32,t);
+    const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
+    const int c=t==1?6:t==2?7:8;
+    const unsigned bits=t==1?27u:QSB_GLV_SPLIT7_BALANCED?14u:10u;
+    (void)top;
+    return q11_radix_code_z(ws,q9_bigtbl_shift(c),bits,q9_bigtbl_offset(c));
+#else
     if(t==0) return q9_bigtbl_code_z(w,top,m32,0);
     if(t>=3) return q9_bigtbl_code_z(w,top,m32,t+1);
     const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
@@ -373,6 +434,7 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_z(
     const unsigned bits=t==1?27u:28u;
     (void)top;
     return q11_radix_code_z(ws,q9_bigtbl_shift(c),bits,q9_bigtbl_offset(c));
+#endif
 }
 #endif
 #if QSB_GLV_ZDEC && QSB_DIGIT_LEAN && QSB_FOUR_HOT

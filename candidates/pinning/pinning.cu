@@ -5,6 +5,7 @@
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
+#define QSB_TABLE_PERSIST 0 /* host-only ablation: do not install table access-policy windows */
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #define QSB_GREEN 20
 #define QSB_GREEN_SHARED 8
@@ -160,6 +161,19 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
+/* Apollo/16-GiB production screen: retain GLV11's width-27 segment, but replace
+ * its 8-GiB width-28 segment by an exact 10+18 centered-digit split.  The
+ * low 10-bit subdigit uses a 512-record (32-KiB) shift-45 segment inserted at
+ * the end of the hot prefix; the high 18-bit subdigit reuses segment 3. */
+#ifndef QSB_GLV_SPLIT7
+#define QSB_GLV_SPLIT7 1
+#endif
+/* Bounded follow-up: represent the width-28 field by balanced width-14 tables
+ * at shifts 45 and 59.  Both 512-KiB tables stay in the L2-persisting prefix;
+ * unlike 10+18, neither subterm aliases Q's segment-3 traffic. */
+#ifndef QSB_GLV_SPLIT7_BALANCED
+#define QSB_GLV_SPLIT7_BALANCED 1
+#endif
 /* QSB_QGLV5: Q uses P's five-term decoder (segments 0, 6, 7, 4, 5).
  * Kill switch, default 0: it trades one addition for two more cold-bank gathers
  * (six to eight DRAM row activations per candidate) and measured -18.5 % on an
@@ -180,7 +194,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 65536
+#define QSB_PMIX12 0
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -649,7 +663,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #define GT_CHUNKS 6                        /* GLV12 width; Q uses GT_Q_TERMS of these */
 #define GT_SEGMENTS QSB_GT_SEGMENTS        /* physical table segments */
 #define GT_Q_TERMS (GT_CHUNKS-QSB_QGLV5)   /* Q's chain terms; P starts at this slot */
-#define GT_GLV_TERMS (GT_Q_TERMS+GT_CHUNKS-QSB_GLV11)
+#define GT_GLV_TERMS (GT_Q_TERMS+GT_CHUNKS-QSB_GLV11+QSB_GLV_SPLIT7)
 #define GT_TOTAL_ENTRIES QSB_GT_TOTAL
 #define GT_LO (1u << QSB_GT_RADIX_BITS)
 #define GT_HI (1u << QSB_GT_RADIX_BITS)
@@ -663,16 +677,35 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_GLV11?22688113472ULL:QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              (QSB_GLV_SPLIT7_BALANCED?14099227456ULL:
+               QSB_GLV_SPLIT7?14098211648ULL:
+               QSB_GLV11?22688113472ULL:QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
               "GLV12 geometry/table-byte mismatch");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
 #if QSB_GLV11
+#if QSB_GLV_SPLIT7
+#if QSB_GLV_SPLIT7_BALANCED
+static_assert(786432u+8192u==794624u &&
+              794624u+8192u==802816u &&
+              802816u+67108864u==67911680u &&
+              67911680u+85279885u==153191565u &&
+              153191565u+67108864u==GT_TOTAL_ENTRIES,
+              "balanced split7 table must be contiguous with both sub-tables hot");
+#else
+static_assert(786432u+512u==786944u &&
+              786944u+67108864u==67895808u &&
+              67895808u+85279885u==153175693u &&
+              153175693u+67108864u==GT_TOTAL_ENTRIES,
+              "split7 table must be contiguous with its 32-KiB table hot");
+#endif
+#else
 static_assert(786432u+67108864u+85279885u == 153175181u &&
               153175181u+67108864u == 220284045u &&
               220284045u+134217728u == GT_TOTAL_ENTRIES,
               "segments 6 and 7 must follow segment 5 back to back");
 static_assert(((2u*134217728u-1u)>>QSB_GT_RADIX_BITS) < GT_HI,
               "H ladder must cover segment 7's largest odd multiplier");
+#endif
 #endif
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
@@ -1413,7 +1446,15 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #if QSB_TBL_L2POL && !(QSB_BIGTBL && QSB_FOUR_HOT)
 #error "QSB_TBL_L2POL takes the hot/cold split from the QSB_FOUR_HOT bank order"
 #endif
+#if QSB_GLV_SPLIT7
+#if QSB_GLV_SPLIT7_BALANCED
+#define QSB_HOT_RECS 802816u   /* segments 0..3 plus two 8192-record balanced split tables */
+#else
+#define QSB_HOT_RECS 786944u   /* segments 0..3 plus the 512-record shift-45 split table */
+#endif
+#else
 #define QSB_HOT_RECS 786432u   /* q9_bigtbl_offset(4): segments 0..3, 48 MiB */
+#endif
 #ifndef QSB_TBL_POL_PRED
 #define QSB_TBL_POL_PRED 1
 #endif
@@ -4893,7 +4934,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, const uint8_t neg_r_inv
 #else
         int high=(int)(max_m>>8);
 #endif
-        gt_batch_ladder(grp,step,high,
+        if(high) gt_batch_ladder(grp,step,high,
             hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
     }
     BN_free(x);BN_free(y);BN_free(factor);BN_free(order);BN_free(nri);
@@ -5050,7 +5091,7 @@ static void gt_ladder_part(int ch, int part, uint64_t *hL, uint64_t *hH,
 #else
         int high=(int)(max_m>>8);
 #endif
-        gt_batch_ladder(grp,step,high,
+        if(high) gt_batch_ladder(grp,step,high,
             hH+(size_t)ch*GT_HI*8,x,y,alpha,beta,field_p,ctx);
     }
     BN_free(x);BN_free(y);BN_free(factor);BN_free(order);BN_free(nri);
@@ -5872,7 +5913,7 @@ int main(int argc, char **argv) {
 #if QSB_PERSIST_WINDOW_CAP
         if (want > (size_t)QSB_PERSIST_WINDOW_CAP) want = (size_t)QSB_PERSIST_WINDOW_CAP;
 #endif
-        if (want > 0 && max_window > 0) {
+        if (QSB_TABLE_PERSIST && want > 0 && max_window > 0) {
             cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, lim);
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
@@ -5978,7 +6019,7 @@ int main(int argc, char **argv) {
 #if QSB_PERSIST_WINDOW_CAP
         if (want > (size_t)QSB_PERSIST_WINDOW_CAP) want = (size_t)QSB_PERSIST_WINDOW_CAP;
 #endif
-        if (want > 0 && max_window > 0) {
+        if (QSB_TABLE_PERSIST && want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
