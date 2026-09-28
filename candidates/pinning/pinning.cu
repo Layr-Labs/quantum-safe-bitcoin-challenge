@@ -1,6 +1,7 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
+#define QSB_REMEASURE_TAG_0928162849 1
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -2655,10 +2656,70 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
     }
 
     QSB_RND16L(16);
-    QSB_WMIX_Z();
-    QSB_RND16L(32);
-    QSB_WMIX_Z();
-    QSB_RND15L(48);
+    // Same schedule and rounds, consumed immediately; no new storage or synchronization.
+    w[0] += s1(w[14]) + w[9] + s0(w[1]) + QSB_Z;
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(32) + w[0]);
+    w[1] += s1(w[15]) + w[10] + s0(w[2]) + QSB_Z;
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(33) + w[1]);
+    w[2] += s1(w[0]) + w[11] + s0(w[3]) + QSB_Z;
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(34) + w[2]);
+    w[3] += s1(w[1]) + w[12] + s0(w[4]) + QSB_Z;
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(35) + w[3]);
+    w[4] += s1(w[2]) + w[13] + s0(w[5]) + QSB_Z;
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(36) + w[4]);
+    w[5] += s1(w[3]) + w[14] + s0(w[6]) + QSB_Z;
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(37) + w[5]);
+    w[6] += s1(w[4]) + w[15] + s0(w[7]) + QSB_Z;
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(38) + w[6]);
+    w[7] += s1(w[5]) + w[0] + s0(w[8]) + QSB_Z;
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(39) + w[7]);
+    w[8] += s1(w[6]) + w[1] + s0(w[9]) + QSB_Z;
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(40) + w[8]);
+    w[9] += s1(w[7]) + w[2] + s0(w[10]) + QSB_Z;
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(41) + w[9]);
+    w[10] += s1(w[8]) + w[3] + s0(w[11]) + QSB_Z;
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(42) + w[10]);
+    w[11] += s1(w[9]) + w[4] + s0(w[12]) + QSB_Z;
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(43) + w[11]);
+    w[12] += s1(w[10]) + w[5] + s0(w[13]) + QSB_Z;
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(44) + w[12]);
+    w[13] += s1(w[11]) + w[6] + s0(w[14]) + QSB_Z;
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(45) + w[13]);
+    w[14] += s1(w[12]) + w[7] + s0(w[15]) + QSB_Z;
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(46) + w[14]);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(47) + w[15]);
+    w[0] += s1(w[14]) + w[9] + s0(w[1]) + QSB_Z;
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(48) + w[0]);
+    w[1] += s1(w[15]) + w[10] + s0(w[2]) + QSB_Z;
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(49) + w[1]);
+    w[2] += s1(w[0]) + w[11] + s0(w[3]) + QSB_Z;
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(50) + w[2]);
+    w[3] += s1(w[1]) + w[12] + s0(w[4]) + QSB_Z;
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(51) + w[3]);
+    w[4] += s1(w[2]) + w[13] + s0(w[5]) + QSB_Z;
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(52) + w[4]);
+    w[5] += s1(w[3]) + w[14] + s0(w[6]) + QSB_Z;
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(53) + w[5]);
+    w[6] += s1(w[4]) + w[15] + s0(w[7]) + QSB_Z;
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(54) + w[6]);
+    w[7] += s1(w[5]) + w[0] + s0(w[8]) + QSB_Z;
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(55) + w[7]);
+    w[8] += s1(w[6]) + w[1] + s0(w[9]) + QSB_Z;
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(56) + w[8]);
+    w[9] += s1(w[7]) + w[2] + s0(w[10]) + QSB_Z;
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(57) + w[9]);
+    w[10] += s1(w[8]) + w[3] + s0(w[11]) + QSB_Z;
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(58) + w[10]);
+    w[11] += s1(w[9]) + w[4] + s0(w[12]) + QSB_Z;
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(59) + w[11]);
+    w[12] += s1(w[10]) + w[5] + s0(w[13]) + QSB_Z;
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(60) + w[12]);
+    w[13] += s1(w[11]) + w[6] + s0(w[14]) + QSB_Z;
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(61) + w[13]);
+    w[14] += s1(w[12]) + w[7] + s0(w[15]) + QSB_Z;
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(62) + w[14]);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
