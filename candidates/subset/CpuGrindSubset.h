@@ -1390,6 +1390,10 @@ static bool qsha_supported() {
  * K additions) and the chaining state stays in the ABEF/CDGH layout across the nblk blocks. Used
  * for the tail blocks that do not depend on the epoch: every one of them is one of a few fixed
  * contents per problem, scheduled once in start(). */
+/* terrapinelf 87d9ebfd: reuse a shared immutable schedule across four SHA lanes. */
+#ifndef QSB_CPU_X4PS
+#define QSB_CPU_X4PS 1
+#endif
 QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows, int nblk, uint32_t *out = nullptr, int ostride = 8,
                           const uint32_t *const *in = nullptr) {
     __m128i S0[4], S1[4];
@@ -1407,6 +1411,20 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
         __m128i I0[4], I1[4];
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { I0[l] = S0[l]; I1[l] = S1[l]; }
+        if (QSB_CPU_X4PS && w[0] == w[1] && w[0] == w[2] && w[0] == w[3]) {   /* the same fixed block in all four lanes (the tail
+                                                                                blocks): each W+K pair is loaded once, into xmm0, for four rounds */
+            const uint32_t *ws = w[0];
+            __asm__("" : "+r"(ws));                     /* opaque copy: keeps the compiler from hoisting (and spilling) lane 0's loads */
+#pragma GCC unroll 16
+            for (int r = 0; r < 16; r++) {
+                const __m128i m0 = _mm_loadl_epi64((const __m128i *)(ws + 4 * r));
+#pragma GCC unroll 4
+                for (int l = 0; l < 4; l++) S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m0);
+                const __m128i m1 = _mm_loadl_epi64((const __m128i *)(ws + 4 * r + 2));
+#pragma GCC unroll 4
+                for (int l = 0; l < 4; l++) S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m1);
+            }
+        } else {
 #pragma GCC unroll 16
         for (int r = 0; r < 16; r++) {
 #pragma GCC unroll 4
@@ -1414,6 +1432,7 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
                 S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
                 S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
             }
+        }
         }
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { S0[l] = _mm_add_epi32(S0[l], I0[l]); S1[l] = _mm_add_epi32(S1[l], I1[l]); }

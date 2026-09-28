@@ -1,13 +1,13 @@
 {
   "schema": "qsb.subset.source-manifest.v1",
-  "direct_base_public_submission": "521075fe-1466-4304-9ecc-9cd0a618e8d3",
-  "direct_base_public_commit": "46b24ebaa033fb69c7335794b54fd6a156359ec8",
+  "direct_base_public_submission": "5c7e36c5-0aab-4ced-a6da-93ac4ad5d466",
+  "direct_base_public_commit": "8d07d3ebad41a017dfaa5906b164f883a9b59348",
   "host_source_submission": "4da17ebc-347c-4b90-aa90-3819b322a465",
   "host_source_commit": "f391f74dc765352be557efb044f326f0e2190c45",
   "device_variant_submission": "3e6069ee-b68e-4fd2-bc0e-fbf5804ed599",
   "device_variant_commit": "0a38640ed29390ecea2c43fe260bef6ab9b61a3e",
-  "model": "GPT 6 Sol",
-  "effort": "medium",
+  "model": "GPT (exact variant not exposed)",
+  "effort": "not claimed",
   "harness": "Codex",
   "carrier_cubin_sha256": "f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc",
   "files": {
@@ -18,7 +18,7 @@
     "COMPLETE-POINT.md": "095d328d7c9d2debe51378706356d9ba3f87a28dcd388ecabb0a50ccf01eb500",
     "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
-    "CpuGrindSubset.h": "4fb2760d0de32e1e9a283781a243ba59befeea1288914854daaca724d54d0531",
+    "CpuGrindSubset.h": "b71893ad23e281b048e7b740b199885bc166568ed630b2bf3e53ecaf8a8b26af",
     "GLVScalar.cuh": "96efe62eb4361bf038d01fa821adb19931552609878b7eb1c3c0bef360f3cd35",
     "GPUHash.h": "c8415e1ddc839e078421a1ee347a9db5036f84714b03edb700aa2e635e05fedd",
     "GPUMath.h": "3205120d961990dc55e7e3c622411c2c581d506fa730f568a122530038b84ba6",
@@ -31,15 +31,15 @@
     "POINT-X3.md": "4424c2217c88fff84f1a8e36b3267cc0e6faa10bac189b627c3fec9be8361bc0",
     "QsbCarrier.h": "3b2d0dbe6a41df5483ea8777d6519a6017e0a53a91a770f92ec8363124d495c5",
     "TREE_INVERSE.md": "0b1798a37a17d8e882604784a375068bc1bc1bd5b4ae98da8f903d876961cdab",
-    "build_carrier.sh": "42473abf05df44dff80093f572bf8c37612dc00569c5b99c0c95373ebaf62e0a",
+    "build_carrier.sh": "a8c5dacb500857c75bfeb2e19a084ae591b6ab8bea30556509ddfe44f35b192f",
     "chain_replay_field.cuh": "7390f456f1f8c4cdbf0df2d9e42e8f88935b09e26e1f0be6af6ddbfa59ce4bd9",
     "hit_filter_field.cuh": "b9640d8c4db125f82697ae5bb84182f72c8d22a0dac5567527620dff21659937",
     "hit_filter_field_sc.cuh": "d5b1ac66e1a8f62f17779e39c4244f873080f4864dda9966710c2f5a9f2a6d0e",
     "hit_filter_field_sc_aluz.cuh": "047329878bb74a5ba1e07c00ca1ce1b40a4e96129e9d3016c00dbc7af9fdacb4",
-    "qsb_carrier_sm89.h": "c820151b7c350b1f7eae995f3214773a14aebe53e649b706c08344268dafcaa2",
+    "qsb_carrier_sm89.h": "725f601231787952d4d699173905a150476936e0943cb03ee38f4e36825c1208",
     "sha_gate_fma.cuh": "2233afa68f4909a7932732379fce3815729ec6fb384af63fa111683ebf37819b",
     "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
-    "submission-note.md": "5ecab3979f411618fec80bdf59aeb0c8dc7a530cae1f8721a6d7627db6cae050",
+    "submission-note.md": "d27b48a3cce45d5f2b0bc0ea997086be7febaca9ad45149161bffcbe27280c7e",
     "subset.cu": "bee876563b8c7234eefa658fe4bd2f2b484ee7ce5197df94d68802ce86e281f1",
     "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
     "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
@@ -70,5 +70,6 @@
     "tests/gpu_epochs/window_schedule_shared.cuh": "ad256d03de4ecadf248e091a5ee37a028f1d1b127255044793e1f5ad31125652",
     "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8",
     "y_pair_sc.cuh": "923061f27e02bed6e78c352abdb1285c108650b699bb35668615ae0ef782a4cb"
-  }
+  },
+  "current_change": "Isolated qsha_x4p shared schedule loads QSB_CPU_X4PS from terrapinelf 87d9ebfd; no MRG/KH16/SHC changes"
 }
