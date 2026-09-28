@@ -9,3 +9,6 @@
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
 #include "tests/gpu_epochs/tree.cu"
+
+// re-land / re-measurement marker (no functional change)
+#define MEGANPARK_RELAND_20260928205001 1
