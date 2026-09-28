@@ -56,17 +56,17 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     c7 = QI_LO(QI_LO(c7, a3, b4), a4, b3);
     V c8 = QI_LO(QI_HI(QI_HI(z, a3, b4), a4, b3), a4, b4);
     V c9 = QI_HI(z, a4, b4);                                   /* < 2^46 (a4, b4 < 2^49) */
-    /* high columns to 52-bit limbs (c9 stays < 2^52) */
-    c6 += c5 >> 52; c5 &= M;
-    c7 += c6 >> 52; c6 &= M;
-    c8 += c7 >> 52; c7 &= M;
-    c9 += c8 >> 52; c8 &= M;
-    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
-    V d0 = QI_LO(c0, c5, R);
-    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
-    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
-    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
-    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    /* Split high columns independently, following the promoted Subset IFMA fold.
+     * This removes the c5->c9 carry chain; each h*R fits one 52-bit IFMA input. */
+    const V l5 = c5 & M, h5 = c5 >> 52;
+    const V l6 = c6 & M, h6 = c6 >> 52;
+    const V l7 = c7 & M, h7 = c7 >> 52;
+    const V l8 = c8 & M, h8 = c8 >> 52;
+    V d0 = QI_LO(c0, l5, R);
+    V d1 = QI_LO(QI_HI(QI_LO(c1, h5, R), l5, R), l6, R);
+    V d2 = QI_LO(QI_HI(QI_LO(c2, h6, R), l6, R), l7, R);
+    V d3 = QI_LO(QI_HI(QI_LO(c3, h7, R), l7, R), l8, R);
+    V d4 = QI_LO(QI_HI(QI_LO(c4, h8, R), l8, R), c9, R);
     const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
     d4 += d3 >> 52; d3 &= M;
     const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
@@ -79,7 +79,46 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     d4 += d3 >> 52; d3 &= M;
     r->n[0] = d0; r->n[1] = d1; r->n[2] = d2; r->n[3] = d3; r->n[4] = d4;
 }
-static QI_INL void fsqr(vfe *r, const vfe *a) { fmul(r, a, a); }
+#ifndef QSB_CG_IFMA_SQR
+#define QSB_CG_IFMA_SQR 1
+#endif
+static QI_INL void fsqr(vfe *r, const vfe *a) {
+#if QSB_CG_IFMA_SQR
+    const V x0 = a->n[0], x1 = a->n[1], x2 = a->n[2], x3 = a->n[3], x4 = a->n[4];
+    const V z = vs1(0), M = vs1(QI_M52), R = vs1(QI_R), C = vs1(QI_C);
+    V c[10] = {z,z,z,z,z,z,z,z,z,z};
+#define QI_SQD(k,x) do { c[2*(k)] = QI_LO(c[2*(k)],x,x); c[2*(k)+1] = QI_HI(c[2*(k)+1],x,x); } while (0)
+#define QI_SQX(k,x,y) do { const V lo = QI_LO(z,x,y), hi = QI_HI(z,x,y); c[k] += lo + lo; c[k+1] += hi + hi; } while (0)
+    QI_SQD(0,x0); QI_SQD(1,x1); QI_SQD(2,x2); QI_SQD(3,x3); QI_SQD(4,x4);
+    QI_SQX(1,x0,x1); QI_SQX(2,x0,x2); QI_SQX(3,x0,x3); QI_SQX(4,x0,x4);
+    QI_SQX(3,x1,x2); QI_SQX(4,x1,x3); QI_SQX(5,x1,x4);
+    QI_SQX(5,x2,x3); QI_SQX(6,x2,x4); QI_SQX(7,x3,x4);
+#undef QI_SQD
+#undef QI_SQX
+    c[6] += c[5] >> 52; c[5] &= M;
+    c[7] += c[6] >> 52; c[6] &= M;
+    c[8] += c[7] >> 52; c[7] &= M;
+    c[9] += c[8] >> 52; c[8] &= M;
+    V d0 = QI_LO(c[0], c[5], R);
+    V d1 = QI_LO(QI_HI(c[1], c[5], R), c[6], R);
+    V d2 = QI_LO(QI_HI(c[2], c[6], R), c[7], R);
+    V d3 = QI_LO(QI_HI(c[3], c[7], R), c[8], R);
+    V d4 = QI_LO(QI_HI(c[4], c[8], R), c[9], R);
+    const V e5 = QI_HI(z, c[9], R);
+    d4 += d3 >> 52; d3 &= M;
+    const V top = (d4 >> 48) + (e5 << 4);
+    d4 &= vs1(QI_M48);
+    d0 = QI_LO(d0, top, C);
+    d1 = QI_HI(d1, top, C);
+    d1 += d0 >> 52; d0 &= M;
+    d2 += d1 >> 52; d1 &= M;
+    d3 += d2 >> 52; d2 &= M;
+    d4 += d3 >> 52; d3 &= M;
+    r->n[0] = d0; r->n[1] = d1; r->n[2] = d2; r->n[3] = d3; r->n[4] = d4;
+#else
+    fmul(r, a, a);
+#endif
+}
 
 /* any limbs < 2^62 -> W form (libsecp256k1 fe_normalize_weak, radix 2^52) */
 static QI_INL void fwk(vfe *r) {
