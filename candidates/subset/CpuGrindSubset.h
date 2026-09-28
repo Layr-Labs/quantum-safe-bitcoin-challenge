@@ -500,6 +500,10 @@ void fe8_red(fe8 &r, __m512i c0, __m512i c1, __m512i c2, __m512i c3, __m512i c4,
     fe8_carry(o);
     r = o;
 }
+/* terrapinelf, public 87d9ebfd / a33e04c3: same IFMA sums, one accumulator per column. */
+#ifndef QSB_CPU_MRG
+#define QSB_CPU_MRG 1
+#endif
 /* The 10 product columns of a*b (25 low + 25 high partial products) and of a^2 (the ten cross products once,
  * doubled with one shift per column, plus the five squares: 30 IFMA instead of 50; the same column bounds). */
 /* S = 1 (QSB_CPU_PSEED): columns 0..4 start at 4p's limbs instead of 0, for the fused subtractions below (the same sums). */
@@ -507,6 +511,35 @@ template <int S>
 static inline __attribute__((always_inline, target("avx512f,avx512ifma")))
 void fe8_mul_cols(__m512i *c, const fe8 &a, const fe8 &b) {
     const __m512i Z = _mm512_setzero_si512();
+#if QSB_CPU_MRG && QSB_CPU_FOLD3
+    /* QSB_CPU_MRG: each column's low and high partial products in ONE accumulator (chains of up to 10 IFMA, the same column sums):
+     * no second accumulator to zero and no per-column add (18 vector ops fewer per product); with two SMT threads per core the
+     * longer chains are hidden by the sibling */
+    __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4) : Z, c1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
+            c2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z, c3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
+            c4 = S ? _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4) : Z;
+    __m512i c5 = Z, c6 = Z, c7 = Z, c8 = Z, d9 = Z;
+    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
+    const __m512i b0 = b.l[0], b1 = b.l[1], b2 = b.l[2], b3 = b.l[3], b4 = b.l[4];
+    HI(d9,a4,b4);                                           /* column 9: its fold term hi(c9*R) closes column 5's chain */
+    LO(c4,a0,b4); LO(c5,a1,b4); LO(c3,a0,b3); LO(c6,a2,b4);
+    LO(c4,a1,b3); LO(c5,a2,b3); LO(c3,a1,b2); LO(c6,a3,b3);
+    LO(c4,a2,b2); LO(c5,a3,b2); LO(c3,a2,b1); LO(c6,a4,b2);
+    LO(c4,a3,b1); LO(c5,a4,b1); LO(c3,a3,b0); HI(c6,a1,b4);
+    LO(c4,a4,b0); HI(c5,a0,b4); HI(c3,a0,b2); HI(c6,a2,b3);
+    HI(c4,a0,b3); HI(c5,a1,b3); HI(c3,a1,b1); HI(c6,a3,b2);
+    HI(c4,a1,b2); HI(c5,a2,b2); HI(c3,a2,b0); HI(c6,a4,b1);
+    HI(c4,a2,b1); HI(c5,a3,b1);
+    HI(c4,a3,b0); HI(c5,a4,b0);
+    LO(c2,a0,b2); LO(c7,a3,b4); LO(c1,a0,b1); LO(c8,a4,b4);
+    LO(c2,a1,b1); LO(c7,a4,b3); LO(c1,a1,b0); HI(c8,a3,b4);
+    LO(c2,a2,b0); HI(c7,a2,b4); HI(c1,a0,b0); HI(c8,a4,b3);
+    HI(c2,a0,b1); HI(c7,a3,b3);
+    HI(c2,a1,b0); HI(c7,a4,b2);
+    LO(c0,a0,b0);
+    c5 = _mm512_madd52hi_epu64(c5, d9, _mm512_set1_epi64(0x1000003D10ULL));
+    c[0] = c0; c[1] = c1; c[2] = c2; c[3] = c3; c[4] = c4; c[5] = c5; c[6] = c6; c[7] = c7; c[8] = c8; c[9] = d9;
+#else
     /* low and high partial products in separate accumulators (chains of at most 5 IFMA instead of 9), summed per column */
     __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4) : Z, c1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
             c2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z, c3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
@@ -535,6 +568,7 @@ void fe8_mul_cols(__m512i *c, const fe8 &a, const fe8 &b) {
 #endif
     c[0] = c0; c[1] = _mm512_add_epi64(c1, d1); c[2] = _mm512_add_epi64(c2, d2); c[3] = _mm512_add_epi64(c3, d3); c[4] = _mm512_add_epi64(c4, d4);
     c[5] = _mm512_add_epi64(c5, d5); c[6] = _mm512_add_epi64(c6, d6); c[7] = _mm512_add_epi64(c7, d7); c[8] = _mm512_add_epi64(c8, d8); c[9] = d9;
+#endif
 }
 template <int S>
 static inline __attribute__((always_inline, target("avx512f,avx512ifma")))
