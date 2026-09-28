@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-/* Pinning extension; mathematical model checked, native execution is remote only. */
-/* Derived from the PROMOTED Subset source a137e289b236c3622eba80f1ad5e9a0c8a91eb67. */
+// Pinning extension; mathematical model checked, native execution is remote only.
+// Derived from the PROMOTED Subset source a137e289b236c3622eba80f1ad5e9a0c8a91eb67.
 // Preserves i34-9/VanitySearch (Jean Luc Pons), AbdelStark cooperative inverse,
 // ercumentyildirim table divsteps, newjordan and terrapinelf limb/uniform work.
-/* Original source comments and full sources are retained alongside this file. */
-/* Include after Pinning qsb_field_mul / qsb_field_normalize and ISO constants. */
+// Original source comments and full sources are retained alongside this file.
+// Include after Pinning qsb_field_mul / qsb_field_normalize and ISO constants.
 #pragma once
 namespace qsb_warp_research {
 #define QWR_DEV __device__ __forceinline__
@@ -162,7 +162,7 @@ template<int BYTE> QWR_DEV int32_t qwr_by_signed_byte(uint32_t value){
     static_assert(BYTE>=0&&BYTE<4,"byte selector");
 #ifdef __CUDA_ARCH__
     int32_t out;
-    /* Generic PRMT: select the byte once, replicate its sign into upper bytes. */
+    // Generic PRMT: select the byte once, replicate its sign into upper bytes.
     asm("prmt.b32 %0,%1,0,%2;" : "=r"(out) : "r"(value),"n"(((BYTE+8)*0x1110)|BYTE));
     return out;
 #else
@@ -310,8 +310,8 @@ __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
     R[4]=0;
     return true;
 }
-/* The bounded path leaves R untouched on failure. Exponent p-2 is independent */
-/* of the divstep table and all products use the carry-complete field helper. */
+// The bounded path leaves R untouched on failure. Exponent p-2 is independent
+// of the divstep table and all products use the carry-complete field helper.
 // Canonicalize every product here; this exceptional path is not throughput work.
 __device__ __noinline__ void qwr_fermat_scaled(uint64_t *R) {
     const uint64_t exponent[4]={0xFFFFFFFEFFFFFC2DULL,
@@ -334,7 +334,7 @@ __device__ __noinline__ void qwr_fermat_scaled(uint64_t *R) {
 #endif
     for(int k=0;k<5;++k)R[k]=y[k];
 }
-/* All 32 lanes of warp zero pass the SAME canonical input; same scaled output. */
+// All 32 lanes of warp zero pass the SAME canonical input; same scaled output.
 QWR_DEV void qwr_inverse_scaled(uint64_t *R,int lane){
     if(qwr_inverse_limbs_bounded(R,lane))return;
     if(lane==0)qwr_fermat_scaled(R);

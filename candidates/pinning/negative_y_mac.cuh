@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-/* Research only: seed the promoted integer product with c. */
-/* The changed point representation stores the negative deferred ordinate. */
+// Research only: seed the promoted integer product with c.
+// The changed point representation stores the negative deferred ordinate.
 #pragma once
 #ifndef QSB_SEED_MUL_CUT
 #define QSB_SEED_MUL_CUT 1
