@@ -171,7 +171,7 @@ struct shared_t {
     int wcpu[QSB_CG_MAXW]; uint8_t wsec[QSB_CG_MAXW];
 };
 static shared_t *g_cg = NULL;
-static int g_ctl_verbose = 0;
+static int g_ctl_verbose = 1;
 
 static inline uint64_t thread_cpu_ns() {
     struct timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
@@ -869,7 +869,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
      * the guess as a maximum. Climbing only ever happens on a measured-clean
      * window, and the existing shedding rule still backs off on real loss. */
     g_ctl.whw = S->nworkers;
-    g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
+    g_ctl.verbose = g_ctl_verbose = 1; /* DIAG PROBE: force verbose */
     return S->nworkers;
 }
 
