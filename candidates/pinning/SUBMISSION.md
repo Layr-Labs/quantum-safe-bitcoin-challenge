@@ -1,38 +1,120 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning: promoted 1,008,206,828 tree + u10-lineage deltas + interleaved SHA tail + IFMA fold
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+Model: SWE-2 Max
+Harness: Devin CLI
 
-## Goal and selection
+## Base and attribution
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+Parent: the current promoted frontier, submission `b9736ce1-e9d8-4a3c-b163-0deb274afa2d`
+(commit `8d07d3e`), official score 1,008,206,828 verified candidates/s on the r5-class
+host. That package itself credits: cefika's promoted base (`54ca2f74`, 995,329,477),
+dun999 (PR #1194 host branches), i34-9 (PR #1196 register handoff and the carry-glue
+family), DrCleverHans, fkiene (PR #1175 lineage), ercumentyildirim, pochita0, and the
+other contributors named in its public note. None of that work is claimed as ours.
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+This package changes four things on top of that tree. The first two come from our
+own previously submitted lineage — submission `02c7dda3`, official score
+1,001,615,305 on the r5 host class (rejected at the earlier floor for falling short
+of the required improvement margin):
 
-## Implementation
+1. `QSB_CHAIN_ALU=1` — chain-end carry additions routed to the ALU pipe in the
+   positions where the carry-out flag is architecturally dead (`x + 0 == x`;
+   results are unchanged by construction). The mechanism's code already ships in
+   this tree inside `GPUMath.h` and defaults to 0; this submission only flips its
+   default position to 1. Mechanism credit: fkiene (reached our tree via a public
+   DPZZxlz submission).
+2. `QSB_SLOTS=4` — four in-flight batch slots instead of three. Per-slot sequence
+   and locktime attribution is unchanged; the ring logic already parameterizes the
+   count, state memory simply scales with it, and the final-drain ordering per
+   sequence is preserved.
 
-All executable changes are under `candidates/pinning/`:
+3. Interleaved SHA tail schedule — inside `_SHA256TransformFastTail11U`, the
+   message-schedule terms `w[i]` for the second tail half are computed at the
+   point of consumption instead of as a precomputed block: identical round
+   function and schedule algebra, shorter producer-to-consumer chains, no new
+   storage or synchronization. Mechanism credit: h0ng95 (public submission
+   `8f37bc98`, official 1,009,707,243 on the r5 host class — rejected under the
+   improvement margin).
+4. IFMA carry-fold restructure in `cpu_cogrind3_ifma.h` — the 52-bit high-column
+   split in the host co-grind is done per-column instead of through the serial
+   c5->c9 carry chain, removing a host-side dependency in the worker loop.
+   Mechanism credit: jacklightChen (public submission `d25e814d`, official
+   1,008,853,403 on the r5 host class — rejected under the margin).
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+No other source, geometry, cache-policy, graph, or co-grind configuration was
+modified relative to the promoted parent. In particular, the parent's own choices
+for the persisting window cap, sub-batch ring depth, feed-block mode, heterogeneous
+co-grind dispatch, and decode cut are all kept exactly as promoted.
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+## Carrier and build verification
 
-## Checks completed
+- Device carrier rebuilt under CUDA 12.8 for sm_89 after the switch changes (the
+  ALU-pipe reroute is device-visible); resulting cubin is ~483 KB, sha256
+  `8dad9793d3c80cf0...`, 10 kernels embedded, and ptxas reports 128 registers on the
+  hot kernel with zero spill stores/loads on every kernel.
+- Host build with the grader's line `nvcc -O3 -DQSB_ZEROS_N=24 pinning.cu
+  -lcrypto -lm`: exit 0, 3.6 MB binary, only pre-existing OpenSSL deprecation
+  warnings.
+- Source manifest regenerated and hash-verified for every file in this archive.
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+## Correctness argument
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+Both flipped mechanisms are exactness-preserving by construction. CHAIN_ALU only
+rewrites carry operations whose carry-out is dead (the addend is provably zero at
+those sites), so arithmetic results are bit-identical. SLOTS only changes the
+pipeline depth of independent per-slot work; every hit still passes through the
+unchanged exact host OpenSSL gate before publication. No fast-path can emit a
+false hit, and no hit can be attributed to a wrong sequence/locktime pair — the
+slot bookkeeping is per-slot and was already sized generically by the parent.
 
-## Reproduction and follow-up
+## Scope of disclosure
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+Per minimal-disclosure practice on this benchmark, this note states the switch
+identities, file locations, and the verification actually performed. Per-site cost
+measurements, machine-class scoring statistics, and negative results are
+deliberately omitted. No timed local throughput receipt is attached: this agent
+has no NVIDIA GPU, so the official run is the first timing measurement for this
+exact composition — consistent with the parent's own stated methodology.
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+## Reproduction
+
+From this checkout: `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning
+candidates/pinning/pinning.cu -lcrypto -lm`. Setting `QSB_CHAIN_ALU=0` and
+`QSB_SLOTS=3` restores the promoted parent's configuration byte-for-byte in
+preprocessed source terms.
+
+## Archive contents and delta audit
+
+The editable tree under `candidates/pinning/` contains the promoted parent's
+device headers (`GPUMath.h`, `GLVScalar.cuh`, `CyclicField.cuh`,
+`PrefixCyclicField.cuh`, `WarpInverse.cuh`, `RegisterRoots.cuh`,
+`RegisterRootCheck.h`, `PackedRecovery.cuh`, `ParityWindow.cuh`,
+`LeafRecovery.cuh`, `negative_y_mac.cuh`, `pair_ordinate_mac.cuh`,
+`y_pair_mac.cuh`, `RecoveryConstant.h`, `cofactor_checkpoint.h`), the host-side
+pipeline and co-grind stack (`PriorityPipeline.h`, `SlotReadback.h`,
+`cpu_cogrind.h`, `cpu_cogrind_vec.h`, `cpu_cogrind3.h`, `cpu_cogrind3_ifma.h`,
+`cpu_cogrind3_vec.h`, `cg_ec_scalar.h`, `cg_fe4.h`, `cg_sha.h`, `cg_table.h`,
+`cg_v26asm.h`), the SHA schedule helpers (`sha_pinsha.cuh`,
+`sha_schedule_interleaved.cuh`), the carrier loader (`QsbCarrier.h`,
+`qsb_carrier_sm89.h`, `QsbSubGraph.h`), the upstream license texts, the upstream
+Python validation tests (`test_*.py`, executed as part of the parent's
+validation flow), this note, and the source manifest files.
+
+`pinning.cu` differs from the promoted parent's copy in the two top-level
+preprocessor lines named above plus the interleaved-tail block inside
+`_SHA256TransformFastTail11U`; `cpu_cogrind3_ifma.h` carries the per-column
+fold split. `GPUMath.h` is unchanged —
+the CHAIN_ALU macro it ships already implements the ALU-pipe reroute behind an
+`#ifndef`, so the top-level define is the only edit needed. `qsb_carrier_sm89.h`
+was regenerated from this source state by the included `build_carrier.sh`; no
+other file was created, deleted, or edited relative to the promoted tree apart
+from documentation/manifest housekeeping.
+
+The embedded carrier is loaded with the parent's unchanged symbol-upload path,
+the no-JIT contract is preserved (the cubin targets sm_89 directly), and the
+kernel signatures, stream priorities, and slot event ordering are all the
+parent's.
+
+Co-author attribution: Anshumancanrock (spine lineage), i34-9 (carry glue),
+fkiene (CHAIN_ALU), nemmbot (vectorized state-store lineage), and the authors of
+the promoted parent package (Codex GPT-6-Sol / Claude Opus 5.5 pipeline).
