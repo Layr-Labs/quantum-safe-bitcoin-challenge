@@ -1348,7 +1348,7 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
  * Off: on the 1004f554 tree it measured +0.532 % against that tree's +0.635 %
  * (RTX 4090, ABBA), so the C address stays. */
 #ifndef QSB_PIPE_LEA
-#define QSB_PIPE_LEA 0
+#define QSB_PIPE_LEA 1
 #endif
 #if QSB_PIPE_LEA != 0 && QSB_PIPE_LEA != 1
 #error "QSB_PIPE_LEA must be 0 or 1"
@@ -3072,8 +3072,9 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
     }
 
     if(tid==0){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        uint64_t *root_out=roots+(size_t)blockIdx.x*4u;
+        qsb_st_v2((ulonglong2*)root_out,products[0][2*N-2],products[1][2*N-2]);
+        qsb_st_v2((ulonglong2*)(root_out+2),products[2][2*N-2],products[3][2*N-2]);
     }
 }
 template<int N>
@@ -3185,8 +3186,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
                    active?roots[(size_t)i*4u+3]:0ULL,0};
     qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+        uint64_t *root_out=roots+(size_t)i*4u;
+        qsb_st_v2((ulonglong2*)root_out,r[0],r[1]);
+        qsb_st_v2((ulonglong2*)(root_out+2),r[2],r[3]);
         // One fixed-ordinate multiplication per128-leaf tree, instead of
         // one per leaf in finish. Keep both inverse representatives.
         uint64_t b[5]={
@@ -3198,8 +3200,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #endif
         };
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
+        uint64_t *wroot_out=roots+((size_t)count+i)*4u;
+        qsb_st_v2((ulonglong2*)wroot_out,weighted[0],weighted[1]);
+        qsb_st_v2((ulonglong2*)(wroot_out+2),weighted[2],weighted[3]);
     }
 }
 
