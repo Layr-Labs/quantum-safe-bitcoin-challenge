@@ -116,6 +116,19 @@
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
 #endif
+#ifndef QSB_CPU_BATCH_SOLO
+#define QSB_CPU_BATCH_SOLO 4096    /* amortize batch setup when workers do not share a physical core */
+#endif
+static_assert(QSB_CPU_BATCH % 32 == 0 && QSB_CPU_BATCH >= 32 && QSB_CPU_BATCH <= 8192, "QSB_CPU_BATCH range");
+static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CPU_BATCH_SOLO <= 8192, "QSB_CPU_BATCH_SOLO range");
+#ifndef QSB_CPU_PAT_MINGRP
+#define QSB_CPU_PAT_MINGRP 5       /* keep whole block-0 hash groups with at least five CPU patterns */
+#endif
+#ifndef QSB_CPU_PAT_ALIGN
+#define QSB_CPU_PAT_ALIGN 4        /* four-lane hash plan */
+#endif
+static_assert(QSB_CPU_PAT_MINGRP >= 1 && QSB_CPU_PAT_MINGRP <= 286, "QSB_CPU_PAT_MINGRP range");
+static_assert(QSB_CPU_PAT_ALIGN >= 1 && QSB_CPU_PAT_ALIGN <= 286, "QSB_CPU_PAT_ALIGN range");
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
  * QSB_CPU_TAB_CAP_MB and at no fewer than QSB_CPU_NW_MIN windows; never more than 15 windows (68 MiB).
@@ -1591,6 +1604,7 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+    int batch = QSB_CPU_BATCH;
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
 #if QCPU_SHANI
@@ -2101,7 +2115,7 @@ static void worker(Ctx *c, int tid) {
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
-    const int B = QSB_CPU_BATCH;
+    const int B = c->batch;
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
@@ -2396,6 +2410,38 @@ static Ctx *g_ctx = nullptr;
 #ifdef CPU_COUNT
 static cpu_set_t g_initial_cpus;
 static int g_initial_ok = [] { CPU_ZERO(&g_initial_cpus); return sched_getaffinity(0, sizeof g_initial_cpus, &g_initial_cpus) == 0 ? 1 : 0; }();
+/* Use the larger batch only when the workers' allowed CPUs have no SMT siblings. */
+static bool solo_worker_cores(const cpu_set_t &mask, int workers) {
+    if (CPU_COUNT(&mask) < workers) return false;
+    for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+        if (!CPU_ISSET(cpu, &mask)) continue;
+        char path[128], list[512];
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+        FILE *f = fopen(path, "r");
+        if (!f) return false;
+        const bool ok = fgets(list, sizeof list, f) != nullptr;
+        fclose(f);
+        if (!ok) return false;
+        for (char *p = list; *p; ) {
+            char *end = nullptr;
+            const long first = strtol(p, &end, 10);
+            if (end == p) return false;
+            p = end;
+            long last = first;
+            if (*p == '-') {
+                last = strtol(p + 1, &end, 10);
+                if (end == p + 1 || last < first || last - first >= CPU_SETSIZE) return false;
+                p = end;
+            }
+            for (long sibling = first; sibling <= last; sibling++)
+                if (sibling != cpu && sibling >= 0 && sibling < CPU_SETSIZE && CPU_ISSET(sibling, &mask)) return false;
+            if (*p == ',') p++;
+            else if (*p == '\n' || *p == '\0') break;
+            else return false;
+        }
+    }
+    return true;
+}
 #endif
 static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, int cut, int early) {
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
@@ -2457,6 +2503,14 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     const int extra = 0;
 #endif
     Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth + extra; c->cut = cut; c->early = early;
+#ifdef CPU_COUNT
+    c->batch = (nth <= 1 || (work_mask && solo_worker_cores(work_cpus, nth))) ? QSB_CPU_BATCH_SOLO : QSB_CPU_BATCH;
+#else
+    c->batch = nth <= 1 ? QSB_CPU_BATCH_SOLO : QSB_CPU_BATCH;
+#endif
+    printf("  CPU co-grind: batch %d (%s)\n", c->batch,
+           c->batch == QSB_CPU_BATCH_SOLO ? "solo core" : "shared or unknown topology");
+    fflush(stdout);
 #if QCPU_VEC
     __builtin_cpu_init();
     c->vec = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma") && !getenv("QSB_CPU_NOVEC");
@@ -2481,7 +2535,40 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     c->mid_bytes = dp->total_preimage_len - unpadded;
     c->n_epochs = binom_u64(cut, early);
 #if QCPU_SHANI
-    if (c->shani) hash_plan(*c);
+    if (c->shani) {
+        hash_plan(*c);
+#if QSB_CPU_PAT_MINGRP > 1
+        if (c->hplan) {
+            int group_size[286] = {0}, group_order[286], order_count = 0;
+            bool seen[286] = {false};
+            for (int i = 0; i < c->ncwin; i++) group_size[c->h_g0[i]]++;
+            for (int i = 0; i < c->ncwin; i++) {
+                const int g = c->h_g0[i];
+                if (!seen[g] && group_size[g] >= QSB_CPU_PAT_MINGRP) {
+                    seen[g] = true; group_order[order_count++] = g;
+                }
+            }
+            int total = 0, keep_groups = 0;
+            for (int i = 0; i < order_count; i++) {
+                total += group_size[group_order[i]];
+                if (total % QSB_CPU_PAT_ALIGN == 0) keep_groups = i + 1;
+            }
+            bool keep[286] = {false};
+            for (int i = 0; i < keep_groups; i++) keep[group_order[i]] = true;
+            uint8_t selected[286][3]; int count = 0;
+            for (int i = 0; i < c->ncwin; i++)
+                if (keep[c->h_g0[i]]) memcpy(selected[count++], c->cwin[i], 3);
+            if (count >= 16 && count < c->ncwin) {
+                const int before = c->ncwin;
+                memcpy(c->cwin, selected, (size_t)count * 3);
+                c->ncwin = count;
+                hash_plan(*c);  /* rebuild every SHA schedule and group index for the selected patterns */
+                printf("  CPU co-grind: %d of %d patterns kept in whole block-0 groups\n", count, before);
+                fflush(stdout);
+            }
+        }
+#endif
+    }
 #endif
     if (!qsb_hv_init(&c->hv, dp, (const uint8_t (*)[QSB_SE_TWIN])win3, cut, early)) { printf("  CPU co-grind: off (gate)\n"); delete c; return; }
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
