@@ -55,6 +55,9 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
+#ifndef QSB_CG_RECOVER
+#define QSB_CG_RECOVER 1                  /* 1: a clean A/B window restores one shed worker */
+#endif
 #if (QSB_CG_B % 8) != 0
 #error "QSB_CG_B must be a multiple of 8"
 #endif
@@ -127,12 +130,18 @@ struct shared_t {
     std::atomic<int> running;
     std::atomic<int> ready;
     std::atomic<int> failed;
+    /* pochita0 accounting isolation: one writer per counter, 64B stride avoids
+     * adjacent workers sharing an active cache line. */
+    struct busy_counter_t {
+        std::atomic<uint64_t> value;
+        unsigned char padding[64 - sizeof(std::atomic<uint64_t>)];
+    };
     int nworkers;
-    int has_avx2, has_adx, has_sha;
+    int has_ifma, has_avx2, has_adx, has_sha;
     int ec_env, sha_env;                  /* overrides, -1 = auto */
-    std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4; -1 until chosen */
+    std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4, 3 = ifma8; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
-    std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
+    busy_counter_t busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
     double t_build;
 };
@@ -411,14 +420,27 @@ static int fill_batch(worker_t *w) {
 #define QSB_CG_HAVE_SIMD 0
 #endif
 
+/* ---------------- AVX-512 IFMA EC back end ---------------- */
+#define QSB_CG_NO_IFMA 1
+#if defined(__x86_64__) && !defined(QSB_CG_NO_IFMA)
+#include "cg_ifma8.h"
+#define QSB_CG_HAVE_IFMA 1
+#else
+#define QSB_CG_HAVE_IFMA 0
+#endif
+
 /* ---------------- table build ---------------- */
 #include "cg_table.h"
 
 
 static void run_ec(worker_t *w, int mode, void *vs, void *ss) {
+#if QSB_CG_HAVE_IFMA
+    if (mode == 3) { v8::ec_batch(w, (v8::vstate *)vs); return; }
+#endif
 #if QSB_CG_HAVE_SIMD
     if (mode == 2) { v4::ec_batch(w, (v4::vstate *)vs); return; }
-#else
+#endif
+#if !QSB_CG_HAVE_SIMD && !QSB_CG_HAVE_IFMA
     (void)vs;
 #endif
     if (mode == 1) ec_scalar<qcg_fe::FeAsm>(w, (sstate *)ss);
@@ -442,8 +464,15 @@ static void *worker_main(void *arg) {
         !BN_lebin2bn(S->pp->u2r_y, 32, w->ry) ||
         !EC_POINT_set_affine_coordinates(w->grp, w->Ru2, w->rx, w->ry, w->ctx)) { S->failed.store(1); return NULL; }
     void *vs = NULL;
+#if QSB_CG_HAVE_SIMD || QSB_CG_HAVE_IFMA
+    size_t vs_sz = 0;
 #if QSB_CG_HAVE_SIMD
-    if (S->has_avx2) vs = aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
+    if (sizeof(v4::vstate) > vs_sz) vs_sz = sizeof(v4::vstate);
+#endif
+#if QSB_CG_HAVE_IFMA
+    if (sizeof(v8::vstate) > vs_sz) vs_sz = sizeof(v8::vstate);
+#endif
+    if (S->has_avx2 || S->has_ifma) vs = aligned_alloc(64, (vs_sz + 63) & ~(size_t)63);
 #endif
     sstate *ss = (sstate *)aligned_alloc(64, (sizeof(sstate) + 63) & ~(size_t)63);
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load() || S->failed.load()) return NULL; usleep(2000); }
@@ -452,12 +481,17 @@ static void *worker_main(void *arg) {
      * the first discarded; the minimum per-candidate time of each stage decides. The AVX2 EC
      * stage is the design point: the scalar MULX stage is chosen only if it is >10% faster. */
     if (id == 0 && S->ec_mode.load() < 0) {
-        int ecs[3], nec = 0, shs[3], nsh = 0;
+        int ecs[4], nec = 0, shs[3], nsh = 0;
         if (S->ec_env >= 0) ecs[nec++] = S->ec_env;
-        else { if (S->has_avx2 && QSB_CG_HAVE_SIMD) ecs[nec++] = 2; if (S->has_adx) ecs[nec++] = 1; if (!nec) ecs[nec++] = 0; }
+        else {
+            if (S->has_ifma && QSB_CG_HAVE_IFMA) ecs[nec++] = 3;
+            if (S->has_avx2 && QSB_CG_HAVE_SIMD) ecs[nec++] = 2;
+            if (S->has_adx) ecs[nec++] = 1;
+            if (!nec) ecs[nec++] = 0;
+        }
         if (S->sha_env >= 0) shs[nsh++] = S->sha_env;
         else { if (S->has_sha) shs[nsh++] = 2; if (S->has_avx2) shs[nsh++] = 1; if (!nsh) shs[nsh++] = 0; }
-        double sha_best[3] = {1e30, 1e30, 1e30}, ec_best[3] = {1e30, 1e30, 1e30};   /* indexed by mode */
+        double sha_best[3] = {1e30, 1e30, 1e30}, ec_best[4] = {1e30, 1e30, 1e30, 1e30};   /* indexed by mode */
         for (int a = 0; a < nsh; a++) {
             S->sha_mode.store(shs[a]);
             for (int b = 0; b < nec; b++) {
@@ -486,13 +520,13 @@ static void *worker_main(void *arg) {
         S->sha_mode.store(bsha);
         S->ec_mode.store(bec);
         if (g_ctl_verbose) {
-            char tb[6][16];
-            const double tv[6] = {sha_best[2], sha_best[1], sha_best[0], ec_best[2], ec_best[1], ec_best[0]};
-            for (int q = 0; q < 6; q++) { if (tv[q] < 1e29) snprintf(tb[q], sizeof tb[q], "%.0f", tv[q]); else snprintf(tb[q], sizeof tb[q], "-"); }
-            printf("  [CPU] tsc/cand sha: sha-ni %s avx2x8 %s ref %s | ec: avx2x4 %s mulx %s c %s\n", tb[0], tb[1], tb[2], tb[3], tb[4], tb[5]);
+            char tb[7][16];
+            const double tv[7] = {sha_best[2], sha_best[1], sha_best[0], ec_best[3], ec_best[2], ec_best[1], ec_best[0]};
+            for (int q = 0; q < 7; q++) { if (tv[q] < 1e29) snprintf(tb[q], sizeof tb[q], "%.0f", tv[q]); else snprintf(tb[q], sizeof tb[q], "-"); }
+            printf("  [CPU] tsc/cand sha: sha-ni %s avx2x8 %s ref %s | ec: ifma8 %s avx2x4 %s mulx %s c %s\n", tb[0], tb[1], tb[2], tb[3], tb[4], tb[5], tb[6]);
             printf("  [CPU] chosen: sha=%s ec=%s, table %s (%.0f MiB, %d windows, built in %.2f s)\n",
                    bsha == 2 ? "sha-ni" : bsha == 1 ? "avx2x8" : "ref",
-                   bec == 2 ? "avx2x4" : bec == 1 ? "mulx" : "c", S->lay.name,
+                   bec == 3 ? "ifma8" : bec == 2 ? "avx2x4" : bec == 1 ? "mulx" : "c", S->lay.name,
                    (double)S->table_bytes / 1048576.0, S->lay.nwin, S->t_build);
         }
     }
@@ -508,7 +542,7 @@ static void *worker_main(void *arg) {
         if (n) run_ec(w, ecm, vs, ss);
         const uint64_t r2 = __rdtsc();
         S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
-        S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
+        S->busy_ns[id].value.fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
         S->running.fetch_sub(1);
         if (!n) break;
         S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
@@ -565,7 +599,7 @@ static double mem_available_mib() {
 
 /* ---------------- controller (called from the GPU host loop) ---------------- */
 struct ctl_t {
-    int wmax, cur;
+    int wmax, cur, wcap, whw;   /* whw = hardware ceiling, independent of the quota guess */
     int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
     double t_phase;
     double last_done;
@@ -580,7 +614,7 @@ struct ctl_t {
 };
 static ctl_t g_ctl;
 
-static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].load(std::memory_order_relaxed); return s; }
+static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworkers; i++) s += g_cg->busy_ns[i].value.load(std::memory_order_relaxed); return s; }
 
 /* Start: pick the table layout, build it in the background and spawn the (paused) workers. */
 static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) {
@@ -631,6 +665,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     if (env) nw = atoi(env);
     if (nw > QSB_CG_MAXW) nw = QSB_CG_MAXW;
     const int has_avx2 = __builtin_cpu_supports("avx2"), has_bmi2 = __builtin_cpu_supports("bmi2");
+    const int has_ifma = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma");
     int has_adx = 0;
     { unsigned r[4] = {0, 0, 0, 0}; __cpuid_count(7, 0, r[0], r[1], r[2], r[3]); has_adx = (r[1] >> 19) & 1; }
     const int has_sha = __builtin_cpu_supports("sha") && __builtin_cpu_supports("sse4.1");
@@ -647,9 +682,9 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
         else if (avail >= 900) lok = layout_by_name(&L, "small");
         else if (avail >= 500) lok = layout_by_name(&L, "tiny");
     }
-    printf("  CPU co-grind: %d CPUs in affinity, cgroup quota %s%.2f, %d workers%s%s%s%s, mem avail %.0f MiB\n",
+    printf("  CPU co-grind: %d CPUs in affinity, cgroup quota %s%.2f, %d workers%s%s%s%s%s, mem avail %.0f MiB\n",
            ncpu, quota > 0 ? "" : "none ", quota > 0 ? quota : 0.0, nw > 0 ? nw : 0, guard_ok ? ", smt-guard" : "",
-           has_avx2 ? ", avx2" : "", has_adx && has_bmi2 ? ", adx" : "", has_sha ? ", sha-ni" : "", avail);
+           has_ifma ? ", ifma8" : "", has_avx2 ? ", avx2" : "", has_adx && has_bmi2 ? ", adx" : "", has_sha ? ", sha-ni" : "", avail);
     if (nw <= 0 || lok != 0) return 0;
     if (pp->suffix_len > 119 || pp->seq_offset + 4 > pp->suffix_len || pp->lt_offset + 4 > pp->suffix_len || lt_max <= lt_min) return 0;
 
@@ -661,13 +696,15 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     S->n_chunks = (uint64_t)S->chunks_per_seq * 0x3FFFFFFFull;      /* sequences 0xFFFFFFFE down to 0xC0000000 */
     S->nblk = pp->suffix_len < 56 ? 1 : 2;
     S->cache_first = S->nblk == 2 && pp->seq_offset + 4 <= 64 && pp->lt_offset >= 64;
-    S->has_avx2 = has_avx2; S->has_adx = has_adx && has_bmi2; S->has_sha = has_sha;
+    S->has_ifma = has_ifma; S->has_avx2 = has_avx2; S->has_adx = has_adx && has_bmi2; S->has_sha = has_sha;
     g_fe_asm = S->has_adx;
     S->ec_env = -1; S->sha_env = -1;
     if (getenv("QSB_COGRIND_EC")) {
         const char *e = getenv("QSB_COGRIND_EC");
-        S->ec_env = !strcmp(e, "avx2") ? 2 : !strcmp(e, "mulx") ? 1 : 0;
-        if ((S->ec_env == 2 && !(has_avx2 && QSB_CG_HAVE_SIMD)) || (S->ec_env == 1 && !S->has_adx)) S->ec_env = 0;
+        S->ec_env = (!strcmp(e, "ifma") || !strcmp(e, "ifma8")) ? 3 : !strcmp(e, "avx2") ? 2 : !strcmp(e, "mulx") ? 1 : 0;
+        if ((S->ec_env == 3 && !(has_ifma && QSB_CG_HAVE_IFMA)) ||
+            (S->ec_env == 2 && !(has_avx2 && QSB_CG_HAVE_SIMD)) ||
+            (S->ec_env == 1 && !S->has_adx)) S->ec_env = 0;
     }
     if (getenv("QSB_COGRIND_SHA")) {
         const char *e = getenv("QSB_COGRIND_SHA");
@@ -690,17 +727,37 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     mkdir("results", 0755);
     S->hit_fd = open("results/pinning_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (S->hit_fd < 0) { g_cg = NULL; return 0; }
+    /* nw is only the STARTUP ALLOWANCE. Under a cgroup quota it is
+     * ceil(quota)-2, which on the ranked 20-CPU host leaves the co-grinder at
+     * roughly 4-5 effective workers and ~2.7 M cand/s, while the identical code
+     * reaches 19-25 M/s on 32-CPU hosts with no measurable GPU cost. Spawn up
+     * to the hardware ceiling instead and let the A/B controller raise
+     * `allowed` toward it; a thread with id >= allowed just parks on a 5 ms
+     * poll, so the spare threads cost nothing until they are switched on. */
+    int nw_hw = guard_ok ? CPU_COUNT(&g_worker_set) : ncpu - 1;
+    if (nw_hw > QSB_CG_MAXW) nw_hw = QSB_CG_MAXW;
+    if (nw_hw < nw) nw_hw = nw;
+    if (env || !QSB_CG_RECOVER) nw_hw = nw;        /* explicit override or switch off */
     if (table_start(S, nw) != 0) { g_cg = NULL; return 0; }
     recode_init(S->lay);
     S->allowed.store(0);
-    S->nworkers = nw;
-    for (int i = 0; i < nw; i++) {
+    S->nworkers = nw_hw;
+    for (int i = 0; i < nw_hw; i++) {
         pthread_t t;
         if (pthread_create(&t, NULL, worker_main, (void *)(intptr_t)i) != 0) { S->nworkers = i; break; }
         pthread_detach(t);
     }
+    if (nw > S->nworkers) nw = S->nworkers;
     memset(&g_ctl, 0, sizeof g_ctl);
-    g_ctl.wmax = S->nworkers; g_ctl.cur = 0;
+    g_ctl.wmax = nw; g_ctl.cur = 0; g_ctl.wcap = nw;
+    /* The startup worker count is a GUESS: under a cgroup quota it is
+     * ceil(quota)-2, which on the ranked 20-CPU host leaves the co-grinder at
+     * roughly 4-5 effective workers and about 2.7 M cand/s, against 19-25 M/s
+     * that the same code reaches on 32-CPU hosts. Record the real hardware
+     * ceiling so the A/B controller can climb toward it instead of treating
+     * the guess as a maximum. Climbing only ever happens on a measured-clean
+     * window, and the existing shedding rule still backs off on real loss. */
+    g_ctl.whw = S->nworkers;
     g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
     return S->nworkers;
 }
@@ -733,6 +790,17 @@ static void tick(double now, double gpu_batch) {
         if (C.verbose) printf("  [CPU] share check: %d workers received %.2f CPUs\n", C.cur, got);
         if (got < 0.8 * C.cur) {
             int nw = (int)got - 2; if (nw < 0) nw = 0;
+            /* Floor the clamp. This check fires 2 s after the first drained
+             * batch, i.e. inside start-up turbulence (table builds, first
+             * page faults), so a single unlucky sample used to strand the
+             * workers for the remaining ~1190 s. Harvested runs show the
+             * co-grinder reaching 19-25 M cand/s on 32-CPU hosts but only
+             * 2.7-5.6 on 20-CPU hosts, with no measurable GPU cost either
+             * way, so an over-tight clamp is the expensive failure, not an
+             * over-generous one. The A/B guard below still sheds on a real,
+             * sustained loss. */
+            const int floor_w = QSB_CG_RECOVER ? (C.wcap + 1) / 2 : 0;
+            if (nw < floor_w) nw = floor_w;
             C.wmax = nw; set_allowed(nw);
             printf("  CPU co-grind: workers received %.1f CPUs; using %d\n", got, nw);
         }
@@ -766,10 +834,22 @@ static void tick(double now, double gpu_batch) {
         const int bad = loss > 0.015 && loss > cpu_frac;
         if (bad && C.strikes >= 1) {
             int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
+            const int floor_w = QSB_CG_RECOVER ? (C.wcap + 3) / 4 : 0;
+            if (nw < floor_w) nw = floor_w;
             C.wmax = nw; set_allowed(nw); C.strikes = 0;
             printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
             C.next_ab = now + 5.0;
         } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
+        else if (QSB_CG_RECOVER && C.wmax < C.whw && loss < 0.005) {
+            /* Both shedding paths only ever lower wmax, so without this a single
+             * transient stall (a slow first table build, a thermal dip, one noisy
+             * A/B pair) strands those workers for the rest of the run. A window
+             * that measures clean hands one worker back and re-checks sooner than
+             * the steady-state interval, until we are up at the starting count
+             * again. Shedding is unchanged, so a real sustained loss still wins. */
+            C.strikes = 0; C.wmax++; set_allowed(C.wmax); C.next_ab = now + 10.0;
+            if (C.verbose) printf("  [CPU] worker ramp -> %d (cap %d, hw %d, loss %+.3f%%)\n", C.wmax, C.wcap, C.whw, 100 * loss);
+        }
         else { C.strikes = 0; C.next_ab = now + 60.0; }
         C.phase = 2;
         return;
