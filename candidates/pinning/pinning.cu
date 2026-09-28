@@ -1,6 +1,8 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
+#define QSB_CHAIN_ALU 1
+#define QSB_REMEASURE_TAG_0928095330 1
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -433,7 +435,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
@@ -1596,6 +1598,13 @@ __device__ __forceinline__ void qsb_pointadd_chain_pipe(
 #if !QSB_MUL_FOLD8_CUT
 #error "QSB_PAIR_ORD requires the QSB_MUL_FOLD8_CUT reduction tail"
 #endif
+/* QSB_KMUL 15: Karatsuba for U2 = X2*ZZ1 (bit 1), PPP = PP*P (bit 2), Q = U2*PP
+ * (bit 4) and ZZZ1 *= PPP (bit 8); ZZ1 *= PP (bit 16) stays on _ModMult. Only the
+ * prepare kernel changes; QSB_KMUL=0 rebuilds the base image byte for byte. */
+#ifndef QSB_KMUL
+#define QSB_KMUL 15
+#endif
+#include "KaratsubaMul.cuh"
 #include "pair_ordinate_mac.cuh"
 /* Chain addition with the negative deferred ordinate held as the pair (Qy,Ry),
  * -Y1 = Qy*Ry. The slope numerator R = S2*ZZZ1 + Qy*Ry is one two-product sum
@@ -1622,30 +1631,30 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #if !QSB_GATHER_EARLY
     if(PIPE) qsb_load_glv_y_code(table,next_code,Yoff);
 #endif
-    _ModMult(U2,X2,ZZ1);
+    QSB_KM3(1,U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
     QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
-    _ModMult(PPP,PP,P);
-    _ModMult(Q,U2,PP);
+    QSB_KM3(2,PPP,PP,P);
+    QSB_KM3(4,Q,U2,PP);
 #if QSB_ZZ_EARLY
     /* QSB_ZZ_EARLY: ZZ1 *= PP before the fused X3 and ZZZ1 *= PPP after Qy (statement order only). */
-    _ModMult(ZZ1,PP);
+    QSB_KM2(16,ZZ1,PP);
     _ModSqrAddSub2(X1,Ry,PPP,Q);
     QSB_SUB_CHAIN_QY(Qy,X1,Q);
 #if QSB_ZZZ_3ARG
-    _ModMult(ZZZ1,ZZZ1,PPP);
+    QSB_KM3(8,ZZZ1,ZZZ1,PPP);
 #else
-    _ModMult(ZZZ1,PPP);
+    QSB_KM2(8,ZZZ1,PPP);
 #endif
 #else
     _ModSqrAddSub2(X1,Ry,PPP,Q);
 #if QSB_ZZZ_3ARG
-    _ModMult(ZZZ1,ZZZ1,PPP);
+    QSB_KM3(8,ZZZ1,ZZZ1,PPP);
 #else
-    _ModMult(ZZZ1,PPP);
+    QSB_KM2(8,ZZZ1,PPP);
 #endif
-    _ModMult(ZZ1,PP);
+    QSB_KM2(16,ZZ1,PP);
     QSB_SUB_CHAIN_QY(Qy,X1,Q);
 #endif
 }
