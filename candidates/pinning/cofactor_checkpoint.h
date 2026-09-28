@@ -50,6 +50,20 @@
 #else
 #define QSB_TOP16_MUL qsb_field_mul
 #endif
+/* QSB_T5V_SC (HY7 port of Anshumancanrock c74c763a, 27 Sep; 0 = the base): the two remaining
+ * carry-complete products inside qsb_cofactor_top5v -- the wave product in qsb_t5v_wave and the hc
+ * product -- use the short-carry twin the rest of the tree already uses. Both results are consumed
+ * only by _ModMultCore-class multiplies (qsb_packed_raw_mul for hc, further tree products for the
+ * wave), which reduce the full 512-bit product and so accept any congruent 256-bit representative.
+ * Neither is a returned leaf inverse, and 0 maps to 0 under both forms (the unusable-lane path). */
+#ifndef QSB_T5V_SC
+#define QSB_T5V_SC 1
+#endif
+#if QSB_T5V_SC
+#define QSB_T5V_MUL qsb_field_mul_sc
+#else
+#define QSB_T5V_MUL qsb_field_mul
+#endif
 
 template<int N> __device__ __forceinline__ void qsb_cofactor_top16(
     uint64_t *roots, uint64_t (*products)[2*N], uint64_t (*excluded)[N]) {
@@ -664,7 +678,7 @@ template<int W,int N,int WARP=0> __device__ __forceinline__ void qsb_t5v_wave(ui
         if(kind) {
             uint64_t a[5],b[5],o[5];
             qsb_tv_ld(a,T,ia);qsb_tv_ld(b,T,ib);
-            qsb_field_mul(o,a,b);
+            QSB_T5V_MUL(o,a,b);
             if(W==4 && kind==3u) {
                 #pragma unroll
                 for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=o[k];
@@ -796,7 +810,7 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top5v(
     uint64_t g[5],e64[5];
     qsb_tv_ld(g,T,16u*QSB_GF_P(tid^(N/2)));
     qsb_tv_ld(e64,T,16u*QSB_GF_E(tid&(N/2-1)));
-    qsb_field_mul(value,g,e64);
+    QSB_T5V_MUL(value,g,e64);
     value[4]=0;
 }
 #endif /* QSB_POST_GLUE & 1 */

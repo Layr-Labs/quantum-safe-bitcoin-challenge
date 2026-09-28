@@ -50,6 +50,26 @@
 #define QSB_GLV_ZDEC  ((QSB_GLV_GLUE & 2) != 0)
 #define QSB_GLV_RND   ((QSB_GLV_GLUE & 4) != 0)
 #define QSB_SEED_GLUE ((QSB_GLV_GLUE & 8) != 0)
+/* QSB_DECODE_CUT (bit mask, default 0; HY16): fewer ALU instructions in the GLV residual path.
+ *  bit 1: q9_zdec borrow skip. w = z - s (s = bit 128 of z) is formed on the low 32-bit word
+ *         only; words 1..3 of w are z's. The borrow reaches word 1 only when s = 1 and
+ *         z mod 2^32 = 0: probability 2^-33 per residual, 2^-32 per candidate. Such a candidate
+ *         decodes a wrong scalar (a lost candidate); the host gate (QSB_HOST_GATE) re-derives
+ *         every published hit, so it can never publish a wrong one.
+ *  bit 2: q9_product129_rx without materialized carries: the column-3 carry of O0 and the
+ *         column-4 carries of E1 are added into O1 (words 3..4) as they are produced, instead
+ *         of being captured into registers and added in the final word chain. Exact: the
+ *         same x*d mod 2^129 (word 4 parity) for every input.
+ * 0 leaves the source and PTX unchanged. */
+#ifndef QSB_DECODE_CUT
+#define QSB_DECODE_CUT 3
+#endif
+#if QSB_DECODE_CUT < 0 || QSB_DECODE_CUT > 3
+#error "QSB_DECODE_CUT is a mask of bits 1 and 2"
+#endif
+#if QSB_DECODE_CUT && !(QSB_GLV_ZDEC && QSB_GLV_EO)
+#error "QSB_DECODE_CUT is written for the QSB_GLV_GLUE bits 1 and 2 path"
+#endif
 #if QSB_FOUR_HOT != 0 && QSB_FOUR_HOT != 1
 #error QSB_FOUR_HOT must be 0 or 1
 #endif
@@ -629,6 +649,26 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
 #if QSB_GLV_HIGH15 != 0 && QSB_GLV_HIGH15 != 1
 #error QSB_GLV_HIGH15 must be 0 or 1
 #endif
+/* Kill switches (0 = the forms below):
+ *   QSB_HIGH15_NOFB (0/1): q9_coeff_high15 always rounds from its diagonals 10..14 (no
+ *     out-of-line reference fallback). This package keeps 1, the value its timed runs used; the
+ *     frontier's author ships 0 in 9813a243 / 2ecfd24e (unpriced alone). 0 is one -D flip plus a
+ *     regenerated native carrier.
+ *   QSB_GLV_NZ_CUT (0/1): q9_glv_split_z reports both halves nonzero, so the chain always
+ *     starts from Q's two register seeds (no zero-half test, no seed-select branch).
+ * Every record code stays inside the table for any residual; the host gate re-derives hits. */
+#ifndef QSB_HIGH15_NOFB
+#define QSB_HIGH15_NOFB 1
+#endif
+#ifndef QSB_GLV_NZ_CUT
+#define QSB_GLV_NZ_CUT 1
+#endif
+#if QSB_HIGH15_NOFB != 0 && QSB_HIGH15_NOFB != 1
+#error "QSB_HIGH15_NOFB must be 0 or 1"
+#endif
+#if QSB_GLV_NZ_CUT != 0 && QSB_GLV_NZ_CUT != 1
+#error "QSB_GLV_NZ_CUT must be 0 or 1"
+#endif
 
 /* Exact original reference and rare out-of-line wrapper. q9_coeff_high15 computes only product
  * diagonals 10..14. The fixed omitted low part is too small to change the
@@ -779,9 +819,13 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
+#if QSB_HIGH15_NOFB
+    {
+#else
     constexpr uint32_t guard=(QSB_GLV_HIGH10_HI && QSB_GLV_LEAN)
         ? (WHICH==1 ? 0x7ffffff7U : 0x7ffffff8U) : FALLBACK_WORD;
     if(w11<guard || w11>=0x80000000U){
+#endif
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
 #if QSB_GLV_RND
@@ -795,10 +839,13 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
         const uint64_t round=(uint64_t)(w11>>31);
         q9_round_coeff(out,lo,hi,round);
 #endif
-    }else{
+    }
+#if !QSB_HIGH15_NOFB
+    else{
         ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
         out[0]=r.x;out[1]=r.y;
     }
+#endif
 }
 
 __device__ __forceinline__ void q9_coeff_g1(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
@@ -951,6 +998,43 @@ __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint3
  * x_i with odd d_j are added whole; their bits above bit 0 only reach unused bits of word 4). */
 __device__ __forceinline__ q9_u129 q9_product129_rx(const uint64_t x[2],const uint32_t d[4],uint32_t X) {
     uint32_t w0,w1,w2,w3,top;
+#if QSB_DECODE_CUT & 2
+    /* O1 first; cc3 (bit 0 of O1) and the two cc4 carries (bit 32 of O1) are added into it
+     * straight off the carry flag. O1 is kept mod 2^64: word 4 only matters for bit 0. */
+    asm("{\n\t"
+        ".reg .u32 x0,x1,x2,x3,a,b,c,e;\n\t"
+        ".reg .u64 E0,O0,E1,O1,m;\n\t"
+        "mov.b64 {x0,x1},%5;\n\t"
+        "mov.b64 {x2,x3},%6;\n\t"
+        "mul.wide.u32 O1,x0,%10;\n\t"
+        "mad.wide.u32 O1,x1,%9,O1;\n\t"
+        "mad.wide.u32 O1,x2,%8,O1;\n\t"
+        "mad.wide.u32 O1,x3,%7,O1;\n\t"
+        "mov.b64 {c,e},O1;\n\t"
+        "mul.wide.u32 E0,x0,%7;\n\t"
+        "mul.wide.u32 O0,x0,%8;\n\t"
+        "mul.wide.u32 m,x1,%7;\n\t"
+        "add.cc.u64 O0,O0,m;\n\t"
+        "addc.cc.u32 c,c,0;\n\t"
+        "addc.u32 e,e,0;\n\t"
+        "mul.wide.u32 E1,x0,%9;\n\t"
+        "mul.wide.u32 m,x1,%8;\n\t"
+        "add.cc.u64 E1,E1,m;\n\t"
+        "addc.u32 e,e,0;\n\t"
+        "mul.wide.u32 m,x2,%7;\n\t"
+        "add.cc.u64 E1,E1,m;\n\t"
+        "addc.u32 e,e,0;\n\t"
+        "mov.b64 {%0,a},E0;\n\t"
+        "mov.b64 {b,x0},O0;\n\t"
+        "add.cc.u32 %1,a,b;\n\t"
+        "mov.b64 {a,b},E1;\n\t"
+        "addc.cc.u32 %2,a,x0;\n\t"
+        "addc.cc.u32 %3,b,c;\n\t"
+        "addc.u32 %4,e,%11;\n\t"
+        "}"
+        : "=r"(w0),"=r"(w1),"=r"(w2),"=r"(w3),"=r"(top)
+        : "l"(x[0]),"l"(x[1]),"r"(d[0]),"r"(d[1]),"r"(d[2]),"r"(d[3]),"r"(X));
+#else
     asm("{\n\t"
         ".reg .u32 x0,x1,x2,x3,a,b,c,e,t,cc3,cc4;\n\t"
         ".reg .u64 E0,O0,E1,O1,m;\n\t"
@@ -985,6 +1069,7 @@ __device__ __forceinline__ q9_u129 q9_product129_rx(const uint64_t x[2],const ui
         "}"
         : "=r"(w0),"=r"(w1),"=r"(w2),"=r"(w3),"=r"(top)
         : "l"(x[0]),"l"(x[1]),"r"(d[0]),"r"(d[1]),"r"(d[2]),"r"(d[3]),"r"(X));
+#endif
     q9_u129 r={(uint64_t)w0|((uint64_t)w1<<32),
                (uint64_t)w2|((uint64_t)w3<<32),top};   /* bit 0 of top is bit 128 */
     return r;
@@ -1071,12 +1156,23 @@ __device__ __forceinline__ q9_u129 q9_sub129_z(q9_u129 a,q9_u129 b) {
 /* w = z + M = z - s (M = -s on all 128 bits), m32 = -s, top keeps bit 0 = s. */
 __device__ __forceinline__ void q9_zdec(uint64_t w[2],uint32_t *top,uint32_t *m32,q9_u129 z) {
     uint32_t m;
+#if QSB_DECODE_CUT & 1
+    /* QSB_DECODE_CUT bit 1: the low word only (see the switch; miss 2^-33, host-gated) */
+    asm("{\n\t.reg .u32 a,b;\n\t"
+        "bfe.s32 %1,%3,0,1;\n\t"
+        "mov.b64 {a,b},%2;\n\t"
+        "add.u32 a,a,%1;\n\t"
+        "mov.b64 %0,{a,b};\n\t}"
+        : "=l"(w[0]),"=r"(m) : "l"(z.lo),"r"(z.top));
+    w[1]=z.hi;
+#else
     asm("{\n\t.reg .u64 M;\n\t"
         "bfe.s32 %2,%5,0,1;\n\t"
         "mov.b64 M,{%2,%2};\n\t"
         "add.cc.u64 %0,%3,M;\n\t"
         "addc.u64 %1,%4,M;\n\t}"
         : "=l"(w[0]),"=l"(w[1]),"=r"(m) : "l"(z.lo),"l"(z.hi),"r"(z.top));
+#endif
     *top=z.top;*m32=m;
 }
 /* QSB_ZSPLIT_NOPRE (kill switch, default 1): q9_glv_split_z skips the k >= n pre-reduction.
@@ -1139,8 +1235,12 @@ __device__ __forceinline__ unsigned q9_glv_split_z(const uint64_t input[4],uint6
     const q9_u129 z1=q9_sub129_z(q9_sub129_z(kk,p),q);
     const q9_u129 z2=q9_sub129_z(rr,p);
     q9_zdec(w1,t1,m1,z1);q9_zdec(w2,t2,m2,z2);
+#if QSB_GLV_NZ_CUT
+    return 3u;
+#else
     const unsigned p_nonzero=(z1.lo|z1.hi)!=0;
     const unsigned q_nonzero=(z2.lo|z2.hi)!=0;
     return q_nonzero|(p_nonzero<<1);
+#endif
 }
 #endif

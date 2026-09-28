@@ -1,7 +1,10 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 4
+#define QSB_SUBRING 6
 #define QSB_ROOT_FUSED 1
+#ifndef QSB_PERSIST_WINDOW_CAP
+#define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #define QSB_GREEN 20
 #define QSB_GREEN_SHARED 8
@@ -36,6 +39,15 @@
 
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
+#endif
+#ifndef QSB_FEED_BLOCK
+#define QSB_FEED_BLOCK 2 /* HY24 (host only): 0 = CUDA's default spin wait (the feeder thread burns a core).
+                          * 1 = blocking sync (context flag + blocking slot events), and the co-grinder may use
+                          *     the feeder CPU's hyperthread sibling; 2 = as 1, plus a SCHED_IDLE worker on the
+                          *     feeder CPU itself (the woken feeder preempts it). Device code is unchanged. */
+#endif
+#if QSB_FEED_BLOCK < 0 || QSB_FEED_BLOCK > 2
+#error "QSB_FEED_BLOCK must be 0, 1 or 2"
 #endif
 #ifndef QSB_C31
 #define QSB_C31 1        /* 2^-31 fold / 64-bit split-3p / one-limb K; needs HOST_GATE */
@@ -144,7 +156,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
- * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 4 x 4M here, 2 x 8M before. */
+ * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 3 x 4M here (4 x 4M, 2 x 8M before). */
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
@@ -168,7 +180,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * candidate, 128 B less DRAM): it moves a fraction 1/K of the candidates from the
  * DRAM-bound mix toward the compute side. 0 compiles the GLV11 decode and chain as before. */
 #ifndef QSB_PMIX12
-#define QSB_PMIX12 32
+#define QSB_PMIX12 65536
 #endif
 #if QSB_PMIX12 != 0 && (QSB_PMIX12 < 2 || (QSB_PMIX12 & (QSB_PMIX12-1)) != 0)
 #error "QSB_PMIX12 must be 0 or a power of two >= 2"
@@ -421,8 +433,8 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
-                               * 4 x 4M holds the 2 x 8M state bytes: each sequence's final drain and
+#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+                               * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
 #endif
@@ -575,6 +587,22 @@ __device__ __forceinline__ void qsb_st_state_u64(uint64_t *p, uint64_t a) {
                  :: "l"(p), "l"(a) : "memory");
 #else
     qsb_st_u64(p, a);
+#endif
+}
+/* 16-byte form of qsb_st_state_u64 (same L2 policy): one entry of a state plane. */
+__device__ __forceinline__ void qsb_st_state_v2(ulonglong2 *p, uint64_t a, uint64_t b) {
+#if (QSB_L2STATE & 8) && QSB_SM80_PTX
+    /* QSB_L2STATE bit 8 on the 16-byte form: the same L2::evict_last cache policy as
+     * qsb_st_state_u64, same bytes, same address. */
+    uint64_t pol;
+    asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(pol));
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.L2::cache_hint.v2.u64 [g], {%1,%2}, %3; }"
+                 :: "l"(p), "l"(a), "l"(b), "l"(pol) : "memory");
+#elif QSB_L2STATE & 1
+    asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %0; st.global.v2.u64 [g], {%1,%2}; }"
+                 :: "l"(p), "l"(a), "l"(b) : "memory");
+#else
+    qsb_st_v2(p, a, b);
 #endif
 }
 __device__ __forceinline__ void qsb_discard_l2(const void *p) {
@@ -954,11 +982,22 @@ __device__ __forceinline__ void _PointAddXYZZ_early(
  * sum subtracts 2c = K-1 (_ModAddLazyOff in GPUMath.h), and the last anchor is converted
  * back here. The borrow is kept through limb 1: dropped only if y'0 < c (2^-33) and y'1 == 0
  * (2^-64), i.e. <= 2^-97 once per candidate. */
+/* QSB_YOFF_Y1_CUT (kill switch, default 1): the conversion subtracts c from limb 0 only. */
+#ifndef QSB_YOFF_Y1_CUT
+#define QSB_YOFF_Y1_CUT 1
+#endif
+#if QSB_YOFF_Y1_CUT != 0 && QSB_YOFF_Y1_CUT != 1
+#error "QSB_YOFF_Y1_CUT must be 0 or 1"
+#endif
 __device__ __forceinline__ void qsb_yoff_to_y(uint64_t *y) {
+#if QSB_YOFF_Y1_CUT
+    y[0] = y[0] - 0x800001E8ULL;
+#else
     uint64_t r0, r1;
     asm("{\n.reg .u64 t;\nsub.cc.u64 %0, %2, 0x800001E8;\nsubc.u64 %1, %3, 0;\n}"
         : "=l"(r0), "=l"(r1) : "l"(y[0]), "l"(y[1]));
     y[0] = r0; y[1] = r1;
+#endif
 }
 /* Table post-pass: y += c for every entry (exact: y < p so y + c < 2^256). */
 __global__ void qsb_table_offset_y(uint8_t *gTable) {
@@ -1543,6 +1582,16 @@ __device__ __forceinline__ void qsb_pointadd_chain_pipe(
     _ModSub256(Q,X1,Q);
     _ModMult(Y1,Q,R);
 }
+/* QSB_ZZZ_3ARG (kill switch, default 1): the chain add's ZZZ1 *= PPP is written as the three-argument
+ * _ModMult(ZZZ1,ZZZ1,PPP) (ZZZ1*PPP) instead of the two-argument form (PPP*ZZZ1). _ModMultCore reduces
+ * the exact product, so the operand order cannot change the bits; only ptxas' register assignment
+ * differs (with QSB_SAS_PRESUB it removes 8 moves/SASS from the chain loop). */
+#ifndef QSB_ZZZ_3ARG
+#define QSB_ZZZ_3ARG 1
+#endif
+#ifndef QSB_ZZ_EARLY
+#define QSB_ZZ_EARLY 1
+#endif
 #if QSB_PAIR_ORD
 #if !QSB_MUL_FOLD8_CUT
 #error "QSB_PAIR_ORD requires the QSB_MUL_FOLD8_CUT reduction tail"
@@ -1575,14 +1624,30 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #endif
     _ModMult(U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
-    _ModSub256(P,U2,X1);
+    QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
     _ModMult(PPP,PP,P);
     _ModMult(Q,U2,PP);
-    _ModSqrAddSub2(X1,Ry,PPP,Q);
-    _ModMult(ZZZ1,PPP);
+#if QSB_ZZ_EARLY
+    /* QSB_ZZ_EARLY: ZZ1 *= PP before the fused X3 and ZZZ1 *= PPP after Qy (statement order only). */
     _ModMult(ZZ1,PP);
-    _ModSub256(Qy,X1,Q);
+    _ModSqrAddSub2(X1,Ry,PPP,Q);
+    QSB_SUB_CHAIN_QY(Qy,X1,Q);
+#if QSB_ZZZ_3ARG
+    _ModMult(ZZZ1,ZZZ1,PPP);
+#else
+    _ModMult(ZZZ1,PPP);
+#endif
+#else
+    _ModSqrAddSub2(X1,Ry,PPP,Q);
+#if QSB_ZZZ_3ARG
+    _ModMult(ZZZ1,ZZZ1,PPP);
+#else
+    _ModMult(ZZZ1,PPP);
+#endif
+    _ModMult(ZZ1,PP);
+    QSB_SUB_CHAIN_QY(Qy,X1,Q);
+#endif
 }
 /* _PointAddXYZZ_mm with its deferred ordinate returned as the pair (T-Q, R). */
 __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
@@ -1590,16 +1655,16 @@ __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
                                      const uint64_t *X1,const uint64_t *Y1,
                                      const uint64_t *X2,const uint64_t *Y2) {
     uint64_t P[4],Q[4],T[4];
-    _ModSub256(P,(uint64_t *)X2,(uint64_t *)X1);
-    _ModSub256(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
+    QSB_SUB_SEED(P,(uint64_t *)X2,(uint64_t *)X1);
+    QSB_SUB_SEED(Ry,(uint64_t *)Y2,(uint64_t *)Y1);
     _ModSqr(ZZ3,P);
     _ModMult(ZZZ3,ZZ3,P);
     _ModMult(Q,(uint64_t *)X1,ZZ3);
     _ModSqr(T,Ry);
-    _ModSub256(T,T,ZZZ3);
-    _ModSub256(T,T,Q);
-    _ModSub256(T,T,Q);
-    _ModSub256(Qy,T,Q);
+    QSB_SUB_SEED(T,T,ZZZ3);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(T,T,Q);
+    QSB_SUB_SEED(Qy,T,Q);
     Load256(X3,T);
 }
 #endif
@@ -3149,6 +3214,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #ifndef QSB_ROOT_FUSED
 #define QSB_ROOT_FUSED 0
 #endif
+#ifndef QSB_RROOT_TREES
+#define QSB_RROOT_TREES 1  /* register-tree root inverse, checked at startup */
+#endif
 #ifndef QSB_RF_LANES
 #define QSB_RF_LANES 128   /* one prepare-block slot: 128 threads x <= 128 registers */
 #endif
@@ -3308,6 +3376,13 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         }
     }
 }
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream);
 #endif
 
 /* Shared-denominator recovery directly from XYZZ coordinates.
@@ -3525,14 +3600,13 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
     Load256(W,rw);
     W[4]=0;
 }
-/* The state stores of qsb_packed_prepare (QSB_PREP_STATE == 2): same bytes, same addresses. */
+/* The state stores of qsb_packed_prepare, as four 16-byte stores: same bytes, same addresses. */
 __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *vbar, const uint64_t *tbar) {
     ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
-    uint64_t *sw=(uint64_t *)st;
-    qsb_st_state_u64(sw,vbar[0]); qsb_st_state_u64(sw+1,vbar[1]);
-    qsb_st_state_u64(sw+2*QSB_TREE_N,vbar[2]); qsb_st_state_u64(sw+2*QSB_TREE_N+1,vbar[3]);
-    qsb_st_state_u64(sw+4*QSB_TREE_N,tbar[0]); qsb_st_state_u64(sw+4*QSB_TREE_N+1,tbar[1]);
-    qsb_st_state_u64(sw+6*QSB_TREE_N,tbar[2]); qsb_st_state_u64(sw+6*QSB_TREE_N+1,tbar[3]);
+    qsb_st_state_v2(st,vbar[0],vbar[1]);
+    qsb_st_state_v2(st+QSB_TREE_N,vbar[2],vbar[3]);
+    qsb_st_state_v2(st+2*QSB_TREE_N,tbar[0],tbar[1]);
+    qsb_st_state_v2(st+3*QSB_TREE_N,tbar[2],tbar[3]);
 }
 #if QSB_POST_GLUE & 4
 /* QSB_POST_GLUE bit 4: an unusable lane (W == 0, or inactive) also enters the tree with U = 0.
@@ -3985,7 +4059,27 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
+#endif
 #include "QsbCarrier.h"
+#if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    constexpr int K=QSB_RF_K;
+    if(g_qsb_register_roots){
+        if(qsb_carrier_has(QK_RR))
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,roots,count);
+        else qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    } else if(qsb_carrier_has(QK_RF))
+        qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+}
+#endif
+
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4129,7 +4223,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t sB[2], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4169,8 +4263,10 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
 #ifndef QSB_GREEN_RT_B
 #define QSB_GREEN_RT_B 0   /* 1: the root kernel runs on the finish partition */
 #endif
-    if (qsb_cuGreenCtxStreamCreate(&t, QSB_GREEN_RT_B ? gB : gA, CU_STREAM_NON_BLOCKING, greatest) != CUDA_SUCCESS) return 0;
-    sA[2] = (cudaStream_t)t;
+    for (int i = 0; i < 2; i++) {
+        if (qsb_cuGreenCtxStreamCreate(&t, QSB_GREEN_RT_B ? gB : gA, CU_STREAM_NON_BLOCKING, greatest) != CUDA_SUCCESS) return 0;
+        sA[2+i] = (cudaStream_t)t;
+    }
 #ifndef QSB_GREEN_S2_LEAST
 #define QSB_GREEN_S2_LEAST 0   /* 1: finish streams at the least priority (the root kernel then outranks them) */
 #endif
@@ -4185,14 +4281,17 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[3], cudaStream_t s
 /* QSB_SUBPIPE: one host batch as a sequence of QSB_SUBPIPE-candidate sub-batches.
  * Sub-batch g uses ring entry g % QSB_SUBRING (state, roots, super roots, checkpoint).
  *   prepare(g)  on sp.s0[g&1]  (least priority; waits for finish(g-QSB_SUBRING): ring reuse)
- *   roots(g)    on sp.rt       (greatest priority; waits for prepare(g))
+ *   roots(g)    on sp.rtb[g&1] (greatest priority; waits for its own prepare(g))
  *   finish(g)   on sp.s2       (QSB_SUB_S2PRIO; waits for roots(g))
  * Every kernel gets exactly the arguments the monolithic launch would give it for the same
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
+#include "QsbSubGraph.h"
+
 struct QsbSubPipe {
     int ready;
-    cudaStream_t s0[2], rt, s2, s2b[2];
+    cudaStream_t s0[2], rt, rtb[2], s2, s2b[2];
+    int root_serial; // correctness/diagnostic rollback only; no timing-based selection
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
@@ -4204,6 +4303,7 @@ static void qsb_subpipe_die(const char *what, cudaError_t e) {
     fprintf(stderr, "Sub-batch pipeline %s failed: %s\n", what, cudaGetErrorString(e));
     exit(2);
 }
+#include "RegisterRootCheck.h"
 static int g_qsb_sub_ok = 0;
 static int qsb_subpipe_init(cudaStream_t like) {
     QsbSubPipe &P = g_qsb_sub;
@@ -4227,28 +4327,35 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[3], sB[2]; unsigned nA = 0, nB = 0;
+        cudaStream_t sA[4], sB[2]; unsigned nA = 0, nB = 0;
         if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
             printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
             return 0;
         }
-        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2]; P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
+        P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2];
+        P.rtb[0] = sA[2]; P.rtb[1] = sA[3];
+        P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
         printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
     }
 #else
     for (int i = 0; i < 2 && e == cudaSuccess; i++)
         e = cudaStreamCreateWithPriority(&P.s0[i], cudaStreamNonBlocking, least);
-    if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.rt, cudaStreamNonBlocking, greatest);
+    for (int i = 0; i < 2 && e == cudaSuccess; i++)
+        e = cudaStreamCreateWithPriority(&P.rtb[i], cudaStreamNonBlocking, greatest);
+    P.rt = P.rtb[0];
     if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.s2, cudaStreamNonBlocking,
                                                            QSB_SUB_S2PRIO ? greatest : least);
     P.s2b[0] = P.s2b[1] = P.s2;
     if (e != cudaSuccess) qsb_subpipe_die("stream setup", e);
 #endif
+    const char *root_serial = getenv("QSB_ROOT_SERIAL");
+    P.root_serial = root_serial && atoi(root_serial) != 0;
+    printf("  Root queues: %s\n", P.root_serial ? "serial diagnostic" : "two independent prepare lanes");
     /* The persisting-L2 window is a per-stream attribute: copy the slot stream's. */
     cudaStreamAttrValue av = {};
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
-        cudaStream_t all[5] = {P.s0[0], P.s0[1], P.rt, P.s2b[0], P.s2b[1]};
-        for (int i = 0; i < 5; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+        cudaStream_t all[6] = {P.s0[0], P.s0[1], P.rtb[0], P.rtb[1], P.s2b[0], P.s2b[1]};
+        for (int i = 0; i < 6; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -4269,6 +4376,16 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=QSB_RROOT_TREES &&
+        qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted prefix / scalar fallback");
+    fflush(stdout);
+    /* QSB_SUBGRAPH (QsbSubGraph.h, default 0): one CUDA graph per state ring for
+     * prepare -> root inverse -> finish, on the same streams' contexts. */
+    qsb_sg::enabled = qsb_sg::init(P.s0, P.rtb, P.s2b, g_qsb_register_roots);
+#endif
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4278,7 +4395,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            qsb_launch_selected_roots(P.roots[0],nb,P.rt);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4310,17 +4427,53 @@ static void qsb_subpipe_launch(
     if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2b[0], P.ev_in, 0);
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(P.s2b[1], P.ev_in, 0);
     if (e != cudaSuccess) qsb_subpipe_die("input ordering", e);
+    if (qsb_sg::enabled)
+        for (int r = 0; r < QSB_SUBRING; r++)
+            qsb_sg::check(cudaStreamWaitEvent(qsb_sg::rings[r].stream, P.ev_in, 0), "input ordering");
     for (int off = 0; off < batch_size; off += QSB_SUBPIPE) {
         const int n = batch_size - off < QSB_SUBPIPE ? batch_size - off : QSB_SUBPIPE;
         const int r = (int)(P.g % (unsigned long long)QSB_SUBRING);
         cudaStream_t s0 = P.s0[P.g & 1ull];
+        cudaStream_t root_st = P.rtb[P.root_serial ? 0 : (P.g & 1ull)];
         const uint32_t lt0 = start_lt + (uint32_t)off;
         uint64_t *hit_base = (uint64_t *)(uintptr_t)(uint32_t)off;   /* finish: QSB_HIT_BASE */
-        if (P.used[r]) {
+        const int blocks = (n + QSB_TREE_N - 1) / QSB_TREE_N;
+#if QSB_ROOT_FUSED
+        qsb_sg::Ring &graph = qsb_sg::rings[r];
+        if (qsb_sg::enabled && graph.exec) {
+            /* Replay the ring's captured chain with this sub-batch's arguments. The root
+             * buffer and full sub-batch count stay fixed per ring; a short tail updates the
+             * root count, and the next full batch restores it. */
+            qsb_sg::update(kernel_pinning_pipeline<true,0>, graph.exec, graph.prepare, graph.pp, dim3(blocks),
+                d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+            if (graph.root_count != blocks) {
+                if (g_qsb_register_roots)
+                    qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(1),
+                                   P.roots[r], blocks);
+                else
+                    qsb_sg::update(qsb_root_fused<QSB_RF_K>, graph.exec, graph.root, graph.rp, dim3(1),
+                                   P.roots[r], blocks);
+                graph.root_count = blocks;
+            }
+            qsb_sg::update(kernel_pinning_pipeline<true,2>, graph.exec, graph.finish, graph.fp, dim3(blocks),
+                d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                P.state[r],P.roots[r],hit_base,tp);
+            qsb_sg::check(cudaGraphLaunch(graph.exec, graph.stream), "launch");
+            P.g++;
+            continue;
+        }
+        if (qsb_sg::enabled)
+            qsb_sg::check(cudaStreamBeginCapture(s0, cudaStreamCaptureModeRelaxed), "begin capture");
+#endif
+        if (P.used[r] && !qsb_sg::enabled) {
             e = cudaStreamWaitEvent(s0, P.ev_s2[r], 0);
             if (e != cudaSuccess) qsb_subpipe_die("ring wait", e);
         }
-        const int blocks = (n + QSB_TREE_N - 1) / QSB_TREE_N;
         const int groups = (blocks + 255) / 256;
         if (qsb_carrier_has(QK_S0))
             qsb_carrier_launch(kernel_pinning_pipeline<true,0>,QK_S0,dim3(blocks),dim3(QSB_S0_THREADS),s0,
@@ -4336,35 +4489,31 @@ static void qsb_subpipe_launch(
                 P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
         e = cudaGetLastError();
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_s0[r], s0);
-        if (e == cudaSuccess) e = cudaStreamWaitEvent(P.rt, P.ev_s0[r], 0);
+        if (e == cudaSuccess) e = cudaStreamWaitEvent(root_st, P.ev_s0[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        if (qsb_carrier_has(QK_RF))
-            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
-        else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,root_st);
 #else
         if (qsb_carrier_has(QK_RGP))
-            qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
+            qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),root_st,
                 P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
         else
-            qsb_root_group_prepare<<<groups,256,0,P.rt>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
+            qsb_root_group_prepare<<<groups,256,0,root_st>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
         if (qsb_carrier_has(QK_ISR))
-            qsb_carrier_launch(qsb_invert_super_roots,QK_ISR,dim3((groups+255)/256),dim3(256),P.rt,
+            qsb_carrier_launch(qsb_invert_super_roots,QK_ISR,dim3((groups+255)/256),dim3(256),root_st,
                 P.super_roots[r],groups);
         else
-            qsb_invert_super_roots<<<(groups+255)/256,256,0,P.rt>>>(P.super_roots[r],groups);
+            qsb_invert_super_roots<<<(groups+255)/256,256,0,root_st>>>(P.super_roots[r],groups);
         if (qsb_carrier_has(QK_RGF))
-            qsb_carrier_launch(qsb_root_group_finish,QK_RGF,dim3(groups),dim3(256),P.rt,
+            qsb_carrier_launch(qsb_root_group_finish,QK_RGF,dim3(groups),dim3(256),root_st,
                 P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
         else
-            qsb_root_group_finish<<<groups,256,0,P.rt>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
+            qsb_root_group_finish<<<groups,256,0,root_st>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
 #endif
         e = cudaGetLastError();
         P.s2 = P.s2b[P.g & 1ull];
-        if (e == cudaSuccess) e = cudaEventRecord(P.ev_rt[r], P.rt);
+        if (e == cudaSuccess) e = cudaEventRecord(P.ev_rt[r], root_st);
         if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2, P.ev_rt[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("roots", e);
         if (qsb_carrier_has(QK_S2))
@@ -4382,8 +4531,25 @@ static void qsb_subpipe_launch(
         e = cudaGetLastError();
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_s2[r], P.s2);
         if (e != cudaSuccess) qsb_subpipe_die("finish", e);
+#if QSB_ROOT_FUSED
+        if (qsb_sg::enabled) {
+            qsb_sg::check(cudaStreamWaitEvent(s0, P.ev_s2[r], 0), "capture join");
+            qsb_sg::check(cudaStreamEndCapture(s0, &graph.graph), "end capture");
+            qsb_sg::instantiate(graph, blocks);
+            qsb_sg::check(cudaGraphLaunch(graph.exec, graph.stream), "first launch");
+        }
+#endif
         P.used[r] = 1;
         P.g++;
+    }
+    if (qsb_sg::enabled) {
+        /* Each ring stream orders its own graph launches across host batches; the slot's
+         * readback waits for every ring's last finish before its hit buffers are reused. */
+        for (int r = 0; r < QSB_SUBRING; r++) {
+            qsb_sg::check(cudaEventRecord(qsb_sg::rings[r].done, qsb_sg::rings[r].stream), "completion");
+            qsb_sg::check(cudaStreamWaitEvent(st, qsb_sg::rings[r].done, 0), "output ordering");
+        }
+        return;
     }
     /* the slot's readback (on st) follows the last finish of this host batch */
     e = cudaEventRecord(P.ev_out, P.s2b[0]);
@@ -4422,8 +4588,22 @@ static void qsb_subpipe_launch(
  * left out of the product exactly as the one-record builder copies them. The spot check
  * and the host-builder fallback are unchanged. 1 restores the one-inversion-per-record
  * kernel. */
+/* QSB_GT_STRIPE (0 or 1, default 0; after pochita0 511b391d, startup only): a warp owns 32*B
+ * records and each lane's inversion batch walks columns spaced by 32, so a warp's j-th writes touch
+ * 32 adjacent table records; with it the default batch is 24. The unchanged 256-thread launch
+ * covers whole warps. 0 = the consecutive-record batches below. */
+#ifndef QSB_GT_STRIPE
+#define QSB_GT_STRIPE 0
+#endif
+#if QSB_GT_STRIPE != 0 && QSB_GT_STRIPE != 1
+#error "QSB_GT_STRIPE must be 0 or 1"
+#endif
 #ifndef QSB_GT_BATCH
+#if QSB_GT_STRIPE
+#define QSB_GT_BATCH 24
+#else
 #define QSB_GT_BATCH 12
+#endif
 #endif
 static_assert(QSB_GT_BATCH >= 1 && QSB_GT_BATCH <= 32, "QSB_GT_BATCH range");
 #if QSB_GT_BATCH > 1
@@ -4496,15 +4676,27 @@ __global__ void kernel_build_gtable(
     uint8_t * __restrict__ gTable)
 {
 #if QSB_GT_BATCH > 1
+#if QSB_GT_STRIPE
+    const uint64_t tid = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const uint64_t t0 = (tid >> 5) * (32u * QSB_GT_BATCH) + (tid & 31u);
+#define QSB_GT_REC(j) (t0 + (uint64_t)(j) * 32u)
+#else
     const uint64_t t0 = ((uint64_t)blockIdx.x * blockDim.x + threadIdx.x) * QSB_GT_BATCH;
+#define QSB_GT_REC(j) (t0 + (uint64_t)(j))
+#endif
     if (t0 >= GT_TOTAL_ENTRIES) return;
+#if QSB_GT_STRIPE
+    const uint64_t remaining = (GT_TOTAL_ENTRIES - t0 + 31u) / 32u;
+    const int n = remaining < (uint64_t)QSB_GT_BATCH ? (int)remaining : QSB_GT_BATCH;
+#else
     const int n = (GT_TOTAL_ENTRIES - t0) < (uint64_t)QSB_GT_BATCH ?
                   (int)(GT_TOTAL_ENTRIES - t0) : QSB_GT_BATCH;
+#endif
     uint64_t zs[QSB_GT_BATCH][4], pref[QSB_GT_BATCH][4];
     uint64_t acc[5] = {1, 0, 0, 0, 0};   /* _ModInv works on five limbs; acc[4] stays 0 */
     uint32_t fix = 0;                    /* bit j: record j is projective (hi != 0) */
     for (int j = 0; j < n; j++) {
-        const uint64_t t = t0 + j;
+        const uint64_t t = QSB_GT_REC(j);
         const int ch = gt_build_segment(t);
         if (ch < 0) continue;
         const int d = (int)(t - gt_offset(ch));
@@ -4551,7 +4743,7 @@ __global__ void kernel_build_gtable(
         } else {
             for (int k = 0; k < 4; k++) zinv[k] = acc[k];
         }
-        uint64_t *rec = (uint64_t *)(gTable + (t0 + j) * 64);
+        uint64_t *rec = (uint64_t *)(gTable + QSB_GT_REC(j) * 64);
         for (int k = 0; k < 4; k++) { px[k] = rec[k]; py[k] = rec[4 + k]; }
         _ModMult(px, zinv); _ModMult(py, zinv);
         /* The shared chain runs on the approximate field products (C31 tails), which err
@@ -4561,7 +4753,7 @@ __global__ void kernel_build_gtable(
         if (gt_on_curve(px, py, bc)) {
             for (int k = 0; k < 4; k++) { rec[k] = px[k]; rec[4 + k] = py[k]; }
         } else {
-            gt_build_one(t0 + j, d_L, d_H, gTable);
+            gt_build_one(QSB_GT_REC(j), d_L, d_H, gTable);
         }
     }
 #else
@@ -5196,10 +5388,40 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #ifndef QSB_CPU_GRIND
 #define QSB_CPU_GRIND 1
 #endif
+/* QSB_CPU_GRIND_V3 (host only): 1 = the V3 co-grinder (cpu_cogrind3.h: the public v2 grinder's
+ * AVX2 multi-buffer SHA, signed windows and memory-sized table, plus an AVX-512 IFMA radix-2^52
+ * EC stage chosen by cpuid and timing, with AVX2/MULX/C fallbacks) in place of cpu_cogrind.h;
+ * same sequences, same exact gate, same qcg:: interface. 0 = the base's co-grinder. */
+#ifndef QSB_CPU_GRIND_V3
+#define QSB_CPU_GRIND_V3 1
+#endif
+/* QSB_CG_HIGHFOLD (host only; HY7 port of jacklightChen fb1105b1, 27 Sep): 1 = the V3 co-grinder may
+ * pick the "highfold" 17 GiB table (the A-folded unsigned window moved to bits 231..255, nine signed
+ * 25/26-bit windows below it: ten windows, one CPU affine addition fewer than xlarge's eleven) when the
+ * host and cgroup report >= 32 GiB available, and builds tables in 65,536-entry segments of 4,096-point
+ * rows. Every CPU nomination still passes the exact host gate. 0 = the base co-grinder byte for byte. */
+#ifndef QSB_CG_HIGHFOLD
+#define QSB_CG_HIGHFOLD 1
+#endif
+/* QSB_CG_HETERO (host only; CG5, 27 Sep): 1 = when the V3 co-grinder runs its AVX2 EC stage on a host
+ * without IFMA, pin each worker to one CPU and, after all workers run, time the SMT split (AVX2 on each
+ * core's first sibling, MULX on the second) against AVX2 everywhere in 3 s windows (off on on off, twice);
+ * keep the split only if it is >= 3% faster per worker. Measured +3.6% on a Xeon E5-2630 v4 (the r5
+ * grader class, 18 workers). Same candidates, same exact gate. 0 = the base co-grinder's behaviour. */
+#ifndef QSB_CG_HETERO
+#define QSB_CG_HETERO 1
+#endif
+#if QSB_CG_HIGHFOLD && !QSB_CPU_GRIND_V3
+#error "QSB_CG_HIGHFOLD is ported into the V3 co-grinder (QSB_CPU_GRIND_V3=1)"
+#endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
 #include <fcntl.h>
 #include <unistd.h>
+#if QSB_CPU_GRIND_V3
+#include "cpu_cogrind3.h"
+#else
 #include "cpu_cogrind.h"
+#endif
 #endif
 
 
@@ -5232,6 +5454,15 @@ int main(int argc, char **argv) {
 #if !QSB_FAST_START
     /* Use the specified GPU */
     cudaSetDevice(gpu_index);
+#if QSB_FEED_BLOCK
+    {   /* the primary context exists after cudaSetDevice; CUDA 12 overwrites its flags in place */
+        cudaError_t fe = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+        unsigned int ff = 0; cudaGetDeviceFlags(&ff);
+        printf("  Feeder sync: blocking (%s, flags 0x%x), mode %d\n",
+               fe == cudaSuccess ? "set" : cudaGetErrorString(fe), ff, QSB_FEED_BLOCK);
+        cudaGetLastError();
+    }
+#endif
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
@@ -5280,6 +5511,15 @@ int main(int argc, char **argv) {
 
     /* Meanwhile the main thread creates the context. */
     cudaSetDevice(gpu_index);
+#if QSB_FEED_BLOCK
+    {   /* the primary context exists after cudaSetDevice; CUDA 12 overwrites its flags in place */
+        cudaError_t fe = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+        unsigned int ff = 0; cudaGetDeviceFlags(&ff);
+        printf("  Feeder sync: blocking (%s, flags 0x%x), mode %d\n",
+               fe == cudaSuccess ? "set" : cudaGetErrorString(fe), ff, QSB_FEED_BLOCK);
+        cudaGetLastError();
+    }
+#endif
 
     cudaDeviceProp prop; cudaGetDeviceProperties(&prop, gpu_index);
     printf("QSB Real Pinning Search (seq+lt) [GPU %d]\n", gpu_index);
@@ -5628,8 +5868,12 @@ int main(int argc, char **argv) {
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
 #endif
         if (want > gt_sz - skip) want = gt_sz - skip;
+        size_t lim = want;   /* the set-aside limit stays at the max; only the window shrinks */
+#if QSB_PERSIST_WINDOW_CAP
+        if (want > (size_t)QSB_PERSIST_WINDOW_CAP) want = (size_t)QSB_PERSIST_WINDOW_CAP;
+#endif
         if (want > 0 && max_window > 0) {
-            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, want);
+            cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, lim);
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
@@ -5698,7 +5942,11 @@ int main(int argc, char **argv) {
         for (int s = 0; s < QSB_SLOTS && se==cudaSuccess; s++) {
             se = cudaStreamCreateWithFlags(&slot_stream[s], cudaStreamNonBlocking);
             if (se==cudaSuccess) se = slot_flow[s].init(slot_stream[s], QSB_COMPLETION_MODE);
-            if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming);
+            if (se==cudaSuccess) se = cudaEventCreateWithFlags(&slot_done[s], cudaEventDisableTiming
+#if QSB_FEED_BLOCK
+                                                                                     | cudaEventBlockingSync
+#endif
+                                                                                     );
 #if QSB_COMPACT_READBACK
             if (se==cudaSuccess) se = slot_readback[s].init();
             if (se==cudaSuccess) {
@@ -5727,6 +5975,9 @@ int main(int argc, char **argv) {
                       (QSB_L2_SKIP ? (size_t)gt_entries(0) * 64u : 0u);
 #endif
         if (want > gt_sz - skip) want = gt_sz - skip;
+#if QSB_PERSIST_WINDOW_CAP
+        if (want > (size_t)QSB_PERSIST_WINDOW_CAP) want = (size_t)QSB_PERSIST_WINDOW_CAP;
+#endif
         if (want > 0 && max_window > 0) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);

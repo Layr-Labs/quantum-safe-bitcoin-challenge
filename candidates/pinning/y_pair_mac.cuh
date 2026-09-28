@@ -1,19 +1,19 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 // Generated from the pinned product schedules of _ModMultCore and qsb_muladd_seed.
-// schedule: bias2, tail: asm
+/* schedule: bias2, tail: asm */
 // QSB_Y_PAIR: exact (a*b + c*d) mod p with ONE reduction. Both 512-bit products use pinned
-// product schedules (c*d: _ModMultCore renamed, unmerged; a*b: qsb_muladd_seed, whose even
-// and odd first rows absorb the low words of c*d inside the wide multiplies). The exact
-// 513-bit sum is reduced with every carry kept, so the result is in [0,2^256) and
+/* product schedules (c*d: _ModMultCore renamed, unmerged; a*b: qsb_muladd_seed, whose even */
+/* and odd first rows absorb the low words of c*d inside the wide multiplies). The exact */
+/* 513-bit sum is reduced with every carry kept, so the result is in [0,2^256) and */
 // congruent to a*b + c*d for EVERY input a,b,c,d in [0,2^256).
 #pragma once
 // QSB_RMAC_TAIL (kill switch, default 1): the reduction tail drops four carries that are set
 // with probability below 2^-21 each on the hashed operands (carry out of r3 + x14*977 and of
 // h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of
-// z8 = k16 + w7 and of {z0,z8+k16} + z8*977) and stops the second fold's carry at z3. A dropped
-// carry only changes that one candidate's recovered ordinate, which the host exact gate
-// would reject: a candidate lost with probability < 2^-19, never a false hit. 0 is the
-// every-carry-kept tail described above.
+/* z8 = k16 + w7 and of {z0,z8+k16} + z8*977) and stops the second fold's carry at z3. A dropped */
+/* carry only changes that one candidate's recovered ordinate, which the host exact gate */
+/* would reject: a candidate lost with probability < 2^-19, never a false hit. 0 is the */
+/* every-carry-kept tail described above. */
 #ifndef QSB_RMAC_TAIL
 #define QSB_RMAC_TAIL 1
 #endif
