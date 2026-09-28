@@ -3149,6 +3149,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #ifndef QSB_ROOT_FUSED
 #define QSB_ROOT_FUSED 0
 #endif
+#ifndef QSB_RROOT_TREES
+#define QSB_RROOT_TREES 1  /* register-tree root inverse, checked at startup */
+#endif
 #ifndef QSB_RF_LANES
 #define QSB_RF_LANES 128   /* one prepare-block slot: 128 threads x <= 128 registers */
 #endif
@@ -3308,6 +3311,13 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         }
     }
 }
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#include "RegisterRoots.cuh"
+static bool qsb_register_startup_check(uint64_t *,cudaStream_t);
+static bool g_qsb_register_roots=false;
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream);
 #endif
 
 /* Shared-denominator recovery directly from XYZZ coordinates.
@@ -3985,7 +3995,27 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 }
 #endif
 
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+#define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
+#endif
 #include "QsbCarrier.h"
+#if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
+#error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
+#endif
+
+#if QSB_SUBPIPE && QSB_ROOT_FUSED
+static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
+    constexpr int K=QSB_RF_K;
+    if(g_qsb_register_roots){
+        if(qsb_carrier_has(QK_RR))
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,roots,count);
+        else qsb_root_register<<<1,128,0,stream>>>(roots,count);
+    } else if(qsb_carrier_has(QK_RF))
+        qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
+    else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
+}
+#endif
+
 #if QSB_SLOTPIPE
 #define QSB_LAUNCH_ST st
 #else
@@ -4204,6 +4234,7 @@ static void qsb_subpipe_die(const char *what, cudaError_t e) {
     fprintf(stderr, "Sub-batch pipeline %s failed: %s\n", what, cudaGetErrorString(e));
     exit(2);
 }
+#include "RegisterRootCheck.h"
 static int g_qsb_sub_ok = 0;
 static int qsb_subpipe_init(cudaStream_t like) {
     QsbSubPipe &P = g_qsb_sub;
@@ -4269,6 +4300,13 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e != cudaSuccess) qsb_subpipe_die("buffer setup", e);
     P.g = 0; P.ready = 1;
 #if QSB_ROOT_FUSED
+    g_qsb_register_roots=QSB_RROOT_TREES &&
+        qsb_register_startup_check(P.roots[0],P.rt);
+    printf("  Root inverse: %s\n",g_qsb_register_roots?
+        "independent register trees / cyclic fields (startup checked)":"promoted prefix / scalar fallback");
+    fflush(stdout);
+#endif
+#if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
         const int nb = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
         uint64_t *h = (uint64_t *)malloc((size_t)nb * 8u * sizeof(uint64_t));
@@ -4278,7 +4316,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
         for (int i = 0; i < reps; i++) {
             cudaMemcpy(P.roots[0], h, (size_t)nb * 8u * sizeof(uint64_t), cudaMemcpyHostToDevice);
             cudaEventRecord(a, P.rt);
-            qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[0],nb);
+            qsb_launch_selected_roots(P.roots[0],nb,P.rt);
             cudaEventRecord(b, P.rt); cudaEventSynchronize(b);
             float ms; cudaEventElapsedTime(&ms, a, b); if (i) tot += ms;
         }
@@ -4340,11 +4378,7 @@ static void qsb_subpipe_launch(
         if (e != cudaSuccess) qsb_subpipe_die("prepare", e);
 #if QSB_ROOT_FUSED
         (void)groups;
-        if (qsb_carrier_has(QK_RF))
-            qsb_carrier_launch(qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES>,QK_RF,
-                dim3(1),dim3(QSB_RF_LANES),P.rt,P.roots[r],blocks);
-        else
-        qsb_root_fused<(QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES><<<1,QSB_RF_LANES,0,P.rt>>>(P.roots[r],blocks);
+        qsb_launch_selected_roots(P.roots[r],blocks,P.rt);
 #else
         if (qsb_carrier_has(QK_RGP))
             qsb_carrier_launch(qsb_root_group_prepare,QK_RGP,dim3(groups),dim3(256),P.rt,
@@ -5633,6 +5667,8 @@ int main(int argc, char **argv) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            if (av.accessPolicyWindow.num_bytes > 42ull * 1024 * 1024)
+                av.accessPolicyWindow.num_bytes = 42ull * 1024 * 1024;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
@@ -5731,6 +5767,8 @@ int main(int argc, char **argv) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
+            if (av.accessPolicyWindow.num_bytes > 42ull * 1024 * 1024)
+                av.accessPolicyWindow.num_bytes = 42ull * 1024 * 1024;
             av.accessPolicyWindow.hitRatio  = 1.0f;
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
@@ -6327,3 +6365,6 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+
+// Yukon reuse package v1; original inventory SHA-256: e7d43a57fe1f82abd4c1968d1cfe5b774ffbb7c001304473f718fb46d4f70195
