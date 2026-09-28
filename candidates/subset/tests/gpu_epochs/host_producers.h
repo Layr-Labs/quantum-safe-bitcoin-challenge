@@ -35,7 +35,7 @@
  * QSB_HP_NOSHANI=1 forces the OpenSSL path; QSB_HP_WAIT_MS (default 40);
  * QSB_HP_CORRUPT=1 flips one host word of batch 0 (self-check test). */
 #ifndef QSB_HP_PLACE
-#define QSB_HP_PLACE 0   /* ercumentyildirim: 3 floating producers (the placement whose ring never starved on the ranked host), with the v3 code */
+#define QSB_HP_PLACE 0
 #endif
 #ifndef QSB_HP_HELPER
 #define QSB_HP_HELPER 1
@@ -73,6 +73,9 @@ static int blocksync() {
 }
 /* Set by start(): the main thread's CPU, which the co-grinder may also use for a worker (blocking sync). */
 static int g_share_cpu = -1;
+/* PLACE=0 with blocking waits: the main thread's whole core, which the co-grinder may also use (SCHED_IDLE workers yield to the main thread at once). */
+static cpu_set_t g_share_core;
+static int g_share_core_n = 0;
 
 /* ---- SHA-256 compression: 4-lane (and 1-lane) SHA-NI, else OpenSSL ---- */
 #define QHP_SHA __attribute__((target("sha,sse4.1,ssse3")))
@@ -808,6 +811,8 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
     } else place = 0;
     h->place = place;
     if (place && blocksync()) g_share_cpu = cpu;
+    CPU_ZERO(&g_share_core); g_share_core_n = 0;
+    if (!place && blocksync() && use_mask) { g_share_core = mine; g_share_core_n = CPU_COUNT(&mine); }
     g_hp = h;
     if (place) {
         h->nthreads = 1 + helper;
