@@ -18,10 +18,11 @@
  * Safety: batch 0 is always built by the GPU producers AND by the host; the GPU copy is read
  * back and every descriptor (mid, remW, early) and every used first-state word is compared.
  * Host batches are used only after that start-up self-check passes; any mismatch switches the
- * host producers off for the run. Per batch, if the host batch is not ready within
- * QSB_HP_WAIT_MS the GPU producers run for that batch (the host copy is discarded); after
- * QSB_HP_MAX_FALLBACKS consecutive fallbacks the host producers are switched off (watchdog).
- * Host-only code: the device image (and the carrier cubin) is unchanged.
+ * host producers off for the run. Per batch, the consume side waits only as long as the
+ * measured producer rate predicts the batch still needs, bounded by QSB_HP_WAIT_MS; a late
+ * batch goes to the GPU producers instead of burning a fixed wait (the host copy is discarded).
+ * After QSB_HP_MAX_FALLBACKS consecutive fallbacks the host producers are switched off
+ * (watchdog). Host-only code: the device image (and the carrier cubin) is unchanged.
  *
  * Placement (QSB_HP_PLACE, default 1): the main thread is pinned to the one logical CPU it runs on
  * and the producer is pinned to that core's other SMT sibling(s), which were idle before (the main
@@ -32,8 +33,12 @@
  * on both siblings of its core, QSB_HP_THREADS floating producers).
  *
  * Environment (diagnostics): QSB_HP_DISABLE=1 off; QSB_HP_THREADS (1..3, default 3 with PLACE=0);
- * QSB_HP_NOSHANI=1 forces the OpenSSL path; QSB_HP_WAIT_MS (default 40);
- * QSB_HP_CORRUPT=1 flips one host word of batch 0 (self-check test). */
+ * QSB_HP_NOSHANI=1 forces the OpenSSL path; QSB_HP_WAIT_MS (default 40; the adaptive wait's cap);
+ * QSB_HP_ADAPTIVE_WAIT=0 restores the fixed wait; QSB_HP_CORRUPT=1 flips one host word of batch 0
+ * (self-check test). */
+#ifndef QSB_HP_ADAPTIVE_WAIT
+#define QSB_HP_ADAPTIVE_WAIT 1
+#endif
 #ifndef QSB_HP_PLACE
 #define QSB_HP_PLACE 0   /* ercumentyildirim: 3 floating producers (the placement whose ring never starved on the ranked host), with the v3 code */
 #endif
@@ -69,6 +74,11 @@ enum { MAXK = 8, NCLS = 16, CHUNK = 16384, NSLOT = 4 };
 static int blocksync() {
     static int v = -1;
     if (v < 0) { v = QSB_HP_BLOCKSYNC; if (getenv("QSB_HP_BLOCKSYNC")) v = atoi(getenv("QSB_HP_BLOCKSYNC")) ? 1 : 0; }
+    return v;
+}
+static int adaptive_wait() {
+    static int v = -1;
+    if (v < 0) { v = QSB_HP_ADAPTIVE_WAIT; if (getenv("QSB_HP_ADAPTIVE_WAIT")) v = atoi(getenv("QSB_HP_ADAPTIVE_WAIT")) ? 1 : 0; }
     return v;
 }
 /* Set by start(): the main thread's CPU, which the co-grinder may also use for a worker (blocking sync). */
@@ -862,8 +872,24 @@ static Slot *acquire(int64_t k) {
     for (int i = 0; i < NSLOT; i++)
         if (h->slot[i].batch == k && (h->slot[i].state == S_PROD || h->slot[i].state == S_READY)) s = &h->slot[i];
     if (!h->active) { if (s) abandon_locked(h, s); return nullptr; }
-    if (s && s->state == S_PROD && h->wait_ms > 0)
-        h->cv_ready.wait_for(lk, std::chrono::milliseconds(h->wait_ms), [&] { return s->state == S_READY || h->dead; });
+    if (s && s->state == S_PROD && h->wait_ms > 0) {
+        int wait_ms = h->wait_ms;
+        if (adaptive_wait() && h->tchunk > 0) {
+            int queued = 0;
+            for (int i = 0; i < NSLOT; i++) {
+                const Slot &x = h->slot[i];
+                if (x.state == S_PROD && x.batch <= k) queued += x.nchunks - x.done_chunks;
+            }
+            int workers = h->nthreads > 0 ? h->nthreads : 1;
+            if (h->place && workers > 1 && !h->behind) workers = 1;
+            const double eta = (double)queued * h->tchunk / workers;
+            const double cap = h->wait_ms * 1e-3;
+            wait_ms = eta > cap ? 0 : (int)ceil(eta * 1200.0 + 1.0);
+            if (wait_ms > h->wait_ms) wait_ms = h->wait_ms;
+        }
+        if (wait_ms > 0)
+            h->cv_ready.wait_for(lk, std::chrono::milliseconds(wait_ms), [&] { return s->state == S_READY || h->dead; });
+    }
     if (s && s->state == S_READY && !h->dead) {
         s->state = S_UPLOAD; h->n_host++; h->consec_fb = 0;
         int ahead = 0;

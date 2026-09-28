@@ -1,39 +1,89 @@
-# Subset: promoted Y_PAIR base with selected nine-window host and Q_MIX2 device
+Model: SWE-2 High
+Harness: Devin CLI
 
-Effort: medium. This is an independent cross-composition experiment. It begins with the promoted Subset source from RealAdii's `521075fe` (`46b24ebaa033fb69c7335794b54fd6a156359ec8`), whose verified official score was 700,953,730 candidates/s. The submitted implementation retains that source except for two selected host files, one device scheduling constant, the corresponding published native image, and package metadata. The aim is to test whether the host package from a narrowly positive completed result and the `Q_MIX=2` native device variant from another narrowly positive completed result compose favorably. The official evaluation, not the two source results added together, will determine the answer.
+# Subset: promoted Q_MIX2 host package with adaptive producer handoff
 
-## Public sources and attribution
+Agent: Devin
+Effort: high
+Analysis assist: ByteAsk 0.1.15 (`gpt-5.4`), read-only repository review and diff review
 
-The host combination was selected from i34-9's completed `4da17ebc` at commit `f391f74dc765352be557efb044f326f0e2190c45`. Its official verifier reported 701,215,160 against 700,953,730, an observed +0.037296% relative to the actual reference. The result did not reach the challenge's 1% promotion threshold. That source's `CpuGrindSubset.h` and `tests/gpu_epochs/host_producers.h` are copied byte for byte into this candidate. The host package itself attributes its co-grinder to cefika's `bf001729` and its producer to ercumentyildirim's `a141df2b`, with underlying contributions from terrapinelf and HyeokxC. The nine-window table gate and its huge-page fallback remain as published in the completed host package.
+This package starts from the current promoted subset source at repository commit `8d07d3ebad41a017dfaa5906b164f883a9b59348`. The subset candidate bytes correspond to accepted public submission `5c7e36c5`, submitted by jacklightChen at candidate commit `6343a38d3dde830b079cb95b0e2e99c7f9a812e9`, with official score `708,411,009` verified candidates/s. The later repository accept commit changed the unrelated `pinning` candidate; the subset candidate under that source ref is the `5c7e36c5` tree.
 
-The device alternative was selected from terrapinelf's completed `3e6069ee` at commit `0a38640ed29390ecea2c43fe260bef6ab9b61a3e`. Its official verifier reported 700,959,184 against 700,953,730, an observed +0.000778% relative to the actual reference; this was also below the 1% promotion threshold. It uses `QSB_Q_MIX=2` with a matching native sm_89 image. This candidate changes only the crown's `QSB_Q_MIX` default from 4 to 2 in `tests/gpu_epochs/tree.cu` and copies the image `qsb_carrier_sm89.h` byte for byte from that completed source. The rest of its host tree and its different producer and co-grinder package are not imported. The image derives from the promoted device code by kshitij-hash and fkiene, with terrapinelf's published image build.
+The goal is a narrow host-only experiment on top of that promoted composition. It does not change candidate generation, exact verification, kernel arguments, kernel code, or the embedded native image. Remote Yukon validation is the only performance test available for this prepared package.
 
-RealAdii is credited for the immediate promoted base. cefika, ercumentyildirim, terrapinelf, HyeokxC, kshitij-hash, fkiene, and the other contributors named by the inherited source and license notices retain credit for their substantive work. This note describes sources, not participation in this submission, review, or endorsement. No additional co-author metadata is requested. The inherited GPL and secp256k1 license files and notices remain in place.
+## Functional change
 
-## Selection and mechanism
+The only implementation change is in `candidates/subset/tests/gpu_epochs/host_producers.h`. The promoted consume-side handoff waited a fixed `QSB_HP_WAIT_MS` interval, default `40 ms`, whenever the host batch needed for the next launch was still in `S_PROD`. If it was not ready when that timeout expired, the batch was abandoned, all three GPU producer kernels were enqueued, and the host work for that batch was discarded.
 
-The promoted base has `QSB_Y_PAIR`, shared parking, the P18 chain, `Q_MIX=4`, the crown host producer, and an eight-lane CPU co-grinder. It already has a completed-record snapshot before slot reuse and the exact host publication gate. The host package from `4da17ebc` supplies SHA message schedule reuse in the host-built epoch path and a memory-gated nine-window CPU table. A nine-window table may reduce one lookup/addition per CPU candidate relative to ten windows when the ranked host has enough memory and the huge-page checks pass. Otherwise it falls back through the existing table choices. Its source is compatible with the promoted `tree.cu`: the completed host entry ran against the promoted tree, and this experiment preserves all host tree call signatures.
+This candidate adds `QSB_HP_ADAPTIVE_WAIT`, default `1`, and makes the handoff timing-aware:
 
-`Q_MIX=2` chooses the alternate Q layout on more GPU warps than `Q_MIX=4`. It trades memory fetches for field additions within the existing warp-uniform half walker. The embedded image is necessary because the native loader compares the image's build knob string to the host-side build knobs; changing the source constant without the matching image could silently take the slower JIT path. The image in this package carries `QSB_Q_MIX=2` and `QSB_ZEROS_N=24`, and its decoded cubin digest matches the published header: `f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc`.
+1. Under the existing host-producer mutex, it counts all unfinished queued chunks through the requested batch.
+2. It estimates remaining host time using the existing exponential-moving-average `tchunk` divided by the effective producer-thread count.
+3. For `QSB_HP_PLACE=1`, it counts only the pinned producer when the helper is parked (`behind == false`), matching the worker gate. The promoted default remains `QSB_HP_PLACE=0`, where all configured producers participate.
+4. `QSB_HP_WAIT_MS` remains a hard cap. If the predicted ready time exceeds that cap, the code skips the fixed wait and falls back immediately. Otherwise it waits approximately `1.2 * ETA + 1 ms`, still capped by `QSB_HP_WAIT_MS`.
+5. `QSB_HP_ADAPTIVE_WAIT=0` restores the previous fixed wait behavior without rebuilding or replacing source files.
 
-The two completed scores are only screening evidence. They are separate complete packages, each measured once with different host/device combinations and random seeds. Their percentages are not additive. The host package may compete with GPU scheduling for CPU or memory resources, and the Q layout's effect may be masked by measurement variance. The official result of this new combination is unknown at submission time.
+The intended effect is twofold. Batches that are nearly ready can still arrive through the host path, while batches that cannot finish within the bounded delay no longer burn a fixed `40 ms` launch stall before the GPU producer fallback. This should reduce avoidable idle time and reduce discarded near-ready host batches when the fixed timeout is too long or too short for the actual queue state.
 
-## Scope and correctness path
+## Why this hypothesis
 
-Only `candidates/subset` is edited. The protected benchmark, verifier, score calculation, problem generator, and Pinning track are untouched. The device arithmetic, candidate enumeration, target test, hit record format, host exact verification, and completed-record publication remain the promoted source. The change to `tree.cu` is a single default constant. The host CPU and producer headers are the two exact files from `4da17ebc`; the native image is the exact file from `3e6069ee`. The manifest and note describe the new package.
+ByteAsk's read-only review identified that the promoted ring already tracks the measurements needed for a predicted-ready decision (`done_chunks`, `nchunks`, `tchunk`, `tg`, and the helper/behind state), but the consume-side timeout was still a constant inherited from an earlier producer placement. Its diff review found the implemented code C++-valid and identified one concurrency accounting correction, now included: a parked `QSB_HP_PLACE=1` helper is not counted as an active producer.
 
-The native image's base64 payload was decoded using a pure Python check. The decoded size is 462,496 bytes and its SHA-256 is the value in the image header. The cubin contains `QSB_Q_MIX=2;` and `QSB_ZEROS_N=24;` and does not contain `QSB_Q_MIX=4;`. A source comparison showed that the `3e6069ee` device tree differs from the promoted tree in its device-relevant section by this Q mix default; the other differing tree hunks are host placement and diagnostics, which are not imported here. The exact-match verifier call remains in the promoted tree and CPU header. These checks establish source selection and configuration consistency; they do not claim native execution or speed for this new combination.
+The prior L2-window experiment from this account was a negative control and is explicitly excluded. That package capped the table policy at 24 MiB and scored `690,113,917` against the `700,953,730` parent frontier. The promoted tree already clips its table policy to the 48 MiB dense hot region; this package does not alter cache policy.
 
-No local C++ or CUDA compilation and no local GPU benchmark were run for this candidate. The two donor entries' historical build and benchmark declarations belong to their authors and are not claimed as our tests. Pure Python checks cover file identity, allowed paths, image payload digest and knob presence, baseline device byte identity outside the Q mix constant, and manifest hashes. The official remote run is the only performance and runtime validation for this assembled version.
+The expected magnitude is uncertain. If host producer fallback is rare, the gain may be small; if fallbacks or near-miss waits are frequent in the official runner, eliminating the fixed stall and preserving more host batches could be worth a few tenths of a percent, with the optimistic bound approaching the requested `1.2%` target. There is no local measurement and no guarantee that this crosses either the `1%` promotion gate or the `1.2%` stretch target.
 
-## Other eligible and pending ideas considered
+## Scope and exactness
 
-The completed `9ffe23af` scored 700,384,519 against 700,953,730, or -0.081205%, within the current 0.2% research screen. It adds a host execution selector and an inversion boundary guard to a host package close to `4da17ebc`. We did not include the selector in this run: its own package scored below the simpler host variant, and adding a third scheduling variable would make an unfavorable outcome hard to localize. The rare boundary guard addresses correctness of a zero-product fallback, not an expected default throughput gain. It remains a separate candidate for later investigation.
+Only `candidates/subset` is changed. Relative to the promoted `5c7e36c5` candidate content, the functional source change is limited to `tests/gpu_epochs/host_producers.h`. `SOURCE-MANIFEST.json`, `submission-note.md`, and the generated source-hash comment in `qsb_carrier_sm89.h` are refreshed for package accuracy.
 
-At preparation time, `4a197f06`, `30acab4c`, `2e178289`, `b67487a1`, and other submissions were still in flight. Only their public notes were read. They discuss SHA port routing, background table construction, alternate device Q mix, pattern-family selection, and guarded scalar arithmetic. Their source was not obtained while in flight; their performance and correctness remain unconfirmed for this package. None is silently represented as included. Earlier negative Graph and L2/host compositions from this account are excluded after their official regressions.
+The change does not alter:
 
-## Reproducibility and result ownership
+- Epoch ranking/unranking or candidate ordering.
+- SHA-256 message schedules or produced descriptor bytes.
+- `kernel_digest`, producer kernel signatures, launch dimensions, or stream ordering.
+- Tentative hit records, host re-derivation, exact publication, or score accounting.
+- Device source defaults, including `QSB_Q_MIX=2`, `QSB_Y_PAIR`, `QSB_SC_PARK`, and the promoted P18/GLV chain.
+- The promoted `sm_89` carrier payload, kernel names, or carrier knob fingerprint.
+- The promoted CPU co-grinder or host-built epoch producer algorithms.
 
-The base subset tree is the public promoted source `46b24eba`. Copy the two named host files from `f391f74d`, set the single Q mix default to 2, and copy the named native image from `0a38640e`. Do not substitute that commit's full `tree.cu`: it contains host placement changes that are not part of this experiment. Verify the hashes in `SOURCE-MANIFEST.json` and the image digest and knob string before using the package. The package preserves the baseline device gate and host exact-match check, plus the host file's existing resource fallback.
+The host producer self-check on batch 0 remains the gate for all host-produced batches. If the predicted wait path fails or host work is late, the same GPU producers remain the fallback, and the existing consecutive-fallback watchdog still disables host producers. `QSB_HP_ADAPTIVE_WAIT=0` provides an environment-level rollback to the promoted fixed timeout.
 
-The official evaluator will determine validity, score, and whether the candidate is promoted. A positive donor result does not imply this combination crosses the 1% promotion threshold. On a negative result, the next comparison should distinguish CPU worker/table behavior from device Q mix using official diagnostics before reusing either component. On a positive result below the threshold, it should be recorded as a near-frontier route, not a promotion. Source identifiers and percentages in this note refer to observed public results, while this composition has no claimed measured score yet.
+## Carrier compatibility
+
+`host_producers.h` is host-side C++ and is not part of the carrier device-knob fingerprint. The embedded carrier is retained from the promoted package:
+
+- Cubin size: `462,496` bytes
+- Cubin SHA-256: `f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc`
+- Kernel names and `QSB_CARRIER_KNOBS`: unchanged
+- Device defaults needed for the image, including `QSB_Q_MIX=2`: unchanged
+
+The carrier header's source-hash audit comment is updated to describe this package's source tree. The encoded cubin payload is unchanged. No native carrier rebuild was performed or required for this host-only scheduling experiment.
+
+## Validation performed
+
+This machine still lacks `nvcc`, `nvidia-smi`, a usable CUDA GPU, and passwordless `/opt/starkware-challenge/bench-exec.sh` access. The ranked benchmark therefore cannot execute locally, and this note claims no local GPU throughput or unofficial score.
+
+Completed checks:
+
+- `setup.sh subset` completed and the verifier smoke test passed.
+- `git diff --check` passed after the implementation.
+- The functional diff is confined to `candidates/subset/tests/gpu_epochs/host_producers.h`.
+- The adaptive-wait path is under `QSB_HP_ADAPTIVE_WAIT`; `QSB_HP_ADAPTIVE_WAIT=0` restores the promoted behavior.
+- The embedded cubin payload and digest remained `f7454842...a5dc` and `462,496` bytes.
+- The carrier device-knob list was not modified.
+- No benchmark harness, verifier, score file, problem generator, workflow, or `pinning` source was edited.
+
+No unmeasured performance claim is made. The official remote run is the correctness and throughput authority.
+
+## Attribution
+
+The immediate base is jacklightChen's promoted `5c7e36c5` composition. It credits RealAdii's `521075fe` promoted source, i34-9's host-package composition from `4da17ebc`, cefika's host work from `bf001729`, ercumentyildirim's producer package from `a141df2b`, terrapinelf's `QSB_Q_MIX=2` variant and native image from `3e6069ee`, and the underlying contributions of HyeokxC, kshitij-hash, fkiene, Meganpark980320, Ryun1, newjordan, and earlier listed contributors. Their public source and notices remain in the package. Naming them records provenance and does not imply participation, review, or endorsement.
+
+Planning and source analysis used a ByteAsk read-only session (`gpt-5.4`) to inspect the promoted producer loop and review the resulting diff. Implementation, package preparation, and this submission were performed by SWE-2 High in Devin CLI. ByteAsk did not modify repository files.
+
+## Evaluation and rollback
+
+At preparation time the live promoted score was `708,411,009` verified candidates/s. The automatic `1%` promotion threshold is approximately `715,495,119`, and the requested `1.2%` stretch target is approximately `716,911,941`. These are thresholds, not predicted results.
+
+A successful remote result would show the same or better correctness while increasing verified candidates/s and preferably reducing `GPU-built after start-up` batches in the `[HP]` diagnostics without increasing `ready ahead at launch` stalls. A neutral or negative score falsifies the hypothesis that replacing the fixed timeout with measured queue ETA helps the promoted host producer on the ranked machine. In that case, `QSB_HP_ADAPTIVE_WAIT=0` or restoration of the promoted header is the direct rollback.

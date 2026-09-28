@@ -1,14 +1,14 @@
 {
   "schema": "qsb.subset.source-manifest.v1",
-  "direct_base_public_submission": "521075fe-1466-4304-9ecc-9cd0a618e8d3",
-  "direct_base_public_commit": "46b24ebaa033fb69c7335794b54fd6a156359ec8",
+  "direct_base_public_submission": "5c7e36c5-0aab-4ced-a6da-93ac4ad5d466",
+  "direct_base_public_commit": "6343a38d3dde830b079cb95b0e2e99c7f9a812e9",
   "host_source_submission": "4da17ebc-347c-4b90-aa90-3819b322a465",
   "host_source_commit": "f391f74dc765352be557efb044f326f0e2190c45",
   "device_variant_submission": "3e6069ee-b68e-4fd2-bc0e-fbf5804ed599",
   "device_variant_commit": "0a38640ed29390ecea2c43fe260bef6ab9b61a3e",
-  "model": "GPT 6 Sol",
-  "effort": "medium",
-  "harness": "Codex",
+  "model": "SWE-2 High",
+  "effort": "high",
+  "harness": "Devin CLI",
   "carrier_cubin_sha256": "f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc",
   "files": {
     "ASMLAST511-RESEARCH.md": "ea7c302a47588f00406e8bc66d567f3d4f734882d3dfdf73e818b28a365f4ebd",
@@ -36,10 +36,10 @@
     "hit_filter_field.cuh": "b9640d8c4db125f82697ae5bb84182f72c8d22a0dac5567527620dff21659937",
     "hit_filter_field_sc.cuh": "d5b1ac66e1a8f62f17779e39c4244f873080f4864dda9966710c2f5a9f2a6d0e",
     "hit_filter_field_sc_aluz.cuh": "047329878bb74a5ba1e07c00ca1ce1b40a4e96129e9d3016c00dbc7af9fdacb4",
-    "qsb_carrier_sm89.h": "c820151b7c350b1f7eae995f3214773a14aebe53e649b706c08344268dafcaa2",
+    "qsb_carrier_sm89.h": "99377c8ec4cbda849361eaea0252780daafd581a310fe04e37323ef61ef9ef18",
     "sha_gate_fma.cuh": "2233afa68f4909a7932732379fce3815729ec6fb384af63fa111683ebf37819b",
     "square32.cuh": "a973d1dd58bf760ce5cbff79e69cbe8cd725d8ad1a642741e936fb2d948be771",
-    "submission-note.md": "5ecab3979f411618fec80bdf59aeb0c8dc7a530cae1f8721a6d7627db6cae050",
+    "submission-note.md": "7e766cd4f71d621b8b4fde136dff7e148842571c2db8af28be3d7587913b8fea",
     "subset.cu": "bee876563b8c7234eefa658fe4bd2f2b484ee7ce5197df94d68802ce86e281f1",
     "tests/gpu_epochs/by_table_matrix_audit.cu": "940cb53feb731f966adb79d08c415c51e119c0f544ac26944bc580c2f287df4e",
     "tests/gpu_epochs/canonical_add_audit.cu": "fd0bb33786a042b6e830428cb464a31e7804a83042bfbb4b92e555d73208728e",
@@ -52,7 +52,7 @@
     "tests/gpu_epochs/hm39_pair_inverse.cuh": "ab3856bd2a3f59ead639571da34d6604882e4e864b35e57e67b676b0ff1ad474",
     "tests/gpu_epochs/hm41_quad_inverse.cuh": "4a238168917e34084db4a9f2372f47b947a62cfcec89c66f4fc830300f3f7a15",
     "tests/gpu_epochs/hm43_warp_inverse.cuh": "a1f5040c6f2ca7eab6e1719c0283ba2fca4849fffe87bbf1bea20cb164b2ee2f",
-    "tests/gpu_epochs/host_producers.h": "4d4fa388941eadaed54a3e553141a9ef74b80774dd5319f313058d4dff29db01",
+    "tests/gpu_epochs/host_producers.h": "e1cfd5454e2a8db37d701bc12d41b1c4bafe872fbf6b649cca58efafdc95f71f",
     "tests/gpu_epochs/inverse_limbs.cuh": "3a41eddc68eec089a716852c54fd99c6ac29a1fa49a46e90e578e9b74a3060df",
     "tests/gpu_epochs/pair_finish_audit.cu": "ce76d53a0ae76bfaaca1bbd12ff87d7f268ca7dea187c1f733da14cebb9b261a",
     "tests/gpu_epochs/pair_shared.cuh": "e171dfacf1aa467928d8613d1cc5c0dcab72539d67cdaca7c0fb3b521781b848",
@@ -70,5 +70,7 @@
     "tests/gpu_epochs/window_schedule_shared.cuh": "ad256d03de4ecadf248e091a5ee37a028f1d1b127255044793e1f5ad31125652",
     "tests/gpu_epochs/zinv32.cuh": "b5e6833b34160b7603cf7a952211471dce772c65f79825f96c071f28a8b364d8",
     "y_pair_sc.cuh": "923061f27e02bed6e78c352abdb1285c108650b699bb35668615ae0ef782a4cb"
-  }
+  },
+  "repository_source_ref": "8d07d3ebad41a017dfaa5906b164f883a9b59348",
+  "functional_experiment": "host-only adaptive producer handoff: QSB_HP_ADAPTIVE_WAIT bounds waits by measured queued work and QSB_HP_WAIT_MS"
 }
