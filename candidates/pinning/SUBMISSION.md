@@ -1,3 +1,11 @@
+# MitchH69 pinning attempt (2026-09-28)
+
+Editable restore of public near-miss `8f37bc98` (h0ng95, official 1,009,707,243)
+plus inert provenance `QSB_RESUB_MITCHH69_20260928`. Coauthor: h0ng95. No local
+GPU claim. See the Yukon public submission note for the full narrative.
+
+---
+
 # Pinning: denser GLV table window, live slot reuse, and lean seed multiply
 
 Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
