@@ -335,13 +335,37 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
 #else
 #define QSB_S0M(x) S0(x)
 #endif
-#define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
+/* QSB_FIN_RASSOC (kill switch): the same six multiply-pipe adds per round, reassociated.
+ * bit 2: T2 = S0(a) + Maj(a,b,c) is formed beside T1 and a' = T1 + T2 (instead of
+ * (T1 + S0) + Maj). bit 1: Ch is added to T1 before S1 (measured slower; kept for reference).
+ * Sums mod 2^32 are order-independent, so every word is unchanged. */
+#ifndef QSB_FIN_RASSOC
+#define QSB_FIN_RASSOC 0
+#endif
+#if QSB_FIN_RASSOC & 1
+#define QSB_RL_T1(h, e, f, g, kw) \
+    t1 = qsb_fadd(h, one, (kw)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = qsb_fadd(t1, one, QSB_S1M(e));
+#else
+#define QSB_RL_T1(h, e, f, g, kw) \
     t1 = qsb_fadd(h, one, (kw)); \
     t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
-    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g));
+#endif
+#if QSB_FIN_RASSOC & 2
+#define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
+    QSB_RL_T1(h, e, f, g, kw) \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = qsb_fadd(QSB_S0M(a), one, Maj(a,b,c)); \
+    h  = qsb_fadd(t1, one, t2);
+#else
+#define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
+    QSB_RL_T1(h, e, f, g, kw) \
     d  = qsb_fadd(d, one, t1); \
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
 #define QSB_RND15L_F(k) {\
 QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(k), w[0]));\
 QSB_RL_F(h, a, b, c, d, e, f, g, QSB_KWF(qsb_klit(k + 1), w[1]));\
@@ -392,6 +416,28 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 } while (0)
 #endif
 
+/* QSB_FIN_IVFOLD (kill switch): rounds 2 and 3 of the pubkey hash run with an IV word in the
+ * h role (IV5, then IV4). t1 = h + (K + W) was two multiply-pipe adds with h a literal; the
+ * literal now rides in the immediate of the K + W add: t1 = W*one + (K + IV). Same sum mod 2^32. */
+#ifndef QSB_FIN_IVFOLD
+#define QSB_FIN_IVFOLD 0
+#endif
+/* QSB_FIN_W8S0 (kill switch): s0 of the padded last message word W8 = (b << 24) | 0x800000
+ * (b = the low byte of x) from its 8 live bits; see the W23 step of _SHA256Pubkey33H0. */
+#ifndef QSB_FIN_W8S0
+#define QSB_FIN_W8S0 1
+#endif
+#if QSB_SHA_FMA_ADD
+/* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
+#define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
+    t1 = qsb_fadd((W), one, (KH)); \
+    t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
+    h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
+
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
  * W15=0x108, from the IV. Equal to out[0] of _SHA256TransformPubkey33. */
 #if QSB_SHA_ALU_ADD
@@ -414,8 +460,14 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     {
         const uint32_t one = pin_one_mul;
         QSB_IV_ROUNDS01_F(w[0], w[1]);
+#if QSB_FIN_IVFOLD
+        /* h role: f = IV5 in round 2, e = IV4 in round 3 (both still the IV literals) */
+        QSB_RL_FK(g, h, a, b, c, d, e, f, w[2], qsb_klit(2) + QSB_IV5);
+        QSB_RL_FK(f, g, h, a, b, c, d, e, w[3], qsb_klit(3) + QSB_IV4);
+#else
         QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(2), w[2]));
         QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(3), w[3]));
+#endif
         QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(4), w[4]));
         QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(5), w[5]));
         QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(6), w[6]));
@@ -438,7 +490,23 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[4] = qsb_fadd(qsb_fadd(w[4], one, QSB_s1M(w[2])), one, QSB_s0M(w[5]));
         w[5] = qsb_fadd(qsb_fadd(w[5], one, QSB_s1M(w[3])), one, QSB_s0M(w[6]));
         w[6] = qsb_fadd(qsb_fadd(qsb_fadd(w[6], one, QSB_s1M(w[4])), one, 0x108u), one, QSB_s0M(w[7]));
+#if QSB_FIN_W8S0
+        {   /* s0 is linear over GF(2): s0(W8) = s0(b<<24) ^ s0(0x800000)
+             * = (b<<6) ^ (b<<17) ^ (b<<21) ^ 0x110020, and (b<<17) ^ (b<<21) ^ 0x100000
+             * = (b ^ (b<<4) ^ 8) << 17 (bits 17..28) is disjoint from b<<6 (bits 6..13) and from
+             * 0x10020 (bits 5, 16), so the XOR of the three equals their sum:
+             * s0(W8) = b*64 + (b ^ b*16 ^ 8)*2^17 + 0x10020 (checked for all 256 b). Two ALU ops
+             * (shift, LOP3) replace two rotations, a shift and a LOP3; the rest runs as IMAD. */
+            const uint32_t b8 = w[8] >> 24;
+            const uint32_t c8 = b8 ^ qsb_fadd(b8, 16u, 0u) ^ 8u;
+            uint32_t t8 = qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]);
+            t8 = qsb_fadd(b8, 64u, t8);
+            t8 = qsb_fadd(c8, 131072u, t8);
+            w[7] = qsb_fadd(t8, one, 0x10020u);
+        }
+#else
         w[7] = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]), one, QSB_s0M(w[8]));
+#endif
         w[8] = qsb_fadd(qsb_fadd(w[8], one, QSB_s1M(w[6])), one, w[1]);
         w[9] = qsb_fadd(QSB_s1M(w[7]), one, w[2]);
         w[10] = qsb_fadd(QSB_s1M(w[8]), one, w[3]);
