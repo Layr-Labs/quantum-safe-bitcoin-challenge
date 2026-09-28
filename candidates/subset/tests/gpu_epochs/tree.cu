@@ -3918,6 +3918,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
 
+#include "../../QsbNativeSelector.h"
+
 int main(int argc, char **argv) {
     if (argc < 5) {
         printf("Usage: %s <digest_rN.bin> <gpu_index> <sequence> <locktime> [total_gpus] [global_offset] [easy] [single_hash] [--tiles=PATH]\n", argv[0]);
@@ -4632,6 +4634,11 @@ int main(int argc, char **argv) {
             (void)cudaGetLastError();
         }
     }
+    if(g_qsb_alternate.on) {
+        const cudaError_t rc=cudaFuncSetAttribute((const void *)g_qsb_alternate.k[QK_DIG],
+            cudaFuncAttributePreferredSharedMemoryCarveout,cudaSharedmemCarveoutMaxShared);
+        if(rc!=cudaSuccess)qsb_alternate_off("carveout_hint");
+    }
     clock_gettime(CLOCK_MONOTONIC, &t0);
     t_last_report = t0;
     uint64_t total_searched = 0;
@@ -4971,9 +4978,64 @@ int main(int argc, char **argv) {
             sp_epochs[s] = epochs_in_batch;
             return 0;
         };
+        qsb_native_select::Selector native_selector;
+        // Called only with both slots empty. Every arm ends empty, with every
+        // collected batch published exactly once. The normal epoch/batch counters
+        // advance on these useful launches, including warmup and rejected series.
+        auto native_leg = [&](int arm,int batches,qsb_native_select::Sample &sample)->int {
+            (void)arm;
+            constexpr uint64_t epochs_per_batch=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
+            constexpr uint64_t candidates_per_batch=epochs_per_batch*QSB_SE_PER_EPOCH;
+            static_assert(QSB_SE_PER_EPOCH==QSB_SE_WINDOWS,"candidate/epoch conversion");
+            const uint64_t begin_epoch=epoch_base;
+            const double begin=qsb_native_select::now();
+            const uint64_t begin_gpu=total_searched,begin_cpu=qsb_native_select::cpu_count();
+            int launched=0,finished=0;bool valid=true;
+            while(finished<launched || launched<batches) {
+                const int slot=(int)(sp_batch_no&1);
+                CompletedSubset completed;
+                if(sp_collect(slot,completed))return -1;
+                if(completed.valid)++finished;
+                if(g_stop_signal || !native_selector.intact() ||
+                   epoch_base>=n_epochs || n_epochs-epoch_base<epochs_per_batch)valid=false;
+                if(valid && launched<batches) {
+                    const int launch_error=sp_launch(slot,epoch_base,(int)epochs_per_batch);
+                    if(sp_publish(completed))return -1;
+                    if(launch_error)return -1;
+                    epoch_base+=epochs_per_batch;++sp_batch_no;++launched;
+                } else {
+                    if(sp_publish(completed))return -1;
+                    // slot is now empty; the opposite slot is the only possible
+                    // outstanding batch (and is necessarily the next in order).
+                    CompletedSubset tail;
+                    if(sp_collect(slot^1,tail))return -1;
+                    if(tail.valid){if(sp_publish(tail))return -1;++finished;}
+                    break;
+                }
+            }
+            sample.cpu=qsb_native_select::cpu_count();
+            sample.seconds=qsb_native_select::now()-begin;
+            sample.gpu=total_searched-begin_gpu;
+            if(sample.cpu<begin_cpu)return 0;
+            sample.cpu-=begin_cpu;
+            return valid && launched==batches && finished==batches &&
+                sample.gpu==candidates_per_batch*(uint64_t)batches &&
+                epoch_base-begin_epoch==epochs_per_batch*(uint64_t)batches &&
+                sample.gpu==(epoch_base-begin_epoch)*QSB_SE_WINDOWS && !sp_busy[0] && !sp_busy[1];
+        };
         g_stop_polled = 1;
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
         while (1) {
+            if(native_selector.needs_fallback()) {
+                const int oldest=(int)(sp_batch_no&1);
+                if(sp_drain(oldest) || sp_drain(oldest^1))return 1;
+                native_selector.retain("fixed_state_changed");
+            }
+            if(!g_stop_signal && native_selector.ready()) {
+                const int oldest=(int)(sp_batch_no&1);
+                if(sp_drain(oldest) || sp_drain(oldest^1))return 1;
+                if(native_selector.calibrate(native_leg))return 1;
+            }
             const int s = (int)(sp_batch_no & 1);
             CompletedSubset completed;
             if (sp_collect(s, completed)) return 1;          /* snapshot batch k-2 before slot reuse */
