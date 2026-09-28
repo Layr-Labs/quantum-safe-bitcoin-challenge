@@ -160,15 +160,21 @@ static QSB_SHA_NI void shani_store_state(uint32_t *st, __m128i S0, __m128i S1) {
     _mm_storeu_si128((__m128i *)&st[0], S0);
     _mm_storeu_si128((__m128i *)&st[4], S1);
 }
-static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+template<bool PAD32>
+static QSB_SHA_NI void shani_compress2_impl(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
     __m128i A0, A1, B0, B1;
     shani_load_state(stA, A0, A1); shani_load_state(stB, B0, B1);
     const __m128i A0s = A0, A1s = A1, B0s = B0, B1s = B1;
     __m128i MA0, MA1, MA2, MA3, MB0, MB1, MB2, MB3, mA, mB, K;
     MA0 = _mm_loadu_si128((const __m128i *)(wA + 0));  MB0 = _mm_loadu_si128((const __m128i *)(wB + 0));
     MA1 = _mm_loadu_si128((const __m128i *)(wA + 4));  MB1 = _mm_loadu_si128((const __m128i *)(wB + 4));
+    if (PAD32) {
+        MA2 = MB2 = _mm_setr_epi32((int)0x80000000u, 0, 0, 0);
+        MA3 = MB3 = _mm_setr_epi32(0, 0, 0, 256);
+    } else {
     MA2 = _mm_loadu_si128((const __m128i *)(wA + 8));  MB2 = _mm_loadu_si128((const __m128i *)(wB + 8));
     MA3 = _mm_loadu_si128((const __m128i *)(wA + 12)); MB3 = _mm_loadu_si128((const __m128i *)(wB + 12));
+    }
     /* group g: rounds 4g..4g+3 on message vector Mc; Mn = next (msg2 target), Mp = previous
        (alignr source), Mq = the vector msg1 updates */
 #define SHANI2_ROUNDS(g, McA, McB)                                                     \
@@ -186,7 +192,14 @@ static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32
     /* g = 0 */  SHANI2_ROUNDS(0, MA0, MB0) SHANI2_TAIL()
     /* g = 1 */  SHANI2_ROUNDS(1, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
     /* g = 2 */  SHANI2_ROUNDS(2, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
-    /* g = 3 */  SHANI2_ROUNDS(3, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* PAD32: alignr gives W9..W12 = 0; msg1(MA2,MA3) is identity. */
+    /* g = 3 */  SHANI2_ROUNDS(3, MA3, MB3)
+    if (PAD32) {
+        MA0 = _mm_sha256msg2_epu32(MA0, MA3);
+        MB0 = _mm_sha256msg2_epu32(MB0, MB3);
+    } else { SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) }
+    SHANI2_TAIL()
+    if (!PAD32) { SHANI2_MSG1(MA2, MB2, MA3, MB3) }
     /* g = 4 */  SHANI2_ROUNDS(4, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
     /* g = 5 */  SHANI2_ROUNDS(5, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
     /* g = 6 */  SHANI2_ROUNDS(6, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
@@ -206,6 +219,13 @@ static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32
     A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
     B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
     shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
+}
+static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+    shani_compress2_impl<false>(stA, wA, stB, wB);
+}
+/* Only for exactly 32-byte messages padded as W8=0x80000000, W15=256. */
+static QSB_SHA_NI void shani_compress2_pad32(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+    shani_compress2_impl<true>(stA, wA, stB, wB);
 }
 /* single compression (tests only) */
 static QSB_SHA_NI void shani_compress1(uint32_t *st, const uint32_t *w) {

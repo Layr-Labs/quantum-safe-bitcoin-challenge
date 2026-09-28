@@ -408,7 +408,14 @@ static unsigned z_shani_2(worker_t *w, int i0) {
     uint32_t DA[16] = {sa[0], sa[1], sa[2], sa[3], sa[4], sa[5], sa[6], sa[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
     uint32_t DB[16] = {sb[0], sb[1], sb[2], sb[3], sb[4], sb[5], sb[6], sb[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
     memcpy(sa, IV256, 32); memcpy(sb, IV256, 32);
+#ifndef QSB_CG_SHA32PAD
+#define QSB_CG_SHA32PAD 1
+#endif
+#if QSB_CG_SHA32PAD
+    shani_compress2_pad32(sa, DA, sb, DB);
+#else
     shani_compress2(sa, DA, sb, DB);
+#endif
     for (int k = 0; k < 4; k++) {
         w->zq[k][i0] = (uint64_t)sa[6 - 2 * k] << 32 | sa[7 - 2 * k];
         w->zq[k][i0 + 1] = (uint64_t)sb[6 - 2 * k] << 32 | sb[7 - 2 * k];
