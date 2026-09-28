@@ -186,6 +186,63 @@ static QI_INL void vinv(vfe *inv, const vfe *m) {
     fmul(inv, &t, &oth);
 }
 
+/* 256-bit rotate SHA for the IFMA-only path. The existing IFMA dispatch
+ * already requires AVX512F and AVX512VL. Message schedule and rounds are unchanged. */
+#ifndef QSB_CG_VL_SHA
+#define QSB_CG_VL_SHA 1
+#endif
+static QI_INL __m256i vls_S0(__m256i x) { return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 2), _mm256_ror_epi32(x, 13)), _mm256_ror_epi32(x, 22)); }
+static QI_INL __m256i vls_S1(__m256i x) { return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 6), _mm256_ror_epi32(x, 11)), _mm256_ror_epi32(x, 25)); }
+static QI_INL __m256i vls_s0(__m256i x) { return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 7), _mm256_ror_epi32(x, 18)), _mm256_srli_epi32(x, 3)); }
+static QI_INL __m256i vls_s1(__m256i x) { return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 17), _mm256_ror_epi32(x, 19)), _mm256_srli_epi32(x, 10)); }
+#define VLS_ROUND(a, b, c, d, e, f, g, h, kw, bc) do {                                        \
+        v8u t1_ = s8_add(s8_add(h, vls_S1(e)), s8_add(s8_xor(g, s8_and(e, s8_xor(f, g))), (kw))); \
+        v8u ab_ = s8_xor(a, b);                                                                \
+        v8u t2_ = s8_add(vls_S0(a), s8_xor(s8_and(ab_, bc), b));                                \
+        d = s8_add(d, t1_); h = s8_add(t1_, t2_); bc = ab_;                                    \
+    } while (0)
+
+/* Generic 8-lane compression. st[8] and w[16] word-major (v8u per word). st updated in place.
+ * The 64 rounds use a rotating register naming via an 8-step unrolled macro. */
+static QI_INL void s8_compress_vl(qcg_sha::v8u st[8], const qcg_sha::v8u w_in[16]) {
+    using namespace qcg_sha;
+    v8u w[16];
+    for (int i = 0; i < 16; i++) w[i] = w_in[i];
+    v8u a = st[0], b = st[1], c = st[2], d = st[3], e = st[4], f = st[5], g = st[6], h = st[7];
+    v8u bc = s8_xor(b, c);
+#define VLS_R8(base, VLS_WEXPR) \
+    VLS_ROUND(a, b, c, d, e, f, g, h, s8_add(s8_set1(K256[base + 0]), VLS_WEXPR(0)), bc); \
+    VLS_ROUND(h, a, b, c, d, e, f, g, s8_add(s8_set1(K256[base + 1]), VLS_WEXPR(1)), bc); \
+    VLS_ROUND(g, h, a, b, c, d, e, f, s8_add(s8_set1(K256[base + 2]), VLS_WEXPR(2)), bc); \
+    VLS_ROUND(f, g, h, a, b, c, d, e, s8_add(s8_set1(K256[base + 3]), VLS_WEXPR(3)), bc); \
+    VLS_ROUND(e, f, g, h, a, b, c, d, s8_add(s8_set1(K256[base + 4]), VLS_WEXPR(4)), bc); \
+    VLS_ROUND(d, e, f, g, h, a, b, c, s8_add(s8_set1(K256[base + 5]), VLS_WEXPR(5)), bc); \
+    VLS_ROUND(c, d, e, f, g, h, a, b, s8_add(s8_set1(K256[base + 6]), VLS_WEXPR(6)), bc); \
+    VLS_ROUND(b, c, d, e, f, g, h, a, s8_add(s8_set1(K256[base + 7]), VLS_WEXPR(7)), bc);
+#define VLS_WLOAD0(k) w[(k)]
+#define VLS_WLOAD8(k) w[8 + (k)]
+    VLS_R8(0, VLS_WLOAD0)
+    VLS_R8(8, VLS_WLOAD8)
+#define VLS_WEXP(k) (w[(k)] = s8_add(s8_add(w[(k)], vls_s0(w[((k) + 1) & 15])), s8_add(w[((k) + 9) & 15], vls_s1(w[((k) + 14) & 15]))))
+#define VLS_WEXP0(k) VLS_WEXP(k)
+#define VLS_WEXP8(k) VLS_WEXP(8 + (k))
+    for (int r = 16; r < 64; r += 16) {
+        VLS_R8(r, VLS_WEXP0)
+        VLS_R8(r + 8, VLS_WEXP8)
+    }
+#undef VLS_WLOAD0
+#undef VLS_WLOAD8
+#undef VLS_WEXP0
+#undef VLS_WEXP8
+    st[0] = s8_add(st[0], a); st[1] = s8_add(st[1], b); st[2] = s8_add(st[2], c); st[3] = s8_add(st[3], d);
+    st[4] = s8_add(st[4], e); st[5] = s8_add(st[5], f); st[6] = s8_add(st[6], g); st[7] = s8_add(st[7], h);
+}
+
+
+#undef VLS_ROUND
+#undef VLS_R8
+#undef VLS_WEXP
+
 /* 8-lane pubkey SHA of Q+ (lanes 0-3) and Q- (lanes 4-7); canonical inputs; returns the
  * 8-bit mask of lanes whose H0 passes the leading-zero prefilter (v4::hash_block's layout) */
 static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, const vfe *ym, int use_ni) {
@@ -218,7 +275,11 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
     } else {
         v8u st[8];
         for (int j = 0; j < 8; j++) st[j] = _mm256_set1_epi32((int)IV256[j]);
+#if QSB_CG_VL_SHA
+        s8_compress_vl(st, W);
+#else
         s8_compress_full(st, W);
+#endif
         h0 = st[0];
     }
 #if QSB_ZEROS_N >= 32
