@@ -17,13 +17,21 @@ __device__ __forceinline__ bool qbw_root_load(
     if(!nz)x[0]=1;
     return nz;
 }
+#ifndef QSB_RROOT_WEIGHT_FIRST
+#define QSB_RROOT_WEIGHT_FIRST 1
+#endif
+#if QSB_RROOT_WEIGHT_FIRST != 0 && QSB_RROOT_WEIGHT_FIRST != 1
+#error "QSB_RROOT_WEIGHT_FIRST must be 0 or 1"
+#endif
 __device__ __forceinline__ void qbw_root_store(
     uint64_t *roots,unsigned count,unsigned i,uint64_t x[5],bool nonzero) {
     if(i>=count)return;
     qsb_field_normalize(x);
     if(!nonzero)x[0]=x[1]=x[2]=x[3]=0;
+#if !defined(__CUDA_ARCH__) || !QSB_RROOT_WEIGHT_FIRST
     #pragma unroll
     for(int k=0;k<4;++k)roots[(size_t)i*4u+k]=x[k];
+#endif
     uint64_t b[5]={
 #if QSB_ISO_XR
         pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],
@@ -34,6 +42,10 @@ __device__ __forceinline__ void qbw_root_store(
 #endif
     };
     uint64_t weighted[5];qsb_field_mul(weighted,x,b);
+#if defined(__CUDA_ARCH__) && QSB_RROOT_WEIGHT_FIRST
+    #pragma unroll
+    for(int k=0;k<4;++k)roots[(size_t)i*4u+k]=x[k];
+#endif
     #pragma unroll
     for(int k=0;k<4;++k)roots[((size_t)count+i)*4u+k]=weighted[k];
 }
