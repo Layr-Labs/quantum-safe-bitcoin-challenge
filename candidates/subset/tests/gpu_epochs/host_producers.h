@@ -31,11 +31,16 @@
  * only when the pinned producer cannot keep up. QSB_HP_PLACE=0: the previous placement (main thread
  * on both siblings of its core, QSB_HP_THREADS floating producers).
  *
+ * In-run A/B (QSB_AB in tree.cu): the producers serve one epoch region per variant from ONE shared ring
+ * (no extra pinned memory), following the main thread's plan of upcoming launches; each region has its
+ * own self-check, and any failure switches the producers off for both variants alike (an asymmetric loss
+ * would bias the A/B). See "batch pipeline" below.
+ *
  * Environment (diagnostics): QSB_HP_DISABLE=1 off; QSB_HP_THREADS (1..3, default 3 with PLACE=0);
  * QSB_HP_NOSHANI=1 forces the OpenSSL path; QSB_HP_WAIT_MS (default 40);
  * QSB_HP_CORRUPT=1 flips one host word of batch 0 (self-check test). */
 #ifndef QSB_HP_PLACE
-#define QSB_HP_PLACE 0   /* ercumentyildirim: 3 floating producers (the placement whose ring never starved on the ranked host), with the v3 code */
+#define QSB_HP_PLACE 0
 #endif
 #ifndef QSB_HP_HELPER
 #define QSB_HP_HELPER 1
@@ -62,6 +67,7 @@
 #include <immintrin.h>
 #include <cpuid.h>
 #include <openssl/sha.h>
+#include <sys/mman.h>
 
 namespace qhp {
 
@@ -73,6 +79,9 @@ static int blocksync() {
 }
 /* Set by start(): the main thread's CPU, which the co-grinder may also use for a worker (blocking sync). */
 static int g_share_cpu = -1;
+/* PLACE=0 with blocking waits: the main thread's whole core, which the co-grinder may also use (SCHED_IDLE workers yield to the main thread at once). */
+static cpu_set_t g_share_core;
+static int g_share_core_n = 0;
 
 /* ---- SHA-256 compression: 4-lane (and 1-lane) SHA-NI, else OpenSSL ---- */
 #define QHP_SHA __attribute__((target("sha,sse4.1,ssse3")))
@@ -172,7 +181,7 @@ struct Params {
     SCtx c0;                    /* after prefix_remainder, from the problem midstate */
     const uint8_t *rows;        /* dummy sig pushes, SIG_PUSH_SIZE bytes each, contiguous */
     int cut, K, ncls;
-    uint64_t n_epochs, cap;     /* epoch space size, epochs per batch */
+    uint64_t n_epochs, cap;     /* epoch space size (region 0), epochs per batch */
     ClsVec cv[NCLS];            /* first-block class words (QSB_FIRST_UNIQUE) */
     /* Precomputed message schedules (W[i] + K[i], 64 words per block), SHA-NI path only. A block's
      * schedule depends on its 64 message bytes alone, and the producer's blocks repeat:
@@ -518,49 +527,76 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
  * search loop runs and one piece per driver call, so no allocation holds the driver for long while the
  * main thread starts up or launches. Batch 0 (always GPU-built) is also built by the host into pageable
  * memory for the self-check; the GPU's copy goes to a device scratch buffer (stream-ordered D2D copy)
- * and a worker compares the two. */
-enum { NPIECE = 8 };
+ * and a worker compares the two.
+ *
+ * Regions (the in-run A/B of tree.cu). The producers serve nreg epoch regions [lo, lo + n): one without
+ * the A/B (the whole space, lo = 0), one per variant with it. A batch is (region v, batch b of that region)
+ * and starts at epoch lo_v + b * cap. The ring is ONE set of NSLOT pinned slots shared by the regions (the
+ * A/B adds no pinned memory). What to build comes from the main thread's plan: the predicted (v, b) of
+ * the next launches in launch order (set_plan after every launch; without the A/B simply the next batches).
+ * Workers finish partly built plan batches first, then start the earliest plan batch not in the ring (after
+ * the claim lead), taking a free slot or evicting a finished batch that has left the plan (a mispredicted
+ * A/B switch). Each region has its own self-check. The A/B variant B checks its batch 0's first check_n
+ * epochs (one chunk, 5 MiB); that host copy (and its 1 MiB staging buffer) is mmap'd only once B's batch 0
+ * has been launched and munmap'd right after the comparison, so the A/B adds no resident host memory. A
+ * batch of a region is host-built only after that region's check passed; any failure (check, watchdog,
+ * pinned allocation) switches the producers off for all regions alike. */
+enum { NPIECE = 8, MAXREG = 2, PLAN_MAX = 24 };
 enum { S_FREE = 0, S_PROD, S_READY, S_UPLOAD, S_INFLIGHT };   /* UPLOAD: taken by main, copy event not yet recorded */
 struct Slot {
     uint8_t *ep[NPIECE] = {}; uint32_t *fi[NPIECE] = {}; int npieces_ok = 0;
-    int64_t batch = -1; int state = S_FREE;
+    int v = 0; int64_t batch = -1; int state = S_FREE;
     int nchunks = 0, next_chunk = 0, done_chunks = 0; bool abandoned = false;
     cudaEvent_t copied = nullptr;
 };
+struct PlanItem { int v; int64_t b; };
+struct Reg {                    /* one epoch region [lo, lo + n) */
+    uint64_t lo = 0, n = 0;
+    int64_t n_batches = 0, need = 0;   /* batches; next batch the main thread asks for */
+    /* self-check on the region's batch 0 */
+    int check = 0;              /* 0 pending, 1 passed, -1 failed */
+    uint64_t check_n = 0;       /* epochs of batch 0 compared */
+    uint8_t *c_ep = nullptr; uint32_t *c_fi = nullptr;           /* host-built copy (pageable, allocated when built) */
+    int c_nchunks = 0, c_next = 0, c_done = 0; bool c_alloc = false;
+    uint8_t *d_scr_ep = nullptr; uint32_t *d_scr_fi = nullptr;   /* GPU-built copy (device scratch) */
+    cudaEvent_t chk_evt = nullptr; bool chk_enqueued = false, chk_running = false;
+    int corrupt = 0;
+    uint64_t n_host = 0, n_fb = 0;
+    char tag[8] = "";           /* "" alone, " [A]" / " [B]" with the A/B */
+};
 struct Hp {
     Params P;
+    Reg reg[MAXREG]; int nreg = 1;
     Slot slot[NSLOT];
+    PlanItem plan[PLAN_MAX]; int plan_n = 0;
     std::mutex m;
     std::condition_variable cv_work, cv_ready;
     std::vector<std::thread> th;
-    int64_t prod_batch = 1, need_batch = 0, n_batches = 0;
     bool stop = false, loop_started = false;
     uint64_t pe = 0;            /* epochs per piece */
-    /* self-check on batch 0 */
-    int check = 0;              /* 0 pending, 1 passed, -1 failed */
-    uint8_t *c_ep = nullptr; uint32_t *c_fi = nullptr;           /* host-built batch 0 (pageable) */
-    int c_nchunks = 0, c_next = 0, c_done = 0;
-    uint8_t *d_scr_ep = nullptr; uint32_t *d_scr_fi = nullptr;   /* GPU-built batch 0 (device scratch) */
-    cudaEvent_t chk_evt = nullptr; bool chk_enqueued = false, chk_running = false;
     /* rate estimates for the claim lead: GPU batch interval, host chunk time (one thread) */
     double tg = 0, t_last_acq = 0, tchunk = 0;
     /* stats / watchdog */
-    uint64_t n_host = 0, n_fb = 0, ahead_sum = 0, ahead_n = 0; int consec_fb = 0, max_fb = 16, wait_ms = 40, ahead_min = 99;
-    bool active = false, dead = false;
-    int nthreads = 3, dev = 0, corrupt = 0;
+    uint64_t ahead_sum = 0, ahead_n = 0, n_evict = 0; int consec_fb = 0, max_fb = 16, wait_ms = 40, ahead_min = 99;
+    bool dead = false;
+    int nthreads = 3, dev = 0;
     /* placement: thread 0 pinned to the main core's sibling(s), thread 1 the floating helper */
     int place = 0; bool behind = true; uint64_t helper_chunks = 0;
 };
 static Hp *g_hp = nullptr;
 
 static double now_s() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
-static uint64_t batch_len(const Hp *h, int64_t b) {
-    const uint64_t base = (uint64_t)b * h->P.cap;
-    return base >= h->P.n_epochs ? 0 : (h->P.n_epochs - base < h->P.cap ? h->P.n_epochs - base : h->P.cap);
+static uint64_t batch_len(const Hp *h, int v, int64_t b) {
+    const uint64_t off = (uint64_t)b * h->P.cap, n = h->reg[v].n;
+    return off >= n ? 0 : (n - off < h->P.cap ? n - off : h->P.cap);
+}
+static int plan_pos(const Hp *h, int v, int64_t b) {
+    for (int i = 0; i < h->plan_n; i++) if (h->plan[i].v == v && h->plan[i].b == b) return i;
+    return -1;
 }
 static void kill_locked(Hp *h, const char *why) {
     if (h->dead) return;
-    h->dead = true; h->active = false; h->stop = true;
+    h->dead = true; h->stop = true;
     h->cv_work.notify_all(); h->cv_ready.notify_all();
     printf("  Host producers: off (%s) -> GPU producers for the rest of the run\n", why);
     fflush(stdout);
@@ -573,43 +609,57 @@ static void abandon_locked(Hp *h, Slot *s) {
     if (s->done_chunks == s->nchunks) { s->state = S_FREE; s->batch = -1; h->cv_work.notify_all(); }
 }
 
-/* Worker: compare the host-built batch 0 with the GPU's copy (device scratch -> pageable, 16 MiB at a time). */
-static void run_check(Hp *h) {
-    const uint64_t n = batch_len(h, 0);
+/* Worker: compare region v's host-built batch 0 with the GPU's copy (device scratch -> pageable, 16 MiB at a time). */
+static void run_check(Hp *h, int v) {
+    Reg &r = h->reg[v];
+    const uint64_t n = r.check_n;
     const size_t ep_n = (size_t)n * 64, fi_n = (size_t)n * h->P.ncls * 8;
-    if (h->corrupt) h->c_fi[(size_t)12345 % fi_n] ^= 1u;
-    const size_t BUF = 16u << 20;
-    std::vector<uint8_t> buf(BUF);
-    uint64_t bad_ep = 0, bad_fi = 0, first_bad = ~0ull; bool io_ok = true;
+    if (r.corrupt) r.c_fi[(size_t)12345 % fi_n] ^= 1u;
+    /* staging buffer: 16 MiB (region 0, as without the A/B); A/B region B: 1 MiB, mmap'd */
+    const size_t BUF = v == 0 ? (16u << 20) : (1u << 20);
+    std::vector<uint8_t> vbuf;
+    uint8_t *sb = nullptr;
+    if (v == 0) { vbuf.resize(BUF); sb = vbuf.data(); }
+    else { void *m = mmap(nullptr, BUF, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); sb = m == MAP_FAILED ? nullptr : (uint8_t *)m; }
+    uint64_t bad_ep = 0, bad_fi = 0, first_bad = ~0ull; bool io_ok = sb != nullptr;
     for (size_t off = 0; off < ep_n && io_ok; off += BUF) {
         const size_t len = ep_n - off < BUF ? ep_n - off : BUF;
-        io_ok = cudaMemcpy(buf.data(), h->d_scr_ep + off, len, cudaMemcpyDeviceToHost) == cudaSuccess;
-        for (size_t r = 0; io_ok && r < len; r += 64)      /* mid, remW, early; the GPU never writes the pad */
-            if (memcmp(buf.data() + r, h->c_ep + off + r, 40 + h->P.K)) { bad_ep++; if ((off + r) / 64 < first_bad) first_bad = (off + r) / 64; }
+        io_ok = cudaMemcpy(sb, r.d_scr_ep + off, len, cudaMemcpyDeviceToHost) == cudaSuccess;
+        for (size_t q = 0; io_ok && q < len; q += 64)      /* mid, remW, early; the GPU never writes the pad */
+            if (memcmp(sb + q, r.c_ep + off + q, 40 + h->P.K)) { bad_ep++; if ((off + q) / 64 < first_bad) first_bad = (off + q) / 64; }
     }
     for (size_t off = 0; off < fi_n * 4 && io_ok; off += BUF) {
         const size_t len = fi_n * 4 - off < BUF ? fi_n * 4 - off : BUF;
-        io_ok = cudaMemcpy(buf.data(), (const uint8_t *)h->d_scr_fi + off, len, cudaMemcpyDeviceToHost) == cudaSuccess;
-        if (io_ok && memcmp(buf.data(), (const uint8_t *)h->c_fi + off, len))
+        io_ok = cudaMemcpy(sb, (const uint8_t *)r.d_scr_fi + off, len, cudaMemcpyDeviceToHost) == cudaSuccess;
+        if (io_ok && memcmp(sb, (const uint8_t *)r.c_fi + off, len))
             for (size_t w = 0; w < len / 4; w++)
-                if (((const uint32_t *)buf.data())[w] != h->c_fi[off / 4 + w]) {
+                if (((const uint32_t *)sb)[w] != r.c_fi[off / 4 + w]) {
                     bad_fi++; const uint64_t e = (off / 4 + w) / (h->P.ncls * 8); if (e < first_bad) first_bad = e;
                 }
     }
-    free(h->c_ep); free(h->c_fi); h->c_ep = nullptr; h->c_fi = nullptr;
+    if (v == 0) { free(r.c_ep); free(r.c_fi); }
+    else {
+        munmap(r.c_ep, (size_t)n * 64); munmap(r.c_fi, fi_n * 4);
+        if (sb) munmap(sb, BUF);
+    }
+    r.c_ep = nullptr; r.c_fi = nullptr;
     std::lock_guard<std::mutex> g(h->m);
-    h->chk_running = false;
-    if (!io_ok) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check readback failed"); return; }
+    r.chk_running = false;
+    if (!io_ok) { (void)cudaGetLastError(); r.check = -1; kill_locked(h, "self-check readback failed"); return; }
     if (bad_ep || bad_fi) {
-        h->check = -1;
-        printf("  Host producers: SELF-CHECK FAILED on batch 0 (%llu descriptors, %llu first-state words differ; first epoch %llu)\n",
-               (unsigned long long)bad_ep, (unsigned long long)bad_fi, (unsigned long long)first_bad);
+        r.check = -1;
+        printf("  Host producers%s: SELF-CHECK FAILED on batch 0 (%llu descriptors, %llu first-state words differ; first epoch %llu)\n",
+               r.tag, (unsigned long long)bad_ep, (unsigned long long)bad_fi, (unsigned long long)(r.lo + first_bad));
         kill_locked(h, "self-check mismatch");
         return;
     }
-    h->check = 1; h->active = true;
-    printf("  Host producers: self-check passed (batch 0: %llu descriptors + %llu first-block states bit-identical)\n",
-           (unsigned long long)n, (unsigned long long)n * h->P.ncls);
+    r.check = 1;
+    if (r.lo || n != batch_len(h, v, 0))
+        printf("  Host producers%s: self-check passed (batch 0 at epoch %llu: first %llu descriptors + %llu first-block states bit-identical)\n",
+               r.tag, (unsigned long long)r.lo, (unsigned long long)n, (unsigned long long)n * h->P.ncls);
+    else
+        printf("  Host producers%s: self-check passed (batch 0: %llu descriptors + %llu first-block states bit-identical)\n",
+               r.tag, (unsigned long long)n, (unsigned long long)n * h->P.ncls);
     fflush(stdout);
     h->cv_work.notify_all();
 }
@@ -635,24 +685,47 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
     const bool helper = h->place && id == 1;
     std::unique_lock<std::mutex> lk(h->m);
     while (!h->stop) {
-        /* 1. self-check: build batch 0 on the host, then compare once the GPU copy is complete */
-        if (h->check == 0 && h->c_next < h->c_nchunks) {
-            const int ch = h->c_next++;
-            lk.unlock();
-            const uint64_t n = batch_len(h, 0), e0 = (uint64_t)ch * CHUNK, e1 = e0 + CHUNK < n ? e0 + CHUNK : n;
-            const double t0 = now_s();
-            produce(h->P, 0, e0, e1, h->c_ep, h->c_fi);
-            const double dt = now_s() - t0;
-            lk.lock();
-            h->tchunk = h->tchunk > 0 ? 0.8 * h->tchunk + 0.2 * dt : dt;
-            h->c_done++;
-            continue;
+        /* 1. self-checks: build each region's batch 0 on the host (region 0 at once, as without the A/B; a
+         *    region v > 0 only once its batch 0 has been launched, i.e. its GPU copy is enqueued), then compare
+         *    once the GPU copy is complete */
+        bool did = false, chk_wait = false;
+        for (int v = 0; v < h->nreg && !did && !h->stop; v++) {
+            Reg &r = h->reg[v];
+            if (r.check == 0 && r.c_next < r.c_nchunks && (v == 0 || r.chk_enqueued)) {
+                if (!r.c_alloc) {
+                    r.c_alloc = true;
+                    if (v == 0) {   /* as without the A/B */
+                        r.c_ep = (uint8_t *)malloc((size_t)r.check_n * 64);
+                        r.c_fi = (uint32_t *)malloc((size_t)r.check_n * h->P.ncls * 32);
+                    } else {        /* A/B region B: mmap'd, so munmap hands the pages back (no resident residue) */
+                        void *a = mmap(nullptr, (size_t)r.check_n * 64, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                        void *b = mmap(nullptr, (size_t)r.check_n * h->P.ncls * 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                        r.c_ep = a == MAP_FAILED ? nullptr : (uint8_t *)a;
+                        r.c_fi = b == MAP_FAILED ? nullptr : (uint32_t *)b;
+                    }
+                    if (!r.c_ep || !r.c_fi) { r.check = -1; kill_locked(h, "self-check buffers"); break; }
+                }
+                const int ch = r.c_next++;
+                lk.unlock();
+                const uint64_t n = r.check_n, e0 = (uint64_t)ch * CHUNK, e1 = e0 + CHUNK < n ? e0 + CHUNK : n;
+                const double t0 = now_s();
+                produce(h->P, r.lo, r.lo + e0, r.lo + e1, r.c_ep, r.c_fi);
+                const double dt = now_s() - t0;
+                lk.lock();
+                h->tchunk = h->tchunk > 0 ? 0.8 * h->tchunk + 0.2 * dt : dt;
+                r.c_done++;
+                did = true;
+                break;
+            }
+            if (r.check == 0 && r.c_done == r.c_nchunks && r.c_nchunks > 0 && r.chk_enqueued && !r.chk_running) {
+                const cudaError_t q = cudaEventQuery(r.chk_evt);
+                if (q == cudaSuccess) { r.chk_running = true; lk.unlock(); run_check(h, v); lk.lock(); did = true; break; }
+                if (q != cudaErrorNotReady) { (void)cudaGetLastError(); r.check = -1; kill_locked(h, "self-check event failed"); break; }
+                chk_wait = true;
+            }
         }
-        if (h->check == 0 && h->c_done == h->c_nchunks && h->chk_enqueued && !h->chk_running) {
-            const cudaError_t q = cudaEventQuery(h->chk_evt);
-            if (q == cudaSuccess) { h->chk_running = true; lk.unlock(); run_check(h); lk.lock(); continue; }
-            if (q != cudaErrorNotReady) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check event failed"); break; }
-        }
+        if (h->stop) break;
+        if (did) continue;
         /* 2. worker 0 pins the ring, one piece per pass, once the search loop runs */
         if (id == 0 && h->loop_started) {
             Slot *a = nullptr;
@@ -669,50 +742,64 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
                 continue;
             }
         }
-        /* 3. ring production (only once the self-check has passed: until then batches go to the GPU) */
+        /* 3. ring production: plan batches, in plan order, of regions whose self-check has passed */
         const bool inflight = release_locked(h);
         Slot *w = nullptr;
-        if (h->check == 1 && !(helper && !h->behind)) {
-            for (int s = 0; s < NSLOT; s++) {
+        if (!(helper && !h->behind)) {
+            int best = PLAN_MAX + 1;
+            for (int s = 0; s < NSLOT; s++) {       /* finish a partly built plan batch first (the earliest) */
                 Slot &x = h->slot[s];
-                if (x.state == S_PROD && x.next_chunk < x.nchunks && (!w || x.batch < w->batch)) w = &x;
+                if (x.state != S_PROD || x.next_chunk >= x.nchunks) continue;
+                const int pos = plan_pos(h, x.v, x.batch);
+                if (pos >= 0 && pos < best) { best = pos; w = &x; }
             }
             if (!w) {
-                Slot *f = nullptr;
-                for (int s = 0; s < NSLOT && !f; s++) if (h->slot[s].npieces_ok == NPIECE && h->slot[s].state == S_FREE) f = &h->slot[s];
-                if (f) {
-                    int64_t b = h->prod_batch > h->need_batch ? h->prod_batch : h->need_batch;
-                    /* lead: a batch the host cannot finish before the main thread asks for it is wasted work;
-                     * skip far enough ahead given the queued chunks, the host chunk time and the GPU batch time */
-                    if (h->tg > 0 && h->tchunk > 0) {
-                        int queued = 0;
-                        for (int s = 0; s < NSLOT; s++) if (h->slot[s].state == S_PROD) queued += h->slot[s].nchunks - h->slot[s].done_chunks;
-                        const int nch = (int)((h->P.cap + CHUNK - 1) / CHUNK);
-                        const double th = (queued + nch) * h->tchunk / h->nthreads, slack = h->wait_ms * 1e-3;
-                        int64_t lead = th > slack ? (int64_t)ceil((th - slack) / h->tg) : 0;
-                        if (lead > 16) lead = 16;
-                        if (b < h->need_batch + lead) b = h->need_batch + lead;
-                    }
-                    if (b < h->n_batches) {
-                        w = f; w->batch = b; h->prod_batch = b + 1;
+                /* lead: a batch the host cannot finish before the main thread asks for it is wasted work;
+                 * skip that many plan entries given the queued chunks, the host chunk time and the GPU batch time */
+                int lead = 0;
+                if (h->tg > 0 && h->tchunk > 0) {
+                    int queued = 0;
+                    for (int s = 0; s < NSLOT; s++) if (h->slot[s].state == S_PROD) queued += h->slot[s].nchunks - h->slot[s].done_chunks;
+                    const int nch = (int)((h->P.cap + CHUNK - 1) / CHUNK);
+                    const double th = (queued + nch) * h->tchunk / h->nthreads, slack = h->wait_ms * 1e-3;
+                    lead = th > slack ? (int)ceil((th - slack) / h->tg) : 0;
+                    if (lead > 16) lead = 16;
+                }
+                const PlanItem *it = nullptr;
+                for (int i = lead; i < h->plan_n && !it; i++) {
+                    const PlanItem &c = h->plan[i];
+                    if (c.v < 0 || c.v >= h->nreg || h->reg[c.v].check != 1 || c.b < h->reg[c.v].need || c.b >= h->reg[c.v].n_batches) continue;
+                    bool held = false;
+                    for (int s = 0; s < NSLOT; s++) if (h->slot[s].state != S_FREE && h->slot[s].v == c.v && h->slot[s].batch == c.b) held = true;
+                    if (!held) it = &c;
+                }
+                if (it) {
+                    Slot *f = nullptr;
+                    for (int s = 0; s < NSLOT && !f; s++) if (h->slot[s].npieces_ok == NPIECE && h->slot[s].state == S_FREE) f = &h->slot[s];
+                    for (int s = 0; s < NSLOT && !f; s++)     /* evict a finished batch that has left the plan */
+                        if (h->slot[s].npieces_ok == NPIECE && h->slot[s].state == S_READY && plan_pos(h, h->slot[s].v, h->slot[s].batch) < 0) {
+                            f = &h->slot[s]; h->n_evict++;
+                        }
+                    if (f) {
+                        w = f; w->v = it->v; w->batch = it->b;
                         w->state = S_PROD; w->abandoned = false;
-                        w->nchunks = (int)((batch_len(h, b) + CHUNK - 1) / CHUNK);
+                        w->nchunks = (int)((batch_len(h, it->v, it->b) + CHUNK - 1) / CHUNK);
                         w->next_chunk = 0; w->done_chunks = 0;
                     }
                 }
             }
         }
         if (!w) {
-            if ((h->check == 0 && h->chk_enqueued && h->c_done == h->c_nchunks) || inflight)
-                h->cv_work.wait_for(lk, std::chrono::milliseconds(2));   /* poll a pending event */
+            if (chk_wait || inflight) h->cv_work.wait_for(lk, std::chrono::milliseconds(2));   /* poll a pending event */
             else h->cv_work.wait(lk);
             continue;
         }
         const int ch = w->next_chunk++;
+        const int wv = w->v;
         const int64_t b = w->batch;
         if (helper) h->helper_chunks++;
         lk.unlock();
-        const uint64_t base = (uint64_t)b * h->P.cap, n = batch_len(h, b);
+        const uint64_t base = h->reg[wv].lo + (uint64_t)b * h->P.cap, n = batch_len(h, wv, b);
         const uint64_t e0 = base + (uint64_t)ch * CHUNK;
         const uint64_t e1 = (uint64_t)(ch + 1) * CHUNK < n ? base + (uint64_t)(ch + 1) * CHUNK : base + n;
         const int p = (int)(((uint64_t)ch * CHUNK) / h->pe);           /* chunks never straddle pieces */
@@ -748,12 +835,16 @@ static void cpu_core_siblings(int cpu, cpu_set_t *out) {
 }
 
 /* Start the host producers (main thread, once the problem, window schedule and first classes are known).
- * Workers begin at once on the self-check copy of batch 0; the pinned ring waits for the search loop. */
-static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t n_epochs, uint64_t cap) {
+ * Workers begin at once on the self-check copy of batch 0; the pinned ring waits for the search loop.
+ * nreg regions [lo[i], hi[i]) (2 with the A/B, else 1 covering the whole space) share one ring;
+ * check_n[i] = epochs of region i's batch 0 its self-check compares (0 = the whole batch). */
+static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t cap,
+                  int nreg, const uint64_t *lo, const uint64_t *hi, const uint64_t *check_n) {
     if (getenv("QSB_HP_DISABLE") && atoi(getenv("QSB_HP_DISABLE"))) { printf("  Host producers: off (QSB_HP_DISABLE)\n"); return; }
+    if (nreg < 1 || nreg > MAXREG) { printf("  Host producers: off (bad region count)\n"); return; }
     Hp *h = new Hp;
     Params &P = h->P;
-    P.cut = cut; P.K = K; P.ncls = ncls; P.n_epochs = n_epochs; P.cap = cap; P.rows = dp->dummy_sigs;
+    P.cut = cut; P.K = K; P.ncls = ncls; P.n_epochs = hi[0] - lo[0]; P.cap = cap; P.rows = dp->dummy_sigs;
     const int stream_len = (int)dp->prefix_remainder_len + SIG_PUSH_SIZE * (cut - K);
     h->pe = cap / NPIECE;
     if (K > MAXK || K < 2 || ncls < 1 || ncls > NCLS || (stream_len & 63) != 8 || cut > 150 || cap % (NPIECE * (uint64_t)CHUNK)) {
@@ -770,20 +861,26 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
         P.cv[c].M2 = _mm_set_epi32((int)w[9], (int)w[8], (int)w[7], (int)w[6]);
         P.cv[c].M3 = _mm_set_epi32((int)w[13], (int)w[12], (int)w[11], (int)w[10]);
     }
-    h->n_batches = (int64_t)((n_epochs + cap - 1) / cap);
     if (getenv("QSB_HP_THREADS")) { int t = atoi(getenv("QSB_HP_THREADS")); if (t >= 1 && t <= 3) h->nthreads = t; }
     if (getenv("QSB_HP_WAIT_MS")) { int t = atoi(getenv("QSB_HP_WAIT_MS")); if (t >= 0 && t <= 1000) h->wait_ms = t; }
-    h->corrupt = getenv("QSB_HP_CORRUPT") ? atoi(getenv("QSB_HP_CORRUPT")) : 0;
+    const int corrupt = getenv("QSB_HP_CORRUPT") ? atoi(getenv("QSB_HP_CORRUPT")) : 0;   /* 1: region A (or the only one), 2: B */
     cudaGetDevice(&h->dev);
-    const uint64_t n0 = batch_len(h, 0);
-    h->c_ep = (uint8_t *)malloc((size_t)n0 * 64);
-    h->c_fi = (uint32_t *)malloc((size_t)n0 * ncls * 32);
-    h->c_nchunks = (int)((n0 + CHUNK - 1) / CHUNK);
-    bool ok = h->c_ep && h->c_fi && n0 > 0 &&
-              cudaMalloc((void **)&h->d_scr_ep, (size_t)n0 * 64) == cudaSuccess &&
-              cudaMalloc((void **)&h->d_scr_fi, (size_t)n0 * ncls * 32) == cudaSuccess &&
-              cudaEventCreateWithFlags(&h->chk_evt, cudaEventDisableTiming) == cudaSuccess;
-    if (!ok) { (void)cudaGetLastError(); printf("  Host producers: off (self-check buffers)\n"); return; }
+    h->nreg = nreg;
+    for (int i = 0; i < nreg; i++) {
+        Reg &r = h->reg[i];
+        r.lo = lo[i]; r.n = hi[i] - lo[i];
+        r.n_batches = (int64_t)((r.n + cap - 1) / cap);
+        if (nreg > 1) snprintf(r.tag, sizeof r.tag, " [%c]", 'A' + i);
+        r.corrupt = corrupt == i + 1;
+        const uint64_t nb0 = batch_len(h, i, 0);
+        r.check_n = check_n && check_n[i] && check_n[i] < nb0 ? check_n[i] : nb0;
+        r.c_nchunks = (int)((r.check_n + CHUNK - 1) / CHUNK);
+        bool ok = r.check_n > 0 &&
+                  cudaMalloc((void **)&r.d_scr_ep, (size_t)r.check_n * 64) == cudaSuccess &&
+                  cudaMalloc((void **)&r.d_scr_fi, (size_t)r.check_n * ncls * 32) == cudaSuccess &&
+                  cudaEventCreateWithFlags(&r.chk_evt, cudaEventDisableTiming) == cudaSuccess;
+        if (!ok) { (void)cudaGetLastError(); printf("  Host producers: off (self-check buffers)\n"); return; }
+    }
     /* Placement. PLACE=1: main thread on its current logical CPU, producer 0 on that core's other
      * sibling(s), the helper (if any) floating over the remaining CPUs. PLACE=0 (or no SMT sibling):
      * main thread on its whole core, producers floating over the other CPUs. */
@@ -808,36 +905,45 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
     } else place = 0;
     h->place = place;
     if (place && blocksync()) g_share_cpu = cpu;
+    CPU_ZERO(&g_share_core); g_share_core_n = 0;
+    if (!place && blocksync() && use_mask) { g_share_core = mine; g_share_core_n = CPU_COUNT(&mine); }
     g_hp = h;
+    char regs[160] = "";
+    if (nreg > 1)
+        snprintf(regs, sizeof regs, " shared by the A/B regions (A epochs [%llu, %llu), B [%llu, %llu)), self-check on each region's batch 0 (B: first %llu epochs)",
+                 (unsigned long long)lo[0], (unsigned long long)hi[0], (unsigned long long)lo[1], (unsigned long long)hi[1],
+                 (unsigned long long)h->reg[1].check_n);
     if (place) {
         h->nthreads = 1 + helper;
         h->th.emplace_back(worker, h, 0, sib, true);
         if (helper) h->th.emplace_back(worker, h, 1, wmask, true);
         char sibs[64] = ""; int n = 0;
         for (int c = 0; c < CPU_SETSIZE && n < 40; c++) if (CPU_ISSET(c, &sib)) n += snprintf(sibs + n, sizeof sibs - n, "%s%d", n ? "," : "", c);
-        printf("  Host producers: 1 thread pinned to CPU %s (the main thread's SMT sibling; main thread on CPU %d, %s)%s (%s), %d pinned slots of %.0f MiB, self-check on batch 0\n",
+        printf("  Host producers: 1 thread pinned to CPU %s (the main thread's SMT sibling; main thread on CPU %d, %s)%s (%s), %d pinned slots of %.0f MiB%s\n",
                sibs, cpu, blocksync() ? "blocking event waits" : "spinning event waits", helper ? " + a floating helper while the ring is behind" : "", g_shani ? "SHA-NI, precomputed schedules" : "OpenSSL",
-               NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0);
+               NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0, nreg > 1 ? regs : ", self-check on batch 0");
     } else {
         for (int t = 0; t < h->nthreads; t++) h->th.emplace_back(worker, h, t, wmask, use_mask);
-        printf("  Host producers: %d threads (%s, %s), %d pinned slots of %.0f MiB, self-check on batch 0\n",
+        printf("  Host producers: %d threads (%s, %s), %d pinned slots of %.0f MiB%s\n",
                h->nthreads, g_shani ? "SHA-NI, precomputed schedules" : "OpenSSL", use_mask ? "off the main core" : "unpinned",
-               NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0);
+               NSLOT, (double)cap * (64 + ncls * 32) / 1048576.0, nreg > 1 ? regs : ", self-check on batch 0");
     }
     fflush(stdout);
 }
 
-/* Main thread, batch 0 (GPU producers), right after first_flat on slot 0's stream: stream-ordered
- * device copy of the GPU-built batch 0 for the self-check. Never waits. */
-static void enqueue_check_copy(cudaStream_t st, const void *d_ep, const uint32_t *d_fi, size_t fi_pitch) {
-    Hp *h = g_hp; if (!h) return;
-    const size_t n = (size_t)batch_len(h, 0), w = (size_t)h->P.ncls * 32;
-    cudaError_t e = cudaMemcpyAsync(h->d_scr_ep, d_ep, n * 64, cudaMemcpyDeviceToDevice, st);
-    if (e == cudaSuccess) e = cudaMemcpy2DAsync(h->d_scr_fi, w, d_fi, fi_pitch, w, n, cudaMemcpyDeviceToDevice, st);
-    if (e == cudaSuccess) e = cudaEventRecord(h->chk_evt, st);
+/* Main thread, batch 0 of region v (GPU producers), right after first_flat on that batch's stream:
+ * stream-ordered device copy of the GPU-built batch 0 (its first check_n epochs) for the self-check.
+ * Never waits. */
+static void enqueue_check_copy(int v, cudaStream_t st, const void *d_ep, const uint32_t *d_fi, size_t fi_pitch) {
+    Hp *h = g_hp; if (!h || v >= h->nreg) return;
+    Reg &r = h->reg[v];
+    const size_t n = (size_t)r.check_n, w = (size_t)h->P.ncls * 32;
+    cudaError_t e = cudaMemcpyAsync(r.d_scr_ep, d_ep, n * 64, cudaMemcpyDeviceToDevice, st);
+    if (e == cudaSuccess) e = cudaMemcpy2DAsync(r.d_scr_fi, w, d_fi, fi_pitch, w, n, cudaMemcpyDeviceToDevice, st);
+    if (e == cudaSuccess) e = cudaEventRecord(r.chk_evt, st);
     std::lock_guard<std::mutex> g(h->m);
-    if (e != cudaSuccess) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check copy failed"); return; }
-    h->chk_enqueued = true;
+    if (e != cudaSuccess) { (void)cudaGetLastError(); r.check = -1; kill_locked(h, "self-check copy failed"); return; }
+    r.chk_enqueued = true;
     h->cv_work.notify_all();
 }
 
@@ -848,27 +954,43 @@ static void poll() {
     release_locked(h);
 }
 
-/* Main thread, before launching batch k: a ready host batch (slot now in flight) or null (run the GPU
- * producers for batch k). */
-static Slot *acquire(int64_t k) {
-    Hp *h = g_hp; if (!h) return nullptr;
+/* Main thread, after every launch: the predicted (region, batch) of the next launches, in launch order.
+ * Partly built batches that left the plan are abandoned; finished ones stay until a slot is needed. */
+static void set_plan(const PlanItem *items, int n) {
+    Hp *h = g_hp; if (!h) return;
+    std::lock_guard<std::mutex> g(h->m);
+    h->plan_n = n < PLAN_MAX ? n : PLAN_MAX;
+    for (int i = 0; i < h->plan_n; i++) h->plan[i] = items[i];
+    for (int s = 0; s < NSLOT; s++) {
+        Slot &x = h->slot[s];
+        if (x.state == S_PROD && !x.abandoned && plan_pos(h, x.v, x.batch) < 0) abandon_locked(h, &x);
+        else if (x.state == S_READY && x.batch < h->reg[x.v].need) { x.state = S_FREE; x.batch = -1; }   /* passed by */
+    }
+    h->cv_work.notify_all();
+}
+
+/* Main thread, before launching batch b of region v (launch = the loop's launch number): a ready host batch
+ * (slot now in flight) or null (run the GPU producers for this batch). */
+static Slot *acquire(int v, int64_t b, int64_t launch) {
+    Hp *h = g_hp; if (!h || v >= h->nreg) return nullptr;
     std::unique_lock<std::mutex> lk(h->m);
+    Reg &r = h->reg[v];
     const double t = now_s();
-    if (k >= 3 && h->t_last_acq > 0) { const double dt = t - h->t_last_acq; h->tg = h->tg > 0 ? 0.8 * h->tg + 0.2 * dt : dt; }
+    if (launch >= 3 && h->t_last_acq > 0) { const double dt = t - h->t_last_acq; h->tg = h->tg > 0 ? 0.8 * h->tg + 0.2 * dt : dt; }
     h->t_last_acq = t;
-    if (k >= 1 && !h->loop_started) { h->loop_started = true; h->cv_work.notify_all(); }
-    if (h->need_batch < k + 1) h->need_batch = k + 1;
+    if (launch >= 1 && !h->loop_started) { h->loop_started = true; h->cv_work.notify_all(); }
+    if (r.need < b + 1) r.need = b + 1;
     Slot *s = nullptr;
     for (int i = 0; i < NSLOT; i++)
-        if (h->slot[i].batch == k && (h->slot[i].state == S_PROD || h->slot[i].state == S_READY)) s = &h->slot[i];
-    if (!h->active) { if (s) abandon_locked(h, s); return nullptr; }
+        if (h->slot[i].v == v && h->slot[i].batch == b && (h->slot[i].state == S_PROD || h->slot[i].state == S_READY)) s = &h->slot[i];
+    if (h->dead || r.check != 1) { if (s) abandon_locked(h, s); return nullptr; }
     if (s && s->state == S_PROD && h->wait_ms > 0)
         h->cv_ready.wait_for(lk, std::chrono::milliseconds(h->wait_ms), [&] { return s->state == S_READY || h->dead; });
     if (s && s->state == S_READY && !h->dead) {
-        s->state = S_UPLOAD; h->n_host++; h->consec_fb = 0;
+        s->state = S_UPLOAD; r.n_host++; h->consec_fb = 0;
         int ahead = 0;
-        for (int i = 0; i < NSLOT; i++) if (h->slot[i].state == S_READY && h->slot[i].batch > k) ahead++;
-        if (h->n_host > 16) {       /* after the catch-up: host batches queued beyond this one */
+        for (int i = 0; i < NSLOT; i++) if (h->slot[i].state == S_READY && &h->slot[i] != s) ahead++;
+        if (r.n_host > 16) {        /* after the catch-up: host batches queued beyond this one */
             h->ahead_sum += ahead; h->ahead_n++; if (ahead < h->ahead_min) h->ahead_min = ahead;
         }
         /* helper policy: work only while no host batch beyond the one being launched is ready */
@@ -878,7 +1000,7 @@ static Slot *acquire(int64_t k) {
     }
     if (s) abandon_locked(h, s);
     if (!h->behind) { h->behind = true; h->cv_work.notify_all(); }
-    h->n_fb++;
+    r.n_fb++;
     if (++h->consec_fb >= h->max_fb) kill_locked(h, "host cannot keep up (watchdog)");
     return nullptr;
 }
@@ -903,13 +1025,17 @@ static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, 
     return e;
 }
 
-static void stats(uint64_t *host, uint64_t *fb, int *state, double *ahead_avg = nullptr, int *ahead_min = nullptr, uint64_t *helper_chunks = nullptr) {
-    Hp *h = g_hp; if (!h) { *host = *fb = 0; *state = -2; return; }
+/* Per region: host-built batches, GPU-built batches after start-up, state (1 on, 0 pending, -1 off, -2 none);
+ * shared: ready-ahead at launch, helper chunks, evictions. */
+static void stats(int v, uint64_t *host, uint64_t *fb, int *state, double *ahead_avg = nullptr, int *ahead_min = nullptr,
+                  uint64_t *helper_chunks = nullptr, uint64_t *evict = nullptr) {
+    Hp *h = g_hp; if (!h || v >= h->nreg) { *host = *fb = 0; *state = -2; return; }
     std::lock_guard<std::mutex> g(h->m);
-    *host = h->n_host; *fb = h->n_fb; *state = h->dead ? -1 : h->active ? 1 : 0;
+    *host = h->reg[v].n_host; *fb = h->reg[v].n_fb; *state = h->dead ? -1 : h->reg[v].check == 1 ? 1 : 0;
     if (ahead_avg) *ahead_avg = h->ahead_n ? (double)h->ahead_sum / h->ahead_n : 0.0;
     if (ahead_min) *ahead_min = h->ahead_n ? h->ahead_min : 0;
     if (helper_chunks) *helper_chunks = h->helper_chunks;
+    if (evict) *evict = h->n_evict;
 }
 
 /* Stop and join the workers (a chunk or one piece allocation takes a few ms). */

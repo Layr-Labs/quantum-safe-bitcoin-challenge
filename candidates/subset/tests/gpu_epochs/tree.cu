@@ -405,7 +405,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 2
+#define QSB_Q_MIX 4
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -3739,7 +3739,181 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #if QSB_HOST_PRODUCERS && QSB_SLOT_PIPELINE && ZLAB_HITPATH
 #include "host_producers.h"
 #define QSB_HP_ON 1
+static int qhp_blocksync() { return qhp::blocksync(); }
+#else
+static int qhp_blocksync() { return 0; }
 #endif
+#include <stdarg.h>
+/* ---- In-run A/B scheduler (QSB_AB, QsbCarrier.h; host only, the device images are untouched) ----
+ * With image B loaded, the two-slot loop runs two variants on disjoint epoch regions of the same
+ * rank-ordered space: A = image A on [0, floor(n/2)), walked upward from 0; B = image B on
+ * [floor(n/2), n), walked upward from floor(n/2). Each batch is a full 2^20-epoch batch of one variant
+ * (the last one of a region may be short); a region is never crossed and n is never passed, so every
+ * candidate is exact and unique and the run is an ordinary scored run. GPU wall time is attributed per
+ * batch by completion intervals (host clock after each slot's event): the variant of the next batch is
+ * kept until its accumulated time (plus an estimate for the batch in flight) leads the other's by half
+ * a slice (QSB_AB_SLICE_MS, default 60 s), which yields alternating slices of QSB_AB_SLICE_MS after a first
+ * half slice (A B B A A B ...: linear drifts cancel). From process time QSB_AB_FINE_AT_S on (the ranked and
+ * the harness runs stop at 1200 s; the imbalance there is at most half a slice, which the lagging variant
+ * makes up alone in <= 30 s) every batch goes to the variant with less time, so the stop leaves the two
+ * time shares within about one batch. The public hit list then gives each variant's batch count
+ * exactly (its highest GPU-pattern hit rank in its region; ~16 GPU hits per batch), and the ratio of
+ * the counts is the ratio of the two images' speeds over equal time shares (bin/ab_decode.py).
+ * Env (local tests): QSB_AB=0 (plain single-image run), QSB_AB_SLICE_MS, QSB_AB_FINE_AT_S, QSB_AB_LOG=<file>,
+ * QSB_AB_REGION_CAP=<epochs> (test only: smaller regions, to exercise the exhaustion stop). */
+#ifndef QSB_AB_SLICE_MS
+#define QSB_AB_SLICE_MS 60000   /* 60 s: long enough for each variant's own clock/thermal state (6 s slices share it
+                                 * and measured only the per-cycle part: Q_MIX 2 ~0 at 6 s, -0.28% at 60 s, -0.32% standalone) */
+#endif
+#ifndef QSB_AB_FINE_AT_S
+#define QSB_AB_FINE_AT_S 1140
+#endif
+#ifndef QSB_AB_B_CHECK_EPOCHS
+#define QSB_AB_B_CHECK_EPOCHS 16384   /* variant B's host-producer self-check: first epochs of its batch 0 (one
+                                       * chunk: 16384 descriptors + 131072 first-block states, 5 MiB host copy) */
+#endif
+static double qsb_ab_now() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + 1e-9 * (double)t.tv_nsec; }
+static const double qsb_ab_t_proc0 = qsb_ab_now();   /* ~process start: static initialization, before main */
+struct QsbAb {
+    int on = 0;                                    /* two regions (image B loaded at set-up) */
+    uint64_t lo[2] = {0, 0}, hi[2] = {0, 0};       /* regions [lo, hi) */
+    uint64_t next[2] = {0, 0}, nb[2] = {0, 0};     /* next epoch, batches launched */
+    double T[2] = {0, 0};                          /* GPU wall seconds per variant (completion intervals) */
+    double est[2] = {0, 0};                        /* EMA of one batch interval per variant */
+    uint64_t done[2] = {0, 0};                     /* batches completed per variant */
+    double h = 3.0, fine_at = QSB_AB_FINE_AT_S;    /* switch threshold (half a slice), fine phase (process s) */
+    int cur = 0, fine = 0, slice_ms = QSB_AB_SLICE_MS;
+    uint64_t switches = 0, fine_batches = 0;
+    double t_prev = 0;                             /* previous completion */
+    int sv = -1; uint64_t sn = 0, nslices[2] = {0, 0}; double st = 0;   /* current slice (by completions) */
+    uint64_t fine_n[2] = {0, 0}; double fine_T[2] = {0, 0};             /* one-batch slices of the fine phase */
+};
+static QsbAb g_ab;
+static const char *qsb_ab_name(int v) { return v ? "B" : "A"; }
+/* QSB_AB_LOG=<path> (local runs): the [A/B] lines are also appended to that file (the harness discards the
+ * grinder's stdout). Unset (ranked): stdout only. */
+static FILE *g_ab_log = nullptr;
+static void qsb_ab_out(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void qsb_ab_out(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt); vprintf(fmt, ap); va_end(ap);
+    if (g_ab_log) { va_start(ap, fmt); vfprintf(g_ab_log, fmt, ap); va_end(ap); fflush(g_ab_log); }
+}
+static void qsb_ab_slice_end(QsbAb &ab) {
+    if (ab.sv < 0 || !ab.on) return;
+    if (ab.fine && ab.sn == 1) { ab.fine_n[ab.sv]++; ab.fine_T[ab.sv] += ab.st; }   /* summed in the final line */
+    else qsb_ab_out("  [A/B] slice %llu %s batches %llu gpu_s %.4f\n", (unsigned long long)(ab.nslices[0] + ab.nslices[1]),
+                qsb_ab_name(ab.sv), (unsigned long long)ab.sn, ab.st);
+    ab.nslices[ab.sv]++;
+}
+/* A batch of variant v completed (its slot event returned): attribute the interval since the previous
+ * completion to v. */
+static void qsb_ab_done(QsbAb &ab, int v) {
+    const double t = qsb_ab_now(), dt = t - ab.t_prev;
+    ab.t_prev = t;
+    ab.T[v] += dt; ab.done[v]++;
+    ab.est[v] = ab.est[v] > 0 ? 0.8 * ab.est[v] + 0.2 * dt : dt;
+    if (v != ab.sv) { qsb_ab_slice_end(ab); ab.sv = v; ab.sn = 0; ab.st = 0; }
+    ab.sn++; ab.st += dt;
+}
+/* Variant of the next batch, or -1: without the A/B once the space is exhausted; with the A/B once EITHER
+ * region is (both variants stop there, so the time shares stay equal; the loop then idles until the stop
+ * signal instead of exiting early). inflight = variant of the batch still running (-1: none). */
+static int qsb_ab_pick(QsbAb &ab, int inflight) {
+    const bool ex0 = ab.next[0] >= ab.hi[0], ex1 = ab.next[1] >= ab.hi[1];
+    if (ex0 && ex1) return -1;
+    if (ab.on && (ex0 || ex1)) return -1;
+    if (ex1) return 0;
+    if (ex0) return 1;
+    double T0 = ab.T[0], T1 = ab.T[1];
+    if (inflight == 0) T0 += ab.est[0]; else if (inflight == 1) T1 += ab.est[1];
+    if (!ab.fine) {
+        /* per-batch balance from fine_at, or as soon as either region has less than (half a slice + 10 s) of work
+         * left: enough for the lagging variant to catch up before a region runs out, so an exhaustion (which stops
+         * both variants) also leaves the time shares equal */
+        const double tp = qsb_ab_now() - qsb_ab_t_proc0;
+        int near = -1;
+        for (int v = 0; v < 2; v++)
+            if (ab.est[v] > 0 && (double)(ab.hi[v] - ab.next[v]) < (ab.h + 10.0) / ab.est[v] * (double)((uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL))
+                near = v;
+        if (tp >= ab.fine_at || near >= 0) {
+            ab.fine = 1;
+            qsb_ab_out("  [A/B] fine phase from process time %.1f s (%s): every batch to the variant with less GPU time (A %.3f s, B %.3f s so far)\n",
+                       tp, near >= 0 ? (near ? "region B nearly exhausted" : "region A nearly exhausted") : "scheduled", ab.T[0], ab.T[1]);
+            fflush(stdout);
+        }
+    }
+    if (ab.fine) return T0 < T1 ? 0 : T1 < T0 ? 1 : 1 - ab.cur;
+    const int c = ab.cur;
+    const double Tc = c ? T1 : T0, To = c ? T0 : T1;
+    return Tc - To >= ab.h ? 1 - c : c;
+}
+#ifdef QSB_HP_ON
+/* Predicted variants of the next n launches after the one just made (v_now; inflight_v = the batch launched
+ * before it, if still running), for the host producers' plan: qsb_ab_pick simulated forward with the
+ * per-variant batch-time estimates. A misprediction (a switch a batch early or late) only costs one
+ * GPU-built batch or one evicted host batch. */
+static int qsb_ab_plan(const QsbAb &ab, int inflight_v, int v_now, qhp::PlanItem *out, int n) {
+    const uint64_t cap = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
+    double est[2] = {ab.est[0], ab.est[1]};
+    const double e0 = est[0] > 0 ? est[0] : est[1] > 0 ? est[1] : 0.15;
+    if (!(est[0] > 0)) est[0] = e0;
+    if (!(est[1] > 0)) est[1] = e0;
+    double T[2] = {ab.T[0], ab.T[1]};
+    if (inflight_v >= 0) T[inflight_v] += est[inflight_v];   /* completes before the next pick */
+    uint64_t next[2] = {ab.next[0], ab.next[1]}, nb[2] = {ab.nb[0], ab.nb[1]};
+    int cur = v_now, infl = v_now, fine = ab.fine, k = 0;
+    const double tp = qsb_ab_now() - qsb_ab_t_proc0;
+    for (; k < n; k++) {
+        const bool ex0 = next[0] >= ab.hi[0], ex1 = next[1] >= ab.hi[1];
+        if ((ex0 && ex1) || (ab.on && (ex0 || ex1))) break;
+        int pick;
+        if (!ab.on || ex1) pick = 0;
+        else if (ex0) pick = 1;
+        else {
+            double T0 = T[0], T1 = T[1];
+            if (infl == 0) T0 += est[0]; else T1 += est[1];
+            if (!fine) {
+                if (tp + (k + 1) * 0.5 * (est[0] + est[1]) >= ab.fine_at) fine = 1;
+                for (int v = 0; v < 2; v++)
+                    if ((double)(ab.hi[v] - next[v]) < (ab.h + 10.0) / est[v] * (double)cap) fine = 1;
+            }
+            if (fine) pick = T0 < T1 ? 0 : T1 < T0 ? 1 : 1 - cur;
+            else { const double Tc = cur ? T1 : T0, To = cur ? T0 : T1; pick = Tc - To >= ab.h ? 1 - cur : cur; }
+        }
+        out[k].v = pick; out[k].b = (int64_t)nb[pick];
+        nb[pick]++; next[pick] += cap;
+        T[infl] += est[infl];
+        infl = pick; cur = pick;
+    }
+    return k;
+}
+#endif
+static void qsb_ab_setup(QsbAb &ab, uint64_t n_epochs) {
+    ab.on = QSB_AB && g_qsb_carrier.on && g_qsb_carrier_b.on;
+    const uint64_t mid = n_epochs / 2;
+    ab.lo[0] = 0; ab.hi[0] = ab.on ? mid : n_epochs;
+    ab.lo[1] = ab.on ? mid : n_epochs; ab.hi[1] = n_epochs;
+    if (ab.on && getenv("QSB_AB_REGION_CAP")) {   /* test only: cap each region (exercises the exhaustion stop) */
+        const uint64_t c = strtoull(getenv("QSB_AB_REGION_CAP"), NULL, 10);
+        for (int v = 0; v < 2; v++) if (c && ab.hi[v] - ab.lo[v] > c) ab.hi[v] = ab.lo[v] + c;
+    }
+    ab.next[0] = ab.lo[0]; ab.next[1] = ab.lo[1];
+    if (getenv("QSB_AB_SLICE_MS")) { const int v = atoi(getenv("QSB_AB_SLICE_MS")); if (v >= 50 && v <= 600000) ab.slice_ms = v; }
+    if (getenv("QSB_AB_FINE_AT_S")) { const double v = atof(getenv("QSB_AB_FINE_AT_S")); if (v >= 0) ab.fine_at = v; }
+    ab.h = ab.slice_ms / 2000.0;
+    if (!ab.on) {
+        if (QSB_AB) printf("  A/B: off (image B: %s); single image, epochs from 0\n", g_qsb_carrier.on ? g_qsb_ab_b_why : "carrier off");
+        return;
+    }
+    if (getenv("QSB_AB_LOG") && *getenv("QSB_AB_LOG")) g_ab_log = fopen(getenv("QSB_AB_LOG"), "a");
+#if QSB_AB_B_IMAGE
+    qsb_ab_out("  A/B: on: variant A = image A (sha256 %.16s...) on epochs [0, %llu) from 0; variant B = image B (sha256 %.16s..., flags '%s') on epochs [%llu, %llu) from %llu; slices of %d ms of GPU time (switch when one variant leads by %.3f s), every batch balanced from process time %.0f s\n",
+           qsb_carrier_cubin_sha256, (unsigned long long)ab.hi[0], qsb_ab_b::qsb_carrier_cubin_sha256, qsb_ab_b::qsb_carrier_b_flags,
+           (unsigned long long)ab.lo[1], (unsigned long long)ab.hi[1], (unsigned long long)ab.lo[1], ab.slice_ms, ab.h, ab.fine_at);
+#endif
+    fflush(stdout);
+}
 /* QSB_HOST_BLOCKING (host-only): the slot completion events are created with cudaEventBlockingSync, so the GPU
  * host thread sleeps in cudaEventSynchronize instead of spinning a CPU while two batches are in flight (after
  * newjordan's QSB_ASYNC_BLOCKING in 212237f4, which measured the unstarved rate unchanged on a 4090). The host
@@ -4429,9 +4603,13 @@ int main(int argc, char **argv) {
         memcpy(g_hv_win3, h_win3, sizeof(h_win3));
 #endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
+        qsb_ab_setup(g_ab, n_epochs);   /* A/B regions (before the host producers, which follow them) */
 #ifdef QSB_HP_ON
-        qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
-                   (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+        {
+            const uint64_t chk[2] = {0, QSB_AB_B_CHECK_EPOCHS};
+            qhp::start(&dp, window_start, s_early, qsb_first_class_count, (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL,
+                       g_ab.on ? 2 : 1, g_ab.lo, g_ab.hi, chk);
+        }
 #endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -4632,6 +4810,14 @@ int main(int argc, char **argv) {
             (void)cudaGetLastError();
         }
     }
+#if QSB_AB_B_IMAGE
+    if (qsb_ab_b_has(QK_DIG)) {   /* image B's digest kernel gets the same hint as image A's */
+        const cudaError_t rb = cudaFuncSetAttribute((const void *)g_qsb_carrier_b.k[QK_DIG],
+            cudaFuncAttributePreferredSharedMemoryCarveout, cudaSharedmemCarveoutMaxShared);
+        if (rb != cudaSuccess) { (void)cudaGetLastError(); if (qsb_carveout_rc == cudaSuccess) qsb_ab_b_off("carveout hint unavailable on image B only"); }
+    }
+    qsb_ab_b_verify();            /* every upload is done: read them back from image B */
+#endif
     clock_gettime(CLOCK_MONOTONIC, &t0);
     t_last_report = t0;
     uint64_t total_searched = 0;
@@ -4783,7 +4969,10 @@ int main(int argc, char **argv) {
             cudaError_t se = cudaSuccess;
             for (int s = 0; s < 2 && se == cudaSuccess; s++) {
                 se = cudaStreamCreateWithFlags(&sp_stream[s], cudaStreamNonBlocking);
-                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (QSB_HOST_BLOCKING ? cudaEventBlockingSync : 0));
+                /* QSB_HP_BLOCKSYNC: the per-batch wait (cudaEventSynchronize below) sleeps instead of
+                 * spinning, so the main thread's CPU is free for a co-grinder worker between launches; the
+                 * two-slot pipeline hides the wake-up latency (host-only; see host_producers.h). */
+                if (se == cudaSuccess) se = cudaEventCreateWithFlags(&sp_done[s], cudaEventDisableTiming | (qhp_blocksync() ? cudaEventBlockingSync : 0));
             }
             if (se == cudaSuccess) se = cudaMalloc(&d_hitbuf_s[1], 4 + (size_t)1024 * ZLAB_HIT_REC);
             if (se == cudaSuccess) se = cudaHostAlloc((void **)&h_tent, 2 * (size_t)SP_HOST_BYTES, cudaHostAllocDefault);
@@ -4846,7 +5035,9 @@ int main(int argc, char **argv) {
             if (sp_collect(s, completed)) return 1;
             return sp_publish(completed);
         };
-        auto sp_launch = [&](int s, uint64_t base, int epochs_in_batch) -> int {
+        int sp_var[2] = {0, 0};      /* A/B variant of the batch in each slot */
+        /* v, vj: A/B variant (region) and its batch number there (without the A/B: 0 and the batch number) */
+        auto sp_launch = [&](int s, uint64_t base, int epochs_in_batch, int v, int64_t vj) -> int {
             cudaStream_t st = sp_stream[s];
             epoch_desc_t *d_ep = d_epochs_s[s];
             uint32_t *d_fi = d_first_s[s];
@@ -4864,7 +5055,7 @@ int main(int argc, char **argv) {
             /* Host producers: release finished uploads, then take this batch from the host if it
              * is ready (else the GPU producers below build it). */
             qhp::poll();
-            qhp::Slot *hp_slot = qhp::acquire((int64_t)sp_batch_no);
+            qhp::Slot *hp_slot = qhp::acquire(v, vj, (int64_t)sp_batch_no);
             if (hp_slot) {
                 /* The upload replaces all three producers, including epochs_inc's reset of this
                  * slot's tentative count. */
@@ -4929,8 +5120,8 @@ int main(int argc, char **argv) {
                       d_ep, d_fi, (unsigned)epochs_in_batch, (unsigned)qsb_first_class_count))
               kernel_build_first_flat<<<(nthr + 255) / 256, 256, 0, st>>>(d_ep, d_fi, (unsigned)epochs_in_batch, (unsigned)qsb_first_class_count); }
 #ifdef QSB_HP_ON
-            if (sp_batch_no == 0)   /* start-up self-check: device copy of the GPU-built batch 0, stream-ordered */
-                qhp::enqueue_check_copy(st, d_ep, d_fi, (size_t)QSB_FIRST_SLOTS * 8 * sizeof(uint32_t));
+            if (vj == 0)   /* start-up self-check: device copy of the variant's GPU-built batch 0, stream-ordered */
+                qhp::enqueue_check_copy(v, st, d_ep, d_fi, (size_t)QSB_FIRST_SLOTS * 8 * sizeof(uint32_t));
 #endif
             }
             if (!qsb_carrier_try(kernel_digest, QK_DIG, dim3(nblk), dim3(QSB_SE_BLOCK), st,
@@ -4973,23 +5164,51 @@ int main(int argc, char **argv) {
         };
         g_stop_polled = 1;
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
+        g_qsb_carrier_b.running = 1;
+        QsbAb &ab = g_ab;
+        ab.t_prev = qsb_ab_now();
+        (void)sp_drain;              /* the stop path below drains with the A/B time accounting */
         while (1) {
             const int s = (int)(sp_batch_no & 1);
             CompletedSubset completed;
             if (sp_collect(s, completed)) return 1;          /* snapshot batch k-2 before slot reuse */
-            if (g_stop_signal || epoch_base >= n_epochs) {
+            if (completed.valid) qsb_ab_done(ab, sp_var[s]);
+            const int v = qsb_ab_pick(ab, sp_busy[s ^ 1] ? sp_var[s ^ 1] : -1);
+            if (g_stop_signal || v < 0) {                    /* v < 0: both regions (without the A/B: the space) done */
                 if (sp_publish(completed)) return 1;
-                if (sp_drain(s ^ 1)) return 1;               /* then batch k-1 */
+                CompletedSubset last;                        /* then batch k-1 */
+                if (sp_collect(s ^ 1, last)) return 1;
+                if (last.valid) qsb_ab_done(ab, sp_var[s ^ 1]);
+                if (sp_publish(last)) return 1;
+                if (!g_stop_signal && ab.on) {                 /* A/B region exhausted: idle to the stop signal */
+                    qsb_ab_out("  [A/B] region %s exhausted at process time %.1f s: no further GPU batches (equal time shares kept); idle until the stop signal\n",
+                               ab.next[0] >= ab.hi[0] ? "A" : "B", qsb_ab_now() - qsb_ab_t_proc0);
+                    fflush(stdout);
+                    while (!g_stop_signal) usleep(20000);
+                }
                 break;
             }
-            const uint64_t epochs_left = n_epochs - epoch_base;
+            const uint64_t epochs_left = ab.hi[v] - ab.next[v];
             const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
             const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
-            const int launch_error = sp_launch(s, epoch_base, epochs_in_batch);
+            if (sp_batch_no > 0 && v != ab.cur) ab.switches++;
+            sp_var[s] = v;
+            g_qsb_img = (v == 1 && g_qsb_carrier_b.on) ? 1 : 0;   /* variant B's launches go to image B */
+            const int launch_error = sp_launch(s, ab.next[v], epochs_in_batch, v, (int64_t)ab.nb[v]);
+            g_qsb_img = 0;
             if (sp_publish(completed)) return 1;
             if (launch_error) return 1;
-            epoch_base += epochs_in_batch;
+            ab.next[v] += (uint64_t)epochs_in_batch; ab.nb[v]++; ab.cur = v;
+            if (ab.fine) ab.fine_batches++;
+            epoch_base += epochs_in_batch;                   /* epochs launched (both regions) */
             sp_batch_no++;
+#ifdef QSB_HP_ON
+            {   /* the host producers build the predicted next launches, in order, into the shared ring */
+                qhp::PlanItem plan[qhp::PLAN_MAX];
+                const int np = qsb_ab_plan(ab, sp_busy[s ^ 1] ? sp_var[s ^ 1] : -1, v, plan, qhp::PLAN_MAX);
+                qhp::set_plan(plan, np);
+            }
+#endif
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
@@ -5005,10 +5224,16 @@ int main(int argc, char **argv) {
                        (unsigned long long)(global_total/1000000),
                        rate/1e6, elapsed_total);
 #ifdef QSB_HP_ON
-                { uint64_t hb, fb; int hst; qhp::stats(&hb, &fb, &hst);
-                  if (hst != -2) printf("  [HP] host-built batches %llu, GPU-built after start-up %llu, host producers %s\n",
-                                        (unsigned long long)hb, (unsigned long long)fb, hst == 1 ? "on" : hst == 0 ? "pending" : "off"); }
+                for (int hv = 0; hv < (ab.on ? 2 : 1); hv++) {
+                  uint64_t hb, fb; int hst; qhp::stats(hv, &hb, &fb, &hst);
+                  if (hst != -2) printf("  [HP%s] host-built batches %llu, GPU-built after start-up %llu, host producers %s\n",
+                                        ab.on ? (hv ? " B" : " A") : "", (unsigned long long)hb, (unsigned long long)fb, hst == 1 ? "on" : hst == 0 ? "pending" : "off"); }
 #endif
+                if (ab.on)
+                    qsb_ab_out("  [A/B] A: %llu batches, %.1f s GPU, next epoch %llu | B: %llu batches, %.1f s GPU, next epoch %llu | %llu switches%s, image B %s\n",
+                           (unsigned long long)ab.done[0], ab.T[0], (unsigned long long)ab.next[0],
+                           (unsigned long long)ab.done[1], ab.T[1], (unsigned long long)ab.next[1],
+                           (unsigned long long)ab.switches, ab.fine ? ", fine phase" : "", g_qsb_carrier_b.on ? "on" : "OFF");
                 fflush(stdout);
                 if (summary_f) {
                     time_t now_epoch = time(NULL);
@@ -5020,11 +5245,28 @@ int main(int argc, char **argv) {
                 t_last_se = t_now;
             }
         }
+        qsb_ab_slice_end(ab);
+        if (ab.on) {
+            const double eA = (double)(ab.next[0] - ab.lo[0]), eB = (double)(ab.next[1] - ab.lo[1]);
+            qsb_ab_out("  [A/B] final: A %llu batches = %llu epochs [%llu, %llu) in %.3f s GPU (%llu slices); B %llu batches = %llu epochs [%llu, %llu) in %.3f s GPU (%llu slices); "
+                   "time share B/A %.5f, epochs B/A %.5f, per-GPU-second B/A %.5f; %llu switches, fine phase %s (%llu batches; one-batch slices A %llu in %.3f s, B %llu in %.3f s); image B %s\n",
+                   (unsigned long long)ab.nb[0], (unsigned long long)(ab.next[0] - ab.lo[0]), (unsigned long long)ab.lo[0], (unsigned long long)ab.next[0], ab.T[0], (unsigned long long)ab.nslices[0],
+                   (unsigned long long)ab.nb[1], (unsigned long long)(ab.next[1] - ab.lo[1]), (unsigned long long)ab.lo[1], (unsigned long long)ab.next[1], ab.T[1], (unsigned long long)ab.nslices[1],
+                   ab.T[0] > 0 ? ab.T[1] / ab.T[0] : 0.0, eA > 0 ? eB / eA : 0.0,
+                   (eA > 0 && ab.T[1] > 0) ? (eB / ab.T[1]) / (eA / ab.T[0]) : 0.0,
+                   (unsigned long long)ab.switches, ab.fine ? "reached" : "not reached", (unsigned long long)ab.fine_batches,
+                   (unsigned long long)ab.fine_n[0], ab.fine_T[0], (unsigned long long)ab.fine_n[1], ab.fine_T[1],
+                   g_qsb_carrier_b.on ? "on" : g_qsb_ab_b_was_on ? "switched off during the run" : "off");
+        }
 #ifdef QSB_HP_ON
         qhp::shutdown();
-        { uint64_t hb, fb; int hst, amin; double aavg; qhp::stats(&hb, &fb, &hst, &aavg, &amin);
-          if (hst != -2) printf("  [HP] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d\n",
-                                (unsigned long long)hb, (unsigned long long)fb, (unsigned long long)sp_batch_no, aavg, amin); }
+        for (int hv = 0; hv < (ab.on ? 2 : 1); hv++) {
+          uint64_t hb, fb, hc, ev; int hst, amin; double aavg; qhp::stats(hv, &hb, &fb, &hst, &aavg, &amin, &hc, &ev);
+          char evs[64] = "";
+          if (ab.on && hv) snprintf(evs, sizeof evs, "; shared ring, evictions %llu", (unsigned long long)ev);
+          if (hst != -2) printf("  [HP%s] final: host-built batches %llu, GPU-built after start-up %llu (of %llu); ready ahead at launch: avg %.2f, min %d; helper chunks %llu%s\n",
+                                ab.on ? (hv ? " B" : " A") : "", (unsigned long long)hb, (unsigned long long)fb,
+                                (unsigned long long)(ab.on ? ab.nb[hv] : sp_batch_no), aavg, amin, (unsigned long long)hc, evs); }
 #endif
         g_stop_polled = 0;
 #else

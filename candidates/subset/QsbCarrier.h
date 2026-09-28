@@ -83,11 +83,11 @@ enum QsbCarrierKernel {
  * from the timed window. Each upload is logged; if the carrier is ever switched off,
  * qsb_carrier_off replays the log into the compute_52 image (JIT-compiling it then)
  * before any <<<>>> launch, so the fallback sees exactly the same data. */
-struct QsbUpload { const void *sym; void *data; size_t n; };
+struct QsbUpload { const void *sym; const char *name; void *data; size_t n; };
 static QsbUpload *g_qsb_uploads = nullptr;       /* grows as needed; uploads are startup-only */
 static int g_qsb_n_uploads = 0, g_qsb_cap_uploads = 0;
 static void (*g_qsb_jit_hook)(void) = nullptr;   /* JIT-image-only setup, run on fallback */
-static bool qsb_upload_log(const void *sym, const void *src, size_t n) {
+static bool qsb_upload_log(const void *sym, const char *name, const void *src, size_t n) {
     if (g_qsb_n_uploads == g_qsb_cap_uploads) {
         const int cap = g_qsb_cap_uploads ? 2 * g_qsb_cap_uploads : 32;
         QsbUpload *grown = (QsbUpload *)realloc(g_qsb_uploads, (size_t)cap * sizeof(QsbUpload));
@@ -97,7 +97,7 @@ static bool qsb_upload_log(const void *sym, const void *src, size_t n) {
     void *copy = malloc(n ? n : 1);
     if (!copy) return false;
     memcpy(copy, src, n);
-    g_qsb_uploads[g_qsb_n_uploads++] = {sym, copy, n};
+    g_qsb_uploads[g_qsb_n_uploads++] = {sym, name, copy, n};
     return true;
 }
 
@@ -109,7 +109,36 @@ struct QsbCarrierState {
 };
 static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
+/* ---- In-run A/B (QSB_AB; host only, the device images are untouched) ----
+ * A second native image B (qsb_carrier_b_sm89.h, written by build_carrier_b.sh / mk_b_header.py) is
+ * loaded next to image A. Every host upload is mirrored into both images and read back from B before
+ * the search loop; the A/B scheduler in tree.cu then routes the four search-loop kernels (epoch groups,
+ * incremental epochs, first-block states, digest) of variant-B batches to image B through
+ * g_qsb_img. Table build and heal scan stay on image A (they only write the shared table buffer).
+ * B is optional: if it is absent, fails to load or verify, or a B launch fails, B is switched off
+ * (never unloaded: kernels may be in flight) and its batches run on image A; nothing ever exits
+ * because of B. Image A going off switches B off first. */
+#ifndef QSB_AB
+#define QSB_AB 1
+#endif
+static QsbCarrierState g_qsb_carrier_b = {0, 0, nullptr, {}};
+static int g_qsb_img = 0;                 /* image of the next search-loop launch: 0 = A, 1 = B */
+static char g_qsb_ab_b_why[160] = "not loaded";
+static int g_qsb_ab_b_was_on = 0;
+static void qsb_ab_b_off(const char *why) {
+    const int was_on = g_qsb_carrier_b.on;
+    g_qsb_carrier_b.on = 0;
+    g_qsb_img = 0;
+    snprintf(g_qsb_ab_b_why, sizeof(g_qsb_ab_b_why), "%s", why);
+    cudaGetLastError();
+    if (was_on) { printf("  A/B: image B off (%s); variant-B batches run on image A from here on\n", why); fflush(stdout); }
+}
+static inline bool qsb_ab_b_has(int kid) {
+    return g_qsb_carrier_b.on && kid != QK_GT && kid != QK_HEAL && g_qsb_carrier_b.k[kid];
+}
+
 static void qsb_carrier_off(const char *why) {
+    qsb_ab_b_off("image A off");
     /* Never unload an image whose kernels may still be in flight; just stop using it. */
     if (g_qsb_carrier.lib && !g_qsb_carrier.running) {
         cudaLibraryUnload(g_qsb_carrier.lib);
@@ -139,6 +168,15 @@ static void qsb_carrier_off(const char *why) {
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#if QSB_AB && __has_include("qsb_carrier_b_sm89.h")
+#define QSB_AB_B_IMAGE 1
+namespace qsb_ab_b {                        /* same names as image A's header, own namespace */
+#include "qsb_carrier_b_sm89.h"
+}
+#include <openssl/sha.h>
+#else
+#define QSB_AB_B_IMAGE 0
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -150,26 +188,153 @@ static int qsb_b64_val(unsigned char c) {
 }
 
 /* Decode the line-split base64 image. Returns a malloc'd buffer or nullptr. */
-static unsigned char *qsb_carrier_decode(size_t *out_len) {
-    unsigned char *buf = (unsigned char *)malloc(qsb_carrier_cubin_bytes + 4);
+static unsigned char *qsb_carrier_decode_img(size_t *out_len, size_t bytes, unsigned lines, const char *const *b64) {
+    unsigned char *buf = (unsigned char *)malloc(bytes + 4);
     if (!buf) return nullptr;
     size_t n = 0; unsigned acc = 0; int bits = 0;
-    for (unsigned li = 0; li < qsb_carrier_b64_lines; li++) {
-        for (const unsigned char *p = (const unsigned char *)qsb_carrier_b64[li]; *p; p++) {
+    for (unsigned li = 0; li < lines; li++) {
+        for (const unsigned char *p = (const unsigned char *)b64[li]; *p; p++) {
             int v = qsb_b64_val(*p);
             if (v < 0) continue;              /* '=' padding */
             acc = (acc << 6) | (unsigned)v; bits += 6;
             if (bits >= 8) {
                 bits -= 8;
-                if (n >= qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
+                if (n >= bytes) { free(buf); return nullptr; }
                 buf[n++] = (unsigned char)(acc >> bits);
             }
         }
     }
-    if (n != qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
+    if (n != bytes) { free(buf); return nullptr; }
     *out_len = n;
     return buf;
 }
+static unsigned char *qsb_carrier_decode(size_t *out_len) {
+    return qsb_carrier_decode_img(out_len, qsb_carrier_cubin_bytes, qsb_carrier_b64_lines, qsb_carrier_b64);
+}
+
+#if QSB_AB_B_IMAGE
+/* Print the knob-by-knob difference of two "NAME=value;" fingerprints (at most `cap` bytes). */
+static void qsb_ab_knob_delta(const char *a, const char *b, char *out, size_t cap) {
+    size_t w = 0; out[0] = 0;
+    auto val = [](const char *s, const char *name, size_t nl, char *v, size_t vc) -> bool {
+        for (const char *p = s; *p;) {
+            const char *eq = strchr(p, '='), *sc = strchr(p, ';');
+            if (!eq || !sc) break;
+            if ((size_t)(eq - p) == nl && !strncmp(p, name, nl)) {
+                size_t l = (size_t)(sc - eq - 1); if (l >= vc) l = vc - 1;
+                memcpy(v, eq + 1, l); v[l] = 0; return true;
+            }
+            p = sc + 1;
+        }
+        return false;
+    };
+    for (int pass = 0; pass < 2; pass++) {
+        const char *s = pass ? b : a, *o = pass ? a : b;
+        for (const char *p = s; *p;) {
+            const char *eq = strchr(p, '='), *sc = strchr(p, ';');
+            if (!eq || !sc) break;
+            const size_t nl = (size_t)(eq - p);
+            char name[96], va[96], vb[96];
+            if (nl < sizeof(name)) {
+                memcpy(name, p, nl); name[nl] = 0;
+                const bool ha = val(a, name, nl, va, sizeof va), hb = val(b, name, nl, vb, sizeof vb);
+                const bool diff = pass == 0 ? (!hb || strcmp(va, vb) != 0) : !val(o, name, nl, vb, sizeof vb);
+                if (diff && w + 1 < cap)
+                    w += (size_t)snprintf(out + w, cap - w, "%s%s=%s->%s", w ? " " : "", name,
+                                          ha ? va : "(none)", hb ? vb : "(none)");
+            }
+            p = sc + 1;
+        }
+    }
+    if (!w) snprintf(out, cap, "none (identical fingerprints)");
+}
+
+/* Load image B next to image A (A must be on). Called before the first upload. */
+static void qsb_ab_b_init(const char *knobs) {
+    const char *env = getenv("QSB_AB");
+    if (env && *env && atoi(env) == 0) { qsb_ab_b_off("disabled by QSB_AB=0"); return; }
+    namespace B = qsb_ab_b;
+    size_t len = 0;
+    unsigned char *img = qsb_carrier_decode_img(&len, B::qsb_carrier_cubin_bytes, B::qsb_carrier_b64_lines, B::qsb_carrier_b64);
+    if (!img) { qsb_ab_b_off("embedded image B failed to decode"); return; }
+    unsigned char md[32]; char hex[65];
+    SHA256(img, len, md);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", md[i]);
+    if (strcmp(hex, B::qsb_carrier_cubin_sha256) != 0) { free(img); qsb_ab_b_off("image B sha256 mismatch"); return; }
+    cudaError_t e = cudaLibraryLoadData(&g_qsb_carrier_b.lib, img, nullptr, nullptr, 0, nullptr, nullptr, 0);
+    free(img);
+    if (e != cudaSuccess) { g_qsb_carrier_b.lib = nullptr; char w[160]; snprintf(w, sizeof w, "image B load: %s", cudaGetErrorString(e)); qsb_ab_b_off(w); return; }
+    const int used[4] = {QK_EG, QK_BEI, QK_BFF, QK_DIG};
+    for (int i = 0; i < 4; i++) {
+        const int k = used[i];
+        if (strcmp(qsb_carrier_kernel_names[k], B::qsb_carrier_kernel_names[k]) != 0 ||
+            cudaLibraryGetKernel(&g_qsb_carrier_b.k[k], g_qsb_carrier_b.lib, B::qsb_carrier_kernel_names[k]) != cudaSuccess) {
+            qsb_ab_b_off("image B kernel ABI differs from image A"); return;
+        }
+    }
+    /* integrity: the image's own fingerprint is the one recorded when its header was generated */
+    void *dk = nullptr; size_t kb = 0;
+    const size_t want = strlen(B::qsb_carrier_b_knobs) + 1;
+    e = cudaLibraryGetGlobal(&dk, &kb, g_qsb_carrier_b.lib, "qsb_carrier_knobs");
+    char *ik = (char *)malloc(want);
+    const bool ok = e == cudaSuccess && kb == want && ik && cudaMemcpy(ik, dk, want, cudaMemcpyDeviceToHost) == cudaSuccess &&
+                    memcmp(ik, B::qsb_carrier_b_knobs, want) == 0;
+    free(ik);
+    if (!ok) { qsb_ab_b_off("image B fingerprint differs from its header"); return; }
+    g_qsb_carrier_b.on = 1; g_qsb_ab_b_was_on = 1;
+    char delta[512];
+    qsb_ab_knob_delta(knobs, B::qsb_carrier_b_knobs, delta, sizeof delta);
+    printf("  A/B: image B loaded (%zu-byte image, sha256 %.16s..., build flags '%s'; knob delta vs A: %s)\n",
+           len, B::qsb_carrier_cubin_sha256, B::qsb_carrier_b_flags, delta);
+    fflush(stdout);
+}
+
+/* After every upload, before the search loop: each logged upload must read back byte-identical from
+ * image B (where B has that global, with image A's size); image-initialized globals that differ from
+ * image A's are listed (a code variant may change a device table). Any mismatch switches B off. */
+static void qsb_ab_b_verify() {
+    if (!g_qsb_carrier_b.on || !g_qsb_carrier.on) return;
+    namespace B = qsb_ab_b;
+    int mirrored = 0;
+    for (int i = 0; i < g_qsb_n_uploads; i++) {
+        const QsbUpload &u = g_qsb_uploads[i];
+        void *db = nullptr, *da = nullptr; size_t sb = 0, sa = 0;
+        const cudaError_t eb = cudaLibraryGetGlobal(&db, &sb, g_qsb_carrier_b.lib, u.name);
+        if (eb != cudaSuccess) { cudaGetLastError(); continue; }        /* B does not reference it */
+        const cudaError_t ea = cudaLibraryGetGlobal(&da, &sa, g_qsb_carrier.lib, u.name);
+        if (ea != cudaSuccess || sa != sb) { cudaGetLastError(); qsb_ab_b_off("uploaded global size differs between A and B"); return; }
+        void *h = malloc(u.n ? u.n : 1);
+        const bool same = h && cudaMemcpy(h, db, u.n, cudaMemcpyDeviceToHost) == cudaSuccess && memcmp(h, u.data, u.n) == 0;
+        free(h);
+        if (!same) { char w[160]; snprintf(w, sizeof w, "upload %s did not read back from image B", u.name); qsb_ab_b_off(w); return; }
+        mirrored++;
+    }
+    char diff[512] = ""; size_t w = 0; int ndiff = 0, nsame = 0;
+    for (unsigned i = 0; i < B::qsb_carrier_b_n_globals; i++) {
+        const char *nm = B::qsb_carrier_b_globals[i].name;
+        if (!strcmp(nm, "qsb_carrier_knobs")) continue;
+        bool uploaded = false;
+        for (int j = 0; j < g_qsb_n_uploads; j++) if (!strcmp(g_qsb_uploads[j].name, nm)) uploaded = true;
+        if (uploaded) continue;
+        void *db = nullptr, *da = nullptr; size_t sb = 0, sa = 0;
+        bool same = false;
+        if (cudaLibraryGetGlobal(&db, &sb, g_qsb_carrier_b.lib, nm) == cudaSuccess &&
+            cudaLibraryGetGlobal(&da, &sa, g_qsb_carrier.lib, nm) == cudaSuccess && sa == sb) {
+            void *ha = malloc(sa ? sa : 1), *hb = malloc(sb ? sb : 1);
+            same = ha && hb && cudaMemcpy(ha, da, sa, cudaMemcpyDeviceToHost) == cudaSuccess &&
+                   cudaMemcpy(hb, db, sb, cudaMemcpyDeviceToHost) == cudaSuccess && memcmp(ha, hb, sa) == 0;
+            free(ha); free(hb);
+        }
+        cudaGetLastError();
+        if (same) { nsame++; continue; }
+        ndiff++;
+        if (w + 1 < sizeof diff) w += (size_t)snprintf(diff + w, sizeof diff - w, "%s%s", w ? "," : "", nm);
+    }
+    printf("  A/B: image B verified: %d upload(s) read back identical from B; image-initialized globals: %d identical to A, %d differ%s%s\n",
+           mirrored, nsame, ndiff, ndiff ? ": " : "", diff);
+    fflush(stdout);
+}
+#endif
 
 /* `knobs` is this binary's QSB_CARRIER_KNOBS string (host pass, same macros). */
 static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
@@ -202,6 +367,11 @@ static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B cold-record loads)\n",
            len, qsb_carrier_cubin_sha256);
     fflush(stdout);
+#if QSB_AB_B_IMAGE
+    qsb_ab_b_init(knobs);
+#else
+    qsb_ab_b_off(QSB_AB ? "no image B in this build (qsb_carrier_b_sm89.h absent)" : "QSB_AB=0 at compile time");
+#endif
 }
 #else
 static void qsb_carrier_init(const cudaDeviceProp &, const char *) {}
@@ -213,17 +383,17 @@ static inline bool qsb_carrier_has(int kid) { return g_qsb_carrier.on && g_qsb_c
  * parameter types: every argument is converted to its declared parameter type before
  * its address goes to cudaLaunchKernel, exactly as a <<<>>> launch would. */
 template <typename... P, typename... A, size_t... I>
-static cudaError_t qsb_carrier_launch_impl(int kid, dim3 g, dim3 b, cudaStream_t st,
+static cudaError_t qsb_carrier_launch_impl(cudaKernel_t kernel, dim3 g, dim3 b, cudaStream_t st,
                                            std::index_sequence<I...>, A &&...a) {
     std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
     void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
-    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, 0, st);
+    return cudaLaunchKernel((const void *)kernel, g, b, argv, 0, st);
 }
 template <typename... P, typename... A>
 static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
                                       A &&...a) {
     static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
-    return qsb_carrier_launch_impl<P...>(kid, g, b, st, std::index_sequence_for<P...>{},
+    return qsb_carrier_launch_impl<P...>(g_qsb_carrier.k[kid], g, b, st, std::index_sequence_for<P...>{},
                                          std::forward<A>(a)...);
 }
 /* Try the carrier launch; on failure switch the carrier off (the caller then issues
@@ -232,6 +402,15 @@ template <typename... P, typename... A>
 static bool qsb_carrier_try(void (*kern)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
                             A &&...a) {
     if (!qsb_carrier_has(kid)) return false;
+    if (g_qsb_img == 1 && qsb_ab_b_has(kid)) {   /* A/B: variant-B batch on image B (arguments copied) */
+        static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
+        const cudaError_t eb = qsb_carrier_launch_impl<P...>(g_qsb_carrier_b.k[kid], g, b, st,
+                                                             std::index_sequence_for<P...>{}, a...);
+        if (eb == cudaSuccess) return true;
+        char whyb[160];
+        snprintf(whyb, sizeof(whyb), "launch failed: %s", cudaGetErrorString(eb));
+        qsb_ab_b_off(whyb);                        /* then the same launch on image A below */
+    }
     cudaError_t e = qsb_carrier_launch(kern, kid, g, b, st, std::forward<A>(a)...);
     if (e == cudaSuccess) return true;
     char why[160];
@@ -248,9 +427,23 @@ template <class T>
 static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src, size_t n) {
     if (!g_qsb_carrier.on) return cudaMemcpyToSymbol(sym, src, n);
     /* Carrier on: write the image only and log the upload for a possible fallback. */
-    if (!qsb_upload_log((const void *)&sym, src, n)) {
+    if (!qsb_upload_log((const void *)&sym, name, src, n)) {
         qsb_carrier_off("out of host memory for the upload log");   /* replays the earlier uploads */
         return cudaMemcpyToSymbol(sym, src, n);
+    }
+    if (g_qsb_carrier_b.on) {                         /* A/B: the same bytes into image B's global */
+        void *db = nullptr; size_t szb = 0;
+        cudaError_t cb = cudaLibraryGetGlobal(&db, &szb, g_qsb_carrier_b.lib, name);
+        if (cb == cudaErrorSymbolNotFound || cb == cudaErrorInvalidSymbol) cudaGetLastError();   /* B does not use it */
+        else {
+            if (cb == cudaSuccess && n > szb) cb = cudaErrorInvalidValue;
+            if (cb == cudaSuccess) cb = cudaMemcpy(db, src, n, cudaMemcpyHostToDevice);
+            if (cb != cudaSuccess) {
+                char whyb[160];
+                snprintf(whyb, sizeof(whyb), "upload of %s into image B failed: %s", name, cudaGetErrorString(cb));
+                qsb_ab_b_off(whyb);
+            }
+        }
     }
     void *d = nullptr; size_t sz = 0;
     cudaError_t ce = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);

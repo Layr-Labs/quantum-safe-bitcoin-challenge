@@ -70,7 +70,7 @@ src = hashlib.sha256()
 for p in sorted(glob.glob("*.cu") + glob.glob("*.cuh") + glob.glob("*.h") +
                 glob.glob("tests/gpu_epochs/*.cuh") + glob.glob("tests/gpu_epochs/*.h") +
                 ["tests/gpu_epochs/tree.cu"]):
-    if p == "qsb_carrier_sm89.h":
+    if p in ("qsb_carrier_sm89.h", "qsb_carrier_b_sm89.h"):   # the images themselves (A, and the A/B variant B)
         continue
     src.update(p.encode() + b"\0" + open(p, "rb").read())
 tool = open(W + "/nvcc.txt").read().strip()
