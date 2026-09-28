@@ -663,13 +663,49 @@ typedef const uint4 *qsb_t5v_tp;
 typedef const uint32_t *qsb_t5v_tp;
 #endif
 
+/* Direct plan variant: per-field selects keep lane alternatives out of
+ * the control-flow graph. The immutable table remains the reference plan. */
+template<int W,int N>
+__host__ __device__ constexpr qsb_gf_op qsb_t5_direct_op(int l) {
+    static_assert(N==128,"direct paired plan requires 128 leaves");
+    if(W==0) {
+        const int c=l-16, b=c^64;
+        return {l<16?192+l:384+c, l<16?208+l:b, l<16?224+l:b, l<16?1:2};
+    } else if(W==1) {
+        const int c=l+8, b=c^64;
+        return {l<8?224+l:384+c, l<8?232+l:b, l<8?240+l:b, l<8?1:2};
+    } else if(W==2) {
+        const int c=l+36, b=c^64, u=c<64?384+c:192+c;
+        return {l<4?240+l:u, l<4?244+l:b, l<4?248+l:b, l<4?1:2};
+    } else if(W==3) {
+        const int c=l+58, b=c^64, j=l-2;
+        return {l<2?248+l:(l<10?240+(j^4):192+c),
+                l<2?250+l:(l<10?248+((j&3)^2):b),
+                l<2?252+l:(l<10?368+j:b), l<10?1:2};
+    } else if(W==4) {
+        const int c=l+81, b=c^64, j=l-1;
+        return {l==0?252:(l<9?368+j:192+c),
+                l==0?253:(l<9?252+((j&1)^1):b),
+                l==0?0:(l<9?368+j:b), l==0?3:(l<9?1:2)};
+    } else {
+        const int c=l+97, b=c^64;
+        return {l<16?224+(l^8):(l==31?0:192+c),
+                l<16?368+(l&7):(l==31?0:b),
+                l<16?352+l:(l==31?0:b), l<16?1:(l==31?0:2)};
+    }
+}
+
 /* Wave W on warp WARP; tp points at this thread's entry of wave 0 (index tid). */
 template<int W,int N,int WARP=0> __device__ __forceinline__ void qsb_t5v_wave(uint64_t *roots, char *T, qsb_t5v_tp tp) {
     const int tid=threadIdx.x;
     if(WARP==0 ? tid<32 : (unsigned)(tid-32*WARP)<32u) {
 #if QSB_POST_GLUE & 2
-        const uint4 op=__ldg(tp+(W*32-32*WARP));
-        const uint32_t kind=op.w, ia=op.x, ib=op.y, io=op.z;
+        /* W and N are compile-time constants. The approved table is generated
+         * from the reference plan; compute its record with per-field selects. */
+        (void)tp;
+        const qsb_gf_op op=qsb_t5_direct_op<W,N>(tid-32*WARP);
+        const uint32_t kind=(uint32_t)op.kind;
+        const uint32_t ia=(uint32_t)op.a*16u, ib=(uint32_t)op.b*16u, io=(uint32_t)op.o*16u;
 #else
         const uint32_t op=tp[W*32-32*WARP];
         const uint32_t kind=op>>27;
