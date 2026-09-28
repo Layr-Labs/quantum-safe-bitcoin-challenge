@@ -4423,7 +4423,7 @@ static void qsb_subpipe_launch(
  * and the host-builder fallback are unchanged. 1 restores the one-inversion-per-record
  * kernel. */
 #ifndef QSB_GT_BATCH
-#define QSB_GT_BATCH 12
+#define QSB_GT_BATCH 16
 #endif
 static_assert(QSB_GT_BATCH >= 1 && QSB_GT_BATCH <= 32, "QSB_GT_BATCH range");
 #if QSB_GT_BATCH > 1
