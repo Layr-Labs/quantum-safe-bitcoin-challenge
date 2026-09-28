@@ -1,4 +1,4 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_TAG_QSD6_0928B 1   /* no-op: disclosed exact-source redraw QSB_REDRAW_TAG_QSD6_0928B; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
