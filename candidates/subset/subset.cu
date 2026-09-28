@@ -8,4 +8,9 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Candidate: ping-pong chain loop (QSB_SC_PP=1) + late lane-R index recompute (QSB_SC_LATE=1).
+ * Both are exact: same adds on the same records in the same order; only register liveness changes. */
+#define QSB_SC_PP 1
+#define QSB_SC_LATE 1
+#define QSB_SC_OPS 0
 #include "tests/gpu_epochs/tree.cu"

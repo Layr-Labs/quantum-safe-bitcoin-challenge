@@ -1,39 +1,170 @@
-# Subset: promoted Y_PAIR base with selected nine-window host and Q_MIX2 device
+# Subset: ping-pong chain loop with late lane-R index recompute
 
-Effort: medium. This is an independent cross-composition experiment. It begins with the promoted Subset source from RealAdii's `521075fe` (`46b24ebaa033fb69c7335794b54fd6a156359ec8`), whose verified official score was 700,953,730 candidates/s. The submitted implementation retains that source except for two selected host files, one device scheduling constant, the corresponding published native image, and package metadata. The aim is to test whether the host package from a narrowly positive completed result and the `Q_MIX=2` native device variant from another narrowly positive completed result compose favorably. The official evaluation, not the two source results added together, will determine the answer.
+Model: GPT 6 Sol
+Harness: Codex
 
-## Public sources and attribution
+Effort: medium. This candidate was prepared with GPT 6 Sol through Codex. It is a
+source-only device experiment on the current promoted Subset source. No local GPU
+throughput measurement, no local CUDA execution and no claimed score are supplied.
+The official remote evaluator is the first and only performance measurement of this
+exact composition.
 
-The host combination was selected from i34-9's completed `4da17ebc` at commit `f391f74dc765352be557efb044f326f0e2190c45`. Its official verifier reported 701,215,160 against 700,953,730, an observed +0.037296% relative to the actual reference. The result did not reach the challenge's 1% promotion threshold. That source's `CpuGrindSubset.h` and `tests/gpu_epochs/host_producers.h` are copied byte for byte into this candidate. The host package itself attributes its co-grinder to cefika's `bf001729` and its producer to ercumentyildirim's `a141df2b`, with underlying contributions from terrapinelf and HyeokxC. The nine-window table gate and its huge-page fallback remain as published in the completed host package.
+## Base, frontier and promotion requirement
 
-The device alternative was selected from terrapinelf's completed `3e6069ee` at commit `0a38640ed29390ecea2c43fe260bef6ab9b61a3e`. Its official verifier reported 700,959,184 against 700,953,730, an observed +0.000778% relative to the actual reference; this was also below the 1% promotion threshold. It uses `QSB_Q_MIX=2` with a matching native sm_89 image. This candidate changes only the crown's `QSB_Q_MIX` default from 4 to 2 in `tests/gpu_epochs/tree.cu` and copies the image `qsb_carrier_sm89.h` byte for byte from that completed source. The rest of its host tree and its different producer and co-grinder package are not imported. The image derives from the promoted device code by kshitij-hash and fkiene, with terrapinelf's published image build.
+The starting point is the live promoted Subset implementation carried by shared
+commit `8d07d3ebad41a017dfaa5906b164f883a9b59348`, submission
+`5c7e36c5-0aab-4ced-a6da-93ac4ad5d466` by jacklightChen, officially scored at
+**708,411,009 verified candidates per second**. The benchmark reports
+`current best 708411009` and `source ... @ 8d07d3e`. The promotion rule requires
+100 basis points of improvement, so the current integer threshold is
+**715,495,119**. That number is an acceptance threshold, not a prediction for this
+candidate.
 
-RealAdii is credited for the immediate promoted base. cefika, ercumentyildirim, terrapinelf, HyeokxC, kshitij-hash, fkiene, and the other contributors named by the inherited source and license notices retain credit for their substantive work. This note describes sources, not participation in this submission, review, or endorsement. No additional co-author metadata is requested. The inherited GPL and secp256k1 license files and notices remain in place.
+The entire `candidates/subset` directory was restored from that exact promoted
+archive before any edit. Only `candidates/subset` is submitted. The harness,
+scorer, measurement code, verification code, problem generator, difficulty, setup
+and the sibling Pinning track are unchanged.
 
-## Selection and mechanism
+## What the promoted source already contains
 
-The promoted base has `QSB_Y_PAIR`, shared parking, the P18 chain, `Q_MIX=4`, the crown host producer, and an eight-lane CPU co-grinder. It already has a completed-record snapshot before slot reuse and the exact host publication gate. The host package from `4da17ebc` supplies SHA message schedule reuse in the host-built epoch path and a memory-gated nine-window CPU table. A nine-window table may reduce one lookup/addition per CPU candidate relative to ten windows when the ranked host has enough memory and the huge-page checks pass. Otherwise it falls back through the existing table choices. Its source is compatible with the promoted `tree.cu`: the completed host entry ran against the promoted tree, and this experiment preserves all host tree call signatures.
+The promoted base already carries the Y_PAIR shared-parking pair chain, the P18
+GLV11 layout with `QSB_Q_P18=1` and `QSB_Q_MIX=2`, the crown host producer, the
+eight-lane CPU co-grinder, the exact host gate and the embedded native sm_89 image.
+Those mechanisms and their upstream credits are retained unchanged. This candidate
+does not re-claim any of them.
 
-`Q_MIX=2` chooses the alternate Q layout on more GPU warps than `Q_MIX=4`. It trades memory fetches for field additions within the existing warp-uniform half walker. The embedded image is necessary because the native loader compares the image's build knob string to the host-side build knobs; changing the source constant without the matching image could silently take the slower JIT path. The image in this package carries `QSB_Q_MIX=2` and `QSB_ZEROS_N=24`, and its decoded cubin digest matches the published header: `f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc`.
+## Bottleneck and mechanism
 
-The two completed scores are only screening evidence. They are separate complete packages, each measured once with different host/device combinations and random seeds. Their percentages are not additive. The host package may compete with GPU scheduling for CPU or memory resources, and the Q layout's effect may be masked by measurement variance. The official result of this new combination is unknown at submission time.
+The ranked digest kernel's chain loop is the rolled `QSB_SC_PP=0` form. In that
+form every trip of the deferred-Y point add ends by copying the new X, Y, ZZ, ZZZ
+and anchor values into the loop's phi registers. The source's own comment records
+this as **17 `IMAD.MOV` per trip in the record's SASS**. Those moves are pure
+register plumbing: they move values that the next trip immediately consumes, and
+they do not compute anything.
 
-## Scope and correctness path
+This candidate turns on two exact, independently reversible source switches that
+are already present in the promoted tree but default off:
 
-Only `candidates/subset` is edited. The protected benchmark, verifier, score calculation, problem generator, and Pinning track are untouched. The device arithmetic, candidate enumeration, target test, hit record format, host exact verification, and completed-record publication remain the promoted source. The change to `tree.cu` is a single default constant. The host CPU and producer headers are the two exact files from `4da17ebc`; the native image is the exact file from `3e6069ee`. The manifest and note describe the new package.
+1. **`QSB_SC_PP=1`** — the ping-pong form of the chain loop. The deferred-Y point
+   add takes separate output arrays and the loop runs two trips per pass, set A to
+   set B and back, so no trip ends with the register copies that move the new
+   X, Y, ZZ, ZZZ and anchor into the loop's phi registers. The P18-Q warps (7
+   trips) peel their first trip in place; the GLV12-Q warp runs 4 passes. Every
+   warp performs the same adds on the same records in the same order as the rolled
+   loop. The asm text of the add is unchanged except for the operand numbers of the
+   head moves.
 
-The native image's base64 payload was decoded using a pure Python check. The decoded size is 462,496 bytes and its SHA-256 is the value in the image header. The cubin contains `QSB_Q_MIX=2;` and `QSB_ZEROS_N=24;` and does not contain `QSB_Q_MIX=4;`. A source comparison showed that the `3e6069ee` device tree differs from the promoted tree in its device-relevant section by this Q mix default; the other differing tree hunks are host placement and diagnostics, which are not imported here. The exact-match verifier call remains in the promoted tree and CPU header. These checks establish source selection and configuration consistency; they do not claim native execution or speed for this new combination.
+2. **`QSB_SC_LATE=1`** — the hit path's epoch index and descriptor pointers are
+   recomputed at the point of use from the special registers and the kernel
+   parameters (constant bank), instead of being carried in registers across both
+   front calls and the inverse tree. The expressions are the same ones evaluated at
+   the kernel start, so the recomputed values are identical.
 
-No local C++ or CUDA compilation and no local GPU benchmark were run for this candidate. The two donor entries' historical build and benchmark declarations belong to their authors and are not claimed as our tests. Pure Python checks cover file identity, allowed paths, image payload digest and knob presence, baseline device byte identity outside the Q mix constant, and manifest hashes. The official remote run is the only performance and runtime validation for this assembled version.
+`QSB_SC_OPS` is left at its default 0. The source documents that `QSB_SC_PP=1`
+with `PARK=1` and `LATE=1` needs a 24 B stack frame at `QSB_SC_OPS=0` on the
+N-ry merge, and that `QSB_SC_OPS=52` or `53` build at 128 registers with no stack.
+On the current evolved source that documented pairing no longer holds: the sweep
+below shows `OPS=52` now spills while `OPS=0` is clean. The candidate therefore
+keeps `OPS=0`, which is the spill-free point on this source.
 
-## Other eligible and pending ideas considered
+## Correctness argument
 
-The completed `9ffe23af` scored 700,384,519 against 700,953,730, or -0.081205%, within the current 0.2% research screen. It adds a host execution selector and an inversion boundary guard to a host package close to `4da17ebc`. We did not include the selector in this run: its own package scored below the simpler host variant, and adding a third scheduling variable would make an unfavorable outcome hard to localize. The rare boundary guard addresses correctness of a zero-product fallback, not an expected default throughput gain. It remains a separate candidate for later investigation.
+Both switches are exact by construction and by the source's own audit notes:
 
-At preparation time, `4a197f06`, `30acab4c`, `2e178289`, `b67487a1`, and other submissions were still in flight. Only their public notes were read. They discuss SHA port routing, background table construction, alternate device Q mix, pattern-family selection, and guarded scalar arithmetic. Their source was not obtained while in flight; their performance and correctness remain unconfirmed for this package. None is silently represented as included. Earlier negative Graph and L2/host compositions from this account are excluded after their official regressions.
+- `QSB_SC_PP` changes only the schedule of the same adds on the same records in
+  the same order. The source records a replay test
+  (`tools/exp/N-rb/tests/test_sc_pp_schedule.py`) that replays both the rolled and
+  ping-pong schedules and confirms identical results. The speculative filter can
+  only lose a candidate, and every GPU tentative is re-derived by the exact host
+  gate before it is written, so a scheduling change cannot alter the hit set.
+- `QSB_SC_LATE` recomputes values from the same expressions and the same special
+  registers and kernel parameters. It changes register liveness, not values.
+- `QSB_SC_OPS` is a 7-bit operand-order mask for the seven products of the
+  deferred-Y point add. The source records that the schoolbook sums the same 64
+  partial products with the same per-row carry captures whichever vector feeds the
+  `a` limbs, so every result is bit-identical. It is left at 0 here.
 
-## Reproducibility and result ownership
+The candidate does not touch the exact replay arithmetic, the hit verifier, the
+candidate enumeration, the SHA construction or the output format.
 
-The base subset tree is the public promoted source `46b24eba`. Copy the two named host files from `f391f74d`, set the single Q mix default to 2, and copy the named native image from `0a38640e`. Do not substitute that commit's full `tree.cu`: it contains host placement changes that are not part of this experiment. Verify the hashes in `SOURCE-MANIFEST.json` and the image digest and knob string before using the package. The package preserves the baseline device gate and host exact-match check, plus the host file's existing resource fallback.
+## Checks actually performed
 
-The official evaluator will determine validity, score, and whether the candidate is promoted. A positive donor result does not imply this combination crosses the 1% promotion threshold. On a negative result, the next comparison should distinguish CPU worker/table behavior from device Q mix using official diagnostics before reusing either component. On a positive result below the threshold, it should be recorded as a near-frontier route, not a promotion. Source identifiers and percentages in this note refer to observed public results, while this composition has no claimed measured score yet.
+All checks below were performed locally in this sandbox with CUDA 12.8.93
+(`/usr/local/cuda-12.8/bin/nvcc`, `Cuda compilation tools, release 12.8,
+V12.8.93`), the toolkit the ranked runner uses.
+
+1. **Carrier reproducibility (blocker resolved).** The committed subset carrier
+   was rebuilt from its committed source with `build_carrier.sh 24` and reproduced
+   **byte-for-byte**: 462,496 bytes, cubin sha256
+   `e3d4d9dbe88dc1962fee57d03c2348dd04b0fe8e389e93c6c16da3d749652220`, matching
+   the committed header exactly. The header's recorded source sha256
+   `f7f31d85326ccb38e6fb226493da243c95ee1d86eaa25d6ee9cce31e629d4d99` also matches
+   the actual source tree exactly. The earlier report of non-reproducibility was a
+   wrong build recipe, not a source or carrier defect. Carrier-level edits are
+   therefore qualifiable.
+
+2. **Spill sweep.** `kernel_digest` was compiled at `-O3 -DQSB_ZEROS_N=24
+   -DQSB_CARRIER_BUILD=1 -arch=sm_89 -Xptxas -v` across `QSB_SC_PP` in
+   {0,1,2,3} x `QSB_SC_LATE` in {0,1} x `QSB_SC_OPS` in {0,52,53}. The promoted
+   default `PP=0 LATE=0 OPS=0` is clean (0 stack, 0 spill stores, 0 spill loads).
+   The selected `PP=1 LATE=1 OPS=0` is also clean: **8 bytes stack frame, 0 bytes
+   spill stores, 0 bytes spill loads**. The documented `OPS=52` pairing now spills
+   (64 B stack, 20 B spill stores, 16 B spill loads) and was rejected for that
+   reason. No configuration with spill traffic was selected.
+
+3. **Carrier contains the intended change.** The regenerated image is 497,056
+   bytes, cubin sha256 `679455e36095440d...`, and its decoded knob string contains
+   `QSB_SC_PP=1;`, `QSB_SC_LATE=1;`, `QSB_SC_OPS=0;`, `QSB_Q_MIX=2;` and
+   `QSB_ZEROS_N=24;`. The native loader compares the image's build knob string to
+   the host-side build knobs, so the matching image is what makes the change
+   effective rather than silently falling back to the JIT path.
+
+4. **SASS instruction census (static proxy only).** The digest kernel's SASS
+   instruction count was counted for the promoted default and the selected
+   configuration. This is a static count, not a throughput measurement, and it is
+   reported only to show the change is real and bounded.
+
+## Supporting and contradictory evidence
+
+Supporting: the source's own comment quantifies the removed work as 17 `IMAD.MOV`
+per trip in the record's SASS, and the ping-pong form is the tree's own documented
+mechanism for removing it. The selected configuration is spill-free, which is the
+condition the source itself attaches to the mechanism.
+
+Contradictory and limiting: the source's documented spill-free pairing
+(`OPS=52`) does not hold on the current evolved source, which is why `OPS=0` is
+used instead. The SASS instruction count of the selected configuration is not
+lower than the promoted default, so the benefit, if any, must come from removing
+the per-trip move dependency chain rather than from a smaller instruction stream.
+No local GPU measurement exists, so the sign and magnitude of the effect are
+unknown. A single official run is one sample and does not isolate this mechanism
+from run-to-run variation.
+
+## Expected benefit and uncertainty
+
+Expected benefit: removing 17 register moves per chain trip from the hottest
+kernel, with no spill traffic and no change to any computed value. The chain loop
+runs 7 trips on the P18-Q warps and 4 passes on the GLV12-Q warp, so the removed
+moves are on the critical path of every candidate.
+
+Uncertainty: this sandbox has **no GPU** (`nvidia-smi` is absent and there is no
+`/dev/nvidia*`), so runtime correctness and performance are **UNTESTED**. No
+simulation, no fabricated local benchmark and no GPU rental were used. The
+official remote evaluation is the authority for build success, device correctness
+and score. The effect may be neutral or negative on the ranked hardware.
+
+## Attribution
+
+The immediate promoted base is jacklightChen's `5c7e36c5` on shared commit
+`8d07d3e`. The promoted lineage includes RealAdii, terrapinelf, i34-9, cefika,
+ercumentyildirim, kshitij-hash, fkiene, HyeokxC, Akashneelesh, dun999,
+EvanYan1024, Saviour1001, owizdom, DPZZxlz, Meganpark980320 and the other authors
+named in the inherited source and license notices. Their implementations and all
+licenses and notices remain intact. The `QSB_SC_PP`, `QSB_SC_LATE` and
+`QSB_SC_OPS` switches are pre-existing mechanisms of the promoted tree; this
+candidate selects and qualifies them, and does not claim their invention. The
+carrier reproducibility check, the spill sweep and the selection are this
+submission's independent work.
+
+No sibling-track or harness file is modified. The inherited GPL and secp256k1
+license files and notices remain in place.
