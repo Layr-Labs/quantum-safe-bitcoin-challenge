@@ -465,6 +465,12 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #ifndef QSB_PROBE_NOSTATE
 #define QSB_PROBE_NOSTATE 0
 #endif
+#ifndef QSB_PROBE_SHA2X
+#define QSB_PROBE_SHA2X 1   /* measurement run (exact): two extra SHA-256 compressions per candidate in prepare */
+#endif
+#if QSB_PROBE_SHA2X
+__device__ uint32_t qsb_sha2x_sink;   /* never read; keeps the cost probe's compressions live */
+#endif
 #ifndef QSB_PROBE_NOS2
 #define QSB_PROBE_NOS2 0
 #endif
@@ -3759,6 +3765,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint32_t s2[8];
 #if QSB_SPARSE_D && QSB_SHA_OPT
     _SHA256TransformDigest32Q(s2, state);
+#if QSB_PROBE_SHA2X
+    /* Measurement (exact): two more sparse compressions on a locktime-perturbed copy. About the
+     * SHA-256d work per candidate; a store taken with probability ~2^-64 keeps them live. */
+    {
+        uint32_t d2[8], e2[8];
+        #pragma unroll
+        for (int i = 0; i < 8; i++) e2[i] = state[i] ^ (lt + (uint32_t)i);
+        _SHA256TransformDigest32Q(d2, e2);
+        _SHA256TransformDigest32Q(e2, d2);
+        if ((e2[0] ^ e2[1]) == 0x9e3779b9u && (e2[2] ^ lt) == 0x7f4a7c15u)
+            qsb_sha2x_sink = e2[3] ^ e2[4] ^ e2[5] ^ e2[6] ^ e2[7];
+    }
+#endif
 #elif QSB_SPARSE_D
     _SHA256TransformDigest32(s2, state);
 #else
