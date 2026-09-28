@@ -56,17 +56,33 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     c7 = QI_LO(QI_LO(c7, a3, b4), a4, b3);
     V c8 = QI_LO(QI_HI(QI_HI(z, a3, b4), a4, b3), a4, b4);
     V c9 = QI_HI(z, a4, b4);                                   /* < 2^46 (a4, b4 < 2^49) */
-    /* high columns to 52-bit limbs (c9 stays < 2^52) */
-    c6 += c5 >> 52; c5 &= M;
-    c7 += c6 >> 52; c6 &= M;
-    c8 += c7 >> 52; c7 &= M;
-    c9 += c8 >> 52; c8 &= M;
+    /*
+     * Split the high columns before folding.  The old serial carry chain
+     * made c5 feed c6, then c7, then c8, then c9.  For k in [5, 8], write
+     * c_k = l_k + 2^52 h_k independently.  Since
+     *
+     *   2^(52k) = 2^(52(k-5)) * 2^260
+     *            = 2^(52(k-5)) * R (mod p),
+     *
+     * the low part uses the existing low/high IFMA pair and h_k*R is one
+     * extra low IFMA in the next output column.  This removes the carry
+     * dependency across the four high columns without changing the field
+     * element represented by the product.
+     */
+    const V h5 = c5 >> 52; c5 &= M;
+    const V h6 = c6 >> 52; c6 &= M;
+    const V h7 = c7 >> 52; c7 &= M;
+    const V h8 = c8 >> 52; c8 &= M;
     /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
     V d0 = QI_LO(c0, c5, R);
     V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
     V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
     V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
     V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    d1 = QI_LO(d1, h5, R);
+    d2 = QI_LO(d2, h6, R);
+    d3 = QI_LO(d3, h7, R);
+    d4 = QI_LO(d4, h8, R);
     const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
     d4 += d3 >> 52; d3 &= M;
     const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
