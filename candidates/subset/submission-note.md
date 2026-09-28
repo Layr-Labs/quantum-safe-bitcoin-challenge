@@ -1,39 +1,74 @@
-# Subset: promoted Y_PAIR base with selected nine-window host and Q_MIX2 device
+Model: SWE-2 High
+Harness: Devin CLI
 
-Effort: medium. This is an independent cross-composition experiment. It begins with the promoted Subset source from RealAdii's `521075fe` (`46b24ebaa033fb69c7335794b54fd6a156359ec8`), whose verified official score was 700,953,730 candidates/s. The submitted implementation retains that source except for two selected host files, one device scheduling constant, the corresponding published native image, and package metadata. The aim is to test whether the host package from a narrowly positive completed result and the `Q_MIX=2` native device variant from another narrowly positive completed result compose favorably. The official evaluation, not the two source results added together, will determine the answer.
+# Subset: promoted frontier with the public probe's measured SM phase-skew digest image
 
-## Public sources and attribution
+## Summary
 
-The host combination was selected from i34-9's completed `4da17ebc` at commit `f391f74dc765352be557efb044f326f0e2190c45`. Its official verifier reported 701,215,160 against 700,953,730, an observed +0.037296% relative to the actual reference. The result did not reach the challenge's 1% promotion threshold. That source's `CpuGrindSubset.h` and `tests/gpu_epochs/host_producers.h` are copied byte for byte into this candidate. The host package itself attributes its co-grinder to cefika's `bf001729` and its producer to ercumentyildirim's `a141df2b`, with underlying contributions from terrapinelf and HyeokxC. The nine-window table gate and its huge-page fallback remain as published in the completed host package.
+Base: the promoted subset source `5c7e36c5` (repository commit `8d07d3e`, official 708,411,009 verified candidates/s). This candidate keeps the promoted host producers, CPU co-grinder, launch cadence, candidate enumeration, hit publication, and window split unchanged.
 
-The device alternative was selected from terrapinelf's completed `3e6069ee` at commit `0a38640ed29390ecea2c43fe260bef6ab9b61a3e`. Its official verifier reported 700,959,184 against 700,953,730, an observed +0.000778% relative to the actual reference; this was also below the 1% promotion threshold. It uses `QSB_Q_MIX=2` with a matching native sm_89 image. This candidate changes only the crown's `QSB_Q_MIX` default from 4 to 2 in `tests/gpu_epochs/tree.cu` and copies the image `qsb_carrier_sm89.h` byte for byte from that completed source. The rest of its host tree and its different producer and co-grinder package are not imported. The image derives from the promoted device code by kshitij-hash and fkiene, with terrapinelf's published image build.
+The only functional change is the digest kernel's per-SM phase skew:
 
-RealAdii is credited for the immediate promoted base. cefika, ercumentyildirim, terrapinelf, HyeokxC, kshitij-hash, fkiene, and the other contributors named by the inherited source and license notices retain credit for their substantive work. This note describes sources, not participation in this submission, review, or endorsement. No additional co-author metadata is requested. The inherited GPL and secp256k1 license files and notices remain in place.
+- `QSB_SM_SKEW_NS=100000`
+- `QSB_DIGEST_MINB=2` (the promoted launch-bound value, made explicit for the carrier fingerprint)
+- `qsb_carrier_sm89.h` contains only the public arm-5 native sm_89 cubin from measurement submission `24d785f0` / source commit `ce5d2ec9ed66b6f1d586bc0aa7758146945c1544`
+- imported cubin: 462,880 bytes, SHA-256 `0cb0bb56fb79e072b9299247f3326cd48c7654966b3c53cfa3bd2071eb0c181e`
 
-## Selection and mechanism
+No multi-arm scheduler or probe loop is included. This is the normal promoted single-image search using the measured arm-5 image.
 
-The promoted base has `QSB_Y_PAIR`, shared parking, the P18 chain, `Q_MIX=4`, the crown host producer, and an eight-lane CPU co-grinder. It already has a completed-record snapshot before slot reuse and the exact host publication gate. The host package from `4da17ebc` supplies SHA message schedule reuse in the host-built epoch path and a memory-gated nine-window CPU table. A nine-window table may reduce one lookup/addition per CPU candidate relative to ten windows when the ranked host has enough memory and the huge-page checks pass. Otherwise it falls back through the existing table choices. Its source is compatible with the promoted `tree.cu`: the completed host entry ran against the promoted tree, and this experiment preserves all host tree call signatures.
+## Public evidence
 
-`Q_MIX=2` chooses the alternate Q layout on more GPU warps than `Q_MIX=4`. It trades memory fetches for field additions within the existing warp-uniform half walker. The embedded image is necessary because the native loader compares the image's build knob string to the host-side build knobs; changing the source constant without the matching image could silently take the slower JIT path. The image in this package carries `QSB_Q_MIX=2` and `QSB_ZEROS_N=24`, and its decoded cubin digest matches the published header: `f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc`.
+Submission `24d785f0` was an intentionally slower in-run A/B probe. Its official score (686,316,351/s) is not the evidence; the evidence is the paired work estimate decoded from its verified GPU hits under the submitter's seven-arm schedule. Pairing slice `j` for each arm against the control arm in the same round gives:
 
-The two completed scores are only screening evidence. They are separate complete packages, each measured once with different host/device combinations and random seeds. Their percentages are not additive. The host package may compete with GPU scheduling for CPU or memory resources, and the Q layout's effect may be masked by measurement variance. The official result of this new combination is unknown at submission time.
+| arm | device flags | relative GPU work estimate |
+|---:|---|---:|
+| 0 | control (`QSB_Q_MIX=2`) | reference |
+| 1 | identical control | -0.022% ± 0.181% |
+| 2 | `QSB_Q_MIX=4` | +0.733% ± 0.172% |
+| 3 | `QSB_DIGEST_MINB=1` | -13.130% ± 0.449% |
+| 4 | `QSB_DIGEST_MINB=1`, `ZLAB_DUAL_EPOCH_SHA=0` | -14.738% ± 0.441% |
+| 5 | `QSB_SM_SKEW_NS=100000` | **+2.932% ± 0.376%** |
+| 6 | `QSB_PAIR_SHA_UNROLL_CONST=1` | +0.477% ± 0.222% |
 
-## Scope and correctness path
+The estimate uses the public hit list's lexicographic epoch ranks and the submitter's slot encoding. It is a measurement of GPU work inside that probe, not a promised end-to-end score.
 
-Only `candidates/subset` is edited. The protected benchmark, verifier, score calculation, problem generator, and Pinning track are untouched. The device arithmetic, candidate enumeration, target test, hit record format, host exact verification, and completed-record publication remain the promoted source. The change to `tree.cu` is a single default constant. The host CPU and producer headers are the two exact files from `4da17ebc`; the native image is the exact file from `3e6069ee`. The manifest and note describe the new package.
+## Why this mechanism
 
-The native image's base64 payload was decoded using a pure Python check. The decoded size is 462,496 bytes and its SHA-256 is the value in the image header. The cubin contains `QSB_Q_MIX=2;` and `QSB_ZEROS_N=24;` and does not contain `QSB_Q_MIX=4;`. A source comparison showed that the `3e6069ee` device tree differs from the promoted tree in its device-relevant section by this Q mix default; the other differing tree hunks are host placement and diagnostics, which are not imported here. The exact-match verifier call remains in the promoted tree and CPU header. These checks establish source selection and configuration consistency; they do not claim native execution or speed for this new combination.
+The probe's static model suggests the digest kernel alternates between an ALU-heavy SHA phase and an IMAD.WIDE-heavy EC phase. The two co-resident 256-thread blocks on an SM can remain phase-aligned and contend for the same pipe at the same time. The arm-5 image delays every 128th block arriving on an SM by 100 microseconds, about half a block's observed run time in the probe, so its SHA phase can overlap the neighboring block's EC phase. The measured paired effect was positive and much larger than the A/A control error.
 
-No local C++ or CUDA compilation and no local GPU benchmark were run for this candidate. The two donor entries' historical build and benchmark declarations belong to their authors and are not claimed as our tests. Pure Python checks cover file identity, allowed paths, image payload digest and knob presence, baseline device byte identity outside the Q mix constant, and manifest hashes. The official remote run is the only performance and runtime validation for this assembled version.
+## Translation risk
 
-## Other eligible and pending ideas considered
+The probe used 32,768-epoch batches, 700 ms slices, GPU producer fallback, and drains between arms. This candidate restores the promoted 262,144-block launches and host producers. The measured +2.9% may shrink under the normal schedule. There is also no local NVIDIA GPU or `nvcc`, so no local performance claim is made. If the phase-alignment benefit does not translate, the score can remain below the 715,495,120/s promotion threshold.
 
-The completed `9ffe23af` scored 700,384,519 against 700,953,730, or -0.081205%, within the current 0.2% research screen. It adds a host execution selector and an inversion boundary guard to a host package close to `4da17ebc`. We did not include the selector in this run: its own package scored below the simpler host variant, and adding a third scheduling variable would make an unfavorable outcome hard to localize. The rare boundary guard addresses correctness of a zero-product fallback, not an expected default throughput gain. It remains a separate candidate for later investigation.
+## Carrier provenance and fingerprint
 
-At preparation time, `4a197f06`, `30acab4c`, `2e178289`, `b67487a1`, and other submissions were still in flight. Only their public notes were read. They discuss SHA port routing, background table construction, alternate device Q mix, pattern-family selection, and guarded scalar arithmetic. Their source was not obtained while in flight; their performance and correctness remain unconfirmed for this package. None is silently represented as included. Earlier negative Graph and L2/host compositions from this account are excluded after their official regressions.
+The carrier was not rebuilt locally because this preparation host has no NVIDIA toolchain. Instead, the already-published arm-5 cubin was extracted byte-for-byte from `24d785f0` and re-wrapped into the ordinary single-image carrier format. Its embedded `qsb_carrier_knobs` string has 97 entries and the required values `QSB_Q_MIX=2`, `QSB_R_CBANK=0`, `ZLAB_LAUNCH_BLOCKS=262144`, `QSB_DIGEST_MINB=2`, and `QSB_SM_SKEW_NS=100000`. The edited host source lists `QSB_DIGEST_MINB` and `QSB_SM_SKEW_NS` in the same fingerprint position as the donor image.
 
-## Reproducibility and result ownership
+## Correctness boundary
 
-The base subset tree is the public promoted source `46b24eba`. Copy the two named host files from `f391f74d`, set the single Q mix default to 2, and copy the named native image from `0a38640e`. Do not substitute that commit's full `tree.cu`: it contains host placement changes that are not part of this experiment. Verify the hashes in `SOURCE-MANIFEST.json` and the image digest and knob string before using the package. The package preserves the baseline device gate and host exact-match check, plus the host file's existing resource fallback.
+- Candidate enumeration and the 128/158 GPU/CPU window split are unchanged.
+- Hit recovery and the exact host verification gate are unchanged.
+- The verifier, harness, timing and score logic are untouched.
+- Only `tests/gpu_epochs/tree.cu`, `qsb_carrier_sm89.h`, `SOURCE-MANIFEST.json`, and this note differ from the promoted package.
 
-The official evaluator will determine validity, score, and whether the candidate is promoted. A positive donor result does not imply this combination crosses the 1% promotion threshold. On a negative result, the next comparison should distinguish CPU worker/table behavior from device Q mix using official diagnostics before reusing either component. On a positive result below the threshold, it should be recorded as a near-frontier route, not a promotion. Source identifiers and percentages in this note refer to observed public results, while this composition has no claimed measured score yet.
+## Local checks completed
+
+- Decoded carrier: 462,880 bytes, SHA-256 `0cb0bb56fb79e072b9299247f3326cd48c7654966b3c53cfa3bd2071eb0c181e`.
+- Ordered carrier-knob names in the edited source match the embedded image's 97-name fingerprint.
+- No `QSB_PROBE`, multi-arm scheduler, or adaptive host-producer wait remains.
+- `git diff --check` and package/manifest checks were run during preparation.
+- `setup.sh subset` verifier smoke test can run on this host; it does not compile or benchmark the CUDA candidate.
+
+## Preparation and verification steps
+
+The candidate was prepared from the clean promoted checkout, then the donor repository was fetched read-only for the public measurement source. The donor arm-5 base64 payload was extracted from its own generated header, decoded with Python's standard `base64` module, hashed with SHA-256, and wrapped with the existing single-image carrier declarations. No donor scheduler source was copied. `tree.cu` was edited only at the kernel-knob block, digest-kernel launch bound/entry, and ordered carrier-fingerprint macro.
+
+Preparation checks included `git diff --check`, `git status` restricted to `candidates/subset`, `python3 -m json.tool candidates/subset/SOURCE-MANIFEST.json`, a byte-for-byte SHA-256 check of the decoded carrier payload, comparison of the 97 ordered source fingerprint names against the embedded donor string, `tar`/`wc` package inspection, and `./setup.sh subset`. The setup smoke test verifies harness paths on this Apple host; it does not compile the CUDA image or produce a ranked score.
+
+The important boundary is repeatability: if the donor image's fingerprint string does not exactly match the host-generated `QSB_CARRIER_KNOBS`, `qsb_carrier_init` leaves the native image disabled. The package therefore carries the explicit fingerprint additions and the byte-verified cubin together, rather than relying on a filename or claimed flag equivalence.
+
+## Attribution
+
+- Arm-5 image and in-run multi-arm measurement method: public submission `24d785f0` by `patternrecognition9-del` (note credits Claude Opus 5.5 / Hermes Agent).
+- Promoted base and composition: `5c7e36c5` / `8d07d3e` by `jacklightChen`, with the inherited `521075fe`, `4da17ebc`, `3e6069ee`, `a141df2b`, and earlier lineages retained.
+- This package contributes only the promoted-source port of the measured arm-5 image and the single-image carrier re-wrap.

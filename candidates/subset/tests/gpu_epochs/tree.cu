@@ -2215,7 +2215,19 @@ __global__ void kernel_verify_pair_hits(
 #endif /* !QSB_HOST_VERIFY */
 
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+/* QSB_DIGEST_MINB (device knob, default 2): the minBlocksPerMultiprocessor bound of kernel_digest.
+ * 2 is the promoted value (<= 128 registers, two 48 KiB blocks per SM); 1 lets ptxas use more
+ * registers, which drops residency to one barrier-locked block per SM (probe arm). */
+#ifndef QSB_SM_SKEW_NS
+#define QSB_SM_SKEW_NS 100000
+#endif
+#if QSB_SM_SKEW_NS
+__device__ unsigned qsb_sm_skew_ctr[256];   /* per-SM block arrival count */
+#endif
+#ifndef QSB_DIGEST_MINB
+#define QSB_DIGEST_MINB 2
+#endif
+__global__ void __launch_bounds__(256, QSB_DIGEST_MINB) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -2242,6 +2254,16 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 , const uint32_t *d_first, int epochs_in_batch
 ) {
+#if QSB_SM_SKEW_NS && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    /* Phase-offset the two co-resident blocks of an SM. Every 128th block to arrive on an SM
+     * waits ~QSB_SM_SKEW_NS (100 us, about half a block's run time in the public probe) before
+     * starting, so its SHA (ALU-bound) phase overlaps the other block's EC (IMAD.WIDE-bound)
+     * phase instead of coinciding with it; identical blocks otherwise stay phase-locked from
+     * the launch's first wave. Costs one delayed half-block per 128 block arrivals per SM. */
+    if(threadIdx.x==0){unsigned sm;asm volatile("mov.u32 %0, %%smid;":"=r"(sm));
+        if((atomicAdd(&qsb_sm_skew_ctr[sm&255u],1u)&127u)==1u)__nanosleep(QSB_SM_SKEW_NS);}
+    __syncthreads();
+#endif
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
@@ -3911,6 +3933,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_TABLE_L2_WINDOW) QSB_CARRIER_KV(QSB_TRIM_DIRECT_PRODUCER) \
     QSB_CARRIER_KV(QSB_Z2_SPEC_CUT) QSB_CARRIER_KV(ZLAB_DIRDIG) QSB_CARRIER_KV(ZLAB_DUAL_EPOCH_SHA) \
     QSB_CARRIER_KV(ZLAB_HITPATH) QSB_CARRIER_KV(ZLAB_K2S3M) QSB_CARRIER_KV(ZLAB_LAUNCH_BLOCKS) \
+    QSB_CARRIER_KV(QSB_DIGEST_MINB) QSB_CARRIER_KV(QSB_SM_SKEW_NS) \
     QSB_CARRIER_KV(ZLAB_MODSQR) QSB_CARRIER_KV(ZLAB_PAIRSHA) QSB_CARRIER_KV(ZLAB_T14) \
     QSB_CARRIER_KV(ZLAB_TREE) QSB_CARRIER_KV(ZLAB_TRIM) QSB_CARRIER_KV(QSB_FORCE_EXACT_HIT_CHECK) \
     QSB_CARRIER_KV(QSB_SC_OPS) QSB_CARRIER_KV(QSB_SC_PP) QSB_CARRIER_KV(QSB_SC_ALUZ) QSB_CARRIER_KV(QSB_SC_PARK) QSB_CARRIER_KV(QSB_SC_LATE)
