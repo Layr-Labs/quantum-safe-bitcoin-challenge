@@ -629,6 +629,12 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
 #if QSB_GLV_HIGH15 != 0 && QSB_GLV_HIGH15 != 1
 #error QSB_GLV_HIGH15 must be 0 or 1
 #endif
+#ifndef QSB_HIGH15_NOFB
+#define QSB_HIGH15_NOFB 1
+#endif
+#if QSB_HIGH15_NOFB != 0 && QSB_HIGH15_NOFB != 1
+#error "QSB_HIGH15_NOFB must be 0 or 1"
+#endif
 
 /* Exact original reference and rare out-of-line wrapper. q9_coeff_high15 computes only product
  * diagonals 10..14. The fixed omitted low part is too small to change the
@@ -779,9 +785,13 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
+#if QSB_HIGH15_NOFB
+    {
+#else
     constexpr uint32_t guard=(QSB_GLV_HIGH10_HI && QSB_GLV_LEAN)
         ? (WHICH==1 ? 0x7ffffff7U : 0x7ffffff8U) : FALLBACK_WORD;
     if(w11<guard || w11>=0x80000000U){
+#endif
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
 #if QSB_GLV_RND
@@ -795,10 +805,13 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
         const uint64_t round=(uint64_t)(w11>>31);
         q9_round_coeff(out,lo,hi,round);
 #endif
-    }else{
+    }
+#if !QSB_HIGH15_NOFB
+    else{
         ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
         out[0]=r.x;out[1]=r.y;
     }
+#endif
 }
 
 __device__ __forceinline__ void q9_coeff_g1(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
