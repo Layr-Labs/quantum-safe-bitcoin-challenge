@@ -185,6 +185,40 @@
 #if QSB_CARRY_GLUE && !(QSB_C31 && QSB_SHORT_CARRY && QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL)
 #error "QSB_CARRY_GLUE is written for C31 + SHORT_CARRY + SAS_SPLIT3P + SAS_Z9SUB_ALL"
 #endif
+/* Shortened carry forms of the prepare kernel's chain glue (kill switches; 0 = the forms above):
+ *   QSB_ADDOFF_CUT (0/1): _ModAddLazyOff applies its correction to the low limb's two
+ *     32-bit words only (one multiply-add with the 256-bit carry as carry-in, one add).
+ *   QSB_SAS2_GLUE (0/1): _ModSqrAddSub2's second fold adds its two carries into z2 in
+ *     place instead of capturing the first one in a register (same bits).
+ *   QSB_SUB_CUT (mask): _ModSub256C, the K correction of a borrowing subtraction as one
+ *     multiply-add on the low word and one add on the high word, at the chain's
+ *     P = U2 - X1 (bit 1), Qy = X1 - Q (bit 2) and the six seed subtractions (bit 4).
+ * A dropped inner carry perturbs only that candidate's point; every published hit is
+ * re-derived by the exact host recover+hash (QSB_HOST_GATE). */
+#ifndef QSB_ADDOFF_CUT
+#define QSB_ADDOFF_CUT 1
+#endif
+#ifndef QSB_SAS2_GLUE
+#define QSB_SAS2_GLUE 1
+#endif
+#ifndef QSB_SUB_CUT
+#define QSB_SUB_CUT 7
+#endif
+#if QSB_ADDOFF_CUT != 0 && QSB_ADDOFF_CUT != 1
+#error "QSB_ADDOFF_CUT must be 0 or 1"
+#endif
+#if QSB_SAS2_GLUE != 0 && QSB_SAS2_GLUE != 1
+#error "QSB_SAS2_GLUE must be 0 or 1"
+#endif
+#if QSB_SUB_CUT < 0 || QSB_SUB_CUT > 7
+#error "QSB_SUB_CUT is a mask of bits 1, 2 and 4"
+#endif
+#if (QSB_ADDOFF_CUT || QSB_SUB_CUT) && !(QSB_CARRY_GLUE && QSB_HOST_GATE)
+#error "QSB_ADDOFF_CUT / QSB_SUB_CUT are written for the CARRY_GLUE forms behind the host gate"
+#endif
+#if QSB_SAS2_GLUE && !(QSB_C31 && QSB_SHORT_CARRY && QSB_SAS_SPLIT3P && QSB_SAS_Z9SUB_ALL)
+#error "QSB_SAS2_GLUE needs the plain-carry sfc (SPLIT3P + Z9SUB_ALL) and the empty C31 second-fold tail"
+#endif
 #ifndef QSB_MUL_FOLD8_CUT
 #define QSB_MUL_FOLD8_CUT 1
 #endif
@@ -663,6 +697,31 @@ __device__ __forceinline__ void _ModSub256(uint64_t *r, const uint64_t *a, const
 
 #endif
 __device__ __forceinline__ void _ModSub256(uint64_t *r,uint64_t *b) { _ModSub256(r,r,b); }
+#if QSB_SUB_CUT
+/* QSB_SUB_CUT: r = a - b; on a borrow (m = -1) the low word adds m*977 and the high word adds m. */
+__device__ __forceinline__ void _ModSub256C(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t r0,r1,r2,r3;
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 m,l0,h0;\nsub.cc.u64 t0,%4,%8;\nsubc.cc.u64 t1,%5,%9; subc.cc.u64 t2,%6,%10; subc.cc.u64 t3,%7,%11;\nsubc.u32 m,0,0;\nmov.b64 {l0,h0},t0;\nmad.lo.u32 l0,m,977,l0; add.u32 h0,h0,m;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#endif
+#if QSB_SUB_CUT & 1
+#define QSB_SUB_CHAIN_P _ModSub256C
+#else
+#define QSB_SUB_CHAIN_P _ModSub256
+#endif
+#if QSB_SUB_CUT & 2
+#define QSB_SUB_CHAIN_QY _ModSub256C
+#else
+#define QSB_SUB_CHAIN_QY _ModSub256
+#endif
+#if QSB_SUB_CUT & 4
+#define QSB_SUB_SEED _ModSub256C
+#else
+#define QSB_SUB_SEED _ModSub256
+#endif
 
 // Lazy add: r = a + b reduced only by folding the 2^256 carry as K. The
 // result is in [0, 2^256) and congruent mod p, which every consumer in the
@@ -720,7 +779,10 @@ __device__ __forceinline__ void _ModAddLazy(uint64_t *r, const uint64_t *a, cons
 #if QSB_K32_OFF
 __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
-#if QSB_CARRY_GLUE
+#if QSB_CARRY_GLUE && QSB_ADDOFF_CUT
+    /* mk = k-1 without touching CF (still k): l0 + mk*0x3D0 + k, h0 + mk. */
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 mk,l0,h0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk,0xFFFFFFFF,0;\nmov.b64 {l0,h0},t0;\nmadc.lo.u32 l0,mk,0x3D0,l0; add.u32 h0,h0,mk;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+#elif QSB_CARRY_GLUE
     asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk,0xFFFFFFFF,0; and.b32 clo,mk,0xFFFFFC30; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\naddc.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
 #else
     asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 kk,0,0; sub.u32 mk,kk,1; and.b32 clo,mk,0xFFFFFC2F; add.u32 clo,clo,1; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\nadd.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
@@ -2009,7 +2071,11 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 z3, z3, 0; subc.u32 z4, z4, " QZ ";\n"
 #endif
 #endif
+#if QSB_SAS2_GLUE
+        "\t{ .reg .u64 sfz, sft; .reg .u32 sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\naddc.u32 z2, z2, 0;\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, 0; }\n\n"
+#else
         "\t{ .reg .u64 sfz, sft; .reg .u32 sfc, sfq, sfl, sfh;\n" QSB_SAS_SFQ "\nmov.b64 sfz, {z0, sfq};\nmul.wide.u32 sft, z8, 977;\nadd.cc.u64 sft, sft, sfz;\n" QSB_SAS_SFC "\nmov.b64 {sfl, sfh}, sft;\nmov.u32 z0, sfl;\nadd.cc.u32 z1, z1, sfh;\naddc.cc.u32 z2, z2, sfc; }\n\n"
+#endif
 #if QSB_SHORT_CARRY
         QSB_SECOND_FOLD_TAIL
 #else
