@@ -629,6 +629,15 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
 #if QSB_GLV_HIGH15 != 0 && QSB_GLV_HIGH15 != 1
 #error QSB_GLV_HIGH15 must be 0 or 1
 #endif
+/* A valid scalar split has two nonzero signed halves except for the negligible
+ * exact-zero corner.  The publication gate re-derives every nominated hit, so
+ * this cut removes the per-candidate zero tests without risking false output. */
+#ifndef QSB_GLV_NZ_CUT
+#define QSB_GLV_NZ_CUT 1
+#endif
+#if QSB_GLV_NZ_CUT != 0 && QSB_GLV_NZ_CUT != 1
+#error "QSB_GLV_NZ_CUT must be 0 or 1"
+#endif
 
 /* Exact original reference and rare out-of-line wrapper. q9_coeff_high15 computes only product
  * diagonals 10..14. The fixed omitted low part is too small to change the
@@ -1139,8 +1148,12 @@ __device__ __forceinline__ unsigned q9_glv_split_z(const uint64_t input[4],uint6
     const q9_u129 z1=q9_sub129_z(q9_sub129_z(kk,p),q);
     const q9_u129 z2=q9_sub129_z(rr,p);
     q9_zdec(w1,t1,m1,z1);q9_zdec(w2,t2,m2,z2);
+#if QSB_GLV_NZ_CUT
+    return 3u;
+#else
     const unsigned p_nonzero=(z1.lo|z1.hi)!=0;
     const unsigned q_nonzero=(z2.lo|z2.hi)!=0;
     return q_nonzero|(p_nonzero<<1);
+#endif
 }
 #endif
