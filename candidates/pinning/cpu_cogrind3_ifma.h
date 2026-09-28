@@ -56,17 +56,17 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     c7 = QI_LO(QI_LO(c7, a3, b4), a4, b3);
     V c8 = QI_LO(QI_HI(QI_HI(z, a3, b4), a4, b3), a4, b4);
     V c9 = QI_HI(z, a4, b4);                                   /* < 2^46 (a4, b4 < 2^49) */
-    /* high columns to 52-bit limbs (c9 stays < 2^52) */
-    c6 += c5 >> 52; c5 &= M;
-    c7 += c6 >> 52; c6 &= M;
-    c8 += c7 >> 52; c7 &= M;
-    c9 += c8 >> 52; c8 &= M;
-    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
-    V d0 = QI_LO(c0, c5, R);
-    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
-    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
-    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
-    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    /* Split high columns independently, following the promoted Subset IFMA fold.
+     * This removes the c5->c9 carry chain; each h*R fits one 52-bit IFMA input. */
+    const V l5 = c5 & M, h5 = c5 >> 52;
+    const V l6 = c6 & M, h6 = c6 >> 52;
+    const V l7 = c7 & M, h7 = c7 >> 52;
+    const V l8 = c8 & M, h8 = c8 >> 52;
+    V d0 = QI_LO(c0, l5, R);
+    V d1 = QI_LO(QI_HI(QI_LO(c1, h5, R), l5, R), l6, R);
+    V d2 = QI_LO(QI_HI(QI_LO(c2, h6, R), l6, R), l7, R);
+    V d3 = QI_LO(QI_HI(QI_LO(c3, h7, R), l7, R), l8, R);
+    V d4 = QI_LO(QI_HI(QI_LO(c4, h8, R), l8, R), c9, R);
     const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
     d4 += d3 >> 52; d3 &= M;
     const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
@@ -186,6 +186,66 @@ static QI_INL void vinv(vfe *inv, const vfe *m) {
     fmul(inv, &t, &oth);
 }
 
+/* The IFMA lane already requires AVX-512VL. Its native 256-bit rotates shorten the
+ * vector SHA sigma dependency chains while retaining the original AVX2 path elsewhere. */
+#ifndef QSB_CG_VL_SHA
+#define QSB_CG_VL_SHA 1
+#endif
+static QI_INL qcg_sha::v8u s8v_S0(qcg_sha::v8u x) {
+    return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 2), _mm256_ror_epi32(x, 13)), _mm256_ror_epi32(x, 22));
+}
+static QI_INL qcg_sha::v8u s8v_S1(qcg_sha::v8u x) {
+    return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 6), _mm256_ror_epi32(x, 11)), _mm256_ror_epi32(x, 25));
+}
+static QI_INL qcg_sha::v8u s8v_s0(qcg_sha::v8u x) {
+    return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 7), _mm256_ror_epi32(x, 18)), _mm256_srli_epi32(x, 3));
+}
+static QI_INL qcg_sha::v8u s8v_s1(qcg_sha::v8u x) {
+    return _mm256_xor_si256(_mm256_xor_si256(_mm256_ror_epi32(x, 17), _mm256_ror_epi32(x, 19)), _mm256_srli_epi32(x, 10));
+}
+static QI_INL void s8v_compress_full(qcg_sha::v8u st[8], const qcg_sha::v8u w_in[16]) {
+    using namespace qcg_sha;
+    v8u w[16]; for (int i = 0; i < 16; i++) w[i] = w_in[i];
+    v8u a = st[0], b = st[1], c = st[2], d = st[3], e = st[4], f = st[5], g = st[6], h = st[7];
+    v8u bc = _mm256_xor_si256(b, c);
+#define V8_RND(a,b,c,d,e,f,g,h,kw,bc) do { \
+    v8u t1 = _mm256_add_epi32(_mm256_add_epi32(h, s8v_S1(e)), \
+        _mm256_add_epi32(_mm256_xor_si256(g, _mm256_and_si256(e, _mm256_xor_si256(f,g))), (kw))); \
+    v8u ab = _mm256_xor_si256(a,b); \
+    v8u t2 = _mm256_add_epi32(s8v_S0(a), _mm256_xor_si256(_mm256_and_si256(ab,bc),b)); \
+    d = _mm256_add_epi32(d,t1); h = _mm256_add_epi32(t1,t2); bc = ab; \
+} while (0)
+#define V8_R8(base, WX) \
+    V8_RND(a,b,c,d,e,f,g,h,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+0]),WX(0)),bc); \
+    V8_RND(h,a,b,c,d,e,f,g,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+1]),WX(1)),bc); \
+    V8_RND(g,h,a,b,c,d,e,f,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+2]),WX(2)),bc); \
+    V8_RND(f,g,h,a,b,c,d,e,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+3]),WX(3)),bc); \
+    V8_RND(e,f,g,h,a,b,c,d,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+4]),WX(4)),bc); \
+    V8_RND(d,e,f,g,h,a,b,c,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+5]),WX(5)),bc); \
+    V8_RND(c,d,e,f,g,h,a,b,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+6]),WX(6)),bc); \
+    V8_RND(b,c,d,e,f,g,h,a,_mm256_add_epi32(_mm256_set1_epi32((int)K256[base+7]),WX(7)),bc);
+#define V8_W0(k) w[(k)]
+#define V8_W8(k) w[8+(k)]
+    V8_R8(0,V8_W0)
+    V8_R8(8,V8_W8)
+#define V8_WEXP(k) (w[(k)] = _mm256_add_epi32(_mm256_add_epi32(w[(k)],s8v_s0(w[((k)+1)&15])), \
+                                  _mm256_add_epi32(w[((k)+9)&15],s8v_s1(w[((k)+14)&15]))))
+#define V8_E0(k) V8_WEXP(k)
+#define V8_E8(k) V8_WEXP(8+(k))
+    for (int r = 16; r < 64; r += 16) { V8_R8(r,V8_E0) V8_R8(r+8,V8_E8) }
+#undef V8_RND
+#undef V8_R8
+#undef V8_W0
+#undef V8_W8
+#undef V8_WEXP
+#undef V8_E0
+#undef V8_E8
+    st[0] = _mm256_add_epi32(st[0],a); st[1] = _mm256_add_epi32(st[1],b);
+    st[2] = _mm256_add_epi32(st[2],c); st[3] = _mm256_add_epi32(st[3],d);
+    st[4] = _mm256_add_epi32(st[4],e); st[5] = _mm256_add_epi32(st[5],f);
+    st[6] = _mm256_add_epi32(st[6],g); st[7] = _mm256_add_epi32(st[7],h);
+}
+
 /* 8-lane pubkey SHA of Q+ (lanes 0-3) and Q- (lanes 4-7); canonical inputs; returns the
  * 8-bit mask of lanes whose H0 passes the leading-zero prefilter (v4::hash_block's layout) */
 static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, const vfe *ym, int use_ni) {
@@ -218,7 +278,11 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
     } else {
         v8u st[8];
         for (int j = 0; j < 8; j++) st[j] = _mm256_set1_epi32((int)IV256[j]);
+#if QSB_CG_VL_SHA
+        s8v_compress_full(st, W);
+#else
         s8_compress_full(st, W);
+#endif
         h0 = st[0];
     }
 #if QSB_ZEROS_N >= 32

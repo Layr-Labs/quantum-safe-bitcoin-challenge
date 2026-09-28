@@ -12,6 +12,12 @@
 #ifndef QSB_PARITY_WINDOW_NARROW
 #define QSB_PARITY_WINDOW_NARROW 1
 #endif
+/* Split the seven low-half parity MADs into two independent accumulators.
+ * Addition modulo 2^32 is associative, so mid1 = acc_a + acc_b bit-exactly.
+ * Adapted from pochita0's PW_SPLIT_MAD for the 7-term FIN_CAP_IMAD chain. */
+#ifndef QSB_PW_SPLIT_MAD
+#define QSB_PW_SPLIT_MAD 1
+#endif
 /* QSB_FIN_BAL2 bit 1: the narrow window's two carry accumulators start from the constant-bank
  * zero pin_zero_add instead of the literal 0. top = 0 + carry is the same value, but ptxas then
  * emits the first capture as IMAD.X (multiply pipe) instead of SEL. */
@@ -111,6 +117,17 @@ __device__ __forceinline__ void qsb_parity_window_words(
          * the XOR of the addends' bit 0 (no carry reaches bit 0), while bit 0 of a_i*b_j is
          * a_i & b_j & 1. So mid1 + sum(a_i*b_j) has the same bit 0 as the XOR chain below,
          * and the seven steps run as IMAD on the multiply pipe instead of LOP3. */
+#if QSB_PW_SPLIT_MAD
+        ".reg .u32 paux;\n"
+        "mad.lo.u32 mid1,a1,b7,mid1;\n"
+        "mul.lo.u32 paux,a2,b6;\n"
+        "mad.lo.u32 mid1,a3,b5,mid1;\n"
+        "mad.lo.u32 paux,a4,b4,paux;\n"
+        "mad.lo.u32 mid1,a5,b3,mid1;\n"
+        "mad.lo.u32 paux,a6,b2,paux;\n"
+        "mad.lo.u32 mid1,a7,b1,mid1;\n"
+        "add.u32 mid1,mid1,paux;\n"
+#else
         "mad.lo.u32 mid1,a1,b7,mid1;\n"
         "mad.lo.u32 mid1,a2,b6,mid1;\n"
         "mad.lo.u32 mid1,a3,b5,mid1;\n"
@@ -118,6 +135,7 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mad.lo.u32 mid1,a5,b3,mid1;\n"
         "mad.lo.u32 mid1,a6,b2,mid1;\n"
         "mad.lo.u32 mid1,a7,b1,mid1;\n"
+#endif
 #else
         "and.b32 bit,a1,b7;\n"
         "xor.b32 mid1,mid1,bit;\n"
