@@ -1,6 +1,8 @@
+#define QSB_DRAW_TAG 0x6aba6ad4u /* inert draw tag */
+#define QSB_DECODE_CUT 0 /* mkvar override */
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 6
+#define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -116,7 +118,7 @@
                           * and blockDim.x == 128, both checked on the host */
 #endif
 #ifndef QSB_UNIF_DP
-#define QSB_UNIF_DP 1    /* uniform-datapath steering (bit 1: prepare tail W0/W1 and the W1-only schedule
+#define QSB_UNIF_DP 0    /* uniform-datapath steering (bit 1: prepare tail W0/W1 and the W1-only schedule
                           * terms from a uniform blockIdx read); same values, needs QSB_SHA_UNIF */
 #endif
 #if (QSB_UNIF_DP & 1) && !QSB_SHA_UNIF
