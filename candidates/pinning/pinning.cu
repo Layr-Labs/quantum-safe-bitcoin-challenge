@@ -1596,6 +1596,15 @@ __device__ __forceinline__ void qsb_pointadd_chain_pipe(
 #if !QSB_MUL_FOLD8_CUT
 #error "QSB_PAIR_ORD requires the QSB_MUL_FOLD8_CUT reduction tail"
 #endif
+/* QSB_KMUL 15 on this tree: Karatsuba for U2 = X2*ZZ1 (bit 1), PPP = PP*P (bit 2), Q = U2*PP
+ * (bit 4) and ZZZ1 *= PPP (bit 8); ZZ1 *= PP (bit 16) stays on _ModMult. All 31 non-zero masks
+ * were compiled for sm_89 (cicc 12.8, ptxas 12.8.93): only 10, 11, 15 and 16 leave the prepare
+ * kernel spill-free (the header default 14 spills 20 B here); 15 converts the most products.
+ * Only the prepare kernel changes; QSB_KMUL=0 rebuilds the base image byte for byte. */
+#ifndef QSB_KMUL
+#define QSB_KMUL 15
+#endif
+#include "KaratsubaMul.cuh"
 #include "pair_ordinate_mac.cuh"
 /* Chain addition with the negative deferred ordinate held as the pair (Qy,Ry),
  * -Y1 = Qy*Ry. The slope numerator R = S2*ZZZ1 + Qy*Ry is one two-product sum
@@ -1622,30 +1631,30 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #if !QSB_GATHER_EARLY
     if(PIPE) qsb_load_glv_y_code(table,next_code,Yoff);
 #endif
-    _ModMult(U2,X2,ZZ1);
+    QSB_KM3(1,U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
     QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
-    _ModMult(PPP,PP,P);
-    _ModMult(Q,U2,PP);
+    QSB_KM3(2,PPP,PP,P);
+    QSB_KM3(4,Q,U2,PP);
 #if QSB_ZZ_EARLY
     /* QSB_ZZ_EARLY: ZZ1 *= PP before the fused X3 and ZZZ1 *= PPP after Qy (statement order only). */
-    _ModMult(ZZ1,PP);
+    QSB_KM2(16,ZZ1,PP);
     _ModSqrAddSub2(X1,Ry,PPP,Q);
     QSB_SUB_CHAIN_QY(Qy,X1,Q);
 #if QSB_ZZZ_3ARG
-    _ModMult(ZZZ1,ZZZ1,PPP);
+    QSB_KM3(8,ZZZ1,ZZZ1,PPP);
 #else
-    _ModMult(ZZZ1,PPP);
+    QSB_KM2(8,ZZZ1,PPP);
 #endif
 #else
     _ModSqrAddSub2(X1,Ry,PPP,Q);
 #if QSB_ZZZ_3ARG
-    _ModMult(ZZZ1,ZZZ1,PPP);
+    QSB_KM3(8,ZZZ1,ZZZ1,PPP);
 #else
-    _ModMult(ZZZ1,PPP);
+    QSB_KM2(8,ZZZ1,PPP);
 #endif
-    _ModMult(ZZ1,PP);
+    QSB_KM2(16,ZZ1,PP);
     QSB_SUB_CHAIN_QY(Qy,X1,Q);
 #endif
 }
