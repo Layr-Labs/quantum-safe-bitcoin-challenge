@@ -1,3 +1,4 @@
+#define QSB_DRAW_TAG 0x6abb2b62u /* inert draw tag (second measurement run) */
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
@@ -5,7 +6,9 @@
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
+#ifndef QSB_L2STATE
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
+#endif
 #define QSB_GREEN 20
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
@@ -405,6 +408,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_PROBE_MASK
 #define QSB_PROBE_MASK 0      /* speed probe only: mask table indices to shrink the working set (wrong math) */
+#endif
+/* QSB_ARMS (host only): the in-run multi-arm A/B probe (QsbCarrier.h,
+ * challenges/qsb-tools/PROBE-DESIGN.md). N > 1 (<= the header's QSB_CARRIER_ARMS) time-slices
+ * the first N carrier images of qsb_carrier_sm89.h (arm table: build_carrier.sh); 1 (default)
+ * is the base single-image search on image 0 (the control), with every probe line compiled out.
+ * The ranked build line passes no -D, so a probe submission sets the 1 below to 6. */
+#ifndef QSB_ARMS
+#define QSB_ARMS 5    /* probe run: the five arms of build_carrier.sh (1 = the base single-image search) */
 #endif
 #ifndef QSB_SLOTPIPE
 #define QSB_SLOTPIPE 1        /* 1: slotted multi-stream batch pipeline (draheemking 11ba7e43 / PR 230,
@@ -1445,6 +1456,55 @@ __device__ __forceinline__ void qsb_tbl_policies(uint64_t &cold,uint64_t &hot) {
 #else
 #define QSB_TBL_L2POL_ON 0
 #endif
+/* QSB_TAX_WIDE / QSB_TAX_ALU / QSB_TAX_OFF (measurement arms, default 0 = compiled out):
+ * dummy work added once per chain trip, used only to calibrate the per-instruction cost of
+ * the chain on the ranked host against the same arms run locally. The result is folded into
+ * X[0] through g_qsb_tax_zero, which is 0 at run time, so every value is unchanged.
+ *   QSB_TAX_WIDE=N: N dependent IMAD.WIDE.U32 seeded from X[0] (on the serial chain).
+ *   QSB_TAX_ALU=M:  M dependent add/xor pairs (2M ALU ops) seeded from X[0] (on the chain).
+ *   QSB_TAX_OFF=M:  the same 2M ALU ops seeded from the trip's next_code (off the chain). */
+#ifndef QSB_TAX_WIDE
+#define QSB_TAX_WIDE 0
+#endif
+#ifndef QSB_TAX_ALU
+#define QSB_TAX_ALU 0
+#endif
+#ifndef QSB_TAX_OFF
+#define QSB_TAX_OFF 0
+#endif
+#if QSB_TAX_WIDE || QSB_TAX_ALU || QSB_TAX_OFF
+__constant__ uint32_t g_qsb_tax_zero = 0u;
+__constant__ uint64_t g_qsb_tax_zero64 = 0ull;   /* 64-bit sink keeps both halves of the WIDE chain live */
+__device__ __forceinline__ void qsb_tax_trip(uint64_t *X, uint32_t next_code) {
+#if QSB_TAX_WIDE
+    {
+        uint64_t t = X[0];
+        #pragma unroll
+        for (int k = 0; k < QSB_TAX_WIDE; k++) t = (uint64_t)(uint32_t)t * 0x9E3779B1u + t;
+        X[0] += t & g_qsb_tax_zero64;
+    }
+#endif
+#if QSB_TAX_ALU
+    {
+        uint32_t a = (uint32_t)X[0];
+        #pragma unroll
+        for (int k = 0; k < QSB_TAX_ALU; k++) a = (a + (0x9E3779B9u * (uint32_t)(k + 1))) ^ (0x7F4A7C15u + (uint32_t)k);
+        X[0] += a & g_qsb_tax_zero;
+    }
+#endif
+#if QSB_TAX_OFF
+    {
+        uint32_t a = next_code;
+        #pragma unroll
+        for (int k = 0; k < QSB_TAX_OFF; k++) a = (a + (0x9E3779B9u * (uint32_t)(k + 1))) ^ (0x7F4A7C15u + (uint32_t)k);
+        X[0] += a & g_qsb_tax_zero;
+    }
+#endif
+}
+#define QSB_TAX_TRIP(X, c) qsb_tax_trip((X), (c))
+#else
+#define QSB_TAX_TRIP(X, c) ((void)0)
+#endif
 /* QSB_GATHER_EARLY (kill switch, default 1): the piped pair-add issues the next
  * record's Y gather immediately after S2 = Y2+Yoff. Yoff is not read again in the
  * addition (the slope MAC takes S2, ZZZ, Qy and Ry), and the Y gather is the load
@@ -1907,6 +1967,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #else
         qsb_pointadd_chain_pipe(X,Y,U,V,x1,y1,y0,table,next_code);
 #endif
+        QSB_TAX_TRIP(X, next_code);
         #pragma unroll
         for(int i=0;i<4;i++) { uint64_t t=y1[i]; y1[i]=y0[i]; y0[i]=t; }
     }
@@ -6305,7 +6366,16 @@ int main(int argc, char **argv) {
         return publish_hits(slot_seq[s], slot_lt[s], count, hits);
     };
 #endif
+#if QSB_PROBE
+    /* Multi-arm probe (QsbCarrier.h): false keeps every line of the base loop below. */
+    const bool probe = qsb_probe_begin(effective_total, seq_start_override != 0, SEQ_MIN, BATCH);
+#endif
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += effective_total) {
+#if QSB_PROBE
+        /* Every slot was drained at the end of the previous slice: select the next arm and
+         * its fresh sequence SEQ_MIN + (arm << 26) + slice. */
+        if (probe) seq = qsb_probe_slice_begin(SEQ_MIN);
+#endif
         if (fast_tail) {
             uint8_t block[64];
             memcpy(block, pp.suffix, sizeof(block));
@@ -6334,6 +6404,9 @@ int main(int argc, char **argv) {
 
         /* Search all safe locktimes for this sequence */
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += BATCH) {
+#if QSB_PROBE
+            if (probe && qsb_probe_batch_stop()) break;   /* slice time is up */
+#endif
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = (lt_off + BATCH <= lt_range) ? BATCH : (lt_range - lt_off);
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
@@ -6432,9 +6505,23 @@ int main(int argc, char **argv) {
          * QSB_SLOTS-1 batches are in flight when the harness stops the run. */
         for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
 #endif
+#if QSB_PROBE
+        if (probe) {
+#if QSB_OVERLAP_SEQUENCES && !QSB_TAIL_TAB
+            /* The base keeps slots in flight across sequences; a probe slice ends empty so the
+             * next arm starts on an idle GPU and every hit of this slice is published under
+             * its own slot_seq/slot_lt before the kernel table changes. */
+            for (int s = 0; s < QSB_SLOTS; s++) if (drain_slot(s)) return 1;
+#endif
+            qsb_probe_slice_end();
+        }
+#endif
 
         /* Progress every 10 sequences */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + 1;
+#if QSB_PROBE
+        if (probe) seqs_done = (uint32_t)g_qsb_probe.g;   /* slices completed */
+#endif
         if (seqs_done % 10 == 0) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
