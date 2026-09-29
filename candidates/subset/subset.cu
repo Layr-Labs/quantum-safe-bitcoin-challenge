@@ -8,4 +8,8 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Exact chain scheduling from completed af2d81b3: use the matching native image. */
+#define QSB_SC_PP 1
+#define QSB_SC_LATE 1
+#define QSB_SC_OPS 0
 #include "tests/gpu_epochs/tree.cu"

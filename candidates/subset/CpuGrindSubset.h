@@ -116,6 +116,12 @@
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
 #endif
+#ifndef QSB_CPU_EPOCH_CONTIG
+#define QSB_CPU_EPOCH_CONTIG 1      /* disjoint contiguous epoch ranges save prefix re-hashes and binomial unranking */
+#endif
+#ifndef QSB_CPU_EPOCH_CAP
+#define QSB_CPU_EPOCH_CAP (~0ull)   /* optional bounded-range oracle; default covers the full remaining space */
+#endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
  * QSB_CPU_TAB_CAP_MB and at no fewer than QSB_CPU_NW_MIN windows; never more than 15 windows (68 MiB).
@@ -2109,7 +2115,18 @@ static void worker(Ctx *c, int tid) {
     std::vector<uint8_t> skips((size_t)B * 9 + 8);   /* +8: the wide skip stores below overrun by 3 bytes */
     uint8_t pk[64]; memset(pk, 0, 64); pk[33] = 0x80; pk[62] = 0x01; pk[63] = 0x08;   /* 264 bits */
     uint8_t blk2[64]; memset(blk2, 0, 64); blk2[32] = 0x80; blk2[62] = 0x01;          /* 256 bits */
+#if QSB_CPU_EPOCH_CONTIG
+    const uint64_t eavail = c->n_epochs > c->epoch_base ? c->n_epochs - c->epoch_base : 0;
+    const uint64_t etotal = eavail < (uint64_t)QSB_CPU_EPOCH_CAP ? eavail : (uint64_t)QSB_CPU_EPOCH_CAP;
+    const uint64_t workers = (uint64_t)(c->nthreads > 0 ? c->nthreads : 1);
+    const uint64_t span = etotal / workers;
+    uint64_t epoch = c->epoch_base + (uint64_t)tid * span;
+    const uint64_t epoch_end = (uint64_t)tid + 1 == workers ? c->epoch_base + etotal : epoch + span;
+    const uint64_t estep = 1;
+#else
     uint64_t epoch = c->epoch_base + (uint64_t)tid;   /* epoch_base: see QSB_CPU_DIAG_EPOCH */
+    const uint64_t epoch_end = ~0ull, estep = (uint64_t)c->nthreads;
+#endif
     int wi = c->ncwin;
     SHA256_CTX ectx; uint8_t early[16];
     std::vector<uint8_t> pbuf((size_t)dp->n * SIG_PUSH_SIZE + 64);
@@ -2135,7 +2152,7 @@ static void worker(Ctx *c, int tid) {
     if (dp->prefix_remainder_len) memcpy(pfx.data(), dp->prefix_remainder, dp->prefix_remainder_len);
     std::vector<uint32_t> pst((pfx_max / 64 + 2) * 8);
     memcpy(pst.data(), dp->midstate, 32);
-    uint8_t pv_early[16]; bool pv_ok = false;
+    uint8_t pv_early[16]; bool pv_ok = false; uint64_t pv_epoch = 0;
     alignas(16) uint32_t gstb[2][286 + 3][8]; int gpar = 0;   /* this epoch's and the previous epoch's block-0 group states: a lane */
     uint32_t (*gst)[8] = gstb[0];                             /* group of 4 spans at most 2 epochs (ncwin >= 4, see hash_plan) */
     const uint32_t *lin[4];
@@ -2176,10 +2193,20 @@ static void worker(Ctx *c, int tid) {
         int k = 0;
         while (k < B) {
             if (wi == c->ncwin) {                       /* next epoch: hash its fixed prefix once */
-                if (epoch >= c->n_epochs) return;
+                if (epoch >= c->n_epochs || epoch >= epoch_end) return;
 #if QCPU_SHANI
                 if (shani && hplan) {                       /* re-hash the prefix from the first block this epoch changes */
-                    {                                       /* qsb_host_unrank with a binomial table */
+                    int su = -1;
+                    if (QSB_CPU_EPOCH_CONTIG && pv_ok && epoch == pv_epoch + 1) {
+                        su = c->early - 1;
+                        while (su >= 0 && pv_early[su] == c->cut - c->early + su) su--;
+                        if (su >= 0) {
+                            memcpy(early, pv_early, (size_t)c->early);
+                            early[su]++;
+                            for (int i = su + 1; i < c->early; i++) early[i] = (uint8_t)(early[i - 1] + 1);
+                        }
+                    }
+                    if (su < 0) {                           /* binomial unrank at the first epoch or after a boundary */
                         uint64_t rank = epoch; int lo = 0;
                         for (int i = 0; i < c->early; i++) {
                             int cc = lo;
@@ -2187,6 +2214,7 @@ static void worker(Ctx *c, int tid) {
                             early[i] = (uint8_t)cc; lo = cc + 1;
                         }
                     }
+                    pv_epoch = epoch;
                     const size_t prl = dp->prefix_remainder_len;
                     size_t from = 0, pl = 0; int e2 = 0, i0 = 0;
                     if (pv_ok) {
@@ -2222,7 +2250,7 @@ static void worker(Ctx *c, int tid) {
                         for (int l = 0; l < 4; l++) { memcpy(gst[g + l], est, 32); gp[l] = &gwk[(size_t)(g + l) * 64]; }
                         qsha_x4p(&gst[g], gr, 1);
                     }
-                    epoch += (uint64_t)c->nthreads; wi = 0;
+                    epoch += estep; wi = 0;
                     goto have_epoch;
                 }
 #endif
@@ -2249,7 +2277,7 @@ static void worker(Ctx *c, int tid) {
                     if (ectx.num != remlen || nb > 16) shani = false;   /* unexpected shape: stay on OpenSSL (decided at the first epoch, k = 0) */
                 }
 #endif
-                epoch += (uint64_t)c->nthreads; wi = 0;
+                epoch += estep; wi = 0;
             }
 #if QCPU_SHANI
             have_epoch:
