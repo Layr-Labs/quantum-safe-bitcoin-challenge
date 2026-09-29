@@ -1,4 +1,5 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_ERC_0929023638 1   /* inert tag; unreferenced */
+#define QSB_Q_MIX 2   /* the record's Q layout mix (image f7454842) */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
