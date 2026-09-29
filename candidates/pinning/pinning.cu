@@ -1,6 +1,6 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 6
+#define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -433,7 +433,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
@@ -1609,45 +1609,22 @@ __device__ __forceinline__ void qsb_pointadd_pair(
     const uint8_t *table,uint32_t next_code) {
     uint64_t U2[4],S2[4],P[4],PP[4],PPP[4],Q[4];
     _ModAddLazyOff(S2,Y2,Yoff);
-#if QSB_GATHER_EARLY
-    /* Yoff dies in S2. Issue the 64 B record fetch before the slope MAC.
-     * The empty barrier keeps that load above qsb_mul2add in the PTX: the MAC
-     * does not read Yoff, so nothing else stops the compiler from sinking it. */
+    _ModMult(U2,X2,ZZ1);
     if(PIPE) {
         qsb_load_glv_y_code(table,next_code,Yoff);
         asm volatile("" ::: "memory");
     }
-#endif
-    qsb_mul2add(Ry,S2,ZZZ1,Qy,Ry);
-#if !QSB_GATHER_EARLY
-    if(PIPE) qsb_load_glv_y_code(table,next_code,Yoff);
-#endif
-    _ModMult(U2,X2,ZZ1);
     if(PIPE) qsb_load_glv_x_code(table,next_code,X2);
+    qsb_mul2add(Ry,S2,ZZZ1,Qy,Ry);
     QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
-    _ModMult(PPP,PP,P);
     _ModMult(Q,U2,PP);
-#if QSB_ZZ_EARLY
-    /* QSB_ZZ_EARLY: ZZ1 *= PP before the fused X3 and ZZZ1 *= PPP after Qy (statement order only). */
+    _ModMult(PPP,PP,P);
     _ModMult(ZZ1,PP);
     _ModSqrAddSub2(X1,Ry,PPP,Q);
-    QSB_SUB_CHAIN_QY(Qy,X1,Q);
-#if QSB_ZZZ_3ARG
     _ModMult(ZZZ1,ZZZ1,PPP);
-#else
-    _ModMult(ZZZ1,PPP);
-#endif
-#else
-    _ModSqrAddSub2(X1,Ry,PPP,Q);
-#if QSB_ZZZ_3ARG
-    _ModMult(ZZZ1,ZZZ1,PPP);
-#else
-    _ModMult(ZZZ1,PPP);
-#endif
-    _ModMult(ZZ1,PP);
     QSB_SUB_CHAIN_QY(Qy,X1,Q);
-#endif
+    /* ss-variant A.M2.LY.LX.M1.S3.Q1.M4.M3.M5.X3.M6.S4|000000 */
 }
 /* _PointAddXYZZ_mm with its deferred ordinate returned as the pair (T-Q, R). */
 __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
@@ -6578,3 +6555,6 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+
+// Yukon reuse package v1; original inventory SHA-256: 58ad4e979cb203a216fb4704f378a99fa7e80c714106e7aaa5169c9c41cd86b4
