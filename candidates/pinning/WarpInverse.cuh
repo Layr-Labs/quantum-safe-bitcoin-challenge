@@ -198,8 +198,17 @@ QWR_DEV void qwr_condneg(uint32_t *X,uint32_t neg){
     for(int i=0;i<9;i++){c+=(uint64_t)(X[i]^msk);X[i]=(uint32_t)c;c>>=32;}
 }
 
+#ifndef QSB_QWR_CANON_CC
+#define QSB_QWR_CANON_CC 1
+#endif
+#if QSB_QWR_CANON_CC != 0 && QSB_QWR_CANON_CC != 1
+#error "QSB_QWR_CANON_CC must be 0 or 1"
+#endif
+
 QWR_DEV void qwr_canon(uint32_t *X){
+#if !defined(__CUDA_ARCH__) || !QSB_QWR_CANON_CC
     const uint32_t QWR_PL[9]=QWR_PL_INIT;
+#endif
     const int32_t hi=(int32_t)X[8];
     int64_t acc=(int64_t)X[0]+(int64_t)hi*977;
     X[0]=(uint32_t)acc; acc>>=32;
@@ -208,10 +217,59 @@ QWR_DEV void qwr_canon(uint32_t *X){
     for(int i=2;i<8;i++){acc+=(int64_t)X[i];X[i]=(uint32_t)acc;acc>>=32;}
     X[8]=(uint32_t)acc;                               /* -1, 0 or 1 */
     const uint32_t mneg=(uint32_t)((int32_t)X[8]>>31);
+    uint32_t T[9];
+#if defined(__CUDA_ARCH__) && QSB_QWR_CANON_CC
+    /* Capture every input before any output: two independent, initialized
+     * nine-word carry/borrow chains. Keep corrected X[8], even on subtraction. */
+    asm( "{ .reg .u32 a<9>,t<9>,m0,m1;\n"
+         "and.b32 m0,%27,0xfffffc2f;\n"
+         "and.b32 m1,%27,0xfffffffe;\n"
+         "add.cc.u32 a0,%18,m0;\n"
+         "addc.cc.u32 a1,%19,m1;\n"
+         "addc.cc.u32 a2,%20,%27;\n"
+         "addc.cc.u32 a3,%21,%27;\n"
+         "addc.cc.u32 a4,%22,%27;\n"
+         "addc.cc.u32 a5,%23,%27;\n"
+         "addc.cc.u32 a6,%24,%27;\n"
+         "addc.cc.u32 a7,%25,%27;\n"
+         "addc.u32 a8,%26,0;\n"
+         "sub.cc.u32 t0,a0,0xfffffc2f;\n"
+         "subc.cc.u32 t1,a1,0xfffffffe;\n"
+         "subc.cc.u32 t2,a2,0xffffffff;\n"
+         "subc.cc.u32 t3,a3,0xffffffff;\n"
+         "subc.cc.u32 t4,a4,0xffffffff;\n"
+         "subc.cc.u32 t5,a5,0xffffffff;\n"
+         "subc.cc.u32 t6,a6,0xffffffff;\n"
+         "subc.cc.u32 t7,a7,0xffffffff;\n"
+         "subc.u32 t8,a8,0;\n"
+         "mov.b32 %0,a0;\n"
+         "mov.b32 %1,a1;\n"
+         "mov.b32 %2,a2;\n"
+         "mov.b32 %3,a3;\n"
+         "mov.b32 %4,a4;\n"
+         "mov.b32 %5,a5;\n"
+         "mov.b32 %6,a6;\n"
+         "mov.b32 %7,a7;\n"
+         "mov.b32 %8,a8;\n"
+         "mov.b32 %9,t0;\n"
+         "mov.b32 %10,t1;\n"
+         "mov.b32 %11,t2;\n"
+         "mov.b32 %12,t3;\n"
+         "mov.b32 %13,t4;\n"
+         "mov.b32 %14,t5;\n"
+         "mov.b32 %15,t6;\n"
+         "mov.b32 %16,t7;\n"
+         "mov.b32 %17,t8;\n"
+         "}"
+         : "=r"(X[0]),"=r"(X[1]),"=r"(X[2]),"=r"(X[3]),"=r"(X[4]),"=r"(X[5]),"=r"(X[6]),"=r"(X[7]),"=r"(X[8]),
+           "=r"(T[0]),"=r"(T[1]),"=r"(T[2]),"=r"(T[3]),"=r"(T[4]),"=r"(T[5]),"=r"(T[6]),"=r"(T[7]),"=r"(T[8])
+         : "r"(X[0]),"r"(X[1]),"r"(X[2]),"r"(X[3]),"r"(X[4]),"r"(X[5]),"r"(X[6]),"r"(X[7]),"r"(X[8]),"r"(mneg));
+#else
     uint64_t c=0;
     for(int i=0;i<9;i++){c+=(uint64_t)X[i]+(uint64_t)(QWR_PL[i]&mneg);X[i]=(uint32_t)c;c>>=32;}
-    uint32_t T[9]; c=1;
+    c=1;
     for(int i=0;i<9;i++){c+=(uint64_t)X[i]+(uint64_t)(uint32_t)~QWR_PL[i];T[i]=(uint32_t)c;c>>=32;}
+#endif
     const uint32_t keep=(uint32_t)((int32_t)T[8]>>31);
     for(int i=0;i<8;i++)X[i]=(X[i]&keep)|(T[i]&~keep);
 }
