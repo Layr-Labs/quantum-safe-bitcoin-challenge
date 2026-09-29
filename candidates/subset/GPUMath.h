@@ -722,7 +722,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 // Host (CPU verification): a __uint128_t transcription of the IDENTICAL schedule -- even chain
 // e0..e7, odd chain o0..o6, merge to 16 u32 limbs, then the same double fold. Validated against
 // harness/crypto.py; the asm<->C line correspondence is documented in
-// notes/ce-tools/mm32-cref-map.md so the two cannot silently drift.
+// so the two cannot silently drift.
 
 
 
@@ -912,7 +912,7 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
 // 8 diagonal squares, then the same double-fold as _ModMultCore. 45 IMAD.WIDE/square
 // (vs 73 for a*a via _ModMultCore). Output convention identical to _ModMultCore:
 // [0,p), including the bounded final carry fold. Device: inline PTX; host: __uint128_t C-ref of
-// the IDENTICAL schedule. Independently validated (notes/research/sqr_ptx/VALIDATION.md):
+// the IDENTICAL schedule. Independently validated:
 // 10^6 random + boundaries vs crypto.py, PTX row-schedule emulation, CE 45 IMAD.WIDE.
 __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 #ifdef __CUDA_ARCH__
