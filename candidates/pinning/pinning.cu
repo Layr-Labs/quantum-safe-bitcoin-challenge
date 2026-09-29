@@ -3905,6 +3905,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
 #endif
 
+/* Candidate 072: the ranked two-pubkey hashes are independent. Complete both
+ * H0 values before publication, retaining the original first-recid preference. */
+#ifndef QSB_DEFER_HASH_HIT
+#define QSB_DEFER_HASH_HIT 1
+#endif
+#if QSB_DEFER_HASH_HIT != 0 && QSB_DEFER_HASH_HIT != 1
+#error "QSB_DEFER_HASH_HIT must be 0 or 1"
+#endif
+#if QSB_DEFER_HASH_HIT && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+    uint32_t ranked_h0[2];
+#endif
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
     #pragma unroll
@@ -3942,11 +3953,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
         if (FAST_TAIL) {
             /* ranked gate: only digest word 0 is read */
+#if QSB_DEFER_HASH_HIT
+            ranked_h0[ri]=_SHA256Pubkey33H0(pb);
+#else
             if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
                 uint32_t pos=atomicAdd(d_hit_cnt,1);
                 if(pos<1024)d_hit_idx[pos]=((uint32_t)idx+QSB_HIT_BASE)|(ri<<30);
                 return;
             }
+#endif
             continue;
         }
 #endif
@@ -3993,6 +4008,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
             return;
         }
     }
+#if QSB_DEFER_HASH_HIT && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+    if(FAST_TAIL) {
+        const bool hit0=gpu_bench_valid_h0(ranked_h0[0]);
+        const bool hit1=gpu_bench_valid_h0(ranked_h0[1]);
+        if(hit0||hit1) {
+            const uint32_t ri=hit0?0u:1u;
+            uint32_t pos=atomicAdd(d_hit_cnt,1);
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx+QSB_HIT_BASE)|(ri<<30);
+            return;
+        }
+    }
+#endif
 #if (QSB_L2STATE & 2) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 2: this block's state lines are dead once every lane has consumed its
      * four entries (long before this point: the values fed the whole recovery). Lanes 0, 8,
