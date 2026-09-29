@@ -1,152 +1,46 @@
 {
-  "schema": "zarar1337.source-manifest.v1",
-  "track": "pinning",
-  "base_commit": "b59484345df5208f5caffc82c25a4a3b50cbe523",
-  "implementation_commit": "e3e413bb820dc339a11cf30df4de7ade8d179845",
-  "metadata_excluded": [
-    "candidates/pinning/SOURCE-MANIFEST.json",
-    "candidates/pinning/SUBMISSION.md"
-  ],
-  "files": [
-    {
-      "path": "candidates/pinning/COPYING",
-      "bytes": 35149,
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    },
-    {
-      "path": "candidates/pinning/COPYING-secp256k1",
-      "bytes": 1057,
-      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
-    },
-    {
-      "path": "candidates/pinning/DEAD-ENDS.md",
-      "bytes": 2477,
-      "sha256": "331cbef238214a036c176e4593c46581d5b314fbf27b066ab1d3a1f4ba123894"
-    },
-    {
-      "path": "candidates/pinning/GLVScalar.cuh",
-      "bytes": 20416,
-      "sha256": "c587e6cd72a528c73cdcca002c86ede6f4ab455e653f80604569ce137c4696ae"
-    },
-    {
-      "path": "candidates/pinning/GPUHash.h",
-      "bytes": 35133,
-      "sha256": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc"
-    },
-    {
-      "path": "candidates/pinning/GPUMath.h",
-      "bytes": 121679,
-      "sha256": "7f67eba59dd01125151f2ae257ad4782d37d98e2e2b37a196c4e7deb81229a2d"
-    },
-    {
-      "path": "candidates/pinning/LeafRecovery.cuh",
-      "bytes": 6880,
-      "sha256": "92c86c563f21072b5f0b66ca2746b8e4927a9a6dcd27c9fccf7537a32aa05e7d"
-    },
-    {
-      "path": "candidates/pinning/NARROW-PARITY.md",
-      "bytes": 11898,
-      "sha256": "dae41e5a9a55648030bd458b9ab122e355831827ab6c6826833580c4bcf3e617"
-    },
-    {
-      "path": "candidates/pinning/NEXT-OPTIMIZATIONS.md",
-      "bytes": 2521,
-      "sha256": "b8e8e130f9ff2446abe3ed3742c6a6c186fe28250158123c16817fcb1d1c1b4e"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-SUBMISSION.md",
-      "bytes": 26615,
-      "sha256": "cab14ad4209f84cac589a04b9c01d6e5bd55ffbdd39a2c6ad8f17c46ad418717"
-    },
-    {
-      "path": "candidates/pinning/PRIORITY-VALIDATION.json",
-      "bytes": 1146,
-      "sha256": "ad71fb82fd28e7253deb9d7f87ea03e516da567c6f5b28c86a3e0bcff93f56f8"
-    },
-    {
-      "path": "candidates/pinning/PackedRecovery.cuh",
-      "bytes": 7733,
-      "sha256": "47e16d8a2e3e6d193bd864c681ef8a9af8743332b01beb5ae29e9bb946c34afe"
-    },
-    {
-      "path": "candidates/pinning/ParityWindow.cuh",
-      "bytes": 6292,
-      "sha256": "46d75063be4a1e9ae84c4b1c520fa688d870ad66d4be659be9071eb384be5ca4"
-    },
-    {
-      "path": "candidates/pinning/PriorityPipeline.h",
-      "bytes": 2435,
-      "sha256": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f"
-    },
-    {
-      "path": "candidates/pinning/RESEARCH.md",
-      "bytes": 23810,
-      "sha256": "c0f4f1c68fd87a48b3650217da60a4cb9fcc74758a48747c2693f1b71a69e69c"
-    },
-    {
-      "path": "candidates/pinning/RecoveryConstant.h",
-      "bytes": 1091,
-      "sha256": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369"
-    },
-    {
-      "path": "candidates/pinning/SlotReadback.h",
-      "bytes": 1756,
-      "sha256": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25"
-    },
-    {
-      "path": "candidates/pinning/__pycache__/test_priority_pipeline.cpython-312.pyc",
-      "bytes": 20260,
-      "sha256": "6109f51ebf5321f27fc86211c2de122c372d20ffc495cfe30e36514b05b1fde9"
-    },
-    {
-      "path": "candidates/pinning/cofactor_checkpoint.h",
-      "bytes": 9186,
-      "sha256": "d41d3507e86c85b11bda88c466b1cda08efcf29ae2baf581e06933ba34279c55"
-    },
-    {
-      "path": "candidates/pinning/negative_y_mac.cuh",
-      "bytes": 8451,
-      "sha256": "d8893d08e76acd5c9c00531e89783c309e1dab78c3cce6509e4c667e36ac0335"
-    },
-    {
-      "path": "candidates/pinning/pinning.cu",
-      "bytes": 168922,
-      "sha256": "34718f4ba86dbbd6d16cf1164d1a296c3675e01d0aa5f30ebe9e1d7130853cad"
-    },
-    {
-      "path": "candidates/pinning/sha_pinsha.cuh",
-      "bytes": 18132,
-      "sha256": "bd811f32f3560fe5fd694f4afd4990c3da451819dd486579d74695cb85ed5462"
-    },
-    {
-      "path": "candidates/pinning/sha_schedule_interleaved.cuh",
-      "bytes": 1597,
-      "sha256": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f"
-    },
-    {
-      "path": "candidates/pinning/test_carry62.py",
-      "bytes": 13593,
-      "sha256": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445"
-    },
-    {
-      "path": "candidates/pinning/test_host_gate.py",
-      "bytes": 6491,
-      "sha256": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0"
-    },
-    {
-      "path": "candidates/pinning/test_priority_pipeline.py",
-      "bytes": 16765,
-      "sha256": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9"
-    },
-    {
-      "path": "candidates/pinning/test_sha_interleave.py",
-      "bytes": 4040,
-      "sha256": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd"
-    },
-    {
-      "path": "candidates/pinning/test_slot_readback.py",
-      "bytes": 11396,
-      "sha256": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849"
-    }
-  ]
+  "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+  "COPYING-secp256k1": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f",
+  "CyclicField.cuh": "d8b6a91165d61b507424c3512c01617a4c0e947000820f08955ec2ca93fa6a0d",
+  "GLVScalar.cuh": "c3374df0f9919e7b84139b604a5869dea7e03afc62c9bf82bc50bb8c2f42bbd3",
+  "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+  "GPUMath.h": "97317bdb047c823107d6582a55b55a4d825a179ea7ccc34015acb4ce1b54ef2b",
+  "LeafRecovery.cuh": "5d986b1cb538b09b99452c859072cdcd3fb80796855f9dc3c15617fea9d5b53d",
+  "PackedRecovery.cuh": "9d24e3344fcffa4948b16f537f4bc5a99ef8c3e0eef76a5876fefcdf4a07f958",
+  "ParityWindow.cuh": "98c231ea7457bf010fe8b21379d03678491a629c8df2b0943883f2f2f2dac29d",
+  "PrefixCyclicField.cuh": "75897d79959efe07481c704416fa2ae4778d6b30a94d63c9898cbfc5be739494",
+  "PriorityPipeline.h": "35bcd42ff2bce56f044eab04147a6d80356b29074a484a4f9acdb4ea4499215f",
+  "QsbCarrier.h": "b51cc45df536356be5be9f7f9760a80e1de8c9343d23057d7c8310742d4083e1",
+  "QsbSubGraph.h": "a8046aa32036cddc3da6c039d596f8946b3c5420e81d251e23d74991a043846d",
+  "RecoveryConstant.h": "6f6c0347ab0bb4abca13b2cdbb9294a997c9b3c6a076fd7ed7493e531ac0e369",
+  "RegisterRootCheck.h": "43c08a04cd93ae3fec66984718662aed824992d265cd0fb7933eda0b5e01aeae",
+  "RegisterRoots.cuh": "8195427ff33126ddea7e005c645efaca543d4bb81f0ab84c99c4dc54d26edf13",
+  "SUBMISSION.md": "dbe26d97acf4dd8af8d09162bd7b63616f448a521359b63e68c43dd6612f93ac",
+  "SlotReadback.h": "1a3e4699d37aa5beeaa8be8a86da3e16aa5f21183e51781eff19fff279282b25",
+  "WarpInverse.cuh": "483159ce179a4460013ef2d00acb54ce4a0b5ce3fa162f4e220731ffd2511b6e",
+  "build_carrier.sh": "351c3e1d83b906a7f1a14241f82c5967c0d20e19b24a26dee8b4d3dd37922b46",
+  "cg_ec_scalar.h": "8fe8a7916f6f87802b85d6cd0ac53c3661adea3a2f57cc02794009882298d2f4",
+  "cg_fe4.h": "eb28ee9cd35920bc6799eb34004f9a1e653aec766c3a7b1fa0270cf411919c1e",
+  "cg_sha.h": "f78312f46439ae95813ce5ffececf7968923f61453d8abfbac230c05f733a407",
+  "cg_table.h": "cf2168f9707b4447bd6fa6287c8f91766fa417041860568aa85609b902ea9094",
+  "cg_v26asm.h": "17cb5425ff23cc6e6a18ccc117eb1e6e5f8a4719f067017aa03d630d15166ea2",
+  "cofactor_checkpoint.h": "e8d207b956f724653f65c71ec554f94f0e8c59a4061b52f96242e908b0b05180",
+  "cpu_cogrind.h": "e82b5a8ce0349a91d07a09f6c85da55958c976705a077fe6896332d295c18176",
+  "cpu_cogrind3.h": "3cae9b25c36657085c0723d8031ed3cc5fa148d618a0db511e40209af573bb72",
+  "cpu_cogrind3_ifma.h": "ed236dc734b2244bd6ef13e0857d81c1e04123cba0d1f1577b89d5e0a872ba1a",
+  "cpu_cogrind3_vec.h": "42c495a24dbc8fb83db17dbf072ff7d304b6fcf224e8bbc544ffe34e0a151a3d",
+  "cpu_cogrind_vec.h": "42c495a24dbc8fb83db17dbf072ff7d304b6fcf224e8bbc544ffe34e0a151a3d",
+  "negative_y_mac.cuh": "65f804f08ddd51fd1738ff1fe427b5d0e617e592a334fdf4000257c594ffdb70",
+  "pair_ordinate_mac.cuh": "a769b5aad9a65e988aaaaae75fa680ad708bc19bea111a54f440b96f5c417355",
+  "pinning.cu": "9ca8af8eddd7f000ff2efb386ca10684fb37955ed9738579a06062846cf94d08",
+  "qsb_carrier_sm89.h": "c0442a4db8a7a3cbb3118f1f0f93266f0831fcbe0b7f63a2be9587b58c64ded7",
+  "sha_pinsha.cuh": "2e7c2e190144ce74cbde33a0331f23dc27679224b7e7d1a75155797dbf61fcdc",
+  "sha_schedule_interleaved.cuh": "629417bb86ff908078b8f1358a2b2773b44f02f1c88c3bce9f61a622e24b403f",
+  "test_carry62.py": "8ab2198a99aed46a71d14cb24e578d4f35f74da6403bdbaefbbaf7ca0e29b445",
+  "test_glv_coeff.py": "cf695ec2e9a1d6878dd5ce3301be291780fdafe7b52d621b63486a8ccb9a70fc",
+  "test_host_gate.py": "1c2c99b3f4ab3abccf7898b357796d037a0a32a545d57c2118afab0bcc6f36b0",
+  "test_priority_pipeline.py": "530ac53ca497eb32cce7800444e597c4426e9420ecf6baa38aa0a53aa6fbffe9",
+  "test_sha_interleave.py": "2664db22771e5197f26e8c1512fef6fb3a4eaecc954145fb24eed2cd4bd029dd",
+  "test_slot_readback.py": "0132b657304cb39398648e7bac9ed97b2abc5c3dfa13597cddcc7c4e9081c849",
+  "y_pair_mac.cuh": "99999cae705afb42aba097f3bfb377ac9f0917a13e9116551678e7f7c3b352d0"
 }
