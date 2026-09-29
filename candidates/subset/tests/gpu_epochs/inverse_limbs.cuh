@@ -71,7 +71,7 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         m=(m*ZI_MM32)&ZI_MASK30&(0u-rs);
 #if QSB_INVERSE_CORRECTION
         // The sparse modulus correction is one unsigned 32x32 product.
-        // All eight lanes follow the same instruction stream.
+        /* All eight lanes follow the same instruction stream. */
         const uint32_t factor=digit==0?977u:digit==1?1u:0u;
         acc-=(int64_t)((uint64_t)factor*m);
 #else

@@ -14,8 +14,8 @@ __device__ __forceinline__ uint64_t hm41_exchange(uint64_t value,int source){
 }
 #endif
 
-// Negation of the full signed product, not only its low five words. Equivalent
-// to negating both matrix coefficients before _MatrixVecMulHalf, modulo 2^384.
+/* Negation of the full signed product, not only its low five words. Equivalent */
+/* to negating both matrix coefficients before _MatrixVecMulHalf, modulo 2^384. */
 __device__ __forceinline__ void hm41_negate_product(uint64_t t[5],uint64_t *carry){
     Neg(t);
     *carry=~*carry+(uint64_t)_IsZero(t);
@@ -39,10 +39,10 @@ __device__ __forceinline__ void hm41_quad_inverse(uint64_t result[5],int lane){
             left[j]=(lane&1)?partner:state[j];
             right[j]=(lane&1)?state[j]:partner;
         }
-        // U and V owners have identical decision inputs. They calculate the
-        // same matrix in one warp instruction stream, then each broadcasts
-        // only its own row to the corresponding R or S owner: two exchanges
-        // instead of four coefficients (or four normalized decision inputs).
+        /* U and V owners have identical decision inputs. They calculate the */
+        /* same matrix in one warp instruction stream, then each broadcasts */
+        /* only its own row to the corresponding R or S owner: two exchanges */
+        /* instead of four coefficients (or four normalized decision inputs). */
         int64_t uu=0,uv=0,vu=0,vv=0;
         if(lane<2)hm39_divstep62(left,right,&pos,&uu,&uv,&vu,&vv);
         const int64_t a=(int64_t)hm41_exchange((uint64_t)((lane&1)?vu:uu),lane&1);

@@ -13,7 +13,7 @@
  * _ModInv and 28,155 with this form (-29.4%); 85-90% of what remains is the ~190-iteration
  * divstep decision chain, which is serial in any design. */
 #pragma once
-// Derived from i34-9 public PR216; bounded and wide-top-word changes below.
+/* Derived from i34-9 public PR216; bounded and wide-top-word changes below. */
 #ifndef ZI_ROOT_MAX_BATCHES
 #define ZI_ROOT_MAX_BATCHES (2*QSB_ROOT_MAX_BATCHES)
 #endif
@@ -331,7 +331,7 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
     X[8]=(uint32_t)acc;
     for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
-    // Keep the full signed top accumulator until after the delayed shift.
+    /* Keep the full signed top accumulator until after the delayed shift. */
     // R/S may have grown to 32*p at the cap; pre-shift rows need >288 bits.
     X[8]=(uint32_t)(acc>>ZI_B);
 }
@@ -417,7 +417,7 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     R[4]=0;
     return true;
 }
-// The independent fixed-exponent fallback uses the repaired field primitives.
+/* The independent fixed-exponent fallback uses the repaired field primitives. */
 __device__ __forceinline__ void zi_inverse_quad(uint64_t *R,int lane){
     if(zi_inverse_quad_bounded(R,lane))return;
     if(lane==0){

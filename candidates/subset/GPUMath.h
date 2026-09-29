@@ -15,7 +15,7 @@
 * along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
 // 256(+64) bits integer CUDA libray for SECPK1
 // ---------------------------------------------------------------------------------
 
@@ -28,11 +28,11 @@
 #define MM64 0xD838091DD2253531ULL
 
 
-// We need 1 extra block for ModInv
+/* We need 1 extra block for ModInv */
 #define NBBLOCK 5
 #define BIFULLSIZE 40
 
-// Assembly directives
+/* Assembly directives */
 #define UADDO(c, a, b) asm volatile ("add.cc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b) : "memory" );
 #define UADDC(c, a, b) asm volatile ("addc.cc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b) : "memory" );
 #define UADD(c, a, b) asm volatile ("addc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b));
@@ -61,7 +61,7 @@
 //__device__ __constant__ uint64_t _beta2[] = { 0x3EC693D68E6AFA40ULL, 0x630FB68AED0A766AULL, 0x919BB86153CBCB16ULL, 0x851695D49A83F8EFULL };
 
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define _IsPositive(x) (((int64_t)(x[4]))>=0LL)
 #define _IsNegative(x) (((int64_t)(x[4]))<0LL)
@@ -83,7 +83,7 @@
   UADDC1(r[3], 0xFFFFFFFFFFFFFFFFULL); \
   UADD1(r[4], 0ULL);}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define Add2(r,a,b)  {\
   UADDO(r[0], a[0], b[0]); \
@@ -92,7 +92,7 @@
   UADDC(r[3], a[3], b[3]); \
   UADD(r[4], a[4], b[4]);}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define SubP(r) { \
   USUBO1(r[0], 0xFFFFFFFEFFFFFC2FULL); \
@@ -101,7 +101,7 @@
   USUBC1(r[3], 0xFFFFFFFFFFFFFFFFULL); \
   USUB1(r[4], 0ULL);}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define Sub2(r,a,b)  {\
   USUBO(r[0], a[0], b[0]); \
@@ -119,7 +119,7 @@
   USUBC1(r[3], a[3]); \
   USUB1(r[4], a[4]);}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define Neg(r) {\
 USUBO(r[0],0ULL,r[0]); \
@@ -128,7 +128,7 @@ USUBC(r[2],0ULL,r[2]); \
 USUBC(r[3],0ULL,r[3]); \
 USUB(r[4],0ULL,r[4]); }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define UMult(r, a, b) {\
   UMULLO(r[0],a[0],b); \
@@ -190,7 +190,7 @@ __device__ void _ShiftR62(uint64_t *r)
     r[1] = (r[2] << 2) | (r[1] >> 62);
     r[2] = (r[3] << 2) | (r[2] >> 62);
     r[3] = (r[4] << 2) | (r[3] >> 62);
-    // With sign extent
+    /* With sign extent */
     r[4] = (int64_t)(r[4]) >> 62;
 
 }
@@ -206,7 +206,7 @@ __device__ void _ShiftR62(uint64_t dest[5], uint64_t r[5], uint64_t carry)
 
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 __device__ void _IMult(uint64_t *r, uint64_t *a, int64_t b)
 {
@@ -243,7 +243,7 @@ __device__ uint64_t _IMultC(uint64_t *r, uint64_t *a, int64_t b)
     uint64_t t[NBBLOCK];
     uint64_t carry;
 
-    // Make b positive
+    /* Make b positive */
     if (b < 0) {
         b = -b;
         USUBO(t[0], 0ULL, a[0]);
@@ -325,13 +325,13 @@ __device__ void _ModNeg256(uint64_t *r)
 
 #ifdef __CUDA_ARCH__
 struct QsbFieldWords { uint64_t a, b, c, d; };
-// Called only when the second fold carries or its low part is at least p.
+/* Called only when the second fold carries or its low part is at least p. */
 // The second-fold sum is below 2^256+C*C (C=2^32+977), hence one
-// addition of C modulo 2^256 gives the canonical residue in either case.
-// A separate device call keeps the eight-word correction off the hot path.
+/* addition of C modulo 2^256 gives the canonical residue in either case. */
+/* A separate device call keeps the eight-word correction off the hot path. */
 // Conservative boundary prefilter: carry implies L<C*C (top word zero);
 // normalization implies top word all ones. Unsigned (top+1)<=1 covers both.
-// The exact test stays here:
+/* The exact test stays here: */
 // false positives retain their original words, including non-boundary large values.
 __device__ __noinline__ QsbFieldWords qsb_field_cold_correction(QsbFieldWords x,uint32_t carry) {
     if (!carry && !((x.b & x.c & x.d) == UINT64_MAX && x.a >= 0xfffffffefffffc2fULL)) return x;
@@ -351,7 +351,7 @@ __device__ __forceinline__ void _ModAdd256(uint64_t *r,uint64_t *a,uint64_t *b){
 #ifdef __CUDA_ARCH__
     uint64_t r0,r1,r2,r3;uint32_t carry;
     // S=a+b<2^257. Fold its high bit with C=2^32+977, retaining
-    // the fold's carry. The resulting total is below 2^256+C.
+    /* the fold's carry. The resulting total is below 2^256+C. */
     asm("{\n\t.reg .u64 h,t;\n\t"
         "add.cc.u64 %0,%5,%9;\n\t"
         "addc.cc.u64 %1,%6,%10;\n\t"
@@ -416,7 +416,7 @@ __device__ void _ModSub256(uint64_t *r, uint64_t *a, uint64_t *b)
 
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 __device__ void _ModSub256(uint64_t *r, uint64_t *b)
 {
@@ -439,7 +439,7 @@ __device__ void _ModSub256(uint64_t *r, uint64_t *b)
 
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 __device__ __forceinline__ uint32_t _CTZ(uint64_t x)
 {
@@ -453,7 +453,7 @@ __device__ __forceinline__ uint32_t _CTZ(uint64_t x)
     return n;
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 #define SWAP(tmp,x,y) tmp = x; x = y; y = tmp;
 #define MSK62 0x3FFFFFFFFFFFFFFF
 
@@ -465,8 +465,8 @@ __device__ void _DivStep62(uint64_t u[5], uint64_t v[5],
 
 
     // u' = (uu*u + uv*v) >> bitCount
-    // v' = (vu*u + vv*v) >> bitCount
-    // Do not maintain a matrix for r and s, the number of
+    /* v' = (vu*u + vv*v) >> bitCount */
+    /* Do not maintain a matrix for r and s, the number of */
     // 'added P' can be easily calculated
 
     *uu = 1; *uv = 0;
@@ -477,8 +477,8 @@ __device__ void _DivStep62(uint64_t u[5], uint64_t v[5],
     uint64_t u0 = u[0];
     uint64_t v0 = v[0];
 
-    // Extract 64 MSB of u and v
-    // u and v must be positive
+    /* Extract 64 MSB of u and v */
+    /* u and v must be positive */
     uint64_t uh, vh;
     int64_t w, x, y, z;
     bitCount = 62;
@@ -506,7 +506,7 @@ __device__ void _DivStep62(uint64_t u[5], uint64_t v[5],
 
     while (true) {
 
-        // Use a sentinel bit to count zeros only up to bitCount
+        /* Use a sentinel bit to count zeros only up to bitCount */
         zeros = _CTZ(v0 | (1ULL << bitCount));
 
         v0 >>= zeros;
@@ -602,7 +602,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
     // Compute modular inverse of R mod P (using 320bits signed integer)
     // 0 < this < P  , P must be odd
     // Return 0 if no inverse
-    // See IntMod.cpp for more info.
+    /* See IntMod.cpp for more info. */
 
     uint64_t u[NBBLOCK];
     uint64_t v[NBBLOCK];
@@ -638,7 +638,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
     r[3] = 0; s[3] = 0;
     r[4] = 0; s[4] = 0;
 
-    // Delayed right shift 62bits
+    /* Delayed right shift 62bits */
 
     // DivStep loop -------------------------------
 
@@ -675,7 +675,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 
         } else {
 
-            // Update s
+            /* Update s */
             _MatrixVecMulHalf(ts, r, s, vu, vv, &carryS);
             ms0 = (ts[0] * MM64) & MSK62;
             _MulP(s0, ms0);
@@ -712,17 +712,17 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 // ---------------------------------------------------------------------------------------
 // secp256k1 field multiply r = a*b mod p, 8x32-bit even/odd column product chains fused
 // into IMAD.WIDE.U32[.X], then the sparse double-fold R = L + H*0x1000003D1 (2^256 = 2^32+977
-// mod p) applied twice. Fold the remaining 2^256 carry with 2^32+977 and then
-// normalize to [0,p). The input contract permits all four-limb values <2^256.
-// The product schedule is unchanged; only its reduction tail is repaired.
+/* mod p) applied twice. Fold the remaining 2^256 carry with 2^32+977 and then */
+/* normalize to [0,p). The input contract permits all four-limb values <2^256. */
+/* The product schedule is unchanged; only its reduction tail is repaired. */
 //
 // Device (__CUDA_ARCH__): one non-volatile asm block -- the njuffa/mm32 schedule measured at
-// 124 SASS / 73 IMAD.WIDE on Compiler Explorer nvcc 12.9.1 sm_89. %4..%7 = a limbs (LE),
+/* 124 SASS / 73 IMAD.WIDE on Compiler Explorer nvcc 12.9.1 sm_89. %4..%7 = a limbs (LE), */
 // %8..%11 = b limbs, %0..%3 = result limbs.
-// Host (CPU verification): a __uint128_t transcription of the IDENTICAL schedule -- even chain
-// e0..e7, odd chain o0..o6, merge to 16 u32 limbs, then the same double fold. Validated against
-// harness/crypto.py; the asm<->C line correspondence is documented in
-// so the two cannot silently drift.
+/* Host (CPU verification): a __uint128_t transcription of the IDENTICAL schedule -- even chain */
+/* e0..e7, odd chain o0..o6, merge to 16 u32 limbs, then the same double fold. Validated against */
+/* harness/crypto.py; the asm<->C line correspondence is documented in */
+/* so the two cannot silently drift. */
 
 
 
@@ -877,7 +877,7 @@ __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, con
 #endif
 #ifndef __CUDA_ARCH__
     // Raw reduction is below 2^256. At most one subtraction yields [0,p).
-    // Bounded carry and normalization follow promoted subset 65fb673d.
+    /* Bounded carry and normalization follow promoted subset 65fb673d. */
     if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
         r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
         r[0] -= 0xFFFFFFFEFFFFFC2FULL;
@@ -886,9 +886,9 @@ __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, con
 #endif
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 // Compute a*b (mod p). Interface unchanged: uint64_t[4] little-endian, inputs < 2^256.
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 __device__ void _ModMult(uint64_t *r, uint64_t *a, uint64_t *b)
 {
     _ModMultCore(r, a, b);
@@ -906,14 +906,14 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
 #define ZLAB_MODSQR 1
 #endif
 #if ZLAB_MODSQR
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 // Dedicated secp256k1 square r = a^2 mod p. Triangular 8x32 schedule: 28 off-diagonal
 // cross products a_i*a_j (even/odd column chains with multi-bit carries), doubled, plus
 // 8 diagonal squares, then the same double-fold as _ModMultCore. 45 IMAD.WIDE/square
 // (vs 73 for a*a via _ModMultCore). Output convention identical to _ModMultCore:
 // [0,p), including the bounded final carry fold. Device: inline PTX; host: __uint128_t C-ref of
 // the IDENTICAL schedule. Independently validated:
-// 10^6 random + boundaries vs crypto.py, PTX row-schedule emulation, CE 45 IMAD.WIDE.
+/* 10^6 random + boundaries vs crypto.py, PTX row-schedule emulation, CE 45 IMAD.WIDE. */
 __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 #ifdef __CUDA_ARCH__
     uint64_t r0,r1,r2,r3; uint32_t carry;
@@ -1136,7 +1136,7 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 #endif
 #ifndef __CUDA_ARCH__
     // Raw reduction is below 2^256. At most one subtraction yields [0,p).
-    // Bounded carry and normalization follow promoted subset 65fb673d.
+    /* Bounded carry and normalization follow promoted subset 65fb673d. */
     if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
         r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
         r[0] -= 0xFFFFFFFEFFFFFC2FULL;
@@ -1238,14 +1238,14 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 
 // ---------------------------------------------------------------------------------------
 // XYZZ coordinates: x = X/ZZ, y = Y/ZZZ with the invariant ZZ^3 == ZZZ^2 (a = 0 plays no
-// part in addition). Same limb convention as _ModMult: values in [0, 2^256), not
+/* part in addition). Same limb convention as _ModMult: values in [0, 2^256), not */
 // necessarily < p. Outputs must not alias inputs.
 //
 // EFD "madd-2008-s" -- (X1,Y1,ZZ1,ZZZ1) += affine (X2,Y2) in place, 8M + 2S:
 //   U2 = X2*ZZ1, S2 = Y2*ZZZ1, P = U2-X1, R = S2-Y1, PP = P^2, PPP = P*PP, Q = X1*PP
 //   X3 = R^2 - PPP - 2Q,  Y3 = R*(Q-X3) - Y1*PPP,  ZZ3 = ZZ1*PP,  ZZZ3 = ZZZ1*PPP
-// P == 0 (x1 == x2) gives ZZ3 == ZZZ3 == 0: the point at infinity for P1 == -P2 and, as
-// with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in
+/* P == 0 (x1 == x2) gives ZZ3 == ZZZ3 == 0: the point at infinity for P1 == -P2 and, as */
+/* with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in */
 // the fixed-base multiply, whose table entries are distinct non-opposite multiples of G.
 // ---------------------------------------------------------------------------------------
 __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
@@ -1288,10 +1288,10 @@ __device__ void _PointAddXYZZ(uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_
 // The accumulator stores Yd = Y + Yoff*ZZZ for the previous affine point's y (Yoff);
 // the ordinary slope numerator is (Y2+Yoff)*ZZZ1 - Yd, so the Y1*PPP product is
 // skipped. With defer_y the new Y again holds only R*(Q-X3) (anchor = Y2); the last
-// addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final.
-// ---------------------------------------------------------------------------------------
+/* addition passes defer_y=false and resolves the exact Y3. 7M+2S deferred, 8M+2S final. */
+/* --------------------------------------------------------------------------------------- */
 // Templated deferred-anchor XYZZ madd (hot-path codegen). DEFER_Y specializes
-// the exact-Y resolve so intermediate adds compile without the runtime branch.
+/* the exact-Y resolve so intermediate adds compile without the runtime branch. */
 // __restrict__ matches the pinning XYZZ hot-path; arithmetic is unchanged from
 // the prior bool form (no lazy/fused-X3 riders).
 template<bool DEFER_Y>
@@ -1353,8 +1353,8 @@ __device__ __forceinline__ void _PointAddXYZZ_def(
 }
 
 // Deferred-Y two-affine prefix ("mmadd-2008-s" without the -Y1*ZZZ3 term), 3M + 2S.
-// X3, ZZ3, ZZZ3 are the ordinary coordinates of P1+P2; Y3 holds only R*(Q-X3). The
-// caller anchors the next _PointAddXYZZ_def with Yoff = Y1 (the first affine y).
+/* X3, ZZ3, ZZZ3 are the ordinary coordinates of P1+P2; Y3 holds only R*(Q-X3). The */
+/* caller anchors the next _PointAddXYZZ_def with Yoff = Y1 (the first affine y). */
 __device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                      const uint64_t *X1, const uint64_t *Y1,
                                      const uint64_t *X2, const uint64_t *Y2)
@@ -1381,9 +1381,9 @@ __device__ void _PointAddXYZZ_mm_def(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, 
 }
 
 // EFD "mmadd-2008-s" -- affine (X1,Y1) + affine (X2,Y2) -> XYZZ, 4M + 2S (ZZ1 = ZZZ1 = 1):
-//   P = X2-X1, R = Y2-Y1, PP = P^2, PPP = P*PP, Q = X1*PP
-//   X3 = R^2 - PPP - 2Q,  Y3 = R*(Q-X3) - Y1*PPP,  ZZ3 = PP,  ZZZ3 = PPP
-// Used to seed the accumulator from the first two table points instead of a Z = 1 madd.
+/*   P = X2-X1, R = Y2-Y1, PP = P^2, PPP = P*PP, Q = X1*PP */
+/*   X3 = R^2 - PPP - 2Q,  Y3 = R*(Q-X3) - Y1*PPP,  ZZ3 = PP,  ZZZ3 = PPP */
+/* Used to seed the accumulator from the first two table points instead of a Z = 1 madd. */
 __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                  const uint64_t *X1, const uint64_t *Y1,
                                  const uint64_t *X2, const uint64_t *Y2)
