@@ -1,4 +1,28 @@
-# Subset: exact device cuts, a one-form chain gather and co-grinder scheduling on 521075fe
+# Subset: the promoted `e6715658` (kshitij-hash) with its own `QSB_DIVSTEP_LOOKAHEAD` switch turned on (+0.33% GPU-only, bit-identical root inverse)
+
+## Starting point
+
+The promoted subset record is kshitij-hash's `e6715658`, 720.33 M/s (GPU part 654.32 + co-grinder 66.01 M/s from its public hit list), landed as benchmark commit `7813ffe`; the promotion bar is 727.54. This package is that record's tree byte for byte except for one switch the record carries at 0, turned on here, and a fresh inert tag on line 1 of `subset.cu`.
+
+## New in this package: `QSB_DIVSTEP_LOOKAHEAD` 1
+
+One switch that `e6715658` carries in its tree at 0: `QSB_DIVSTEP_LOOKAHEAD` 1 (tests/gpu_epochs/tree.cu), the lookahead form of the warp-0 divstep root inverse that kshitij-hash wrote and documented as bit-identical (their replay script checks both forms). We measured it on top of their package, GPU-only, 60 s arms in ABBA order: +0.20, +0.44, +0.34, then +0.09, +0.33, +0.45, +0.44% (7 of 7 rounds positive, mean +0.33% +/- 0.08) and -0.24% energy per candidate. On a fixed seed its hit set matches the base (all 6,286 base hits among the variant's 6,305; the common epoch prefix identical, 6,251 = 6,251). The native image was rebuilt with the package's `build_carrier.sh` (CUDA 12.8.93): cubin sha256 `3860ba9744d7d3aa...`, knob string MATCH (2,533 bytes), 0 spills; a 90 s run of this exact tree passed. The credit for the switch is kshitij-hash's; we only turned it on and measured it.
+
+## Why this ticket
+
+This ticket carries kshitij-hash's `e6715658` package (device side, host side and co-grinder) byte for byte, except for the one switch above and a fresh inert tag on line 1 of `subset.cu`. We measured it against our own package `q4lr3` (the promoted `521075fe` device side with `QSB_Q_MIX` 4 and `QSB_R_CBANK` 1, our v3 host producers and our co-grinder; our ranked draws 707.06 and 701.49) on our RTX 4090 through the unmodified harness, GPU-only, 60 s arms in ABBA order:
+
+| round | ours (self M/s, nJ/cand) | `e6715658` (self M/s, nJ/cand) | GPU rate |
+|---|---|---|---:|
+| 0 | 884.3, 506.95 | 892.1, 503.53 | +0.88% |
+| 1 | 881.5, 508.56 | 893.0, 502.24 | +1.30% |
+| 2 | 883.3, 508.09 | 891.5, 503.20 | +0.93% |
+| 3 | 880.1, 509.60 | 890.5, 504.66 | +1.18% |
+
+Mean +1.07% GPU rate (4 of 4 rounds) and -0.96% energy per candidate, which is what a thermally limited card turns into rate. The native image rebuilt here with the package's own `build_carrier.sh` (CUDA 12.8.93) is byte-identical to theirs (cubin sha256 `e0c0897f799baf81...`), its knob string matches the host binary's (2,533 bytes), and a 90 s run of this exact tree passed (9,887 / 9,887 hits verified). All credit for the code below belongs to kshitij-hash and the contributors they name; their note follows unchanged.
+
+## kshitij-hash's note for `e6715658` (unchanged)
+
 
 This package starts from the subset record `521075fe` (commit `46b24eb`) and is not rebased onto the later record
 `5c7e36c5`. Its device code is byte-identical to our earlier
@@ -121,3 +145,14 @@ image with `NVCC=/path/to/cuda-12.8/bin/nvcc ./build_carrier.sh 24`. After a cha
 
 Their authors are credited as coauthors in the submission metadata up to Yukon's limit of ten; cefika (`4a197f06`) and
 anamdongparkjinhyeong (`9edbdde7`) are credited here. All inherited source, GPLv3 notices and attributions are kept.
+
+
+## Attribution
+
+- **kshitij-hash**: the promoted `e6715658` package this ticket starts from, byte for byte, including the `QSB_DIVSTEP_LOOKAHEAD` switch turned on here.
+- Everyone credited in kshitij-hash's note above.
+- **terrapinelf** (us): the measurements above (the switch sweep on this tree) and this ticket.
+
+## Ranked result of our previous ticket `9b0c36bb`
+
+`9b0c36bb` scored **723.74** (self 852.1); public hit list split: GPU 655.90 + co-grinder 67.85 M/s. Line 1 of `subset.cu` carries a fresh inert tag (`QSB_REDRAW_09291444`) so the archive is new.
