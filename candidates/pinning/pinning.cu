@@ -5386,7 +5386,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * from 0xFFFFFFFE (disjoint from the GPU's upward walk from 0x80000000) and publish only
  * hits the exact OpenSSL gate re-derives (cpu_cogrind.h); 0 = GPU only. */
 #ifndef QSB_CPU_GRIND
-#define QSB_CPU_GRIND 1
+#define QSB_CPU_GRIND 0
 #endif
 /* QSB_CPU_GRIND_V3 (host only): 1 = the V3 co-grinder (cpu_cogrind3.h: the public v2 grinder's
  * AVX2 multi-buffer SHA, signed windows and memory-sized table, plus an AVX-512 IFMA radix-2^52
