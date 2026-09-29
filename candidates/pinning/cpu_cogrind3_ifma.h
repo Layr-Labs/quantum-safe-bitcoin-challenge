@@ -17,6 +17,9 @@
  * Every function carries target(avx512f,avx512vl,avx512ifma) and is only called after
  * __builtin_cpu_supports reports all three (which includes the OS's AVX-512 state check).
  */
+#ifndef QSB_CG_NORM_IFMA
+#define QSB_CG_NORM_IFMA 1 /* fused exact final canonical correction */
+#endif
 namespace v4i {
 #define QI_TGT "avx2,avx512f,avx512vl,avx512ifma"
 #define QI_INL __attribute__((target(QI_TGT), always_inline)) inline
@@ -106,7 +109,12 @@ static QI_INL void fnorm(vfe *r) {
     /* value < 2p here; subtract p once if value >= p (limbs < 2^53: signed compares are exact) */
     const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
     x = (t4 >> 48) | ((V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48)) & (V)_mm256_cmpeq_epi64((__m256i)m, (__m256i)M) & ge & vs1(1));
+#if QSB_CG_NORM_IFMA
+    /* x is 0 or 1: x*C fits below 2^52, so madd52lo keeps its exact value. */
+    t0 = QI_LO(t0, x, vs1(QI_C));
+#else
     t0 += (vs1(0) - x) & vs1(QI_C);                             /* x in {0, 1} */
+#endif
     t1 += t0 >> 52; t0 &= M;
     t2 += t1 >> 52; t1 &= M;
     t3 += t2 >> 52; t2 &= M;
