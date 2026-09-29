@@ -1878,6 +1878,9 @@ struct Build8 {};
 /* SHA-256 compression of 4 independent (state, block) pairs with the x86 SHA extensions,
  * instruction streams interleaved so the sha256rnds2 latency of one lane hides behind the others. */
 #define QSHA __attribute__((target("sha,sse4.1,ssse3,avx")))   /* VEX: 3-operand adds/palignr feed sha256rnds2 without copies */
+#ifndef QSB_CPU_SHA_BRIDGE
+#define QSB_CPU_SHA_BRIDGE 1        /* feed first digest's four SHA-NI register pairs directly to SHA-256d's fixed 32-byte block */
+#endif
 alignas(16) static const uint32_t qsha_k[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -1939,14 +1942,18 @@ static bool qsha_supported() {
  * K additions) and the chaining state stays in the ABEF/CDGH layout across the nblk blocks. Used
  * for the tail blocks that do not depend on the epoch: every one of them is one of a few fixed
  * contents per problem, scheduled once in start(). */
+QSHA static inline void qsha_dbl32_four(uint32_t (*out)[8],
+    __m128i a0, __m128i b0, __m128i a1, __m128i b1,
+    __m128i a2, __m128i b2, __m128i a3, __m128i b3);
 QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows, int nblk, uint32_t *out = nullptr, int ostride = 8,
                           const uint32_t *const *in = nullptr
 #if QCPU_PFQ
                           , QPfRing *pq = nullptr
 #endif
+                          , uint32_t (*dbl32)[8] = nullptr
                           ) {
     __m128i S0[4], S1[4];
-    if (!out) out = &st[0][0];                          /* out: lane l's final state at out + l * ostride (default: in place) */
+    if (!out && !dbl32) out = &st[0][0];                /* dbl32 consumes the chaining pairs before their usual intermediate stores */
 #pragma GCC unroll 4
     for (int l = 0; l < 4; l++) {
         const uint32_t *s = in ? in[l] : st[l];         /* in: lane l's initial state (default: st[l]) */
@@ -1989,6 +1996,12 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { S0[l] = _mm_add_epi32(S0[l], I0[l]); S1[l] = _mm_add_epi32(S1[l], I1[l]); }
     }
+#if QSB_CPU_SHA_BRIDGE && QSB_CPU_SHC && QSB_CPU_SHA4
+    if (dbl32) {
+        qsha_dbl32_four(dbl32, S0[0], S1[0], S0[1], S1[1], S0[2], S1[2], S0[3], S1[3]);
+        return;
+    }
+#endif
 #pragma GCC unroll 4
     for (int l = 0; l < 4; l++) {
         __m128i t = _mm_shuffle_epi32(S0[l], 0x1B), b = _mm_shuffle_epi32(S1[l], 0xB1);
@@ -2045,6 +2058,26 @@ QSHA static inline void qsha_st8(uint32_t *st, __m128i a, __m128i b) {
     b = _mm_shuffle_epi32(b, 0xB1);                                           /* DCHG */
     _mm_storeu_si128((__m128i *)&st[0], _mm_blend_epi16(t, b, 0xF0));         /* DCBA -> a b c d */
     _mm_storeu_si128((__m128i *)&st[4], _mm_alignr_epi8(b, t, 8));            /* HGFE -> e f g h */
+}
+/* Four-lane second SHA-256 without the first digest's intermediate w2 store/reload.
+ * Retain the existing four-lane memory-ring schedule so the round interleave is unchanged. */
+QSHA static inline void qsha_dbl32_four(uint32_t (*out)[8],
+    __m128i a0, __m128i b0, __m128i a1, __m128i b1,
+    __m128i a2, __m128i b2, __m128i a3, __m128i b3) {
+    const __m128i P2 = _mm_set_epi32(0, 0, 0, (int)0x80000000u), P3 = _mm_set_epi32(256, 0, 0, 0);
+    const __m128i da[4] = {a0, a1, a2, a3}, db[4] = {b0, b1, b2, b3};
+    __m128i mr[16], x[4], y[4];
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        const __m128i t = _mm_shuffle_epi32(da[l], 0x1B), b = _mm_shuffle_epi32(db[l], 0xB1);
+        _mm_store_si128(mr + 4 * l + 0, _mm_blend_epi16(t, b, 0xF0));
+        _mm_store_si128(mr + 4 * l + 1, _mm_alignr_epi8(b, t, 8));
+        _mm_store_si128(mr + 4 * l + 2, P2);
+        _mm_store_si128(mr + 4 * l + 3, P3);
+    }
+    qsha_rounds4m<true>(mr, x, y);
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) qsha_st8(out[l], x[l], y[l]);
 }
 #endif
 /* SHA-256 compression with the message given as 16 native-order words per lane (no byte round trip),
@@ -3035,8 +3068,10 @@ static void worker(Ctx *c, int tid) {
     uint32_t (*gst)[8] = gstb[0];                             /* group of 4 spans at most 2 epochs (ncwin >= 4, see hash_plan) */
     const uint32_t *lin[4];
     const uint32_t *const *lrow[4];
+#if !(QSB_CPU_SHA_BRIDGE && QSB_CPU_SHC && QSB_CPU_SHA4)
     alignas(16) uint32_t w2[4][16]; memset(w2, 0, sizeof w2);
     for (int l = 0; l < 4; l++) { w2[l][8] = 0x80000000u; w2[l][15] = 256; }   /* second SHA: 32-byte message */
+#endif
     uint32_t cw4[286];                                     /* skip-record bytes 6..9 of each CPU pattern */
     for (int i = 0; i < c->ncwin; i++) cw4[i] = (uint32_t)c->cwin[i][0] | (uint32_t)c->cwin[i][1] << 8 | (uint32_t)c->cwin[i][2] << 16;
 #endif
@@ -3166,6 +3201,15 @@ static void worker(Ctx *c, int tid) {
                     memcpy(sk, &e8, 8); memcpy(sk + 6, &cw4[pi], 4);   /* bytes 0..5 = early, 6..8 = the pattern (byte 9: next record's) */
                     if (j == 3) {                           /* four candidates ready: blocks 1..nb-1 (digests straight into the second
                                                                SHA-256's message words), then the second SHA-256 into z = h0 (MSW) .. h7 */
+#if QSB_CPU_SHA_BRIDGE && QSB_CPU_SHC && QSB_CPU_SHA4
+#if QCPU_PFQ
+                        qsha_x4p(nullptr, lrow, nb - 1, nullptr, 8, lin, hpf ? &pfq : nullptr,
+                                  (uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8]);
+#else
+                        qsha_x4p(nullptr, lrow, nb - 1, nullptr, 8, lin,
+                                  (uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8]);
+#endif
+#else
 #if QCPU_PFQ
                         qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin, hpf ? &pfq : nullptr);
 #else
@@ -3175,6 +3219,7 @@ static void worker(Ctx *c, int tid) {
                         qsha_x4w_iv32((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);   /* w2[l][8..15]: the constant padding */
 #else
                         qsha_x4w_iv((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);
+#endif
 #endif
 #if QCPU_VEC
 #if QCPU_PFQ

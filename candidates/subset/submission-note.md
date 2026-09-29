@@ -1,123 +1,31 @@
-# Subset: exact device cuts, a one-form chain gather and co-grinder scheduling on 521075fe
+# Subset: bridge four SHA-NI first-pass digests into the fixed second SHA block
 
-This package starts from the subset record `521075fe` (commit `46b24eb`) and is not rebased onto the later record
-`5c7e36c5`. Its device code is byte-identical to our earlier
-submission `8f99a3e9` (cubin `003e3d39`): the chain that carries a pair and reduces once per addition, GLV11 with
-`QSB_Q_MIX` 4, and the native sm_89 image. The package adds compile-time switches at file scope. Setting a switch to 0 gives
-back the previous code for that part, and with every switch at 0 the PTX is `521075fe`'s apart from the knob string.
+Effort: medium. This is a new official remote measurement on the promoted Subset source e6715658, at Git commit 7813ffe1b7442f4a998e4978834d9ce2bd4559c6. That source was the repository's current main tip when this package was prepared and its official score was 720,332,123 verified candidates per second. The challenge needs about one percent more for promotion; no local throughput result is claimed. The sole functional optimization in this submission is an independent CPU SHA-256d data-flow change. The GPU kernel, its prebuilt native image, the CPU elliptic-curve arithmetic, the pattern split, the host producer, and the exact-hit verifier are inherited unchanged.
 
-`kernel_digest` runs at 128 registers with no stack frame and no spills, 2 blocks per SM as before. The committed native
-image is cubin sha256 `e0c0897f799baf81...` (473,376 B), built from this tree's own source with CUDA 12.8.93;
-`build_carrier.sh` reproduces it byte for byte. The ranked build line exits 0.
+## Why this path
 
-Written with Claude Fable 5.1 and Claude Opus 5.5 in Claude Code.
+The promoted CPU planned path hashes four candidate messages together. Its qsha_x4p routine leaves each first SHA-256 digest in two 128-bit SHA-NI chaining registers. Previously it permuted those eight chaining registers into natural digest order and wrote four 32-byte digests to a 4-by-16-word w2 scratch array. The fixed 32-byte second SHA-256 path immediately read those same four digests back from w2 into the existing four-lane message ring. This was a short intermediate memory round trip on a per-four-candidate hot path. The first digest already exists in the exact register representation needed to create the second block's first eight words; its remaining words are the same fixed padding and 256-bit length that the promoted path already uses.
 
-## Device switches (on)
+This package adds QSB_CPU_SHA_BRIDGE, default 1, to CpuGrindSubset.h. After the final feed-forward of qsha_x4p, it converts each ABEF/CDGH pair to the same natural word vectors the old qsha_x4p store generated and writes those vectors directly into the existing four-lane SHA-NI message ring. The other two ring vectors are the promoted constant padding vectors. It then calls the unchanged qsha_rounds4m<true> four-lane compression and unchanged qsha_st8 output shuffle. The normal intermediate-store path remains in the source and can be restored by setting QSB_CPU_SHA_BRIDGE=0. The new bridge is compiled only with the existing fixed-padding and four-lane SHA switches enabled; other configurations retain their former path.
 
-Files without a directory sit in `tests/gpu_epochs/`. Every device switch is in the image's knob list, so flipping one needs
-`build_carrier.sh`.
+The mechanism is removal of one 128-byte first-digest store and one 128-byte digest reload per group of four candidates, plus the now unused w2 scratch in this configuration. It is not a claim about actual cache traffic: a compiler could have optimized the old round trip, could spill registers in the new inlined helper, or could produce larger code that hurts the instruction cache. We preserved the four-lane round interleave because changing it to two lanes would introduce a separate performance confound. The output z words and the later CPU key gate have the same layout and consumers as before.
 
-| switch, default | file | change |
-|---|---|---|
-| `QSB_GATHER_LEA2` 1 | tree.cu | the 64-byte record address as LOP3, LEA, LEA.HI.X |
-| `QSB_GLV_EO` 1, `QSB_GLV_ZDEC` 1, `QSB_GLV_RND` 2, `QSB_DECODE_CUT` 2 | GLVScalar.cuh, tree.cu | the GLV split's residual products from column-pair accumulators, signed residuals for the walker, the rounding constant folded into a carry, and the residual carries taken straight off the carry flag |
-| `QSB_TREE_WAVE_TOP` 1 | tree_inverse.cuh | the top of the block inversion tree as four packed waves on warp 0 |
-| `QSB_GT_BATCH` 1 | tree.cu | the table build shares one field inversion across 16 records and checks each inverse |
-| `QSB_SHA_SCHED_V4` 1, `QSB_SHA_CONST_IV` 1, `QSB_GATE_W8_LEA` 1 | tree.cu, window_schedule_shared.cuh | 128-bit schedule loads, one induction variable for the constant blocks' loop, gate word 8 as one LEA |
-| `QSB_YNEG_FOLD` 1 | tree.cu, pair_shared.cuh | the last chain addition hands the pre-inverse step the negated ordinate |
-| `QSB_HIT_NO_COMBO` 1 | tree.cu | the hit record keeps its 4-byte tag; the host rebuilds the rest, so the published hit text is unchanged |
-| `QSB_FX3_PRESUB` 1, `QSB_FX3_PRESUB_EARLY` 1 | hit_filter_field_sc.cuh | the fused X3 subtracts V once, before the odd row is merged |
-| `QSB_K32_SUBCUT` 7, `QSB_K32_ADDCUT` 1 | hit_filter_field_sc.cuh | the K corrections of the subtractions and the anchor sum on limb 0's 32-bit halves |
-| `QSB_S3_DOFF` 1, `QSB_S3_UNIFORM_G` 1 | tree.cu | the chain loop counts a byte offset; a warp vote makes the psi branch warp-uniform |
-| `QSB_S3_NM_MASK` 1, `QSB_S3_NM_SEED` 1, `QSB_GATHER_ONE_FORM` 1 | tree.cu | the chain's and the seed's gathers take index and mask as two walker values, and each record is loaded in one form |
-| `QSB_XNEG_BRANCH` 1, `QSB_PARK128` 1, `QSB_OK_FOLD` 2, `QSB_TID_UNSIGNED` 1 | tree.cu | a grid-uniform sign branch, 16-byte parked rows, one OR for an unusable lane, unsigned half index |
-| `QSB_SC_OPS` 48 | hit_filter_field_sc.cuh | the operand order of the point add's seven products, searched over all 32 legal orders for this switch set |
+## Correctness and scope
 
-Other device switches are in the tree at 0, each with its alternative code kept for later images.
+For each lane, the old qsha_x4p exit computed t=shuffle(S0,0x1B), b=shuffle(S1,0xB1), then stored blend(t,b,0xF0) as words 0 through 3 and alignr(b,t,8) as words 4 through 7. The bridge computes those exact two vectors from the same feed-forwarded S0/S1 registers, placing them in message-ring entries 0 and 1. Entries 2 and 3 are the promoted P2/P3 constants: SHA-256 padding for a 32-byte digest, ending in bit length 256. From there both old and new paths call the same qsha_rounds4m<true> and qsha_st8 routines, so the only algorithmic distinction is where the eight first-digest words live between the passes.
 
-## Host switches (on)
+The source diff changes only candidates/subset/CpuGrindSubset.h and this public note. No Pinning worktree, scorer, test vector, CUDA source, native image, or shared Git configuration is modified. The exact publication gates remain: CPU hits still pass gate_publish_exact and the existing host exact verifier; GPU nominations still undergo the inherited exact check. The SHA fallback selected when the planned path is unavailable is untouched. The old compile-time path remains selectable, which makes a later A/B comparison possible without reconstructing historical source.
 
-None is in the knob list, so they leave the image unchanged.
+A pure-Python audit generated 2,000 sets of four random chaining-register pairs. For every lane, it compared the vectors that the old w2 store would have produced with the vectors sent to the new ring, and checked the resulting 16-word one-block SHA padding for a 32-byte first digest. It passed. A source-range check confirmed that the bridge is under QSB_CPU_SHA_BRIDGE, QSB_CPU_SHC and QSB_CPU_SHA4, while the fallback path is still present; git diff --check passed. These checks establish the data mapping and intended source scope, not a native compilation or runtime proof. The official remote verifier is the first actual execution of this exact package. No local C++ or CUDA compilation and no local GPU benchmark were run.
 
-| switch, default | file | change | source |
-|---|---|---|---|
-| `QSB_SP_REFILL_FIRST` 1 | tree.cu | the slot loop launches batch k before it gates batch k-2 | `521075fe` after `9edbdde7` |
-| `QSB_CPU_TRY9` 1, `QSB_CPU_ALLCPU` 1, `QSB_HP_V3` 1 | CpuGrindSubset.h, host_producers.h | a 9-window table on huge pages when memory allows, workers on every CPU, the v3 host producers | `789aed1b`, `a141df2b` |
-| `QSB_CPU_X4PS` 1, `QSB_CPU_SHC` 1 | CpuGrindSubset.h | shared schedule rows for four lanes; padding carried as constants | `c13302f3` |
-| `QSB_CPU_KH16` 1, `QSB_CPU_MRG` 1, `QSB_CPU_AINL` 1 | CpuGrindSubset.h | 16-key key-hash schedules, one accumulator per column, inlined small field operations | `a33e04c3` |
-| `QSB_CPU_BATCH_AUTO` 1 | CpuGrindSubset.h | batch size chosen from the CPU topology | `86c643ae` |
-| `QSB_CPU_PREFIX100` 1 | CpuGrindSubset.h | the co-grinder walks the 100 of its 158 window patterns whose first message block five patterns share | `b67487a1`, after `4a197f06` |
-| `QSB_CPU_SHA4` 1, `QSB_CPU_DNF` 1, `QSB_CPU_RECODE_NG` 1, `QSB_CPU_FOLD4` 1 | CpuGrindSubset.h | four interleaved SHA-NI lanes, an unfolded limb in the window step, hash words by transpose instead of gathers, an 11-IFMA reduction | ours |
-| `QSB_CPU_ILP2` 1, `QSB_CPU_NCH` 2, `QSB_CPU_PFSPREAD` 3 | CpuGrindSubset.h | two groups interleaved in the backward passes, two inversion chains instead of four, spread row prefetches | ours |
-| `QSB_NO_SUMMARY_FSYNC` 1, `QSB_LAZY_MODULES` 1, `QSB_CPU_FOLD_PAR` 1, `QSB_CPU_TOUCH_GUARD` 1, `QSB_FAST_TEARDOWN` 1, `QSB_STARTUP_THREADS` 1 | tree.cu, CpuGrindSubset.h | start-up and exit hardening: no fsync of an unread file, lazy module loading, a parallel fold, a first-touch time limit with a 10-window fallback, table unmap during the drain, threaded start-up ladders | ours |
+## Relationship to public research
 
-## Exactness
+The reference that prompted this route was the user's read-only Pinning staging commit b0a450b. Its SHA-NI double-hash handoff keeps a first digest close to the second SHA block, but the Pinning message geometry and lane count are different. The Pinning 16-lane AVX-512 software SHA path and locktime packing are not imported. That staged Pinning candidate had no official throughput result when inspected, so this Subset submission does not cite it as speed evidence. The Subset bridge was independently adapted to its own promoted four-lane planned path and existing memory-ring compressor. The Plonky3 PR2345 mentioned in the research discussion is about BLAKE3, not SHA-256; only the general idea of overlapping independent chains and respecting register pressure was considered, with no code transplanted.
 
-Most device switches are bit-identical: the same addresses, words, coefficients and field elements by a different route.
-The GLV split, the signed-residual walker and the gather forms are replayed by the start-up self-check before each run, which
-also catches deliberately broken variants. The point add at this operand order matches a bigint model of the madd on every
-tested random state. The paired hash matches OpenSSL's compression on 10^6 cases.
+The promoted e6715658 source already includes SHA-NI four-lane compression, fixed-block W+K precomputation, shared schedule loads, fixed second-pass padding, an AVX-512 16-key schedule, and a GPU SHA schedule improvement. Those promoted components and their original GPL, secp256k1, and contributor notices remain in place. The inherited public note, archived separately with this run, describes the prior developers' longer optimization history; its old timings and source identity are historical and are not measurements of this candidate. In particular, the new bridge's performance is unknown before the official run.
 
-Some cuts use the rare-carry class the chain and tree already have in `521075fe`: the tree top's short-carry products and the
-K32 corrections can drop a carry in a small fraction of candidates (about 2^-16 to 2^-21 each). Such a candidate can lose a
-hit but can never publish a wrong one, and the loss is a few hits per hundred thousand. The host gate recomputes every GPU
-nomination and every co-grinder hit with OpenSSL before publishing it.
+Substantive inherited source credit includes RealAdii's paired-chain and field work; kshitij-hash's promoted source e6715658 and host/GPU SHA scheduling; i34-9's host producer/co-grinder work; terrapinelf's Q_MIX and native image work; code-up-matrix's ping-pong and late-index research; cefika's contiguous epoch route; and the additional contributors named in the existing GPL and source notes. This credit documents lineage, not participation in this submission or endorsement. No additional co-author field is used.
 
-The co-grinder switches run the same operations on the same operands (reordered, regrouped with every lazy value carried
-before a subtraction, or with prefetches moved). On fixed work (one worker, 16,179,200 candidates, `QSB_ZEROS_N` 14) the
-co-grinder gives the same hit file with each host switch on or off; the pattern selection changes which candidates are
-walked, stays disjoint from the GPU's patterns, and every one of its hits re-derives with the harness's own
-`problem.candidate_hash`. Hit sets matched in every comparison we ran between this package and its predecessors.
+## Evaluation decision
 
-## Full run of this exact package
-
-One official-path run of this exact tree, 1,200 s, on a rented Zen 4 EPYC slice (12 CPUs) with an RTX 4090 (CUDA 12.8).
-We copied the harness, replaced `candidates/subset`, deleted any binary, then ran `./setup.sh subset` and
-`./benchmark.sh subset` through the command grinder with a cold JIT cache and problem seed 20260927. `setup.sh` exited 0 and
-the native image loaded.
-
-| result | score | verified hits | elapsed |
-|---|---:|---:|---:|
-| PASS (scored) | 872.95 M/s | 125,077 of 125,077 | 1,201.92 s |
-
-This host is not the runner (its card held its power limit and the co-grinder had 12 CPUs), so the score does not predict
-the ranked one. The run shows that the package builds with the ranked line, loads its image and publishes only verified
-hits.
-
-## Reproducing
-
-```
-./setup.sh subset
-./benchmark.sh subset
-```
-
-Off the official runners, the harness's command grinder runs the same build:
-
-```
-QSB_GRINDER='cmd:python3 harness/gpu_wrap.py --src candidates/{bench}/{bench}.cu --no-build' ./benchmark.sh subset
-```
-
-To isolate a change, set its switch with `-D` or at its `#define` and rebuild. After any device switch flips, regenerate the
-image with `NVCC=/path/to/cuda-12.8/bin/nvcc ./build_carrier.sh 24`. After a change to a `QSB_FX3_*`, `QSB_K32_*`,
-`QSB_S3_*` or `QSB_GATHER_*` switch, search `QSB_SC_OPS` again. `QSB_S3_NM_MASK` 0 needs `QSB_GATHER_ONE_FORM` 0.
-`QSB_CPU_ALLCPU` 0 puts `QSB_CPU_RSV_CORE` back to 1.
-
-## Base and credits
-
-- Base: `521075fe`, itself built on our `8f99a3e9`; the refill-before-publish order after `9edbdde7`.
-- Through `8f99a3e9`: `2d1631b0` (the co-grinder engine, with the batch-affine prefix after `55757d4d`), `888f5fce` after
-  `212237f4` (the blocking host wait), `de5739c9` (the promoted GLV12xc base, half-walk, the 8-lane IFMA and 4-lane SHA-NI
-  co-grinder), `82d8493f` and `97f347a8` (host producers, warp-uniform root, row prefetch), `bb2a3eb7`, `2a1f43c5`,
-  `d1ddefca`, `25bd990a` / `7a75fa50` (carrier and co-grinder design), `73224391`, `eaba5205` / `b864a72c`, `14675ab0` /
-  `adfa8aaa`, `933abead`; libsecp256k1 (MIT, notice kept).
-- From queued work: `789aed1b` and `a141df2b` (also in `4da17ebc`); `c13302f3`; `86c643ae`; `a33e04c3`; `b67487a1` after
-  `4a197f06`.
-- From pinning work: the pinning record `b9736ce1` (kaankolcu) for `QSB_DECODE_CUT` bit 2 (credited there to HY16) and the
-  seed gathers' index and mask form; the single V subtraction of ercumentyildirim's `QSB_SAS_PRESUB`; i34-9's `QSB_SUB_CUT`
-  and `QSB_ADDOFF_CUT`, written here as the K32 switches.
-- Ours: the remaining device switches, the operand-order search, `QSB_CPU_SHA4`, `QSB_CPU_DNF`, `QSB_CPU_RECODE_NG`,
-  `QSB_CPU_FOLD4`, `QSB_CPU_ILP2`, `QSB_CPU_NCH`, `QSB_CPU_PFSPREAD`, the hardening switches, and the ports of the items
-  above as switches.
-
-Their authors are credited as coauthors in the submission metadata up to Yukon's limit of ten; cefika (`4a197f06`) and
-anamdongparkjinhyeong (`9edbdde7`) are credited here. All inherited source, GPLv3 notices and attributions are kept.
+Submit this one-change package once for the official Subset remote verifier and 1,200-second throughput measurement. Record its score against the actual evaluation reference, which may differ from the last observed 720,332,123 if another promotion lands first. If the official result is slower, revert this switch and return to the then-current promoted frontier; do not claim that the store/reload saving was realized in machine code. If it is positive but below the promotion threshold, retain it only as a completed route whose whole-package result and reference are explicitly recorded. The next useful experiment would inspect compiler spills and the CPU/GPU throughput breakdown on the official hardware, then compare the bridge against the old path without changing unrelated SHA or elliptic-curve switches.
