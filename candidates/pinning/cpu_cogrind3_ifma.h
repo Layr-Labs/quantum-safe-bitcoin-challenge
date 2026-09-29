@@ -229,8 +229,16 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
     return (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(ok));
 }
 
+#ifndef QSB_CG_ZMASK4
+#define QSB_CG_ZMASK4 1 /* exact bit-30 broadcast to whole 64-bit lanes */
+#endif
 static QI_INL V zmask4(const uint32_t *d4) {
+#if QSB_CG_ZMASK4
+    const __m128i d = _mm_loadu_si128((const __m128i *)d4);
+    return (V)_mm256_cvtepi32_epi64(_mm_srai_epi32(_mm_slli_epi32(d, 1), 31));
+#else
     V m; for (int l = 0; l < 4; l++) m[l] = QCG_ZERO(d4[l]) ? ~0ULL : 0; return m;
+#endif
 }
 static QI_INL V negmask4(const uint32_t *d4) {
     const __m128i c = _mm_loadu_si128((const __m128i *)d4);
