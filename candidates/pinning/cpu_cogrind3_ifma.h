@@ -94,6 +94,9 @@ static QI_INL void fwk(vfe *r) {
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
 }
 /* canonical value in [0, p) from limbs < 2^62 (libsecp256k1 fe_normalize, radix 2^52) */
+#ifndef QSB_CG_NORM_MASK
+#define QSB_CG_NORM_MASK 1 /* predicate construction in mask registers only */
+#endif
 static QI_INL void fnorm(vfe *r) {
     const V M = vs1(QI_M52);
     V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4], m;
@@ -104,8 +107,15 @@ static QI_INL void fnorm(vfe *r) {
     t3 += t2 >> 52; t2 &= M; m &= t2;
     t4 += t3 >> 52; t3 &= M; m &= t3;
     /* value < 2p here; subtract p once if value >= p (limbs < 2^53: signed compares are exact) */
+#if QSB_CG_NORM_MASK
+    const __mmask8 correction = _mm256_cmpge_epu64_mask((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL))
+        & _mm256_cmpeq_epi64_mask((__m256i)t4, (__m256i)vs1(QI_M48))
+        & _mm256_cmpeq_epi64_mask((__m256i)m, (__m256i)M);
+    x = (t4 >> 48) | (V)_mm256_maskz_set1_epi64(correction, 1);
+#else
     const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
     x = (t4 >> 48) | ((V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48)) & (V)_mm256_cmpeq_epi64((__m256i)m, (__m256i)M) & ge & vs1(1));
+#endif
     t0 += (vs1(0) - x) & vs1(QI_C);                             /* x in {0, 1} */
     t1 += t0 >> 52; t0 &= M;
     t2 += t1 >> 52; t1 &= M;
