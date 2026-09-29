@@ -1,6 +1,6 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 6
+#define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -156,7 +156,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
- * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 3 x 4M here (4 x 4M, 2 x 8M before). */
+ * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 4 x 4M here (4 x 4M, 2 x 8M before). */
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
@@ -433,7 +433,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
@@ -3905,6 +3905,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     }
 #endif
 
+/* Candidate 072: the ranked two-pubkey hashes are independent. Complete both
+ * H0 values before publication, retaining the original first-recid preference. */
+#ifndef QSB_DEFER_HASH_HIT
+#define QSB_DEFER_HASH_HIT 1
+#endif
+#if QSB_DEFER_HASH_HIT != 0 && QSB_DEFER_HASH_HIT != 1
+#error "QSB_DEFER_HASH_HIT must be 0 or 1"
+#endif
+#if QSB_DEFER_HASH_HIT && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+    uint32_t ranked_h0[2];
+#endif
     /* Check both pubkeys × 2 hashes */
 #if QSB_PK_UNROLL
     #pragma unroll
@@ -3942,11 +3953,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
         if (FAST_TAIL) {
             /* ranked gate: only digest word 0 is read */
+#if QSB_DEFER_HASH_HIT
+            ranked_h0[ri]=_SHA256Pubkey33H0(pb);
+#else
             if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
                 uint32_t pos=atomicAdd(d_hit_cnt,1);
                 if(pos<1024)d_hit_idx[pos]=((uint32_t)idx+QSB_HIT_BASE)|(ri<<30);
                 return;
             }
+#endif
             continue;
         }
 #endif
@@ -3993,6 +4008,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
             return;
         }
     }
+#if QSB_DEFER_HASH_HIT && QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+    if(FAST_TAIL) {
+        const bool hit0=gpu_bench_valid_h0(ranked_h0[0]);
+        const bool hit1=gpu_bench_valid_h0(ranked_h0[1]);
+        if(hit0||hit1) {
+            const uint32_t ri=hit0?0u:1u;
+            uint32_t pos=atomicAdd(d_hit_cnt,1);
+            if(pos<1024)d_hit_idx[pos]=((uint32_t)idx+QSB_HIT_BASE)|(ri<<30);
+            return;
+        }
+    }
+#endif
 #if (QSB_L2STATE & 2) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 2: this block's state lines are dead once every lane has consumed its
      * four entries (long before this point: the values fed the whole recovery). Lanes 0, 8,
