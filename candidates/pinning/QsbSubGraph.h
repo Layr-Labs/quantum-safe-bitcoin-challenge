@@ -23,7 +23,7 @@
 #include <utility>
 
 #ifndef QSB_SUBGRAPH
-#define QSB_SUBGRAPH 0
+#define QSB_SUBGRAPH 1
 #endif
 #if QSB_SUBGRAPH != 0 && QSB_SUBGRAPH != 1
 #error "QSB_SUBGRAPH must be 0 or 1"
