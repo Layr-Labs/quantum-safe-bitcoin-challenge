@@ -1,3 +1,9 @@
+/* Use the promoted context-preserving three-node subgraph pipeline by default.
+ * Device arithmetic and native carrier are unchanged; unsupported contexts
+ * retain the promoted stream fallback via qsb_sg::init. */
+#ifndef QSB_SUBGRAPH
+#define QSB_SUBGRAPH 1
+#endif
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6

@@ -159,7 +159,7 @@ struct shared_t {
     int nworkers;
     int has_avx2, has_adx, has_sha, has_ifma;
     int ec_env, sha_env;                  /* overrides, -1 = auto */
-    std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4, 3 = avx512 ifma x4; -1 until chosen */
+    std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4, 3 = avx512 ifma x4, 4 = avx512 ifma x8; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
     std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
@@ -463,6 +463,7 @@ static int fill_batch(worker_t *w) {
 #if defined(__x86_64__) && !defined(QSB_CG_NO_SIMD)
 #include "cpu_cogrind3_vec.h"
 #include "cpu_cogrind3_ifma.h"
+#include "cpu_cogrind3_ifma8.h"
 #define QSB_CG_HAVE_SIMD 1
 #else
 #define QSB_CG_HAVE_SIMD 0
@@ -477,6 +478,7 @@ static double mem_available_mib();
 
 static void run_ec(worker_t *w, int mode, void *vs, void *ss, void *vi) {
 #if QSB_CG_HAVE_SIMD
+    if (mode == 4) { v8i::ec_batch(w, (v8i::vstate *)vi); return; }
     if (mode == 3) { v4i::ec_batch(w, (v4i::vstate *)vi); return; }
     if (mode == 2) { v4::ec_batch(w, (v4::vstate *)vs); return; }
 #else
@@ -509,7 +511,7 @@ static void *worker_main(void *arg) {
 #endif
     void *vi = NULL;
 #if QSB_CG_HAVE_SIMD
-    if (S->has_ifma) vi = aligned_alloc(64, (sizeof(v4i::vstate) + 63) & ~(size_t)63);
+    if (S->has_ifma) vi = aligned_alloc(64, ((sizeof(v4i::vstate)>sizeof(v8i::vstate)?sizeof(v4i::vstate):sizeof(v8i::vstate)) + 63) & ~(size_t)63);
     if (S->has_ifma && !vi) { S->failed.store(1); return NULL; }
 #endif
     sstate *ss = (sstate *)aligned_alloc(64, (sizeof(sstate) + 63) & ~(size_t)63);
@@ -519,12 +521,12 @@ static void *worker_main(void *arg) {
      * the first discarded; the minimum per-candidate time of each stage decides. The AVX2 EC
      * stage is the design point: the scalar MULX stage is chosen only if it is >10% faster. */
     if (id == 0 && S->ec_mode.load() < 0) {
-        int ecs[4], nec = 0, shs[3], nsh = 0;
+        int ecs[5], nec = 0, shs[3], nsh = 0;
         if (S->ec_env >= 0) ecs[nec++] = S->ec_env;
-        else { if (S->has_avx2 && QSB_CG_HAVE_SIMD) ecs[nec++] = 2; if (S->has_adx) ecs[nec++] = 1; if (S->has_ifma) ecs[nec++] = 3; if (!nec) ecs[nec++] = 0; }
+        else { if (S->has_avx2 && QSB_CG_HAVE_SIMD) ecs[nec++] = 2; if (S->has_adx) ecs[nec++] = 1; if (S->has_ifma) { ecs[nec++] = 3; ecs[nec++] = 4; } if (!nec) ecs[nec++] = 0; }
         if (S->sha_env >= 0) shs[nsh++] = S->sha_env;
         else { if (S->has_sha) shs[nsh++] = 2; if (S->has_avx2) shs[nsh++] = 1; if (!nsh) shs[nsh++] = 0; }
-        double sha_best[3] = {1e30, 1e30, 1e30}, ec_best[4] = {1e30, 1e30, 1e30, 1e30};   /* indexed by mode */
+        double sha_best[3] = {1e30, 1e30, 1e30}, ec_best[5] = {1e30, 1e30, 1e30, 1e30, 1e30};   /* indexed by mode */
         for (int a = 0; a < nsh; a++) {
             S->sha_mode.store(shs[a]);
             for (int b = 0; b < nec; b++) {
@@ -548,19 +550,19 @@ static void *worker_main(void *arg) {
         for (int b = 1; b < nec; b++) {
             const int m = ecs[b];
             /* AVX2 stays unless the scalar MULX stage is >10% faster; IFMA wins on any gain */
-            const double margin = m == 3 ? 1.0 : (bec == 2 && m != 2) ? 0.9 : (m == 2 && bec != 2) ? 1.0 / 0.9 : 1.0;
+            const double margin = m >= 3 ? 1.0 : (bec == 2 && m != 2) ? 0.9 : (m == 2 && bec != 2) ? 1.0 / 0.9 : 1.0;
             if (ec_best[m] < margin * ec_best[bec]) bec = m;
         }
         S->sha_mode.store(bsha);
         S->ec_mode.store(bec);
         if (g_ctl_verbose) {
-            char tb[7][16];
-            const double tv[7] = {sha_best[2], sha_best[1], sha_best[0], ec_best[3], ec_best[2], ec_best[1], ec_best[0]};
-            for (int q = 0; q < 7; q++) { if (tv[q] < 1e29) snprintf(tb[q], sizeof tb[q], "%.0f", tv[q]); else snprintf(tb[q], sizeof tb[q], "-"); }
-            printf("  [CPU] tsc/cand sha: sha-ni %s avx2x8 %s ref %s | ec: ifma %s avx2x4 %s mulx %s c %s\n", tb[0], tb[1], tb[2], tb[3], tb[4], tb[5], tb[6]);
+            char tb[8][16];
+            const double tv[8] = {sha_best[2], sha_best[1], sha_best[0], ec_best[3], ec_best[2], ec_best[1], ec_best[0], ec_best[4]};
+            for (int q = 0; q < 8; q++) { if (tv[q] < 1e29) snprintf(tb[q], sizeof tb[q], "%.0f", tv[q]); else snprintf(tb[q], sizeof tb[q], "-"); }
+            printf("  [CPU] tsc/cand sha: sha-ni %s avx2x8 %s ref %s | ec: ifma %s avx2x4 %s mulx %s c %s ifma8 %s\n", tb[0], tb[1], tb[2], tb[3], tb[4], tb[5], tb[6], tb[7]);
             printf("  [CPU] chosen: sha=%s ec=%s, table %s (%.0f MiB, %d windows, built in %.2f s)\n",
                    bsha == 2 ? "sha-ni" : bsha == 1 ? "avx2x8" : "ref",
-                   bec == 3 ? "ifma" : bec == 2 ? "avx2x4" : bec == 1 ? "mulx" : "c", S->lay.name,
+                   bec == 4 ? "ifma8" : bec == 3 ? "ifma" : bec == 2 ? "avx2x4" : bec == 1 ? "mulx" : "c", S->lay.name,
                    (double)S->table_bytes / 1048576.0, S->lay.nwin, S->t_build);
         }
     }
@@ -805,8 +807,8 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     S->ec_env = -1; S->sha_env = -1;
     if (getenv("QSB_COGRIND_EC")) {
         const char *e = getenv("QSB_COGRIND_EC");
-        S->ec_env = !strcmp(e, "ifma") ? 3 : !strcmp(e, "avx2") ? 2 : !strcmp(e, "mulx") ? 1 : 0;
-        if ((S->ec_env == 3 && !S->has_ifma) || (S->ec_env == 2 && !(has_avx2 && QSB_CG_HAVE_SIMD)) || (S->ec_env == 1 && !S->has_adx)) S->ec_env = 0;
+        S->ec_env = !strcmp(e, "ifma8") ? 4 : !strcmp(e, "ifma") ? 3 : !strcmp(e, "avx2") ? 2 : !strcmp(e, "mulx") ? 1 : 0;
+        if ((S->ec_env >= 3 && !S->has_ifma) || (S->ec_env == 2 && !(has_avx2 && QSB_CG_HAVE_SIMD)) || (S->ec_env == 1 && !S->has_adx)) S->ec_env = 0;
     }
     if (getenv("QSB_COGRIND_SHA")) {
         const char *e = getenv("QSB_COGRIND_SHA");
