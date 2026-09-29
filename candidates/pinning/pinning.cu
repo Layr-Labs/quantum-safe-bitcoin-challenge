@@ -1,3 +1,5 @@
+#define QSB_SHA_LEA 0
+#define QSB_FIN_LEA 1
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
