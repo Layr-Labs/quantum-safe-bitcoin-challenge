@@ -672,7 +672,7 @@ __device__ uint64_t BINOM_C[151][10];
  * unchanged. Needs the wave top (QSB_TREE_WAVE_TOP 1), ZLAB_K2S3M and ZLAB_DUAL_EPOCH_SHA (the
  * qsb_pair_front3_z_value path). 0 = the base byte for byte. */
 #ifndef QSB_PRE3_ROOT
-#define QSB_PRE3_ROOT 0   /* off */
+#define QSB_PRE3_ROOT 1 /* off */
 #endif
 #if QSB_PRE3_ROOT < 0 || QSB_PRE3_ROOT > 2
 #error "QSB_PRE3_ROOT must be 0, 1 or 2"
