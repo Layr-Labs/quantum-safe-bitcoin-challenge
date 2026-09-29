@@ -1,6 +1,6 @@
-// Derived from odinfree's GPU-epoch consumer in submission 0db6e203.
-// Only the first block depends on the epoch remainder. The second block's
-// expanded schedule is shared by every epoch with the same window choice.
+/* Derived from odinfree's GPU-epoch consumer in submission 0db6e203. */
+/* Only the first block depends on the epoch remainder. The second block's */
+/* expanded schedule is shared by every epoch with the same window choice. */
 #pragma once
 #ifndef QSB_950_PACK
 #define QSB_950_PACK 1

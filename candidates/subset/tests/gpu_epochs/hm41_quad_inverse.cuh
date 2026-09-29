@@ -40,7 +40,7 @@ __device__ __forceinline__ void hm41_quad_inverse(uint64_t result[5],int lane){
             right[j]=(lane&1)?state[j]:partner;
         }
         // U and V owners have identical decision inputs. They calculate the
-        // same matrix in one warp instruction stream, then each broadcasts
+        /* same matrix in one warp instruction stream, then each broadcasts */
         // only its own row to the corresponding R or S owner: two exchanges
         // instead of four coefficients (or four normalized decision inputs).
         int64_t uu=0,uv=0,vu=0,vv=0;

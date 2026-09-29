@@ -1,6 +1,6 @@
 // Paired two-CTA layout: separate immutable products from downward inverses.
-// This restores the audited earlier tree layout, retaining current root-entry
-// warp synchronization. The extra 8 KiB removes destructive-read barriers.
+/* This restores the audited earlier tree layout, retaining current root-entry */
+/* warp synchronization. The extra 8 KiB removes destructive-read barriers. */
 // One work-efficient binary product tree per block. The caller supplies
 // a power-of-two block size at most 256 and identity factors for inactive lanes.
 #pragma once
@@ -106,7 +106,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     #pragma unroll
     for(int k=0;k<4;k++)tree[k][n+tid]=value[k];
     __syncthreads();
-    // Upward levels with at least two writers; the readers of level `width`
+    /* Upward levels with at least two writers; the readers of level `width` */
     // are its writers' low half, so a warp barrier suffices once width<=32.
     #pragma unroll 1
     for(int width=n>>1;width>1;width>>=1){
@@ -162,7 +162,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         // level (width == n/4), which every lane reads for its own leaf.
         if((width<<1)>32 || (width<<2)==n)__syncthreads();else __syncwarp();
     }
-    // Leaf level: every lane multiplies its parent inverse by its sibling's
+    /* Leaf level: every lane multiplies its parent inverse by its sibling's */
     // (never overwritten) leaf product. No shared write, no barrier.
     {
         uint64_t parent[5],sibling[5];
@@ -221,7 +221,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     qsb_root_lut_wait();
 #endif
     __syncthreads();
-    // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
+    /* Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is */
     // formed by lanes < count/2 and read by lanes < count/4.
     int offset=0;
 #if QSB_TREE_UNROLL
@@ -249,7 +249,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         offset+=count;
         if(half>32)__syncthreads();else __syncwarp();
     }
-    // offset == 2n-4: the two root children.
+    /* offset == 2n-4: the two root children. */
 #if HM43_WARP_ROOT
 #ifndef QSB_ROOT_UNIFORM_WARP
 #define QSB_ROOT_UNIFORM_WARP 1
@@ -288,9 +288,9 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #if !(QSB_ROOT_UNIFORM_WARP && QSB_INVERSE_LIMBS)
 #error "QSB_TREE_WAVE_TOP is written for the uniform warp-0 root (QSB_ROOT_UNIFORM_WARP, QSB_INVERSE_LIMBS)"
 #endif
-    // QSB_TREE_WAVE_TOP (tree.cu): the base root block above is compiled out; offset == 2n-32, the
+    /* QSB_TREE_WAVE_TOP (tree.cu): the base root block above is compiled out; offset == 2n-32, the */
     // sixteen L16 nodes x[j]. P8, P4, P2 go to their base columns (the base's up levels 16, 8, 4);
-    // c, d and E16 stay in the registers of lanes 0..15.
+    /* c, d and E16 stay in the registers of lanes 0..15. */
 #if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
     if(__all_sync(0xffffffffu,RW?(unsigned)(tid-32*RW)<32u:tid<32)){
         const int lt=RW?tid-32*RW:tid;   /*: lane index inside the root warp RW */
@@ -301,7 +301,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         const int l8=offset+16,l4=offset+24,l2=offset+28;
         const bool cof=lt<16;
         uint64_t a[5],b[5],r[5];
-        // Wave A: P8[j] = x[j]*x[j+8] on lanes j < 8 (lanes 8..31 repeat them, unstored).
+        /* Wave A: P8[j] = x[j]*x[j+8] on lanes j < 8 (lanes 8..31 repeat them, unstored). */
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset+(lt&7)];b[k]=products[k][offset+8+(lt&7)];}
         a[4]=b[4]=0;QSB_TREE_MUL(r,a,b);
@@ -323,8 +323,8 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
             }
         }
         __syncwarp();
-        // Wave C: d[i] = c[i]*P4[(i&3)^2] on lanes i < 16; P2[j] = P4[j]*P4[j+2] on lanes 16+j, j < 2
-        // (the first operand is every lane's own wave-B product: c[i], or P4[j] on lane 16+j).
+        /* Wave C: d[i] = c[i]*P4[(i&3)^2] on lanes i < 16; P2[j] = P4[j]*P4[j+2] on lanes 16+j, j < 2 */
+        /* (the first operand is every lane's own wave-B product: c[i], or P4[j] on lane 16+j). */
         {
             const int ib=cof?l4+((lt&3)^2):l4+2+(lt&1);
             #pragma unroll
@@ -336,7 +336,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
             }
         }
         __syncwarp();
-        // Wave D: E16[i] = d[i]*P2[(i&1)^1] on lanes i < 16; the root P2[0]*P2[1] on lane 16 (own P2[0]).
+        /* Wave D: E16[i] = d[i]*P2[(i&1)^1] on lanes i < 16; the root P2[0]*P2[1] on lane 16 (own P2[0]). */
         {
             const int ib=cof?l2+((lt&1)^1):l2+1;
             #pragma unroll
@@ -352,7 +352,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if(lt==0)QSB_ISO_SCALE_ROOT(root);
         #pragma unroll
         for(int k=0;k<4;k++)root[k]=__shfl_sync(0xffffffffu,root[k],0);
-        // inv16[i] = root^-1 * E16[i]: the inverse of x[i], at the base's level-16 inverse column.
+        /* inv16[i] = root^-1 * E16[i]: the inverse of x[i], at the base's level-16 inverse column. */
         r[4]=0;QSB_TREE_MUL(r,root,r);
         if(cof){
             #pragma unroll
@@ -419,7 +419,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     __syncwarp();
     // Level count (4..n/2): lanes < count read parent inverses written by
-    // lanes < count/2 and write inverses read by lanes < 2*count.
+    /* lanes < count/2 and write inverses read by lanes < 2*count. */
     offset-=QSB_TREE_WAVE_TOP?32:4;   /* level count=4 (QSB_TREE_WAVE_TOP: 32, the waves wrote level 16) */
 #if QSB_TREE_UNROLL
     #pragma unroll
@@ -449,7 +449,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         offset-=count<<1;
         if((count<<1)>32)__syncthreads();else __syncwarp();
     }
-    // offset == 0 would be the leaf level; lanes form their own leaf inverse.
+    /* offset == 0 would be the leaf level; lanes form their own leaf inverse. */
     {
         const int half=n>>1;
         uint64_t parent_inv[5],sibling[5];

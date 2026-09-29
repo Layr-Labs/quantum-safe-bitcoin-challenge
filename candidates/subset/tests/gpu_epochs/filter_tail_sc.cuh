@@ -1,8 +1,8 @@
 // Speculative-filter-only field helpers for the finish (pre-inverse, block tree, post-inverse).
 // Same bounded carry truncation as the promoted QSB_SHORT_CARRY/QSB_SHORT_CARRY2 chain sites:
 // a dropped carry/borrow can only corrupt this candidate's (or, in the block tree, this block's)
-// speculative x-coordinates, which loses tentative hits; it can never publish one, because every
-// tentative hit is recomputed by kernel_verify_pair_hits with the unchanged exact arithmetic.
+/* speculative x-coordinates, which loses tentative hits; it can never publish one, because every */
+/* tentative hit is recomputed by kernel_verify_pair_hits with the unchanged exact arithmetic. */
 // The exact replay chain, qsb_k2s_front_exact/qsb_k2s_post and the verifier never call these.
 #pragma once
 #ifndef QSB_SHORT_CARRY3
@@ -23,9 +23,9 @@
 #define QSB_SHORT_CARRY4 1
 #endif
 #if QSB_SHORT_CARRY3
-// r = a - b mod p for a,b < 2^256. The borrow correction subtracts K = 2^32+977 from the
-// wrapped difference; its borrow is kept through limb 1 only. It would have to cross limb 1
-// only if limb0 < K and limb1 == 0 after the subtraction: probability <= 2^-95.
+/* r = a - b mod p for a,b < 2^256. The borrow correction subtracts K = 2^32+977 from the */
+/* wrapped difference; its borrow is kept through limb 1 only. It would have to cross limb 1 */
+/* only if limb0 < K and limb1 == 0 after the subtraction: probability <= 2^-95. */
 __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n\t.reg .u64 brw,lo;\n\t"
@@ -45,8 +45,8 @@ __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const u
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
 }
-// r = a + b mod p (a,b < 2^256): fold the carry with K; the fold's carry is kept through limb 1
-// (crossing it needs limb0 overflow, p <= 2^-31, and limb1 == 2^64-1: <= 2^-95 overall).
+/* r = a + b mod p (a,b < 2^256): fold the carry with K; the fold's carry is kept through limb 1 */
+/* (crossing it needs limb0 overflow, p <= 2^-31, and limb1 == 2^64-1: <= 2^-95 overall). */
 __device__ __forceinline__ void qsb_fadd(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
     asm("{\n\t.reg .u64 h,t;\n\t"

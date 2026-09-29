@@ -1,5 +1,5 @@
-// Independent OpenSSL curve oracle for the actual pre/post recovery helpers.
-// Synthetic projective scales include zero and unusable equal/opposite points.
+/* Independent OpenSSL curve oracle for the actual pre/post recovery helpers. */
+/* Synthetic projective scales include zero and unusable equal/opposite points. */
 #define main qsb_candidate_main
 #include "tree.cu"
 #undef main

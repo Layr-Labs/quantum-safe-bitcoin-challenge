@@ -1,5 +1,5 @@
 // Diagnostic only: fused trial formula versus separate C++ field calls.
-// Also compares every result and flag with the separately generated CPU fixture.
+/* Also compares every result and flag with the separately generated CPU fixture. */
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -11,7 +11,7 @@ __device__ __forceinline__ void qsb_replay_x3_reference(
 #ifdef __CUDA_ARCH__
     uint64_t r0,r1,r2,r3,high;
     // a+b-2c = low+h*2^256, h in {-2,-1,0,1}, for ALL 256-bit inputs.
-    // low+h*K lies in (-2K,2^256+K). Retain its signed high word.
+    /* low+h*K lies in (-2K,2^256+K). Retain its signed high word. */
     asm("{\n\t.reg .u64 h,t,ext;\n\t"
         "add.cc.u64 %0,%5,%9;\n\t"
         "addc.cc.u64 %1,%6,%10;\n\t"

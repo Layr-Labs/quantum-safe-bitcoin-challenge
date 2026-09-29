@@ -1,4 +1,4 @@
-// GPL-3.0-only; constant-address form of VanitySearch's _DivStep62 head
+/* GPL-3.0-only; constant-address form of VanitySearch's _DivStep62 head */
 // selection. See GPUMath.h for Jean Luc Pons's original copyright notice.
 #pragma once
 __device__ __forceinline__ void qsb_divstep_head(const uint64_t u[5], const uint64_t v[5],
@@ -45,8 +45,8 @@ __device__ __forceinline__ void hm39_divstep62(uint64_t u[5], uint64_t v[5],
     uint64_t u0 = u[0];
     uint64_t v0 = v[0];
 
-    // Extract 64 MSB of u and v
-    // u and v must be positive
+    /* Extract 64 MSB of u and v */
+    /* u and v must be positive */
     uint64_t uh, vh;
     int64_t w, x, y, z;
     bitCount = 62;
@@ -55,13 +55,13 @@ __device__ __forceinline__ void hm39_divstep62(uint64_t u[5], uint64_t v[5],
 
     while (true) {
 
-        // Use a sentinel bit to count zeros only up to bitCount
+        /* Use a sentinel bit to count zeros only up to bitCount */
         zeros = _CTZ(v0 | (1ULL << bitCount));
 
         v0 >>= zeros;
         vh >>= zeros;
         // Coefficients are two's-complement bit patterns; avoid signed-left-
-        // shift UB in the host oracle while preserving CUDA integer semantics.
+        /* shift UB in the host oracle while preserving CUDA integer semantics. */
         *uu = (int64_t)((uint64_t)*uu << zeros);
         *uv = (int64_t)((uint64_t)*uv << zeros);
         bitCount -= zeros;

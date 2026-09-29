@@ -1,4 +1,4 @@
-// Canonical parent arithmetic with delayed cold-path dispatch.
+/* Canonical parent arithmetic with delayed cold-path dispatch. */
 // Preserve all inherited VanitySearch/GPL and point-chain attribution.
 #pragma once
 __device__ __forceinline__ uint32_t qsb_replay_guard(uint64_t top){
@@ -194,7 +194,7 @@ __device__ __forceinline__ void qsb_replay_point_add(
 #ifdef __CUDA_ARCH__
   if(DEFER_Y){
     // One declared asm block; every guard is retained as a predicate until
-    // the point finishes. The enclosing chain still performs exact replay.
+    /* the point finishes. The enclosing chain still performs exact replay. */
     asm(
         "{\n"
         ".reg .u64 XX0,XX1,XX2,XX3,YY0,YY1,YY2,YY3,ZZ0,ZZ1,ZZ2,ZZ3,ZZZ0,ZZZ1,ZZZ2,ZZZ3,AX0,AX1,AX2,AX3,AY0,AY1,AY2,AY3,OFF0,OFF1,OFF2,OFF3,U0,U1,U2,U3,S0,S1,S2,S3,D0,D1,D2,D3,R0,R1,R2,R3,PP0,PP1,PP2,PP3,PPP0,PPP1,PPP2,PPP3,Q0,Q1,Q2,Q3,T0,T1,T2,T3;\n"
@@ -1684,16 +1684,16 @@ __device__ __forceinline__ void qsb_replay_point_add(
   Load256(X1, T);                      // X3
 }
 
-// The seed-X3 opportunity is independently identified in fkiene PR338,
-// e532114a2b3bc9a86ef618238ee77631cbe15924. This implementation uses our
-// signed-quotient fold from ad4b6d1, with a retained boundary guard and the
+/* The seed-X3 opportunity is independently identified in fkiene PR338, */
+/* e532114a2b3bc9a86ef618238ee77631cbe15924. This implementation uses our */
+/* signed-quotient fold from ad4b6d1, with a retained boundary guard and the */
 // unchanged exact whole-chain replay. Preserve all prior notices and licenses.
 __device__ __forceinline__ void qsb_replay_seed_x3(
     uint64_t *r,const uint64_t *a,const uint64_t *b,const uint64_t *c,uint32_t &bad){
 #ifdef __CUDA_ARCH__
     uint64_t r0,r1,r2,r3,high;
-    // a-b-2c = low+h*2^256, h in {-3,-2,-1,0}, for all 256-bit inputs.
-    // low+h*K lies in (-3K,2^256). A boundary flag triggers exact chain replay.
+    /* a-b-2c = low+h*2^256, h in {-3,-2,-1,0}, for all 256-bit inputs. */
+    /* low+h*K lies in (-3K,2^256). A boundary flag triggers exact chain replay. */
     asm("{\n\t.reg .u64 h,t,ext;\n\t"
         "sub.cc.u64 %0,%5,%9;\n\t"
         "subc.cc.u64 %1,%6,%10;\n\t"

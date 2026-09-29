@@ -21,12 +21,12 @@ __device__ __constant__ uint32_t qsb_sc_zero = 0;   /* read by ld.const inside t
 #include "hit_filter_field_sc.cuh"
 #endif
 #else
-// Speculative filter only: these raw point results are never trusted for output.
+/* Speculative filter only: these raw point results are never trusted for output. */
 // Every proposed hit is recomputed with the unchanged guarded/exact recovery
-// before atomic publication. Lost tentative hits reduce the actual scored yield.
+/* before atomic publication. Lost tentative hits reduce the actual scored yield. */
 // Retain all inherited source notices and licenses.
-// Canonical parent arithmetic with delayed cold-path dispatch.
-// Preserve all inherited VanitySearch/GPL and point-chain attribution.
+/* Canonical parent arithmetic with delayed cold-path dispatch. */
+/* Preserve all inherited VanitySearch/GPL and point-chain attribution. */
 #pragma once
 
 
@@ -236,7 +236,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
 {
 #ifdef __CUDA_ARCH__
   if(DEFER_Y){
-    // One declared asm block; every guard is retained as a predicate until
+    /* One declared asm block; every guard is retained as a predicate until */
     // the point finishes. The enclosing chain still performs exact replay.
     asm(
         "{\n"
@@ -1783,16 +1783,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
   Load256(X1, T);                      // X3
 }
 
-// The seed-X3 opportunity is independently identified in fkiene PR338,
-// e532114a2b3bc9a86ef618238ee77631cbe15924. This implementation uses our
+/* The seed-X3 opportunity is independently identified in fkiene PR338, */
+/* e532114a2b3bc9a86ef618238ee77631cbe15924. This implementation uses our */
 // signed-quotient fold from ad4b6d1, with a retained boundary guard and the
 // unchanged exact whole-chain replay. Preserve all prior notices and licenses.
 __device__ __forceinline__ void qsb_filter_seed_x3(
     uint64_t *r,const uint64_t *a,const uint64_t *b,const uint64_t *c,uint32_t &bad){
 #ifdef __CUDA_ARCH__
     uint64_t r0,r1,r2,r3,high;
-    // a-b-2c = low+h*2^256, h in {-3,-2,-1,0}, for all 256-bit inputs.
-    // low+h*K lies in (-3K,2^256). A boundary flag triggers exact chain replay.
+    /* a-b-2c = low+h*2^256, h in {-3,-2,-1,0}, for all 256-bit inputs. */
+    /* low+h*K lies in (-3K,2^256). A boundary flag triggers exact chain replay. */
     asm("{\n\t.reg .u64 h,t,ext;\n\t"
         "sub.cc.u64 %0,%5,%9;\n\t"
         "subc.cc.u64 %1,%6,%10;\n\t"

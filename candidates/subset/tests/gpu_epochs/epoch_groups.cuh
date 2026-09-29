@@ -1,9 +1,9 @@
-// Incremental epoch producer. Epochs are enumerated in lexicographic order of their early
+/* Incremental epoch producer. Epochs are enumerated in lexicographic order of their early */
 // omission set (o1<...<o6); consecutive epochs share o1..o5 in runs of up to 131. The SHA-256
-// stream of an epoch is identical to that of its (o1..o5) "group" up to push o5, so the group's
+/* stream of an epoch is identical to that of its (o1..o5) "group" up to push o5, so the group's */
 // state (whole blocks + the partial block buffer) is computed once per group and each epoch only
 // hashes pushes o5+1..cut-1 minus o6 (about 7 instead of 21 compressions per epoch on a ranked run).
-// Output (mid, remW, early) is bit-identical to kernel_build_epochs for every epoch.
+/* Output (mid, remW, early) is bit-identical to kernel_build_epochs for every epoch. */
 #pragma once
 
 /* QSB_EPOCH_FAST (kill switch, default 1): two exact changes to the epoch producer, both pure

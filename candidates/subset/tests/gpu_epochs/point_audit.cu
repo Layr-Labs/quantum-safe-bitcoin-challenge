@@ -1,6 +1,6 @@
-// Audit the actual point chain against OpenSSL EC_POINT_mul.
+/* Audit the actual point chain against OpenSSL EC_POINT_mul. */
 // Includes the parent final-doubling witness and all old scalar edge cases.
-// Not a performance workload; unused record fields preserve fixture layout.
+/* Not a performance workload; unused record fields preserve fixture layout. */
 #define main qsb_candidate_main
 #ifndef QSB_POINT_TREE
 #define QSB_POINT_TREE "tree.cu"
@@ -30,7 +30,7 @@ int main(int argc,char**argv){
     if(!gpu_ok(cudaMalloc(&dc,cases.size()*sizeof(point_case))))return 2;
     if(!gpu_ok(cudaMemcpy(dc,cases.data(),cases.size()*sizeof(point_case),cudaMemcpyHostToDevice)))return 2;
     std::vector<unsigned> select;
-    // All deterministic edges and crafted doubling cases, plus fresh randoms.
+    /* All deterministic edges and crafted doubling cases, plus fresh randoms. */
     for(unsigned i=0;i<count;i++)if(i<(count>100000?count-100000:count) || i+2048>=count)select.push_back(i);
     cudaMalloc(&ds,select.size()*4);cudaMemcpy(ds,select.data(),select.size()*4,cudaMemcpyHostToDevice);
     uint64_t *dout;cudaMalloc(&dout,select.size()*128);

@@ -644,7 +644,7 @@ __device__ uint64_t BINOM_C[151][10];
  * tree_audit.cu's direct-root kernels (audit_warp_roots, audit_bounded_status) fill the table themselves.
  * 0 = the base byte for byte (the constant-bank lookups). */
 #ifndef QSB_ROOT_LUT_SMEM
-#define QSB_ROOT_LUT_SMEM 0
+#define QSB_ROOT_LUT_SMEM 1   /* divstep table read from shared memory (pool part; unpriced) */
 #endif
 #if QSB_ROOT_LUT_SMEM != 0 && QSB_ROOT_LUT_SMEM != 1
 #error "QSB_ROOT_LUT_SMEM must be 0 or 1"
@@ -895,7 +895,7 @@ __device__ uint64_t BINOM_C[151][10];
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
 #ifndef QSB_DIVSTEP_LOOKAHEAD
-#define QSB_DIVSTEP_LOOKAHEAD 0
+#define QSB_DIVSTEP_LOOKAHEAD 1   /* on: same switch value as terrapinelf's public 9b0c36bb; exact by the replay above */
 #endif
 #if QSB_DIVSTEP_LOOKAHEAD < 0 || QSB_DIVSTEP_LOOKAHEAD > 1
 #error "QSB_DIVSTEP_LOOKAHEAD must be 0 or 1"

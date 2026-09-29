@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 // Exact parity-window core ported from public PR885 (EvanYan1024, 3e166ba4).
-// Subset adapter: fallback preserves the inherited speculative qsb_fmul/qsb_fadd path.
+/* Subset adapter: fallback preserves the inherited speculative qsb_fmul/qsb_fadd path. */
 #pragma once
 #ifndef QSB_K2S_PARITY_WINDOW
 #define QSB_K2S_PARITY_WINDOW 1
@@ -260,7 +260,7 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     // Only bit 32 and bits 0..31 of q are used. u64 overflow is harmless.
     const uint64_t q=top+977ULL*(top>>32)+x7+(beta[3]>>32);
     // Unknown carries change q by at most 1958. Exclude the final all-one
-    // limb too, so the baseline sum-parity exceptional correction cannot fire.
+    /* limb too, so the baseline sum-parity exceptional correction cannot fire. */
     if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u) {
         return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(q>>32)^neg)&1u);
     }

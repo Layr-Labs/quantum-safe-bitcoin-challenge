@@ -13,7 +13,7 @@
  * _ModInv and 28,155 with this form (-29.4%); 85-90% of what remains is the ~190-iteration
  * divstep decision chain, which is serial in any design. */
 #pragma once
-// Derived from i34-9 public PR216; bounded and wide-top-word changes below.
+/* Derived from i34-9 public PR216; bounded and wide-top-word changes below. */
 #ifndef ZI_ROOT_MAX_BATCHES
 #define ZI_ROOT_MAX_BATCHES (2*QSB_ROOT_MAX_BATCHES)
 #endif
@@ -54,7 +54,7 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 #else
 #define ZI_CONST static const
 #endif
-// Six-step extension of the PR296 table-driven divstep mechanism.
+/* Six-step extension of the PR296 table-driven divstep mechanism. */
 // Odd rescaling preserves the decision sequence: index by g/f modulo64.
 // For odd f, f*(2-f*f) is its inverse modulo64. Five exact groups give30 steps.
 #define ZI_BY_LUT_INIT { \
@@ -331,7 +331,7 @@ ZI_DEV void zi_row_ip(uint32_t *X,const uint32_t *Y,int32_t a,int32_t b,uint32_t
     acc+=(int64_t)a*(int64_t)(int32_t)X[8]+(int64_t)b*(int64_t)(int32_t)Y[8]+(int64_t)m;
     X[8]=(uint32_t)acc;
     for(int i=0;i<8;i++)X[i]=(X[i]>>ZI_B)|(X[i+1]<<(32-ZI_B));
-    // Keep the full signed top accumulator until after the delayed shift.
+    /* Keep the full signed top accumulator until after the delayed shift. */
     // R/S may have grown to 32*p at the cap; pre-shift rows need >288 bits.
     X[8]=(uint32_t)(acc>>ZI_B);
 }
@@ -381,7 +381,7 @@ ZI_DEV bool zi_inverse_quad_bounded(uint64_t *R,int lane){
     unsigned batches=0;
     int32_t delta=1;
     while(true){
-        // Uniform across all four lanes; original R is still unchanged.
+        /* Uniform across all four lanes; original R is still unchanged. */
         if(batches==ZI_ROOT_MAX_BATCHES)return false;
         ++batches;
 #if QSB_INVERSE_COLUMNS

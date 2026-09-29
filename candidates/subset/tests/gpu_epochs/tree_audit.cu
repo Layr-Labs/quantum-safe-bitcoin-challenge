@@ -83,7 +83,7 @@ int main(){
     BIGNUM *p=nullptr,*a=BN_new(),*b=BN_new(),*r=BN_new();
     BN_hex2bn(&p,"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
     std::vector<uint64_t> inputs(n*8),results(n*15),expected(n*5);
-    // Cartesian edge cases include p, p+1, 2^256-1 and near-boundary products.
+    /* Cartesian edge cases include p, p+1, 2^256-1 and near-boundary products. */
     std::vector<BIGNUM*> edges;
     for(int j=0;j<8;j++){
         BIGNUM *v=BN_new();

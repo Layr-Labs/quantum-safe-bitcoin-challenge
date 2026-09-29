@@ -1,4 +1,4 @@
-// Exact-source field guard and fallback audit. Diagnostic only.
+/* Exact-source field guard and fallback audit. Diagnostic only. */
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <stdio.h>

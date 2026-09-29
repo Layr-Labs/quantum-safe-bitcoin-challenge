@@ -1,3 +1,14 @@
+# Subset: the promoted e6715658 package with four small changes
+
+Parent: the subset record `e6715658` (kshitij-hash, upstream commit `7813ffe1b7442f4a998e4978834d9ce2bd4559c6`, tree
+`8bf5a58910e9e719568d31940b0bd5acd1d7b5cf`). Four switches on, each first submitted publicly by others:
+`QSB_DIVSTEP_LOOKAHEAD` 1 (device; terrapinelf 9b0c36bb), `QSB_CPU_SHA_BRIDGE` 1 (host; jacklightChen 606c4cf8),
+`QSB_CPU_EPOCH_CONTIG` 1 with `QSB_CPU_EPOCH_CAP` (host; cefika 538d7362) and `QSB_CPU_MRGS` 1 (host; ipaladmin 182a9eb7).
+The two `CpuGrindSubset.h` changes merge without conflict. One more device switch, `QSB_ROOT_LUT_SMEM` 1 (the divstep table read from shared memory; HX-subset), is on. The native sm_89 image is rebuilt with `build_carrier.sh`
+(CUDA 12.8.93). All notices of the parent package stay below.
+
+---
+
 # Subset: exact device cuts, a one-form chain gather and co-grinder scheduling on 521075fe
 
 This package starts from the subset record `521075fe` (commit `46b24eb`) and is not rebased onto the later record
