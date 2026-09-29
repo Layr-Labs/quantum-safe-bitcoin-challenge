@@ -6545,7 +6545,12 @@ int main(int argc, char **argv) {
         if (g_stop_signal && qhp::g_hp) {   /* H9: producers joined and the GPU idle (cudaFreeHost waits for the device): the pinned ring now */
             struct timespec fa, fb; clock_gettime(CLOCK_MONOTONIC, &fa);
             for (auto &sl : qhp::g_hp->slot) {
-                for (int p = 0; p < sl.npieces_ok; p++) { cudaFreeHost(sl.ep[p]); cudaFreeHost(sl.fi[p]); sl.ep[p] = nullptr; sl.fi[p] = nullptr; }
+                for (int p = 0; p < sl.npieces_ok; p++) {
+#if QSB_HP_DEAD_DESCRIPTORS
+                    if (sl.ep[p])
+#endif
+                    cudaFreeHost(sl.ep[p]); cudaFreeHost(sl.fi[p]); sl.ep[p] = nullptr; sl.fi[p] = nullptr;
+                }
                 sl.npieces_ok = 0;
             }
             (void)cudaGetLastError();
