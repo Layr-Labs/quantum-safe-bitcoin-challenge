@@ -8,4 +8,6 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* W01 host-only experiment: split the four longest MRG IFMA chains into two accumulators. */
+#define QSB_CPU_MRGS 1
 #include "tests/gpu_epochs/tree.cu"
