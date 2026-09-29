@@ -8,4 +8,6 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Host-only experiment from the public PR2441 mechanism: leave batch construction to the existing GPU producers, freeing CPU time for the co-grinder. */
+#define QSB_HOST_PRODUCERS 0
 #include "tests/gpu_epochs/tree.cu"
