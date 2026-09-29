@@ -6,6 +6,9 @@
 #define QSB_REMEASURE_TAG_0921R3 1 /* no-op: exact-source PR897 remeasurement */
 #endif
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
+#ifndef QSB_SC_OPS
+#define QSB_SC_OPS 28  /* BABYDOV: spill-free operand schedule selected by full valid-mask CUDA 12.8 sweep */
+#endif
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
 #include "tests/gpu_epochs/tree.cu"
