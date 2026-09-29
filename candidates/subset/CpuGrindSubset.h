@@ -237,6 +237,15 @@
 #define QSB_CPU_TAB_CAP_MB 4096
 #endif
 #ifndef QSB_CPU_TAB_FRAC
+#ifndef QSB_CPU_ADAPT
+#define QSB_CPU_ADAPT 1          /* M-A 2026-09-29: measured window-count probe at startup (see the chooser in start's setup thread) */
+#endif
+#ifndef QSB_CPU_ADAPT_S
+#define QSB_CPU_ADAPT_S 0.5     /* seconds of real grinding per probed geometry */
+#endif
+#ifndef QSB_CPU_ADAPT_EDGE
+#define QSB_CPU_ADAPT_EDGE 0.04  /* a smaller table must beat the incumbent by this much to be re-probe-noise-proof */
+#endif
 #define QSB_CPU_TAB_FRAC 0.25
 #endif
 #ifndef QSB_CPU_VBUILD
@@ -429,7 +438,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 
 namespace qcpu {
-static const int NWMAX = 16;
+static const int NWMAX = 18;   /* M-A 2026-09-29: 17/18-window tables (19/12 MiB) fit small LLCs */
 #if QCPU_PFQ
 /* (QSB_CPU_PFSPREAD bit 0): the hashing phase's row prefetches, queued (hpf_rows8) and issued a few at a time between
  * SHA-256 blocks (qsha_x4p), so that at most a couple of L2-DTLB-missing prefetches are in flight at once. */
@@ -2375,6 +2384,9 @@ struct Ctx {
     uint64_t dev_limit = 0;         /* dev only (never in a ranked build): each worker stops once this many candidates are done */
     std::atomic<int> dev_live{0};
 #endif
+    /* M-A 2026-09-29: measured window-count probe. probe_deadline != 0: each worker stops at the batch boundary
+     * once CLOCK_MONOTONIC passes it (probe mode of the ranked build; the mini-rate the chooser measures). */
+    double probe_deadline = 0;   /* ranked-build field: the chooser's bounded probe (QSB_CPU_ADAPT) */
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
     bool kh16 = false;              /* QSB_CPU_KH16 key hashes (8-lane path with SHA-NI, AVX-512VL and the C fold) */
@@ -3093,6 +3105,10 @@ static void worker(Ctx *c, int tid) {
     };
     for (;;) {
         if (c->stop.load(std::memory_order_relaxed)) return;   /* H9: stop_unmap (every earlier batch's hits are published) */
+        if (c->probe_deadline > 0) {                  /* M-A: the chooser's probe (ranked build too) */
+            struct timespec tp; clock_gettime(CLOCK_MONOTONIC, &tp);
+            if (tp.tv_sec + 1e-9 * tp.tv_nsec >= c->probe_deadline) { c->dev_live--; return; }
+        }
 #ifdef QSB_CPU_DEVBENCH
         if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
 #endif
@@ -3610,6 +3626,64 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
             tab_ok = table_check(*c);
         }
         if (!tab_ok) { printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
+#if QSB_CPU_ADAPT
+        /* M-A 2026-09-29: measured window-count probe (ranked build). Probes the built geometry against the
+         * alternates by running the real worker path under a short deadline, then keeps the fastest table.
+         * Skipped when QSB_CPU_NW forces a geometry or the probe is disabled. Cost: about one table rebuild
+         * per alternate plus QSB_CPU_ADAPT_S seconds of grinding each (defaults below). */
+        if (!getenv("QSB_CPU_NW") && !getenv("QSB_CPU_ADAPT_OFF")) {
+            struct timespec ta, tb; clock_gettime(CLOCK_MONOTONIC, &ta);
+            const double ps = getenv("QSB_CPU_ADAPT_S") ? atof(getenv("QSB_CPU_ADAPT_S")) : (double)QSB_CPU_ADAPT_S;
+            int alts[4] = {17, 16, 15, 12}, best_nw = c->g.nw;
+            double best_rate = -1;
+            auto mini = [&](void) -> double {
+                const uint64_t c0 = c->cand.load(std::memory_order_relaxed);
+                struct timespec tp; clock_gettime(CLOCK_MONOTONIC, &tp);
+                c->probe_deadline = tp.tv_sec + 1e-9 * tp.tv_nsec + ps;
+                c->dev_live = nth;
+                for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
+                while (c->dev_live.load() > 0) usleep(2000);
+                c->probe_deadline = 0;                    /* M-A: a later spawn must never see a stale deadline */
+                const double dt = ps + 0.05;
+                return (double)(c->cand.load(std::memory_order_relaxed) - c0) / dt;
+            };
+            mini();                                     /* warmup: the first pass pays page-fault noise */
+            best_rate = mini();                      /* the incumbent (built, checked) stays mapped throughout */
+            for (int k = 0; k < 4; k++) {
+                const int a = alts[k];
+                if (a == c->g.nw) continue;
+                /* probe alternate a in a side table: the incumbent's mapping is untouched */
+                const Geo ginc = c->g;
+                pt *tinc = c->table; const pt *twinc[NWMAX]; for (int i = 0; i < NWMAX; i++) twinc[i] = c->tw[i];
+                void *minc = c->table_map; const size_t binc = c->table_map_bytes;
+                c->table_map = nullptr; c->g = geo_make(a, true);
+                bool ok = table_alloc(*c);
+                if (ok) { build_table(*c, fax, fay, nth); ok = table_check(*c); }
+                double r = -1;
+                if (ok) { mini(); r = mini(); }       /* warmup, then the measured pass */
+                table_free(*c);                        /* side table released */
+                c->g = ginc; c->table = tinc; for (int i = 0; i < NWMAX; i++) c->tw[i] = (pt *)twinc[i];
+                c->table_map = minc; c->table_map_bytes = binc;   /* the incumbent returns without a rebuild */
+                if (r > best_rate * (1.0 + (double)QSB_CPU_ADAPT_EDGE)) { best_rate = r; best_nw = a; }
+            }
+            if (best_nw != c->g.nw) {                 /* a smaller table won: build it beside, then swap */
+                const Geo ginc = c->g;
+                pt *tinc = c->table; const pt *twinc[NWMAX]; for (int i = 0; i < NWMAX; i++) twinc[i] = c->tw[i];
+                void *minc = c->table_map; const size_t binc = c->table_map_bytes;
+                c->table_map = nullptr; c->g = geo_make(best_nw, true);
+                if (!table_alloc(*c) || !({ build_table(*c, fax, fay, nth); table_check(*c); })) {
+                    c->g = ginc; c->table = tinc; for (int i = 0; i < NWMAX; i++) c->tw[i] = (pt *)twinc[i];
+                    c->table_map = minc; c->table_map_bytes = binc;   /* fall back to the incumbent */
+                    best_nw = ginc.nw; best_rate = -1;
+                } else {
+                    munmap(minc, binc);               /* the incumbent's mapping is released */
+                }
+            }
+            clock_gettime(CLOCK_MONOTONIC, &tb);
+            printf("  CPU co-grind: adaptive window count %d (probe %.2f Mc/s)\n", best_nw, best_rate / 1e6);
+            fflush(stdout);
+        }
+#endif
         clock_gettime(CLOCK_MONOTONIC, &t1);
 #if QSB_CPU_DIAG_EPOCH   /* default at file scope (package y2d: 0) */
         {   /* Zero-cost diagnostic. Every epoch of the co-grinder's walk is real work on patterns disjoint from
