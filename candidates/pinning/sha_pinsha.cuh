@@ -201,6 +201,66 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;\
     QSB_STEPL(15,b,c,d,e,f,g,h,a,base); \
 } while (0)
 
+/* The same rolling step with the constant-bank zero addend of QSB_WMIX_Z: schedule word j
+ * is formed just before the round that reads it, with QSB_WMIX_Z's terms in QSB_WMIX_Z's
+ * order. Rounds 32..62 of a compression as steps, then the round-63 word: every w[] value
+ * and every round input equals the QSB_WMIX_Z / RND16L(32) / QSB_WMIX_Z / RND15L(48) form. */
+#define QSB_STEPZ(j, a,b,c,d,e,f,g,h, base) do { \
+    w[j] += s1(w[((j)+14)&15]) + w[((j)+9)&15] + s0(w[((j)+1)&15]) + QSB_Z; \
+    QSB_RL(a,b,c,d,e,f,g,h,qsb_klit((base)+(j)) + w[j]); \
+} while (0)
+#define QSB_STEPZ15(base) do { \
+    QSB_STEPZ(0,a,b,c,d,e,f,g,h,base); \
+    QSB_STEPZ(1,h,a,b,c,d,e,f,g,base); \
+    QSB_STEPZ(2,g,h,a,b,c,d,e,f,base); \
+    QSB_STEPZ(3,f,g,h,a,b,c,d,e,base); \
+    QSB_STEPZ(4,e,f,g,h,a,b,c,d,base); \
+    QSB_STEPZ(5,d,e,f,g,h,a,b,c,base); \
+    QSB_STEPZ(6,c,d,e,f,g,h,a,b,base); \
+    QSB_STEPZ(7,b,c,d,e,f,g,h,a,base); \
+    QSB_STEPZ(8,a,b,c,d,e,f,g,h,base); \
+    QSB_STEPZ(9,h,a,b,c,d,e,f,g,base); \
+    QSB_STEPZ(10,g,h,a,b,c,d,e,f,base); \
+    QSB_STEPZ(11,f,g,h,a,b,c,d,e,base); \
+    QSB_STEPZ(12,e,f,g,h,a,b,c,d,base); \
+    QSB_STEPZ(13,d,e,f,g,h,a,b,c,base); \
+    QSB_STEPZ(14,c,d,e,f,g,h,a,b,base); \
+} while (0)
+#define QSB_STEPZ_32_62() do { \
+    QSB_STEPZ15(32); \
+    QSB_STEPZ(15,b,c,d,e,f,g,h,a,32); \
+    QSB_STEPZ15(48); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z; \
+} while (0)
+/* QSB_DIGEST_WSTEP (kill switch, default 1): the SHA256d outer compression runs rounds 32..63
+ * with QSB_STEPZ_32_62 (each schedule word formed beside its round) instead of two whole-block
+ * QSB_WMIX_Z passes. Issue order only; 0 restores the whole-block form. */
+#ifndef QSB_DIGEST_WSTEP
+#define QSB_DIGEST_WSTEP 0
+#endif
+#if QSB_DIGEST_WSTEP && !QSB_DIGEST_WMIX_Z
+#error "QSB_DIGEST_WSTEP is the QSB_DIGEST_WMIX_Z schedule (constant-bank zero addend) in step form"
+#endif
+/* Rounds 32..62 as QSB_STEPL steps (plain four-input schedule sums, no constant-bank zero),
+ * then the round-63 word. w[j] += s1(w[j+14]) + w[j+9] + s0(w[j+1]) in place and in index
+ * order is the recurrence W_t = s1(W_t-2) + W_t-7 + s0(W_t-15) + W_t-16 that the whole-block
+ * pass computes, so every schedule word and every round input is the same 32-bit value; the
+ * register roles are RND16L(32) / RND15L(48)'s. */
+#define QSB_STEPL_32_62() do { \
+    QSB_INTERLEAVED16L(32); \
+    QSB_INTERLEAVED15L(48); \
+    w[15] += s1(w[13]) + w[8] + s0(w[0]); \
+} while (0)
+/* QSB_DIGEST_RSTEP (kill switch, default 0): the SHA256d outer compression runs rounds 32..63
+ * with QSB_STEPL_32_62, each schedule word formed beside the round that reads it, with the
+ * plain sums. It takes precedence over QSB_DIGEST_WSTEP and QSB_DIGEST_WMIX_Z for these rounds
+ * only; rounds 16..31 are unchanged. Exact: QSB_Z is the constant-bank zero, so dropping it
+ * changes no sum. Off: its 4090 reading on the rolled-tail tree was below zero, so the outer
+ * compression keeps the crown's whole-block QSB_WMIX_Z passes. */
+#ifndef QSB_DIGEST_RSTEP
+#define QSB_DIGEST_RSTEP 0
+#endif
+
 /* Rounds 0 and 1 from the SHA-256 IV with message words W0, W1 (digest and pubkey
  * transforms). Round 1's Maj has two constant inputs: Maj(A1,IV0,IV1) =
  * (A1 & (IV0^IV1)) + (IV0&IV1); the constant rides in t1 and leaves again
@@ -270,6 +330,11 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     }
 
     QSB_RND16L(16);
+#if QSB_DIGEST_RSTEP
+    QSB_STEPL_32_62();
+#elif QSB_DIGEST_WSTEP
+    QSB_STEPZ_32_62();
+#else
 #if QSB_DIGEST_WMIX_Z
     /* Outer-digest schedule with the constant-bank zero addend: the four-input sums become
      * five-input, so ptxas emits two IADD3 instead of IADD3 plus a multiply-pipe IMAD.IADD. */
@@ -284,6 +349,7 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     WMIX();
 #endif
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
     out[1] = QSB_IV1 + b;
     out[2] = QSB_IV2 + c;
@@ -419,11 +485,13 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 } while (0)
 #endif
 
-/* QSB_FIN_IVFOLD (kill switch): rounds 2 and 3 of the pubkey hash run with an IV word in the
- * h role (IV5, then IV4). t1 = h + (K + W) was two multiply-pipe adds with h a literal; the
- * literal now rides in the immediate of the K + W add: t1 = W*one + (K + IV). Same sum mod 2^32. */
+/* QSB_FIN_IVFOLD (kill switch, default 1): rounds 2 and 3 of the pubkey hash run with an IV word
+ * in the h role (IV5, then IV4). t1 = h + (K + W) was two multiply-pipe adds with h a literal; the
+ * literal now rides in the immediate of the K + W add: t1 = W*one + (K + IV). Same sum mod 2^32.
+ * One multiply-pipe add fewer in each of the two rounds, for both recovered keys. 0 = the crown's
+ * QSB_RL_F rounds. */
 #ifndef QSB_FIN_IVFOLD
-#define QSB_FIN_IVFOLD 0
+#define QSB_FIN_IVFOLD 1
 #endif
 /* QSB_FIN_W8S0 (kill switch): s0 of the padded last message word W8 = (b << 24) | 0x800000
  * (b = the low byte of x) from its 8 live bits; see the W23 step of _SHA256Pubkey33H0. */

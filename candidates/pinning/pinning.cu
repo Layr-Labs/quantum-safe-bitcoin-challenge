@@ -6,7 +6,9 @@
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
-#define QSB_GREEN 20
+#ifndef QSB_GREEN
+#define QSB_GREEN 22 /* finish green partition: 22 SMs (8 shared with prepare), the measured +0.21% split; 20 = the crown's */
+#endif
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
@@ -2586,6 +2588,17 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
  * operand, and a regrouped uniform term would pull W1 and its schedule back to per-lane code).
  * Every value equals the Q transform's: the same 32-bit sums in another association. */
 #define QSB_UB(x) ((x) ^ QSB_Z)
+#ifndef QSB_TAIL_WSTEP
+#define QSB_TAIL_WSTEP 1
+#endif
+/* QSB_TAIL_PLAIN (kill switch, default 0; needs QSB_TAIL_WSTEP): the rolled tail steps use the
+ * plain four-input schedule sums of QSB_STEPL_32_62 instead of QSB_STEPZ_32_62's constant-bank
+ * zero addend. pin_zero_add == 0, so every schedule word and round input is the same 32-bit
+ * value; ptxas may put the two-input adds on either pipe. Off: its 4090 reading on the parked
+ * tree was -0.23 %, so the tail keeps the QSB_STEPZ form. */
+#ifndef QSB_TAIL_PLAIN
+#define QSB_TAIL_PLAIN 0
+#endif
 __device__ __forceinline__ void _SHA256TransformFastTail11U(
     uint32_t state[8], uint32_t lane, uint32_t u0, uint32_t w1, uint32_t w2, const qsb_tail_pre &tp)
 {
@@ -2655,10 +2668,20 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
     }
 
     QSB_RND16L(16);
+#if QSB_TAIL_WSTEP && QSB_TAIL_PLAIN
+    /* QSB_TAIL_PLAIN: rounds 32..63 as rolling steps with the plain schedule sums. */
+    QSB_STEPL_32_62();
+#elif QSB_TAIL_WSTEP
+    /* QSB_TAIL_WSTEP: each schedule word of rounds 32..63 is formed just before its round
+     * (QSB_STEPZ_32_62: same sums, same order of terms); 0 = the crown's whole-block
+     * QSB_WMIX_Z form. */
+    QSB_STEPZ_32_62();
+#else
     QSB_WMIX_Z();
     QSB_RND16L(32);
     QSB_WMIX_Z();
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
