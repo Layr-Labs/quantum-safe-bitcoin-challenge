@@ -2,12 +2,23 @@
 /* Python-validated integration, no native compilation or GPU execution. Four fields per warp. */
 /* Include after CyclicField.cuh for its full-carry normalize8 helper. */
 #pragma once
+#ifndef QSB_PREFIX_FINISH_UNIFORM
+#define QSB_PREFIX_FINISH_UNIFORM 1
+#endif
+#if QSB_PREFIX_FINISH_UNIFORM != 0 && QSB_PREFIX_FINISH_UNIFORM != 1
+#error "QSB_PREFIX_FINISH_UNIFORM must be 0 or 1"
+#endif
 namespace qsb_prefix_cyclic_research {
 constexpr unsigned full=0xffffffffu;
 
 /* Exactly add cf*(2^32+977). cf<=1. When cf==1, the caller proves t<2^65, */
 // so word2<=1 and no propagation beyond word2 is possible. cf==0 is identity.
 __device__ __forceinline__ uint32_t finish3(uint32_t t,uint32_t cf,unsigned lane){
+#if QSB_PREFIX_FINISH_UNIFORM
+    // One uniform decision across the full participating warp. If any field
+    // needs correction, ALL lanes execute the inherited full-mask shuffles.
+    if(!__any_sync(full,cf!=0u))return t;
+#endif
     const unsigned d=lane&7u;
     const uint32_t s0=t+(d==0?977u*cf:0u);
     const uint32_t c0=__shfl_sync(full,(uint32_t)(s0<t),0,8);
