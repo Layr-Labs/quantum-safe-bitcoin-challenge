@@ -3,7 +3,7 @@
 #define QSB_SUBRING 6
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (48u<<20)
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #define QSB_GREEN 20
@@ -5393,7 +5393,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * EC stage chosen by cpuid and timing, with AVX2/MULX/C fallbacks) in place of cpu_cogrind.h;
  * same sequences, same exact gate, same qcg:: interface. 0 = the base's co-grinder. */
 #ifndef QSB_CPU_GRIND_V3
-#define QSB_CPU_GRIND_V3 1
+#define QSB_CPU_GRIND_V3 0
 #endif
 /* QSB_CG_HIGHFOLD (host only; HY7 port of jacklightChen fb1105b1, 27 Sep): 1 = the V3 co-grinder may
  * pick the "highfold" 17 GiB table (the A-folded unsigned window moved to bits 231..255, nine signed
@@ -5401,7 +5401,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * host and cgroup report >= 32 GiB available, and builds tables in 65,536-entry segments of 4,096-point
  * rows. Every CPU nomination still passes the exact host gate. 0 = the base co-grinder byte for byte. */
 #ifndef QSB_CG_HIGHFOLD
-#define QSB_CG_HIGHFOLD 1
+#define QSB_CG_HIGHFOLD 0
 #endif
 /* QSB_CG_HETERO (host only; CG5, 27 Sep): 1 = when the V3 co-grinder runs its AVX2 EC stage on a host
  * without IFMA, pin each worker to one CPU and, after all workers run, time the SMT split (AVX2 on each
