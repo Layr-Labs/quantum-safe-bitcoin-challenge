@@ -10,14 +10,7 @@
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
-#if QSB_SHA_SCHED_V4
-/* QSB_SHA_SCHED_V4: W+K word r of second-block slot s at [r/4][s].{x,y,z,w}, so a block's 8 rounds
- * read two 16 B words per lane instead of eight 4 B words; same 32 KiB, same values. */
-__device__ uint4 QSB_WINDOW_SECOND[16][QSB_SE_PER_EPOCH];
-#define QSB_WSEC_V4(r, slot) (QSB_WINDOW_SECOND[(r) >> 2][slot])
-#else
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
-#endif
 __device__ uint32_t QSB_WINDOW_CLASS[QSB_SE_PER_EPOCH];
 __device__ uint32_t QSB_FIRST_CLASS[QSB_SE_PER_EPOCH];
 /* Public PR950: lossless (first_slot << 16) | second_slot. */
@@ -101,19 +94,7 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
 #endif
     if (QSB_TO_SYMBOL(QSB_WINDOW_CLASS,classes,sizeof(classes))!=cudaSuccess) return 1;
     if (QSB_TO_SYMBOL(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
-#if QSB_SHA_SCHED_V4
-    {   /* QSB_SHA_SCHED_V4: the same words in the [r/4][slot].{x,y,z,w} layout */
-        static uint4 second4[16][QSB_SE_PER_EPOCH];
-        for(int r=0;r<64;r+=4)
-            for(int slot=0;slot<QSB_SE_PER_EPOCH;slot++){
-                second4[r/4][slot].x=second[r][slot];   second4[r/4][slot].y=second[r+1][slot];
-                second4[r/4][slot].z=second[r+2][slot]; second4[r/4][slot].w=second[r+3][slot];
-            }
-        return QSB_TO_SYMBOL(QSB_WINDOW_SECOND,second4,sizeof(second4))==cudaSuccess?0:1;
-    }
-#else
     return QSB_TO_SYMBOL(QSB_WINDOW_SECOND,second,sizeof(second))==cudaSuccess?0:1;
-#endif
 }
 
 /* First-block states for every (epoch, class) of a launch, computed as its own
@@ -169,17 +150,6 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
     #pragma unroll 1
     for (int r=0; r<64; r+=8) {
-#if QSB_SHA_SCHED_V4
-        const uint4 wa=QSB_WSEC_V4(r,slot), wb=QSB_WSEC_V4(r+4,slot);
-        S2Round(a,b,c,d,e,f,g,h,0,wa.x);
-        S2Round(h,a,b,c,d,e,f,g,0,wa.y);
-        S2Round(g,h,a,b,c,d,e,f,0,wa.z);
-        S2Round(f,g,h,a,b,c,d,e,0,wa.w);
-        S2Round(e,f,g,h,a,b,c,d,0,wb.x);
-        S2Round(d,e,f,g,h,a,b,c,0,wb.y);
-        S2Round(c,d,e,f,g,h,a,b,0,wb.z);
-        S2Round(b,c,d,e,f,g,h,a,0,wb.w);
-#else
         S2Round(a,b,c,d,e,f,g,h,0,QSB_WINDOW_SECOND[r][slot]);
         S2Round(h,a,b,c,d,e,f,g,0,QSB_WINDOW_SECOND[r+1][slot]);
         S2Round(g,h,a,b,c,d,e,f,0,QSB_WINDOW_SECOND[r+2][slot]);
@@ -188,7 +158,6 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
         S2Round(d,e,f,g,h,a,b,c,0,QSB_WINDOW_SECOND[r+5][slot]);
         S2Round(c,d,e,f,g,h,a,b,0,QSB_WINDOW_SECOND[r+6][slot]);
         S2Round(b,c,d,e,f,g,h,a,0,QSB_WINDOW_SECOND[r+7][slot]);
-#endif
     }
     state[0]+=a;state[1]+=b;state[2]+=c;state[3]+=d;
     state[4]+=e;state[5]+=f;state[6]+=g;state[7]+=h;
@@ -266,18 +235,6 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     #pragma unroll 1
 #endif
     for(int r=0;r<64;r+=8){
-#if QSB_SHA_SCHED_V4
-        /* QSB_SHA_SCHED_V4: two 16 B loads carry the 8 rounds' W+K words; the same words in the same order */
-        const uint4 wa=QSB_WSEC_V4(r,slot), wb=QSB_WSEC_V4(r+4,slot);
-        {const uint32_t w=wa.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-        {const uint32_t w=wa.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-        {const uint32_t w=wa.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-        {const uint32_t w=wa.w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-        {const uint32_t w=wb.x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-        {const uint32_t w=wb.y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-        {const uint32_t w=wb.z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-        {const uint32_t w=wb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-#else
         {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+2][slot];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
@@ -286,71 +243,8 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         {const uint32_t w=QSB_WINDOW_SECOND[r+5][slot];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+6][slot];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-#endif
     }
     QSB_PAIR_STATE_ADD();
-#if QSB_SHA_CONST_IV
-    /* QSB_SHA_CONST_IV: the four constant blocks on one induction variable. q indexes the 16 B rows
-     * of QSB_CONST_SCHEDULE viewed as uint4[64] (block b, rounds r..r+3 at q = 16 b + r/4) and runs on across
-     * the block boundaries, so the inner loop needs no block term in its address (the base LEA and IMAD per
-     * 8 rounds go) and the block loop needs no counter of its own. Same words, same rounds, same order. */
-    {
-        /* The constant-bank byte address itself is the induction variable (a 32-bit register; LLVM's loop
-         * strength reduction otherwise splits a pointer walk into a trip counter plus an index): kp walks the
-         * 64 rows, 32 B per 8 rounds, and the loops end on its value. */
-        uint32_t kp, kw0,kw1,kw2,kw3,kw4,kw5,kw6,kw7;
-        asm("mov.u32 %0, QSB_CONST_SCHEDULE;" : "=r"(kp));
-        const uint32_t kall=kp+1024u;
-/* the step as asm too, so LLVM cannot re-derive the walk as a trip counter plus an index */
-#define QSB_R2B_KSTEP() asm("add.u32 %0, %0, 32;" : "+r"(kp))
-#define QSB_R2B_KLOAD() asm("ld.const.v4.u32 {%0,%1,%2,%3}, [%8];\n\tld.const.v4.u32 {%4,%5,%6,%7}, [%8+16];" \
-            : "=r"(kw0),"=r"(kw1),"=r"(kw2),"=r"(kw3),"=r"(kw4),"=r"(kw5),"=r"(kw6),"=r"(kw7) : "r"(kp))
-        #pragma unroll 1
-        do{
-#if !QSB_SHA_CONST_PEEL
-            QSB_PAIR_STATE_LOAD();
-#endif
-            uint32_t kend; asm("add.u32 %0, %1, 256;" : "=r"(kend) : "r"(kp));
-#if QSB_SHA_CONST_PEEL
-            /* QSB_SHA_CONST_PEEL: rounds 0..7 of the block read the saved state (stateA/stateB) and write the
-             * working registers, so the 16 working-state copies per block per pair go; costs one more
-             * 8-round body of code. */
-            {
-                QSB_R2B_KLOAD();
-                uint32_t pa0=stateA[0],pb0=stateA[1],pc0=stateA[2],pd0=stateA[3],pe0=stateA[4],pf0=stateA[5],pg0=stateA[6],ph0=stateA[7];
-                uint32_t pa1=stateB[0],pb1=stateB[1],pc1=stateB[2],pd1=stateB[3],pe1=stateB[4],pf1=stateB[5],pg1=stateB[6],ph1=stateB[7];
-                {const uint32_t w=kw0;S2Round(pa0,pb0,pc0,pd0,pe0,pf0,pg0,ph0,0,w);S2Round(pa1,pb1,pc1,pd1,pe1,pf1,pg1,ph1,0,w);}
-                {const uint32_t w=kw1;S2Round(ph0,pa0,pb0,pc0,pd0,pe0,pf0,pg0,0,w);S2Round(ph1,pa1,pb1,pc1,pd1,pe1,pf1,pg1,0,w);}
-                {const uint32_t w=kw2;S2Round(pg0,ph0,pa0,pb0,pc0,pd0,pe0,pf0,0,w);S2Round(pg1,ph1,pa1,pb1,pc1,pd1,pe1,pf1,0,w);}
-                {const uint32_t w=kw3;S2Round(pf0,pg0,ph0,pa0,pb0,pc0,pd0,pe0,0,w);S2Round(pf1,pg1,ph1,pa1,pb1,pc1,pd1,pe1,0,w);}
-                {const uint32_t w=kw4;S2Round(pe0,pf0,pg0,ph0,pa0,pb0,pc0,pd0,0,w);S2Round(pe1,pf1,pg1,ph1,pa1,pb1,pc1,pd1,0,w);}
-                {const uint32_t w=kw5;S2Round(pd0,pe0,pf0,pg0,ph0,pa0,pb0,pc0,0,w);S2Round(pd1,pe1,pf1,pg1,ph1,pa1,pb1,pc1,0,w);}
-                {const uint32_t w=kw6;S2Round(pc0,pd0,pe0,pf0,pg0,ph0,pa0,pb0,0,w);S2Round(pc1,pd1,pe1,pf1,pg1,ph1,pa1,pb1,0,w);}
-                {const uint32_t w=kw7;S2Round(pb0,pc0,pd0,pe0,pf0,pg0,ph0,pa0,0,w);S2Round(pb1,pc1,pd1,pe1,pf1,pg1,ph1,pa1,0,w);}
-                a0=pa0;b0=pb0;c0=pc0;d0=pd0;e0=pe0;f0=pf0;g0=pg0;h0=ph0;
-                a1=pa1;b1=pb1;c1=pc1;d1=pd1;e1=pe1;f1=pf1;g1=pg1;h1=ph1;
-                QSB_R2B_KSTEP();
-            }
-#endif
-            #pragma unroll 1
-            do{
-                QSB_R2B_KLOAD();
-                {const uint32_t w=kw0;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-                {const uint32_t w=kw1;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-                {const uint32_t w=kw2;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-                {const uint32_t w=kw3;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-                {const uint32_t w=kw4;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-                {const uint32_t w=kw5;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-                {const uint32_t w=kw6;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-                {const uint32_t w=kw7;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-                QSB_R2B_KSTEP();
-            }while(kp!=kend);
-            QSB_PAIR_STATE_ADD();
-        }while(kp!=kall);
-#undef QSB_R2B_KLOAD
-#undef QSB_R2B_KSTEP
-    }
-#else
 #if QSB_PAIR_SHA_UNROLL_CONST
     #pragma unroll
 #else
@@ -364,19 +258,6 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         #pragma unroll 1
 #endif
         for(int r=0;r<64;r+=8){
-#if QSB_SHA_SCHED_V4
-            /* QSB_SHA_SCHED_V4: the 16 B-aligned constant rows read as two uint4 (LDC.128) per 8 rounds */
-            const uint4 ka=*reinterpret_cast<const uint4*>(&QSB_CONST_SCHEDULE[block][r]);
-            const uint4 kb=*reinterpret_cast<const uint4*>(&QSB_CONST_SCHEDULE[block][r+4]);
-            {const uint32_t w=ka.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-            {const uint32_t w=ka.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-            {const uint32_t w=ka.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-            {const uint32_t w=ka.w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-            {const uint32_t w=kb.x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-            {const uint32_t w=kb.y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-            {const uint32_t w=kb.z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-            {const uint32_t w=kb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-#else
             {const uint32_t w=QSB_CONST_SCHEDULE[block][r];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
             {const uint32_t w=QSB_CONST_SCHEDULE[block][r+1];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
             {const uint32_t w=QSB_CONST_SCHEDULE[block][r+2];S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
@@ -385,11 +266,9 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
             {const uint32_t w=QSB_CONST_SCHEDULE[block][r+5];S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
             {const uint32_t w=QSB_CONST_SCHEDULE[block][r+6];S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
             {const uint32_t w=QSB_CONST_SCHEDULE[block][r+7];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
-#endif
         }
         QSB_PAIR_STATE_ADD();
     }
-#endif /* QSB_SHA_CONST_IV */
 #undef QSB_PAIR_STATE_LOAD
 #undef QSB_PAIR_STATE_ADD
 }

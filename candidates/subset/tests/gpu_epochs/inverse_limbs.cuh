@@ -25,35 +25,6 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
     uint32_t x=odd?(rs?scaled:xl):(rs?0u:pl);
     int32_t xt=0,delta=1;
     unsigned batches=0;
-#if defined(QSB_DIVSTEP_LOOKAHEAD) && QSB_DIVSTEP_LOOKAHEAD
-    /* QSB_DIVSTEP_LOOKAHEAD (tree.cu): the decision for the first batch is peeled; inside the loop
-     * the next batch's decision is formed as soon as acc exists, from the new low limbs of f and g, and
-     * takes effect after the termination vote. Why the early low limb is exact (both QSB_INVERSE_BIAS
-     * forms): on digit 0 prev is 0, so low0 = (u32)acc0 and carry bit 0 is 0; carry bit 1 is gen0 =
-     * (low0 + 0 < low0) = 0, so low1 = (u32)biased1 + (u32)(biased0 >> 32) = (u32)acc1 + (u32)(acc0 >> 32)
-     * mod 2^32 (the two 2^31 biases cancel); rows f and g (rs = 0) take no Montgomery correction (m = 0),
-     * so their acc is final here. The new x on digit 0 is (low0 >> 30) | (low1 << 2). */
-    int32_t top,bottom;
-    {
-        const uint32_t f0=__shfl_sync(mask,x,0),g0=__shfl_sync(mask,x,8);
-        delta=zi_divstep30_column(delta,f0,g0,rs,&top,&bottom);
-    }
-    while(true){
-        if(batches==ZI_ROOT_MAX_BATCHES)return false;
-        ++batches;
-        const int32_t selected=odd?bottom:top;
-        const int32_t a=__shfl_sync(mask,selected,odd?24:0);
-        const int32_t b=__shfl_sync(mask,selected,odd?8:16);
-        const uint32_t y=__shfl_sync(mask,x,lane^8);
-        const int32_t yt=__shfl_sync(mask,xt,lane^8);
-        int64_t acc=(int64_t)a*(int64_t)x+(int64_t)b*(int64_t)y;
-        const uint32_t la_acc1=__shfl_down_sync(mask,(uint32_t)acc,1,8);
-        const uint32_t la_x0=((uint32_t)acc>>30)|((la_acc1+(uint32_t)(acc>>32))<<2);
-        const uint32_t la_f0=__shfl_sync(mask,la_x0,0),la_g0=__shfl_sync(mask,la_x0,8);
-        int32_t la_top,la_bottom;
-        const int32_t la_delta=zi_divstep30_column(delta,la_f0,la_g0,rs,&la_top,&la_bottom);
-        uint32_t m=__shfl_sync(mask,(uint32_t)acc,start);
-#else
     while(true){
         if(batches==ZI_ROOT_MAX_BATCHES)return false;
         ++batches;
@@ -67,7 +38,6 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         const int32_t yt=__shfl_sync(mask,xt,lane^8);
         int64_t acc=(int64_t)a*(int64_t)x+(int64_t)b*(int64_t)y;
         uint32_t m=__shfl_sync(mask,(uint32_t)acc,start);
-#endif
         m=(m*ZI_MM32)&ZI_MASK30&(0u-rs);
 #if QSB_INVERSE_CORRECTION
         // The sparse modulus correction is one unsigned 32x32 product.
@@ -120,9 +90,6 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         x=(low>>30)|(next<<2);
         xt=(int32_t)(high>>30);
         if((__ballot_sync(mask,x!=0 || xt!=0)&0x0000ff00u)==0)break;
-#if defined(QSB_DIVSTEP_LOOKAHEAD) && QSB_DIVSTEP_LOOKAHEAD
-        delta=la_delta;top=la_top;bottom=la_bottom;   /* the look-ahead becomes the next batch's decision */
-#endif
     }
     uint32_t out[9];
     #pragma unroll

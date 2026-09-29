@@ -404,28 +404,6 @@ __device__ __forceinline__ void q9_round_coeff(uint64_t out[2],uint64_t lo,uint6
 #error "QSB_GLV_HIGH15_HI must be 0 or 1"
 #endif
 
-/* QSB_GLV_RND (port of our pinning tree's QSB_GLV_GLUE bit 4, "rounding takes bit 31"): the same rounded
- * coefficient c = floor(P'/2^384) + bit 383 of P' mod 2^128 (P' = the high15 approximation of k*g, words
- * w11..w15 above bit 352) in fewer instructions; the exact-fallback band is unchanged.
- *  1: pinning's form. The rounding bit is the carry out of w11 + 2^31, fed straight into the 128-bit add
- *     of (w12..w15): no shift and mask of w11.
- *  2: the 2^31 rides in the diagonal-10 carry, so diagonal 11 accumulates w11 + 2^31 and its carry into
- *     diagonal 12 already holds the rounding bit: w12..w15 ARE floor((P' + 2^383)/2^384) and no rounding
- *     add is left. The band test w11 in [FALLBACK_WORD, 2^31) becomes w11' = w11 + 2^31 mod 2^32 in
- *     [2^31 + FALLBACK_WORD, 2^32): one unsigned compare. Diagonal 11 cannot overflow its 64-bit sum (the
- *     carry grows by 2^31 < 2^32; COEFF_BOUNDS needs carry < (2^32 - b7 - b6) * 2^32).
- * (ptxas places the 2^31 as one IADD3 + IMAD.X inside diagonal 11 and adds 3 moves at the fallback
- * join, so form 2 nets -3 slots per candidate, form 1 -2; writing the diagonal-10 sum as mad.hi + 32-bit
- * adds so the constant rides in an existing IADD3 gave -1 and +1)
- * Both forms give floor((P' + 2^383)/2^384) mod 2^128 on the same P' and the same band, so every
- * coefficient is bit-identical to the base for every k. 0 = q9_round_coeff byte for byte. */
-#ifndef QSB_GLV_RND
-#define QSB_GLV_RND 2
-#endif
-#if QSB_GLV_RND < 0 || QSB_GLV_RND > 2
-#error "QSB_GLV_RND must be 0, 1 or 2"
-#endif
-
 template<int WHICH,uint32_t FALLBACK_WORD>
 __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
     const uint32_t a3=(uint32_t)(k[1]>>32);
@@ -451,9 +429,6 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w10=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
 
 #endif
-#if QSB_GLV_RND == 2
-    carry+=0x80000000ULL;   /* + 2^383: diagonal 11 now accumulates w11 + 2^31 */
-#endif
 
     q9_high15_begin(&acc,&overflow,carry,QSB_GLV_PRODUCT(a4,b7),QSB_GLV_PRODUCT(a5,b6));
     q9_high15_add(&acc,&overflow,QSB_GLV_PRODUCT(a6,b5));
@@ -475,29 +450,12 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
-#if QSB_GLV_RND == 2
-    /* w11 here is w11 + 2^31 mod 2^32 and w12..w15 already carry the rounding bit. */
-    if(__builtin_expect(w11<0x80000000U+FALLBACK_WORD,1)){
-        out[0]=(uint64_t)w12|((uint64_t)w13<<32);
-        out[1]=(uint64_t)w14|((uint64_t)w15<<32);
-    }else{
-#else
     if(w11<FALLBACK_WORD || w11>=0x80000000U){
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
-#if QSB_GLV_RND == 1 && defined(__CUDA_ARCH__)
-        /* (hi:lo) + (w11 >> 31) mod 2^128: the carry out of w11 + 2^31 is bit 31 of w11. */
-        asm("{\n\t.reg .u32 t;\n\t"
-            "add.cc.u32 t,%4,0x80000000;\n\t"
-            "addc.cc.u64 %0,%2,0;\n\t"
-            "addc.u64 %1,%3,0;\n\t}"
-            : "=l"(out[0]),"=l"(out[1]) : "l"(lo),"l"(hi),"r"(w11));
-#else
         const uint64_t round=(uint64_t)(w11>>31);
         q9_round_coeff(out,lo,hi,round);
-#endif
     }else{
-#endif
         ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
         out[0]=r.x;out[1]=r.y;
     }
@@ -618,130 +576,6 @@ __device__ __forceinline__ void q9_glv_residual3(
  * carry and the parity of diagonal four both contribute to that top bit. */
 struct q9_u129 { uint64_t lo,hi;uint32_t top; };
 
-/* QSB_GLV_EO (from our pinning tree, QSB_GLV_GLUE bit 1): the same x*d mod 2^129 from column-pair
- * accumulators instead of row-wise multiply-adds, fewer carry-propagation instructions per product
- * (three products per GLV split). Bit-identical result. 0 = the row-wise form byte for byte. */
-#ifndef QSB_GLV_EO
-#define QSB_GLV_EO 1
-#endif
-#if QSB_GLV_EO != 0 && QSB_GLV_EO != 1
-#error "QSB_GLV_EO must be 0 or 1"
-#endif
-/* QSB_DECODE_CUT (bit mask; after HY16's QSB_DECODE_CUT in the pinning record b9736ce1 by kaankolcu,
- * GLVScalar.cuh:53-72 there): fewer ALU instructions on the GLV residual path.
- *  bit 2: q9_product129_rx without materialised carries: the column-3 carry of O0 and the two column-4 carries
- *         of E1 are added into O1 (words 3..4) straight off the carry flag as they are produced, instead of being
- *         captured into registers (cc3, cc4) and added in the final word chain. O1 is kept mod 2^64 and word 4
- *         matters only for bit 0, so the result is the same x*d mod 2^129 (bit 0 of top) for every input:
- *         bit-identical. The asm is the record's, which starts from the same QSB_GLV_EO form as this tree.
- *  bit 1: q9_zwalk_value forms v = z - s*(1 + D*2^100) mod 2^128 as two 32-bit adds, one on word 0 (z - s) and
- *         one on word 3 (-s*16D mod 2^32 = 0xA2A891A0 & -s), instead of a 128-bit add with carries. It differs from
- *         the exact v only when s = 1 and word 0 of z is 0 (the borrow of z - 1 into word 1 is dropped: v comes out
- *         2^32 too large), about 2^-33 per residual and 2^-32 per candidate. Such a candidate walks a wrong but
- *         in-range scalar (only the field containing bit 32 moves, by one; the top field moves only if words 0..2
- *         of z are all 0) and is lost; the exact host gate re-derives every nomination, so it can never publish
- * a wrong hit.
- * Every value is in QSB_CARRIER_KNOBS. 0 = the previous q9_product129_rx and q9_zwalk_value byte for byte.
- * Default 2 (gate): bit 2 is -6 slots per candidate (census_b8, 20,554.2 against 20,560.2)
- * and bit-identical; bit 1 in this tree's walker form is +3 slots (ptxas splits the 64-bit words it had fused with
- * the walker's field extraction: +6 LOP3, +4 IMAD.IADD against -8 IADD3/IADD3.X), so it stays off. */
-#ifndef QSB_DECODE_CUT
-#define QSB_DECODE_CUT 2
-#endif
-#if QSB_DECODE_CUT < 0 || QSB_DECODE_CUT > 3
-#error "QSB_DECODE_CUT is a mask of bits 1 and 2"
-#endif
-#if QSB_GLV_EO
-/* x*d mod 2^129 from column-pair accumulators: E0 = x0d0 (words 0-1), O0 = x0d1+x1d0
- * (words 1-2, carry cc3 into word 3), E1 = x0d2+x1d1+x2d0 (words 2-3, carries cc4 into
- * word 4), O1 = x0d3+x1d2+x2d1+x3d0 mod 2^64 (words 3-4). Word 4 only matters for its
- * parity (bit 0 of top is bit 128); X is added into it: the parity terms, which include the
- * low bits of x1*d3, x2*d2 and x3*d1 (bit 0 of each is x_i & d_j & 1, so the words x_i with
- * odd d_j are added whole; their bits above bit 0 only reach unused bits of word 4). */
-__device__ __forceinline__ q9_u129 q9_product129_rx(const uint64_t x[2],const uint32_t d[4],uint32_t X) {
-    uint32_t w0,w1,w2,w3,top;
-#if QSB_DECODE_CUT & 2
-    /* QSB_DECODE_CUT bit 2: O1 first; cc3 (bit 0 of O1's word 3 slot) and the two cc4 carries (word 4) are
-     * added into O1 straight off the carry flag. */
-    asm("{\n\t"
-        ".reg .u32 x0,x1,x2,x3,a,b,c,e;\n\t"
-        ".reg .u64 E0,O0,E1,O1,m;\n\t"
-        "mov.b64 {x0,x1},%5;\n\t"
-        "mov.b64 {x2,x3},%6;\n\t"
-        "mul.wide.u32 O1,x0,%10;\n\t"
-        "mad.wide.u32 O1,x1,%9,O1;\n\t"
-        "mad.wide.u32 O1,x2,%8,O1;\n\t"
-        "mad.wide.u32 O1,x3,%7,O1;\n\t"
-        "mov.b64 {c,e},O1;\n\t"
-        "mul.wide.u32 E0,x0,%7;\n\t"
-        "mul.wide.u32 O0,x0,%8;\n\t"
-        "mul.wide.u32 m,x1,%7;\n\t"
-        "add.cc.u64 O0,O0,m;\n\t"
-        "addc.cc.u32 c,c,0;\n\t"
-        "addc.u32 e,e,0;\n\t"
-        "mul.wide.u32 E1,x0,%9;\n\t"
-        "mul.wide.u32 m,x1,%8;\n\t"
-        "add.cc.u64 E1,E1,m;\n\t"
-        "addc.u32 e,e,0;\n\t"
-        "mul.wide.u32 m,x2,%7;\n\t"
-        "add.cc.u64 E1,E1,m;\n\t"
-        "addc.u32 e,e,0;\n\t"
-        "mov.b64 {%0,a},E0;\n\t"
-        "mov.b64 {b,x0},O0;\n\t"
-        "add.cc.u32 %1,a,b;\n\t"
-        "mov.b64 {a,b},E1;\n\t"
-        "addc.cc.u32 %2,a,x0;\n\t"
-        "addc.cc.u32 %3,b,c;\n\t"
-        "addc.u32 %4,e,%11;\n\t"
-        "}"
-        : "=r"(w0),"=r"(w1),"=r"(w2),"=r"(w3),"=r"(top)
-        : "l"(x[0]),"l"(x[1]),"r"(d[0]),"r"(d[1]),"r"(d[2]),"r"(d[3]),"r"(X));
-#else
-    asm("{\n\t"
-        ".reg .u32 x0,x1,x2,x3,a,b,c,e,t,cc3,cc4;\n\t"
-        ".reg .u64 E0,O0,E1,O1,m;\n\t"
-        "mov.b64 {x0,x1},%5;\n\t"
-        "mov.b64 {x2,x3},%6;\n\t"
-        "mul.wide.u32 E0,x0,%7;\n\t"
-        "mul.wide.u32 O0,x0,%8;\n\t"
-        "mul.wide.u32 m,x1,%7;\n\t"
-        "add.cc.u64 O0,O0,m;\n\t"
-        "addc.u32 cc3,0,0;\n\t"
-        "mul.wide.u32 E1,x0,%9;\n\t"
-        "mul.wide.u32 m,x1,%8;\n\t"
-        "add.cc.u64 E1,E1,m;\n\t"
-        "addc.u32 cc4,0,0;\n\t"
-        "mul.wide.u32 m,x2,%7;\n\t"
-        "add.cc.u64 E1,E1,m;\n\t"
-        "addc.u32 cc4,cc4,0;\n\t"
-        "mul.wide.u32 O1,x0,%10;\n\t"
-        "mad.wide.u32 O1,x1,%9,O1;\n\t"
-        "mad.wide.u32 O1,x2,%8,O1;\n\t"
-        "mad.wide.u32 O1,x3,%7,O1;\n\t"
-        "mov.b64 {%0,a},E0;\n\t"
-        "mov.b64 {b,c},O0;\n\t"
-        "add.cc.u32 %1,a,b;\n\t"
-        "mov.b64 {a,b},E1;\n\t"
-        "addc.cc.u32 %2,a,c;\n\t"
-        "mov.b64 {c,e},O1;\n\t"
-        "addc.cc.u32 %3,b,c;\n\t"
-        "addc.u32 t,e,cc4;\n\t"
-        "add.cc.u32 %3,%3,cc3;\n\t"
-        "addc.u32 %4,t,%11;\n\t"
-        "}"
-        : "=r"(w0),"=r"(w1),"=r"(w2),"=r"(w3),"=r"(top)
-        : "l"(x[0]),"l"(x[1]),"r"(d[0]),"r"(d[1]),"r"(d[2]),"r"(d[3]),"r"(X));
-#endif
-    q9_u129 r={(uint64_t)w0|((uint64_t)w1<<32),
-               (uint64_t)w2|((uint64_t)w3<<32),top};   /* bit 0 of top is bit 128 */
-    return r;
-}
-__device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint32_t d[4]) {
-    const uint32_t x1=(uint32_t)(x[0]>>32),x2=(uint32_t)x[1],x3=(uint32_t)(x[1]>>32);
-    q9_u129 r=q9_product129_rx(x,d,((d[3]&1U)?x1:0U)+((d[2]&1U)?x2:0U)+((d[1]&1U)?x3:0U));
-    r.top&=1U;return r;
-}
-#else
 __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint32_t d[4]) {
     const uint32_t x0=(uint32_t)x[0],x1=(uint32_t)(x[0]>>32);
     const uint32_t x2=(uint32_t)x[1],x3=(uint32_t)(x[1]>>32);
@@ -773,7 +607,6 @@ __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint3
                  (uint64_t)w2|((uint64_t)w3<<32),top&1U};
     return r;
 }
-#endif
 
 __device__ __forceinline__ q9_u129 q9_sub129(q9_u129 a,q9_u129 b) {
     q9_u129 r;uint32_t top;
@@ -841,114 +674,3 @@ __device__ __forceinline__ void q9_glv_split(const uint64_t input[4],uint64_t r1
     q9_glv_residual_reference(k,c1,c2,a1,a2,b1,r1,r2,s1,s2);
 #endif
 }
-
-/* QSB_GLV_ZDEC (analog of our pinning tree's QSB_GLV_GLUE bit 2, signed-residual decode; walker side in
- * tests/gpu_epochs/tree.cu, qsb_s3_code_z): the split hands the chain the signed residuals instead of
- * (|r|, sign), and the walker decodes the same table codes from them. With s = bit 128 of the 129-bit
- * residual z and M = -s, the magnitude is |r| = (z - s) ^ M on 128 bits. Every centred segment field of
- * (z - s) is the magnitude's field complemented when s = 1, which negates its odd digit, and the digit's
- * negation cancels the component sign in the code's bit 31: those fields decode with no sign at all. The
- * two uncentred segments need their own handling: the top field (bits 100..127, centre C = 170559770)
- * of a negative component is pre-shifted by D = 2^28 - C here (it then decodes as the negated digit with
- * the same centre; the complemented field is >= D + 1 because |r| < 0xa2a8918c... gives a top field
- * <= C - 2, so the shift never borrows), and segment 0 (unsigned, bias only) takes its digit centre 2^19
- * instead of 0 when s = 1 (the chain passes 1 - (M & 2^19) as that term's centre). So
- *   v = z - s * (1 + D * 2^100) mod 2^128,
- * one 128-bit add of a masked constant in place of q9_abs129's mask, four XORs and 128-bit increment; the
- * word-4 parity fix-ups of the three residual products (sum2 and c's implicit bit 128) fold into the
- * product's word-4 add (as pinning's q9_glv_split_z), and the subtractions keep no masks (only bit 0 of
- * every top word is read). Same scalar lattice, coefficients and residuals as q9_glv_split; every table
- * code the chain gathers is identical (qsb_s3_selfcheck replays the z walker against q9_bigtbl_code /
- * q11_bigtbl_code). 0 = q9_glv_split and the (|r|, sign) walker byte for byte. */
-#ifndef QSB_GLV_ZDEC
-#define QSB_GLV_ZDEC 1
-#endif
-#if QSB_GLV_ZDEC != 0 && QSB_GLV_ZDEC != 1
-#error "QSB_GLV_ZDEC must be 0 or 1"
-#endif
-/* Top word of -(1 + D*2^100) mod 2^128, D = 2^28 - 170559770 = 97875686: 0xFFFFFFFF - 16*D. */
-#define QSB_ZDEC_TOPWORD 0xA2A8919Fu
-#if QSB_DECODE_CUT && !(QSB_GLV_ZDEC && QSB_GLV_EO)
-#error "QSB_DECODE_CUT is written for the QSB_GLV_EO product and the QSB_GLV_ZDEC walker value"
-#endif
-#if QSB_GLV_ZDEC
-#if !QSB_GLV_RESIDUAL129 || !QSB_GLV_EO || !QSB_GLV_NO_KRED
-#error "QSB_GLV_ZDEC is written for the RESIDUAL129 / GLV_EO / GLV_NO_KRED split"
-#endif
-/* Only bit 0 of every top word is meaningful on this path (bit 128); no masks. */
-__device__ __forceinline__ q9_u129 q9_sub129_z(q9_u129 a,q9_u129 b) {
-    q9_u129 r;
-    asm("{sub.cc.u64 %0,%3,%6;subc.cc.u64 %1,%4,%7;subc.u32 %2,%5,%8;}"
-        : "=l"(r.lo),"=l"(r.hi),"=r"(r.top)
-        : "l"(a.lo),"l"(a.hi),"r"(a.top),"l"(b.lo),"l"(b.hi),"r"(b.top));
-    return r;
-}
-/* v = z - s*(1 + D*2^100) mod 2^128 and m = -s, s = bit 0 of z.top (bit 128 of z). */
-__device__ __forceinline__ void q9_zwalk_value(uint64_t v[2],uint32_t *m32,q9_u129 z) {
-    uint32_t m;
-#if QSB_DECODE_CUT & 1
-    /* QSB_DECODE_CUT bit 1: z - s on word 0 only and -s*16D on word 3 only (0xA2A891A0 = 2^32 - 16D =
-     * QSB_ZDEC_TOPWORD + 1); the borrow of z - 1 into word 1 (s = 1, word 0 of z = 0: 2^-33 per residual)
-     * is dropped, a lost candidate behind the exact host gate. */
-    static_assert(QSB_ZDEC_TOPWORD + 1u == 0xA2A891A0u, "QSB_DECODE_CUT bit 1: word-3 constant is 2^32 - 16D");
-    asm("{\n\t.reg .u32 t,a,b,c,e;\n\t"
-        "bfe.s32 %2,%5,0,1;\n\t"
-        "and.b32 t,%2,0xA2A891A0;\n\t"
-        "mov.b64 {a,b},%3;\n\t"
-        "mov.b64 {c,e},%4;\n\t"
-        "add.u32 a,a,%2;\n\t"
-        "add.u32 e,e,t;\n\t"
-        "mov.b64 %0,{a,b};\n\t"
-        "mov.b64 %1,{c,e};\n\t}"
-        : "=l"(v[0]),"=l"(v[1]),"=&r"(m) : "l"(z.lo),"l"(z.hi),"r"(z.top));
-#else
-    asm("{\n\t.reg .u32 t;\n\t.reg .u64 M,H;\n\t"
-        "bfe.s32 %2,%5,0,1;\n\t"
-        "and.b32 t,%2,0xA2A8919F;\n\t"
-        "mov.b64 M,{%2,%2};\n\t"
-        "mov.b64 H,{%2,t};\n\t"
-        "add.cc.u64 %0,%3,M;\n\t"
-        "addc.u64 %1,%4,H;\n\t}"
-        : "=l"(v[0]),"=l"(v[1]),"=&r"(m) : "l"(z.lo),"l"(z.hi),"r"(z.top));
-#endif
-    *m32=m;
-}
-/* v1/m1: component r1 (P), v2/m2: component r2 (Q), in q9_glv_split's order. */
-__device__ __forceinline__ void q9_glv_split_z(const uint64_t input[4],uint64_t v1[2],uint64_t v2[2],
-                                               uint32_t *m1,uint32_t *m2){
-    const uint64_t k[4]={input[0],input[1],input[2],input[3]};
-    const uint64_t g1[4]={0xE893209A45DBB031ULL,0x3DAA8A1471E8CA7FULL,0xE86C90E49284EB15ULL,0x3086D221A7D46BCDULL};
-    const uint64_t g2[4]={0x1571B4AE8AC47F71ULL,0x221208AC9DF506C6ULL,0x6F547FA90ABFE4C4ULL,0xE4437ED6010E8828ULL};
-    const uint32_t a1[4]={0x9284eb15,0xe86c90e4,0xa7d46bcd,0x3086d221};
-    const uint32_t a2[5]={0x9d44cfd8,0x57c1108d,0xa8e2f3f6,0x14ca50f7,1};
-    const uint32_t b1[4]={0x0abfe4c3,0x6f547fa9,0x010e8828,0xe4437ed6};
-    uint64_t c1[2],c2[2];q9_coeff_g1(c1,k,g1);q9_coeff_g2(c2,k,g2);
-    /* sum = c1 + c2 (129 bits) and P = sum*a1's word-4 parity addend: sum2 (a1[0] odd adds sum2 at bit
-     * 128) plus sum words 1 and 2 (a1[3], a1[2] odd, a1[1] even), folded into the carry capture. */
-    uint64_t sum0,sum1;uint32_t xp;
-    asm("{\n\t.reg .u32 a,b,c,d,t;\n\t"
-        "add.cc.u64 %0,%3,%5;\n\t"
-        "addc.cc.u64 %1,%4,%6;\n\t"
-        "mov.b64 {a,b},%0;\n\t"
-        "mov.b64 {c,d},%1;\n\t"
-        "add.u32 t,b,c;\n\t"
-        "addc.u32 %2,t,0;\n\t}"
-        : "=l"(sum0),"=l"(sum1),"=r"(xp)
-        : "l"(c1[0]),"l"(c1[1]),"l"(c2[0]),"l"(c2[1]));
-    const uint64_t sum[2]={sum0,sum1};
-    static_assert((0x9284eb15u&1u)==1u && (0xa7d46bcdu&1u)==1u && (0x3086d221u&1u)==1u && (0xe86c90e4u&1u)==0u,
-                  "parity addend of P assumes a1 words 0, 2, 3 odd and word 1 even");
-    static_assert((0x0abfe4c3u&1u)==1u && (0x6f547fa9u&1u)==1u && (0x010e8828u&1u)==0u && (0xe4437ed6u&1u)==0u,
-                  "parity addend of Q assumes b1 words 0, 1 odd and words 2, 3 even");
-    static_assert((0x57c1108du&1u)==1u && (0xa8e2f3f6u&1u)==0u && (0x14ca50f7u&1u)==1u,
-                  "parity addend of R assumes a2 words 1, 3 odd and word 2 even");
-    const q9_u129 p=q9_product129_rx(sum,a1,xp);
-    const q9_u129 q=q9_product129_rx(c2,b1,(uint32_t)(c2[1]>>32));                     /* b1[1] odd: x3 */
-    const q9_u129 rr=q9_product129_rx(c1,a2,(uint32_t)c1[0]+(uint32_t)(c1[0]>>32)
-                                       +(uint32_t)(c1[1]>>32));  /* c's bit 128 adds c1; a2[3], a2[1] odd: x1, x3 */
-    const q9_u129 kk={k[0],k[1],(uint32_t)k[2]};
-    const q9_u129 z1=q9_sub129_z(q9_sub129_z(kk,p),q);
-    const q9_u129 z2=q9_sub129_z(rr,p);
-    q9_zwalk_value(v1,m1,z1);q9_zwalk_value(v2,m2,z2);
-}
-#endif

@@ -8,11 +8,11 @@
 #define QSB_SHORT_CARRY 1
 #endif
 #if QSB_SHORT_CARRY
-/* QSB_SC_ALUZ (default 0): the chain loop's register-plus-carry adds with the constant-bank zero
+/* QSB_SC_ALUZ (lane R, default 0): the chain loop's register-plus-carry adds with the constant-bank zero
  * as addend (IADD3.X on the ALU pipe instead of IMAD.X on the multiply pipe); the generated file is the
- * same source with those addends behind macros. */
+ * same source with those addends behind macros (tools/exp/N-rb/work/gen_aluz.py). */
 #ifndef QSB_SC_ALUZ
-#define QSB_SC_ALUZ 0   /* explicit default so the carrier knob string records a value */
+#define QSB_SC_ALUZ 0   /* N-ry merge: explicit default so the carrier knob string records a value */
 #endif
 #if QSB_SC_ALUZ
 __device__ __constant__ uint32_t qsb_sc_zero = 0;   /* read by ld.const inside the chain add */
