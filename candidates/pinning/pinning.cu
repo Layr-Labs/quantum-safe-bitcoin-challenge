@@ -1,6 +1,8 @@
+#define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact) */
+#define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact) */
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 6
+#define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -433,7 +435,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
@@ -2485,6 +2487,12 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
 }
 
 #include "sha_pinsha.cuh"
+#if QSB_SHA_LEA
+/* tail-block transforms: the QSB_RLM round form (keeps the W1 terms on the uniform datapath) */
+#pragma push_macro("QSB_RL")
+#undef QSB_RL
+#define QSB_RL(a, b, c, d, e, f, g, h, kw) QSB_RLM(a, b, c, d, e, f, g, h, kw)
+#endif
 
 /* QSB_SHA_OPT tail transform: _SHA256TransformFastTail11P with literal K, round 1
  * rewritten with the host constants v2y/c2y/mx (Maj and Ch of constant midstate words
@@ -2528,18 +2536,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3: e+K3 precomputed */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {
         w[0] += s0(w[1]);
@@ -2622,18 +2630,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {
         w[0] = lane + QSB_UB(u0 + s0(w[1]));   /* W16 = W0 + s0(W1) */
@@ -2712,18 +2720,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11S(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {   /* W16..W31: the W1-only terms come from shared memory */
         w[0] += sa.y;          /* s0(W1) */
@@ -2805,18 +2813,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11ST(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {   /* W16..W31: the W1-only terms come from shared memory */
         w[0] += sa.y;          /* s0(W1) */
@@ -2867,6 +2875,9 @@ __device__ __forceinline__ void _SHA256TransformFastTail11ST(
     state[6] = tp.mid[6] + g;
     state[7] = tp.mid[7] + h;
 }
+#if QSB_SHA_LEA
+#pragma pop_macro("QSB_RL")
+#endif
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
