@@ -1,9 +1,9 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_09272336 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
-#ifndef QSB_REMEASURE_TAG_0921R3
-#define QSB_REMEASURE_TAG_0921R3 1 /* no-op: exact-source PR897 remeasurement */
+#ifndef QSB_REMEASURE_TAG_092903451381
+#define QSB_REMEASURE_TAG_092903451381 1 /* no-op: exact-source PR897 remeasurement */
 #endif
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
