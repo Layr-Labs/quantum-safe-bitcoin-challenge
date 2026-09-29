@@ -895,7 +895,7 @@ __device__ uint64_t BINOM_C[151][10];
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
 #ifndef QSB_DIVSTEP_LOOKAHEAD
-#define QSB_DIVSTEP_LOOKAHEAD 0
+#define QSB_DIVSTEP_LOOKAHEAD 1   /* public PR #2387: measured +0.33% GPU-only, exact lookahead */
 #endif
 #if QSB_DIVSTEP_LOOKAHEAD < 0 || QSB_DIVSTEP_LOOKAHEAD > 1
 #error "QSB_DIVSTEP_LOOKAHEAD must be 0 or 1"

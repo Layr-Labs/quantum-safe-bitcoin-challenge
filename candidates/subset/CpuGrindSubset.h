@@ -237,6 +237,18 @@
 #define QSB_CPU_TAB_CAP_MB 4096
 #endif
 #ifndef QSB_CPU_TAB_FRAC
+#ifndef QSB_CPU_ADAPT
+#define QSB_CPU_ADAPT 1          /* M-A 2026-09-29: measured window-count probe at startup (see the chooser in start's setup thread) */
+#endif
+#ifndef QSB_CPU_ADAPT_S
+#define QSB_CPU_ADAPT_S 0.5     /* seconds of real grinding per probed geometry */
+#endif
+#ifndef QSB_CPU_ADAPT_EDGE
+#define QSB_CPU_ADAPT_EDGE 0.04  /* an alternate must beat the incumbent by this much */
+#endif
+#ifndef QSB_CPU_ADAPT_SLOT_EPOCHS
+#define QSB_CPU_ADAPT_SLOT_EPOCHS 1000000ull /* disjoint reserved probe space per worker and pass */
+#endif
 #define QSB_CPU_TAB_FRAC 0.25
 #endif
 #ifndef QSB_CPU_VBUILD
@@ -429,7 +441,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 
 namespace qcpu {
-static const int NWMAX = 16;
+static const int NWMAX = 18;   /* M-A 2026-09-29: 17/18-window tables (19/12 MiB) fit small LLCs */
 #if QCPU_PFQ
 /* (QSB_CPU_PFSPREAD bit 0): the hashing phase's row prefetches, queued (hpf_rows8) and issued a few at a time between
  * SHA-256 blocks (qsha_x4p), so that at most a couple of L2-DTLB-missing prefetches are in flight at once. */
@@ -2375,6 +2387,11 @@ struct Ctx {
     uint64_t dev_limit = 0;         /* dev only (never in a ranked build): each worker stops once this many candidates are done */
     std::atomic<int> dev_live{0};
 #endif
+    /* M-A 2026-09-29: measured window-count probe. probe_deadline != 0: each worker stops at the batch boundary
+     * once CLOCK_MONOTONIC passes it (probe mode of the ranked build; the mini-rate the chooser measures). */
+    double probe_deadline = 0;   /* nonzero only while joined adaptive probe workers run */
+    uint64_t probe_epoch_offset = 0, probe_epoch_span = 0;
+    uint64_t production_epoch_offset = 0; /* production skips every reserved probe slot */
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
     bool kh16 = false;              /* QSB_CPU_KH16 key hashes (8-lane path with SHA-NI, AVX-512VL and the C fold) */
@@ -2992,6 +3009,9 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 #ifndef QSB_CPU_EPOCH_CONTIG
 #define QSB_CPU_EPOCH_CONTIG 1      /* worker t walks a contiguous epoch range (fewer prefix blocks re-hashed per epoch, no unrank); 0 = epochs t, t+T, ... */
 #endif
+#ifndef QSB_CPU_PREFIX_SWAP
+#define QSB_CPU_PREFIX_SWAP 1  /* exact one-record update on a no-carry lexicographic successor */
+#endif
 #ifndef QSB_CPU_EPOCH_CAP
 #define QSB_CPU_EPOCH_CAP (~0ull)   /* at most this many epochs above the base are shared out by the contiguous ranges (tests set it small) */
 #endif
@@ -3020,8 +3040,12 @@ static void worker(Ctx *c, int tid) {
      * co-grinder's rate without hit-count noise. */
     const uint64_t eavail = c->n_epochs > c->epoch_base ? c->n_epochs - c->epoch_base : 0;
     const uint64_t espan = (eavail < (uint64_t)QSB_CPU_EPOCH_CAP ? eavail : (uint64_t)QSB_CPU_EPOCH_CAP) / (uint64_t)(c->nthreads > 0 ? c->nthreads : 1);
-    uint64_t epoch = c->epoch_base + (uint64_t)tid * espan;   /* epoch_base: see QSB_CPU_DIAG_EPOCH */
-    const uint64_t epoch_end = epoch + espan, estep = 1;
+    const uint64_t worker_base = c->epoch_base + (uint64_t)tid * espan;
+    uint64_t epoch = worker_base + (c->probe_deadline > 0 ? c->probe_epoch_offset : c->production_epoch_offset);
+    uint64_t epoch_end = worker_base + espan;
+    if (c->probe_deadline > 0 && c->probe_epoch_span < epoch_end - epoch)
+        epoch_end = epoch + c->probe_epoch_span;
+    const uint64_t estep = 1;
 #else
     uint64_t epoch = c->epoch_base + (uint64_t)tid;   /* epoch_base: see QSB_CPU_DIAG_EPOCH */
     const uint64_t epoch_end = ~0ull, estep = (uint64_t)c->nthreads;
@@ -3093,6 +3117,10 @@ static void worker(Ctx *c, int tid) {
     };
     for (;;) {
         if (c->stop.load(std::memory_order_relaxed)) return;   /* H9: stop_unmap (every earlier batch's hits are published) */
+        if (c->probe_deadline > 0) {                  /* M-A: the chooser's probe (ranked build too) */
+            struct timespec tp; clock_gettime(CLOCK_MONOTONIC, &tp);
+            if (tp.tv_sec + 1e-9 * tp.tv_nsec >= c->probe_deadline) return;
+        }
 #ifdef QSB_CPU_DEVBENCH
         if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
 #endif
@@ -3127,6 +3155,16 @@ static void worker(Ctx *c, int tid) {
                         from = prl + (size_t)(lo - e) * SIG_PUSH_SIZE;   /* the kept pushes below push lo are unchanged */
                         i0 = lo; e2 = e; pl = (size_t)(lo - e) * SIG_PUSH_SIZE;   /* early[0..e-1] < lo: rebuild from push lo on */
                     }
+                    /* If only the final omission advances from x to x+1, the kept
+                     * stream changes at one record: x+1 is replaced by x. su is
+                     * nonnegative only for a validated consecutive-epoch update.
+                     * Carries, first epochs and noncontiguous walks keep the full path. */
+#if QSB_CPU_PREFIX_SWAP
+                    if (su >= 0 && su == c->early - 1) {
+                        memcpy(&pfx[prl + pl], dp->dummy_sigs + (size_t)i0 * SIG_PUSH_SIZE, SIG_PUSH_SIZE);
+                        pl = (size_t)(c->cut - c->early) * SIG_PUSH_SIZE;
+                    } else
+#endif
                     for (int i = i0; i < c->cut; i++) {
                         if (e2 < c->early && early[e2] == i) { e2++; continue; }
                         memcpy(&pfx[prl + pl], dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pl += SIG_PUSH_SIZE;
@@ -3610,6 +3648,75 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
             tab_ok = table_check(*c);
         }
         if (!tab_ok) { printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
+#if QSB_CPU_ADAPT
+        /* Corrected adaptive chooser: real workers, joined before every table change.
+         * Ten one-million-epoch slots per worker are reserved for at most five
+         * geometries x warmup/measurement. Production starts after the reservation,
+         * so probe and production candidates cannot overlap. */
+        if (!getenv("QSB_CPU_NW") && !getenv("QSB_CPU_ADAPT_OFF")) {
+            const uint64_t eavail = c->n_epochs > c->epoch_base ? c->n_epochs - c->epoch_base : 0;
+            const uint64_t espan = (eavail < (uint64_t)QSB_CPU_EPOCH_CAP ? eavail : (uint64_t)QSB_CPU_EPOCH_CAP) /
+                                   (uint64_t)(nth > 0 ? nth : 1);
+            const uint64_t reserve = 10ull * (uint64_t)QSB_CPU_ADAPT_SLOT_EPOCHS;
+            if (espan > reserve) {
+                c->production_epoch_offset = reserve;
+                const double ps = getenv("QSB_CPU_ADAPT_S") ? atof(getenv("QSB_CPU_ADAPT_S")) : (double)QSB_CPU_ADAPT_S;
+                int alts[4] = {17, 16, 15, 12}, best_nw = c->g.nw, slot = 0;
+                double best_rate = -1.0;
+                auto mini = [&](void) -> double {
+                    const uint64_t c0 = c->cand.load(std::memory_order_relaxed);
+                    c->probe_epoch_offset = (uint64_t)slot++ * (uint64_t)QSB_CPU_ADAPT_SLOT_EPOCHS;
+                    c->probe_epoch_span = (uint64_t)QSB_CPU_ADAPT_SLOT_EPOCHS;
+                    struct timespec a, b; clock_gettime(CLOCK_MONOTONIC, &a);
+                    c->probe_deadline = a.tv_sec + 1e-9 * a.tv_nsec + ps;
+                    c->live += nth; /* worker LiveGuard decrements exactly once */
+                    std::vector<std::thread> probe;
+                    for (int t = 0; t < nth; t++) probe.emplace_back(worker, c, t);
+                    for (auto &th : probe) th.join();
+                    clock_gettime(CLOCK_MONOTONIC, &b);
+                    c->probe_deadline = 0; c->probe_epoch_span = 0;
+                    const double dt = (b.tv_sec - a.tv_sec) + 1e-9 * (b.tv_nsec - a.tv_nsec);
+                    return dt > 0 ? (double)(c->cand.load(std::memory_order_relaxed) - c0) / dt : -1.0;
+                };
+                mini();
+                best_rate = mini();
+                for (int k = 0; k < 4; k++) {
+                    const int a = alts[k];
+                    if (a == c->g.nw) continue;
+                    const Geo ginc = c->g;
+                    pt *tinc = c->table; const pt *twinc[NWMAX]; for (int i = 0; i < NWMAX; i++) twinc[i] = c->tw[i];
+                    void *minc = c->table_map; const size_t binc = c->table_map_bytes;
+                    c->table = nullptr; c->table_map = nullptr; c->table_map_bytes = 0; c->g = geo_make(a, true);
+                    bool ok = table_alloc(*c);
+                    if (ok) { build_table(*c, fax, fay, nth); ok = table_check(*c); }
+                    double rate = -1.0;
+                    if (ok) { mini(); rate = mini(); }
+                    table_free(*c);
+                    c->g = ginc; c->table = tinc; for (int i = 0; i < NWMAX; i++) c->tw[i] = (pt *)twinc[i];
+                    c->table_map = minc; c->table_map_bytes = binc;
+                    if (rate > best_rate * (1.0 + (double)QSB_CPU_ADAPT_EDGE)) { best_rate = rate; best_nw = a; }
+                }
+                if (best_nw != c->g.nw) {
+                    const Geo ginc = c->g;
+                    pt *tinc = c->table; const pt *twinc[NWMAX]; for (int i = 0; i < NWMAX; i++) twinc[i] = c->tw[i];
+                    void *minc = c->table_map; const size_t binc = c->table_map_bytes;
+                    c->table = nullptr; c->table_map = nullptr; c->table_map_bytes = 0; c->g = geo_make(best_nw, true);
+                    bool ok = table_alloc(*c);
+                    if (ok) { build_table(*c, fax, fay, nth); ok = table_check(*c); }
+                    if (!ok) {
+                        table_free(*c);
+                        c->g = ginc; c->table = tinc; for (int i = 0; i < NWMAX; i++) c->tw[i] = (pt *)twinc[i];
+                        c->table_map = minc; c->table_map_bytes = binc;
+                        best_nw = ginc.nw; best_rate = -1.0;
+                    } else {
+                        munmap(minc, binc);
+                    }
+                }
+                printf("  CPU co-grind: adaptive window count %d (probe %.2f Mc/s)\n", best_nw, best_rate / 1e6);
+                fflush(stdout);
+            }
+        }
+#endif
         clock_gettime(CLOCK_MONOTONIC, &t1);
 #if QSB_CPU_DIAG_EPOCH   /* default at file scope (package y2d: 0) */
         {   /* Zero-cost diagnostic. Every epoch of the co-grinder's walk is real work on patterns disjoint from
