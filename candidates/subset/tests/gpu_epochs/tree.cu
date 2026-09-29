@@ -559,7 +559,7 @@ __device__ uint64_t BINOM_C[151][10];
  * warps on sub-partition 0; this puts them on 0 and 3. Both layouts sum Q to the same point, so every
  * candidate's z*A and hit set are unchanged. 0 = the QSB_Q_MIX choice byte for byte. */
 #ifndef QSB_Q_SPREAD
-#define QSB_Q_SPREAD 0
+#define QSB_Q_SPREAD 1
 #endif
 #if QSB_Q_SPREAD != 0 && QSB_Q_SPREAD != 1
 #error "QSB_Q_SPREAD must be 0 or 1"
