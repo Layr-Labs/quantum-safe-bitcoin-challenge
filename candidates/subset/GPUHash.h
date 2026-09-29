@@ -16,8 +16,8 @@
 */
 
 // ---------------------------------------------------------------------------------
-// SHA256
-// ---------------------------------------------------------------------------------
+/* SHA256 */
+/* --------------------------------------------------------------------------------- */
 
 __device__ __constant__ uint32_t K[] = {
 	0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
@@ -155,18 +155,18 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
 //#define Maj(x,y,z) ((x&y)^(x&z)^(y&z))
 //#define Ch(x,y,z)  ((x&y)^(~x&z))
 
-// The following functions are equivalent to the above
+/* The following functions are equivalent to the above */
 #define Maj(x,y,z) ((x & y) | (z & (x | y)))
 #define Ch(x,y,z) (z ^ (x & (y ^ z)))
 
-// SHA-256 inner round
+/* SHA-256 inner round */
 #define S2Round(a, b, c, d, e, f, g, h, k, w) \
     t1 = h + S1(e) + Ch(e,f,g) + k + (w); \
     t2 = S0(a) + Maj(a,b,c); \
     d += t1; \
     h = t1 + t2;
 
-// WMIX
+/* WMIX */
 #define WMIX() { \
 w[0] += s1(w[14]) + w[9] + s0(w[1]);\
 w[1] += s1(w[15]) + w[10] + s0(w[2]);\
@@ -186,7 +186,7 @@ w[14] += s1(w[12]) + w[7] + s0(w[15]);\
 w[15] += s1(w[13]) + w[8] + s0(w[0]);\
 }
 
-// ROUND
+/* ROUND */
 #define SHA256_RND(k) {\
 S2Round(a, b, c, d, e, f, g, h, K[k], w[0]);\
 S2Round(h, a, b, c, d, e, f, g, K[k + 1], w[1]);\
@@ -636,8 +636,8 @@ __device__ void _FindComboStart(int8_t * inputComboGPU, int8_t * combo) {
 }
 
 // ---------------------------------------------------------------------------------
-// RIPEMD160
-// ---------------------------------------------------------------------------------
+/* RIPEMD160 */
+/* --------------------------------------------------------------------------------- */
 __device__ __constant__ uint64_t ripemd160_sizedesc_32 = 32 << 3;
 
 __device__ void _RIPEMD160Initialize(uint32_t s[5])
@@ -1047,7 +1047,7 @@ __device__ __noinline__ void _GetHash160P2SHUncomp(uint64_t* x, uint64_t* y, uin
 
 
 // ---------------------------------------------------------------------------------
-// KECCAK/SHA3
+/* KECCAK/SHA3 */
 // ---------------------------------------------------------------------------------
 
 

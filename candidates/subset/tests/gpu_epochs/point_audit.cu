@@ -1,5 +1,5 @@
 // Audit the actual point chain against OpenSSL EC_POINT_mul.
-// Includes the parent final-doubling witness and all old scalar edge cases.
+/* Includes the parent final-doubling witness and all old scalar edge cases. */
 // Not a performance workload; unused record fields preserve fixture layout.
 #define main qsb_candidate_main
 #ifndef QSB_POINT_TREE
@@ -30,7 +30,7 @@ int main(int argc,char**argv){
     if(!gpu_ok(cudaMalloc(&dc,cases.size()*sizeof(point_case))))return 2;
     if(!gpu_ok(cudaMemcpy(dc,cases.data(),cases.size()*sizeof(point_case),cudaMemcpyHostToDevice)))return 2;
     std::vector<unsigned> select;
-    // All deterministic edges and crafted doubling cases, plus fresh randoms.
+    /* All deterministic edges and crafted doubling cases, plus fresh randoms. */
     for(unsigned i=0;i<count;i++)if(i<(count>100000?count-100000:count) || i+2048>=count)select.push_back(i);
     cudaMalloc(&ds,select.size()*4);cudaMemcpy(ds,select.data(),select.size()*4,cudaMemcpyHostToDevice);
     uint64_t *dout;cudaMalloc(&dout,select.size()*128);
@@ -45,7 +45,7 @@ int main(int argc,char**argv){
         uint8_t seed[32],nri[32];
         for(int i=0;i<32;i++)seed[i]=(uint8_t)(i*43+run*79+11);
         SHA256(seed,32,nri);BN_bin2bn(nri,32,base);BN_mod(base,base,n,ctx);
-        // The production table builder accepts little-endian neg_r_inv.
+        /* The production table builder accepts little-endian neg_r_inv. */
         BN_bn2lebinpad(base,nri,32);
         std::vector<uint64_t>L(GT_CHUNKS*GT_LO*8),H(GT_CHUNKS*GT_HI*8);
         gt_build_ladders(L.data(),H.data(),nri);

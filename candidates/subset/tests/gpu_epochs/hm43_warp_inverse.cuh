@@ -15,7 +15,7 @@ __device__ __forceinline__ uint32_t hm43_ballot(bool value){return __ballot_sync
 __device__ __forceinline__ uint64_t hm43_mulhi(uint64_t a,uint64_t b){return __umul64hi(a,b);}
 #endif
 
-// Full-mask operations must be called by all 32 lanes, including unused words.
+/* Full-mask operations must be called by all 32 lanes, including unused words. */
 __device__ __forceinline__ uint64_t hm43_add(uint64_t a,uint64_t b,int lane){
     const int word=lane&7;
     uint64_t sum=a+b;
@@ -42,8 +42,8 @@ __device__ __forceinline__ uint64_t hm43_signed_mul(uint64_t x,int64_t k,int lan
     return k<0?negative:out;
 }
 
-// m < 2^62. For c=2^32+977, m*p = m*2^256 - m*c. Since c is
-// odd and 0<=m<2^64, the low product is zero iff m==0; that determines
+/* m < 2^62. For c=2^32+977, m*p = m*2^256 - m*c. Since c is */
+/* odd and 0<=m<2^64, the low product is zero iff m==0; that determines */
 // the entire borrow chain without another distributed multiplication.
 __device__ __forceinline__ uint64_t hm43_multiple_p(uint64_t m,int word){
     uint64_t al=m*0x1000003D1ULL,ah=hm43_mulhi(m,0x1000003D1ULL);
@@ -57,7 +57,7 @@ __device__ __forceinline__ uint64_t hm43_multiple_p(uint64_t m,int word){
 
 // Bound the new signed-accumulator argument explicitly. The cap/fallback
 // concern was identified in hybridnoise's public PR200; the scalar Fermat
-// fallback here is independent and uses this candidate's corrected field code.
+/* fallback here is independent and uses this candidate's corrected field code. */
 #ifndef QSB_ROOT_MAX_BATCHES
 #define QSB_ROOT_MAX_BATCHES 16
 #endif
@@ -80,8 +80,8 @@ __device__ __forceinline__ bool hm43_warp_inverse_bounded(uint64_t result[5],int
     uint32_t nonzero=0;
     unsigned batches=0;
     while(true){
-        // The condition and return are uniform across all participating lanes.
-        // The caller result has not been modified on this path.
+        /* The condition and return are uniform across all participating lanes. */
+        /* The caller result has not been modified on this path. */
         if(batches==QSB_ROOT_MAX_BATCHES)return false;
         ++batches;
         uint32_t nz=hm43_ballot(word<5 && state!=0);
@@ -148,7 +148,7 @@ __device__ __forceinline__ bool hm43_warp_inverse_bounded(uint64_t result[5],int
 
 // x^(p-2), p=2^256-2^32-977. This fixed-work fallback terminates for every
 // input. It returns the canonical inverse for x!=0 (mod p), and zero for zero.
-// Its arithmetic has no dependence on the divstep iteration count or estimates.
+/* Its arithmetic has no dependence on the divstep iteration count or estimates. */
 struct QsbInverseWords {uint64_t a,b,c,d;};
 __device__ __noinline__ QsbInverseWords qsb_root_fermat(QsbInverseWords input){
     uint64_t x[4]={input.a,input.b,input.c,input.d};

@@ -130,7 +130,7 @@ int main(){
     printf("Canonical multiplication: %d/%d exact matches (three alias modes)\n",3*n-failures,3*n);
 #endif
     if(failures)return 1;
-    // Nonzero canonical inputs, including identity factors, for every inverse.
+    /* Nonzero canonical inputs, including identity factors, for every inverse. */
     const int ni=8191;
     for(int i=0;i<ni;i++){
         BN_lebin2bn((unsigned char*)(inputs.data()+8*i),32,a);BN_mod(a,a,p,ctx);

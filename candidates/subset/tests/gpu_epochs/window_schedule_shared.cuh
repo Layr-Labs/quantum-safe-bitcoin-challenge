@@ -1,6 +1,6 @@
-// Derived from odinfree's GPU-epoch consumer in submission 0db6e203.
-// Only the first block depends on the epoch remainder. The second block's
-// expanded schedule is shared by every epoch with the same window choice.
+/* Derived from odinfree's GPU-epoch consumer in submission 0db6e203. */
+/* Only the first block depends on the epoch remainder. The second block's */
+/* expanded schedule is shared by every epoch with the same window choice. */
 #pragma once
 #ifndef QSB_950_PACK
 #define QSB_950_PACK 1
@@ -194,7 +194,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
     state[4]+=e;state[5]+=f;state[6]+=g;state[7]+=h;
 #if QSB_SHA_UNROLL_CONST
     // Fully unrolled constant blocks: K+W becomes a constant-bank operand of the
-    // round adds (no LDC, no loop counter). Same arithmetic, same order.
+    /* round adds (no LDC, no loop counter). Same arithmetic, same order. */
     qsb_compress_constant<0>(state);
     qsb_compress_constant<1>(state);
     qsb_compress_constant<2>(state);

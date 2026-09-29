@@ -32,10 +32,10 @@ __device__ __forceinline__ void hm39_divstep62(uint64_t u[5], uint64_t v[5],
 {
 
 
-    // u' = (uu*u + uv*v) >> bitCount
-    // v' = (vu*u + vv*v) >> bitCount
+    /* u' = (uu*u + uv*v) >> bitCount */
+    /* v' = (vu*u + vv*v) >> bitCount */
     // Do not maintain a matrix for r and s, the number of
-    // 'added P' can be easily calculated
+    /* 'added P' can be easily calculated */
 
     *uu = 1; *uv = 0;
     *vu = 0; *vv = 1;
@@ -46,7 +46,7 @@ __device__ __forceinline__ void hm39_divstep62(uint64_t u[5], uint64_t v[5],
     uint64_t v0 = v[0];
 
     // Extract 64 MSB of u and v
-    // u and v must be positive
+    /* u and v must be positive */
     uint64_t uh, vh;
     int64_t w, x, y, z;
     bitCount = 62;
@@ -61,7 +61,7 @@ __device__ __forceinline__ void hm39_divstep62(uint64_t u[5], uint64_t v[5],
         v0 >>= zeros;
         vh >>= zeros;
         // Coefficients are two's-complement bit patterns; avoid signed-left-
-        // shift UB in the host oracle while preserving CUDA integer semantics.
+        /* shift UB in the host oracle while preserving CUDA integer semantics. */
         *uu = (int64_t)((uint64_t)*uu << zeros);
         *uv = (int64_t)((uint64_t)*uv << zeros);
         bitCount -= zeros;
