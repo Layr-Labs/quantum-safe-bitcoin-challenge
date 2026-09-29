@@ -1,18 +1,29 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset: the record `fb6f5a8f` with its host producers off (ercumentyildirim's `QSB_HP_SKIP`) and all 32 CPUs given to the co-grinder
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU. The device side and the native image are the record's, byte for byte; two host-only lines change.
 
 ## Summary
 
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
+- **Base:** the current subset record `fb6f5a8f` (728.34) = kshitij-hash's `e6715658` + my contiguous co-grinder epoch walk.
+- **Change 1, `QSB_HP_SKIP` 1** (ercumentyildirim, PR 2441 / `dea321f0`): the host producers are not started. The GPU producers build every batch on the slot stream, the fallback the search loop already takes whenever a host-built batch is not ready. The co-grinder keeps the producers' CPU time.
+- **Change 2, `QSB_CPU_RESERVE` 0:** with the producers on, the main thread is narrowed to one CPU and the co-grinder gets the other 31 plus the main thread's (32). With them off, the main thread keeps its full set, so the count falls to ncpu − `QSB_CPU_RESERVE` = 30 (the hit lists of `dea321f0` and `f70a9cbd` show exactly 30 worker ranges). The main thread sleeps in blocking waits and every worker is `SCHED_IDLE`, so this package reserves nothing: 32 workers.
+- **Unchanged:** the device code and the native sm_89 image (cubin `e0c0897f…`, byte-identical; knob strings identical).
 
-## The change
+## Ranked evidence
+
+Every package with the contiguous walk shows its co-grinder rate without hit noise (per-worker ranges, see below):
+
+| draw | host producers | workers | co-grinder, luck-free (M/s) |
+|---|---|---:|---:|
+| `538d7362` (this record's code) | on | 32 | 66.45 |
+| `dea321f0` (ercumentyildirim) | off | 30 | 67.98 |
+| `f70a9cbd` (my probe) | off | 30 | 68.26 |
+
+- **CPU:** with the producers off, each worker walks about 9% more epochs, so the 30 workers deliver +1.5 to +1.8 M/s over the 32 with producers. Two more workers should add about another +1 to +2 M/s.
+- **GPU:** the cost of GPU-built batches is not resolved by a single draw. `dea321f0` read 639.4 M/s of GPU work against 640.7 for its neighbours, inside the card's phase drift. This draw measures the co-grinder exactly and adds one GPU reading.
+
+## The record's contiguous walk (unchanged)
+
 
 In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
 
@@ -23,9 +34,9 @@ In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker
 - **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
 - **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
 
-## Ranked draws of this exact package
+## Ranked draws of the record's code
 
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
+The record's code drew `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47), and `fb6f5a8f`: 728.34 (GPU 662.35 + co-grinder 65.99), promoted.
 
 - **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
 - **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
@@ -63,11 +74,11 @@ All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's tool
 
 Emulated timings say nothing about Zen 4, so I did not measure speed here.
 
-## Kill switch
+## Kill switches
 
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
+- `-DQSB_HP_SKIP=0` (or delete the `#define` in `subset.cu`): the host producers run as in the record.
+- `-DQSB_CPU_RESERVE=2`: 30 workers when the producers are off.
+- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk.
 
 ## Reproducing
 
@@ -85,8 +96,9 @@ To read the co-grinder's rate without hit noise from a ranked run:
 
 ## Base and attribution
 
+- **ercumentyildirim** (co-author): `QSB_HP_SKIP` (PR 2441, `dea321f0`) and the first ranked draw with the producers off.
 - **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
+- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
 - **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
 - **Mine:**
   - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.

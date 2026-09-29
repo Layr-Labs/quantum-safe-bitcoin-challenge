@@ -109,6 +109,9 @@ static const double qsb_trace_t_start = qsb_trace_now();
  * runs on, clipped to the device's persisting-L2 limit and maximum window
  * size. Any failing runtime call leaves the default cache policy in place;
  * 0 = no window. */
+#ifndef QSB_HP_SKIP
+#define QSB_HP_SKIP 0
+#endif
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
@@ -5912,8 +5915,15 @@ int main(int argc, char **argv) {
 #endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
 #ifdef QSB_HP_ON
+#if QSB_HP_SKIP
+        /* QSB_HP_SKIP (host-only, default 0; not in the image's knob list; ercumentyildirim, PR 2441): do not start the
+         * host producers, so every batch is built by the GPU producers on its slot stream (the fallback the search loop
+         * already takes whenever a host-built batch is not ready) and the co-grinder keeps the producers' CPU time. */
+        printf("  Host producers: off (QSB_HP_SKIP; the GPU producers build every batch)\n");
+#else
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
                    (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+#endif
 #endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
