@@ -176,36 +176,75 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 }
 #else
 #ifndef QSB_SC_PARK
-#define QSB_SC_PARK 1   /* lane R: 1 = the product arena is a file-scope array that kernel_digest also uses to park prodA across B's front call; baked on in N-ry (merge, 2026-09-27: with QSB_Y_PAIR=1), 0 = the record's arena */
+#define QSB_SC_PARK 1   /* 1 = the product arena is a file-scope array that kernel_digest also uses to park prodA across B's front call; on with QSB_Y_PAIR=1, 0 = the record's arena */
 #endif
 #if QSB_SC_PARK
 __shared__ uint64_t qsb_sc_products[4][512];
 #endif
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+/*. LUT_ISSUED (QSB_ROOT_LUT_SMEM): 1 = the caller already issued qsb_root_lut_issue (kernel_digest
+ * does it at kernel start), 0 = the tree issues it here. Idle (QSB_PRE3_ROOT): work that warps 1..n/32-1 run
+ * on the wave-top branch while warp 0 runs the root, before the down-sweep barrier they wait at anyway. */
+struct QsbTreeNoIdle{__device__ __forceinline__ void operator()()const{}};
+#if QSB_ROOT_LUT_SMEM
+#define inverses qsb_tree_inverses_smem   /* file-scope rows (zinv32.cuh): the divstep LUT rides in them */
+#endif
+/* RW (QSB_ROOT_WARP, tree.cu): the warp whose lanes form the top of the tree (up levels with at
+ * most 32 writers, the waves, the root, down level 32). Node and inverse indices use the lane's index in that
+ * warp, so every node is the same product of the same operands as with warp 0; RW 0 is the base code. */
+template<int LUT_ISSUED,class Idle,int RW=0>
+__device__ __forceinline__ void qsb_block_inverse_tree_x(uint64_t *value,const Idle &idle){
+#else
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+#endif
 #if QSB_SC_PARK
     uint64_t (&products)[4][512] = qsb_sc_products;
 #else
     __shared__ uint64_t products[4][512];
 #endif
+#if !QSB_ROOT_LUT_SMEM
     __shared__ uint64_t inverses[4][256];
+#endif
+#if QSB_TREE_UNROLL
+    static_assert(QSB_SE_BLOCK==256,"QSB_TREE_UNROLL (tree.cu): the tree is written out for 256-thread kernel_digest blocks");
+    const int tid=threadIdx.x;constexpr int n=QSB_SE_BLOCK;
+#else
     const int tid=threadIdx.x,n=blockDim.x;
+#endif
     #pragma unroll
     for(int k=0;k<4;k++)products[k][tid]=value[k];
+#if QSB_ROOT_LUT_SMEM
+    /* The table words land in the dead inverses rows (flat word i < 832 at ((uint64_t*)inverses)[i]);
+     * this barrier publishes them to warp 0. The first tree write into these rows is the root section's
+     * inverses[k][offset-n+tid], after the root's last lookup, by the same warp. */
+    if(!LUT_ISSUED)qsb_root_lut_issue(tid,n);
+    qsb_root_lut_wait();
+#endif
     __syncthreads();
     // Level (offset,count): (0,n),(n,n/2),...,(2n-4,2). Level `count` is
     // formed by lanes < count/2 and read by lanes < count/4.
     int offset=0;
+#if QSB_TREE_UNROLL
+    #pragma unroll
+#else
     #pragma unroll 1
-    for(int count=n;count>2;count>>=1){
+#endif
+    for(int count=n;count>(QSB_TREE_WAVE_TOP?16:2);count>>=1){
         int half=count>>1;
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+        const int ut=(RW && half<=32)?tid-32*RW:tid;   /*: levels with <= 32 writers on warp RW */
+        if(RW?(unsigned)ut<(unsigned)half:tid<half){
+#else
+        const int ut=tid;
         if(tid<half){
+#endif
             uint64_t a[5],b[5],out[5];
             #pragma unroll
-            for(int k=0;k<4;k++){a[k]=products[k][offset+tid];b[k]=products[k][offset+half+tid];}
+            for(int k=0;k<4;k++){a[k]=products[k][offset+ut];b[k]=products[k][offset+half+ut];}
             a[4]=b[4]=0;
             QSB_TREE_MUL(out,a,b);
             #pragma unroll
-            for(int k=0;k<4;k++)products[k][offset+count+tid]=out[k];
+            for(int k=0;k<4;k++)products[k][offset+count+ut]=out[k];
         }
         offset+=count;
         if(half>32)__syncthreads();else __syncwarp();
@@ -219,7 +258,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     /* Exact: the root runs on warp 0 only. A warp vote is warp-uniform to ptxas, so the branch
      * below is uniform and the root's shfl/ballot need no per-op WARPSYNC subroutine
      * (CALL/RET wrappers). The same threads execute the same code as before. */
-    if(__all_sync(0xffffffffu,tid<32)){
+    if(!QSB_TREE_WAVE_TOP && __all_sync(0xffffffffu,tid<32)){
 #else
     if(tid<(QSB_INVERSE_LIMBS?32:4)){
 #endif
@@ -245,6 +284,85 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
             for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child[k];
         }
     }
+#if QSB_TREE_WAVE_TOP
+#if !(QSB_ROOT_UNIFORM_WARP && QSB_INVERSE_LIMBS)
+#error "QSB_TREE_WAVE_TOP is written for the uniform warp-0 root (QSB_ROOT_UNIFORM_WARP, QSB_INVERSE_LIMBS)"
+#endif
+    // QSB_TREE_WAVE_TOP (tree.cu): the base root block above is compiled out; offset == 2n-32, the
+    // sixteen L16 nodes x[j]. P8, P4, P2 go to their base columns (the base's up levels 16, 8, 4);
+    // c, d and E16 stay in the registers of lanes 0..15.
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+    if(__all_sync(0xffffffffu,RW?(unsigned)(tid-32*RW)<32u:tid<32)){
+        const int lt=RW?tid-32*RW:tid;   /*: lane index inside the root warp RW */
+#else
+    if(__all_sync(0xffffffffu,tid<32)){
+        const int lt=tid;
+#endif
+        const int l8=offset+16,l4=offset+24,l2=offset+28;
+        const bool cof=lt<16;
+        uint64_t a[5],b[5],r[5];
+        // Wave A: P8[j] = x[j]*x[j+8] on lanes j < 8 (lanes 8..31 repeat them, unstored).
+        #pragma unroll
+        for(int k=0;k<4;k++){a[k]=products[k][offset+(lt&7)];b[k]=products[k][offset+8+(lt&7)];}
+        a[4]=b[4]=0;QSB_TREE_MUL(r,a,b);
+        if(lt<8){
+            #pragma unroll
+            for(int k=0;k<4;k++)products[k][l8+lt]=r[k];
+        }
+        __syncwarp();
+        // Wave B: c[i] = x[i^8]*P8[(i&7)^4] on lanes i < 16; P4[j] = P8[j]*P8[j+4] on lanes 16+j, j < 4.
+        {
+            const int ia=cof?offset+(lt^8):l8+(lt&3);
+            const int ib=cof?l8+((lt&7)^4):l8+4+(lt&3);
+            #pragma unroll
+            for(int k=0;k<4;k++){a[k]=products[k][ia];b[k]=products[k][ib];}
+            a[4]=b[4]=0;QSB_TREE_MUL(r,a,b);
+            if((unsigned)(lt-16)<4u){
+                #pragma unroll
+                for(int k=0;k<4;k++)products[k][l4+(lt&3)]=r[k];
+            }
+        }
+        __syncwarp();
+        // Wave C: d[i] = c[i]*P4[(i&3)^2] on lanes i < 16; P2[j] = P4[j]*P4[j+2] on lanes 16+j, j < 2
+        // (the first operand is every lane's own wave-B product: c[i], or P4[j] on lane 16+j).
+        {
+            const int ib=cof?l4+((lt&3)^2):l4+2+(lt&1);
+            #pragma unroll
+            for(int k=0;k<4;k++)b[k]=products[k][ib];
+            b[4]=0;QSB_TREE_MUL(r,r,b);
+            if((unsigned)(lt-16)<2u){
+                #pragma unroll
+                for(int k=0;k<4;k++)products[k][l2+(lt&1)]=r[k];
+            }
+        }
+        __syncwarp();
+        // Wave D: E16[i] = d[i]*P2[(i&1)^1] on lanes i < 16; the root P2[0]*P2[1] on lane 16 (own P2[0]).
+        {
+            const int ib=cof?l2+((lt&1)^1):l2+1;
+            #pragma unroll
+            for(int k=0;k<4;k++)b[k]=products[k][ib];
+            b[4]=0;QSB_TREE_MUL(r,r,b);
+        }
+        uint64_t root[5];
+        #pragma unroll
+        for(int k=0;k<4;k++)root[k]=__shfl_sync(0xffffffffu,r[k],16);
+        qsb_field_normalize(root);
+        root[4]=0;
+        zi_inverse_limbs(root,lt);
+        if(lt==0)QSB_ISO_SCALE_ROOT(root);
+        #pragma unroll
+        for(int k=0;k<4;k++)root[k]=__shfl_sync(0xffffffffu,root[k],0);
+        // inv16[i] = root^-1 * E16[i]: the inverse of x[i], at the base's level-16 inverse column.
+        r[4]=0;QSB_TREE_MUL(r,root,r);
+        if(cof){
+            #pragma unroll
+            for(int k=0;k<4;k++)inverses[k][offset-n+lt]=r[k];
+        }
+    }
+#if QSB_PRE3_ROOT
+    else idle();   /* warps 1..: QSB_PRE3_ROOT (tree.cu), before the down-sweep barrier below */
+#endif
+#endif
 #elif HM41_QUAD_ROOT
     if(tid<4){
         uint64_t a[5],b[5],root[5];
@@ -302,21 +420,31 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     __syncwarp();
     // Level count (4..n/2): lanes < count read parent inverses written by
     // lanes < count/2 and write inverses read by lanes < 2*count.
-    offset-=4;   /* level count=4 */
+    offset-=QSB_TREE_WAVE_TOP?32:4;   /* level count=4 (QSB_TREE_WAVE_TOP: 32, the waves wrote level 16) */
+#if QSB_TREE_UNROLL
+    #pragma unroll
+#else
     #pragma unroll 1
-    for(int count=4;count<n;count<<=1){
+#endif
+    for(int count=QSB_TREE_WAVE_TOP?32:4;count<n;count<<=1){
         int half=count>>1;
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+        const int ut=(RW && count<=32)?tid-32*RW:tid;   /*: down level 32 on warp RW (it reads RW's inverses) */
+        if(RW?(unsigned)ut<(unsigned)count:tid<count){
+#else
+        const int ut=tid;
         if(tid<count){
+#endif
             uint64_t parent_inv[5],sibling[5],child_inv[5];
             #pragma unroll
             for(int k=0;k<4;k++){
-                parent_inv[k]=inverses[k][offset+count-n+(tid&(half-1))];
-                sibling[k]=products[k][offset+(tid^half)];
+                parent_inv[k]=inverses[k][offset+count-n+(ut&(half-1))];
+                sibling[k]=products[k][offset+(ut^half)];
             }
             parent_inv[4]=sibling[4]=0;
             QSB_TREE_MUL(child_inv,parent_inv,sibling);
             #pragma unroll
-            for(int k=0;k<4;k++)inverses[k][offset-n+tid]=child_inv[k];
+            for(int k=0;k<4;k++)inverses[k][offset-n+ut]=child_inv[k];
         }
         offset-=count<<1;
         if((count<<1)>32)__syncthreads();else __syncwarp();
@@ -335,4 +463,21 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+#if QSB_ROOT_LUT_SMEM
+#undef inverses
+#endif
+__device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+    qsb_block_inverse_tree_x<0>(value,QsbTreeNoIdle());
+}
+#endif
+#endif
+#if (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT) && ZLAB_TREE != 2
+#error "QSB_ROOT_LUT_SMEM and QSB_PRE3_ROOT (tree.cu) are written for the level-packed tree (ZLAB_TREE 2)"
+#endif
+#if QSB_ROOT_LUT_SMEM && !(HM43_WARP_ROOT && QSB_INVERSE_LIMBS)
+#error "QSB_ROOT_LUT_SMEM (tree.cu) is written for the warp-0 limbs root (HM43_WARP_ROOT, QSB_INVERSE_LIMBS)"
+#endif
+#if QSB_TREE_WAVE_TOP && (ZLAB_TREE != 2 || !HM43_WARP_ROOT)
+#error "QSB_TREE_WAVE_TOP (tree.cu) is written for the level-packed tree (ZLAB_TREE 2) with the warp-0 root (HM43_WARP_ROOT)"
 #endif

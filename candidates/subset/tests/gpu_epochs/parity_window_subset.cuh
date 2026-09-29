@@ -226,7 +226,25 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
 #if QSB_K2S_PARITY_NARROW
     qsb_parity_window_words_narrow(mid,top,a,b);
     const uint32_t xn=(uint32_t)mid;
+#if QSB_PW_QN == 2
+    /* QSB_PW_QN 2: the same u64 sum with the two 32-bit addends typed as 32-bit values. */
+    const uint64_t qn=top+(uint64_t)(977u*0u)+977ULL*(uint32_t)(top>>32)+(uint64_t)xn+(uint64_t)(uint32_t)(beta[3]>>32);
+#elif QSB_PW_QN
+    /* QSB_PW_QN (tree.cu): the same u64 sum, as mad.wide.u32 + one three-input add pair. */
+    uint64_t qn;
+    asm("{\n\t.reg .u32 th,lo,hi;\n\t"
+        "mov.b64 {lo,th}, %1;\n\t"
+        "mad.wide.u32 %0, th, 977, %1;\n\t"
+        "mov.b64 {lo,hi}, %0;\n\t"
+        "add.cc.u32 lo, lo, %2;\n\t"
+        "addc.u32 hi, hi, 0;\n\t"
+        "add.cc.u32 lo, lo, %3;\n\t"
+        "addc.u32 hi, hi, 0;\n\t"
+        "mov.b64 %0, {lo,hi};\n\t}"
+        : "=l"(qn) : "l"(top), "r"(xn), "r"((uint32_t)(beta[3]>>32)));
+#else
     const uint64_t qn=top+977ULL*(top>>32)+xn+(beta[3]>>32);
+#endif
     /* D5 omission changes the middle accumulator by at most 6; D12
      * omission changes the high accumulator by at most 3. Including a
      * possible high-word carry gives |Q_old-Q_new|<=986. These stronger

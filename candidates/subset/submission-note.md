@@ -1,39 +1,123 @@
-# Subset: promoted Y_PAIR base with selected nine-window host and Q_MIX2 device
+# Subset: exact device cuts, a one-form chain gather and co-grinder scheduling on 521075fe
 
-Effort: medium. This is an independent cross-composition experiment. It begins with the promoted Subset source from RealAdii's `521075fe` (`46b24ebaa033fb69c7335794b54fd6a156359ec8`), whose verified official score was 700,953,730 candidates/s. The submitted implementation retains that source except for two selected host files, one device scheduling constant, the corresponding published native image, and package metadata. The aim is to test whether the host package from a narrowly positive completed result and the `Q_MIX=2` native device variant from another narrowly positive completed result compose favorably. The official evaluation, not the two source results added together, will determine the answer.
+This package starts from the subset record `521075fe` (commit `46b24eb`) and is not rebased onto the later record
+`5c7e36c5`. Its device code is byte-identical to our earlier
+submission `8f99a3e9` (cubin `003e3d39`): the chain that carries a pair and reduces once per addition, GLV11 with
+`QSB_Q_MIX` 4, and the native sm_89 image. The package adds compile-time switches at file scope. Setting a switch to 0 gives
+back the previous code for that part, and with every switch at 0 the PTX is `521075fe`'s apart from the knob string.
 
-## Public sources and attribution
+`kernel_digest` runs at 128 registers with no stack frame and no spills, 2 blocks per SM as before. The committed native
+image is cubin sha256 `e0c0897f799baf81...` (473,376 B), built from this tree's own source with CUDA 12.8.93;
+`build_carrier.sh` reproduces it byte for byte. The ranked build line exits 0.
 
-The host combination was selected from i34-9's completed `4da17ebc` at commit `f391f74dc765352be557efb044f326f0e2190c45`. Its official verifier reported 701,215,160 against 700,953,730, an observed +0.037296% relative to the actual reference. The result did not reach the challenge's 1% promotion threshold. That source's `CpuGrindSubset.h` and `tests/gpu_epochs/host_producers.h` are copied byte for byte into this candidate. The host package itself attributes its co-grinder to cefika's `bf001729` and its producer to ercumentyildirim's `a141df2b`, with underlying contributions from terrapinelf and HyeokxC. The nine-window table gate and its huge-page fallback remain as published in the completed host package.
+Written with Claude Fable 5.1 and Claude Opus 5.5 in Claude Code.
 
-The device alternative was selected from terrapinelf's completed `3e6069ee` at commit `0a38640ed29390ecea2c43fe260bef6ab9b61a3e`. Its official verifier reported 700,959,184 against 700,953,730, an observed +0.000778% relative to the actual reference; this was also below the 1% promotion threshold. It uses `QSB_Q_MIX=2` with a matching native sm_89 image. This candidate changes only the crown's `QSB_Q_MIX` default from 4 to 2 in `tests/gpu_epochs/tree.cu` and copies the image `qsb_carrier_sm89.h` byte for byte from that completed source. The rest of its host tree and its different producer and co-grinder package are not imported. The image derives from the promoted device code by kshitij-hash and fkiene, with terrapinelf's published image build.
+## Device switches (on)
 
-RealAdii is credited for the immediate promoted base. cefika, ercumentyildirim, terrapinelf, HyeokxC, kshitij-hash, fkiene, and the other contributors named by the inherited source and license notices retain credit for their substantive work. This note describes sources, not participation in this submission, review, or endorsement. No additional co-author metadata is requested. The inherited GPL and secp256k1 license files and notices remain in place.
+Files without a directory sit in `tests/gpu_epochs/`. Every device switch is in the image's knob list, so flipping one needs
+`build_carrier.sh`.
 
-## Selection and mechanism
+| switch, default | file | change |
+|---|---|---|
+| `QSB_GATHER_LEA2` 1 | tree.cu | the 64-byte record address as LOP3, LEA, LEA.HI.X |
+| `QSB_GLV_EO` 1, `QSB_GLV_ZDEC` 1, `QSB_GLV_RND` 2, `QSB_DECODE_CUT` 2 | GLVScalar.cuh, tree.cu | the GLV split's residual products from column-pair accumulators, signed residuals for the walker, the rounding constant folded into a carry, and the residual carries taken straight off the carry flag |
+| `QSB_TREE_WAVE_TOP` 1 | tree_inverse.cuh | the top of the block inversion tree as four packed waves on warp 0 |
+| `QSB_GT_BATCH` 1 | tree.cu | the table build shares one field inversion across 16 records and checks each inverse |
+| `QSB_SHA_SCHED_V4` 1, `QSB_SHA_CONST_IV` 1, `QSB_GATE_W8_LEA` 1 | tree.cu, window_schedule_shared.cuh | 128-bit schedule loads, one induction variable for the constant blocks' loop, gate word 8 as one LEA |
+| `QSB_YNEG_FOLD` 1 | tree.cu, pair_shared.cuh | the last chain addition hands the pre-inverse step the negated ordinate |
+| `QSB_HIT_NO_COMBO` 1 | tree.cu | the hit record keeps its 4-byte tag; the host rebuilds the rest, so the published hit text is unchanged |
+| `QSB_FX3_PRESUB` 1, `QSB_FX3_PRESUB_EARLY` 1 | hit_filter_field_sc.cuh | the fused X3 subtracts V once, before the odd row is merged |
+| `QSB_K32_SUBCUT` 7, `QSB_K32_ADDCUT` 1 | hit_filter_field_sc.cuh | the K corrections of the subtractions and the anchor sum on limb 0's 32-bit halves |
+| `QSB_S3_DOFF` 1, `QSB_S3_UNIFORM_G` 1 | tree.cu | the chain loop counts a byte offset; a warp vote makes the psi branch warp-uniform |
+| `QSB_S3_NM_MASK` 1, `QSB_S3_NM_SEED` 1, `QSB_GATHER_ONE_FORM` 1 | tree.cu | the chain's and the seed's gathers take index and mask as two walker values, and each record is loaded in one form |
+| `QSB_XNEG_BRANCH` 1, `QSB_PARK128` 1, `QSB_OK_FOLD` 2, `QSB_TID_UNSIGNED` 1 | tree.cu | a grid-uniform sign branch, 16-byte parked rows, one OR for an unusable lane, unsigned half index |
+| `QSB_SC_OPS` 48 | hit_filter_field_sc.cuh | the operand order of the point add's seven products, searched over all 32 legal orders for this switch set |
 
-The promoted base has `QSB_Y_PAIR`, shared parking, the P18 chain, `Q_MIX=4`, the crown host producer, and an eight-lane CPU co-grinder. It already has a completed-record snapshot before slot reuse and the exact host publication gate. The host package from `4da17ebc` supplies SHA message schedule reuse in the host-built epoch path and a memory-gated nine-window CPU table. A nine-window table may reduce one lookup/addition per CPU candidate relative to ten windows when the ranked host has enough memory and the huge-page checks pass. Otherwise it falls back through the existing table choices. Its source is compatible with the promoted `tree.cu`: the completed host entry ran against the promoted tree, and this experiment preserves all host tree call signatures.
+Other device switches are in the tree at 0, each with its alternative code kept for later images.
 
-`Q_MIX=2` chooses the alternate Q layout on more GPU warps than `Q_MIX=4`. It trades memory fetches for field additions within the existing warp-uniform half walker. The embedded image is necessary because the native loader compares the image's build knob string to the host-side build knobs; changing the source constant without the matching image could silently take the slower JIT path. The image in this package carries `QSB_Q_MIX=2` and `QSB_ZEROS_N=24`, and its decoded cubin digest matches the published header: `f74548427859ec03273f05e9151c810716c6475596e0213a0db3915e468aa5dc`.
+## Host switches (on)
 
-The two completed scores are only screening evidence. They are separate complete packages, each measured once with different host/device combinations and random seeds. Their percentages are not additive. The host package may compete with GPU scheduling for CPU or memory resources, and the Q layout's effect may be masked by measurement variance. The official result of this new combination is unknown at submission time.
+None is in the knob list, so they leave the image unchanged.
 
-## Scope and correctness path
+| switch, default | file | change | source |
+|---|---|---|---|
+| `QSB_SP_REFILL_FIRST` 1 | tree.cu | the slot loop launches batch k before it gates batch k-2 | `521075fe` after `9edbdde7` |
+| `QSB_CPU_TRY9` 1, `QSB_CPU_ALLCPU` 1, `QSB_HP_V3` 1 | CpuGrindSubset.h, host_producers.h | a 9-window table on huge pages when memory allows, workers on every CPU, the v3 host producers | `789aed1b`, `a141df2b` |
+| `QSB_CPU_X4PS` 1, `QSB_CPU_SHC` 1 | CpuGrindSubset.h | shared schedule rows for four lanes; padding carried as constants | `c13302f3` |
+| `QSB_CPU_KH16` 1, `QSB_CPU_MRG` 1, `QSB_CPU_AINL` 1 | CpuGrindSubset.h | 16-key key-hash schedules, one accumulator per column, inlined small field operations | `a33e04c3` |
+| `QSB_CPU_BATCH_AUTO` 1 | CpuGrindSubset.h | batch size chosen from the CPU topology | `86c643ae` |
+| `QSB_CPU_PREFIX100` 1 | CpuGrindSubset.h | the co-grinder walks the 100 of its 158 window patterns whose first message block five patterns share | `b67487a1`, after `4a197f06` |
+| `QSB_CPU_SHA4` 1, `QSB_CPU_DNF` 1, `QSB_CPU_RECODE_NG` 1, `QSB_CPU_FOLD4` 1 | CpuGrindSubset.h | four interleaved SHA-NI lanes, an unfolded limb in the window step, hash words by transpose instead of gathers, an 11-IFMA reduction | ours |
+| `QSB_CPU_ILP2` 1, `QSB_CPU_NCH` 2, `QSB_CPU_PFSPREAD` 3 | CpuGrindSubset.h | two groups interleaved in the backward passes, two inversion chains instead of four, spread row prefetches | ours |
+| `QSB_NO_SUMMARY_FSYNC` 1, `QSB_LAZY_MODULES` 1, `QSB_CPU_FOLD_PAR` 1, `QSB_CPU_TOUCH_GUARD` 1, `QSB_FAST_TEARDOWN` 1, `QSB_STARTUP_THREADS` 1 | tree.cu, CpuGrindSubset.h | start-up and exit hardening: no fsync of an unread file, lazy module loading, a parallel fold, a first-touch time limit with a 10-window fallback, table unmap during the drain, threaded start-up ladders | ours |
 
-Only `candidates/subset` is edited. The protected benchmark, verifier, score calculation, problem generator, and Pinning track are untouched. The device arithmetic, candidate enumeration, target test, hit record format, host exact verification, and completed-record publication remain the promoted source. The change to `tree.cu` is a single default constant. The host CPU and producer headers are the two exact files from `4da17ebc`; the native image is the exact file from `3e6069ee`. The manifest and note describe the new package.
+## Exactness
 
-The native image's base64 payload was decoded using a pure Python check. The decoded size is 462,496 bytes and its SHA-256 is the value in the image header. The cubin contains `QSB_Q_MIX=2;` and `QSB_ZEROS_N=24;` and does not contain `QSB_Q_MIX=4;`. A source comparison showed that the `3e6069ee` device tree differs from the promoted tree in its device-relevant section by this Q mix default; the other differing tree hunks are host placement and diagnostics, which are not imported here. The exact-match verifier call remains in the promoted tree and CPU header. These checks establish source selection and configuration consistency; they do not claim native execution or speed for this new combination.
+Most device switches are bit-identical: the same addresses, words, coefficients and field elements by a different route.
+The GLV split, the signed-residual walker and the gather forms are replayed by the start-up self-check before each run, which
+also catches deliberately broken variants. The point add at this operand order matches a bigint model of the madd on every
+tested random state. The paired hash matches OpenSSL's compression on 10^6 cases.
 
-No local C++ or CUDA compilation and no local GPU benchmark were run for this candidate. The two donor entries' historical build and benchmark declarations belong to their authors and are not claimed as our tests. Pure Python checks cover file identity, allowed paths, image payload digest and knob presence, baseline device byte identity outside the Q mix constant, and manifest hashes. The official remote run is the only performance and runtime validation for this assembled version.
+Some cuts use the rare-carry class the chain and tree already have in `521075fe`: the tree top's short-carry products and the
+K32 corrections can drop a carry in a small fraction of candidates (about 2^-16 to 2^-21 each). Such a candidate can lose a
+hit but can never publish a wrong one, and the loss is a few hits per hundred thousand. The host gate recomputes every GPU
+nomination and every co-grinder hit with OpenSSL before publishing it.
 
-## Other eligible and pending ideas considered
+The co-grinder switches run the same operations on the same operands (reordered, regrouped with every lazy value carried
+before a subtraction, or with prefetches moved). On fixed work (one worker, 16,179,200 candidates, `QSB_ZEROS_N` 14) the
+co-grinder gives the same hit file with each host switch on or off; the pattern selection changes which candidates are
+walked, stays disjoint from the GPU's patterns, and every one of its hits re-derives with the harness's own
+`problem.candidate_hash`. Hit sets matched in every comparison we ran between this package and its predecessors.
 
-The completed `9ffe23af` scored 700,384,519 against 700,953,730, or -0.081205%, within the current 0.2% research screen. It adds a host execution selector and an inversion boundary guard to a host package close to `4da17ebc`. We did not include the selector in this run: its own package scored below the simpler host variant, and adding a third scheduling variable would make an unfavorable outcome hard to localize. The rare boundary guard addresses correctness of a zero-product fallback, not an expected default throughput gain. It remains a separate candidate for later investigation.
+## Full run of this exact package
 
-At preparation time, `4a197f06`, `30acab4c`, `2e178289`, `b67487a1`, and other submissions were still in flight. Only their public notes were read. They discuss SHA port routing, background table construction, alternate device Q mix, pattern-family selection, and guarded scalar arithmetic. Their source was not obtained while in flight; their performance and correctness remain unconfirmed for this package. None is silently represented as included. Earlier negative Graph and L2/host compositions from this account are excluded after their official regressions.
+One official-path run of this exact tree, 1,200 s, on a rented Zen 4 EPYC slice (12 CPUs) with an RTX 4090 (CUDA 12.8).
+We copied the harness, replaced `candidates/subset`, deleted any binary, then ran `./setup.sh subset` and
+`./benchmark.sh subset` through the command grinder with a cold JIT cache and problem seed 20260927. `setup.sh` exited 0 and
+the native image loaded.
 
-## Reproducibility and result ownership
+| result | score | verified hits | elapsed |
+|---|---:|---:|---:|
+| PASS (scored) | 872.95 M/s | 125,077 of 125,077 | 1,201.92 s |
 
-The base subset tree is the public promoted source `46b24eba`. Copy the two named host files from `f391f74d`, set the single Q mix default to 2, and copy the named native image from `0a38640e`. Do not substitute that commit's full `tree.cu`: it contains host placement changes that are not part of this experiment. Verify the hashes in `SOURCE-MANIFEST.json` and the image digest and knob string before using the package. The package preserves the baseline device gate and host exact-match check, plus the host file's existing resource fallback.
+This host is not the runner (its card held its power limit and the co-grinder had 12 CPUs), so the score does not predict
+the ranked one. The run shows that the package builds with the ranked line, loads its image and publishes only verified
+hits.
 
-The official evaluator will determine validity, score, and whether the candidate is promoted. A positive donor result does not imply this combination crosses the 1% promotion threshold. On a negative result, the next comparison should distinguish CPU worker/table behavior from device Q mix using official diagnostics before reusing either component. On a positive result below the threshold, it should be recorded as a near-frontier route, not a promotion. Source identifiers and percentages in this note refer to observed public results, while this composition has no claimed measured score yet.
+## Reproducing
+
+```
+./setup.sh subset
+./benchmark.sh subset
+```
+
+Off the official runners, the harness's command grinder runs the same build:
+
+```
+QSB_GRINDER='cmd:python3 harness/gpu_wrap.py --src candidates/{bench}/{bench}.cu --no-build' ./benchmark.sh subset
+```
+
+To isolate a change, set its switch with `-D` or at its `#define` and rebuild. After any device switch flips, regenerate the
+image with `NVCC=/path/to/cuda-12.8/bin/nvcc ./build_carrier.sh 24`. After a change to a `QSB_FX3_*`, `QSB_K32_*`,
+`QSB_S3_*` or `QSB_GATHER_*` switch, search `QSB_SC_OPS` again. `QSB_S3_NM_MASK` 0 needs `QSB_GATHER_ONE_FORM` 0.
+`QSB_CPU_ALLCPU` 0 puts `QSB_CPU_RSV_CORE` back to 1.
+
+## Base and credits
+
+- Base: `521075fe`, itself built on our `8f99a3e9`; the refill-before-publish order after `9edbdde7`.
+- Through `8f99a3e9`: `2d1631b0` (the co-grinder engine, with the batch-affine prefix after `55757d4d`), `888f5fce` after
+  `212237f4` (the blocking host wait), `de5739c9` (the promoted GLV12xc base, half-walk, the 8-lane IFMA and 4-lane SHA-NI
+  co-grinder), `82d8493f` and `97f347a8` (host producers, warp-uniform root, row prefetch), `bb2a3eb7`, `2a1f43c5`,
+  `d1ddefca`, `25bd990a` / `7a75fa50` (carrier and co-grinder design), `73224391`, `eaba5205` / `b864a72c`, `14675ab0` /
+  `adfa8aaa`, `933abead`; libsecp256k1 (MIT, notice kept).
+- From queued work: `789aed1b` and `a141df2b` (also in `4da17ebc`); `c13302f3`; `86c643ae`; `a33e04c3`; `b67487a1` after
+  `4a197f06`.
+- From pinning work: the pinning record `b9736ce1` (kaankolcu) for `QSB_DECODE_CUT` bit 2 (credited there to HY16) and the
+  seed gathers' index and mask form; the single V subtraction of ercumentyildirim's `QSB_SAS_PRESUB`; i34-9's `QSB_SUB_CUT`
+  and `QSB_ADDOFF_CUT`, written here as the K32 switches.
+- Ours: the remaining device switches, the operand-order search, `QSB_CPU_SHA4`, `QSB_CPU_DNF`, `QSB_CPU_RECODE_NG`,
+  `QSB_CPU_FOLD4`, `QSB_CPU_ILP2`, `QSB_CPU_NCH`, `QSB_CPU_PFSPREAD`, the hardening switches, and the ports of the items
+  above as switches.
+
+Their authors are credited as coauthors in the submission metadata up to Yukon's limit of ten; cefika (`4a197f06`) and
+anamdongparkjinhyeong (`9edbdde7`) are credited here. All inherited source, GPLv3 notices and attributions are kept.

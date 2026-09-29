@@ -20,6 +20,18 @@
 #else
 #define QSB_R_PASS(rx,ry) ,rx[0],rx[1],rx[2],rx[3],ry[0],ry[1],ry[2],ry[3]
 #endif
+/* QSB_R_CBANK_TAILS (tree.cu): QSB_R_CBANK for the tail callees only (qsb_pair_tail3_value,
+ * qsb_pair_finish3_value, qsb_pair_weave3_value read QSB_U2R from the constant bank; the front keeps its
+ * ABI). QSB_R_TAIL_CBANK is the callee-side test, QSB_R_PASS_TAIL the caller-side argument list. */
+#ifndef QSB_R_CBANK_TAILS
+#define QSB_R_CBANK_TAILS 0
+#endif
+#define QSB_R_TAIL_CBANK (QSB_R_CBANK || QSB_R_CBANK_TAILS)
+#if QSB_R_TAIL_CBANK
+#define QSB_R_PASS_TAIL(rx,ry)
+#else
+#define QSB_R_PASS_TAIL(rx,ry) ,rx[0],rx[1],rx[2],rx[3],ry[0],ry[1],ry[2],ry[3]
+#endif
 #if QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_k2s_pre(
     uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
@@ -89,8 +101,14 @@ __device__ __forceinline__ void qsb_k2s_pre3(
 ) {
     uint64_t yb[4];
     QSB_PRE_FMUL(yb, yR, ZZZ);
+#if QSB_YNEG_FOLD
+    /* QSB_YNEG_FOLD (tree.cu): the filter chain hands back s = -Y, so n1 = yb - Y = yb + s, n2 = yb + Y = yb - s. */
+    QSB_PRE_FADD(n, yb, Y);
+    QSB_PRE_FSUB(n + 4, yb, Y);
+#else
     QSB_PRE_FSUB(n, yb, Y);
     QSB_PRE_FADD(n + 4, yb, Y);
+#endif
     Load256(n + 8, ZZ);
 }
 /* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
@@ -98,7 +116,22 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
     uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
 ) {
     uint64_t t[4];
-#if QSB_ISO_FAST_X
+#if QSB_ISO_FAST_X && QSB_XNEG_BRANCH
+    (void)xR;
+    /* QSB_XNEG_BRANCH (tree.cu): grid-uniform branch. t = p - ZZ mod 2^256 is the mask form's
+     * ~ZZ + (p+1) mod 2^256 word for word; t = ZZ is its m = 0 case. */
+    if (QSB_ISO_XNEG) {
+        asm("sub.cc.u64 %0, 0xFFFFFFFEFFFFFC2F, %4;\n\t"
+            "subc.cc.u64 %1, 0xFFFFFFFFFFFFFFFF, %5;\n\t"
+            "subc.cc.u64 %2, 0xFFFFFFFFFFFFFFFF, %6;\n\t"
+            "subc.u64 %3, 0xFFFFFFFFFFFFFFFF, %7;"
+            : "=l"(t[0]),"=l"(t[1]),"=l"(t[2]),"=l"(t[3])
+            : "l"(ZZ[0]),"l"(ZZ[1]),"l"(ZZ[2]),"l"(ZZ[3]));
+        QSB_PRE_FSUB(t, t, X_D);
+    } else {
+        QSB_PRE_FSUB(t, ZZ, X_D);
+    }
+#elif QSB_ISO_FAST_X
     (void)xR;
     /* Branchless selection of ZZ or p-ZZ.  This is the same complement/add-p
      * construction used by signed G-table loads, with a problem-uniform mask. */
@@ -109,7 +142,9 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 #else
     QSB_PRE_FMUL(t,xR,ZZ);
 #endif
+#if !(QSB_ISO_FAST_X && QSB_XNEG_BRANCH)
     QSB_PRE_FSUB(t, t, X_D);
+#endif
     Load256(X_D, t);             /* X_D becomes d */
     QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
     W[4] = 0;
@@ -196,6 +231,10 @@ __device__ __forceinline__ int qsb_k2s_front(
     uint64_t qx[4],qy[4],qzz[4],qzzz[4];
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+#if QSB_YNEG_FOLD
+    /* QSB_YNEG_FOLD (tree.cu): the chain handed back -Y; the 4M pre keeps the base resolve (Y = 0 - s). */
+    { const uint64_t zero[4]={0ULL,0ULL,0ULL,0ULL}; QSB_FSUB(qy,zero,qy); }
+#endif
     qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
     qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
     return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
@@ -234,7 +273,18 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#if QSB_OUTER_LITK
+/* QSB_OUTER_LITK needs the literal-K transform before the outer block; sha_gate_fma.cuh is include-guarded,
+ * so the gate's own include below (QSB_GATE_H0_FMA) is then a no-op. */
+#include "../../sha_gate_fma.cuh"
+#endif
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
+#if QSB_OUTER_LITK
+    /* QSB_OUTER_LITK: the literal-K transform of sha_gate_fma.cuh on the same padded block (W8 =
+     * 0x80000000, W9..14 = 0, W15 = 256) from the IV; K+W8, K+W15 and the IV round-0/1 terms fold. */
+    uint32_t s2[8];
+    _SHA256TransformDigest32Q(s2,state);
+#else
     uint32_t b2[16];
     #pragma unroll
     for(int i=0;i<8;i++)b2[i]=state[i];
@@ -245,6 +295,7 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
     _SHA256Transform(s2,b2);
+#endif
     z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
     z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
@@ -266,7 +317,25 @@ __device__ __forceinline__ int qsb_k2s_front3_z(
     uint32_t unused_flag=0;
     qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
     qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);   /* same finish as qsb_k2s_front3 */
+#if QSB_PRE3_ROOT == 1
+    /* QSB_PRE3_ROOT (tree.cu), form 1: warp 0 keeps pre3 here; warps 1..7 return (Y, ZZZ, ZZ) for the
+     * root-window hook in kernel_digest (QsbPre3Idle). Full-warp vote: warp-uniform. */
+#if QSB_ROOT_WARP
+    /* QSB_ROOT_WARP: the root warp keeps pre3 here; the tree's vote uses the same test. */
+    if(!__all_sync(0xffffffffu,threadIdx.x-32u*(unsigned)QSB_ROOT_WARP<32u)){
+#else
+    if(!__all_sync(0xffffffffu,threadIdx.x<32u)){
+#endif
+        Load256(n,qy);Load256(n+4,qzzz);Load256(n+8,qzz);
+    }else qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#elif QSB_PRE3_ROOT == 2
+    /* Form 2 (reference): return (Y, ZZZ, ZZ) on every warp; kernel_digest applies qsb_k2s_pre3, warp 0
+     * right after its second front and warps 1..7 in the tree's root window. */
+    (void)u2ry;
+    Load256(n,qy);Load256(n+4,qzzz);Load256(n+8,qzz);
+#else
     qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+#endif
     return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
 }
 #endif
@@ -318,7 +387,12 @@ __device__ __forceinline__ void qsb_gate_block(uint32_t *pb, const uint64_t *qx,
     pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
     pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
     pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+#if QSB_GATE_W8_LEA
+    /* QSB_GATE_W8_LEA: the same word 8 (last x byte, then the 0x80 pad byte) as one LEA */
+    pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=(x32[0]<<24)+0x00800000u;
+#else
     pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+#endif
     pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
 }
 #define QSB_GP_WMIX(w) { \
@@ -533,14 +607,14 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
     uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
     uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
-#if !QSB_R_CBANK
+#if !QSB_R_TAIL_CBANK
     ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
     uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
 #endif
     ){
     uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
     uint64_t inv[4]={v0,v1,v2,v3};
-#if QSB_R_CBANK
+#if QSB_R_TAIL_CBANK
     /* The digest kernel's tree already applied 1/u (QSB_ISO_RELOAD_R): original R. */
     uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
     uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
@@ -555,5 +629,147 @@ __device__ __noinline__ int qsb_pair_tail3_value(
     return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 #endif
 }
+#if defined(QSB_TAIL_STAGGER) && QSB_TAIL_STAGGER
+/* QSB_TAIL_STAGGER (tree.cu): qsb_pair_tail3_value split into its two halves. finish3 is tail3 up to
+ * and including qsb_k2s_post3 (x-words of both recovery ids and their parities); gate3 is tail3's gate on
+ * those values. gate3(finish3(args)) == tail3(args) for every argument. */
+struct QsbPairFin3 {uint64_t x[8];uint32_t par;};
+__device__ __noinline__ QsbPairFin3 qsb_pair_finish3_value(
+    uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
+    uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
+    uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
+    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
+#if !QSB_R_TAIL_CBANK
+    ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+    ){
+    uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
+    uint64_t inv[4]={v0,v1,v2,v3};
+#if QSB_R_TAIL_CBANK
+    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+#else
+    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+#endif
+    QsbPairFin3 out;
+    out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
+    return out;
+}
+__device__ __noinline__ int qsb_pair_gate3_value(
+    uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,
+    uint64_t y0,uint64_t y1,uint64_t y2,uint64_t y3,uint32_t par){
+    uint64_t q1x[4]={x0,x1,x2,x3},q2x[4]={y0,y1,y2,y3};int recid=0;
+#if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
+    return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
+#else
+    return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
+#endif
+}
+#endif
+#if defined(QSB_TAIL_WEAVE) && QSB_TAIL_WEAVE
+/* QSB_TAIL_WEAVE (tree.cu): gate A and finish B in one __noinline__ callee. The gate is
+ * qsb_k2s_gate_h0's two H0 hashes with the test written as selects (no branch between the hashes and the
+ * finish), encoded as gate3 encodes it: 1 = hit on recid 0, 2 = hit on recid 1 (only if recid 0 missed),
+ * 0 = none. The finish is finish3's body on B's words. Both are pure functions of their arguments, so
+ * weave(finA, nB, invB) = (gate3(finA), finish3(nB, invB)) word for word. */
+struct QsbPairWeave3 {uint64_t x[8];uint32_t par;int enc;};
+/* gate_h0's verdict from the two digest words, as gate3 encodes it (recid 0 first). */
+__device__ __forceinline__ int qsb_k2s_gate_h0_verdict(uint32_t h0,uint32_t h1){
+    const int z0=(h0>>(32-QSB_ZEROS_N))==0u,z1=(h1>>(32-QSB_ZEROS_N))==0u;
+    return z0?1:(z1?2:0);
+}
+#if QSB_TAIL_WEAVE == 1
+#if !(QSB_NEGFOLD_PARITY && QSB_K2S_PARITY_WINDOW && QSB_GATE_H0_FMA)
+#error "QSB_TAIL_WEAVE 1 copies qsb_k2s_post3's QSB_NEGFOLD_PARITY + QSB_K2S_PARITY_WINDOW form with the FMA H0 hash"
+#endif
+/* qsb_k2s_post3 (its compiled form) with A's two hashes placed in the finish's basic blocks: the recid-0
+ * hash before the products (the block that ends at the first parity window's guard), the recid-1 hash after
+ * the first window (the block with the second product and window), so that each block holds one hash's ALU
+ * rounds beside fmaheavy products and the callee's peak live set stays under ptxas's budget (both hashes
+ * beside the whole finish, form 2, spilled at 128). Same operations in the same order as
+ * post3 for the finish, the same hash for the gate; the two are independent. */
+__device__ __forceinline__ uint32_t qsb_k2s_post3_weave(
+    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+    uint64_t *x1, uint64_t *x2, const uint32_t *pb0, const uint32_t *pb1, uint32_t *h0, uint32_t *h1
+) {
+    uint64_t t[4], sum[4], m1[4], m2[4];
+    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+    *h0=_SHA256Pubkey33H0(pb0);
+    QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
+    QSB_FMUL(m1, n, n + 8);
+    QSB_FMUL(m2, n + 4, n + 8);
+    QSB_FADD(sum, m1, m2);
+    QSB_FSUB(t, m1, cc);
+    QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
+    uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
+    QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
+    *h1=_SHA256Pubkey33H0(pb1);
+    QSB_FSUB(t, m2, cc);
+    QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
+    parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
+    QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
+    return parities;
+}
+#endif
+/* B's twelve finish words come from shared memory (the caller parks them in the thread's own parkA rows
+ * 0..11, free once A's inputs are read; nb_smem is the shared address of row 0, rows QSB_WEAVE_PARK_STRIDE
+ * bytes apart) instead of 24 argument registers: with them as arguments the body and the chain subfunction
+ * spilled around the call sites. */
+__device__ __noinline__ QsbPairWeave3 qsb_pair_weave3_value(
+    uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,
+    uint64_t y0,uint64_t y1,uint64_t y2,uint64_t y3,uint32_t par,
+    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,uint32_t nb_smem
+#if !QSB_R_TAIL_CBANK
+    ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+    ){
+    uint64_t q1x[4]={x0,x1,x2,x3},q2x[4]={y0,y1,y2,y3};
+    uint64_t n[12];
+    #pragma unroll
+    for(int k=0;k<12;k++)
+        asm volatile("ld.shared.b64 %0, [%1];" : "=l"(n[k]) : "r"(nb_smem+(uint32_t)k*(uint32_t)QSB_WEAVE_PARK_STRIDE) : "memory");
+    uint64_t inv[4]={v0,v1,v2,v3};
+#if QSB_R_TAIL_CBANK
+    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+#else
+    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+#endif
+    uint32_t pb0[16],pb1[16],h0,h1;
+    qsb_gate_block(pb0,q1x,par);
+    qsb_gate_block(pb1,q2x,par>>1);
+    QsbPairWeave3 out;
+#if QSB_TAIL_WEAVE == 1
+    out.par=qsb_k2s_post3_weave(n,inv,rx,ry,out.x,out.x+4,pb0,pb1,&h0,&h1);   /* finish B around gate A */
+#elif QSB_TAIL_WEAVE == 2
+    /* Both hashes ahead of the finish in one basic block (spills at 128; kept as the reference form). */
+#if QSB_GATE_H0_FMA
+    h0=_SHA256Pubkey33H0(pb0);
+    h1=_SHA256Pubkey33H0(pb1);
+#else
+    qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
+#endif
+    out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
+#else
+    /* 3: the recid-0 hash ahead of the finish, the recid-1 hash behind it (no copy of post3). */
+    h0=_SHA256Pubkey33H0(pb0);
+    out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
+    h1=_SHA256Pubkey33H0(pb1);
+#endif
+    out.enc=qsb_k2s_gate_h0_verdict(h0,h1);
+    return out;
+}
+#if !(QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32)
+#error "QSB_TAIL_WEAVE is written for the H0 gate (QSB_GATE_H0 with 1 <= QSB_ZEROS_N <= 32)"
+#endif
+#endif
+#endif
+#if defined(QSB_TAIL_STAGGER) && QSB_TAIL_STAGGER && !ZLAB_K2S3M
+#error "QSB_TAIL_STAGGER splits the ZLAB_K2S3M tail (qsb_pair_tail3_value); set it to 0 without ZLAB_K2S3M"
+#endif
+#if QSB_R_CBANK_TAILS && !ZLAB_K2S3M
+#error "QSB_R_CBANK_TAILS is written for the ZLAB_K2S3M tails (tail3, finish3); set it to 0 without ZLAB_K2S3M"
 #endif
 #endif

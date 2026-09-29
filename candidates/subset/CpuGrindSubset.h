@@ -57,7 +57,66 @@
  * final addition of -2C. The rows prefetched a pass ahead -- the next window's during the backward pass and windows 0/1's from the
  * hashing phase -- now go to L2 (prefetcht1) instead of L1 (QSB_CPU_PFNX): 64 KB of rows per window and thread do not fit the 32 KB L1
  * and evicted the backward pass's own lines; the forward pass still pulls its rows into L1 QSB_CPU_PFD groups ahead. Same candidates,
- * gate and records. */
+ * gate and records.
+ *
+ * 2026-09-27 (package y2d): this engine (terrapinelf's 2d1631b0, with jacklightChen's weighted-prefix idea from 55757d4d) at the
+ * thread footprint of Meganpark980320's 296e5e53 co-grinder: ncpu - QSB_CPU_RESERVE workers, none on the GPU host thread's core
+ * or its SMT sibling, the tree's own host producers unchanged. 2d1631b0's footprint items are switches below, each off by default
+ * (QSB_CPU_HP_SHARE, QSB_CPU_NTH_RAISE, QSB_CPU_RSV_CORE=0); QSB_CPU_DIAG_EPOCH (its walk-start diagnostic) is off as well, so the
+ * walk starts at epoch 0. Same candidates, gate and records.
+ *
+ * Three host-only items at the same thread footprint, each a switch whose off value restores the
+ * previous file's behaviour. QSB_CPU_PFD 3 instead of 8 (the forward pass's row-prefetch distance, as in the promoted 521075fe).
+ * QSB_CPU_TRY9 (from 789aed1b): a 9-window table (114,688 MiB, signed digits of 29/28/27 bits: 8 additions per candidate instead
+ * of 9) when the 10-window rule holds and the table fits in half of what the process sees after the reserve (>= ~235.5 GiB), with
+ * the same huge-page guard; an mmap failure, poor backing or a failed table check at 9 goes to 10. The r9 SHA-NI trims (from
+ * c13302f3, without its host-core sharing): the first SHA-256's tail blocks (every block after the per-pattern one holds the same
+ * bytes for all candidates) load each W+K pair once for the four lanes (QSB_CPU_X4PS: 2 loads per round pair instead of 8); the
+ * key hashes and the second SHA-256 skip the message-schedule steps that are identities for their padding (W9..W14 = 0: step
+ * r = 4 has no W[t-7] term, step r = 6's sha256msg1 returns its first operand), and the second SHA-256 takes its padding words as
+ * constants (QSB_CPU_SHC): fewer sha256msg1 ops, which on Zen 4 issue to the pipes the lane's IFMA multiplications use. With
+ * QSB_CPU_PFD 8 and QSB_CPU_TRY9, QSB_CPU_X4PS, QSB_CPU_SHC all 0 the file behaves as 8f99a3e9's. Same candidates, gate and records.
+ *
+ * The heavy host footprint of the queued 789aed1b / a141df2b lineage (4da17ebc, 3ff68d21, 57065b7d,
+ * 2f690f1a), host-only and behind one switch, QSB_CPU_ALLCPU (default 1; 0 restores the the base footprint above byte for byte in
+ * behaviour). Under QSB_HOST_BLOCKING (tree.cu: the GPU host thread sleeps in blocking event waits, so its core idles between
+ * launches) the workers run on every CPU of the process's pre-main() set, the host thread's core included, and the worker count
+ * rises to one per CPU within the cgroup quota (32 of 32 on the ranked host; the workers are SCHED_IDLE and yield at once to the
+ * host thread and to the producers). QSB_CPU_RSV_CORE therefore defaults to 0 under QSB_CPU_ALLCPU (rsv_core_mask would take the
+ * host core back). The producers are the same lineage's v3 file (tests/gpu_epochs/host_producers.h, QSB_HP_V3). Same candidates,
+ * gate and records: only the worker count and placement change.
+ *
+ * The second SHA-256 and the key hashes run as four interleaved SHA-NI lanes per call instead of two calls or
+ * passes of two lanes (QSB_CPU_SHA4; 0 = the 2-lane code above). Two lanes issue one sha256rnds2 per 2 cycles (a dependent pair per
+ * lane, latency 4); four issue one per cycle. sha256rnds2 addresses only xmm0..15, so the four lanes' message rings stay in memory
+ * (qsha_rounds4m) and only the eight chaining registers stay in registers. The first SHA-256's blocks (qsha_x4p) were 4-lane already.
+ * Same hash inputs and digests, same prefilter, gate and records; host-only, no image knob.
+ *
+ * Two host-only co-grinder items from queued rival trees, each behind a switch whose 0 restores
+ * the previous file's behaviour. (1) QSB_CPU_BATCH_AUTO (the rule of 86c643ae's QSB_CPU_BATCH_SOLO, core_sharing and batch_choose,
+ * taken as written): the candidates per batch are chosen in start() from the thread_siblings_list of the workers' CPUs, 4,096
+ * (QSB_CPU_BATCH_SOLO) when no two workers can share a physical core (at most one worker per CPU and no two of their CPUs SMT
+ * siblings; also with one worker), QSB_CPU_BATCH (1,024) whenever siblings are among the workers' CPUs, the topology is unreadable or
+ * there are more workers than CPUs; QSB_CPU_BATCH_RT=<n> (dev) overrides. A larger batch spreads each window step's shared inversion
+ * over more candidates; 1,024 was sized for two SMT threads' batch state in one 1 MB L2. The batch only regroups the same candidates
+ * (the walk order and the hit set are unchanged). (2) QSB_CPU_KH16, QSB_CPU_MRG and QSB_CPU_AINL (a33e04c3's three items, taken as
+ * written): the key hashes of a group's 16 keys (8 candidates x 2 recids) take their message schedule from AVX-512 (16 lanes, the
+ * zero padding words folded at compile time) instead of sha256msg1/msg2 and run their rounds with SHA-NI four keys at a time from
+ * the stored W + K pairs (ec8_final_cf_kh writes the message words straight from the canonical limbs; run-time guarded: AVX-512VL +
+ * SHA-NI + the C fold, else qsha_keyhash4_h0 as before, so with the guard true QSB_CPU_SHA4's key-hash routine is bypassed and SHA4
+ * keeps only the second SHA-256); every 8-lane product accumulates each column's low and high partial products in one register (the
+ * same column sums, 18 vector operations fewer per product); the small field operations are always inlined. Same candidates, same
+ * hash inputs and digests, same prefilter, gate and records; host-only, no image knob.
+ *
+ * The CPU walks 100 of its 158 window patterns (QSB_CPU_PREFIX100, default 1; 0 restores the
+ * 158-pattern walk of the base byte for byte in behaviour), b67487a1's hash_plan_cpu_patterns taken as written (the family selection
+ * after 4a197f06). hash_plan groups the patterns by their first message block (block 0 of the first SHA-256 after the epoch's
+ * state); with the 158/77 shape of this problem, 20 of those groups hold 5 patterns each. The walk keeps exactly those 100 patterns,
+ * in their original order, so each block-0 compression serves 5 candidates instead of about 2 (158 / 77), and 100 is a multiple of
+ * the four SHA-NI lanes. Any other shape (pattern count, group count, number of 5-pattern groups) keeps all 158. The kept patterns
+ * are a subset of the 158, so the CPU's candidates stay disjoint from the GPU's 128 patterns; each worker still walks epochs
+ * t, t + T, ... in order, now over 100 patterns per epoch. Same hash inputs, prefilter, gate and records for every candidate
+ * walked; host-only, no image knob. */
 #include <openssl/sha.h>
 #include <openssl/bn.h>
 #include <openssl/ec.h>
@@ -113,6 +172,20 @@
 #ifndef QSB_CPU_PSEED
 #define QSB_CPU_PSEED 1            /* fused subtractions: the 4p offset rides in the product columns' initial values */
 #endif
+/* IFMA cuts in the 8-lane reduction, exact (same residues, same canonical outputs, same
+ * hits). QSB_CPU_FOLD4: fe8_fold carries the high columns' bits >= 52 into the next column first (h5 -> c6, h6 -> c7, h7 -> c8,
+ * h8 -> column 4 as lo(h8*R)), then folds each carried column with one lo/hi IFMA pair: 11 IFMA per reduction instead of FOLD3's
+ * 14 (3 fewer per multiplication and squaring, about 21 per candidate) and 7 shift/add instead of 8 shift/and; every output column
+ * still takes at most 3 fold terms, so every bound below is unchanged. QSB_CPU_DNF: the window step's D = tx - X keeps limb 4
+ * unfolded (< 2^51 + 2^3; fe8_sub_m: 12 ops, no IFMA, instead of fe8_carry's 15 with one), and x3 = lam^2 - D - 2X seeds its
+ * columns at 16p instead of 4p so every limb stays non-negative: 1 IFMA and 2 ops fewer per group and window. QSB_CPU_VBMI2 now
+ * defaults to 0 (see there). 0 on each switch = the code above it. */
+#ifndef QSB_CPU_FOLD4
+#define QSB_CPU_FOLD4 1
+#endif
+#if QSB_CPU_FOLD4 && !QSB_CPU_FOLD3
+#error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
+#endif
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
 #endif
@@ -141,7 +214,7 @@
 /* QSB_CPU_TRY9: 9 windows (114,688 MiB; 8 additions per candidate instead of 9) when the 10-window rule holds and that
  * table fits in QSB_CPU_TAB9_FRAC of the memory left after QSB_CPU_TAB_RESERVE_MB (i.e. avail >= ~236 GiB), with the same
  * huge-page guard; else 10 (an mmap failure, poor backing or a failed table check at 9 goes to 10). The ranked host offers
- * >= 255 GiB (terrapinelf's 2d1631b0 diagnostic). */
+ * >= 255 GiB (the 2d1631b0 diagnostic). 0 = the 10-window rule as before. */
 #ifndef QSB_CPU_TRY9
 #define QSB_CPU_TRY9 1
 #endif
@@ -187,6 +260,12 @@
 #ifndef QSB_CPU_NF
 #define QSB_CPU_NF 1               /* mul-only differences of normalized operands skip the limb-4 fold (limb 4 stays < 2^52) */
 #endif
+#ifndef QSB_CPU_DNF
+#define QSB_CPU_DNF 1              /*: D = tx - X with limb 4 unfolded (fe8_sub_m, no IFMA); x3's fused columns seeded at 16p */
+#endif
+#if QSB_CPU_DNF && !(QSB_CPU_NOTX && QSB_CPU_PSEED)
+#error "QSB_CPU_DNF is written for the QSB_CPU_NOTX window step with QSB_CPU_PSEED (fe8_sqr_subdx's seeded columns)"
+#endif
 #ifndef QSB_CPU_WPRE
 #define QSB_CPU_WPRE 1             /* batch-affine steps: the forward pass stores prefix * numerator (W), the backward pass lam = inverse * W */
 #endif
@@ -197,12 +276,168 @@
 #define QSB_CPU_PFNX 1             /* next window's rows (backward-pass prefetch) into L2 (prefetcht1) instead of L1 (prefetcht0) */
 #endif
 #define QCPU_NXT_HINT (QSB_CPU_PFNX ? _MM_HINT_T1 : _MM_HINT_T0)
+#ifndef QSB_CPU_X4PS
+#define QSB_CPU_X4PS 1             /* qsha_x4p: one load of a block's W+K words for all four lanes when they hash the same fixed block */
+#endif
+#ifndef QSB_CPU_SHC
+#define QSB_CPU_SHC 1              /* key hashes and second SHA-256: schedule steps of the constant padding words skipped (identities) */
+#endif
+#ifndef QSB_CPU_SHA4
+#define QSB_CPU_SHA4 1             /* key hashes and second SHA-256: four SHA-NI lanes interleaved per call, message rings in memory
+                                    * (one sha256rnds2 per cycle); 0: two lanes per call or pass (one per 2 cycles). Same digests */
+#endif
+/* . QSB_CPU_BATCH_AUTO: the batch (Ctx::batch) chosen in start by 86c643ae's rule (core_sharing,
+ * batch_choose): QSB_CPU_BATCH_SOLO when no two workers can share a physical core (from the thread_siblings_list of the workers'
+ * CPUs; a worker then has its core's L2 to itself, and larger batches amortize the per-batch work: the rival's Zen 4 EPYC 9554, SMT
+ * off, 30 workers, 9 windows: 4,096 +3.5 % co-grinder rate over 1,024; 8,192 +3.0 %, 2,048 +1.9 %, claim), QSB_CPU_BATCH whenever
+ * SMT siblings (or an unreadable topology, or more workers than CPUs) are among the workers' CPUs. Dev override: QSB_CPU_BATCH_RT=<n>
+ * (a multiple of 32, 32..8192). 0: the fixed QSB_CPU_BATCH as before. Every batch is a multiple of 32: the 8-lane window steps and
+ * final steps run over G = B / 8 groups four at a time (G % 4 == 0), recode16 takes 16 candidates at a time, the 16-lane key hashes
+ * and hpf_rows8 8, the 4-lane hashing groups 4. */
+#ifndef QSB_CPU_BATCH_AUTO
+#define QSB_CPU_BATCH_AUTO 1
+#endif
+#ifndef QSB_CPU_BATCH_SOLO
+#define QSB_CPU_BATCH_SOLO 4096
+#endif
+static_assert(QSB_CPU_BATCH % 32 == 0 && QSB_CPU_BATCH >= 32 && QSB_CPU_BATCH <= 8192, "QSB_CPU_BATCH: a multiple of 32, 32..8192");
+static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CPU_BATCH_SOLO <= 8192, "QSB_CPU_BATCH_SOLO: a multiple of 32, 32..8192");
+/*, a33e04c3's three co-grinder items. QSB_CPU_KH16: key hashes from a 16-lane AVX-512 message schedule,
+ * rounds 4 keys at a time with SHA-NI from the stored W + K pairs (8-lane path with SHA-NI, AVX-512VL and the C fold; else, and at
+ * 0, qsha_keyhash4_h0: QSB_CPU_SHA4's four SHA-NI lanes with sha256msg1/2 schedules). QSB_CPU_MRG: fe8_mul_cols accumulates each
+ * column's low and high partial products in one register (needs QSB_CPU_FOLD3; else the split accumulators as before). QSB_CPU_AINL:
+ * the small 8-lane field operations always_inline (the hot loops' codegen independent of unit growth). */
+#ifndef QSB_CPU_KH16
+#define QSB_CPU_KH16 1             /* key hashes: message schedule for 16 keys with AVX-512, rounds 4 keys at a time with SHA-NI from it */
+#endif
+#ifndef QSB_CPU_MRG
+#define QSB_CPU_MRG 1              /* products: one accumulator per column for its low and high partial products */
+#endif
+#ifndef QSB_CPU_AINL
+#define QSB_CPU_AINL 1             /* the small field operations always inlined (codegen of the hot loops independent of unit growth) */
+#endif
+/*. QSB_CPU_RECODE_NG: recode16 reads the 16 candidates' eight SHA state words
+ * with 8 plain 64-byte loads and a 3-stage vpermt2d transpose (24 two-source permutes on the FP12 pipes) instead of 8 vpgatherdd
+ * (about 20 uops each on Zen 4). The same 16 x 8 words end in the same zw[] registers (
+ * derives and checks the index vectors), so digits, bad flags and hits are unchanged. 0 = the gathers. */
+#ifndef QSB_CPU_RECODE_NG
+#define QSB_CPU_RECODE_NG 1
+#endif
+/*: three host-only switches on the 8-lane path, each
+ * default 0 (or 4) = the code above byte for byte in behaviour, for a per-core Zen 4 SMT A/B (bench/r2d.sh). None changes a field
+ * operation's operands or results, so the hit set is unchanged by construction; the bench's fixed-work identity checks it.
+ * QSB_CPU_ILP2 (bit mask) bit 0: the batch-affine backward passes (ec8_window, ec8_final_cf_kh) step two groups of different chains together, op
+ *   by op (lam, lam', run, run', x3, x3', t, t', Y, Y'), so every dependent operation (x3 on lam, Y on x3) has a whole independent
+ *   operation of the other group between it and its producer in program order: the ~40-cycle fold + carry tail of x3 before Y, which
+ *   one group at a time leaves exposed inside a thread's window, is covered by the other group's squaring. The same operations on the
+ *   same operands in another order: bit-identical X, Y. Bit 1: ec8_window's forward pass likewise (rows, D, t, PRE and chain
+ *   products of groups h and h + 1 op by op). 3 = both.
+ * QSB_CPU_NCH 2: the batch inversions combine 2 interleaved chains instead of 4 (fe8_inv2: 3 multiplications around the lane
+ *   inversion instead of fe8_inv4's 9), in ec8_window and ec8_final_cf_kh; each chain then spans G/2 groups. Montgomery's trick over
+ *   another grouping of the same denominators: the same inverses, the same lam, x3 and y3 after their full carries.
+ * QSB_CPU_PFSPREAD (bit mask): bit 0 = the rows of windows 0 and 1 that the hashing phase prefetches (hpf_rows8, 16 per 8
+ *   candidates in one burst) are queued and issued two per SHA-256 block of the following quads (qsha_x4p) instead; bit 1 = the
+ *   backward pass's next-window prefetches go 2 + 2 + 2 + 2 between the group's four field operations instead of 4 + 4 (with
+ *   ILP2: 4 + 4 + 4 + 4 between the pair's four operation pairs). A prefetch that misses the L2 DTLB holds its load-queue slot and
+ *   retirement until a walker returns (C1: +6.9 ns per candidate in a hashing phase that reads no row); at most a few in flight
+ *   instead of 16 lets each walk finish under the SHA rounds. Prefetches only. */
+#ifndef QSB_CPU_ILP2
+#define QSB_CPU_ILP2 1
+#endif
+#ifndef QSB_CPU_NCH
+#define QSB_CPU_NCH 2
+#endif
+#ifndef QSB_CPU_PFSPREAD
+#define QSB_CPU_PFSPREAD 3
+#endif
+#ifndef QSB_CPU_MRGS
+#define QSB_CPU_MRGS 0             /* R2-D: MRG products with the four longest columns split in two chains (see fe8_mul_cols) */
+#endif
+#define QCPU_PFQ ((QSB_CPU_PFSPREAD & 1) && QCPU_VEC && QCPU_SHANI)   /* bit 0 needs the 8-lane path's hpf_rows8 and qsha_x4p */
+#if QSB_CPU_NCH != 4 && QSB_CPU_NCH != 2
+#error "QSB_CPU_NCH: 4 (the code before) or 2"
+#endif
+#if (QSB_CPU_ILP2 || QSB_CPU_NCH != 4) && !(QSB_CPU_WPRE && QSB_CPU_NOTX)
+#error "QSB_CPU_ILP2 / QSB_CPU_NCH are written for the QSB_CPU_WPRE + QSB_CPU_NOTX window step"
+#endif
+#if QSB_CPU_AINL
+#define QCPU_AI always_inline,
+#define QCPU_AIF __attribute__((always_inline))
+#else
+#define QCPU_AI
+#define QCPU_AIF
+#endif
 #ifndef QSB_CPU_F1N
 #define QSB_CPU_F1N (QSB_CPU_HPF < 2)   /* ec8_first prefetches window 1's rows (unless the hashing phase did) */
+#endif
+/* Footprint switches (package y2d). The defaults live here, at file scope and outside every conditional block, so the nvcc
+ * device pass (which parses start() with QCPU_VEC and QCPU_SHANI at 0) and the host pass both see them. */
+/* QSB_CPU_ALLCPU : 1 = the heavy host footprint of 789aed1b / a141df2b (start hunk of blobs ae7f4681 /
+ * f7816eb5, credited there to HyeokxC's 0735233a / 888f5fce): when QSB_HOST_BLOCKING is on (tree.cu defines it before this
+ * file) the GPU host thread sleeps in blocking event waits, so its core idles between launches and the workers take every
+ * CPU of the pre-main() set, that core included, at one worker per CPU within the cgroup quota (32 of 32 on the ranked host).
+ * The workers are SCHED_IDLE: a wake-up of the host thread or a producer preempts them at once. 0 = the the base footprint:
+ * ncpu - QSB_CPU_RESERVE workers, none on the host thread's core (QSB_CPU_RSV_CORE 1). Not an image knob. */
+#ifndef QSB_CPU_ALLCPU
+#define QSB_CPU_ALLCPU 1
+#endif
+#ifndef QSB_CPU_HP_SHARE
+#define QSB_CPU_HP_SHARE 0         /* 1 (2d1631b0): the GPU host thread's own CPU also hosts a worker when the host producers publish
+                                    * qhp::g_share_cpu (2d1631b0's host_producers.h with blocking event waits; this tree's v1 producers
+                                    * have no such symbol, the v3 file's stays -1 at QSB_HP_PLACE 0). 0: no worker there, as 296e5e53 */
+#endif
+#ifndef QSB_CPU_NTH_RAISE
+#define QSB_CPU_NTH_RAISE 0        /* 1 (2d1631b0): one worker per CPU the main thread left when that exceeds ncpu - QSB_CPU_RESERVE (32 of 32
+                                    * on the runner with 2d1631b0's producers). 0: ncpu - QSB_CPU_RESERVE workers, as 296e5e53.
+                                    * QSB_CPU_ALLCPU 1 applies the same raise whatever this value */
+#endif
+#ifndef QSB_CPU_RSV_CORE
+#if QSB_CPU_ALLCPU
+#define QSB_CPU_RSV_CORE 0         /* under QSB_CPU_ALLCPU: no reserved core (rsv_core_mask would take the host core back) */
+#else
+#define QSB_CPU_RSV_CORE 1         /* 1 (296e5e53's rule): the workers never run on the GPU host thread's core (both SMT siblings, from
+                                    * thread_siblings_list) when that thread is pinned at start(), else the last 2-thread core stays free.
+                                    * 0: 2d1631b0's rule (every CPU the main thread no longer uses; every CPU when it is not pinned) */
+#endif
+#endif
+#if QSB_CPU_ALLCPU && QSB_CPU_RSV_CORE
+#error "QSB_CPU_ALLCPU 1 needs QSB_CPU_RSV_CORE 0 (rsv_core_mask would take the GPU host thread's core back from the workers)"
+#endif
+#if QSB_CPU_ALLCPU && QSB_CPU_HP_SHARE
+#error "QSB_CPU_ALLCPU 1 needs QSB_CPU_HP_SHARE 0 (the host thread's CPU is already a worker CPU)"
+#endif
+#ifndef QSB_CPU_DIAG_EPOCH
+#define QSB_CPU_DIAG_EPOCH 0       /* 1 (2d1631b0): the walk starts at a diagnostic code x 2^29 (geometry, huge pages, workers, memory);
+                                    * 0: at epoch 0, as 296e5e53. Enumeration only: disjoint from the GPU's candidates either way */
+#endif
+/* : start-up and teardown of the co-grinder, host-only, no image knob; 0 on each switch =
+ * the base code. QSB_CPU_TOUCH_GUARD: the 9-window table's first touch (the sampled and the full pass) stops once it has run
+ * QSB_CPU_TOUCH9_MAX_S seconds (dev override: the environment variable of that name) and the table falls back to 10 windows, as a
+ * poorly backed 9-window table does (a compaction stall on a fragmented host would otherwise idle the CPU part for its length).
+ * QSB_CPU_FOLD_PAR: the C fold's temporary (the top window: 8 GiB at 9 windows) is a huge-page mapping first touched by the fold's
+ * own threads and copied back by all build threads, instead of a zero-filled std::vector (4 KiB pages) copied and freed by one
+ * thread (measured 4.2 s + 0.5 s + 0.8 s for 8 GiB on one Zen 3 thread, during which every other CPU idled). Same table
+ * entries. stop_unmap() (tree.cu's QSB_FAST_TEARDOWN): the workers stop at their next batch boundary and the table is unmapped. */
+#ifndef QSB_CPU_TOUCH_GUARD
+#define QSB_CPU_TOUCH_GUARD 1
+#endif
+#ifndef QSB_CPU_TOUCH9_MAX_S
+#define QSB_CPU_TOUCH9_MAX_S 20.0
+#endif
+#ifndef QSB_CPU_FOLD_PAR
+#define QSB_CPU_FOLD_PAR 1
 #endif
 
 namespace qcpu {
 static const int NWMAX = 16;
+#if QCPU_PFQ
+/* (QSB_CPU_PFSPREAD bit 0): the hashing phase's row prefetches, queued (hpf_rows8) and issued a few at a time between
+ * SHA-256 blocks (qsha_x4p), so that at most a couple of L2-DTLB-missing prefetches are in flight at once. */
+struct QPfRing { const char *a[64]; unsigned head = 0, tail = 0; };
+static inline __attribute__((always_inline)) void qpf_drain(QPfRing &q, unsigned n) {
+    while (n-- && q.head != q.tail) { _mm_prefetch(q.a[q.head & 63], QSB_CPU_PFNX ? _MM_HINT_T1 : _MM_HINT_T0); q.head++; }
+}
+#endif
 typedef unsigned __int128 u128;
 /* 64 B-aligned storage: one table point = one cache line. */
 template <class T> struct qalloc64 {
@@ -389,7 +624,7 @@ static void recode_scalar(const Geo &g, const uint32_t *zb, uint32_t *ds, int B)
  * every multiplication input must be normalized. Outputs of fe8_mul/fe8_sub/fe8_add are normalized. */
 struct fe8 { __m512i l[5]; };
 #define F8_M52 _mm512_set1_epi64(0xFFFFFFFFFFFFFULL)
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_carry(fe8 &r) {
     /* fold bits >= 256 first (limb 4 bit 48 and up; 2^256 = 0x1000003D1 mod p), then one carry chain:
        limbs 0..3 end < 2^52 and limb 4 < 2^48 + (small carry), so the value is < 2^257 */
@@ -408,7 +643,7 @@ void fe8_carry(fe8 &r) {
  * of a multiplicand, so such an element multiplies exactly like its normalized twin; it must never be an
  * operand of fe8_sub/fe8_add/fe8_sub_sgn, a subtrahend of the fused ops, or be canonicalized. Limb 4
  * is masked as before (its bits 48..51 are inside the multiplicand window). 11 ops instead of 15. */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_carry_lz(fe8 &r) {
     const __m512i M48 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL), K = _mm512_set1_epi64(0x1000003D1ULL);
     __m512i c;
@@ -438,6 +673,26 @@ void fe8_fold(__m512i *o, __m512i c0, __m512i c1, __m512i c2, __m512i c3, __m512
      * to column 5 by the product functions (c5 < 9 * 2^52 + 2^37, so h5 < 2^4 still). Column 4's three fold terms are summed on
      * a side chain (they are ready long before column 4's products); every column still takes at most 12 terms below 2^52.
      * 14 IFMA instead of 17. */
+#if QSB_CPU_FOLD4
+    /*: the bits >= 52 of columns 5..8 (h < 2^4 each: columns < 9 * 2^52 + 2^37) are carried into the next column before
+     * the fold instead of being folded as their own IFMA (h*R): c6' = c6 + h5, c7' = c7 + h6, c8' = c8 + h7 (each still
+     * < 9 * 2^52 + 2^4, so the next h is still < 2^4), and h8 = c8' >> 52 lands at 2^468 = R * 2^208 as one lo IFMA into column
+     * 4 (h8 * R < 2^41). Each carried column is then folded by one lo/hi pair; IFMA reads bits 51:0 of it, so no masking is
+     * needed. 10 IFMA + the pre-folded hi(c9*R) = 11 per reduction (14 with the h terms), 7 shift/add instead of 8 shift/and.
+     * Output columns take at most 3 fold terms (column 4: hi(c8'*R), lo(c9*R), lo(h8*R)), as before, so every bound that
+     * fe8_carry and the fused subtractions rely on is unchanged; the residue is the same, the representative may differ. */
+    const __m512i R = _mm512_set1_epi64(0x1000003D10ULL);
+    const __m512i h5 = _mm512_srli_epi64(c5, 52);
+    c6 = _mm512_add_epi64(c6, h5); const __m512i h6 = _mm512_srli_epi64(c6, 52);
+    c7 = _mm512_add_epi64(c7, h6); const __m512i h7 = _mm512_srli_epi64(c7, 52);
+    c8 = _mm512_add_epi64(c8, h7); const __m512i h8 = _mm512_srli_epi64(c8, 52);
+    __m512i f4 = Z; LO(f4,c9,R); LO(f4,h8,R);
+    LO(c0,c5,R); HI(c1,c5,R);
+    LO(c1,c6,R); HI(c2,c6,R);
+    LO(c2,c7,R); HI(c3,c7,R);
+    LO(c3,c8,R); HI(c4,c8,R);
+    c4 = _mm512_add_epi64(c4, f4);
+#else
     const __m512i M = F8_M52, R = _mm512_set1_epi64(0x1000003D10ULL);
     const __m512i l5 = _mm512_and_si512(c5, M), h5 = _mm512_srli_epi64(c5, 52);
     const __m512i l6 = _mm512_and_si512(c6, M), h6 = _mm512_srli_epi64(c6, 52);
@@ -449,6 +704,7 @@ void fe8_fold(__m512i *o, __m512i c0, __m512i c1, __m512i c2, __m512i c3, __m512
     LO(c1,l6,R); HI(c1,l5,R); LO(c1,h5,R);
     LO(c0,l5,R);
     c4 = _mm512_add_epi64(c4, f4);
+#endif
 #elif QSB_CPU_FOLD2
     /* Every high column c = l + h*2^52 with l < 2^52 and h = c >> 52 < 2^4 (columns < 10 * 2^52), folded
      * without a carry chain: c5+i * 2^(260+52i) = R * 2^(52i) * (l + h*2^52): l*R as a lo/hi IFMA pair into
@@ -507,6 +763,67 @@ template <int S>
 static inline __attribute__((always_inline, target("avx512f,avx512ifma")))
 void fe8_mul_cols(__m512i *c, const fe8 &a, const fe8 &b) {
     const __m512i Z = _mm512_setzero_si512();
+#if QSB_CPU_MRG && QSB_CPU_FOLD3 && QSB_CPU_MRGS
+    /* (QSB_CPU_MRGS): MRG with the high partial products of columns 3..6 (its four longest chains, 7 to 10 IFMA) in a
+     * second accumulator each, added once at the end: the longest chain is 5 IFMA instead of 10 (about 20 cycles off each
+     * product's latency) for 4 additions more; the same column sums. */
+    /* QSB_CPU_MRG (a33e04c3): each column's low and high partial products in ONE accumulator (chains of up to 10 IFMA, the same
+     * column sums): no second accumulator to zero and no per-column add (18 vector ops fewer per product); with two SMT threads per
+     * core the longer chains are hidden by the sibling */
+    __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4) : Z, c1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
+            c2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z, c3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
+            c4 = S ? _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4) : Z;
+    __m512i c5 = Z, c6 = Z, c7 = Z, c8 = Z, d9 = Z, e3 = Z, e4 = Z, e5 = Z, e6 = Z;   /* R2-D MRGS: e3..e6 hold the high products of the four longest columns */
+    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
+    const __m512i b0 = b.l[0], b1 = b.l[1], b2 = b.l[2], b3 = b.l[3], b4 = b.l[4];
+    HI(d9,a4,b4);                                           /* column 9: its fold term hi(c9*R) closes column 5's chain */
+    LO(c4,a0,b4); LO(c5,a1,b4); LO(c3,a0,b3); LO(c6,a2,b4);
+    LO(c4,a1,b3); LO(c5,a2,b3); LO(c3,a1,b2); LO(c6,a3,b3);
+    LO(c4,a2,b2); LO(c5,a3,b2); LO(c3,a2,b1); LO(c6,a4,b2);
+    LO(c4,a3,b1); LO(c5,a4,b1); LO(c3,a3,b0); HI(e6,a1,b4);
+    LO(c4,a4,b0); HI(e5,a0,b4); HI(e3,a0,b2); HI(e6,a2,b3);
+    HI(e4,a0,b3); HI(e5,a1,b3); HI(e3,a1,b1); HI(e6,a3,b2);
+    HI(e4,a1,b2); HI(e5,a2,b2); HI(e3,a2,b0); HI(e6,a4,b1);
+    HI(e4,a2,b1); HI(e5,a3,b1);
+    HI(e4,a3,b0); HI(e5,a4,b0);
+    LO(c2,a0,b2); LO(c7,a3,b4); LO(c1,a0,b1); LO(c8,a4,b4);
+    LO(c2,a1,b1); LO(c7,a4,b3); LO(c1,a1,b0); HI(c8,a3,b4);
+    LO(c2,a2,b0); HI(c7,a2,b4); HI(c1,a0,b0); HI(c8,a4,b3);
+    HI(c2,a0,b1); HI(c7,a3,b3);
+    HI(c2,a1,b0); HI(c7,a4,b2);
+    LO(c0,a0,b0);
+    c5 = _mm512_madd52hi_epu64(c5, d9, _mm512_set1_epi64(0x1000003D10ULL));
+    c3 = _mm512_add_epi64(c3, e3); c4 = _mm512_add_epi64(c4, e4); c5 = _mm512_add_epi64(c5, e5); c6 = _mm512_add_epi64(c6, e6);
+    c[0] = c0; c[1] = c1; c[2] = c2; c[3] = c3; c[4] = c4; c[5] = c5; c[6] = c6; c[7] = c7; c[8] = c8; c[9] = d9;
+#elif QSB_CPU_MRG && QSB_CPU_FOLD3
+    /* QSB_CPU_MRG (a33e04c3): each column's low and high partial products in ONE accumulator (chains of up to 10 IFMA, the same
+     * column sums): no second accumulator to zero and no per-column add (18 vector ops fewer per product); with two SMT threads per
+     * core the longer chains are hidden by the sibling */
+    __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4) : Z, c1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
+            c2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z, c3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
+            c4 = S ? _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4) : Z;
+    __m512i c5 = Z, c6 = Z, c7 = Z, c8 = Z, d9 = Z;
+    const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
+    const __m512i b0 = b.l[0], b1 = b.l[1], b2 = b.l[2], b3 = b.l[3], b4 = b.l[4];
+    HI(d9,a4,b4);                                           /* column 9: its fold term hi(c9*R) closes column 5's chain */
+    LO(c4,a0,b4); LO(c5,a1,b4); LO(c3,a0,b3); LO(c6,a2,b4);
+    LO(c4,a1,b3); LO(c5,a2,b3); LO(c3,a1,b2); LO(c6,a3,b3);
+    LO(c4,a2,b2); LO(c5,a3,b2); LO(c3,a2,b1); LO(c6,a4,b2);
+    LO(c4,a3,b1); LO(c5,a4,b1); LO(c3,a3,b0); HI(c6,a1,b4);
+    LO(c4,a4,b0); HI(c5,a0,b4); HI(c3,a0,b2); HI(c6,a2,b3);
+    HI(c4,a0,b3); HI(c5,a1,b3); HI(c3,a1,b1); HI(c6,a3,b2);
+    HI(c4,a1,b2); HI(c5,a2,b2); HI(c3,a2,b0); HI(c6,a4,b1);
+    HI(c4,a2,b1); HI(c5,a3,b1);
+    HI(c4,a3,b0); HI(c5,a4,b0);
+    LO(c2,a0,b2); LO(c7,a3,b4); LO(c1,a0,b1); LO(c8,a4,b4);
+    LO(c2,a1,b1); LO(c7,a4,b3); LO(c1,a1,b0); HI(c8,a3,b4);
+    LO(c2,a2,b0); HI(c7,a2,b4); HI(c1,a0,b0); HI(c8,a4,b3);
+    HI(c2,a0,b1); HI(c7,a3,b3);
+    HI(c2,a1,b0); HI(c7,a4,b2);
+    LO(c0,a0,b0);
+    c5 = _mm512_madd52hi_epu64(c5, d9, _mm512_set1_epi64(0x1000003D10ULL));
+    c[0] = c0; c[1] = c1; c[2] = c2; c[3] = c3; c[4] = c4; c[5] = c5; c[6] = c6; c[7] = c7; c[8] = c8; c[9] = d9;
+#else
     /* low and high partial products in separate accumulators (chains of at most 5 IFMA instead of 9), summed per column */
     __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4) : Z, c1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
             c2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z, c3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4) : Z,
@@ -535,14 +852,17 @@ void fe8_mul_cols(__m512i *c, const fe8 &a, const fe8 &b) {
 #endif
     c[0] = c0; c[1] = _mm512_add_epi64(c1, d1); c[2] = _mm512_add_epi64(c2, d2); c[3] = _mm512_add_epi64(c3, d3); c[4] = _mm512_add_epi64(c4, d4);
     c[5] = _mm512_add_epi64(c5, d5); c[6] = _mm512_add_epi64(c6, d6); c[7] = _mm512_add_epi64(c7, d7); c[8] = _mm512_add_epi64(c8, d8); c[9] = d9;
+#endif
 }
 template <int S>
 static inline __attribute__((always_inline, target("avx512f,avx512ifma")))
 void fe8_sqr_cols(__m512i *c, const fe8 &a) {
     const __m512i Z = _mm512_setzero_si512();
-    /* S = 1: columns 0..4 start at 4p's limbs (the doubled accumulators x1..x4 at 2p's; 4p's limbs are even) */
-    __m512i x1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 2) : Z, x2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 2) : Z,
-            x3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 2) : Z, x4 = S ? _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 2) : Z;
+    /* S = 1: columns 0..4 start at 4p's limbs (the doubled accumulators x1..x4 at 2p's; 4p's limbs are even).
+     * S = 2 (QSB_CPU_DNF, fe8_sqr_subdx): at 16p's limbs (x1..x4 at 8p's), for a subtrahend D whose limb 4 is < 2^51 + 2^3. */
+    const uint64_t SM = S == 2 ? 8 : 2;                    /* the doubled accumulators' seed multiple of p */
+    __m512i x1 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * SM) : Z, x2 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * SM) : Z,
+            x3 = S ? _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * SM) : Z, x4 = S ? _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * SM) : Z;
     __m512i x5 = Z, x6 = Z, x7 = Z, x8 = Z;
     const __m512i a0 = a.l[0], a1 = a.l[1], a2 = a.l[2], a3 = a.l[3], a4 = a.l[4];
     LO(x1,a0,a1); HI(x2,a0,a1);
@@ -552,7 +872,7 @@ void fe8_sqr_cols(__m512i *c, const fe8 &a) {
     LO(x5,a1,a4); LO(x5,a2,a3); HI(x6,a1,a4); HI(x6,a2,a3);
     LO(x6,a2,a4); HI(x7,a2,a4);
     LO(x7,a3,a4); HI(x8,a3,a4);
-    __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4) : Z, c1 = _mm512_slli_epi64(x1, 1), c2 = _mm512_slli_epi64(x2, 1), c3 = _mm512_slli_epi64(x3, 1),
+    __m512i c0 = S ? _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 2 * SM) : Z, c1 = _mm512_slli_epi64(x1, 1), c2 = _mm512_slli_epi64(x2, 1), c3 = _mm512_slli_epi64(x3, 1),
             c4 = _mm512_slli_epi64(x4, 1), c5 = _mm512_slli_epi64(x5, 1), c6 = _mm512_slli_epi64(x6, 1),
             c7 = _mm512_slli_epi64(x7, 1), c8 = _mm512_slli_epi64(x8, 1), c9 = Z;
 #if QSB_CPU_FOLD3
@@ -572,18 +892,18 @@ void fe8_sqr_cols(__m512i *c, const fe8 &a) {
 #endif
     c[0] = c0; c[1] = c1; c[2] = c2; c[3] = c3; c[4] = c4; c[5] = c5; c[6] = c6; c[7] = c7; c[8] = c8; c[9] = c9;
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_mul(fe8 &r, const fe8 &a, const fe8 &b) {
     __m512i c[10]; fe8_mul_cols<0>(c, a, b);
     fe8_red(r, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9]);
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_mul_lz(fe8 &r, const fe8 &a, const fe8 &b) {
     __m512i c[10]; fe8_mul_cols<0>(c, a, b);
     fe8 o; fe8_fold(o.l, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9]);
     fe8_carry_lz(o); r = o;
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sqr(fe8 &r, const fe8 &a) {
     __m512i c[10]; fe8_sqr_cols<0>(c, a);
     fe8_red(r, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9]);
@@ -594,7 +914,7 @@ void fe8_sqr(fe8 &r, const fe8 &a) {
  * 2^56 + 2^54 < 2^57, which fe8_carry normalizes (limb 4 ends < 2^48 + 2^5). The residue is the same as
  * the unfused sequence's; only the (non-canonical) representative may differ, which no output sees:
  * records hold canonical x and the parity of canonical y. */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sqr_sub2(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
@@ -615,7 +935,7 @@ void fe8_sqr_sub2(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
     fe8_carry(o);
     r = o;
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_mul_sub(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
@@ -639,10 +959,13 @@ void fe8_mul_sub(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
 /* r = a^2 - d - 2x (d, x normalized) with one carry pass, for x3 = lam^2 - D - 2X with D = TX - X (after Meganpark's 9745ce9b
  * and ercumentyildirim's 9f8a33d8, which keep D instead of the table x): 4p_i > d_i + 2 x_i limb-wise (limb 0: 0x3FFFBFFFFF0BC >
  * 3 (2^52 - 1); limb 4: 2^50 - 4 > 3 (2^48 + 2^7)), so every limb stays non-negative; the upper bound is fe8_sqr_sub2's. */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sqr_subdx(fe8 &r, const fe8 &a, const fe8 &d, const fe8 &x) {
 #if QSB_CPU_PSEED
-    __m512i k[10]; fe8_sqr_cols<1>(k, a);                  /* columns 0..4 carry 4p already */
+    /* QSB_CPU_DNF: d from fe8_sub_m (limbs 0..3 < 2^52, limb 4 < 2^51 + 2^3), so the columns start at 16p: 16p_i - d_i - 2x_i > 0
+     * limb-wise (limbs 0..3: 16p_i > 2^56 - 2^5 against < 3 * 2^52; limb 4: 2^52 - 16 against < 2^51 + 2^49 + 2^8) and every
+     * column stays < 2^56 + 12 * 2^52 < 2^57, which fe8_carry normalizes as before (c = l4 >> 48 < 2^9, chain carries < 2^6). */
+    __m512i k[10]; fe8_sqr_cols<QSB_CPU_DNF ? 2 : 1>(k, a);   /* columns 0..4 carry 4p (16p under DNF: 16p_0 > 2^56 - 2^37) already */
     fe8 o; fe8_fold(o.l, k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], k[8], k[9]);
     for (int i = 0; i < 5; i++) o.l[i] = _mm512_sub_epi64(o.l[i], _mm512_add_epi64(d.l[i], _mm512_add_epi64(x.l[i], x.l[i])));
 #else
@@ -659,13 +982,13 @@ void fe8_sqr_subdx(fe8 &r, const fe8 &a, const fe8 &d, const fe8 &x) {
 #undef LO
 #undef HI
 /* r = a + b (inputs normalized) */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_add(fe8 &r, const fe8 &a, const fe8 &b) {
     for (int i = 0; i < 5; i++) r.l[i] = _mm512_add_epi64(a.l[i], b.l[i]);
     fe8_carry(r);
 }
 /* r = a - b (inputs normalized, value < 2^257): a + 4p - b, all limbs stay non-negative */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub(fe8 &r, const fe8 &a, const fe8 &b) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
@@ -679,7 +1002,7 @@ void fe8_sub(fe8 &r, const fe8 &a, const fe8 &b) {
 /* r = (a or -a in the lanes of m) - b (inputs normalized): per limb a + 4p - b, or 4p - a - b in the lanes of m.
  * Both stay non-negative: a_i + b_i < 2^53 < 4p_i for limbs 0..3, and a normalized limb 4 is < 2^48 + 2^6
  * (fe8_carry: masked to 48 bits, then a carry < 2^6), so a_4 + b_4 < 2^49 + 2^7 < 4p_4 = 2^50 - 4. */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub_sgn(fe8 &r, const fe8 &a, const fe8 &b, __mmask8 m) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4), Z = _mm512_setzero_si512();
@@ -691,7 +1014,7 @@ void fe8_sub_sgn(fe8 &r, const fe8 &a, const fe8 &b, __mmask8 m) {
     fe8_carry(r);
 }
 /* Mul-only variants of fe8_sub and fe8_sub_sgn (normalized inputs; the output only feeds IFMA). */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub_lz(fe8 &r, const fe8 &a, const fe8 &b) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
@@ -703,7 +1026,7 @@ void fe8_sub_lz(fe8 &r, const fe8 &a, const fe8 &b) {
     o.l[4] = _mm512_sub_epi64(_mm512_add_epi64(a.l[4], P4), b.l[4]);
     fe8_carry_lz(o); r = o;
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub_sgn_lz(fe8 &r, const fe8 &a, const fe8 &b, __mmask8 m) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4), Z = _mm512_setzero_si512();
@@ -719,7 +1042,7 @@ void fe8_sub_sgn_lz(fe8 &r, const fe8 &a, const fe8 &b, __mmask8 m) {
  * fe8_carry_m in 9f8a33d8): a, b normalized (limb 4 < 2^48 + 2^7), so limb 4 of a + 4p - b (or 4p - a - b) is < 2^51 before
  * and after the carries; IFMA reads 52 bits of every limb and the product bounds need only limbs < 2^52. Limbs 0..3 lazy as in
  * fe8_carry_lz. Never a subtrahend or canonicalized. */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_carry_nf(fe8 &r) {
     __m512i c;
     c = _mm512_srli_epi64(r.l[0], 52); r.l[1] = _mm512_add_epi64(r.l[1], c);
@@ -727,7 +1050,41 @@ void fe8_carry_nf(fe8 &r) {
     c = _mm512_srli_epi64(r.l[2], 52); r.l[3] = _mm512_add_epi64(r.l[3], c);
     c = _mm512_srli_epi64(r.l[3], 52); r.l[4] = _mm512_add_epi64(r.l[4], c);
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+/* (QSB_CPU_DNF): r = a - b (a canonical or normalized, b normalized) with limbs 0..3 normalized (< 2^52) and limb 4
+ * carried but not folded: limb 4 of a + 4p - b is in (4p_4 - 2^48 - 2^7, 4p_4 + 2^48 + 2^7) = (2^50 - 2^49, 2^50 + 2^49), plus a
+ * carry < 2^3: < 2^51 + 2^3. Usable as an IFMA multiplicand (limbs < 2^52) and as a subtrahend of fe8_sqr_subdx's 16p-seeded
+ * columns (never of a 4p-seeded one, never canonicalized). 12 ops, no IFMA, against fe8_carry's 15 with one. */
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
+void fe8_carry_m(fe8 &r) {
+    const __m512i M = F8_M52;
+    __m512i c;
+    c = _mm512_srli_epi64(r.l[0], 52); r.l[0] = _mm512_and_si512(r.l[0], M); r.l[1] = _mm512_add_epi64(r.l[1], c);
+    c = _mm512_srli_epi64(r.l[1], 52); r.l[1] = _mm512_and_si512(r.l[1], M); r.l[2] = _mm512_add_epi64(r.l[2], c);
+    c = _mm512_srli_epi64(r.l[2], 52); r.l[2] = _mm512_and_si512(r.l[2], M); r.l[3] = _mm512_add_epi64(r.l[3], c);
+    c = _mm512_srli_epi64(r.l[3], 52); r.l[3] = _mm512_and_si512(r.l[3], M); r.l[4] = _mm512_add_epi64(r.l[4], c);
+}
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
+void fe8_sub_m(fe8 &r, const fe8 &a, const fe8 &b) {
+    const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
+                  P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 4);
+    fe8 o;
+    o.l[0] = _mm512_sub_epi64(_mm512_add_epi64(a.l[0], P0), b.l[0]);
+    o.l[1] = _mm512_sub_epi64(_mm512_add_epi64(a.l[1], P1), b.l[1]);
+    o.l[2] = _mm512_sub_epi64(_mm512_add_epi64(a.l[2], P1), b.l[2]);
+    o.l[3] = _mm512_sub_epi64(_mm512_add_epi64(a.l[3], P1), b.l[3]);
+    o.l[4] = _mm512_sub_epi64(_mm512_add_epi64(a.l[4], P4), b.l[4]);
+    fe8_carry_m(o); r = o;
+}
+/* The window step's D = tx - X: fe8_sub_m under QSB_CPU_DNF (x3's columns are seeded at 16p there), else fe8_sub. */
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
+void fe8_sub_d(fe8 &r, const fe8 &a, const fe8 &b) {
+#if QSB_CPU_DNF
+    fe8_sub_m(r, a, b);
+#else
+    fe8_sub(r, a, b);
+#endif
+}
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub_nf(fe8 &r, const fe8 &a, const fe8 &b) {
 #if QSB_CPU_NF
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
@@ -743,7 +1100,7 @@ void fe8_sub_nf(fe8 &r, const fe8 &a, const fe8 &b) {
     fe8_sub_lz(r, a, b);
 #endif
 }
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub_sgn_nf(fe8 &r, const fe8 &a, const fe8 &b, __mmask8 m) {
 #if QSB_CPU_NF
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 4), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 4),
@@ -761,7 +1118,7 @@ void fe8_sub_sgn_nf(fe8 &r, const fe8 &a, const fe8 &b, __mmask8 m) {
 }
 /* r = a - b - c (inputs normalized) with one carry pass: a + 8p - b - c, every limb non-negative
  * (b_i + c_i < 2^53 <= 8p_i for limbs 0..3, < 2^50 < 8p_4) and < 2^56, which fe8_carry normalizes. */
-static inline __attribute__((target("avx512f,avx512ifma")))
+static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_sub2(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
     const __m512i P0 = _mm512_set1_epi64(0xFFFFEFFFFFC2FULL * 8), P1 = _mm512_set1_epi64(0xFFFFFFFFFFFFFULL * 8),
                   P4 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL * 8);
@@ -777,14 +1134,14 @@ void fe8_sub2(fe8 &r, const fe8 &a, const fe8 &b, const fe8 &c) {
 #define Q8T __attribute__((target("avx512f,avx512ifma")))
 
 /* fe8 copy as five vector moves (a plain struct assignment compiles to rep movsq here) */
-Q8T static inline void fe8_cp(fe8 &r, const fe8 &a) {
+Q8T static inline QCPU_AIF void fe8_cp(fe8 &r, const fe8 &a) {
     for (int i = 0; i < 5; i++) _mm512_store_si512(&r.l[i], _mm512_load_si512(&a.l[i]));
 }
-Q8T static inline void fe8_set1(fe8 &r) {
+Q8T static inline QCPU_AIF void fe8_set1(fe8 &r) {
     r.l[0] = _mm512_set1_epi64(1);
     for (int i = 1; i < 5; i++) r.l[i] = _mm512_setzero_si512();
 }
-Q8T static inline void fe8_bcast(fe8 &r, const fe &a) {           /* canonical scalar -> all lanes */
+Q8T static inline QCPU_AIF void fe8_bcast(fe8 &r, const fe &a) {           /* canonical scalar -> all lanes */
     const uint64_t M = 0xFFFFFFFFFFFFFULL;
     r.l[0] = _mm512_set1_epi64((long long)(a.v[0] & M));
     r.l[1] = _mm512_set1_epi64((long long)((a.v[0] >> 52 | a.v[1] << 12) & M));
@@ -793,11 +1150,15 @@ Q8T static inline void fe8_bcast(fe8 &r, const fe &a) {           /* canonical s
     r.l[4] = _mm512_set1_epi64((long long)(a.v[3] >> 16));
 }
 #ifndef QSB_CPU_VBMI2
-#define QSB_CPU_VBMI2 1            /* funnel shifts (vpshrdq) in the 4x64 -> 5x52 conversion; every IFMA CPU in service has VBMI2 */
+#define QSB_CPU_VBMI2 1   /* the original form */            /* 1: funnel shifts (vpshrdq) in the 4x64 -> 5x52 conversion; every IFMA CPU in service has VBMI2.
+                                    * 0 (after the co-grinder audit's port model): srli + slli + or instead. On Zen 4 vpshrdq zmm
+                                    * issues on FP0/FP1 only (uops.info), the pipes IFMA and sha256rnds2 saturate, while the shifts go to
+                                    * FP2/FP3 and the or anywhere: 6 FP01 ops per group of 8 rows move off the binding pipes for +12
+                                    * instructions. Same limbs bit for bit. */
 #endif
 #if QSB_CPU_VBMI2
 #define Q8TX __attribute__((target("avx512f,avx512ifma,avx512vbmi2")))
-Q8TX static inline void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m512i a2, __m512i a3) {
+Q8TX static inline QCPU_AIF void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m512i a2, __m512i a3) {
     const __m512i M = F8_M52;
     r.l[0] = _mm512_and_si512(a0, M);
     r.l[1] = _mm512_and_si512(_mm512_shrdi_epi64(a0, a1, 52), M);   /* (a1:a0) >> 52 */
@@ -807,7 +1168,7 @@ Q8TX static inline void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m512i a2, _
 }
 #else
 #define Q8TX Q8T
-Q8T static inline void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m512i a2, __m512i a3) {
+Q8T static inline QCPU_AIF void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m512i a2, __m512i a3) {
     const __m512i M = F8_M52;
     r.l[0] = _mm512_and_si512(a0, M);
     r.l[1] = _mm512_and_si512(_mm512_or_si512(_mm512_srli_epi64(a0, 52), _mm512_slli_epi64(a1, 12)), M);
@@ -817,7 +1178,7 @@ Q8T static inline void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m512i a2, __
 }
 #endif
 /* Load 8 table points (one 64 B row each: x0..x3 y0..y3) and transpose to SoA. */
-Q8TX static inline void pt8_load(fe8 &x, fe8 &y, const pt *const *rows) {
+Q8TX static inline QCPU_AIF void pt8_load(fe8 &x, fe8 &y, const pt *const *rows) {
     const __m512i r0 = _mm512_loadu_si512(rows[0]), r1 = _mm512_loadu_si512(rows[1]),
                   r2 = _mm512_loadu_si512(rows[2]), r3 = _mm512_loadu_si512(rows[3]),
                   r4 = _mm512_loadu_si512(rows[4]), r5 = _mm512_loadu_si512(rows[5]),
@@ -865,7 +1226,7 @@ Q8T static inline void fe8_store_canon(fe out[8], const fe8 &a) {
 }
 /* Canonical form of 8 normalized elements (value v < 2^256 + 2^215 < 2p): v - p when v + (2^256 - p)
  * reaches 2^256, else v. fe8_ge_p returns that mask and, with u != nullptr, v + 2^256 - p mod 2^256. */
-Q8T static inline __mmask8 fe8_ge_p(const fe8 &a, fe8 *u) {
+Q8T static inline QCPU_AIF __mmask8 fe8_ge_p(const fe8 &a, fe8 *u) {
     const __m512i M = F8_M52, K = _mm512_set1_epi64(0x1000003D1ULL);
     __m512i u0 = _mm512_add_epi64(a.l[0], K), c;
     c = _mm512_srli_epi64(u0, 52); u0 = _mm512_and_si512(u0, M); __m512i u1 = _mm512_add_epi64(a.l[1], c);
@@ -877,7 +1238,7 @@ Q8T static inline __mmask8 fe8_ge_p(const fe8 &a, fe8 *u) {
     return ge;
 }
 /* canonical x of 8 lanes as 4x64 limbs (w[k][lane]) */
-Q8T static inline void fe8_canon64(uint64_t w[4][8], const fe8 &a) {
+Q8T static inline QCPU_AIF void fe8_canon64(uint64_t w[4][8], const fe8 &a) {
     fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
     __m512i r[5];
     for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
@@ -887,7 +1248,7 @@ Q8T static inline void fe8_canon64(uint64_t w[4][8], const fe8 &a) {
     _mm512_store_si512(w[3], _mm512_or_si512(_mm512_srli_epi64(r[3], 36), _mm512_slli_epi64(r[4], 16)));
 }
 /* parity of the canonical y of 8 lanes (p is odd: v - p flips v's parity) */
-Q8T static inline __mmask8 fe8_parity(const fe8 &a) {
+Q8T static inline QCPU_AIF __mmask8 fe8_parity(const fe8 &a) {
     return (__mmask8)(_mm512_test_epi64_mask(a.l[0], _mm512_set1_epi64(1)) ^ fe8_ge_p(a, nullptr));
 }
 /* x^(p-2) for one 8-lane element: libsecp256k1's secp256k1_fe_inv addition chain
@@ -1084,6 +1445,28 @@ Q8T static void fe8_inv4(fe8 *x) {
     fe8_mul(x[0], i01, x[1]); fe8_mul(x[1], i01, x0);
     fe8_mul(x[2], i23, x[3]); fe8_mul(x[3], i23, x2);
 }
+#if QSB_CPU_NCH == 2
+/* (QSB_CPU_NCH 2): the 2 interleaved chain products with one inversion: 1 + 2 multiplications around fe8_inv_lanes
+ * instead of fe8_inv4's 3 + 6, and two multiplication latencies fewer on the pass boundary's serial path. */
+Q8T static void fe8_inv2(fe8 *x) {
+    fe8 a;
+    fe8_mul(a, x[0], x[1]);
+#if QSB_CPU_SCALAR_INV
+    fe8_inv_lanes(a);
+#else
+    fe8_inv1(a);
+#endif
+    const fe8 x0 = x[0];
+    fe8_mul(x[0], a, x[1]); fe8_mul(x[1], a, x0);
+}
+#define QCPU_INVC(r) fe8_inv2(r)
+#else
+#define QCPU_INVC(r) fe8_inv4(r)
+#endif
+/* (QSB_CPU_PFSPREAD bit 1): issue rows pr[j0..j1) of the next window's group (no-op without a next window). */
+static inline QCPU_AIF void qcpu_pf_rows(const pt *const *pr, int j0, int j1) {
+    if (pr) for (int j = j0; j < j1; j++) _mm_prefetch((const char *)pr[j], QCPU_NXT_HINT);
+}
 /* One batch-affine window step over G groups of 8 (G % 4 == 0): acc[g] += sign * T[|digit| - 1].
  * rp/ng hold this window's table rows (8 per group, never a digit-0 row) and lane sign masks, computed and
  * prefetched by the previous pass. With nxt, the backward pass computes the next window's rows into rpn/ngn
@@ -1093,18 +1476,37 @@ template <class RowFn>
 Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, int G, const pt *const *rp, const __mmask8 *ng,
                            const pt **rpn, __mmask8 *ngn, const RowFn *nxt) {
     const int PF = QSB_CPU_PFD;
-    fe8 run[4]; for (int c = 0; c < 4; c++) fe8_set1(run[c]);
-    for (int g = 0; g < G; g += 4) {
-        for (int c = 0; c < 4; c++) {
+    const int NC = QSB_CPU_NCH;                      /* R2-D: interleaved chains of the batch inversion (4: the code before) */
+    fe8 run[4]; for (int c = 0; c < NC; c++) fe8_set1(run[c]);
+#if QSB_CPU_ILP2 & 2
+    /* R2-D (QSB_CPU_ILP2 bit 1): the forward pass steps groups h and h + 1 (chains c and c + 1) together, op by op: both groups'
+     * rows are loaded and transposed, then both D, both t, both PRE products, both chain products */
+    for (int g = 0; g < G; g += NC) {
+        for (int c = 0; c < NC; c += 2) {
+            const int hA = g + c, hB = hA + 1;
+            if (hA + PF < G) { const pt *const *pr = rp + (size_t)(hA + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            if (hB + PF < G) { const pt *const *pr = rp + (size_t)(hB + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            fe8 txA, tyA, tA, txB, tyB, tB;
+            pt8_load(txA, tyA, rp + (size_t)hA * 8); pt8_load(txB, tyB, rp + (size_t)hB * 8);
+            fe8_sub_d(D[hA], txA, X[hA]); fe8_sub_d(D[hB], txB, X[hB]);
+            fe8_sub_sgn_nf(tA, tyA, Y[hA], ng[hA]); fe8_sub_sgn_nf(tB, tyB, Y[hB], ng[hB]);
+            fe8_mul_lz(PRE[hA], run[c], tA); fe8_mul_lz(PRE[hB], run[c + 1], tB);
+            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c + 1], run[c + 1], D[hB]);
+        }
+    }
+    (void)TX; (void)TY;
+#else
+    for (int g = 0; g < G; g += NC) {
+        for (int c = 0; c < NC; c++) {
             const int h = g + c;
             if (h + PF < G) { const pt *const *pr = rp + (size_t)(h + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
 #if QSB_CPU_WPRE
             /* weighted prefix: PRE[h] = (product of the earlier D of chain c) * (sign * ty - Y), so the backward pass's slope is
              * one product, lam = (1 / product through h) * PRE[h]; the table y is not kept */
-            { fe8 tx, ty, t; pt8_load(tx, ty, rp + (size_t)h * 8); fe8_sub(D[h], tx, X[h]);   /* D normalized: a subtrahend of x3 */
+            { fe8 tx, ty, t; pt8_load(tx, ty, rp + (size_t)h * 8); fe8_sub_d(D[h], tx, X[h]);   /* D normalized (limb 4 < 2^51 under DNF): a subtrahend of x3 */
               fe8_sub_sgn_nf(t, ty, Y[h], ng[h]); fe8_mul_lz(PRE[h], run[c], t); }
 #elif QSB_CPU_NOTX
-            { fe8 tx; pt8_load(tx, TY[h], rp + (size_t)h * 8); fe8_sub(D[h], tx, X[h]); }   /* D normalized: a subtrahend of x3 */
+            { fe8 tx; pt8_load(tx, TY[h], rp + (size_t)h * 8); fe8_sub_d(D[h], tx, X[h]); }   /* D normalized: a subtrahend of x3 */
             fe8_cp(PRE[h], run[c]);
 #else
             pt8_load(TX[h], TY[h], rp + (size_t)h * 8);   /* kept (transposed) for the backward pass */
@@ -1114,11 +1516,45 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8_mul_lz(run[c], run[c], D[h]);
         }
     }
-    fe8_inv4(run);
-    for (int g = G - 4; g >= 0; g -= 4) {
-        for (int c = 3; c >= 0; c--) {              /* one group at a time, its temporaries in registers */
+#endif
+    QCPU_INVC(run);
+#if QSB_CPU_ILP2 & 1
+    /* R2-D (QSB_CPU_ILP2 bit 0): groups h and h - 1 (chains c and c - 1) step together, op by op; the next window's rows of both are
+     * computed first (hn ascending, as before) and prefetched 4 + 4 + 4 + 4 between the four operation pairs */
+    for (int g = G - NC; g >= 0; g -= NC) {
+        for (int c = NC - 1; c >= 1; c -= 2) {
+            const int hA = g + c, hB = hA - 1;
+            const pt **pA = nullptr, **pB = nullptr;
+            if (nxt) { const int nA = G - 1 - hA, nB = nA + 1; pA = rpn + (size_t)nA * 8; ngn[nA] = (*nxt)(nA, pA);
+                       pB = rpn + (size_t)nB * 8; ngn[nB] = (*nxt)(nB, pB); }
+            qcpu_pf_rows(pA, 0, 4);
+            fe8 lamA, lamB, x3A, x3B, tA, tB;
+            fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
+            qcpu_pf_rows(pA, 4, 8);
+            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            qcpu_pf_rows(pB, 0, 4);
+            fe8_sqr_subdx(x3A, lamA, D[hA], X[hA]); fe8_sqr_subdx(x3B, lamB, D[hB], X[hB]);
+            qcpu_pf_rows(pB, 4, 8);
+            fe8_sub_nf(tA, X[hA], x3A); fe8_sub_nf(tB, X[hB], x3B);
+            fe8_mul_sub(Y[hA], lamA, tA, Y[hA]); fe8_mul_sub(Y[hB], lamB, tB, Y[hB]);
+            fe8_cp(X[hA], x3A); fe8_cp(X[hB], x3B);
+        }
+    }
+#else
+    for (int g = G - NC; g >= 0; g -= NC) {
+        for (int c = NC - 1; c >= 0; c--) {         /* one group at a time, its temporaries in registers */
             const int h = g + c;
             const pt **pr = nullptr;
+#if QSB_CPU_PFSPREAD & 2
+            /* R2-D: the next window's rows 2 + 2 + 2 + 2 between the group's four field operations */
+            if (nxt) { const int hn = G - 1 - h; pr = rpn + (size_t)hn * 8; ngn[hn] = (*nxt)(hn, pr); }
+            qcpu_pf_rows(pr, 0, 2);
+            fe8 t, lam, x3;
+            fe8_mul_lz(lam, run[c], PRE[h]); qcpu_pf_rows(pr, 2, 4);
+            fe8_mul_lz(run[c], run[c], D[h]); qcpu_pf_rows(pr, 4, 6);
+            fe8_sqr_subdx(x3, lam, D[h], X[h]); qcpu_pf_rows(pr, 6, 8);
+            fe8_sub_nf(t, X[h], x3); fe8_mul_sub(Y[h], lam, t, Y[h]); fe8_cp(X[h], x3);
+#else
             if (nxt) { const int hn = G - 1 - h; pr = rpn + (size_t)hn * 8; ngn[hn] = (*nxt)(hn, pr);
                        for (int j = 0; j < 4; j++) _mm_prefetch((const char *)pr[j], QCPU_NXT_HINT); }   /* next window's rows, 4 + 4 per group */
             fe8 t, lam, x3;
@@ -1137,13 +1573,15 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8_sqr_sub2(x3, lam, X[h], TX[h]);                 /* X, Y stay normalized: they are subtrahends */
 #endif
             fe8_sub_nf(t, X[h], x3); fe8_mul_sub(Y[h], lam, t, Y[h]); fe8_cp(X[h], x3);
+#endif
         }
     }
+#endif
 }
 /* Canonical x of 8 lanes into the (candidate, recid) array: lane j -> o[2 * j] (o = &qx[h * 16 + ri]).
  * The four 64-bit limb rows are transposed to one 4-limb row per lane (unpack + permute) and stored as
  * eight 256-bit rows, instead of 32 scalar extractions and stores. */
-Q8T static inline void fe8_store_x(fe *o, const fe8 &a) {
+Q8T static inline QCPU_AIF void fe8_store_x(fe *o, const fe8 &a) {
     fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
     __m512i r[5];
     for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
@@ -1164,7 +1602,7 @@ Q8T static inline void fe8_store_x(fe *o, const fe8 &a) {
     _mm256_storeu_si256((__m256i *)(o + 10), _mm512_castsi512_si256(b3)); _mm256_storeu_si256((__m256i *)(o + 14), _mm512_extracti64x4_epi64(b3, 1));
 }
 /* bit j of x -> byte j (0 or 1) */
-static inline uint64_t spread8(unsigned x) {
+static inline QCPU_AIF uint64_t spread8(unsigned x) {
     const uint64_t v = ((uint64_t)x * 0x0101010101010101ULL) & 0x8040201008040201ULL;
     return ((v + 0x7F7F7F7F7F7F7F7FULL) & 0x8080808080808080ULL) >> 7;
 }
@@ -1237,6 +1675,96 @@ Q8T static void ec8_final_cf(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G
         }
     }
 }
+#if QSB_CPU_KH16 && QCPU_SHANI
+/* ---- QSB_CPU_KH16 (a33e04c3): key hashes from a 16-lane message schedule ----
+ * The 16 keys of a group (8 candidates x 2 recids; lane j = candidate j recid 0, lane 8 + j = recid 1) are hashed together:
+ * ec8_final_cf_kh writes their message words W0..W8 (the 33-byte compressed key 02|03 || x, then 0x80) straight from the canonical
+ * limbs in registers, kh16_pass expands W16..W63 for all 16 keys with AVX-512 (W9..W14 = 0, W15 = 264), stores W + K pairwise
+ * interleaved (unpack of rounds 2p, 2p + 1) and runs the rounds with SHA-NI four keys at a time from those pairs (no sha256msg1/2,
+ * four independent sha256rnds2 chains). Same messages, same rounds, same h0 as qsha_keyhash4_h0. */
+Q8T static inline QCPU_AIF void kh16_canon(__m512i w[4], const fe8 &a) {   /* canonical 4 x 64-bit limbs of 8 lanes */
+    fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
+    __m512i r[5];
+    for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
+    w[0] = _mm512_or_si512(r[0], _mm512_slli_epi64(r[1], 52));
+    w[1] = _mm512_or_si512(_mm512_srli_epi64(r[1], 12), _mm512_slli_epi64(r[2], 40));
+    w[2] = _mm512_or_si512(_mm512_srli_epi64(r[2], 24), _mm512_slli_epi64(r[3], 28));
+    w[3] = _mm512_or_si512(_mm512_srli_epi64(r[3], 36), _mm512_slli_epi64(r[4], 16));
+}
+/* message words W0..W8 of one recid's 8 keys as 64-bit lanes (low 32 bits = the word): x = w3 w2 w1 w0, W0 = pfx << 24 | x >> 232,
+ * W_i = (x >> (232 - 32 i)) & 0xffffffff (i = 1..7), W8 = (x & 0xff) << 24 | 0x800000; pfx = 2 | parity of y */
+Q8T static inline QCPU_AIF void kh16_words8(__m512i W[9], const __m512i w[4], __mmask8 par) {
+    W[0] = _mm512_mask_or_epi64(_mm512_or_si512(_mm512_srli_epi64(w[3], 40), _mm512_set1_epi64(0x02000000)), par,
+                                _mm512_or_si512(_mm512_srli_epi64(w[3], 40), _mm512_set1_epi64(0x02000000)), _mm512_set1_epi64(0x01000000));
+    W[1] = _mm512_srli_epi64(w[3], 8);
+    W[2] = _mm512_or_si512(_mm512_slli_epi64(w[3], 24), _mm512_srli_epi64(w[2], 40));
+    W[3] = _mm512_srli_epi64(w[2], 8);
+    W[4] = _mm512_or_si512(_mm512_slli_epi64(w[2], 24), _mm512_srli_epi64(w[1], 40));
+    W[5] = _mm512_srli_epi64(w[1], 8);
+    W[6] = _mm512_or_si512(_mm512_slli_epi64(w[1], 24), _mm512_srli_epi64(w[0], 40));
+    W[7] = _mm512_srli_epi64(w[0], 8);
+    W[8] = _mm512_or_si512(_mm512_slli_epi64(w[0], 24), _mm512_set1_epi64(0x00800000));
+}
+/* m[0..8] (16 dwords each): recid 0's keys in lanes 0..7, recid 1's in lanes 8..15 */
+Q8T static inline QCPU_AIF void kh16_store(uint32_t *m, const fe8 &x0, __mmask8 p0, const fe8 &x1, __mmask8 p1) {
+    __m512i w[4], W0[9], W1[9];
+    kh16_canon(w, x0); kh16_words8(W0, w, p0);
+    kh16_canon(w, x1); kh16_words8(W1, w, p1);
+    for (int i = 0; i < 9; i++)
+        _mm512_store_si512((void *)(m + 16 * i), _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi64_epi32(W0[i])), _mm512_cvtepi64_epi32(W1[i]), 1));
+}
+/* ec8_final_cf with the key-hash message words as output (m16: 9 x 16 dwords per group) instead of qx/qp. The EC steps are
+ * ec8_final_cf's line for line (a33e04c3 wrote the QSB_CPU_WPRE form; the other branch mirrors ec8_final_cf's). */
+Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, const fe &mx, const fe &my, uint32_t *m16) {
+    fe8 MX, MY; fe8_bcast(MX, mx); fe8_bcast(MY, my);
+    const int NC = QSB_CPU_NCH;                      /* R2-D: chains of the batch inversion (4: the code before) */
+    fe8 run[4]; for (int c = 0; c < NC; c++) fe8_set1(run[c]);
+    for (int g = 0; g < G; g += NC)
+        for (int c = 0; c < NC; c++) {
+            const int h = g + c; fe8_sub_lz(D[h], MX, X[h]);
+#if QSB_CPU_WPRE
+            { fe8 t; fe8_sub_lz(t, MY, Y[h]); fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
+#else
+            fe8_cp(PRE[h], run[c]);
+#endif
+            fe8_mul_lz(run[c], run[c], D[h]);
+        }
+    QCPU_INVC(run);
+#if QSB_CPU_ILP2 & 1
+    /* R2-D (QSB_CPU_ILP2 bit 0): two groups of different chains step together, op by op, as in ec8_window */
+    for (int g = G - NC; g >= 0; g -= NC) {
+        for (int c = NC - 1; c >= 1; c -= 2) {
+            const int hA = g + c, hB = hA - 1;
+            fe8 tA, tB, lamA, lamB, x3A, x3B, y3A, y3B;
+            fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
+            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            fe8_sqr_sub2(x3A, lamA, X[hA], MX); fe8_sqr_sub2(x3B, lamB, X[hB], MX);
+            fe8_sub_lz(tA, X[hA], x3A); fe8_sub_lz(tB, X[hB], x3B);
+            fe8_mul_sub(y3A, lamA, tA, Y[hA]); fe8_mul_sub(y3B, lamB, tB, Y[hB]);
+            kh16_store(m16 + (size_t)hA * 144, X[hA], fe8_parity(Y[hA]), x3A, fe8_parity(y3A));
+            kh16_store(m16 + (size_t)hB * 144, X[hB], fe8_parity(Y[hB]), x3B, fe8_parity(y3B));
+        }
+    }
+#else
+    for (int g = G - NC; g >= 0; g -= NC) {
+        for (int c = NC - 1; c >= 0; c--) {
+            const int h = g + c;
+            fe8 t, lam, x3, y3;
+#if QSB_CPU_WPRE
+            fe8_mul_lz(lam, run[c], PRE[h]); fe8_mul_lz(run[c], run[c], D[h]);
+#else
+            fe8 dinv;
+            fe8_mul_lz(dinv, run[c], PRE[h]); fe8_mul_lz(run[c], run[c], D[h]);
+            fe8_sub_lz(t, MY, Y[h]); fe8_mul_lz(lam, t, dinv);
+#endif
+            fe8_sqr_sub2(x3, lam, X[h], MX);
+            fe8_sub_lz(t, X[h], x3); fe8_mul_sub(y3, lam, t, Y[h]);
+            kh16_store(m16 + (size_t)h * 144, X[h], fe8_parity(Y[h]), x3, fe8_parity(y3));
+        }
+    }
+#endif
+}
+#endif
 /* Window 0: acc = sign * T0[|d0| - 1] (digit-0 lanes load row 0 and are dropped by the caller); computes
  * and prefetches window 1's rows (nxt) into rpn/ngn. */
 template <class RowFn>
@@ -1257,7 +1785,9 @@ Q8TX static void ec8_first(fe8 *X, fe8 *Y, int G, RowFn rowfn, RowFn nxt, const 
 /* Digits of 16 candidates at a time (zb: 8 SHA state words per candidate, h0 most significant) into
  * ds[i * B + k], with the per-window shifts uniform across the lanes; bad[k] = some digit is zero. */
 Q8T static void recode16(const Geo &g, const uint32_t *zb, uint32_t *ds, uint8_t *bad, int B) {
+#if !QSB_CPU_RECODE_NG
     const __m512i vidx = _mm512_set_epi32(120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0);
+#endif
     const __m512i Z = _mm512_setzero_si512(), SB = _mm512_set1_epi32((int)0x80000000u), ONE = _mm512_set1_epi32(1);
     const int nw = g.nw, ns = g.sgn ? nw - 1 : 0;        /* windows 0..ns-1 are signed */
     __m128i shr[NWMAX], shl[NWMAX]; __m512i msk[NWMAX], half[NWMAX], full[NWMAX]; int wq[NWMAX]; bool two[NWMAX];
@@ -1269,7 +1799,26 @@ Q8T static void recode16(const Geo &g, const uint32_t *zb, uint32_t *ds, uint8_t
     }
     for (int k0 = 0; k0 < B; k0 += 16) {
         __m512i zw[9];                                   /* zw[j] = bits 32j..32j+31 of z = word h[7 - j] */
+#if QSB_CPU_RECODE_NG
+        {   /* r[m] = candidates 2m, 2m+1 (position 8*(k&1) + w); three stages swap the vector bits k3, k2, k1 with the word
+             * bits w2, w1, w0, and the last one lays the positions out as k: s[w][k] = word w of candidate k. */
+            const __m512i I00 = _mm512_set_epi32(27, 26, 25, 24, 11, 10, 9, 8, 19, 18, 17, 16, 3, 2, 1, 0);
+            const __m512i I01 = _mm512_set_epi32(31, 30, 29, 28, 15, 14, 13, 12, 23, 22, 21, 20, 7, 6, 5, 4);
+            const __m512i I10 = _mm512_set_epi32(29, 28, 13, 12, 25, 24, 9, 8, 21, 20, 5, 4, 17, 16, 1, 0);
+            const __m512i I11 = _mm512_set_epi32(31, 30, 15, 14, 27, 26, 11, 10, 23, 22, 7, 6, 19, 18, 3, 2);
+            const __m512i I20 = _mm512_set_epi32(30, 22, 14, 6, 28, 20, 12, 4, 26, 18, 10, 2, 24, 16, 8, 0);
+            const __m512i I21 = _mm512_set_epi32(31, 23, 15, 7, 29, 21, 13, 5, 27, 19, 11, 3, 25, 17, 9, 1);
+            const uint32_t *zk = zb + (size_t)k0 * 8;
+            __m512i r[8], s[8];
+            for (int m = 0; m < 8; m++) r[m] = _mm512_loadu_si512((const void *)(zk + 16 * m));
+            for (int v = 0; v < 4; v++) { s[v] = _mm512_permutex2var_epi32(r[v], I00, r[v | 4]); s[v | 4] = _mm512_permutex2var_epi32(r[v], I01, r[v | 4]); }
+            for (int v : {0, 1, 4, 5}) { r[v] = _mm512_permutex2var_epi32(s[v], I10, s[v | 2]); r[v | 2] = _mm512_permutex2var_epi32(s[v], I11, s[v | 2]); }
+            for (int v : {0, 2, 4, 6}) { s[v] = _mm512_permutex2var_epi32(r[v], I20, r[v | 1]); s[v | 1] = _mm512_permutex2var_epi32(r[v], I21, r[v | 1]); }
+            for (int j = 0; j < 8; j++) zw[j] = s[7 - j];
+        }
+#else
         for (int j = 0; j < 8; j++) zw[j] = _mm512_i32gather_epi32(vidx, (const void *)(zb + (size_t)k0 * 8 + (7 - j)), 4);
+#endif
         zw[8] = Z;
         __m512i cy = Z; __mmask16 zero = 0;
         for (int i = 0; i < nw; i++) {
@@ -1391,7 +1940,11 @@ static bool qsha_supported() {
  * for the tail blocks that do not depend on the epoch: every one of them is one of a few fixed
  * contents per problem, scheduled once in start(). */
 QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows, int nblk, uint32_t *out = nullptr, int ostride = 8,
-                          const uint32_t *const *in = nullptr) {
+                          const uint32_t *const *in = nullptr
+#if QCPU_PFQ
+                          , QPfRing *pq = nullptr
+#endif
+                          ) {
     __m128i S0[4], S1[4];
     if (!out) out = &st[0][0];                          /* out: lane l's final state at out + l * ostride (default: in place) */
 #pragma GCC unroll 4
@@ -1403,10 +1956,27 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
         S0[l] = _mm_alignr_epi8(t, u, 8); S1[l] = _mm_blend_epi16(u, t, 0xF0);
     }
     for (int b = 0; b < nblk; b++) {
+#if QCPU_PFQ
+        if (pq) qpf_drain(*pq, 2);                  /* R2-D: two queued row prefetches per block */
+#endif
         const uint32_t *const w[4] = {rows[0][b], rows[1][b], rows[2][b], rows[3][b]};
         __m128i I0[4], I1[4];
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { I0[l] = S0[l]; I1[l] = S1[l]; }
+        if (QSB_CPU_X4PS && w[0] == w[1] && w[0] == w[2] && w[0] == w[3]) {   /* the same fixed block in all four lanes (the tail
+                                                                                blocks): each W+K pair is loaded once, into xmm0, for four rounds */
+            const uint32_t *ws = w[0];
+            __asm__("" : "+r"(ws));                     /* opaque copy: keeps the compiler from hoisting (and spilling) lane 0's loads */
+#pragma GCC unroll 16
+            for (int r = 0; r < 16; r++) {
+                const __m128i m0 = _mm_loadl_epi64((const __m128i *)(ws + 4 * r));
+#pragma GCC unroll 4
+                for (int l = 0; l < 4; l++) S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m0);
+                const __m128i m1 = _mm_loadl_epi64((const __m128i *)(ws + 4 * r + 2));
+#pragma GCC unroll 4
+                for (int l = 0; l < 4; l++) S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m1);
+            }
+        } else {
 #pragma GCC unroll 16
         for (int r = 0; r < 16; r++) {
 #pragma GCC unroll 4
@@ -1414,6 +1984,7 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
                 S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
                 S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
             }
+        }
         }
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { S0[l] = _mm_add_epi32(S0[l], I0[l]); S1[l] = _mm_add_epi32(S1[l], I1[l]); }
@@ -1425,10 +1996,62 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
         _mm_storeu_si128((__m128i *)(out + l * ostride + 4), _mm_alignr_epi8(b, t, 8));
     }
 }
+#if QSB_CPU_SHA4
+/* QSB_CPU_SHA4: the 64 rounds of four SHA-256 compressions from the IV, interleaved. Lane l's message is 16 native-order words in
+ * mr[4l..4l+3], a ring the schedule overwrites in place (after round r >= 4, mr[4l + (r & 3)] holds W[4r..4r+3]); out0[l], out1[l]
+ * receive the feed-forwarded ABEF and CDGH of lane l. sha256rnds2 is legacy-SSE encoded (xmm0..15 only, xmm0 its implicit
+ * round-constant operand), so the eight chaining registers of four lanes leave no room for their sixteen message registers: the
+ * ring stays in memory (the pointer is opaque and every round ends with a compiler barrier), read by sha256msg1/msg2 and palignr
+ * as memory operands and written back once per lane and round (about 3 loads and 1 store per lane and round, on the load/store
+ * pipes, not the FP pipes that sha256rnds2 and IFMA share). The row a round produces is what the next round's schedule step
+ * depends on (W[t-2] in sha256msg2 and the W[t-7] term), so each lane also keeps its previous row in a register (p0..p3): read
+ * back through the ring it would wait on store-to-load forwarding, about 12 cycles per round on Zen 3 against the 8 of the
+ * two dependent sha256rnds2, and the 4-lane block ran 15 % slower than the 2-lane pair. Rows written in rounds 14 and 15 are
+ * never read again and are not stored. Four independent chains issue one sha256rnds2 per cycle (latency 4); two lanes issue
+ * one per 2 cycles. SHC: the schedule identities of W9..W14 = 0 (round 4 has no W[t-7] term, round 6's sha256msg1 is its first
+ * operand), exactly as qsha_xw_iv32 and qsha_keyhash4_h0 apply them. Same round values as qsha_xw_iv<4>. */
+template <bool SHC>
+QSHA static inline void qsha_rounds4m(__m128i *mr, __m128i *out0, __m128i *out1) {
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);   /* ABEF: lanes f e b a */
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);   /* CDGH: lanes h g d c */
+    __m128i a0 = IV0, a1 = IV0, a2 = IV0, a3 = IV0, b0 = IV1, b1 = IV1, b2 = IV1, b3 = IV1;   /* named, not arrays: they stay in registers */
+    __m128i p0 = IV0, p1 = IV0, p2 = IV0, p3 = IV0;                                       /* each lane's previous row (W[4(r-1)..4r-1]) */
+    __asm__("" : "+r"(mr));                              /* opaque ring pointer: the ring is never promoted to registers */
+#pragma GCC unroll 16
+    for (int r = 0; r < 16; r++) {
+        const __m128i K = _mm_load_si128((const __m128i *)&qsha_k[4 * r]);
+#define QSHA4_LANE(L, A, B, P) do {                                                                                      \
+            __m128i *const M = mr + 4 * (L); __m128i w;                                                                  \
+            if (r >= 4) {                                                                                                \
+                __m128i t = (SHC && r == 6) ? _mm_load_si128(M + 2)                                                       \
+                                            : _mm_sha256msg1_epu32(_mm_load_si128(M + (r & 3)), _mm_load_si128(M + ((r + 1) & 3))); \
+                if (!(SHC && r == 4)) t = _mm_add_epi32(t, _mm_alignr_epi8(P, _mm_load_si128(M + ((r + 2) & 3)), 4));    \
+                w = _mm_sha256msg2_epu32(t, P);                                                                          \
+                if (r < 14) _mm_store_si128(M + (r & 3), w);        /* read again in rounds r+2 .. r+4 */                \
+            } else w = _mm_load_si128(M + (r & 3));                                                                      \
+            P = w;                                                                                                       \
+            __m128i m = _mm_add_epi32(w, K);                                                                             \
+            B = _mm_sha256rnds2_epu32(B, A, m); m = _mm_shuffle_epi32(m, 0x0E); A = _mm_sha256rnds2_epu32(A, B, m); } while (0)
+        QSHA4_LANE(0, a0, b0, p0); QSHA4_LANE(1, a1, b1, p1); QSHA4_LANE(2, a2, b2, p2); QSHA4_LANE(3, a3, b3, p3);
+#undef QSHA4_LANE
+        __asm__ volatile("" ::: "memory");                /* the next round reads the ring from memory, not from registers kept live */
+    }
+    out0[0] = _mm_add_epi32(a0, IV0); out0[1] = _mm_add_epi32(a1, IV0); out0[2] = _mm_add_epi32(a2, IV0); out0[3] = _mm_add_epi32(a3, IV0);
+    out1[0] = _mm_add_epi32(b0, IV1); out1[1] = _mm_add_epi32(b1, IV1); out1[2] = _mm_add_epi32(b2, IV1); out1[3] = _mm_add_epi32(b3, IV1);
+}
+/* a = ABEF + IV0, b = CDGH + IV1 -> st[0..7] = a b c d e f g h, the store order of qsha_xw. */
+QSHA static inline void qsha_st8(uint32_t *st, __m128i a, __m128i b) {
+    const __m128i t = _mm_shuffle_epi32(a, 0x1B);                             /* FEBA */
+    b = _mm_shuffle_epi32(b, 0xB1);                                           /* DCHG */
+    _mm_storeu_si128((__m128i *)&st[0], _mm_blend_epi16(t, b, 0xF0));         /* DCBA -> a b c d */
+    _mm_storeu_si128((__m128i *)&st[4], _mm_alignr_epi8(b, t, 8));            /* HGFE -> e f g h */
+}
+#endif
 /* SHA-256 compression with the message given as 16 native-order words per lane (no byte round trip),
  * L lanes interleaved: the second SHA-256 (message = the first digest's state words + fixed padding)
  * and the key hashes. L = 2 keeps state, message and schedule in the 16 legacy-SSE registers that
- * sha256rnds2 can address (4 lanes spill ~60 moves per lane and are not faster). */
+ * sha256rnds2 can address (4 lanes spill ~60 moves per lane and are not faster; QSB_CPU_SHA4's
+ * qsha_rounds4m keeps the message rings in memory instead). */
 template <int L>
 QSHA static inline void qsha_xw(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
     __m128i S0[L], S1[L], I0[L], I1[L], M[L][4];
@@ -1509,18 +2132,101 @@ QSHA static inline void qsha_xw_iv(uint32_t (*st)[8], const uint32_t (*wd)[16]) 
     }
 }
 QSHA static void qsha_x4w_iv(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+#if QSB_CPU_SHA4
+    __m128i mr[16], a[4], b[4];
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++)
+#pragma GCC unroll 4
+        for (int j = 0; j < 4; j++) _mm_store_si128(mr + 4 * l + j, _mm_loadu_si128((const __m128i *)(wd[l] + 4 * j)));
+    qsha_rounds4m<false>(mr, a, b);
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) qsha_st8(st[l], a[l], b[l]);
+#else
     qsha_xw_iv<2>(st, wd); qsha_xw_iv<2>(st + 2, wd + 2);
+#endif
 }
+#if QSB_CPU_SHC
+/* qsha_xw_iv for a 32-byte message (the second SHA-256): only words 0..7 are read from wd; the padding words W8 = 0x80000000,
+ * W9..W14 = 0, W15 = 256 are constants, r = 4's W[t-7] term (W9..W12) is zero and r = 6's sha256msg1(W8..11, W12..15) is W8..11.
+ * The same round values as qsha_xw_iv with wd[l][8..15] set to that padding. */
+template <int L>
+QSHA static inline void qsha_xw_iv32(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+    const __m128i P2 = _mm_set_epi32(0, 0, 0, (int)0x80000000u), P3 = _mm_set_epi32(256, 0, 0, 0);
+    __m128i S0[L], S1[L], M[L][4];
+#pragma GCC unroll 4
+    for (int l = 0; l < L; l++) {
+        S0[l] = IV0; S1[l] = IV1;
+        M[l][0] = _mm_loadu_si128((const __m128i *)(wd[l] + 0)); M[l][1] = _mm_loadu_si128((const __m128i *)(wd[l] + 4));
+        M[l][2] = P2; M[l][3] = P3;
+    }
+#pragma GCC unroll 16
+    for (int r = 0; r < 16; r++) {
+        const __m128i K = _mm_load_si128((const __m128i *)&qsha_k[4 * r]);
+#pragma GCC unroll 4
+        for (int l = 0; l < L; l++) {
+            if (r >= 4) {
+                __m128i t = r == 6 ? M[l][2] : _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+                if (r != 4) t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
+                M[l][r & 3] = _mm_sha256msg2_epu32(t, M[l][(r + 3) & 3]);
+            }
+            __m128i m = _mm_add_epi32(M[l][r & 3], K);
+            S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], m);
+            m = _mm_shuffle_epi32(m, 0x0E);
+            S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], m);
+        }
+    }
+#pragma GCC unroll 4
+    for (int l = 0; l < L; l++) {
+        __m128i a = _mm_add_epi32(S0[l], IV0), b = _mm_add_epi32(S1[l], IV1);
+        __m128i t = _mm_shuffle_epi32(a, 0x1B);
+        b = _mm_shuffle_epi32(b, 0xB1);
+        _mm_storeu_si128((__m128i *)&st[l][0], _mm_blend_epi16(t, b, 0xF0));
+        _mm_storeu_si128((__m128i *)&st[l][4], _mm_alignr_epi8(b, t, 8));
+    }
+}
+QSHA static void qsha_x4w_iv32(uint32_t (*st)[8], const uint32_t (*wd)[16]) {
+#if QSB_CPU_SHA4
+    const __m128i P2 = _mm_set_epi32(0, 0, 0, (int)0x80000000u), P3 = _mm_set_epi32(256, 0, 0, 0);
+    __m128i mr[16], a[4], b[4];
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        _mm_store_si128(mr + 4 * l + 0, _mm_loadu_si128((const __m128i *)(wd[l] + 0)));
+        _mm_store_si128(mr + 4 * l + 1, _mm_loadu_si128((const __m128i *)(wd[l] + 4)));
+        _mm_store_si128(mr + 4 * l + 2, P2); _mm_store_si128(mr + 4 * l + 3, P3);
+    }
+    qsha_rounds4m<true>(mr, a, b);
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) qsha_st8(st[l], a[l], b[l]);
+#else
+    qsha_xw_iv32<2>(st, wd); qsha_xw_iv32<2>(st + 2, wd + 2);
+#endif
+}
+#endif
 /* The key hashes need only h0, the prefilter's input: h0 of SHA-256(compressed key) for the 4 keys (x = qx[l], parity of y
  * = qp[l]) as one vector, lane l = key l. The message words (as native words: word k = key bytes 4k..4k+3 big-endian, key
  * byte 0 = 0x02 | parity, bytes 1..32 = x big-endian, then 0x80 and the 264-bit length in word 15) are built in registers
  * and fed to qsha_xw_iv's rounds, two lanes at a time; no message stores or loads, no state stores. */
 QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
-    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
-    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
     const __m128i I03 = _mm_set_epi8(4, 3, 2, 1, 8, 7, 6, 5, 12, 11, 10, 9, -128, 15, 14, 13);
     const __m128i I47 = _mm_set_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
     __m128i a[4];
+#if QSB_CPU_SHA4
+    __m128i mr[16], b[4];                                /* the 4 keys' message words, built in registers, into the rings */
+#pragma GCC unroll 4
+    for (int l = 0; l < 4; l++) {
+        const fe &x = qx[l];
+        const __m128i lo = _mm_loadu_si128((const __m128i *)&x.v[0]), hi = _mm_loadu_si128((const __m128i *)&x.v[2]);
+        _mm_store_si128(mr + 4 * l + 0, _mm_or_si128(_mm_shuffle_epi8(hi, I03), _mm_cvtsi32_si128((int)((0x02u | (qp[l] & 1)) << 24))));
+        _mm_store_si128(mr + 4 * l + 1, _mm_shuffle_epi8(_mm_alignr_epi8(hi, lo, 1), I47));
+        _mm_store_si128(mr + 4 * l + 2, _mm_cvtsi32_si128((int)(((uint32_t)(x.v[0] & 0xff) << 24) | 0x00800000u)));
+        _mm_store_si128(mr + 4 * l + 3, _mm_set_epi32(264, 0, 0, 0));
+    }
+    qsha_rounds4m<(QSB_CPU_SHC != 0)>(mr, a, b);         /* a[l] = ABEF + IV0 of key l; h0 is its high word */
+#else
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
 #pragma GCC unroll 2
     for (int h = 0; h < 2; h++) {
         __m128i S0[2], S1[2], M[2][4];
@@ -1540,8 +2246,9 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 #pragma GCC unroll 2
             for (int l = 0; l < 2; l++) {
                 if (r >= 4) {
-                    __m128i t = _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
-                    t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
+                    /* W9..W14 = 0: r = 4's W[t-7] words (W9..W12) are zero, r = 6's msg1(W8..11, W12..15) = W8..11 */
+                    __m128i t = (QSB_CPU_SHC && r == 6) ? M[l][2] : _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+                    if (!(QSB_CPU_SHC && r == 4)) t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
                     M[l][r & 3] = _mm_sha256msg2_epu32(t, M[l][(r + 3) & 3]);
                 }
                 __m128i m = _mm_add_epi32(M[l][r & 3], K);
@@ -1552,8 +2259,79 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
         }
         a[2 * h] = _mm_add_epi32(S0[0], IV0); a[2 * h + 1] = _mm_add_epi32(S0[1], IV0);
     }
+#endif
     return _mm_unpackhi_epi64(_mm_unpackhi_epi32(a[0], a[1]), _mm_unpackhi_epi32(a[2], a[3]));
 }
+#if QSB_CPU_KH16 && QCPU_VEC
+#define QSHA16 __attribute__((target("sha,sse4.1,ssse3,avx,avx2,avx512f,avx512vl")))
+/* QSB_CPU_KH16 (a33e04c3): h0 of SHA-256 of the 16 keys whose message words W0..W8 are m[0..8] (lane = key); wk: 32 x 32 dwords of
+ * scratch. Returns the prefilter mask of the 16 keys (bit k = key k's h0 has QSB_ZEROS_N leading zero bits). h0_out (dev builds
+ * only, never in a ranked build): the 16 h0 values for the unit test. */
+QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
+#ifdef QSB_CPU_DEVBENCH
+                                 , uint32_t *h0_out = nullptr
+#endif
+                                 ) {
+#define R16(x, n) _mm512_ror_epi32((x), (n))
+#define S0_16(x) _mm512_ternarylogic_epi32(R16(x, 7), R16(x, 18), _mm512_srli_epi32(x, 3), 0x96)
+#define S1_16(x) _mm512_ternarylogic_epi32(R16(x, 17), R16(x, 19), _mm512_srli_epi32(x, 10), 0x96)
+    __m512i W[16];
+#pragma GCC unroll 9
+    for (int i = 0; i < 9; i++) W[i] = _mm512_load_si512((const void *)(m + 16 * i));
+    for (int i = 9; i < 15; i++) W[i] = _mm512_setzero_si512();
+    W[15] = _mm512_set1_epi32(264);
+    __m512i prev = _mm512_setzero_si512();
+#pragma GCC unroll 64
+    for (int t = 0; t < 64; t++) {
+        __m512i wt;
+        if (t < 16) wt = W[t];
+        else {
+            /* W[t] = s1(W[t-2]) + W[t-7] + s0(W[t-15]) + W[t-16]; the zero words W9..W14 drop out at compile time */
+            const int a2 = (t - 2) & 15, a7 = (t - 7) & 15, a15 = (t - 15) & 15, a16 = t & 15;
+            const bool z2 = (t - 2) >= 9 && (t - 2) <= 14, z7 = (t - 7) >= 9 && (t - 7) <= 14, z15 = (t - 15) >= 9 && (t - 15) <= 14,
+                       z16 = (t - 16) >= 9 && (t - 16) <= 14;
+            wt = z16 ? _mm512_setzero_si512() : W[a16];
+            if (!z15) wt = _mm512_add_epi32(wt, S0_16(W[a15]));
+            if (!z7) wt = _mm512_add_epi32(wt, W[a7]);
+            if (!z2) wt = _mm512_add_epi32(wt, S1_16(W[a2]));
+            W[a16] = wt;
+        }
+        const __m512i wkt = _mm512_add_epi32(wt, _mm512_set1_epi32((int)qsha_k[t]));
+        if (t & 1) {                                     /* rounds t - 1, t as dword pairs, key-major within 128-bit lanes */
+            _mm512_store_si512((void *)(wk + 32 * (t >> 1)), _mm512_unpacklo_epi32(prev, wkt));
+            _mm512_store_si512((void *)(wk + 32 * (t >> 1) + 16), _mm512_unpackhi_epi32(prev, wkt));
+        } else prev = wkt;
+    }
+#undef S0_16
+#undef S1_16
+#undef R16
+    /* key 4L + e: pair p at wk + 32 p + (e >= 2 ? 16 : 0) + 4 L + 2 (e & 1) */
+    const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
+    const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+    alignas(64) uint32_t h0[16];
+#pragma GCC unroll 1
+    for (int L = 0; L < 4; L++) {
+        __m128i S0[4], S1[4];
+        const uint32_t *base[4] = {wk + 4 * L, wk + 4 * L + 2, wk + 16 + 4 * L, wk + 16 + 4 * L + 2};
+#pragma GCC unroll 4
+        for (int e = 0; e < 4; e++) { S0[e] = IV0; S1[e] = IV1; }
+#pragma GCC unroll 16
+        for (int r = 0; r < 16; r++) {
+#pragma GCC unroll 4
+            for (int e = 0; e < 4; e++) S1[e] = _mm_sha256rnds2_epu32(S1[e], S0[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r)));
+#pragma GCC unroll 4
+            for (int e = 0; e < 4; e++) S0[e] = _mm_sha256rnds2_epu32(S0[e], S1[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r + 32)));
+        }
+#pragma GCC unroll 4
+        for (int e = 0; e < 4; e++) h0[4 * L + e] = (uint32_t)_mm_extract_epi32(_mm_add_epi32(S0[e], IV0), 3);
+    }
+#ifdef QSB_CPU_DEVBENCH
+    if (h0_out) memcpy(h0_out, h0, sizeof h0);
+#endif
+    const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
+    return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
+}
+#endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */
 QSHA static void qsha_schedule(uint32_t wk[64], const uint8_t *blk) {
     const __m128i BSWAP = _mm_set_epi64x(0x0c0d0e0f08090a0bULL, 0x0405060700010203ULL);
@@ -1591,8 +2369,16 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+    int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
+    char batch_why[48] = "default";
+#ifdef QSB_CPU_DEVBENCH
+    uint64_t dev_limit = 0;         /* dev only (never in a ranked build): each worker stops once this many candidates are done */
+    std::atomic<int> dev_live{0};
+#endif
     bool vec = false;               /* 8-lane IFMA path */
     bool shani = false;             /* 4-lane SHA-NI hashing */
+    bool kh16 = false;              /* QSB_CPU_KH16 key hashes (8-lane path with SHA-NI, AVX-512VL and the C fold) */
+    std::atomic<int> live{0}, stop{0}, ready{0};   /* H9: workers not yet returned; stop request; workers spawned (stop_unmap) */
 #if QCPU_SHANI
     /* Hashing plan (hash_plan): the message after an epoch's state is block 0 (the epoch's buffered
      * bytes + the first window pushes) and blocks 1..nb-1, whose contents do not depend on the epoch.
@@ -1644,16 +2430,26 @@ static double thp_bytes(const void *p, size_t n) {
 }
 /* First touch of 2 MiB regions i * step, i < n / step, by nth threads (a transparent huge page is allocated
  * at the first fault in a region, or never); returns the fraction of those regions that got one (-1: unknown). */
-static double table_touch(Ctx &c, int nth, size_t step) {
+static double table_touch(Ctx &c, int nth, size_t step, double deadline = 0) {   /* H9: deadline (CLOCK_MONOTONIC s; 0 none): -3 */
     const size_t H = (size_t)2 << 20, n = (c.g.total * sizeof(pt) + H - 1) / H, m = (n + step - 1) / step;
     char *p = (char *)c.table;
     std::atomic<size_t> next{0};
-    auto work = [&]() { for (size_t i; (i = next.fetch_add(1)) < m;) *(volatile char *)(p + i * step * H) = 0; };
+    std::atomic<int> late{0};
+    auto work = [&]() {
+        for (size_t i; (i = next.fetch_add(1)) < m;) {
+            if (deadline > 0) {
+                struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+                if (t.tv_sec + 1e-9 * t.tv_nsec > deadline) { late = 1; next = m; break; }
+            }
+            *(volatile char *)(p + i * step * H) = 0;
+        }
+    };
     std::vector<std::thread> ts;
     const int k = (size_t)nth < m ? nth : (int)m;
     for (int t = 1; t < k; t++) ts.emplace_back(work);
     work();
     for (auto &t : ts) t.join();
+    if (late) return -3;
     const double h = thp_bytes(p, n * H);              /* untouched regions hold no pages */
     return h < 0 ? -1 : h / (double)(m * H);
 }
@@ -1743,7 +2539,18 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
         const int top = g.nw - 1; pt *T = c.table + g.base[top]; const uint32_t n = g.ent[top], CH = 1u << 16;
         const pt C = {c.cx, c.cy};
         std::atomic<uint32_t> next{0}; std::atomic<int> anybad{0};
-        std::vector<pt> tmp(n);
+        std::vector<pt> tmpv; pt *tmp = nullptr;
+#if QSB_CPU_FOLD_PAR
+        const size_t tH = (size_t)2 << 20, tb = ((size_t)n * sizeof(pt) + tH - 1) / tH * tH;   /* H9: the temporary on huge pages, */
+        void *tmap = mmap(nullptr, tb + tH, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);   /* touched by the fold threads */
+        if (tmap == MAP_FAILED) tmap = nullptr;
+        else { tmp = (pt *)(((uintptr_t)tmap + tH - 1) & ~(uintptr_t)(tH - 1));
+#ifdef MADV_HUGEPAGE
+               madvise((void *)tmp, tb, MADV_HUGEPAGE);
+#endif
+        }
+#endif
+        if (!tmp) { tmpv.resize(n); tmp = tmpv.data(); }
         auto work = [&]() {
             std::vector<fe> d(CH), pre(CH); std::vector<uint8_t> inf(CH), bad(CH); std::vector<const pt *> tp(CH, &C);
             Build8 b8; bool okb = false;
@@ -1772,11 +2579,25 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
         for (int t = 0; t < nth; t++) ts.emplace_back(work);
         for (auto &t : ts) t.join();
         if (!anybad) {
-            memcpy(T, tmp.data(), (size_t)n * sizeof(pt));
+#if QSB_CPU_FOLD_PAR
+            {   /* H9: the copy back in 65,536-entry chunks on the build threads */
+                std::atomic<uint32_t> nc{0};
+                auto cp = [&]() { for (uint32_t o; (o = nc.fetch_add(CH)) < n;) memcpy(T + o, tmp + o, (size_t)(n - o < CH ? n - o : CH) * sizeof(pt)); };
+                std::vector<std::thread> tc;
+                for (int t = 1; t < nth; t++) tc.emplace_back(cp);
+                cp();
+                for (auto &t : tc) t.join();
+            }
+#else
+            memcpy(T, tmp, (size_t)n * sizeof(pt));
+#endif
             const pt C2 = pt_double(C);                 /* (mx, my) = -2C */
             c.mx = C2.x; fe z0 = {{0, 0, 0, 0}}; fe_sub(c.my, z0, C2.y);
             c.cfold = true;
         }
+#if QSB_CPU_FOLD_PAR
+        if (tmap) munmap(tmap, tb + tH);
+#endif
     }
 }
 /* Spot-check the table against OpenSSL: in every window the first, the last and a middle entry, and both
@@ -1903,15 +2724,22 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
         for (const char *q = fail; *q;) { const size_t n = strcspn(q, ","); if (n == kl && !strncmp(q, k, n)) return true; q += n; if (*q) q++; }
         return false;
     };
-    auto measure = [&](size_t step) { const double f = table_touch(c, nth, step); return failed(c.g.nw) ? 0.0 : f; };
+    double touch_dl = 0;                                 /* H9: the 9-window first touch's deadline (QSB_CPU_TOUCH_GUARD) */
+    auto measure = [&](size_t step) { const double f = table_touch(c, nth, step, c.g.nw == 9 ? touch_dl : 0); return failed(c.g.nw) && f > -2.5 ? 0.0 : f; };
     size_t at = 0;
     auto add = [&](int nw, double f) {
         if (at >= nn) return;
-        if (f < 0) at += snprintf(note + at, nn - at, "; %d windows: %s", nw, f < -1.5 ? "no memory" : "no smaps");
+        if (f < -2.5) at += snprintf(note + at, nn - at, "; %d windows: first touch over %g s", nw, getenv("QSB_CPU_TOUCH9_MAX_S") ? atof(getenv("QSB_CPU_TOUCH9_MAX_S")) : (double)QSB_CPU_TOUCH9_MAX_S);
+        else if (f < 0) at += snprintf(note + at, nn - at, "; %d windows: %s", nw, f < -1.5 ? "no memory" : "no smaps");
         else at += snprintf(note + at, nn - at, "; %d windows: %.1f%% huge pages", nw, 100.0 * f);
     };
     if (c.g.nw == 9 && c.g.sgn && !forced) {
         if (table_alloc(c)) {
+#if QSB_CPU_TOUCH_GUARD
+            {   struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+                const char *e = getenv("QSB_CPU_TOUCH9_MAX_S");   /* dev override */
+                touch_dl = t.tv_sec + 1e-9 * t.tv_nsec + (e ? atof(e) : (double)QSB_CPU_TOUCH9_MAX_S); }
+#endif
             double f = measure(32);                      /* 1,792 of 57,344 regions */
             if (f >= QSB_CPU_HP_MIN) f = measure(1);
             if (f >= QSB_CPU_HP_MIN) { hp = f; return true; }
@@ -2002,6 +2830,41 @@ static void hash_plan(Ctx &c) {
     if (c.cut > 255 || c.early > 7) return;
     c.h_nb = nb; c.h_ng = ng; c.hplan = true;
 }
+
+#ifndef QSB_CPU_PREFIX100
+#define QSB_CPU_PREFIX100 1
+#endif
+/* b67487a1 (after 4a197f06's family selection), taken as written: keep the 20 block-0 groups of exactly 5 patterns (100 patterns)
+ * when the plan has the 158/77 shape, so each block-0 compression serves 5 candidates; any other shape keeps every pattern.
+ * Runs in start before any worker exists, so no worker holds a pointer into the first plan. 0 = hash_plan alone (the base). */
+static void hash_plan_cpu_patterns(Ctx &c) {
+    hash_plan(c);
+#if QSB_CPU_PREFIX100
+    if (!c.hplan || c.ncwin != 158 || c.h_ng != 77) return;
+    int size[286] = {0}, order[20], count = 0;
+    bool seen[286] = {false};
+    for (int i = 0; i < c.ncwin; i++) size[c.h_g0[i]]++;
+    for (int i = 0; i < c.ncwin; i++) {
+        const int g = c.h_g0[i];
+        if (!seen[g] && size[g] == 5) {
+            seen[g] = true;
+            if (count == 20) return;
+            order[count++] = g;
+        }
+    }
+    if (count != 20) return;
+    bool take[286] = {false};
+    for (int i = 0; i < 20; i++) take[order[i]] = true;
+    uint8_t keep[100][3]; int n = 0;
+    for (int i = 0; i < c.ncwin; i++) if (take[c.h_g0[i]]) {
+        if (n == 100) return;
+        memcpy(keep[n++], c.cwin[i], 3);
+    }
+    if (n != 100) return;
+    memcpy(c.cwin, keep, sizeof keep); c.ncwin = n;
+    hash_plan(c);
+#endif
+}
 #endif
 /* Gate one recovered key (x, parity of y); true when it is an exact hit, which is then published. */
 static inline void pk_block(uint8_t *pk, const fe &x3, unsigned ypar) {    /* compressed key, bytes 0..32 */
@@ -2052,7 +2915,29 @@ Q8T static void hpf_rows8(const uint32_t *zb, int k0, const pt *t0, const pt *t1
     }
     for (int j = 0; j < (QSB_CPU_HPF > 1 ? 16 : 8); j++) _mm_prefetch((const char *)a[j], QCPU_NXT_HINT);
 }
-struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; };
+#if QCPU_PFQ
+/* R2-D: hpf_rows8's addresses into the queue instead of 16 prefetches in a burst */
+Q8T static void hpf_rows8q(const uint32_t *zb, int k0, const pt *t0, const pt *t1, int w0, int w1, bool sgn, QPfRing &q) {
+    const __m512i one = _mm512_set1_epi64(1);
+    const __m512i vi = _mm512_set_epi64(28, 24, 20, 16, 12, 8, 4, 0);
+    const __m512i v = _mm512_i64gather_epi64(vi, (const void *)(zb + (size_t)k0 * 8 + 6), 8);
+    const __m512i zl = _mm512_ror_epi64(v, 32);
+    __m512i u = _mm512_and_si512(zl, _mm512_set1_epi64((long long)((1ULL << w0) - 1)));
+    const __mmask8 n0 = sgn ? _mm512_cmpgt_epu64_mask(u, _mm512_set1_epi64(1LL << (w0 - 1))) : 0;
+    u = _mm512_mask_sub_epi64(u, n0, _mm512_set1_epi64(1LL << w0), u);
+    alignas(64) uint64_t a[16];
+    _mm512_store_si512(a, _mm512_add_epi64(_mm512_set1_epi64((long long)(uintptr_t)t0), _mm512_slli_epi64(_mm512_sub_epi64(_mm512_max_epu64(u, one), one), 6)));
+    if (QSB_CPU_HPF > 1) {
+        __m512i u1 = _mm512_and_si512(_mm512_srl_epi64(zl, _mm_cvtsi32_si128(w0)), _mm512_set1_epi64((long long)((1ULL << w1) - 1)));
+        u1 = _mm512_mask_add_epi64(u1, n0, u1, one);
+        const __mmask8 n1 = sgn ? _mm512_cmpgt_epu64_mask(u1, _mm512_set1_epi64(1LL << (w1 - 1))) : 0;
+        u1 = _mm512_mask_sub_epi64(u1, n1, _mm512_set1_epi64(1LL << w1), u1);
+        _mm512_store_si512(a + 8, _mm512_add_epi64(_mm512_set1_epi64((long long)(uintptr_t)t1), _mm512_slli_epi64(_mm512_sub_epi64(_mm512_max_epu64(u1, one), one), 6)));
+    }
+    for (int j = 0; j < (QSB_CPU_HPF > 1 ? 16 : 8); j++) { if (q.tail - q.head >= 64) qpf_drain(q, 1); q.a[q.tail & 63] = (const char *)a[j]; q.tail++; }
+}
+#endif
+struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; uint32_t *m16 = nullptr, *wk16 = nullptr; };
 static bool vecbuf_alloc(VecBuf &v, int B) {
     const int G = B / 8; void *q[9] = {nullptr};
     const size_t sz[9] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G,
@@ -2060,6 +2945,11 @@ static bool vecbuf_alloc(VecBuf &v, int B) {
     for (int i = 0; i < 9; i++) if (posix_memalign(&q[i], 64, sz[i])) { for (int j = 0; j < i; j++) free(q[j]); return false; }
     v.X = (fe8 *)q[0]; v.Y = (fe8 *)q[1]; v.D = (fe8 *)q[2]; v.P = (fe8 *)q[3]; v.TX = (fe8 *)q[4]; v.TY = (fe8 *)q[5];
     v.qx = (fe *)q[6]; v.qp = (uint8_t *)q[7]; v.bad = (uint8_t *)q[8];
+#if QSB_CPU_KH16 && QCPU_SHANI
+    void *m = nullptr, *w = nullptr;   /* QSB_CPU_KH16: the groups' key-hash message words (9 x 16 dwords each) and the W + K scratch */
+    if (posix_memalign(&m, 64, (size_t)G * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
+    v.m16 = (uint32_t *)m; v.wk16 = (uint32_t *)w;
+#endif
     return true;
 }
 /* Row function of one window: the 8 lanes' rows T[|d| - 1] (row 0 for a zero digit) and their sign mask. */
@@ -2091,17 +2981,22 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
         else ec8_window<RowSgn>(v.X, v.Y, v.D, v.P, v.TX, v.TY, G, rp, ng, nullptr, nullptr, nullptr);
         std::swap(rp, rpn); std::swap(ng, ngn);
     }
+#if QSB_CPU_KH16 && QCPU_SHANI
+    if (c->cfold && c->kh16) ec8_final_cf_kh(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.m16); else
+#endif
     if (c->cfold) ec8_final_cf(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.qx, v.qp);
     else ec8_final(v.X, v.Y, v.D, v.P, G, c->cx, c->cy, v.qx, v.qp);
 }
 #endif
 
 static void worker(Ctx *c, int tid) {
+    struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
-    const int B = QSB_CPU_BATCH;
+    const int B = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;   /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
+                                                                     * run-time value as in 86c643ae; 0: the compile-time constant as before */
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
@@ -2145,6 +3040,9 @@ static void worker(Ctx *c, int tid) {
     uint32_t cw4[286];                                     /* skip-record bytes 6..9 of each CPU pattern */
     for (int i = 0; i < c->ncwin; i++) cw4[i] = (uint32_t)c->cwin[i][0] | (uint32_t)c->cwin[i][1] << 8 | (uint32_t)c->cwin[i][2] << 16;
 #endif
+#if QCPU_PFQ
+    QPfRing pfq;                                    /* R2-D: the hashing phase's queued row prefetches */
+#endif
 #if QCPU_VEC
     VecBuf vb;
     if (c->vec && !vecbuf_alloc(vb, B)) vb = VecBuf();
@@ -2173,6 +3071,10 @@ static void worker(Ctx *c, int tid) {
         if (hpf) for (int q = kl - cnt + 1; q <= kl; q++) hpf_rows(q);
     };
     for (;;) {
+        if (c->stop.load(std::memory_order_relaxed)) return;   /* H9: stop_unmap (every earlier batch's hits are published) */
+#ifdef QSB_CPU_DEVBENCH
+        if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
+#endif
         int k = 0;
         while (k < B) {
             if (wi == c->ncwin) {                       /* next epoch: hash its fixed prefix once */
@@ -2264,10 +3166,22 @@ static void worker(Ctx *c, int tid) {
                     memcpy(sk, &e8, 8); memcpy(sk + 6, &cw4[pi], 4);   /* bytes 0..5 = early, 6..8 = the pattern (byte 9: next record's) */
                     if (j == 3) {                           /* four candidates ready: blocks 1..nb-1 (digests straight into the second
                                                                SHA-256's message words), then the second SHA-256 into z = h0 (MSW) .. h7 */
+#if QCPU_PFQ
+                        qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin, hpf ? &pfq : nullptr);
+#else
                         qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin);
+#endif
+#if QSB_CPU_SHC
+                        qsha_x4w_iv32((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);   /* w2[l][8..15]: the constant padding */
+#else
                         qsha_x4w_iv((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);
+#endif
 #if QCPU_VEC
+#if QCPU_PFQ
+                        if (hpf && (kq & 7) == 7) hpf_rows8q(zb.data(), kq - 7, ht0, ht1, hw0, hw1, hsg, pfq);   /* R2-D: queued */
+#else
                         if (hpf && (kq & 7) == 7) hpf_rows8(zb.data(), kq - 7, ht0, ht1, hw0, hw1, hsg);   /* B % 8 == 0 */
+#endif
 #endif
                     }
                 }
@@ -2328,10 +3242,27 @@ static void worker(Ctx *c, int tid) {
             sk[6] = w3[0]; sk[7] = w3[1]; sk[8] = w3[2];
             k++;
         }
+#if QCPU_PFQ
+        qpf_drain(pfq, 64);                         /* R2-D: the last octet's rows (and any left over) before the EC phase */
+#endif
 #if QCPU_VEC
         if (vb.X) {
             vec_batch(c, zb.data(), ds.data(), B, vb);
 #if QCPU_SHANI
+#if QSB_CPU_KH16
+            if (c->kh16 && c->cfold) {                  /* QSB_CPU_KH16: key hashes 16 at a time: the group's 8 candidates x 2 recids */
+                for (int h = 0; h < B / 8; h++) {
+                    const unsigned pass = kh16_pass(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
+                    if (!pass) continue;
+                    for (int j = 0; j < 8; j++) {
+                        const int q = h * 8 + j;
+                        if (vb.bad[q]) continue;
+                        for (int ri = 0; ri < 2; ri++)
+                            if (((pass >> (8 * ri + j)) & 1) && gate_publish_exact(c, &skips[(size_t)q * 9], ri)) break;   /* one recid per candidate */
+                    }
+                }
+            } else
+#endif
             if (c->shani) {                             /* key hashes 4 at a time: 2 candidates x 2 recids */
                 const __m128i zero = _mm_setzero_si128();
                 for (int kk = 0; kk < B; kk += 2) {
@@ -2397,11 +3328,108 @@ static Ctx *g_ctx = nullptr;
 static cpu_set_t g_initial_cpus;
 static int g_initial_ok = [] { CPU_ZERO(&g_initial_cpus); return sched_getaffinity(0, sizeof g_initial_cpus, &g_initial_cpus) == 0 ? 1 : 0; }();
 #endif
+#if defined(CPU_COUNT) && QSB_CPU_RSV_CORE
+/* 296e5e53's worker CPUs (package y2d): the pre-main() set minus the core of the GPU host thread (start() runs on it) when that
+ * thread is pinned to fewer CPUs; when it is not, minus the last core with two or more CPUs (plan_cores: as 296e5e53's
+ * smt_plan). Without a core to reserve: the pre-main() set minus the host thread's CPUs if it is pinned (296e5e53's table-builder
+ * mask), else false (no mask: the workers inherit, as in 296e5e53). */
+static bool rsv_core_mask(bool plan_cores, cpu_set_t *out) {
+    cpu_set_t cs; CPU_ZERO(&cs);
+    if (g_initial_ok) cs = g_initial_cpus; else if (sched_getaffinity(0, sizeof cs, &cs) != 0) return false;
+    cpu_set_t host; CPU_ZERO(&host);
+    const bool host_pinned = sched_getaffinity(0, sizeof host, &host) == 0 && CPU_COUNT(&host) < CPU_COUNT(&cs);
+    std::vector<std::vector<int> > cores; std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+    bool topo = plan_cores;
+    for (int cpu = 0; cpu < CPU_SETSIZE && topo; cpu++) {
+        if (!CPU_ISSET(cpu, &cs) || seen[cpu]) continue;
+        char path[128]; snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+        FILE *f = fopen(path, "r"); if (!f) { topo = false; break; }
+        char buf[256] = {0}; const bool ok = fgets(buf, sizeof buf, f) != nullptr; fclose(f); if (!ok) { topo = false; break; }
+        std::vector<int> core;
+        for (char *q = buf; *q;) {                      /* "a-b,c,..." */
+            char *e; long a = strtol(q, &e, 10); if (e == q) break; long b = a;
+            if (*e == '-') { q = e + 1; b = strtol(q, &e, 10); }
+            for (long x = a; x <= b && x < CPU_SETSIZE; x++) if (x >= 0 && CPU_ISSET(x, &cs) && !seen[x]) { core.push_back((int)x); seen[x] = 1; }
+            q = e; if (*q == ',') q++; else break;
+        }
+        if (core.empty()) { core.push_back(cpu); seen[cpu] = 1; }
+        cores.push_back(core);
+    }
+    int rsv = -1;
+    if (topo) {
+        if (host_pinned)
+            for (int i = 0; i < (int)cores.size() && rsv < 0; i++) for (int x : cores[i]) if (CPU_ISSET(x, &host)) { rsv = i; break; }
+        for (int i = (int)cores.size() - 1; i >= 0 && rsv < 0; i--) if (cores[i].size() >= 2) rsv = i;
+        if (cores.size() < 2) rsv = -1;
+    }
+    *out = cs;
+    if (rsv >= 0) { for (int x : cores[rsv]) CPU_CLR(x, out); return CPU_COUNT(out) > 0; }
+    if (!host_pinned) return false;
+    for (int x = 0; x < CPU_SETSIZE; x++) if (CPU_ISSET(x, &host)) CPU_CLR(x, out);
+    return CPU_COUNT(out) > 0;
+}
+#endif
+#if QSB_CPU_BATCH_AUTO
+/* QSB_CPU_BATCH_AUTO: 86c643ae's run-time batch choice, its cpu_siblings, core_groups, core_sharing and batch_choose as
+ * written (its smt_plan, the other user of core_groups, is not taken). */
+#ifdef CPU_COUNT
+/* The SMT siblings of a CPU from /sys (thread_siblings_list, "a-b,c,..."); false when the list cannot be read. */
+static bool cpu_siblings(int cpu, std::vector<int> &out) {
+    out.clear();
+    char p[96]; snprintf(p, sizeof p, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+    FILE *f = fopen(p, "r"); if (!f) return false;
+    char buf[512]; const bool ok = fgets(buf, sizeof buf, f) != nullptr; fclose(f);
+    if (!ok) return false;
+    for (char *q = buf; *q; ) {
+        char *e; const long a = strtol(q, &e, 10); if (e == q) break;
+        long b = a; q = e;
+        if (*q == '-') { b = strtol(q + 1, &e, 10); if (e == q + 1) break; q = e; }
+        for (long v = a; v <= b && v - a < 4096; v++) if (v >= 0 && v < CPU_SETSIZE) out.push_back((int)v);
+        if (*q == ',') q++; else break;
+    }
+    return !out.empty();
+}
+/* The CPUs of m grouped by physical core (siblings outside m ignored); a CPU whose list cannot be read is its own core, and
+ * *all_read (if given) turns false. Used by the batch choice (core_sharing). */
+static void core_groups(const cpu_set_t &m, std::vector<std::vector<int> > &cores, bool *all_read = nullptr) {
+    cores.clear(); std::vector<char> seen(CPU_SETSIZE, 0); std::vector<int> sib;
+    if (all_read) *all_read = true;
+    for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+        if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+        std::vector<int> core; core.push_back(cpu); seen[cpu] = 1;
+        if (cpu_siblings(cpu, sib)) { for (int s : sib) if (CPU_ISSET(s, &m) && !seen[s]) { core.push_back(s); seen[s] = 1; } }
+        else if (all_read) *all_read = false;
+        cores.push_back(core);
+    }
+}
+/* nullptr when no two of nw workers running on the CPUs of wm can share a physical core (at most one worker per CPU and no two
+ * CPUs of wm SMT siblings), else why they may. */
+static const char *core_sharing(const cpu_set_t &wm, int nw) {
+    if (CPU_COUNT(&wm) < 1) return "CPU set unknown";
+    if (nw > CPU_COUNT(&wm)) return "more workers than CPUs";
+    std::vector<std::vector<int> > cores; bool all = true; core_groups(wm, cores, &all);
+    if (!all) return "topology unreadable";
+    for (const std::vector<int> &k : cores) if (k.size() > 1) return "SMT siblings among the workers' CPUs";
+    return nullptr;
+}
+#endif
+/* Candidates per batch: QSB_CPU_BATCH_SOLO unless workers may share a core (shared: the reason), then QSB_CPU_BATCH.
+ * QSB_CPU_BATCH_RT=<n> (dev): n, a multiple of 32 in 32..8192. */
+static int batch_choose(int nw, const char *shared, char *why, size_t nwhy) {
+    if (const char *e = getenv("QSB_CPU_BATCH_RT")) {
+        char *end = nullptr; const long v = strtol(e, &end, 10);
+        if (end != e && *end == 0 && v >= 32 && v <= 8192 && v % 32 == 0) { snprintf(why, nwhy, "QSB_CPU_BATCH_RT"); return (int)v; }
+        printf("  CPU co-grind: QSB_CPU_BATCH_RT=%s ignored (a multiple of 32, 32..8192)\n", e); fflush(stdout);
+    }
+    if (nw <= 1) { snprintf(why, nwhy, "one worker"); return QSB_CPU_BATCH_SOLO; }
+    if (shared) { snprintf(why, nwhy, "%s", shared); return QSB_CPU_BATCH; }
+    snprintf(why, nwhy, "no shared cores"); return QSB_CPU_BATCH_SOLO;
+}
+#endif
 static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, int cut, int early) {
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 #ifdef CPU_COUNT
     cpu_set_t work_cpus; CPU_ZERO(&work_cpus); bool work_mask = false;
-    cpu_set_t host_cpus; CPU_ZERO(&host_cpus); int extra = 0;   /* one more worker beside the GPU host thread */
     {
         cpu_set_t cs; CPU_ZERO(&cs);
         if (g_initial_ok) cs = g_initial_cpus; else if (sched_getaffinity(0, sizeof cs, &cs) != 0) CPU_ZERO(&cs);
@@ -2409,23 +3437,17 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         cpu_set_t now; CPU_ZERO(&now);                    /* the main thread's current set (maybe narrowed) */
         if (g_initial_ok && sched_getaffinity(0, sizeof now, &now) == 0 && CPU_COUNT(&now) < CPU_COUNT(&cs)) {
             for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &cs) && !CPU_ISSET(c, &now)) CPU_SET(c, &work_cpus);
-#ifdef QSB_HP_ON
+#if defined(QSB_HP_ON) && QSB_CPU_HP_SHARE
             /* the main thread sleeps between launches (blocking event waits): its CPU may host a worker too */
             if (qhp::g_share_cpu >= 0 && CPU_ISSET(qhp::g_share_cpu, &cs)) CPU_SET(qhp::g_share_cpu, &work_cpus);
 #endif
-#if defined(QSB_HOST_BLOCKING) && QSB_HOST_BLOCKING
+#if QSB_CPU_ALLCPU && defined(QSB_HOST_BLOCKING) && QSB_HOST_BLOCKING
             /* The GPU host thread sleeps in blocking event waits (QSB_HOST_BLOCKING in tree.cu), so its core is idle between
              * launches: workers on every CPU, the host thread's included; they are SCHED_IDLE and yield to it and to the
-             * producers (after HyeokxC's 0735233a / 888f5fce). */
+             * producers (789aed1b / a141df2b, after 0735233a / 888f5fce). */
             for (int c = 0; c < CPU_SETSIZE; c++) if (CPU_ISSET(c, &now)) CPU_SET(c, &work_cpus);
 #endif
             work_mask = CPU_COUNT(&work_cpus) >= 1;       /* workers: every CPU the main thread no longer uses */
-            /* The main thread keeps its core (both SMT siblings) but spins on one CPU; a SCHED_IDLE worker on that core
-             * fills the idle sibling and yields to the main thread (ercumentyildirim's 990960b3 / cfe9f377). */
-            host_cpus = now; extra = (work_mask && CPU_COUNT(&now) >= 2 && qhp::g_share_cpu < 0 && !getenv("QSB_CPU_NOEXTRA")) ? 1 : 0;
-#if defined(QSB_HOST_BLOCKING) && QSB_HOST_BLOCKING
-            extra = 0;                                    /* the host core already has workers */
-#endif
         }
     }
 #endif
@@ -2445,18 +3467,16 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     int nth = QSB_CPU_THREADS;
 #else
     int nth = (int)ncpu - QSB_CPU_RESERVE;
-#ifdef CPU_COUNT
+#if defined(CPU_COUNT) && (QSB_CPU_NTH_RAISE || QSB_CPU_ALLCPU)
     /* The host producers may have narrowed the main thread to one logical CPU (its SMT sibling then runs
-     * the pinned producer): one worker per CPU the main thread left, within the CPU quota. */
+     * the pinned producer): one worker per CPU the main thread left, within the CPU quota. Under QSB_CPU_ALLCPU
+     * the set holds every CPU, so this is one worker per CPU (32 of 32 on the ranked host). */
     if (work_mask && CPU_COUNT(&work_cpus) > nth) nth = CPU_COUNT(&work_cpus) < (int)ncpu ? CPU_COUNT(&work_cpus) : (int)ncpu;
 #endif
 #endif
     if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
     if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
-#ifndef CPU_COUNT
-    const int extra = 0;
-#endif
-    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth + extra; c->cut = cut; c->early = early;
+    Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early;
 #if QCPU_VEC
     __builtin_cpu_init();
     c->vec = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512ifma") && !getenv("QSB_CPU_NOVEC");
@@ -2466,6 +3486,31 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QCPU_SHANI
     c->shani = qsha_supported() && !getenv("QSB_CPU_NOSHANI");
+#if QSB_CPU_KH16 && QCPU_VEC
+    c->kh16 = c->shani && c->vec && __builtin_cpu_supports("avx512vl") && !getenv("QSB_CPU_NOKH16");
+#endif
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_RSV_CORE
+    {   /* 296e5e53's placement (its smt_plan and table-builder mask): the fallback core rule applies where 296e5e53 plans cores */
+        cpu_set_t m;
+        if (rsv_core_mask(c->vec && !getenv("QSB_CPU_NOPIN"), &m)) { work_cpus = m; work_mask = true; }
+    }
+#endif
+#ifdef QSB_CPU_DEVBENCH
+    if (const char *e = getenv("QSB_CPU_DEVCAND")) c->dev_limit = strtoull(e, nullptr, 10);
+    c->dev_live = nth;
+#endif
+#if QSB_CPU_BATCH_AUTO
+    {   /* candidates per batch (86c643ae's rule), before the workers: the workers' CPUs are the builder thread's mask (work_cpus,
+         * else the main thread's current set, which the builder thread and the workers inherit) */
+        const char *shared = "CPU set unknown";
+#ifdef CPU_COUNT
+        cpu_set_t wcs; CPU_ZERO(&wcs);
+        if (work_mask) wcs = work_cpus; else if (sched_getaffinity(0, sizeof wcs, &wcs) != 0) CPU_ZERO(&wcs);
+        shared = core_sharing(wcs, c->nthreads);
+#endif
+        c->batch = batch_choose(c->nthreads, shared, c->batch_why, sizeof c->batch_why);
+    }
 #endif
     /* CPU window patterns: every 3-subset of {cut..n-1} not used by the GPU. */
     for (int a = cut; a < (int)dp->n; a++) for (int b = a + 1; b < (int)dp->n; b++) for (int d3 = b + 1; d3 < (int)dp->n; d3++) {
@@ -2481,7 +3526,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     c->mid_bytes = dp->total_preimage_len - unpadded;
     c->n_epochs = binom_u64(cut, early);
 #if QCPU_SHANI
-    if (c->shani) hash_plan(*c);
+    if (c->shani) hash_plan_cpu_patterns(*c);
 #endif
     if (!qsb_hv_init(&c->hv, dp, (const uint8_t (*)[QSB_SE_TWIN])win3, cut, early)) { printf("  CPU co-grind: off (gate)\n"); delete c; return; }
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
@@ -2494,7 +3539,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     fe_from_le32(c->cx, dp->u2r_x); fe_from_le32(c->cy, dp->u2r_y);
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
 #ifdef CPU_COUNT
-    std::thread([c, fax, fay, nth, work_mask, work_cpus, ncpu, nwin, extra, host_cpus]() {
+    std::thread([c, fax, fay, nth, work_mask, work_cpus, ncpu, nwin]() {
         if (work_mask) sched_setaffinity(0, sizeof work_cpus, &work_cpus);   /* table build + workers inherit */
 #else
     std::thread([c, fax, fay, nth, ncpu, nwin]() {
@@ -2507,9 +3552,10 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         if (!table_setup(*c, nth, hp, note, sizeof note)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         char hps[16]; if (hp < 0) snprintf(hps, sizeof hps, "n/a"); else snprintf(hps, sizeof hps, "%.1f%%", 100.0 * hp);
-        printf("  CPU co-grind: %d threads%s (of %ld CPUs), %s, %s, %d window patterns per epoch disjoint from the GPU's %d; "
+        printf("  CPU co-grind: %d threads (of %ld CPUs), %s, %s%s, %d window patterns per epoch disjoint from the GPU's %d, batch %d (%s); "
                "table %d %s windows of %d..%d bits, %.0f MiB, huge pages %s (%.2f s%s)\n",
-               nth, extra ? " + 1 on the host core" : "", ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->ncwin, nwin,
+               nth, ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->kh16 ? " (16-lane key hashes)" : "",
+               c->ncwin, nwin, c->batch, c->batch_why,
                c->g.nw, c->g.sgn ? "signed" : "unsigned", c->g.wid[c->g.nw - 1], c->g.wid[0], c->g.total * sizeof(pt) / 1048576.0,
                hps, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec), note);
         fflush(stdout);
@@ -2535,10 +3581,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         }
         if (!tab_ok) { printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
-#ifndef QSB_CPU_DIAG_EPOCH
-#define QSB_CPU_DIAG_EPOCH 1
-#endif
-#if QSB_CPU_DIAG_EPOCH
+#if QSB_CPU_DIAG_EPOCH   /* default at file scope (package y2d: 0) */
         {   /* Zero-cost diagnostic. Every epoch of the co-grinder's walk is real work on patterns disjoint from
              * the GPU's, so where the walk starts is a free enumeration choice. Start it at code * 2^29, so the
              * public ranked hit list (the smallest CPU-hit epoch rank / 2^29) shows what this host chose:
@@ -2563,13 +3606,38 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
             fflush(stdout);
         }
 #endif
+        c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
-#ifdef CPU_COUNT
-        if (extra) std::thread([c, nth, host_cpus]() { sched_setaffinity(0, sizeof host_cpus, &host_cpus); worker(c, nth); }).detach();
-#endif
     }).detach();
     g_ctx = c;
+#ifdef QSB_CPU_DEVBENCH
+    if (c->dev_limit) {                                  /* dev only (never in a ranked build): fixed work, then exit */
+        while (c->cand.load() == 0 || c->dev_live.load() > 0) usleep(10000);
+        { std::lock_guard<std::mutex> g(c->io); if (c->out) fflush(c->out); }
+        printf("DEVCAND %llu candidates, %u hits\n", (unsigned long long)c->cand.load(), c->hits.load());
+        fflush(stdout); _exit(0);
+    }
+#endif
 }
 static uint64_t candidates() { return g_ctx ? g_ctx->cand.load() : 0; }
 static uint32_t hits() { return g_ctx ? g_ctx->hits.load() : 0; }
+/* H9 (tree.cu's QSB_FAST_TEARDOWN, on a helper thread once the stop signal is seen): the workers stop at their next batch
+ * boundary (each has published the hits of every batch it finished), then the table is released in 1 GiB steps (MADV_DONTNEED
+ * holds the mmap lock for reading, so other threads' mappings are never held up for long) and unmapped, overlapping the GPU's
+ * drain instead of following it in the exit. Returns the seconds taken, or -1 when the table is left to the exit: the workers
+ * were not spawned yet (table still building) or one did not stop within 0.25 s. */
+static double stop_unmap() {
+    Ctx *c = g_ctx; if (!c) return -1;
+    struct timespec t0, t; clock_gettime(CLOCK_MONOTONIC, &t0);
+    auto el = [&]() { clock_gettime(CLOCK_MONOTONIC, &t); return (t.tv_sec - t0.tv_sec) + 1e-9 * (t.tv_nsec - t0.tv_nsec); };
+    c->stop = 1;
+    if (!c->ready.load()) return -1;
+    while (c->live.load() > 0) { if (el() > 0.25) return -1; usleep(200); }
+    if (c->table_map) {
+        char *a = (char *)c->table_map; const size_t n = c->table_map_bytes, S = (size_t)1 << 30;
+        for (size_t o = 0; o < n; o += S) madvise(a + o, n - o < S ? n - o : S, MADV_DONTNEED);
+        table_free(*c);
+    }
+    return el();
+}
 }  // namespace qcpu

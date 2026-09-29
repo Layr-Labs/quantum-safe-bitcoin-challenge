@@ -31,6 +31,49 @@
 #if QSB_K32_BGLUE != 0 && QSB_K32_BGLUE != 1
 #error "QSB_K32_BGLUE must be 0 or 1"
 #endif
+/*: three rare-carry glue cuts ported from the pinning
+ * record b9736ce1's i34-9 lineage (QSB_SUB_CUT, QSB_ADDOFF_CUT; credit i34-9 f5e5c624) and ercumentyildirim's
+ * QSB_SAS_PRESUB (c12006c2 lineage, in b9736ce1), written for this tree's K32 sites and fused X3. Every one is
+ * default 0, and 0 gives the the base text byte for byte. A dropped carry perturbs only that candidate's
+ * point; every published hit is re-derived by the exact host gate.
+ *   QSB_K32_SUBCUT (mask): a borrowing subtraction's K correction as one multiply-add on the low half of limb 0 and
+ *     one add on its high half (mad.lo.u32 l,m,977,l; add.u32 h,h,m), the low half's borrow into the high half
+ *     dropped (about 2^-23 per site: a borrow, then l < 977). Bit 1: D = U2 - X1 (sub3). Bit 2: Q = X3 - V (sub14).
+ *     Bit 4: the seed's three subtractions (qsb_filter_sub_cut instead of _ModSub256).
+ *   QSB_K32_ADDCUT (0/1): the anchor sum S = AY + OFF folds its carry as mad.lo.u32 l,m,977,l; add.u32 h,h,m, the
+ *     low half's carry into the high half dropped (about 2^-23: a carry, then l >= 2^32 - 977).
+ *   QSB_FX3_PRESUB (0/1/2): the fused X3 = R^2 + PPP - 2Q subtracts V once from f9's undoubled cross sum C (borrow
+ *     kept through word 9: wrong only if C's words 8 and 9 are both 0, about 2^-64), so the doubling yields
+ *     R^2 - 2V >= 0 exactly and only +PPP remains after the first fold: no signed z9 lane, no second V chain.
+ *     The carry of +PPP out of z8 is dropped (z8 = 2^32 - 1: about 2^-32). 1 keeps the second fold's carry
+ *     capture and the z3 carry; 2 also drops them, the lean products' second fold (Z2_SPEC_CUT: about 2^-22). */
+#ifndef QSB_K32_SUBCUT
+#define QSB_K32_SUBCUT 7
+#endif
+#ifndef QSB_K32_ADDCUT
+#define QSB_K32_ADDCUT 1
+#endif
+#ifndef QSB_FX3_PRESUB
+#define QSB_FX3_PRESUB 1
+#endif
+#ifndef QSB_FX3_PRESUB_EARLY
+#define QSB_FX3_PRESUB_EARLY 1   /* placement of PRESUB's C - V: 0 after the odd-row merge, 1 before it (allocation only) */
+#endif
+#if QSB_K32_SUBCUT < 0 || QSB_K32_SUBCUT > 7
+#error "QSB_K32_SUBCUT is a mask of bits 1, 2 and 4"
+#endif
+#if QSB_K32_ADDCUT != 0 && QSB_K32_ADDCUT != 1
+#error "QSB_K32_ADDCUT must be 0 or 1"
+#endif
+#if QSB_FX3_PRESUB < 0 || QSB_FX3_PRESUB > 2
+#error "QSB_FX3_PRESUB must be 0, 1 or 2"
+#endif
+#if (QSB_K32_SUBCUT & 3) && !(QSB_K32 && QSB_K32_BGLUE)
+#error "QSB_K32_SUBCUT bits 1 and 2 are written for the K32 + K32_BGLUE sub3/sub14 sites"
+#endif
+#if QSB_K32_ADDCUT && !QSB_K32
+#error "QSB_K32_ADDCUT is written for the K32 anchor sum"
+#endif
 /* QSB_SQR_X0_GLUE (kill switch; the squaring item of our pinning field-core carry glue): the
  * three filter squarings (qsb_filter_sqr and the point add's PP = D^2 and R^2) build the doubled
  * cross product with x0 = 0 (mov.u32 x0, 0; the lowest cross word lives at bit 32). Hence the
@@ -46,14 +89,14 @@
 #error "QSB_SQR_X0_GLUE must be 0 or 1"
 #endif
 /* QSB_SC_OPS (bit mask, default 0): operand order of the seven products of the deferred-Y point add,
- * the chain loop's one asm block (lane R, register banks). Bit k swaps the two operand vectors of
+ * the chain loop's one asm block (register banks). Bit k swaps the two operand vectors of
  * product k in the QSB_CHAIN_MUL_LEAN body: 0 U2 = X2*ZZ1 (f0), 1 S2*ZZZ1 (f2), 2 PPP = PP*P (f6),
  * 3 V = U2*PP (f7), 4 ZZ3 = ZZ1*PP (f8), 5 ZZZ3 = ZZZ1*PPP (f13), 6 R*(V-X3) (f15). The schoolbook
  * sums the same 64 partial products with the same per-row carry captures whichever vector feeds the
  * a limbs, so every result is bit-identical (tests/test_sc_ops.py runs the PTX text of both orders);
  * only the registers ptxas allocates and reads together change. 0 keeps the record's PTX byte for byte. */
 #ifndef QSB_SC_OPS
-#define QSB_SC_OPS 0
+#define QSB_SC_OPS 48
 #endif
 #if QSB_SC_OPS < 0 || QSB_SC_OPS > 127
 #error "QSB_SC_OPS is a 7-bit mask"
@@ -107,13 +150,13 @@
 #define QSB_SC_F15A "Q"
 #define QSB_SC_F15B "R"
 #endif
-/* QSB_SC_PP (default 0): ping-pong form of the chain loop (tree.cu, qsb_filter_chain_trial, lane R).
+/* QSB_SC_PP (default 0): ping-pong form of the chain loop (tree.cu, qsb_filter_chain_trial).
  * The deferred-Y point add takes separate output arrays (X3, Y3, ZZ3, ZZZ3, Yoff3; the 8-argument form
  * below then updates in place), and the loop runs two trips per pass, set A to set B and back, so no
  * trip ends with the register copies that move the new X, Y, ZZ, ZZZ and anchor into the loop's phi
  * registers (17 IMAD.MOV per trip in the record's SASS). The P18-Q warps (7 trips) peel their first
  * trip in place, the GLV12-Q warp runs 4 passes; every warp performs the same adds on the same records
- * in the same order as the rolled loop (tools/exp/N-rb/tests/test_sc_pp_schedule.py replays both). The
+ * in the same order as the rolled loop. The
  * asm text of the add is unchanged except for the operand numbers of the head moves. */
 #ifndef QSB_SC_PP
 #define QSB_SC_PP 0
@@ -121,8 +164,8 @@
 #if QSB_SC_PP < 0 || QSB_SC_PP > 3
 #error "QSB_SC_PP must be 0, 1 (peeled first trip on the P18-Q warps), 2 (copy-back on their odd exit) or 3 (form 1 without the second-half psi branch)"
 #endif
-/* N-ry merge (lane R x lane Y): with QSB_Y_PAIR=1, QSB_SC_PP=1 PARK=1 LATE=1 needs a 24 B stack frame at
- * QSB_SC_OPS=0; QSB_SC_OPS=52 or 53 build at 128 registers with no stack (notes/lanes/merge.md). */
+/* the base merge: with QSB_Y_PAIR=1, QSB_SC_PP=1 PARK=1 LATE=1 needs a 24 B stack frame at
+ * QSB_SC_OPS=0; QSB_SC_OPS=52 or 53 build at 128 registers with no stack. */
 
 /* Exact loop-carried-anchor deletion.  The deferred point-add already has the
  * current affine Y in AY0..AY3; publish those registers as the next iteration's
@@ -180,11 +223,11 @@
     (QSB_FX3_SPLIT3P != 0 && QSB_FX3_SPLIT3P != 1) || (QSB_FX3_Z9 != 0 && QSB_FX3_Z9 != 1)
 #error QSB_FUSE_X3 / QSB_FX3_SIGNED / QSB_FX3_SPLIT3P / QSB_FX3_Z9 must be 0 or 1
 #endif
-/* QSB_Y_PAIR (lane Y, after the pinning track's Y_PAIR, design P16): carry the deferred Y unreduced,
+/* QSB_Y_PAIR (after the pinning track's Y_PAIR, design P16): carry the deferred Y unreduced,
  * as the exact 512-bit product P16 = (X3 - V)*R (words 0..7 in Y, 8..15 in RP) and form the next trip's
  * R = red(S*ZZZ + P16) with ONE reduction (y_pair_sc.cuh, generated); the seed emits its product unreduced and
  * the last add resolves Y = -red(y*ZZZ3 + P16) with the same fused routine.
- * 1 = on (this overlay's default); 0 = the N-rec text byte for byte. */
+ * 1 = on (this overlay's default); 0 = the the base text byte for byte. */
 #ifndef QSB_Y_PAIR
 #define QSB_Y_PAIR 1
 #endif
@@ -200,6 +243,9 @@
 #define QSB_FX3_ACTIVE (QSB_FUSE_X3 && QSB_CHAIN_MUL_LEAN < 2)
 #define QSB_FX3_SGN (QSB_FX3_SIGNED && QSB_SHORT_CARRY2)
 #define QSB_FX3_KEEPZ9 (QSB_FX3_SGN || QSB_FX3_Z9 || !QSB_FX3_SPLIT3P || !QSB_SHORT_CARRY2)
+#if QSB_FX3_PRESUB && !(QSB_FX3_ACTIVE && QSB_SHORT_CARRY2)
+#error "QSB_FX3_PRESUB is written for the fused X3 on the non-lean f9 square with QSB_SHORT_CARRY2"
+#endif
 
 __device__ __forceinline__ void qsb_filter_add(uint64_t *r,uint64_t *a,uint64_t *b, uint32_t &bad){
 #ifdef __CUDA_ARCH__
@@ -431,7 +477,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         ".reg .u32 taglo,taghi,tag,flags;\n"
         ".reg .pred pending;\n"
         "setp.ne.u32 pending,0,0;\n"
-/* Head reads (lane R x lane Y merge, N-ry): X1, Y1, ZZ1, ZZZ1, Yoff and RP are inputs after the
+/* Head reads (merge, the base): X1, Y1, ZZ1, ZZZ1, Yoff and RP are inputs after the
  * outputs and X2, Y2 under QSB_SC_PP; in place (the record) they are the "+l" outputs. */
 #if QSB_SC_PP && QSB_Y_PAIR
         "mov.u64 XX0,%33;\n"
@@ -560,10 +606,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #if QSB_K32 && QSB_SHORT_CARRY6
         "\t.reg .u32 f1_m,f1_kl,f1_l,f1_hh;\n"
         "\taddc.u32 f1_m,0,0;\n"
+#if QSB_K32_ADDCUT
+        "\tmov.b64 {f1_l,f1_hh},S0;\n"
+        "\tmad.lo.u32 f1_l,f1_m,977,f1_l;\n"
+        "\tadd.u32 f1_hh,f1_hh,f1_m;\n"
+#else
         "\tmul.lo.u32 f1_kl,f1_m,977;\n"
         "\tmov.b64 {f1_l,f1_hh},S0;\n"
         "\tadd.cc.u32 f1_l,f1_l,f1_kl;\n"
         "\taddc.u32 f1_hh,f1_hh,f1_m;\n"
+#endif
         "\tmov.b64 S0,{f1_l,f1_hh};\n"
 #else
         "\taddc.u64 f1_h,0,0;\n"
@@ -1208,10 +1260,16 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #if QSB_K32 && QSB_SHORT_CARRY6
         "\t.reg .u32 f1_m,f1_kl,f1_l,f1_hh;\n"
         "\taddc.u32 f1_m,0,0;\n"
+#if QSB_K32_ADDCUT
+        "\tmov.b64 {f1_l,f1_hh},S0;\n"
+        "\tmad.lo.u32 f1_l,f1_m,977,f1_l;\n"
+        "\tadd.u32 f1_hh,f1_hh,f1_m;\n"
+#else
         "\tmul.lo.u32 f1_kl,f1_m,977;\n"
         "\tmov.b64 {f1_l,f1_hh},S0;\n"
         "\tadd.cc.u32 f1_l,f1_l,f1_kl;\n"
         "\taddc.u32 f1_hh,f1_hh,f1_m;\n"
+#endif
         "\tmov.b64 S0,{f1_l,f1_hh};\n"
 #else
         "\taddc.u64 f1_h,0,0;\n"
@@ -1535,9 +1593,14 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #if QSB_K32 && QSB_SHORT_CARRY6
         ".reg .u32 sub3_m,sub3_kl,sub3_kh,sub3_l,sub3_h;\n"
         "subc.u32 sub3_m,0,0;\n"
+#if !(QSB_K32_BGLUE && (QSB_K32_SUBCUT & 1))
         "and.b32 sub3_kl,sub3_m,0x3D1;\n"
+#endif
         "mov.b64 {sub3_l,sub3_h},D0;\n"
-#if QSB_K32_BGLUE
+#if QSB_K32_BGLUE && (QSB_K32_SUBCUT & 1)
+        "mad.lo.u32 sub3_l,sub3_m,977,sub3_l;\n"
+        "add.u32 sub3_h,sub3_h,sub3_m;\n"
+#elif QSB_K32_BGLUE
         "add.u32 sub3_h,sub3_h,sub3_m;\n"
         "sub.cc.u32 sub3_l,sub3_l,sub3_kl;\n"
         "subc.u32 sub3_h,sub3_h,0;\n"
@@ -2868,11 +2931,29 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.u32 f9_x14, 0; mov.u32 f9_x15, 0;\n"
         "\tmov.b64 {f9_x1,f9_y2}, f9_o1; mov.b64 {f9_y3,f9_y4}, f9_o3; mov.b64 {f9_y5,f9_y6}, f9_o5;\n"
         "\tmov.b64 {f9_y7,f9_y8}, f9_o7; mov.b64 {f9_y9,f9_y10}, f9_o9; mov.b64 {f9_y11,f9_y12}, f9_o11; mov.b64 {f9_y13,f9_y14}, f9_o13;\n"
+#if QSB_FX3_PRESUB && QSB_FX3_PRESUB_EARLY
+        /* QSB_FX3_PRESUB_EARLY: the same C - V, taken from the even-row words before the odd row is merged in
+         * (X - V + Y = C - V); V's registers die before the merge. The borrow stops at x9 (X's words 8, 9 both 0). */
+        "\t{ .reg .u32 fp_v0,fp_v1,fp_v2,fp_v3,fp_v4,fp_v5,fp_v6,fp_v7;\n"
+        "\tmov.b64 {fp_v0,fp_v1}, Q0; mov.b64 {fp_v2,fp_v3}, Q1; mov.b64 {fp_v4,fp_v5}, Q2; mov.b64 {fp_v6,fp_v7}, Q3;\n"
+        "\tsub.cc.u32 f9_x0, f9_x0, fp_v0; subc.cc.u32 f9_x1, f9_x1, fp_v1; subc.cc.u32 f9_x2, f9_x2, fp_v2; subc.cc.u32 f9_x3, f9_x3, fp_v3;\n"
+        "\tsubc.cc.u32 f9_x4, f9_x4, fp_v4; subc.cc.u32 f9_x5, f9_x5, fp_v5; subc.cc.u32 f9_x6, f9_x6, fp_v6; subc.cc.u32 f9_x7, f9_x7, fp_v7;\n"
+        "\tsubc.cc.u32 f9_x8, f9_x8, 0; subc.u32 f9_x9, f9_x9, 0; }\n"
+#endif
         "\tadd.cc.u32 f9_x2, f9_x2, f9_y2; addc.cc.u32 f9_x3, f9_x3, f9_y3;\n"
         "\taddc.cc.u32 f9_x4, f9_x4, f9_y4; addc.cc.u32 f9_x5, f9_x5, f9_y5; addc.cc.u32 f9_x6, f9_x6, f9_y6;\n"
         "\taddc.cc.u32 f9_x7, f9_x7, f9_y7; addc.cc.u32 f9_x8, f9_x8, f9_y8; addc.cc.u32 f9_x9, f9_x9, f9_y9;\n"
         "\taddc.cc.u32 f9_x10, f9_x10, f9_y10; addc.cc.u32 f9_x11, f9_x11, f9_y11; addc.cc.u32 f9_x12, f9_x12, f9_y12;\n"
         "\taddc.cc.u32 f9_x13, f9_x13, f9_y13; addc.cc.u32 f9_x14, f9_x14, f9_y14; addc.u32 f9_x15, f9_x15, 0;\n"
+#if QSB_FX3_PRESUB && !QSB_FX3_PRESUB_EARLY
+        /* QSB_FX3_PRESUB: C - V on the undoubled cross sum (x0 = 0); the doubling yields 2C - 2V, so R^2 - 2V >= 0 is
+         * formed before the first fold. The borrow stops at x9 (wrong only if C's words 8 and 9 are both 0). */
+        "\t{ .reg .u32 fp_v0,fp_v1,fp_v2,fp_v3,fp_v4,fp_v5,fp_v6,fp_v7;\n"
+        "\tmov.b64 {fp_v0,fp_v1}, Q0; mov.b64 {fp_v2,fp_v3}, Q1; mov.b64 {fp_v4,fp_v5}, Q2; mov.b64 {fp_v6,fp_v7}, Q3;\n"
+        "\tsub.cc.u32 f9_x0, f9_x0, fp_v0; subc.cc.u32 f9_x1, f9_x1, fp_v1; subc.cc.u32 f9_x2, f9_x2, fp_v2; subc.cc.u32 f9_x3, f9_x3, fp_v3;\n"
+        "\tsubc.cc.u32 f9_x4, f9_x4, fp_v4; subc.cc.u32 f9_x5, f9_x5, fp_v5; subc.cc.u32 f9_x6, f9_x6, fp_v6; subc.cc.u32 f9_x7, f9_x7, fp_v7;\n"
+        "\tsubc.cc.u32 f9_x8, f9_x8, 0; subc.u32 f9_x9, f9_x9, 0; }\n"
+#endif
         "\tshf.l.wrap.b32 f9_x15, f9_x14, f9_x15, 1; shf.l.wrap.b32 f9_x14, f9_x13, f9_x14, 1;\n"
         "\tshf.l.wrap.b32 f9_x13, f9_x12, f9_x13, 1; shf.l.wrap.b32 f9_x12, f9_x11, f9_x12, 1;\n"
         "\tshf.l.wrap.b32 f9_x11, f9_x10, f9_x11, 1; shf.l.wrap.b32 f9_x10, f9_x9, f9_x10, 1;\n"
@@ -2880,15 +2961,18 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tshf.l.wrap.b32 f9_x7, f9_x6, f9_x7, 1; shf.l.wrap.b32 f9_x6, f9_x5, f9_x6, 1;\n"
         "\tshf.l.wrap.b32 f9_x5, f9_x4, f9_x5, 1; shf.l.wrap.b32 f9_x4, f9_x3, f9_x4, 1;\n"
         "\tshf.l.wrap.b32 f9_x3, f9_x2, f9_x3, 1; shf.l.wrap.b32 f9_x2, f9_x1, f9_x2, 1;\n"
-#if QSB_SQR_X0_GLUE
+#if QSB_SQR_X0_GLUE && !QSB_FX3_PRESUB
         "\tshl.b32 f9_x1, f9_x1, 1;\n"
         "\tmov.b64 f9_d1, {f9_x2,f9_x3}; mov.b64 f9_d2, {f9_x4,f9_x5}; mov.b64 f9_d3, {f9_x6,f9_x7};\n"
 #else
         "\tshf.l.wrap.b32 f9_x1, f9_x0, f9_x1, 1;\n"
+#if QSB_FX3_PRESUB
+        "\tshl.b32 f9_x0, f9_x0, 1;\n"
+#endif
         "\tmov.b64 f9_d0, {f9_x0,f9_x1}; mov.b64 f9_d1, {f9_x2,f9_x3}; mov.b64 f9_d2, {f9_x4,f9_x5}; mov.b64 f9_d3, {f9_x6,f9_x7};\n"
 #endif
         "\tmov.b64 f9_d4, {f9_x8,f9_x9}; mov.b64 f9_d5, {f9_x10,f9_x11}; mov.b64 f9_d6, {f9_x12,f9_x13}; mov.b64 f9_d7, {f9_x14,f9_x15};\n"
-#if QSB_SQR_X0_GLUE
+#if QSB_SQR_X0_GLUE && !QSB_FX3_PRESUB
         "\tmul.wide.u32 f9_d0, f9_a0, f9_a0; { .reg .u32 f9_q0l, f9_q0h; mov.b64 {f9_q0l,f9_q0h}, f9_d0; add.cc.u32 f9_q0h, f9_q0h, f9_x1; mov.b64 f9_d0, {f9_q0l,f9_q0h}; }\n"
 #else
         "\tmul.wide.u32 f9_t, f9_a0, f9_a0; add.cc.u64 f9_d0, f9_d0, f9_t;\n"
@@ -2924,7 +3008,14 @@ __device__ __forceinline__ void qsb_filter_point_add(
         /* QSB_FUSE_X3: z0..z8 (first fold of R^2) + PPP - 2Q, one second fold -> T. */
         "\t{ .reg .u32 fx_u0,fx_u1,fx_u2,fx_u3,fx_u4,fx_u5,fx_u6,fx_u7,fx_v0,fx_v1,fx_v2,fx_v3,fx_v4,fx_v5,fx_v6,fx_v7,fx_z9;\n"
         "\tmov.b64 {fx_u0,fx_u1}, PPP0; mov.b64 {fx_u2,fx_u3}, PPP1; mov.b64 {fx_u4,fx_u5}, PPP2; mov.b64 {fx_u6,fx_u7}, PPP3;\n"
-#if QSB_FX3_SGN
+#if QSB_FX3_PRESUB
+        /* QSB_FX3_PRESUB: z0..z8 is the first fold of R^2 - 2V >= 0; only +PPP remains (z8's carry-out dropped). */
+        "\tadd.cc.u32 f9_z0, f9_z0, fx_u0; addc.cc.u32 f9_z1, f9_z1, fx_u1;\n"
+        "\taddc.cc.u32 f9_z2, f9_z2, fx_u2; addc.cc.u32 f9_z3, f9_z3, fx_u3;\n"
+        "\taddc.cc.u32 f9_z4, f9_z4, fx_u4; addc.cc.u32 f9_z5, f9_z5, fx_u5;\n"
+        "\taddc.cc.u32 f9_z6, f9_z6, fx_u6; addc.cc.u32 f9_z7, f9_z7, fx_u7;\n"
+        "\taddc.u32 f9_z8, f9_z8, 0;\n"
+#elif QSB_FX3_SGN
         "\tmov.b64 {fx_v0,fx_v1}, Q0; mov.b64 {fx_v2,fx_v3}, Q1; mov.b64 {fx_v4,fx_v5}, Q2; mov.b64 {fx_v6,fx_v7}, Q3;\n"
         "\tsub.cc.u32 f9_z0, f9_z0, fx_v0; subc.cc.u32 f9_z1, f9_z1, fx_v1;\n"
         "\tsubc.cc.u32 f9_z2, f9_z2, fx_v2; subc.cc.u32 f9_z3, f9_z3, fx_v3;\n"
@@ -2993,6 +3084,19 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #endif
 #endif
 #endif
+#if QSB_FX3_PRESUB
+        "\t{ .reg .u64 fx_sfz,fx_sft; .reg .u32 fx_sfc,fx_sfh;\n"
+        "\tmov.b64 fx_sfz, {f9_z0, f9_z8};\n"
+        "\tmul.wide.u32 fx_sft, f9_z8, 977; add.cc.u64 fx_sft, fx_sft, fx_sfz;\n"
+#if QSB_FX3_PRESUB == 1
+        "\taddc.u32 fx_sfc, 0, 0;\n"
+        "\tmov.b64 {f9_z0, fx_sfh}, fx_sft;\n"
+        "\tadd.cc.u32 f9_z1, f9_z1, fx_sfh; addc.cc.u32 f9_z2, f9_z2, fx_sfc; addc.u32 f9_z3, f9_z3, 0; }\n"
+#else
+        "\tmov.b64 {f9_z0, fx_sfh}, fx_sft;\n"
+        "\tadd.cc.u32 f9_z1, f9_z1, fx_sfh; addc.u32 f9_z2, f9_z2, 0; }\n"
+#endif
+#else
         "\t{ .reg .u64 fx_sfz,fx_sft; .reg .u32 fx_sfc,fx_sfq,fx_sfh,fx_ext,fx_cf,fx_k0;\n"
 #if QSB_FX3_KEEPZ9
         "\tmad.lo.u32 fx_sfq, fx_z9, 977, f9_z8;\n"
@@ -3018,6 +3122,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\taddc.u32 fx_cf, 0, 0; mul.lo.u32 fx_k0, fx_cf, 977;\n"
         "\tadd.cc.u32 f9_z0, f9_z0, fx_k0; addc.cc.u32 f9_z1, f9_z1, fx_cf; addc.u32 f9_z2, f9_z2, 0; }\n"
 #endif
+#endif /* QSB_FX3_PRESUB */
 #if QSB_SHORT_CARRY2 && QSB_SHORT_CARRY2_SENTINEL
         "\txor.b32 f9_z0,f9_z0,0xC0DE000C;\n"
 #endif
@@ -3391,9 +3496,14 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #if QSB_K32 && QSB_SHORT_CARRY6
         ".reg .u32 sub14_m,sub14_kl,sub14_kh,sub14_l,sub14_h;\n"
         "subc.u32 sub14_m,0,0;\n"
+#if !(QSB_K32_BGLUE && (QSB_K32_SUBCUT & 2))
         "and.b32 sub14_kl,sub14_m,0x3D1;\n"
+#endif
         "mov.b64 {sub14_l,sub14_h},Q0;\n"
-#if QSB_K32_BGLUE
+#if QSB_K32_BGLUE && (QSB_K32_SUBCUT & 2)
+        "mad.lo.u32 sub14_l,sub14_m,977,sub14_l;\n"
+        "add.u32 sub14_h,sub14_h,sub14_m;\n"
+#elif QSB_K32_BGLUE
         "add.u32 sub14_h,sub14_h,sub14_m;\n"
         "sub.cc.u32 sub14_l,sub14_l,sub14_kl;\n"
         "subc.u32 sub14_h,sub14_h,0;\n"
@@ -3913,6 +4023,68 @@ __device__ __forceinline__ void qsb_filter_seed_x3(
 #endif
 }
 
+#if QSB_K32_SUBCUT & 4
+/* QSB_K32_SUBCUT bit 4 (the pinning record's QSB_SUB_CUT bit 4, i34-9 f5e5c624): r = a - b, and on a borrow
+ * (m = -1) the low half of limb 0 adds m*977 and the high half adds m, both without carry-out: exact unless the
+ * wrapped low half is below 977 given a borrow (about 2^-23 per call), a filter-only error the host gate rejects. */
+__device__ __forceinline__ void qsb_filter_sub_cut(uint64_t *r, const uint64_t *a, const uint64_t *b)
+{
+  uint64_t r0, r1, r2, r3;
+  asm("{\n\t.reg .u32 m,l,h;\n\t"
+      "sub.cc.u64 %0,%4,%8;\n\t"
+      "subc.cc.u64 %1,%5,%9;\n\t"
+      "subc.cc.u64 %2,%6,%10;\n\t"
+      "subc.cc.u64 %3,%7,%11;\n\t"
+      "subc.u32 m,0,0;\n\t"
+      "mov.b64 {l,h},%0;\n\t"
+      "mad.lo.u32 l,m,977,l;\n\t"
+      "add.u32 h,h,m;\n\t"
+      "mov.b64 %0,{l,h};\n\t}"
+      : "=l"(r0), "=l"(r1), "=l"(r2), "=l"(r3)
+      : "l"(a[0]), "l"(a[1]), "l"(a[2]), "l"(a[3]),
+        "l"(b[0]), "l"(b[1]), "l"(b[2]), "l"(b[3]));
+  r[0] = r0; r[1] = r1; r[2] = r2; r[3] = r3;
+}
+#if QSB_SEED_K32_SUB
+#error "QSB_K32_SUBCUT bit 4 and QSB_SEED_K32_SUB are two forms of the same seed subtractions; set one"
+#endif
+#endif
+#if QSB_SEED_K32_SUB
+/* QSB_SEED_K32_SUB: r = a - b in the chain's K32 short form, the sub3/sub14 glue of
+ * the point add (QSB_K32, QSB_SHORT_CARRY6, QSB_K32_BGLUE) as a function for the seed's three subtractions.
+ * a - b as four 64-bit limbs with the borrow chain; on a borrow (a < b) the wrapped value a - b + 2^256 is
+ * corrected to a - b + p = wrapped - K, K = 2^32 + 977, as two 32-bit halves of limb 0: h += m (m = -borrow,
+ * so h - 1), l -= m & 977 with its borrow into h, and the borrow out of h dropped. Exact for every input with
+ * no borrow, and on a borrow whenever the wrapped limb 0 is at least K; the dropped borrow (wrapped limb 0
+ * below K, about 2^-32 given a borrow, 2^-33 per call) leaves the result 2^64 too large, a filter-only
+ * error the exact host gate rejects. _ModSub256 is exact on the same inputs except when b - a > p
+ * (about 2^-224; both forms are wrong there). Any representative below 2^256 serves: P, R and X3 - Q feed
+ * squares and products, never a comparison. models both forms.
+ * Default 0 (gate PKG2): the seed loses 15 slots per candidate, but ptxas then re-allocates the chain loop with 3
+ * IMAD.MOV phi copies more per trip (+21.75 per candidate) at the 128-register wall, whichever pinning the asm
+ * carries (plain, volatile with a memory clobber, or _ModSub256's per-instruction form): net +5.5 slots. */
+__device__ __forceinline__ void qsb_filter_sub_k32(uint64_t *r, const uint64_t *a, const uint64_t *b)
+{
+  uint64_t r0, r1, r2, r3;
+  asm("{\n\t.reg .u32 m,kl,l,h;\n\t"
+      "sub.cc.u64 %0,%4,%8;\n\t"
+      "subc.cc.u64 %1,%5,%9;\n\t"
+      "subc.cc.u64 %2,%6,%10;\n\t"
+      "subc.cc.u64 %3,%7,%11;\n\t"
+      "subc.u32 m,0,0;\n\t"
+      "and.b32 kl,m,0x3D1;\n\t"
+      "mov.b64 {l,h},%0;\n\t"
+      "add.u32 h,h,m;\n\t"
+      "sub.cc.u32 l,l,kl;\n\t"
+      "subc.u32 h,h,0;\n\t"
+      "mov.b64 %0,{l,h};\n\t}"
+      : "=l"(r0), "=l"(r1), "=l"(r2), "=l"(r3)
+      : "l"(a[0]), "l"(a[1]), "l"(a[2]), "l"(a[3]),
+        "l"(b[0]), "l"(b[1]), "l"(b[2]), "l"(b[3]));
+  r[0] = r0; r[1] = r1; r[2] = r2; r[3] = r3;
+}
+#endif
+
 __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                      const uint64_t *X1, const uint64_t *Y1,
                                      const uint64_t *X2, const uint64_t *Y2, uint32_t &bad, uint64_t *RP = nullptr)
@@ -3922,8 +4094,16 @@ __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3,
   uint64_t Q[4];
   uint64_t T[4];
 
+#if QSB_K32_SUBCUT & 4
+  qsb_filter_sub_cut(P, X2, X1);                   // P = X2 - X1 (short form)
+  qsb_filter_sub_cut(R, Y2, Y1);                   // R = Y2 - Y1
+#elif QSB_SEED_K32_SUB
+  qsb_filter_sub_k32(P, X2, X1);                   // P = X2 - X1 (K32 short form)
+  qsb_filter_sub_k32(R, Y2, Y1);                   // R = Y2 - Y1
+#else
   _ModSub256(P, (uint64_t *)X2, (uint64_t *)X1);   // P = X2 - X1
   _ModSub256(R, (uint64_t *)Y2, (uint64_t *)Y1);   // R = Y2 - Y1
+#endif
   qsb_filter_sqr(ZZ3, P,bad);                                 // ZZ3  = PP  = P^2
   qsb_filter_mul(ZZZ3, ZZ3, P,bad);                          // ZZZ3 = PPP = P*PP
   qsb_filter_mul(Q, (uint64_t *)X1, ZZ3,bad);                // Q = X1*PP
@@ -3932,7 +4112,13 @@ __device__ void qsb_filter_point_seed(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3,
   qsb_filter_seed_x3(T,T,ZZZ3,Q,bad); // guarded R^2 - PPP - 2Q
 
 #if QSB_Y_PAIR
+#if QSB_K32_SUBCUT & 4
+  qsb_filter_sub_cut(Q, T, Q);                     // X3 - Q (short form)
+#elif QSB_SEED_K32_SUB
+  qsb_filter_sub_k32(Q, T, Q);                     // X3 - Q (K32 short form)
+#else
   _ModSub256(Q, T, Q);                             // X3 - Q
+#endif
   qsb_filter_mul16(Y3, RP, Q, R);                  // P16 = (X3-Q)*R exactly: the deferred Y is -P16
 #else
   _ModSub256(Q, Q, T);                             // Q - X3
