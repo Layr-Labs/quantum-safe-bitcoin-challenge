@@ -423,7 +423,7 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
  * h role (IV5, then IV4). t1 = h + (K + W) was two multiply-pipe adds with h a literal; the
  * literal now rides in the immediate of the K + W add: t1 = W*one + (K + IV). Same sum mod 2^32. */
 #ifndef QSB_FIN_IVFOLD
-#define QSB_FIN_IVFOLD 0
+#define QSB_FIN_IVFOLD 1
 #endif
 /* QSB_FIN_W8S0 (kill switch): s0 of the padded last message word W8 = (b << 24) | 0x800000
  * (b = the low byte of x) from its 8 live bits; see the W23 step of _SHA256Pubkey33H0. */
