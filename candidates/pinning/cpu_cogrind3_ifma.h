@@ -56,17 +56,17 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     c7 = QI_LO(QI_LO(c7, a3, b4), a4, b3);
     V c8 = QI_LO(QI_HI(QI_HI(z, a3, b4), a4, b3), a4, b4);
     V c9 = QI_HI(z, a4, b4);                                   /* < 2^46 (a4, b4 < 2^49) */
-    /* high columns to 52-bit limbs (c9 stays < 2^52) */
-    c6 += c5 >> 52; c5 &= M;
-    c7 += c6 >> 52; c6 &= M;
-    c8 += c7 >> 52; c7 &= M;
-    c9 += c8 >> 52; c8 &= M;
-    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
-    V d0 = QI_LO(c0, c5, R);
-    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
-    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
-    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
-    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    /* Split high columns independently, following the promoted Subset IFMA fold.
+     * This removes the c5->c9 carry chain; each h*R fits one 52-bit IFMA input. */
+    const V l5 = c5 & M, h5 = c5 >> 52;
+    const V l6 = c6 & M, h6 = c6 >> 52;
+    const V l7 = c7 & M, h7 = c7 >> 52;
+    const V l8 = c8 & M, h8 = c8 >> 52;
+    V d0 = QI_LO(c0, l5, R);
+    V d1 = QI_LO(QI_HI(QI_LO(c1, h5, R), l5, R), l6, R);
+    V d2 = QI_LO(QI_HI(QI_LO(c2, h6, R), l6, R), l7, R);
+    V d3 = QI_LO(QI_HI(QI_LO(c3, h7, R), l7, R), l8, R);
+    V d4 = QI_LO(QI_HI(QI_LO(c4, h8, R), l8, R), c9, R);
     const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
     d4 += d3 >> 52; d3 &= M;
     const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
