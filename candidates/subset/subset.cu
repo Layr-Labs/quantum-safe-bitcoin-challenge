@@ -6,6 +6,16 @@
 #define QSB_REMEASURE_TAG_0921R3 1 /* no-op: exact-source PR897 remeasurement */
 #endif
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
+#ifndef QSB_PAIR_SHA_UNROLL_CONST
 #define QSB_PAIR_SHA_UNROLL_CONST 0
+#endif
 #define QSB_SHA_FMA_ADD 0
+/* Measurement submission: the in-run multi-arm A/B probe (QsbCarrier.h). The ranked build line
+ * passes no -D, so the arm count is set here; 1 = the promoted single-image search. */
+#ifndef QSB_ARMS
+#define QSB_ARMS 8
+#endif
+#ifndef QSB_PROBE_SLOTS
+#define QSB_PROBE_SLOTS 224   /* 8 arms: slot = C(137,6)/8/224 = 4.59M epochs, ~30% headroom over a 0.7 s slice */
+#endif
 #include "tests/gpu_epochs/tree.cu"
