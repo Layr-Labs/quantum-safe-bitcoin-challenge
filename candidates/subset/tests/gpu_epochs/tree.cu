@@ -2986,7 +2986,19 @@ __global__ void kernel_verify_pair_hits(
 #endif /* !QSB_HOST_VERIFY */
 
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+/* QSB_DIGEST_MINB (device knob, default 2): the minBlocksPerMultiprocessor bound of kernel_digest.
+ * 2 is the promoted value (<= 128 registers, two 48 KiB blocks per SM); 1 lets ptxas use more
+ * registers, which drops residency to one barrier-locked block per SM (probe arm). */
+#ifndef QSB_SM_SKEW_NS
+#define QSB_SM_SKEW_NS 0
+#endif
+#if QSB_SM_SKEW_NS
+__device__ unsigned qsb_sm_skew_ctr[256];   /* per-SM block arrival count (probe knob only) */
+#endif
+#ifndef QSB_DIGEST_MINB
+#define QSB_DIGEST_MINB 2
+#endif
+__global__ void __launch_bounds__(256, QSB_DIGEST_MINB) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -3013,6 +3025,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 , const uint32_t *d_first, int epochs_in_batch
 ) {
+#if QSB_SM_SKEW_NS && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    /* Probe knob (default 0 = compiled out): phase-offset the two co-resident blocks of an SM.
+     * Every 128th block to arrive on an SM (one per SM per two 32,768-epoch probe batches;
+     * a block runs ~200 us) waits ~QSB_SM_SKEW_NS (100 us = half a block) before starting, so from then on its SHA
+     * (ALU-bound) phase overlaps the other block's EC (IMAD.WIDE-bound) phase instead of
+     * coinciding with it; identical blocks otherwise stay phase-locked from the launch's first
+     * wave. Costs one idle half-block per SM per 2 batches (~0.4% if phases do not matter). */
+    if(threadIdx.x==0){unsigned sm;asm volatile("mov.u32 %0, %%smid;":"=r"(sm));
+        if((atomicAdd(&qsb_sm_skew_ctr[sm&255u],1u)&127u)==1u)__nanosleep(QSB_SM_SKEW_NS);}
+    __syncthreads();
+#endif
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
@@ -5311,6 +5334,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_TABLE_L2_WINDOW) QSB_CARRIER_KV(QSB_TRIM_DIRECT_PRODUCER) \
     QSB_CARRIER_KV(QSB_Z2_SPEC_CUT) QSB_CARRIER_KV(ZLAB_DIRDIG) QSB_CARRIER_KV(ZLAB_DUAL_EPOCH_SHA) \
     QSB_CARRIER_KV(ZLAB_HITPATH) QSB_CARRIER_KV(ZLAB_K2S3M) QSB_CARRIER_KV(ZLAB_LAUNCH_BLOCKS) \
+    QSB_CARRIER_KV(QSB_DIGEST_MINB) QSB_CARRIER_KV(QSB_SM_SKEW_NS) \
     QSB_CARRIER_KV(ZLAB_MODSQR) QSB_CARRIER_KV(ZLAB_PAIRSHA) QSB_CARRIER_KV(ZLAB_T14) \
     QSB_CARRIER_KV(ZLAB_TREE) QSB_CARRIER_KV(ZLAB_TRIM) QSB_CARRIER_KV(QSB_FORCE_EXACT_HIT_CHECK) \
     QSB_CARRIER_KV(QSB_SC_OPS) QSB_CARRIER_KV(QSB_SC_PP) QSB_CARRIER_KV(QSB_SC_ALUZ) QSB_CARRIER_KV(QSB_SC_PARK) QSB_CARRIER_KV(QSB_SC_LATE) \
@@ -5912,6 +5936,11 @@ int main(int argc, char **argv) {
 #endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
 #ifdef QSB_HP_ON
+#if QSB_PROBE
+        /* Probe run: the host producers build ahead by batch index; the probe's schedule is
+         * time-driven, so every batch is built by the GPU producers on its slot stream. */
+        if (g_qsb_arms_on > 1) printf("  Host producers: off (multi-arm probe)\n"); else
+#endif
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
                    (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
 #endif
@@ -6472,6 +6501,11 @@ int main(int argc, char **argv) {
             sp_epochs[s] = epochs_in_batch;
             return 0;
         };
+#if QSB_PROBE
+        /* Multi-arm probe (QsbCarrier.h): false keeps every line of the base loop below. In
+         * probe mode epoch_base counts the epochs launched; the ranks come from the schedule. */
+        const bool probe = qsb_probe_begin(effective_total, se_mode, n_epochs, (uint64_t)QSB_SE_PER_EPOCH);
+#endif
         g_stop_polled = 1;
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
         while (1) {
@@ -6499,6 +6533,25 @@ int main(int argc, char **argv) {
 #endif
             const uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
+#if QSB_PROBE
+            uint64_t launch_base = epoch_base;
+            int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
+            if (probe) {
+                const int pr = qsb_probe_next(&launch_base, &epochs_in_batch);
+                if (pr) {
+                    /* Slice over: slot s is already collected; publish it, drain the other
+                     * slot, and only then may the next slice switch the digest kernel. */
+                    if (sp_publish(completed)) return 1;
+                    if (sp_drain(s ^ 1)) return 1;
+                    qsb_probe_slice_end();
+                    if (pr == 2) break;                      /* schedule used up */
+                    continue;
+                }
+            }
+            const int launch_error = sp_launch(s, launch_base, epochs_in_batch);
+            if (sp_publish(completed)) return 1;
+            if (launch_error) return 1;
+#else
             const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
 #if QSB_SP_REFILL_FIRST
             const int launch_error = sp_launch(s, epoch_base, epochs_in_batch);
@@ -6506,6 +6559,7 @@ int main(int argc, char **argv) {
             if (launch_error) return 1;
 #else
             if (sp_launch(s, epoch_base, epochs_in_batch)) return 1;
+#endif
 #endif
             epoch_base += epochs_in_batch;
             sp_batch_no++;
@@ -6539,6 +6593,9 @@ int main(int argc, char **argv) {
                 t_last_se = t_now;
             }
         }
+#if QSB_PROBE
+        if (probe) qsb_probe_print(" final");
+#endif
 #ifdef QSB_HP_ON
         qhp::shutdown();
 #if QSB_FAST_TEARDOWN && QSB_FAST_TEARDOWN_PIN
