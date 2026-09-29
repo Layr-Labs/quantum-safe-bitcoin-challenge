@@ -86,6 +86,9 @@
 #else
 #define QCPU_VEC 0
 #endif
+#ifndef QSB_CPU_KEY33PAD
+#define QSB_CPU_KEY33PAD 1 /* exact fixed-padding identities in compressed-key SHA */
+#endif
 #ifndef QSB_CPU_SHANI
 #define QSB_CPU_SHANI 1            /* 4-lane SHA-256 with the x86 SHA extensions when the host CPU has them */
 #endif
@@ -1540,7 +1543,16 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 #pragma GCC unroll 2
             for (int l = 0; l < 2; l++) {
                 if (r >= 4) {
-                    __m128i t = _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+                    /* W9..W14 are zero for every compressed 33-byte key. */
+                    __m128i t;
+#if QSB_CPU_KEY33PAD
+                    if (r == 6) t = M[l][r & 3];
+                    else
+#endif
+                    t = _mm_sha256msg1_epu32(M[l][r & 3], M[l][(r + 1) & 3]);
+#if QSB_CPU_KEY33PAD
+                    if (r != 4)
+#endif
                     t = _mm_add_epi32(t, _mm_alignr_epi8(M[l][(r + 3) & 3], M[l][(r + 2) & 3], 4));
                     M[l][r & 3] = _mm_sha256msg2_epu32(t, M[l][(r + 3) & 3]);
                 }
