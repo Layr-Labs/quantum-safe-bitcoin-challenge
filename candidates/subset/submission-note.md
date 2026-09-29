@@ -1,95 +1,44 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset: combine the active KH16 key-hash H0 feed-forward after extraction
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+Model: GPT (exact variant not exposed). Harness: Codex. Solver: dukemawex.
 
-## Summary
+This is an independently prepared, narrow CPU implementation experiment on the promoted source ff27a2b66990a3eb554a1d4453e896c0397337ba. It preserves cefika's contiguous epoch ranges and next-combination walk, the inherited kshitij-hash co-grinder, and all device code. The only production computation change is QSB_CPU_KH16_H0ADD=1 inside the existing kh16_pass helper. Its purpose is to combine identical H0 feed-forward additions after the sixteen raw H0 words have been extracted. It is not a re-submission of the earlier isolated KH16 import, not the old fallback two-pair H0ADD proposal, and not an import of a frontier package presented as new work.
 
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
+The old fallback proposal was parked when the live code moved to the active KH16 path. This patch instead edits the actual kh16_pass used by the current enabled KH16 configuration. The compile-time default QSB_CPU_KH16 remains as promoted. The existing c->kh16 and c->cfold runtime gate is unchanged, as are SHA-NI and vector feature checks. Systems or controller paths that do not select that gate will see no benefit. A static transformation that affects this function is not evidence of an aggregate benchmark gain.
 
-## The change
+## Exact change
 
-In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
+The promoted helper processes sixteen compressed public keys in four groups. At the end of each group's SHA-256 rounds it has four final ABEF vectors S0[e]. Previously it added the complete IV0 vector to each final state and extracted lane 3 into h0[4 * L + e]. Lane 3 is the A word of this representation. Only that word survives to the key prefilter. The other three feed-forward words of those temporary vectors are not needed by this caller.
 
-- **Ranges:** with `QSB_CPU_EPOCH_CONTIG` 1, worker t walks [base + t·span, base + (t+1)·span). Here span is the epoch space above the diagnostic base divided among the workers: about 2.6e8 epochs each at 32 workers (this package has no diagnostic base), against about 2.6e7 walked in 1,200 s.
-- **Prefix re-hash:** in lexicographic order, consecutive epochs differ in the last omission. I replayed both walks on this problem's prefix. The re-hash drops from about 6.1 SHA-256 blocks per epoch at stride 32 to about 3.4.
-- **No unrank:** the next epoch's omissions come from the previous epoch's by the usual next-combination step. The unrank runs only at the start of each range.
-- **Disjointness:** the ranges are disjoint, and the co-grinder's patterns (`QSB_CPU_PREFIX100`) stay the complement subset they are in `e6715658`. So no candidate is walked twice, and every hit still passes the exact OpenSSL gate.
-- **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
-- **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
+With QSB_CPU_KH16_H0ADD enabled, the helper extracts lane 3 of each raw final S0[e] into the same h0 array, preserving the exact group and element indices. Once all sixteen entries exist, the existing 512-bit load gathers those words and a single 512-bit packed 32-bit addition adds broadcast 0x6a09e667. The existing logical right shift and equality mask then run on that corrected vector. Bit k still denotes key k. No candidate ordering, prefilter width, key packing, digest schedule, or SHA round is removed or approximated.
 
-## Ranked draws of this exact package
+The development-only optional h0_out pointer now receives the corrected vector using an unaligned 512-bit store. This preserves all sixteen corrected output words in development builds; production builds do not add that output. With the switch disabled, the old full-register IV additions remain, followed by the same final vector load and original mask operation. The alternate definition does not introduce a different search policy.
 
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
+The arithmetic identity is elementwise modulo 2^32: lane3(S0 + IV0) equals lane3(S0) + 0x6a09e667, wrapped to 32 bits. Moving that addition past lane extraction does not depend on the other lanes. No cross-lane carry exists in either packed-add form. The ordering of the sixteen array entries and the final prefilter mask is therefore central to the check, as is wraparound near 2^32. The helper still performs all 64 SHA-256 rounds and retains the existing input schedule.
 
-- **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
-- **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
-- **Walk:** `e6715658` has no diagnostic base (the smallest co-grinder hit is at epoch 53,476), so the 32 ranges start at t·C(137,6)/32.
+## Checks actually performed
 
-## Ranked evidence (same change on terrapinelf's `a33e04c3` co-grinder with 100 patterns)
+A scalar integer model checked 20,022 groups, each with sixteen arbitrary four-word final states. The reference performs four-word IV addition followed by lane-3 extraction. The transformed model extracts the sixteen raw lane-3 words in group order and applies the broadcast constant addition modulo 2^32. Cases include all-zero and all-one words, 0x80000000, the wrap boundary at minus the IV constant, and 20,000 deterministic random groups. Sixteen separate cases exercise a passing key in each mask position. Corrected words and prefilter masks agree for zero-bit parameters 1, 8, 16, 24, 31, 32 and 40, using the same min(parameter,32) convention as the original code.
 
-| draw | total | GPU (hits) | co-grinder (hits) | co-grinder work, luck-free |
-|---|---:|---:|---:|---:|
-| `56b4b1f9` | 704.73 | 640.61 | 64.12 | 64.96 |
-| `30c24617` | 714.02 | 649.29 | 64.73 | 64.91 |
-| `7e55c5c2` | 709.13 | 644.00 | 65.14 | 64.86 |
+This model does not execute SHA rounds or SIMD instructions. It establishes the local feed-forward and mask identity, not full target execution. The unchanged round and schedule code supplies the surrounding algorithm. Source comparison confirmed that the promoted ff27 helper before this patch is identical to its 7813 predecessor; the intervening promotion modified worker epoch traversal, outside this helper. The patch was applied to the freshly synced ff27 tree, preserving those worker changes.
 
-- **Walk:** on all three draws the hits show 32 workers, each about 2.4e7 epochs into its range (±2%, no range exhausted), on the 9-window table (diagnostic code 6).
-- **Luck-free rate:** 32 × about 2.43e7 epochs × 100 patterns / 1,201.9 s. It reproduces to about 0.1% between the draws, while the hit counts scatter by Poisson around it.
+An isolated wrapper extracted from the actual current helper was compiled using GCC 13.3 with -O3 for both switch values. Static assembly sites changed from 186 to 183 vpaddd, from 66 to 67 vpbroadcastd, and from 66 to 67 movl. Both emitted 128 sha256rnds2 sites and four stack-reference sites. The compiler already folds and removes some unused output operations in the original, so the observed static difference is small. These counts are sites in generated assembly, not executed instruction counts, hardware counters, cycle measurements, or evidence of speed. In particular, vector width, dependency scheduling and register lifetime can offset the arithmetic simplification.
 
-## Checks done here
+The native sm_89 carrier build used CUDA 12.8.93 at QSB_ZEROS_N=24 and completed successfully. All thirteen reported spill records have zero spill stores and zero spill loads. The digest image retains four LTC64B loads. Its 473,376-byte cubin has SHA256 e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea, exactly matching the promoted image. This is expected because the proposed change is CPU-only. A regenerated source fingerprint is build provenance, not the optimization. The standard host build is required separately before dispatch; its final result is recorded in the qualification addendum below.
 
-All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's toolkit.
+The local cuobjdump disassembler fails, so the development-only carrier script retains the existing nvdisasm fallback with exact symbol checks, exact digest-section selection and LTC64B presence validation. This script is not executed by the ranked harness. It does not alter the scoring process, measured elapsed time, hit verifier, or runtime path. No harness, benchmark, setup, measurement or workflow source is modified.
 
-- **Emulation harness:** the co-grinder ran under `qemu-x86_64 -cpu max` (SHA-NI + scalar EC) in a CPU-only harness with tree.cu's loader and 128-pattern rule.
-- **Settings:** `QSB_ZEROS_N=12`, 40 s per run.
-- **Reference:** each run was compared against a brute-force `qsb_hv_check` oracle on the kept 100 patterns.
+## Performance hypothesis and limits
 
-| check | result |
-|---|---|
-| `build_carrier.sh 24` | cubin sha256 `e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea`, 473,376 bytes, byte-identical to `e6715658`'s; 0 spills. Only the informational source hash in the header changes |
-| the harness's build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) | builds with no errors |
-| image `qsb_carrier_knobs` against the host binary's `QSB_CARRIER_KNOBS` | byte-identical (2,534 bytes), so the native image loads |
-| next-combination step against the binomial unrank, 20,000,000 consecutive epochs from 400 starts | 0 mismatches; carries at every index 0..5 exercised |
-| 1 thread | all hits over epochs < 4,096 match the oracle (199 = 199), 0 missing, 0 extra, 0 duplicates |
-| 4 threads, ranges capped to 4 × 1,024 epochs (`-DQSB_CPU_EPOCH_CAP=4096`) | every worker stops at its range end: exactly 409,600 candidates, 199 = 199 hits |
-| 4 threads, full ranges | epochs < 4,096 (worker 0): exact. Worker 2's first 2,048 epochs (from 4,109,236,362): 87 = 87 against a separate oracle run. 0 duplicates |
-| `e6715658` unchanged, same harness | exact (the reference walk) |
+The hypothesis is that grouping the H0 feed-forward at the final sixteen-word vector can modestly reduce work in a frequently called key prefilter. No local target CPU or GPU runtime was executed. This host does not supply the required target SIMD environment or GPU, and no local speed result is claimed. The remote Yukon runner is the performance experiment. A successful build and exact algebraic model do not establish that the benchmark will improve, much less meet its promotion threshold. Additional broadcasting or changes in instruction scheduling can negate or reverse the reduction. A rejection will close this exact package; a tied or noisy result is not a justification for resubmitting the same cut.
 
-Emulated timings say nothing about Zen 4, so I did not measure speed here.
+All inherited field operations, scalar recoding, batch inversion, host producers, prefetch behavior, worker counts, table choices, startup and teardown policies, SHA padding specialization, GPU kernels and controller decisions are preserved. The contiguous epoch walk from cefika remains enabled. No known benchmark outputs, expected hits, or prompt strings are hardcoded. Every published hit continues through the promoted exact verification route. This experiment changes how a generally valid SHA-256 output word is obtained, without knowing the key value or whether it will pass.
 
-## Kill switch
+## Attribution and reproduction
 
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
+The current base is cefika's promoted fb6f5a8f-b29e-4506-a50c-c79a9c5a2a0e, built on kshitij-hash's e6715658. Credits include cefika, kshitij-hash, terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu and newjordan, recorded as space-separated coauthors where the service limit permits. Meganpark980320, Ryun1, RealAdii and the full lineage in the inherited notes are also acknowledged. Existing license notices remain intact, including GPLv3/VanitySearch and MIT/libsecp256k1 lineage. No donor timing result is represented as a measurement of this patch. The new contribution is the narrow placement of the active KH16 H0 feed-forward and its disclosed model/static review.
 
-## Reproducing
+Rebuild the carrier with candidates/subset/build_carrier.sh 24 using CUDA 12.8.93, then use the standard host compile line: nvcc -O3 -DQSB_ZEROS_N=24 -o subset candidates/subset/subset.cu -lcrypto -lm. Do not interpret the isolated wrapper as a benchmark. Setting QSB_CPU_KH16_H0ADD=0 restores the original feed-forward placement for comparison. Any future dispatch must recheck the live source and own queue; if the base moves, this patch requires overlap review and rebuilding before it is eligible.
 
-```
-./setup.sh subset
-./benchmark.sh subset
-```
 
-To read the co-grinder's rate without hit noise from a ranked run:
-
-1. Take the co-grinder hits: the patterns outside the 128 most frequent `skip[6:9]`.
-2. Take each hit's lexicographic epoch rank of the first six skip indices.
-3. Group the hits into the 32 ranges; range t starts at base + t·(C(137,6) − base)/32, with base = the smallest rank with its low 19 bits cleared (0 for this package).
-4. Sum each range's last rank minus its start, × 100 patterns / `elapsed_s`.
-
-## Base and attribution
-
-- **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
-- **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
-- **Mine:**
-  - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.
-  - Earlier: the block-0 pattern selection that `QSB_CPU_PREFIX100` follows (`4a197f06`).
-
-All inherited source, GPLv3 notices and attributions are kept. Only `candidates/subset/` changes.
+Qualification addendum, 2026-09-29: Native and standard host CUDA 12.8.93 builds both exited 0 on freshly synced ff27a2b66990a3eb554a1d4453e896c0397337ba. 13 zero-spill records; regenerated device image matches the promoted cubin exactly. No native target SIMD or GPU runtime execution, timing, or promotion claim.

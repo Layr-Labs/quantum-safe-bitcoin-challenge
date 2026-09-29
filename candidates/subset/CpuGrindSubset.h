@@ -2267,6 +2267,9 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 /* QSB_CPU_KH16 (a33e04c3): h0 of SHA-256 of the 16 keys whose message words W0..W8 are m[0..8] (lane = key); wk: 32 x 32 dwords of
  * scratch. Returns the prefilter mask of the 16 keys (bit k = key k's h0 has QSB_ZEROS_N leading zero bits). h0_out (dev builds
  * only, never in a ranked build): the 16 h0 values for the unit test. */
+#ifndef QSB_CPU_KH16_H0ADD
+#define QSB_CPU_KH16_H0ADD 1 /* combine feed-forward after sixteen H0 extractions */
+#endif
 QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #ifdef QSB_CPU_DEVBENCH
                                  , uint32_t *h0_out = nullptr
@@ -2323,12 +2326,22 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
             for (int e = 0; e < 4; e++) S0[e] = _mm_sha256rnds2_epu32(S0[e], S1[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r + 32)));
         }
 #pragma GCC unroll 4
-        for (int e = 0; e < 4; e++) h0[4 * L + e] = (uint32_t)_mm_extract_epi32(_mm_add_epi32(S0[e], IV0), 3);
-    }
-#ifdef QSB_CPU_DEVBENCH
-    if (h0_out) memcpy(h0_out, h0, sizeof h0);
+        for (int e = 0; e < 4; e++) {
+#if QSB_CPU_KH16_H0ADD
+            h0[4 * L + e] = (uint32_t)_mm_extract_epi32(S0[e], 3);
+#else
+            h0[4 * L + e] = (uint32_t)_mm_extract_epi32(_mm_add_epi32(S0[e], IV0), 3);
 #endif
-    const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
+        }
+    }
+    __m512i hv = _mm512_load_si512((const void *)h0);
+#if QSB_CPU_KH16_H0ADD
+    hv = _mm512_add_epi32(hv, _mm512_set1_epi32((int)0x6a09e667));
+#endif
+#ifdef QSB_CPU_DEVBENCH
+    if (h0_out) _mm512_storeu_si512((void *)h0_out, hv);
+#endif
+    /* pk_prefilter of the 16 keys: bit k = key k passes */
     return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
 }
 #endif
