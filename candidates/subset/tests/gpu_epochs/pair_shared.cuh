@@ -1,4 +1,4 @@
-// First-state producer from dun999 PR212; paired finish from PR258.
+/* First-state producer from dun999 PR212; paired finish from PR258. */
 // Shared pre-inverse finish derived from dun999 PR258, ac9a6164.
 // Window SHA cache is inherited from odinfree; retain all parent notices.
 #pragma once
@@ -545,8 +545,8 @@ __device__ __noinline__ int qsb_pair_tail_value(
 }
 
 #if !QSB_S3  /* GPU verify path (QSB_HOST_VERIFY=0); QSB_S3 requires the host gate */
-// Only this exact check authorizes a hit record. The speculative calculation
-// cannot bypass it, and neither the external verifier nor its inputs changes.
+/* Only this exact check authorizes a hit record. The speculative calculation */
+/* cannot bypass it, and neither the external verifier nor its inputs changes. */
 __device__ __noinline__ int qsb_pair_verify_candidate(
     const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt){
     uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};

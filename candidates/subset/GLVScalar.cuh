@@ -9,7 +9,7 @@
 #endif
 
 #if QSB_BIGTBL
-// BEGIN QSB_BIGTBL_HOST_EXACT
+/* BEGIN QSB_BIGTBL_HOST_EXACT */
 /* Six terms per signed GLV component. The split below is unchanged. Its
  * rounded reciprocal error gives |r_i| <
  * 0xa2a8918ca85bafe22016d0b917e4dd77 (libsecp256k1's (a1+a2+1)/2).
@@ -78,10 +78,10 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(const uint64_t mag[
  return (off+idx)|((neg^sign)<<31);
 }
 #endif
-// END QSB_BIGTBL_HOST_EXACT
+/* END QSB_BIGTBL_HOST_EXACT */
 #endif
 
-// QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction.
+/* QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction. */
 __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],const uint64_t b[4]){
     uint64_t r0,r1,r2,r3,r4,r5,r6,r7;
     asm(
@@ -278,8 +278,8 @@ __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],cons
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     out[0]=r0;out[1]=r1;out[2]=r2;out[3]=r3;out[4]=r4;out[5]=r5;out[6]=r6;out[7]=r7;
 }
-// GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1
-// v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT.
+/* GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1 */
+/* v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT. */
 // The original MIT license is supplied as COPYING-secp256k1.
 #ifndef QSB_GLV_HIGH15
 #define QSB_GLV_HIGH15 1

@@ -1,4 +1,4 @@
-// Diagnostic only: fused trial formula versus separate C++ field calls.
+/* Diagnostic only: fused trial formula versus separate C++ field calls. */
 // Also compares every result and flag with the separately generated CPU fixture.
 #include <cuda_runtime.h>
 #include <stdint.h>

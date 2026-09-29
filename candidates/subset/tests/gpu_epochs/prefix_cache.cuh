@@ -1,5 +1,5 @@
 // Per-batch SHA prefix states derived solely from the current instance.
-// Cache after whole pushes: seven for one block, thirteen for two blocks.
+/* Cache after whole pushes: seven for one block, thirteen for two blocks. */
 #ifndef QSB_PREFIX_BLOCKS
 #define QSB_PREFIX_BLOCKS 1
 #endif

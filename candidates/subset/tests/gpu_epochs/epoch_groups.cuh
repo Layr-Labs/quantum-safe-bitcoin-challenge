@@ -1,9 +1,9 @@
-// Incremental epoch producer. Epochs are enumerated in lexicographic order of their early
+/* Incremental epoch producer. Epochs are enumerated in lexicographic order of their early */
 // omission set (o1<...<o6); consecutive epochs share o1..o5 in runs of up to 131. The SHA-256
-// stream of an epoch is identical to that of its (o1..o5) "group" up to push o5, so the group's
+/* stream of an epoch is identical to that of its (o1..o5) "group" up to push o5, so the group's */
 // state (whole blocks + the partial block buffer) is computed once per group and each epoch only
-// hashes pushes o5+1..cut-1 minus o6 (about 7 instead of 21 compressions per epoch on a ranked run).
-// Output (mid, remW, early) is bit-identical to kernel_build_epochs for every epoch.
+/* hashes pushes o5+1..cut-1 minus o6 (about 7 instead of 21 compressions per epoch on a ranked run). */
+/* Output (mid, remW, early) is bit-identical to kernel_build_epochs for every epoch. */
 #pragma once
 
 /* QSB_EPOCH_FAST (kill switch, default 1): two exact changes to the epoch producer, both pure
@@ -39,7 +39,7 @@ static_assert(sizeof(qsb_group_t)==128,"group record");
 __device__ __forceinline__ uint64_t qsb_rank_lex(const uint8_t *c, int k, int n) {
     uint64_t r = 0; int prev = -1;
     for (int i = 0; i < k; i++) {
-        // sum_{j=prev+1}^{c_i-1} C(n-j-1, k-i-1) = C(n-prev-1, k-i) - C(n-c_i, k-i)
+        /* sum_{j=prev+1}^{c_i-1} C(n-j-1, k-i-1) = C(n-prev-1, k-i) - C(n-c_i, k-i) */
         r += BINOM_C[n - prev - 1][k - i] - BINOM_C[n - c[i]][k - i];
         prev = c[i];
     }

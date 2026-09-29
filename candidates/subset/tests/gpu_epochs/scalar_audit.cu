@@ -1,4 +1,4 @@
-// Actual device scalar setup/direct digits versus independent bigint fixtures.
+/* Actual device scalar setup/direct digits versus independent bigint fixtures. */
 #define main qsb_grinder_main
 #include "tree.cu"
 #undef main
