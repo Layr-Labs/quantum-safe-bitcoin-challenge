@@ -1,6 +1,10 @@
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
+/* Candidate070: exercise the graph implementation inherited from approved main. */
+#ifndef QSB_SUBGRAPH
+#define QSB_SUBGRAPH 1
+#endif
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -4381,7 +4385,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
     printf("  Root inverse: %s\n",g_qsb_register_roots?
         "independent register trees / cyclic fields (startup checked)":"promoted prefix / scalar fallback");
     fflush(stdout);
-    /* QSB_SUBGRAPH (QsbSubGraph.h, default 0): one CUDA graph per state ring for
+    /* QSB_SUBGRAPH (enabled above): one CUDA graph per state ring for
      * prepare -> root inverse -> finish, on the same streams' contexts. */
     qsb_sg::enabled = qsb_sg::init(P.s0, P.rtb, P.s2b, g_qsb_register_roots);
 #endif
