@@ -1,0 +1,114 @@
+{
+  "dateUTC": "2026-09-29T14:57:54.671421+00:00",
+  "baseCommit": "7813ffe1b7442f4a998e4978834d9ce2bd4559c6",
+  "track": "pinning",
+  "hardware": "RTX 5070 Ti 16 GB",
+  "driver": "596.49",
+  "toolchain": "CUDA nvcc 12.8.93, GCC 13.3, OpenSSL 3.0.13, Ubuntu 24.04 WSL2",
+  "hostOracleCases": 100000,
+  "hostOracleMismatches": 0,
+  "deviceTests": [
+    {
+      "variant": 0,
+      "wmixZ": 0,
+      "deviceOracleCases": 65536,
+      "deviceMismatches": 0,
+      "timedDigestsPerRun": 8388608,
+      "milliseconds": [
+        0.97488,
+        0.97456,
+        0.973088,
+        1.00096,
+        0.97536
+      ],
+      "finalOutputSha256": "9245fc0c28668fe122728b3426044fd453079eeb3c9653a56e7e3dc0cc6a893a"
+    },
+    {
+      "variant": 0,
+      "wmixZ": 1,
+      "deviceOracleCases": 65536,
+      "deviceMismatches": 0,
+      "timedDigestsPerRun": 8388608,
+      "milliseconds": [
+        1.034656,
+        1.02768,
+        0.9992,
+        1.001024,
+        0.999744
+      ],
+      "finalOutputSha256": "9245fc0c28668fe122728b3426044fd453079eeb3c9653a56e7e3dc0cc6a893a"
+    },
+    {
+      "variant": 1,
+      "wmixZ": 0,
+      "deviceOracleCases": 65536,
+      "deviceMismatches": 0,
+      "timedDigestsPerRun": 8388608,
+      "milliseconds": [
+        1.09584,
+        0.974848,
+        0.977408,
+        0.981056,
+        0.98704
+      ],
+      "finalOutputSha256": "9245fc0c28668fe122728b3426044fd453079eeb3c9653a56e7e3dc0cc6a893a"
+    },
+    {
+      "variant": 1,
+      "wmixZ": 1,
+      "deviceOracleCases": 65536,
+      "deviceMismatches": 0,
+      "timedDigestsPerRun": 8388608,
+      "milliseconds": [
+        0.98736,
+        0.987648,
+        0.993344,
+        0.993856,
+        0.994816
+      ],
+      "finalOutputSha256": "9245fc0c28668fe122728b3426044fd453079eeb3c9653a56e7e3dc0cc6a893a"
+    }
+  ],
+  "sass": {
+    "changedFunctions": {
+      "_Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre": {
+        "baseline": {
+          "instructions": 7336,
+          "iadd3": 1790,
+          "imad": 2887,
+          "sha256": "256d85849307deccbce6a14bc7a0f36fbfa3d55516a087178786aad8db4b87b6"
+        },
+        "candidate": {
+          "instructions": 7336,
+          "iadd3": 1790,
+          "imad": 2887,
+          "sha256": "92c10fe544611bed8e234a8c1618699bdc00e030a80336fd9306bd43773fbd8c"
+        }
+      }
+    },
+    "unchangedFunctions": 9
+  },
+  "builds": {
+    "sm120": {
+      "prepareRegisters": 126,
+      "prepareSpillStores": 0,
+      "prepareSpillLoads": 0
+    },
+    "sm89": {
+      "prepareRegisters": 128,
+      "prepareSpillStores": 0,
+      "prepareSpillLoads": 0
+    },
+    "officialCompileCommandPassed": true,
+    "officialCompileCommandSeconds": 18.829
+  },
+  "performanceClaim": null,
+  "fullWorkloadValidation": "Not achieved locally; current GLV11 table alone exceeds 16 GB. Official evaluation required.",
+  "sourceHashes": {
+    "sha_pinsha.cuh": "2edccce1e449d90c61fdb23a243029a950f752f94ead89321780b0be07810779",
+    "qsb_carrier_sm89.h": "dd9ad0aab9870669345a3de84d41ed12c418f7bbe276e205fecd012e845ffc8f",
+    "tests/digest-interleave/host.cpp": "2f59200e00931ba240b8dec3744513204b87f60fc84fd3adc947469adf9a56c2",
+    "tests/digest-interleave/device.cu": "df5c5c72c597c1001199eb3aa5c6c50309951fc266d4591a2fbbec435d57c922",
+    "tests/digest-interleave/run.sh": "9db856c06f753058300f93b64bc95e79bf7413ef71a3d7f5c52af17fd74f53a7"
+  }
+}

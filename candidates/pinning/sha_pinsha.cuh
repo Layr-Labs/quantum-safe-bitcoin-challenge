@@ -201,6 +201,44 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;\
     QSB_STEPL(15,b,c,d,e,f,g,h,a,base); \
 } while (0)
 
+/* Extend rolling schedule/compression interleaving to the second digest while
+ * retaining its zero-addend ALU routing. Source ordering exposes independent
+ * schedule and compression operations to the compiler; register savings and
+ * throughput gains depend on the resulting device instructions. */
+#ifndef QSB_DIGEST_INTERLEAVE_Z
+#define QSB_DIGEST_INTERLEAVE_Z 1
+#endif
+#if QSB_DIGEST_WMIX_Z
+#define QSB_DIGEST_ZERO QSB_Z
+#else
+#define QSB_DIGEST_ZERO 0u
+#endif
+#define QSB_DSTEPS(j,a,b,c,d,e,f,g,h,base) do { \
+    w[j] += s1(w[((j)+14)&15]) + w[((j)+9)&15] + s0(w[((j)+1)&15]) + QSB_DIGEST_ZERO; \
+    QSB_RL(a,b,c,d,e,f,g,h,qsb_klit((base)+(j)) + w[j]); \
+} while (0)
+#define QSB_DINTER15(base) do { \
+    QSB_DSTEPS(0,a,b,c,d,e,f,g,h,base); \
+    QSB_DSTEPS(1,h,a,b,c,d,e,f,g,base); \
+    QSB_DSTEPS(2,g,h,a,b,c,d,e,f,base); \
+    QSB_DSTEPS(3,f,g,h,a,b,c,d,e,base); \
+    QSB_DSTEPS(4,e,f,g,h,a,b,c,d,base); \
+    QSB_DSTEPS(5,d,e,f,g,h,a,b,c,base); \
+    QSB_DSTEPS(6,c,d,e,f,g,h,a,b,base); \
+    QSB_DSTEPS(7,b,c,d,e,f,g,h,a,base); \
+    QSB_DSTEPS(8,a,b,c,d,e,f,g,h,base); \
+    QSB_DSTEPS(9,h,a,b,c,d,e,f,g,base); \
+    QSB_DSTEPS(10,g,h,a,b,c,d,e,f,base); \
+    QSB_DSTEPS(11,f,g,h,a,b,c,d,e,base); \
+    QSB_DSTEPS(12,e,f,g,h,a,b,c,d,base); \
+    QSB_DSTEPS(13,d,e,f,g,h,a,b,c,base); \
+    QSB_DSTEPS(14,c,d,e,f,g,h,a,b,base); \
+} while (0)
+#define QSB_DINTER16(base) do { \
+    QSB_DINTER15(base); \
+    QSB_DSTEPS(15,b,c,d,e,f,g,h,a,base); \
+} while (0)
+
 /* Rounds 0 and 1 from the SHA-256 IV with message words W0, W1 (digest and pubkey
  * transforms). Round 1's Maj has two constant inputs: Maj(A1,IV0,IV1) =
  * (A1 & (IV0^IV1)) + (IV0&IV1); the constant rides in t1 and leaves again
@@ -270,6 +308,11 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     }
 
     QSB_RND16L(16);
+#if QSB_DIGEST_INTERLEAVE_Z
+    QSB_DINTER16(32);
+    QSB_DINTER15(48);
+    w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_DIGEST_ZERO;
+#else
 #if QSB_DIGEST_WMIX_Z
     /* Outer-digest schedule with the constant-bank zero addend: the four-input sums become
      * five-input, so ptxas emits two IADD3 instead of IADD3 plus a multiply-pipe IMAD.IADD. */
@@ -284,6 +327,7 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     WMIX();
 #endif
     QSB_RND15L(48);
+#endif
     QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
     out[1] = QSB_IV1 + b;
     out[2] = QSB_IV2 + c;
