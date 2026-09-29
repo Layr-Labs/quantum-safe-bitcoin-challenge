@@ -188,6 +188,9 @@ static QI_INL void vinv(vfe *inv, const vfe *m) {
 
 /* 8-lane pubkey SHA of Q+ (lanes 0-3) and Q- (lanes 4-7); canonical inputs; returns the
  * 8-bit mask of lanes whose H0 passes the leading-zero prefilter (v4::hash_block's layout) */
+#ifndef QSB_CG_H0BOUND
+#define QSB_CG_H0BOUND 1 /* exact unsigned bound for the leading-zero predicate */
+#endif
 static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, const vfe *ym, int use_ni) {
     using namespace qcg_sha;
     V wp[4], wm[4];
@@ -221,12 +224,17 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
         s8_compress_full(st, W);
         h0 = st[0];
     }
+#if QSB_CG_H0BOUND
+    const uint32_t max_h0 = QSB_ZEROS_N >= 32 ? 0u : (0xffffffffu >> QSB_ZEROS_N);
+    return (unsigned)_mm256_cmple_epu32_mask(h0, _mm256_set1_epi32((int)max_h0));
+#else
 #if QSB_ZEROS_N >= 32
     __m256i ok = _mm256_cmpeq_epi32(h0, _mm256_setzero_si256());
 #else
     __m256i ok = _mm256_cmpeq_epi32(_mm256_srli_epi32(h0, 32 - QSB_ZEROS_N), _mm256_setzero_si256());
 #endif
     return (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(ok));
+#endif
 }
 
 static QI_INL V zmask4(const uint32_t *d4) {
