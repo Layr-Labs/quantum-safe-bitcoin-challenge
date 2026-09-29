@@ -53,6 +53,22 @@ __device__ __forceinline__ void qbw_scratch_get(
     v[4]=0;
 }
 
+#if QSB_ROOT_LIMB_HANDOFF
+/* Canonicalize one 256-bit word per eight-lane group before gathering.
+ * Since p > 2^255, a single trial subtraction suffices for every raw input.
+ * Full-warp ballots propagate a borrow independently in each eight-bit group. */
+__device__ __forceinline__ uint32_t qbw_canonical_limb(uint32_t x,unsigned lane){
+    const unsigned d=lane&7u,group=lane&24u;
+    const uint32_t p=d==0?0xfffffc2fu:d==1?0xfffffffeu:0xffffffffu;
+    const uint32_t trial=x-p;
+    const unsigned gen=(__ballot_sync(0xffffffffu,x<p)>>group)&255u;
+    const unsigned prop=(__ballot_sync(0xffffffffu,trial==0u)>>group)&255u;
+    const unsigned borrow=(prop+(gen<<1))^prop;
+    const uint32_t reduced=trial-((borrow>>d)&1u);
+    return (borrow&256u)?x:reduced;
+}
+#endif
+
 template<int N>
 __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     static_assert(N==128,"research fixed four-warp shape");
@@ -89,6 +105,11 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
         __shfl_sync(0xffffffffu,u2,d),
         __shfl_sync(0xffffffffu,u2,8+d),lane);
     uint64_t root[5];
+#if QSB_ROOT_LIMB_HANDOFF
+    // All four u1 groups are identical products of the same two u2 groups.
+    const uint32_t canonical=qbw_canonical_limb(u1,lane);
+    qsb_warp_research::qwr_inverse_limb_scaled(canonical,root,lane);
+#else
     #pragma unroll
     for(unsigned k=0;k<4;++k){
         const uint32_t lo=__shfl_sync(0xffffffffu,u1,2*k);
@@ -97,6 +118,7 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     }
     root[4]=0;qsb_field_normalize(root);
     qsb_warp_research::qwr_inverse_scaled(root,lane);
+#endif
     uint32_t inverse_word=0;
     #pragma unroll
     for(unsigned k=0;k<4;++k)

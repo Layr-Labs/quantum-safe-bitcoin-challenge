@@ -6,6 +6,12 @@
 /* Original source comments and full sources are retained alongside this file. */
 /* Include after Pinning qsb_field_mul / qsb_field_normalize and ISO constants. */
 #pragma once
+#ifndef QSB_ROOT_LIMB_HANDOFF
+#define QSB_ROOT_LIMB_HANDOFF 1
+#endif
+#if QSB_ROOT_LIMB_HANDOFF != 0 && QSB_ROOT_LIMB_HANDOFF != 1
+#error "QSB_ROOT_LIMB_HANDOFF must be 0 or 1"
+#endif
 namespace qsb_warp_research {
 #define QWR_DEV __device__ __forceinline__
 #define QWR_ROOT_MAX_BATCHES 32
@@ -216,12 +222,26 @@ QWR_DEV void qwr_canon(uint32_t *X){
     for(int i=0;i<8;i++)X[i]=(X[i]&keep)|(T[i]&~keep);
 }
 
+#if QSB_ROOT_LIMB_HANDOFF
+__device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane,
+    uint32_t direct_limb=0,bool direct=false){
+#else
 __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
+#endif
     constexpr unsigned mask=0xffffffffu;
     const int digit=lane&7,row=lane>>3,start=lane&~7;
     const unsigned odd=row&1,rs=row>>1;
+#if QSB_ROOT_LIMB_HANDOFF
+    uint32_t xl;
+    if(direct)xl=direct_limb;
+    else{
+        const uint64_t rw=digit<2?R[0]:digit<4?R[1]:digit<6?R[2]:R[3];
+        xl=(uint32_t)(rw>>(32*(digit&1)));
+    }
+#else
     const uint64_t rw=digit<2?R[0]:digit<4?R[1]:digit<6?R[2]:R[3];
     const uint32_t xl=(uint32_t)(rw>>(32*(digit&1)));
+#endif
 #if QSB_ISO_XR
     const uint64_t sw=pin_iso_invu_words[digit>>1];
     const uint32_t scaled=(uint32_t)(sw>>(32*(digit&1)));
@@ -341,6 +361,24 @@ QWR_DEV void qwr_inverse_scaled(uint64_t *R,int lane){
     for(int k=0;k<4;++k)R[k]=__shfl_sync(0xffffffffu,R[k],0);
     R[4]=0;
 }
+#if QSB_ROOT_LIMB_HANDOFF
+/* Every row receives the SAME canonical field, one limb per digit. R is output
+ * storage only until bounded inversion succeeds. On failure construct the
+ * full input for the unchanged scalar Fermat path, then broadcast its result. */
+QWR_DEV void qwr_inverse_limb_scaled(uint32_t input,uint64_t *R,int lane){
+    if(qwr_inverse_limbs_bounded(R,lane,input,true))return;
+    #pragma unroll
+    for(unsigned k=0;k<4;++k){
+        const uint32_t lo=__shfl_sync(0xffffffffu,input,2*k);
+        const uint32_t hi=__shfl_sync(0xffffffffu,input,2*k+1);
+        R[k]=(uint64_t)lo|((uint64_t)hi<<32);
+    }
+    R[4]=0;
+    if(lane==0)qwr_fermat_scaled(R);
+    for(int k=0;k<4;++k)R[k]=__shfl_sync(0xffffffffu,R[k],0);
+    R[4]=0;
+}
+#endif
 #undef QWR_DEV
 #undef QWR_ROOT_MAX_BATCHES
 #undef QWR_MM32
