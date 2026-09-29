@@ -56,17 +56,17 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     c7 = QI_LO(QI_LO(c7, a3, b4), a4, b3);
     V c8 = QI_LO(QI_HI(QI_HI(z, a3, b4), a4, b3), a4, b4);
     V c9 = QI_HI(z, a4, b4);                                   /* < 2^46 (a4, b4 < 2^49) */
-    /* high columns to 52-bit limbs (c9 stays < 2^52) */
-    c6 += c5 >> 52; c5 &= M;
-    c7 += c6 >> 52; c6 &= M;
-    c8 += c7 >> 52; c7 &= M;
-    c9 += c8 >> 52; c8 &= M;
-    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
-    V d0 = QI_LO(c0, c5, R);
-    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
-    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
-    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
-    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    /* Split high columns independently, following the promoted Subset IFMA fold.
+     * This removes the c5->c9 carry chain; each h*R fits one 52-bit IFMA input. */
+    const V l5 = c5 & M, h5 = c5 >> 52;
+    const V l6 = c6 & M, h6 = c6 >> 52;
+    const V l7 = c7 & M, h7 = c7 >> 52;
+    const V l8 = c8 & M, h8 = c8 >> 52;
+    V d0 = QI_LO(c0, l5, R);
+    V d1 = QI_LO(QI_HI(QI_LO(c1, h5, R), l5, R), l6, R);
+    V d2 = QI_LO(QI_HI(QI_LO(c2, h6, R), l6, R), l7, R);
+    V d3 = QI_LO(QI_HI(QI_LO(c3, h7, R), l7, R), l8, R);
+    V d4 = QI_LO(QI_HI(QI_LO(c4, h8, R), l8, R), c9, R);
     const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
     d4 += d3 >> 52; d3 &= M;
     const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
@@ -113,6 +113,23 @@ static QI_INL void fnorm(vfe *r) {
     t4 += t3 >> 52; t3 &= M;
     t4 &= vs1(QI_M48);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+}
+#ifndef QSB_CG_PARITY_ONLY
+#define QSB_CG_PARITY_ONLY 1 /* canonical y parity without materializing all limbs */
+#endif
+static QI_INL V fparity(const vfe *r) {
+    const V M = vs1(QI_M52);
+    V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4], m;
+    V x = t4 >> 48; t4 &= vs1(QI_M48);
+    t0 = QI_LO(t0, x, vs1(QI_C));
+    t1 += t0 >> 52; t0 &= M;
+    t2 += t1 >> 52; t1 &= M; m = t1;
+    t3 += t2 >> 52; t2 &= M; m &= t2;
+    t4 += t3 >> 52; t3 &= M; m &= t3;
+    /* value < 2p here; subtract p once if value >= p (limbs < 2^53: signed compares are exact) */
+    const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
+    x = (t4 >> 48) | ((V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48)) & (V)_mm256_cmpeq_epi64((__m256i)m, (__m256i)M) & ge & vs1(1));
+    return (t0 ^ x) & vs1(1); /* C is odd: the exact correction flips parity iff x=1. */
 }
 /* r = a + 2p - b (b in W form); limbs of r < a's + 2^54 */
 static QI_INL void fsub(vfe *r, const vfe *a, const vfe *b) {
@@ -200,8 +217,13 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
         X[2 * k] = _mm256_blend_epi32(pl, ml, 0xF0);
         X[2 * k + 1] = _mm256_blend_epi32(ph, mh, 0xF0);
     }
-    __m256i par = _mm256_blend_epi32(_mm256_permutevar8x32_epi32((__m256i)yp->n[0], idx_lo),
-                                     _mm256_permutevar8x32_epi32((__m256i)ym->n[0], idx_lo), 0xF0);
+#if QSB_CG_PARITY_ONLY
+    const V yp0 = fparity(yp), ym0 = fparity(ym);
+#else
+    const V yp0 = yp->n[0], ym0 = ym->n[0];
+#endif
+    __m256i par = _mm256_blend_epi32(_mm256_permutevar8x32_epi32((__m256i)yp0, idx_lo),
+                                     _mm256_permutevar8x32_epi32((__m256i)ym0, idx_lo), 0xF0);
     par = _mm256_and_si256(par, _mm256_set1_epi32(1));
     v8u W[16];
     W[0] = _mm256_or_si256(_mm256_slli_epi32(_mm256_or_si256(par, _mm256_set1_epi32(2)), 24), _mm256_srli_epi32(X[7], 8));
@@ -378,7 +400,10 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             fmul(&ym, &lam, &t);
             fsub(&ym, &ym, &py[b]);
             vfe xp = px[b], yp = py[b];
-            fnorm(&xp); fnorm(&yp); fnorm(&xm); fnorm(&ym);
+            fnorm(&xp); fnorm(&xm);
+#if !QSB_CG_PARITY_ONLY || defined(QCG_EC_HOOK)
+            fnorm(&yp); fnorm(&ym);
+#endif
 #ifdef QCG_EC_HOOK
             { V a4[4], b4[4], c4[4], d4[4]; to_w(a4, &xp); to_w(b4, &yp); to_w(c4, &xm); to_w(d4, &ym);
               for (int l = 0; l < 4; l++) { uint64_t X0[4], Y0[4], X1[4], Y1[4];
