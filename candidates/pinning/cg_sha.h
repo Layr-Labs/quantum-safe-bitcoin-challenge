@@ -160,7 +160,8 @@ static QSB_SHA_NI void shani_store_state(uint32_t *st, __m128i S0, __m128i S1) {
     _mm_storeu_si128((__m128i *)&st[0], S0);
     _mm_storeu_si128((__m128i *)&st[4], S1);
 }
-static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+template<bool H0_ONLY>
+static QSB_SHA_NI void shani_compress2_impl(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
     __m128i A0, A1, B0, B1;
     shani_load_state(stA, A0, A1); shani_load_state(stB, B0, B1);
     const __m128i A0s = A0, A1s = A1, B0s = B0, B1s = B1;
@@ -203,9 +204,20 @@ static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32
 #undef SHANI2_TAIL
 #undef SHANI2_MSG2
 #undef SHANI2_MSG1
+    if constexpr (H0_ONLY) {
+        stA[0] += (uint32_t)_mm_extract_epi32(A0, 3);
+        stB[0] += (uint32_t)_mm_extract_epi32(B0, 3);
+    } else {
     A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
     B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
     shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
+    }
+}
+static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+    shani_compress2_impl<false>(stA, wA, stB, wB);
+}
+static QSB_SHA_NI void shani_compress2_h0(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+    shani_compress2_impl<true>(stA, wA, stB, wB);
 }
 /* single compression (tests only) */
 static QSB_SHA_NI void shani_compress1(uint32_t *st, const uint32_t *w) {

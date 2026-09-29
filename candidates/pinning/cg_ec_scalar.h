@@ -189,6 +189,9 @@ __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani(cons
 }
 
 /* word-major variant (Wt[j][k] = word j of key k), used by the AVX2 EC stage on SHA-NI hosts */
+#ifndef QSB_CG_KEY_H0ONLY
+#define QSB_CG_KEY_H0ONLY 1 /* retain only H0 after all compression rounds */
+#endif
 __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani_wm(const uint32_t Wt[9][8], uint32_t h0[8]) {
     using namespace qcg_sha;
     for (int k = 0; k < 8; k += 2) {
@@ -197,7 +200,11 @@ __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani_wm(c
         for (int j = 9; j < 15; j++) { wa[j] = 0; wb[j] = 0; }
         wa[15] = 264; wb[15] = 264;
         memcpy(sa, IV256, 32); memcpy(sb, IV256, 32);
+#if QSB_CG_KEY_H0ONLY
+        shani_compress2_h0(sa, wa, sb, wb);
+#else
         shani_compress2(sa, wa, sb, wb);
+#endif
         h0[k] = sa[0]; h0[k + 1] = sb[0];
     }
 }
