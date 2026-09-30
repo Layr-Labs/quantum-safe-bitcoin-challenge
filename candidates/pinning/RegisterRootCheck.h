@@ -31,7 +31,7 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
            BN_lebin2bn((const unsigned char*)weight_words,32,weight)!=nullptr;
     }
     /* First 64 products are the complete 8x8 edge Cartesian product; remaining */
-    // 192 use deterministic full-width values. Compare every result to OpenSSL.
+    /* 192 use deterministic full-width values. Compare every result to OpenSSL. */
     if(ok&&error==cudaSuccess){
         const uint64_t edges[8][4]={
             {0,0,0,0},{1,0,0,0},
@@ -120,7 +120,7 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
     }
     BN_free(p);BN_free(a);BN_free(inv);BN_free(weighted);BN_free(scale);BN_free(weight);BN_free(observed);BN_CTX_free(ctx);
     free(raw);free(got);
-    // An asynchronous CUDA fault can poison the context. Never silently retry
+    /* An asynchronous CUDA fault can poison the context. Never silently retry */
     /* work under the baseline after such a fault. Arithmetic/host-allocation */
     /* mismatch before search can safely retain the promoted root implementation. */
     if(error!=cudaSuccess)qsb_subpipe_die("register root startup check",error);

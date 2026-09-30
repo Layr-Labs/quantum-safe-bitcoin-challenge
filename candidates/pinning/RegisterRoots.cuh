@@ -4,6 +4,12 @@
 #include "WarpInverse.cuh"
 #include "CyclicField.cuh"
 #include "PrefixCyclicField.cuh"
+#ifndef QSB_RROOT_SCRATCH_V2
+#define QSB_RROOT_SCRATCH_V2 1 /* two volatile 128-bit scratch reads instead of four scalar reads */
+#endif
+#if QSB_RROOT_SCRATCH_V2 != 0 && QSB_RROOT_SCRATCH_V2 != 1
+#error "QSB_RROOT_SCRATCH_V2 must be 0 or 1"
+#endif
 static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE==131072,
               "register roots require promoted 128-lane / 1024-root shape");
 __device__ __forceinline__ bool qbw_root_load(
@@ -48,15 +54,23 @@ __device__ __forceinline__ void qbw_scratch_put(
 __device__ __forceinline__ void qbw_scratch_get(
     uint64_t v[5],const uint64_t *roots,unsigned count,unsigned row) {
     const volatile uint64_t *p=roots+(count+row)*4u;
+#if QSB_RROOT_SCRATCH_V2 && defined(__CUDA_ARCH__)
+    /* Each four-word row is 32-byte aligned. Keep volatile reloads and the same words. */
+    asm volatile("ld.volatile.global.v2.u64 {%0,%1}, [%4];\n\t"
+                 "ld.volatile.global.v2.u64 {%2,%3}, [%4+16];"
+                 : "=&l"(v[0]), "=&l"(v[1]), "=&l"(v[2]), "=&l"(v[3])
+                 : "l"(p) : "memory");
+#else
     #pragma unroll
     for(unsigned k=0;k<4;++k)v[k]=p[k];
+#endif
     v[4]=0;
 }
 
 template<int N>
 __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     static_assert(N==128,"research fixed four-warp shape");
-    // 56 product / 28 inverse rows per warp. Plane padding rotates limb banks.
+    /* 56 product / 28 inverse rows per warp. Plane padding rotates limb banks. */
     __shared__ uint64_t products[4][4*56+4];
     __shared__ uint64_t inverses[4][4*28+4];
     const unsigned tid=threadIdx.x,lane=tid&31u,warp=tid>>5;
