@@ -1,4 +1,24 @@
+#define QSB_SHA_LEA 0
+#define QSB_FIN_LEA 1
 /* l2state variant fkF20c8 + split retry */
+#ifndef QSB_PAIRED_FINISH
+#define QSB_PAIRED_FINISH 1
+#endif
+#if QSB_PAIRED_FINISH != 0 && QSB_PAIRED_FINISH != 1
+#error "QSB_PAIRED_FINISH must be 0 or 1"
+#endif
+#if QSB_PAIRED_FINISH != 1
+#error "This production closure requires QSB_PAIRED_FINISH=1 with its paired native carrier"
+#endif
+#if QSB_PAIRED_FINISH
+#define QSB_FINISH_LAUNCH_THREADS(FAST) ((FAST) ? 256 : QSB_S2_THREADS)
+#define QSB_PAIR_LOGICAL_THREAD ((FAST_TAIL && STAGE == 2) ? (threadIdx.x >> 1) : threadIdx.x)
+#define QSB_PAIR_LOGICAL_BLOCK ((FAST_TAIL && STAGE == 2) ? QSB_TREE_N : blockDim.x)
+#else
+#define QSB_FINISH_LAUNCH_THREADS(FAST) QSB_S2_THREADS
+#define QSB_PAIR_LOGICAL_THREAD threadIdx.x
+#define QSB_PAIR_LOGICAL_BLOCK blockDim.x
+#endif
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
 #define QSB_ROOT_FUSED 1
@@ -6,7 +26,7 @@
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
-#define QSB_GREEN 20
+#define QSB_GREEN 22
 #define QSB_GREEN_SHARED 8
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
@@ -2083,6 +2103,9 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #ifndef QSB_ZEROS_N
 #define QSB_ZEROS_N 24
 #endif
+#if QSB_PAIRED_FINISH && QSB_ZEROS_N > 32
+#error "Paired finish supports QSB_ZEROS_N<=32 only"
+#endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
 __device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
@@ -3521,6 +3544,7 @@ __device__ __constant__ uint64_t pin_recovery_c[4];
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
 #include "PackedRecovery.cuh"
+#include "PairedFinish.cuh"
 static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 #if QSB_PREP_STATE
 /* Block-major state needs the same QSB_TREE_N-lane blocks in prepare and finish (asserted
@@ -3628,8 +3652,15 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #endif
 #endif
 template<bool FAST_TAIL, int STAGE>
+#if QSB_PAIRED_FINISH
+__global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS :
+                                      ((FAST_TAIL && STAGE == 2) ? 256 : QSB_S2_THREADS),
+                                  STAGE == 0 ? QSB_S0_BLOCKS :
+                                      ((FAST_TAIL && STAGE == 2) ? 4 : QSB_S2_BLOCKS)) kernel_pinning_pipeline(
+#else
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
+#endif
     const uint32_t *d_midstate,
     const uint8_t *d_suffix,    /* suffix template */
     int suffix_len,             /* total suffix including lt+sighash */
@@ -3655,13 +3686,13 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * threads, so blockIdx.x*128 < batch_size holds for every launched block and the exit
      * never fired. With that bound, idx < batch_size <=> threadIdx.x < batch_size-128*blockIdx.x
      * (no wrap: 0 < batch_size-128*blockIdx.x <= batch_size). */
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (STAGE != 0 && blockIdx.x * blockDim.x >= batch_size) return;
+    int idx = blockIdx.x * QSB_PAIR_LOGICAL_BLOCK + QSB_PAIR_LOGICAL_THREAD;
+    if (STAGE != 0 && blockIdx.x * QSB_PAIR_LOGICAL_BLOCK >= batch_size) return;
     int active = STAGE != 0 ? idx < batch_size
                             : threadIdx.x < (uint32_t)batch_size - blockIdx.x * (uint32_t)QSB_S0_THREADS;
 #else
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (blockIdx.x * blockDim.x >= batch_size) return;
+    int idx = blockIdx.x * QSB_PAIR_LOGICAL_BLOCK + QSB_PAIR_LOGICAL_THREAD;
+    if (blockIdx.x * QSB_PAIR_LOGICAL_BLOCK >= batch_size) return;
     int active = idx < batch_size;
 #endif
     uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
@@ -3833,6 +3864,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     } else {
 
     if(!active)return;
+#if QSB_PAIRED_FINISH
+    if (FAST_TAIL && STAGE == 2) {
+        qsb_paired_finish_ranked(idx,batch_size,saved,roots,tree,d_hit_cnt,d_hit_idx);
+        return;
+    }
+#endif
 #if QSB_PREP_STATE
     /* Block-major state planes (QSB_PREP_STATE): the entries this lane's prepare wrote. */
     const ulonglong2 *st=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
@@ -4187,13 +4224,13 @@ static void launch_pinning_pipeline(
 #endif
     int blocks2=(batch_size+QSB_S2_THREADS-1)/QSB_S2_THREADS;
     if(FAST_TAIL && qsb_carrier_has(QK_S2))
-        qsb_carrier_launch(kernel_pinning_pipeline<FAST_TAIL,2>,QK_S2,dim3(blocks2),dim3(QSB_S2_THREADS),QSB_LAUNCH_ST,
+        qsb_carrier_launch(kernel_pinning_pipeline<FAST_TAIL,2>,QK_S2,dim3(blocks2),dim3(QSB_FINISH_LAUNCH_THREADS(FAST_TAIL)),QSB_LAUNCH_ST,
             d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
             seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
             d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
             saved,roots,tree,tp);
     else
-    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_S2_THREADS QSB_STREAM_ARG>>>(
+    kernel_pinning_pipeline<FAST_TAIL,2><<<blocks2,QSB_FINISH_LAUNCH_THREADS(FAST_TAIL) QSB_STREAM_ARG>>>(
         d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
         seq_value,start_lt,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
         d_gt,d_hit_cnt,d_hit_idx,batch_size,easy_mode,single_hash,
@@ -4287,6 +4324,9 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
  * candidates (start_lt advanced by the sub-batch offset, a multiple of 256), except that
  * finish writes its hit indices relative to the host batch (QSB_HIT_BASE = offset). */
 #include "QsbSubGraph.h"
+#if QSB_PAIRED_FINISH && QSB_SUBGRAPH
+#error "Paired finish is incompatible with the original128-thread graph nodes"
+#endif
 
 struct QsbSubPipe {
     int ready;
@@ -4517,13 +4557,13 @@ static void qsb_subpipe_launch(
         if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2, P.ev_rt[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("roots", e);
         if (qsb_carrier_has(QK_S2))
-            qsb_carrier_launch(kernel_pinning_pipeline<true,2>,QK_S2,dim3(blocks),dim3(QSB_S2_THREADS),P.s2,
+            qsb_carrier_launch(kernel_pinning_pipeline<true,2>,QK_S2,dim3(blocks),dim3(QSB_FINISH_LAUNCH_THREADS(true)),P.s2,
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
                 seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
                 d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
                 P.state[r],P.roots[r],hit_base,tp);
         else
-            kernel_pinning_pipeline<true,2><<<blocks,QSB_S2_THREADS,0,P.s2>>>(
+            kernel_pinning_pipeline<true,2><<<blocks,QSB_FINISH_LAUNCH_THREADS(true),0,P.s2>>>(
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
                 seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
                 d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,

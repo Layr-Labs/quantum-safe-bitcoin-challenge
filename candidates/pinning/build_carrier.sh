@@ -7,8 +7,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 Z=${1:-24}
 W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
-nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
-     -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
+nvcc -O3 -DQSB_PAIRED_FINISH=1 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -ptx \
+     -o "$W/c.unlimited.ptx" pinning.cu 2> "$W/nvcc.log"
+python3 apply_finish48.py "$W/c.unlimited.ptx" "$W/c.ptx" "$W/cap.json"
+ptxas -O3 -arch=sm_89 -v -o "$W/c.cubin" "$W/c.ptx" 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
 cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
 python3 - "$Z" "$W" <<'PY'
