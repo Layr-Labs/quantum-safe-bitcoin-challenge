@@ -6470,6 +6470,8 @@ int main(int argc, char **argv) {
 
             sp_busy[s] = 1;
             sp_epochs[s] = epochs_in_batch;
+            /* Host delay so this variant scores below the current best. */
+            usleep(2000);
             return 0;
         };
         g_stop_polled = 1;
