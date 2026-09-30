@@ -1,3 +1,7 @@
+#define QSB_DIVSTEP_LOOKAHEAD 1   /* exact knob of the tree: divstep lookahead in the root inverse */
+#define QSB_PARK128 0             /* needed by QSB_PRE3_ROOT */
+#define QSB_PRE3_ROOT 1           /* exact knob of the tree: pre3 root scheduling */
+#define QSB_Q_MIX 8               /* 1 in 8 warps on the GLV12 Q layout (was 4) */
 #define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
