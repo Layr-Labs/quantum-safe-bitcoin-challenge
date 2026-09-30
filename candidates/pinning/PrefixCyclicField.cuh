@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* Python-validated integration, no native compilation or GPU execution. Four fields per warp. */
 /* Include after CyclicField.cuh for its full-carry normalize8 helper. */
 #pragma once
@@ -20,7 +20,7 @@ __device__ __forceinline__ uint32_t multiply8(uint32_t a,uint32_t b,unsigned lan
     const unsigned d=lane&7u;
     uint64_t total=0,prefix=0;
     /* Low byte: total carry beyond bit63 (<=7). Next byte: captured prefix */
-    // carry. The low byte cannot overflow into the snapshot byte.
+    /* carry. The low byte cannot overflow into the snapshot byte. */
     uint32_t counts=0;
     #pragma unroll
     for(unsigned i=0;i<8;++i){
