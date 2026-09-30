@@ -3995,7 +3995,12 @@ __device__ __forceinline__ void qsb_filter_seed_x3(
         "subc.cc.u64 %3,%3,%16;\n\t"
         "subc.u64 h,h,0;\n\t"
         "shr.s64 ext,h,63;\n\t"
+#if QSB_SEED_K_FOLD
+        "{ .reg .u32 hl,hh,el,eh,tl,th; mov.b64 {hl,hh},h; mov.b64 {el,eh},ext; "
+        "mul.lo.u32 tl,hl,977; add.u32 th,hl,eh; mov.b64 t,{tl,th}; }\n\t"
+#else
         "mul.lo.u64 t,h,0x1000003d1;\n\t"
+#endif
         "add.cc.u64 %0,%0,t;\n\t"
         ""
 #if QSB_SHORT_CARRY2
