@@ -344,6 +344,9 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #ifndef QSB_CPU_ILP2
 #define QSB_CPU_ILP2 1
 #endif
+#ifndef QSB_CPU_INV_LAST
+#define QSB_CPU_INV_LAST 1      /* skip an unused final chain update in paired backward passes; 0 retains the baseline */
+#endif
 #ifndef QSB_CPU_NCH
 #define QSB_CPU_NCH 2
 #endif
@@ -1531,7 +1534,9 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8 lamA, lamB, x3A, x3B, tA, tB;
             fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
             qcpu_pf_rows(pA, 4, 8);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            if (!QSB_CPU_INV_LAST || g > 0) {          /* after g==0 both chains are dead; the current slopes already used run */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
             qcpu_pf_rows(pB, 0, 4);
             fe8_sqr_subdx(x3A, lamA, D[hA], X[hA]); fe8_sqr_subdx(x3B, lamB, D[hB], X[hB]);
             qcpu_pf_rows(pB, 4, 8);
@@ -1737,7 +1742,9 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
             const int hA = g + c, hB = hA - 1;
             fe8 tA, tB, lamA, lamB, x3A, x3B, y3A, y3B;
             fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            if (!QSB_CPU_INV_LAST || g > 0) {          /* after g==0 both chains are dead; the current slopes already used run */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
             fe8_sqr_sub2(x3A, lamA, X[hA], MX); fe8_sqr_sub2(x3B, lamB, X[hB], MX);
             fe8_sub_lz(tA, X[hA], x3A); fe8_sub_lz(tB, X[hB], x3B);
             fe8_mul_sub(y3A, lamA, tA, Y[hA]); fe8_mul_sub(y3B, lamB, tB, Y[hB]);
@@ -2267,6 +2274,13 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 /* QSB_CPU_KH16 (a33e04c3): h0 of SHA-256 of the 16 keys whose message words W0..W8 are m[0..8] (lane = key); wk: 32 x 32 dwords of
  * scratch. Returns the prefilter mask of the 16 keys (bit k = key k's h0 has QSB_ZEROS_N leading zero bits). h0_out (dev builds
  * only, never in a ranked build): the 16 h0 values for the unit test. */
+#ifndef QSB_CPU_KH16_PAD_ONCE
+#define QSB_CPU_KH16_PAD_ONCE 1    /* worker scratch pairs 5..7 contain only fixed 33-byte-key padding + K */
+#endif
+#ifndef QSB_CPU_KH16_REGMASK
+#define QSB_CPU_KH16_REGMASK 1    /* pack each completed four-key result in registers before testing h0 */
+#endif
+template <bool PAD_READY = false>
 QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #ifdef QSB_CPU_DEVBENCH
                                  , uint32_t *h0_out = nullptr
@@ -2283,6 +2297,7 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
     __m512i prev = _mm512_setzero_si512();
 #pragma GCC unroll 64
     for (int t = 0; t < 64; t++) {
+        if (PAD_READY && t >= 10 && t <= 15) continue;   /* complete fixed pairs; W9..W15 are still initialized for later expansion */
         __m512i wt;
         if (t < 16) wt = W[t];
         else {
@@ -2308,7 +2323,12 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
     /* key 4L + e: pair p at wk + 32 p + (e >= 2 ? 16 : 0) + 4 L + 2 (e & 1) */
     const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
     const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+#if !QSB_CPU_KH16_REGMASK || defined(QSB_CPU_DEVBENCH)
     alignas(64) uint32_t h0[16];
+#endif
+#if QSB_CPU_KH16_REGMASK
+    unsigned pass = 0;
+#endif
 #pragma GCC unroll 1
     for (int L = 0; L < 4; L++) {
         __m128i S0[4], S1[4];
@@ -2322,14 +2342,31 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #pragma GCC unroll 4
             for (int e = 0; e < 4; e++) S0[e] = _mm_sha256rnds2_epu32(S0[e], S1[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r + 32)));
         }
+#if QSB_CPU_KH16_REGMASK
+        /* IV feed-forward stays per state, exactly as in the original extraction path.
+         * unpackhi32 gives [a2,b2,a3,b3]; unpackhi64 keeps h0=a3,b3,c3,d3. */
+        const __m128i h01 = _mm_unpackhi_epi32(_mm_add_epi32(S0[0], IV0), _mm_add_epi32(S0[1], IV0));
+        const __m128i h23 = _mm_unpackhi_epi32(_mm_add_epi32(S0[2], IV0), _mm_add_epi32(S0[3], IV0));
+        const __m128i hv4 = _mm_unpackhi_epi64(h01, h23);
+        const __m128i hit4 = _mm_cmpeq_epi32(_mm_srli_epi32(hv4, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm_setzero_si128());
+        pass |= (unsigned)_mm_movemask_ps(_mm_castsi128_ps(hit4)) << (4 * L);
+#ifdef QSB_CPU_DEVBENCH
+        _mm_storeu_si128((__m128i *)(h0 + 4 * L), hv4);
+#endif
+#else
 #pragma GCC unroll 4
         for (int e = 0; e < 4; e++) h0[4 * L + e] = (uint32_t)_mm_extract_epi32(_mm_add_epi32(S0[e], IV0), 3);
+#endif
     }
 #ifdef QSB_CPU_DEVBENCH
     if (h0_out) memcpy(h0_out, h0, sizeof h0);
 #endif
+#if QSB_CPU_KH16_REGMASK
+    return pass;
+#else
     const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
     return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
+#endif
 }
 #endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */
@@ -2949,6 +2986,13 @@ static bool vecbuf_alloc(VecBuf &v, int B) {
     void *m = nullptr, *w = nullptr;   /* QSB_CPU_KH16: the groups' key-hash message words (9 x 16 dwords each) and the W + K scratch */
     if (posix_memalign(&m, 64, (size_t)G * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
     v.m16 = (uint32_t *)m; v.wk16 = (uint32_t *)w;
+#if QSB_CPU_KH16_PAD_ONCE
+    /* unpacklo/hi of broadcast words are identical alternating pairs; scalar setup needs no AVX-512 ISA. */
+    for (int p = 5; p < 8; p++) for (int j = 0; j < 32; j++) {
+        const int t = 2 * p + (j & 1);
+        v.wk16[32 * p + j] = qsha_k[t] + (t == 15 ? uint32_t(264) : uint32_t(0));
+    }
+#endif
 #endif
     return true;
 }
@@ -3282,7 +3326,7 @@ static void worker(Ctx *c, int tid) {
 #if QSB_CPU_KH16
             if (c->kh16 && c->cfold) {                  /* QSB_CPU_KH16: key hashes 16 at a time: the group's 8 candidates x 2 recids */
                 for (int h = 0; h < B / 8; h++) {
-                    const unsigned pass = kh16_pass(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
+                    const unsigned pass = kh16_pass<QSB_CPU_KH16_PAD_ONCE != 0>(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
                     if (!pass) continue;
                     for (int j = 0; j < 8; j++) {
                         const int q = h * 8 + j;
