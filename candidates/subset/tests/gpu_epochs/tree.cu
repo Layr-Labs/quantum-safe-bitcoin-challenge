@@ -5284,7 +5284,13 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * knobs whose value is one token are listed (derived macros such as QSB_PAIR_MUL follow
  * from them), so the string does not depend on how a preprocessor spaces expressions;
  * a knob that is not defined in this configuration stringifies to its own name. */
-#define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+/* Keep switch 0 compatible with the exact promoted carrier fingerprint. */
+#if QSB_DIVSTEP_NOSWAP
+#define QSB_DIVSTEP_NOSWAP_KNOB QSB_CARRIER_KV(QSB_DIVSTEP_NOSWAP)
+#else
+#define QSB_DIVSTEP_NOSWAP_KNOB ""
+#endif
+#define QSB_CARRIER_KNOBS QSB_DIVSTEP_NOSWAP_KNOB QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
