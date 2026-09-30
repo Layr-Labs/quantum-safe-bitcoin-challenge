@@ -188,6 +188,8 @@ struct worker_t {
     uint32_t seq, lt0;
     uint64_t cur_seq_tag;
     uint32_t mid1[8];                     /* state after suffix block 0 for cur seq */
+    qcg_sha::s8_plan tplan;               /* suffix block 1 compression plan for cur seq (AVX2 SHA) */
+    int tfast;                            /* 1: the locktime bytes sit in block-1 words 0 and 1 (plan usable) */
     alignas(64) uint64_t zq[4][QSB_CG_BMAX + 8];          /* z of the batch, word-major: zq[k][i] = word k (LE) of candidate i */
     alignas(64) uint32_t dig[QSB_CG_MAXWIN][QSB_CG_BMAX + 32];
     uint8_t zf[QSB_CG_MAXWIN][QSB_CG_BMAX / 4 + 8];
@@ -334,6 +336,10 @@ static void seq_midstate(worker_t *w, uint32_t seq) {
     for (int i = 0; i < 16; i++) wv[i] = (uint32_t)m[4 * i] << 24 | (uint32_t)m[4 * i + 1] << 16 | (uint32_t)m[4 * i + 2] << 8 | m[4 * i + 3];
     memcpy(w->mid1, pp->midstate, 32);
     qcg_sha::sha_compress_ref(w->mid1, wv);
+    /* block 1: words 0 and 1 vary with the locktime, words 2..15 are problem constants */
+    w->tfast = 1;
+    for (int b = 0; b < 4; b++) if (S->lt_word[b] < 0 || S->lt_word[b] > 1) w->tfast = 0;
+    w->tplan = qcg_sha::s8_make_plan(S->w1_tmpl, 0x3u, w->mid1);
 }
 
 /* generic (any layout) scalar z for one candidate */
@@ -373,14 +379,9 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
         W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
     }
     v8u st[8];
-    for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)w->mid1[k]);
-    s8_compress_full(st, W);
-    for (int k = 0; k < 8; k++) W[k] = st[k];
-    W[8] = _mm256_set1_epi32((int)0x80000000u);
-    for (int k = 9; k < 15; k++) W[k] = _mm256_setzero_si256();
-    W[15] = _mm256_set1_epi32(256);
-    for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)IV256[k]);
-    s8_compress_full(st, W);
+    if (w->tfast) s8_compress_plan<0x3u, 0>(st, W, w->tplan);      /* block 1 from the sequence midstate */
+    else s8_compress_mid(st, W, w->mid1);
+    s8_compress_plan<0xFFu, 0>(st, st, S8_PLAN_DIGEST);           /* SHA256 of the 32-byte digest */
     /* zq[k] for lanes: word k (LE 64-bit) = Z[7-2k-1] << 32 | Z[7-2k] (Z0 most significant) */
     for (int k = 0; k < 4; k++) {
         const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
@@ -408,7 +409,14 @@ static unsigned z_shani_2(worker_t *w, int i0) {
     uint32_t DA[16] = {sa[0], sa[1], sa[2], sa[3], sa[4], sa[5], sa[6], sa[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
     uint32_t DB[16] = {sb[0], sb[1], sb[2], sb[3], sb[4], sb[5], sb[6], sb[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
     memcpy(sa, IV256, 32); memcpy(sb, IV256, 32);
+#ifndef QSB_CG_SHA32PAD
+#define QSB_CG_SHA32PAD 1
+#endif
+#if QSB_CG_SHA32PAD
+    shani_compress2_pad32(sa, DA, sb, DB);
+#else
     shani_compress2(sa, DA, sb, DB);
+#endif
     for (int k = 0; k < 4; k++) {
         w->zq[k][i0] = (uint64_t)sa[6 - 2 * k] << 32 | sa[7 - 2 * k];
         w->zq[k][i0 + 1] = (uint64_t)sb[6 - 2 * k] << 32 | sb[7 - 2 * k];
