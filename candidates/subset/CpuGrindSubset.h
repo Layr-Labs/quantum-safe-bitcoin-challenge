@@ -351,7 +351,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #define QSB_CPU_PFSPREAD 3
 #endif
 #ifndef QSB_CPU_MRGS
-#define QSB_CPU_MRGS 0             /* R2-D: MRG products with the four longest columns split in two chains (see fe8_mul_cols) */
+#define QSB_CPU_MRGS 1             /* R2-D: MRG products with the four longest columns split in two chains (see fe8_mul_cols) */
 #endif
 #define QCPU_PFQ ((QSB_CPU_PFSPREAD & 1) && QCPU_VEC && QCPU_SHANI)   /* bit 0 needs the 8-lane path's hpf_rows8 and qsha_x4p */
 #if QSB_CPU_NCH != 4 && QSB_CPU_NCH != 2
