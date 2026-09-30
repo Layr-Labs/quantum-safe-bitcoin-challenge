@@ -6200,6 +6200,7 @@ int main(int argc, char **argv) {
         if (se != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(se)); return 1; }
     }
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
+    uint32_t slot_batch[QSB_SLOTS]={0};    /* completed work belongs to the old slot */
     int slot_busy[QSB_SLOTS];
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
@@ -6216,8 +6217,9 @@ int main(int argc, char **argv) {
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
+        qcg::tick(qcg::mono_s(), (double)slot_batch[s]);
 #endif
+        slot_batch[s] = 0;
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
         const uint32_t *hits = slot_readback[s].indices();
@@ -6291,8 +6293,9 @@ int main(int argc, char **argv) {
 #endif
         if (count > 64) count = 64;
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-        qcg::tick(qcg::mono_s(), (double)BATCH);
+        qcg::tick(qcg::mono_s(), (double)slot_batch[s]);
 #endif
+        slot_batch[s] = 0;
         /* Copy before reuse: the next D2H is allowed to overwrite the pinned
          * report while OpenSSL checks this ordinary host-stack snapshot. */
         if (count) memcpy(hits, source, count*sizeof(uint32_t));
@@ -6401,6 +6404,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Slot completion enqueue failed: %s\n", cudaGetErrorString(slot_error));
                 return 1;
             }
+            slot_batch[s] = (uint32_t)batch_sz;
             slot_busy[s] = 1;
 #if QSB_REFILL_BEFORE_GATE
             /* All replacement kernels and readback are queued before the CPU
