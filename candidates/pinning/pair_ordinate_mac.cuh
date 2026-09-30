@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* r = a*b + c*d (mod p) with ONE pseudo-Mersenne reduction: both 512-bit products are */
-// summed carry-complete into a 513-bit value, then reduced with the _ModMultCore C31
+/* summed carry-complete into a 513-bit value, then reduced with the _ModMultCore C31 */
 /* tail. Ported from Ryun1 submission 5089a297 (lazy deferred ordinate, generated */
 // asm), carried here by the fixed-base chain as the unmultiplied ordinate pair.
 #pragma once

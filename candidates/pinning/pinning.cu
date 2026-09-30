@@ -1,9 +1,13 @@
+#define QSB_DRAW_TAG 0x6ac0b2b3u /* inert draw tag */
+#define QSB_SHA_LEA 1 /* banked 09-29: SHA LEA.HI rotate-add, in-run probe +0.147% exact */
+#define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact) */
+#define QSB_DECODE_CUT 3 /* kk default (probe: 0 was -0.03%) */
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 6
+#define QSB_SUBRING 4
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (36u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #define QSB_GREEN 20
@@ -116,7 +120,7 @@
                           * and blockDim.x == 128, both checked on the host */
 #endif
 #ifndef QSB_UNIF_DP
-#define QSB_UNIF_DP 1    /* uniform-datapath steering (bit 1: prepare tail W0/W1 and the W1-only schedule
+#define QSB_UNIF_DP 0    /* uniform-datapath steering (bit 1: prepare tail W0/W1 and the W1-only schedule
                           * terms from a uniform blockIdx read); same values, needs QSB_SHA_UNIF */
 #endif
 #if (QSB_UNIF_DP & 1) && !QSB_SHA_UNIF
@@ -156,7 +160,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
- * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 3 x 4M here (4 x 4M, 2 x 8M before). */
+ * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 4 x 4M here (4 x 4M, 2 x 8M before). */
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
@@ -236,6 +240,29 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #else
 #define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
 #endif
+/* QSB_QMIX5 (0 or a power of two K >= 2; default 0 = compiled out): the reverse of QSB_PMIX12.
+ * Every K-th prepare block ((blockIdx.x & (K-1)) == 0, block-uniform) decodes Q with P's
+ * five-term GLV11 decoder (segments 0, 6, 7, 4, 5; q11_bigtbl_code_z) instead of GLV12's six
+ * (segments 0..5). Both decoders telescope to the same segment-0 bias (GLVScalar.cuh), so the
+ * digits sum to the same Q component for every residual and the chain's point is identical.
+ * Such a block runs 10 terms (9 additions instead of 10) and 8 cold-bank gathers instead of 6.
+ * Layout: the block's five Q terms take slots 1..5 (term t in slot t+1; the two seeds stay in
+ * registers) and P keeps slots GT_Q_TERMS.. untouched, so the chain simply starts at term 1
+ * instead of 0 and phi still runs before term GT_Q_TERMS, exactly between the Q and the P sum.
+ * Slots 4 and 5 hold the same codes in both decoders (segments 4 and 5), segment 7's field
+ * ends at bit 72 like segment 3's (same top-aligned window), and segment 6 starts at bit 18
+ * like segment 1: only the shift and offset constants of seed 1 and slot 3 depend on the block.
+ * Slot 2 (segment 2) is still written and never read by such a block. */
+#ifndef QSB_QMIX5
+#define QSB_QMIX5 8
+#endif
+#if QSB_QMIX5 != 0 && (QSB_QMIX5 < 2 || (QSB_QMIX5 & (QSB_QMIX5-1)) != 0)
+#error "QSB_QMIX5 must be 0 or a power of two >= 2"
+#endif
+#if QSB_QMIX5 && (!QSB_GLV11 || QSB_QGLV5 || !QSB_PDEC_Z)
+#error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
+#endif
+#define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
 #ifndef QSB_BATCH
 #define QSB_BATCH 4194304    /* candidates per pipeline launch */
 #endif
@@ -433,7 +460,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 4           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
@@ -1185,6 +1212,80 @@ __device__ __forceinline__ void qsb_decode_glv_side_z(const uint64_t w[2],uint32
     }
 }
 #endif
+#if QSB_QMIX5
+#if !(QSB_GLV_ZDEC && QSB_SEED_GLUE && QSB_DIGIT_LEAN && QSB_FOUR_HOT && QSB_BIGTBL)
+#error "QSB_QMIX5 is written for the ZDEC decode with the register seed glue (QSB_GLV_GLUE bits 2 and 8)"
+#endif
+// BEGIN QSB_QMIX5_HOST_EXACT
+/* The signed radix step of q9_bigtbl_code_z / q11_radix_code_z / q9_bigtbl_seed_z for field A
+ * (shift sA, width bA, table offset oA) or, when q5, field B: u = the window of w top-aligned
+ * at the field's top bit, xs = -(top bit), return offset + idx. The same instructions as the
+ * base step with the window, the shift and the offset selected; fields ending at the same bit
+ * share the window, and those selects fold. */
+__host__ __device__ __forceinline__ uint32_t qsb_qmix5_radix(const uint32_t ws[4],bool q5,
+        unsigned sA,unsigned bA,uint32_t oA,unsigned sB,unsigned bB,uint32_t oB,
+        uint32_t *u_out,uint32_t *xs_out) {
+    const unsigned rA=sA+bA-32u,rB=sB+bB-32u;
+    const uint32_t lo=q5?ws[rB>>5]:ws[rA>>5],hi=q5?ws[(rB>>5)+1u]:ws[(rA>>5)+1u];
+    const unsigned rs=q5?(rB&31u):(rA&31u),sh=q5?32u-bB:32u-bA;
+    const uint32_t off=q5?oB-(1u<<(bB-1u)):oA-(1u<<(bA-1u));
+#ifdef __CUDA_ARCH__
+    uint32_t u,xs,v;
+    asm("{\n\t.reg .u32 t;\n\t"
+        "shf.r.clamp.b32 %0,%3,%4,%5;\n\t"
+        "shr.s32 %1,%0,31;\n\t"
+        "lop3.b32 t,%0,%1,0,0xC3;\n\t"          /* u ^ ~xs */
+        "shr.u32 t,t,%6;\n\t"
+        "add.u32 %2,t,%7;\n\t}"                 /* offset + idx */
+        : "=r"(u),"=r"(xs),"=r"(v) : "r"(lo),"r"(hi),"r"(rs),"r"(sh),"r"(off));
+#else
+    const uint32_t u=q9_funnel_r(lo,hi,rs);
+    const uint32_t xs=(uint32_t)((int32_t)u>>31);
+    const uint32_t v=((u^~xs)>>sh)+off;
+#endif
+    *u_out=u;*xs_out=xs;
+    return v;
+}
+/* Q's term 1 as the register seed (rec, ~msk) of q9_bigtbl_seed_z chunk 1: segment 1 (19 bits
+ * at shift 18), or segment 6 (27 bits at shift 18, the five-term decoder's term 1) when q5. */
+__host__ __device__ __forceinline__ void qsb_qmix5_seed1(const uint64_t w[2],bool q5,
+                                                         uint32_t *rec,uint32_t *msk) {
+    const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
+    uint32_t u;
+    *rec=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(1),19u,q9_bigtbl_offset(1),
+                         q9_bigtbl_shift(6),27u,q9_bigtbl_offset(6),&u,msk);
+}
+/* Slot 3's code: segment 3 (18 bits at shift 55), or segment 7 (28 bits at shift 45, the
+ * five-term decoder's term 2) when q5; q9_bigtbl_code_z's final sign step v ^ (~u & 2^31). */
+__host__ __device__ __forceinline__ uint32_t qsb_qmix5_code3(const uint64_t w[2],bool q5) {
+    const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
+    uint32_t u,xs;
+    const uint32_t v=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(3),18u,q9_bigtbl_offset(3),
+                                     q9_bigtbl_shift(7),28u,q9_bigtbl_offset(7),&u,&xs);
+#ifdef __CUDA_ARCH__
+    uint32_t code;
+    asm("lop3.b32 %0,%1,%2,0x80000000,0xD2;" : "=r"(code) : "r"(v),"r"(u));  /* v ^ (~u & 2^31) */
+    return code;
+#else
+    return v^(~u&0x80000000u);
+#endif
+}
+// END QSB_QMIX5_HOST_EXACT
+/* Q's decode (qsb_decode_glv_side_z<1> with the register seed glue), five-term in a QMIX5
+ * block (q5): terms 0, 1 in the seed registers, term t >= 2 in slot t+1 (segments 7, 4, 5 in
+ * slots 3, 4, 5), so the block's chain starts at term 1. Slots 4 and 5 are the same codes in
+ * both decoders; slot 2 (segment 2) is written as before and only the six-term chain reads it. */
+__device__ __forceinline__ void qsb_decode_q_qmix5(const uint64_t w[2],uint32_t top,uint32_t m32,
+        volatile uint32_t *codes,uint32_t *seed0,uint32_t *seed1,uint32_t *msk0,uint32_t *msk1,
+        bool q5) {
+    q9_bigtbl_seed_z(w,m32,0,seed0,msk0);
+    qsb_qmix5_seed1(w,q5,seed1,msk1);
+    codes[(size_t)2*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,2);
+    codes[(size_t)3*QSB_TREE_N+threadIdx.x]=qsb_qmix5_code3(w,q5);
+    codes[(size_t)4*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,4);
+    codes[(size_t)5*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,5);
+}
+#endif
 /* Materialize P=s1 then Q=s2 into their fixed planes; the accumulator consumes
  * the Q planes first. The bounded top digit is centered at333125, not a
  * power-of-two midpoint. Explicit specializations keep component selection
@@ -1217,7 +1318,9 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     qsb_decode_glv_side_z<0>(w[0],top[0],m[0],codes,seed0,seed1);
 #endif
     }
-#if QSB_SEED_GLUE
+#if QSB_QMIX5
+    qsb_decode_q_qmix5(w[1],top[1],m[1],codes,seed0,seed1,msk0,msk1,QSB_QMIX5_SEL());
+#elif QSB_SEED_GLUE
     qsb_decode_glv_side_z<1>(w[1],top[1],m[1],codes,seed0,seed1,msk0,msk1);
 #else
     qsb_decode_glv_side_z<1>(w[1],top[1],m[1],codes,seed0,seed1);
@@ -1753,7 +1856,16 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     }
 #endif
     uint64_t x0[4],y0[4],x1[4],y1[4];
+#if QSB_QMIX5
+#if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP || !QSB_GLV_SEED_REG
+#error "QSB_QMIX5 runs the one-addition piped chain with register seeds (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
+#endif
+    /* A QMIX5 block's five Q terms are in slots 1..5 (seeds in registers): its chain starts at
+     * term 1, so it runs one trip fewer and phi still runs before term GT_Q_TERMS. */
+    int first=(nonzero&1u)?(QSB_QMIX5_SEL()?1:0):GT_Q_TERMS;
+#else
     int first=(nonzero&1u)?0:GT_Q_TERMS;
+#endif
 #if QSB_PMIX12
 #if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP
 #error "QSB_PMIX12 runs the one-addition piped chain (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
@@ -2485,6 +2597,12 @@ __device__ __forceinline__ void _SHA256TransformPubkey33(
 }
 
 #include "sha_pinsha.cuh"
+#if QSB_SHA_LEA
+/* tail-block transforms: the QSB_RLM round form (keeps the W1 terms on the uniform datapath) */
+#pragma push_macro("QSB_RL")
+#undef QSB_RL
+#define QSB_RL(a, b, c, d, e, f, g, h, kw) QSB_RLM(a, b, c, d, e, f, g, h, kw)
+#endif
 
 /* QSB_SHA_OPT tail transform: _SHA256TransformFastTail11P with literal K, round 1
  * rewritten with the host constants v2y/c2y/mx (Maj and Ch of constant midstate words
@@ -2528,18 +2646,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11Q(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3: e+K3 precomputed */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {
         w[0] += s0(w[1]);
@@ -2622,18 +2740,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {
         w[0] = lane + QSB_UB(u0 + s0(w[1]));   /* W16 = W0 + s0(W1) */
@@ -2712,18 +2830,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11S(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {   /* W16..W31: the W1-only terms come from shared memory */
         w[0] += sa.y;          /* s0(W1) */
@@ -2805,18 +2923,18 @@ __device__ __forceinline__ void _SHA256TransformFastTail11ST(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
 
     {   /* W16..W31: the W1-only terms come from shared memory */
         w[0] += sa.y;          /* s0(W1) */
@@ -2867,6 +2985,9 @@ __device__ __forceinline__ void _SHA256TransformFastTail11ST(
     state[6] = tp.mid[6] + g;
     state[7] = tp.mid[7] + h;
 }
+#if QSB_SHA_LEA
+#pragma pop_macro("QSB_RL")
+#endif
 
 /* ============================================================
  * Kernel: searches locktime range for a fixed sequence value
@@ -6578,3 +6699,6 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+
+// Yukon reuse package v1; original inventory SHA-256: 173430ad08bace9b695e20836f73d38a1dc289dac7ecd5b2c0dbe3f5e042f381
