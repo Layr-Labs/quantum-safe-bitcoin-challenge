@@ -438,9 +438,16 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
 #if QSB_GLV_HIGH15_HI
     /* Only the carry into diagonal11 is observed. Retain each product's
      * high32 and bound the omitted sum of five low32 halves separately. */
+#if QSB_GLV_RND_FOLD && QSB_GLV_RND == 2
+    /* QSB_GLV_RND_FOLD: the + 2^31 below as the sum's sixth term (three three-input adds). */
+    carry=((uint64_t)__umulhi(a3,b7)+(uint64_t)__umulhi(a4,b6)+(uint64_t)0x80000000U)
+         +((uint64_t)__umulhi(a5,b5)+(uint64_t)__umulhi(a6,b4))
+         +(uint64_t)__umulhi(a7,b3);
+#else
     carry=(uint64_t)__umulhi(a3,b7)+(uint64_t)__umulhi(a4,b6)
          +(uint64_t)__umulhi(a5,b5)+(uint64_t)__umulhi(a6,b4)
          +(uint64_t)__umulhi(a7,b3);
+#endif
 #else
     /* Diagonal 10: (3,7)..(7,3). A 64-bit sum is insufficient for five
      * products, so overflow counts its lost 2^64 units explicitly. */
@@ -451,7 +458,7 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w10=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
 
 #endif
-#if QSB_GLV_RND == 2
+#if QSB_GLV_RND == 2 && !(QSB_GLV_RND_FOLD && QSB_GLV_HIGH15_HI)
     carry+=0x80000000ULL;   /* + 2^383: diagonal 11 now accumulates w11 + 2^31 */
 #endif
 
@@ -475,7 +482,19 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
-#if QSB_GLV_RND == 2
+#if QSB_GLV_RND == 2 && QSB_GLV_UNI && defined(__CUDA_ARCH__)
+    /* QSB_GLV_UNI: the rare fallback as a warp-uniform branch; every lane of the warp computes the exact
+     * coefficient when any lane needs it and only those lanes take it, so each lane's value is unchanged. */
+    const bool glv_slow = !(w11<0x80000000U+FALLBACK_WORD);
+    out[0]=(uint64_t)w12|((uint64_t)w13<<32);
+    out[1]=(uint64_t)w14|((uint64_t)w15<<32);
+    if(__builtin_expect(__any_sync(0xffffffffu,glv_slow),0)){
+        ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
+        if(glv_slow){out[0]=r.x;out[1]=r.y;}
+    }
+    return;
+    {
+#elif QSB_GLV_RND == 2
     /* w11 here is w11 + 2^31 mod 2^32 and w12..w15 already carry the rounding bit. */
     if(__builtin_expect(w11<0x80000000U+FALLBACK_WORD,1)){
         out[0]=(uint64_t)w12|((uint64_t)w13<<32);
