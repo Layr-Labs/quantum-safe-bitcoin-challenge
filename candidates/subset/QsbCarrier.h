@@ -226,6 +226,23 @@ static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, c
     return qsb_carrier_launch_impl<P...>(kid, g, b, st, std::index_sequence_for<P...>{},
                                          std::forward<A>(a)...);
 }
+
+template <typename... P, typename... A, size_t... I>
+static cudaError_t qsb_carrier_launch_smem_impl(int kid, dim3 g, dim3 b, cudaStream_t st,
+                                                size_t dynamic_smem,
+                                                std::index_sequence<I...>, A &&...a) {
+    std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
+    void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
+    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, dynamic_smem, st);
+}
+template <typename... P, typename... A>
+static cudaError_t qsb_carrier_launch_smem(void (*)(P...), int kid, dim3 g, dim3 b,
+                                           cudaStream_t st, size_t dynamic_smem, A &&...a) {
+    static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
+    return qsb_carrier_launch_smem_impl<P...>(kid, g, b, st, dynamic_smem,
+                                              std::index_sequence_for<P...>{},
+                                              std::forward<A>(a)...);
+}
 /* Try the carrier launch; on failure switch the carrier off (the caller then issues
  * the <<<>>> launch of the same kernel). Returns true when the carrier launched it. */
 template <typename... P, typename... A>
@@ -233,6 +250,19 @@ static bool qsb_carrier_try(void (*kern)(P...), int kid, dim3 g, dim3 b, cudaStr
                             A &&...a) {
     if (!qsb_carrier_has(kid)) return false;
     cudaError_t e = qsb_carrier_launch(kern, kid, g, b, st, std::forward<A>(a)...);
+    if (e == cudaSuccess) return true;
+    char why[160];
+    snprintf(why, sizeof(why), "launch failed: %s", cudaGetErrorString(e));
+    qsb_carrier_off(why);
+    return false;
+}
+
+template <typename... P, typename... A>
+static bool qsb_carrier_try_smem(void (*kern)(P...), int kid, dim3 g, dim3 b,
+                                 cudaStream_t st, size_t dynamic_smem, A &&...a) {
+    if (!qsb_carrier_has(kid)) return false;
+    cudaError_t e = qsb_carrier_launch_smem(kern, kid, g, b, st, dynamic_smem,
+                                            std::forward<A>(a)...);
     if (e == cudaSuccess) return true;
     char why[160];
     snprintf(why, sizeof(why), "launch failed: %s", cudaGetErrorString(e));

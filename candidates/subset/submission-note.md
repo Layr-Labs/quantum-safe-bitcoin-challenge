@@ -1,95 +1,76 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset: a capacity-normalized 512-thread packed inverse tree on the current frontier
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+## Scope and baseline
 
-## Summary
+This experiment starts from the public promoted source `ff27a2b66990a3eb554a1d4453e896c0397337ba` in `Layr-Labs/quantum-safe-bitcoin-challenge`. The Subset benchmark reported 728,337,167 verified candidates per second at preparation time, with a 100-basis-point promotion requirement. The corresponding integer threshold is 735,620,539. These are the organizer's baseline values, not measurements of this candidate.
 
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
+The change is limited to the digest launch geometry, the storage dimensions needed by that geometry, and passing dynamic shared-memory bytes to the existing native-image and fallback launch paths. The curve formulas, GLV decomposition, preimage construction, hash functions, hit publication and exact host verification remain inherited. The protected benchmark harness and the Pinning track are not changed.
 
-## The change
+Our previous official submission `8fb50b42-214e-4055-97d2-9de8eab5ccb1`, PR #2326, scored 704,258,243 and was rejected without promotion. It is not resubmitted. An earlier unsubmitted 512-thread reserve was based on `8d07d3ebad41a017dfaa5906b164f883a9b59348`; copying that entire reserve would discard substantial later work. This version instead ports the small geometry mechanism onto the current promoted source, retaining its vector parking, wave-top inverse, scheduling changes and CPU co-grinder.
 
-In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
+## Mechanism and tradeoff
 
-- **Ranges:** with `QSB_CPU_EPOCH_CONTIG` 1, worker t walks [base + t·span, base + (t+1)·span). Here span is the epoch space above the diagnostic base divided among the workers: about 2.6e8 epochs each at 32 workers (this package has no diagnostic base), against about 2.6e7 walked in 1,200 s.
-- **Prefix re-hash:** in lexicographic order, consecutive epochs differ in the last omission. I replayed both walks on this problem's prefix. The re-hash drops from about 6.1 SHA-256 blocks per epoch at stride 32 to about 3.4.
-- **No unrank:** the next epoch's omissions come from the previous epoch's by the usual next-combination step. The unrank runs only at the start of each range.
-- **Disjointness:** the ranges are disjoint, and the co-grinder's patterns (`QSB_CPU_PREFIX100`) stay the complement subset they are in `e6715658`. So no candidate is walked twice, and every hit still passes the exact OpenSSL gate.
-- **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
-- **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
+The promoted launch has 256 threads in each digest block and a two-block launch-bounds target. This experiment uses 512 threads and a one-block target. A larger group can share one root inversion across twice as many thread inputs. It also adds a tree level and couples more warps to one block-wide synchronization domain. The expected benefit is therefore only a hypothesis: the saved root work may outweigh extra tree work, or the reduced block-level scheduling flexibility may lose.
 
-## Ranked draws of this exact package
+No speedup is inferred from occupancy arithmetic alone. With a sufficiently small register footprint, two 256-thread blocks and one 512-thread block both represent 16 resident warps. The 512-thread case must still pass the actual compiler's resource checks and the organizer's timed RTX 4090 run. The existing choice of a warp-uniform Q layout is preserved; this patch does not retune those formulas or claim their authorship.
 
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
+## Capacity stays fixed
 
-- **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
-- **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
-- **Walk:** `e6715658` has no diagnostic base (the smallest co-grinder hit is at epoch 53,476), so the 32 ranges start at t·C(137,6)/32.
+`QSB_SE_WINDOWS` stays 128. The paired layout defines the number of epochs per block as twice `QSB_SE_BLOCK / QSB_SE_WINDOWS`. That value changes from 4 to 8. Leaving the old grid capacity unchanged would double the epoch buffers and change the batch working set, making the comparison confounded and potentially exceeding practical memory limits.
 
-## Ranked evidence (same change on terrapinelf's `a33e04c3` co-grinder with 100 patterns)
+The grid capacity is consequently normalized as `(ZLAB_LAUNCH_BLOCKS * 256) / QSB_SE_BLOCK`. At the promoted value of 262,144, the new grid has 131,072 blocks. Both configurations retain 1,048,576 epochs and 134,217,728 paired candidates per full batch. Allocations expressed in terms of launch blocks times the paired-epoch multiplier retain their promoted capacity. The program still handles short batches and odd epoch tails; no candidate subset is removed to inflate a rate.
 
-| draw | total | GPU (hits) | co-grinder (hits) | co-grinder work, luck-free |
-|---|---:|---:|---:|---:|
-| `56b4b1f9` | 704.73 | 640.61 | 64.12 | 64.96 |
-| `30c24617` | 714.02 | 649.29 | 64.73 | 64.91 |
-| `7e55c5c2` | 709.13 | 644.00 | 65.14 | 64.86 |
+## Shared-memory layout and launch plumbing
 
-- **Walk:** on all three draws the hits show 32 workers, each about 2.4e7 epochs into its range (±2%, no range exhausted), on the 9-window table (diagnostic code 6).
-- **Luck-free rate:** 32 × about 2.43e7 epochs × 100 patterns / 1,201.9 s. It reproduces to about 0.1% between the draws, while the hit counts scatter by Poisson around it.
+The packed inverse tree needs space for two times the block size in each of four product rows and one times the block size in each of four inverse rows. Its arrays now derive these dimensions from `QSB_SE_BLOCK` instead of fixed 512-column and 256-column constants. For 512 threads this accounts for 49,152 bytes of static shared memory.
 
-## Checks done here
+The current frontier's `QSB_PARK128` optimization is retained. Candidate A's twelve 64-bit values are still stored as six 128-bit vector rows. The parking region is moved to explicitly 16-byte-aligned dynamic shared memory, with a pointer whose row width is `QSB_SE_BLOCK`. At 512 threads it occupies another 49,152 bytes, for 98,304 bytes total per block before the hardware's reserved space.
 
-All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's toolkit.
+NVIDIA's Ada tuning guide documents a 100 KiB shared-memory capacity per SM, a 99 KiB per-block addressable limit, and a 48 KiB static-allocation limit. It also documents the dynamic-allocation opt-in. The source uses `cudaFuncAttributeMaxDynamicSharedMemorySize` on the actual native-image kernel and on the compute_52 fallback kernel, and retains the maximum-shared carveout preference. Failure to establish the required fallback opt-in exits rather than silently launching with an invalid storage contract. This is an architecture-specific experiment for the advertised runner, not a portability claim for every GPU.
 
-- **Emulation harness:** the co-grinder ran under `qemu-x86_64 -cpu max` (SHA-NI + scalar EC) in a CPU-only harness with tree.cu's loader and 128-pattern rule.
-- **Settings:** `QSB_ZEROS_N=12`, 40 s per run.
-- **Reference:** each run was compared against a brute-force `qsb_hv_check` oracle on the kept 100 patterns.
+Official reference: https://docs.nvidia.com/cuda/archive/12.9.1/ada-tuning-guide/index.html
 
-| check | result |
-|---|---|
-| `build_carrier.sh 24` | cubin sha256 `e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea`, 473,376 bytes, byte-identical to `e6715658`'s; 0 spills. Only the informational source hash in the header changes |
-| the harness's build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) | builds with no errors |
-| image `qsb_carrier_knobs` against the host binary's `QSB_CARRIER_KNOBS` | byte-identical (2,534 bytes), so the native image loads |
-| next-combination step against the binomial unrank, 20,000,000 consecutive epochs from 400 starts | 0 mismatches; carries at every index 0..5 exercised |
-| 1 thread | all hits over epochs < 4,096 match the oracle (199 = 199), 0 missing, 0 extra, 0 duplicates |
-| 4 threads, ranges capped to 4 × 1,024 epochs (`-DQSB_CPU_EPOCH_CAP=4096`) | every worker stops at its range end: exactly 409,600 candidates, 199 = 199 hits |
-| 4 threads, full ranges | epochs < 4,096 (worker 0): exact. Worker 2's first 2,048 epochs (from 4,109,236,362): 87 = 87 against a separate oracle run. 0 duplicates |
-| `e6715658` unchanged, same harness | exact (the reference walk) |
+The carrier gets a separate typed launch helper that forwards the requested dynamic byte count to `cudaLaunchKernel`. The existing zero-dynamic helper remains available for other kernels. Every digest triple-chevron launch also passes the byte count, including non-ranked fallback call sites. Tuple-based parameter conversion is preserved. The native-image fingerprint already includes `QSB_SE_BLOCK`, and the image must be rebuilt from the final device sources before submission.
 
-Emulated timings say nothing about Zen 4, so I did not measure speed here.
+Fixed-256 optional paths that have not been ported are rejected at compile time for this geometry: legacy heap trees, shared root LUT, pre3-in-root, the explicitly unrolled 256-thread tree, Q-spread, and the fixed-stride tail weave. The shipped configuration uses none of those options. A failed build is preferable to claiming unsupported combinations are safe.
 
-## Kill switch
+## Reproducible CPU checks and their limits
 
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
+The qualification script has eight test groups. Sixty deterministic randomized packed-wave-tree cases cover block sizes 32, 64, 128, 256 and 512. Twenty-five further cases cover identity padding and boundary field values. The model tracks every shared-arena read and write, rejecting out-of-range access and reading a value before it is initialized. Every modeled leaf inverse is compared with Python's independent modular inverse over the secp256k1 field.
 
-## Reproducing
+This is an exact-field model of the indexing and tree association. It is not an execution of the compiled CUDA arithmetic and does not prove the inherited speculative short-carry path's behavior. That distinction matters: a passing model checks the geometry port, while the unchanged exact host gate and the official verifier still determine whether GPU-produced hits are valid.
 
-```
-./setup.sh subset
-./benchmark.sh subset
-```
+The paired-epoch model checks 79 batch sizes at both geometries, including odd counts and boundaries around 128, 256, 512, 1024 and 2048. It rejects duplicate `(epoch, lane)` pairs and checks that exactly `epochs * 128` candidate positions are covered. Separate checks verify full-batch capacity, shared-memory sizing, vector alignment, every digest launch's dynamic byte argument, and preservation of selected promoted feature switches.
 
-To read the co-grinder's rate without hit noise from a ranked run:
+Executed locally: `python3 qualification/test_invariants.py` passed all eight groups. `python3 -m unittest -v harness.test_gpu_wrap` passed all six existing tests. `bash setup.sh subset` generated the organizer's synthetic seed-zero problem and passed its CPU verifier smoke test. `git diff --check` passed. These are actual executed checks, not proposed tests. No GPU is present on the preparation host, so none is described as a GPU benchmark.
 
-1. Take the co-grinder hits: the patterns outside the 128 most frequent `skip[6:9]`.
-2. Take each hit's lexicographic epoch rank of the first six skip indices.
-3. Group the hits into the 32 ranges; range t starts at base + t·(C(137,6) − base)/32, with base = the smallest rank with its low 19 bits cleared (0 for this package).
-4. Sum each range's last rank minus its start, × 100 patterns / `elapsed_s`.
+## Compiler qualification and first infrastructure failure
 
-## Base and attribution
+The isolated public fork qualification uses `nvidia/cuda:12.8.1-devel-ubuntu22.04`, matching the 12.8 compiler family required by the native-image build script. It builds both the exact promoted control and the candidate with the same commands. For each arm it preserves the native cubin, generated carrier header, SASS, ptxas resource report, full host-build stderr and file hashes.
 
-- **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
-- **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
-- **Mine:**
-  - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.
-  - Earlier: the block-0 pattern selection that `QSB_CPU_PREFIX100` follows (`4a197f06`).
+The first qualification run, 36708839406, passed the eight synthetic and six harness tests on Linux but stopped before compilation. Git was missing when `actions/checkout` ran, so checkout used its archive fallback and a subsequent `git diff` had no repository. The workflow was corrected to install Git before checkout. No benchmark check or candidate test was disabled to make this infrastructure failure pass.
 
-All inherited source, GPLv3 notices and attributions are kept. Only `candidates/subset/` changes.
+A second infrastructure attempt, run 36709129842, had a real Git checkout, but its temporary checkout trust configuration did not persist into the next shell. Both CPU suites passed again before Git discovery failed. The final workflow explicitly trusts only the current workspace and verifies that it is a Git checkout before continuing. The complete corrected qualification, run 36709417150, succeeded. Neither failure was a CUDA compilation or benchmark-result failure; no check was skipped to obtain success.
+
+## Attribution and interpretation
+
+The base's curve arithmetic, packed inverse design, wave-top transformation, vector parking, CPU grinder, native carrier and all retained optimization switches belong to their existing authors. Ryun1's credited native-carrier implementation and its GPL notices are preserved. This patch claims only the explicit 512-thread storage/launch adaptation and capacity normalization on this frontier, including preserving the newer vector-parking representation rather than reverting it.
+
+The test model, launch argument audit, compiler comparison and immutable hashes make the submitted change inspectable. They do not guarantee acceptance, a promotion, or payment. Only a fresh verified official score meeting the then-current promotion requirement can establish a performance improvement. Taskmarket's advertised reward is a shared pool with separate eligibility conditions; no part of that pool is recorded as earned by this preparation work.
+
+
+## Completed qualification evidence
+
+Qualification commit: `c867b0975c4f0bfcbc2dfbc00460843c8531e7d3` in the existing solver fork.
+
+Public run: https://github.com/williamleewilliam1-star/quantum-safe-bitcoin-challenge/actions/runs/36709417150
+
+CUDA 12.8 compiled both the exact promoted control and the new candidate as native sm_89 carriers and as complete executables using the official-style no-architecture build line. The native and full-build digest resource reports are identical across the arms: 128 registers, zero stack frame bytes, zero spill stores, zero spill loads, and 49,152 bytes of static shared memory. The new candidate additionally requests its 49,152 dynamic bytes at each digest launch. No measured GPU throughput is available from this CPU-only compiler job.
+
+The generated candidate image is 473,696 bytes. Its SHA-256 is `a5aede8d7ec39b70230a6efb4235999e116c73b1163b2a63745a5dcd289fe233`. The build-script source fingerprint is `1c69d4bd6b4a166ea53e5bc2d6fc84a957cf19cb9128cda01fc22c5726b36fa4`. The generated header SHA-256 is `be31b7c70675f1bdad561412e3c7b5614dc8966ca0f9645a5132de6e73a6ca5a`.
+
+The downloaded header was independently decoded and compared byte for byte with the compiler's raw cubin. Its image length and SHA-256 matched. The build-script source fingerprint was independently recomputed over the current .cu/.cuh/.h inputs in the same path order and matched. The generated header itself is excluded from that fingerprint, exactly as in build_carrier.sh. Documentation, the Python invariant script and the manifest do not alter the compiled source inputs.
+
+The final archive includes `block512_invariants.py` under the editable candidate directory. From the repository root, run `python3 candidates/subset/block512_invariants.py`. This is the same qualification model with only its repository-root resolution adjusted for its packaged location. The existing harness can be checked with `python3 -m unittest -v harness.test_gpu_wrap`. Rebuilding the native image uses `cd candidates/subset && bash build_carrier.sh 24` with CUDA 12.8 and OpenSSL development headers available.
+
+A fresh authenticated preflight after qualification again reported the same 728,337,167 baseline, the same `ff27a2b` source and no active own submission. The available evidence supports sending this newly compiled geometry experiment for official validation, not asserting a record in advance. No claimed local score is supplied. The next scientific result is the organizer's actual GPU verification and timing of this exact artifact.

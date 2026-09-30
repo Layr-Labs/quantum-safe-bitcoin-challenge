@@ -2,7 +2,8 @@
 // This restores the audited earlier tree layout, retaining current root-entry
 // warp synchronization. The extra 8 KiB removes destructive-read barriers.
 // One work-efficient binary product tree per block. The caller supplies
-// a power-of-two block size at most 256 and identity factors for inactive lanes.
+// a power-of-two block size and identity factors for inactive lanes.
+// The packed tree supports up to QSB_SE_BLOCK; legacy heap variants remain <=256.
 #pragma once
 #ifndef QSB_ISO_FUSED_ROOT_SCALE
 #define QSB_ISO_FUSED_ROOT_SCALE 1
@@ -46,6 +47,9 @@ __device__ __noinline__ void qsb_iso_scale_tree_inverse(uint64_t *value){
 #define QSB_ISO_SCALE_ROOT(value) qsb_iso_scale_tree_inverse(value)
 #else
 #define QSB_ISO_SCALE_ROOT(value) ((void)0)
+#endif
+#if QSB_SE_BLOCK > 256 && (ZLAB_TREE != 2 || QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_TREE_UNROLL || QSB_Q_SPREAD || QSB_TAIL_WEAVE)
+#error "block512 is qualified only for the generic packed tree without fixed-256 optional paths"
 #endif
 #if ZLAB_TREE == 0
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
@@ -179,7 +183,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #define QSB_SC_PARK 1   /* 1 = the product arena is a file-scope array that kernel_digest also uses to park prodA across B's front call; on with QSB_Y_PAIR=1, 0 = the record's arena */
 #endif
 #if QSB_SC_PARK
-__shared__ uint64_t qsb_sc_products[4][512];
+__shared__ uint64_t qsb_sc_products[4][2*QSB_SE_BLOCK];
 #endif
 #if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
 /*. LUT_ISSUED (QSB_ROOT_LUT_SMEM): 1 = the caller already issued qsb_root_lut_issue (kernel_digest
@@ -198,12 +202,12 @@ __device__ __forceinline__ void qsb_block_inverse_tree_x(uint64_t *value,const I
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
 #if QSB_SC_PARK
-    uint64_t (&products)[4][512] = qsb_sc_products;
+    uint64_t (&products)[4][2*QSB_SE_BLOCK] = qsb_sc_products;
 #else
-    __shared__ uint64_t products[4][512];
+    __shared__ uint64_t products[4][2*QSB_SE_BLOCK];
 #endif
 #if !QSB_ROOT_LUT_SMEM
-    __shared__ uint64_t inverses[4][256];
+    __shared__ uint64_t inverses[4][QSB_SE_BLOCK];
 #endif
 #if QSB_TREE_UNROLL
     static_assert(QSB_SE_BLOCK==256,"QSB_TREE_UNROLL (tree.cu): the tree is written out for 256-thread kernel_digest blocks");
