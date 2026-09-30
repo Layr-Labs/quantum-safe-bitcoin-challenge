@@ -275,6 +275,12 @@ ZI_DEV int32_t zi_divstep30_by(int32_t delta,uint32_t f,uint32_t g,
 #ifndef QSB_INVERSE_COLUMNS
 #define QSB_INVERSE_COLUMNS 1
 #endif
+#ifndef QSB_DIVSTEP_NOSWAP
+#define QSB_DIVSTEP_NOSWAP 1
+#endif
+#if QSB_DIVSTEP_NOSWAP != 0 && QSB_DIVSTEP_NOSWAP != 1
+#error "QSB_DIVSTEP_NOSWAP must be 0 or 1"
+#endif
 /* M <- D*M is independent by column. Lanes 0/1 keep column zero,
  * lanes 2/3 column one, cutting four matrix multiplies per six-step group.
  * Each lane selects its row before two shuffles reconstruct (ka,kb).
@@ -286,6 +292,24 @@ ZI_DEV int32_t zi_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
     for(int k=0;k<5;k++){
         const int32_t dc=delta<-6?-6:(delta>6?6:delta);
         const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
+#if QSB_DIVSTEP_NOSWAP
+        /* The no-swap entries have c = (64-ratio)&63 < 2^z,
+         * z = clamp(1-delta,0,6). At delta <= -5 every ratio qualifies;
+         * at delta >= 1 only ratio zero qualifies. Exhaustively checked
+         * against all 832 entries (196 qualify). The exact matrix is
+         * [64,0; (64-ratio)&63,1] and delta increases by six. All four
+         * root lanes share delta/f/g, so this branch is uniform.
+         * Keep the base's uint32 truncation BEFORE the six-bit shift. */
+        const uint32_t z=(uint32_t)(dc<-5?6:(dc>0?0:1-dc));
+        const uint32_t fast_c=(64u-ratio)&63u;
+        if(fast_c<(1u<<z)){
+            g=(fast_c*f+g)>>6; f=(f<<6)>>6;
+            q=(int32_t)(fast_c*(uint32_t)u+(uint32_t)q);
+            u=(int32_t)((uint32_t)u<<6);
+            delta+=6;
+            continue;
+        }
+#endif
         const uint64_t packed=ZI_LUT(((uint32_t)(dc+6)<<6)|ratio);   /* QSB_ROOT_LUT_SMEM */
         const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
         const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
