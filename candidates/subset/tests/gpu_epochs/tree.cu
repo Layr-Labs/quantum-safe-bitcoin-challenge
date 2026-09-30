@@ -545,7 +545,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 4
+#define QSB_Q_MIX 2
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
