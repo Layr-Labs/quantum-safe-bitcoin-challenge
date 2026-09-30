@@ -220,6 +220,25 @@ __device__ __forceinline__ void qsb_parity_window_words_narrow(
 
 #endif
 
+#if QSB_PW_RARE == 1 && QSB_K2S_PARITY_NARROW
+/* QSB_PW_RARE: the original 27-product decision and its speculative fallback, out of line (by value). When the
+ * narrow guard passes, the 27-product guard passes too and gives the same bit (see below), so a warp in which any
+ * lane fails the narrow guard can run this for all its lanes: same parity on every lane, warp-uniform branch. */
+__device__ __noinline__ uint32_t qsb_parity_rare(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
+    uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,uint32_t neg){
+    const uint64_t a[4]={a0,a1,a2,a3}, b[4]={b0,b1,b2,b3}, beta[4]={c0,c1,c2,c3};
+    uint64_t mid,top;
+    qsb_parity_window_words(mid,top,a,b);
+    const uint32_t x7=(uint32_t)mid;
+    const uint64_t q=top+977ULL*(top>>32)+x7+(beta[3]>>32);
+    if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u)
+        return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(q>>32)^neg)&1u);
+    uint64_t raw[4];
+    qsb_fmul(raw,a,b);
+    qsb_fadd(raw,raw,beta);
+    return (uint32_t)((raw[0]^neg)&1u);
+}
+#endif
 __device__ __forceinline__ uint32_t qsb_parity_product_window(
     const uint64_t *a, const uint64_t *b, const uint64_t *beta, uint32_t neg) {
     uint64_t mid,top;
@@ -249,8 +268,30 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
      * omission changes the high accumulator by at most 3. Including a
      * possible high-word carry gives |Q_old-Q_new|<=986. These stronger
      * guards imply the original fast-path guards and preserve its bit 32. */
+#if defined(QSB_OC_PW_Q33) && QSB_OC_PW_Q33 && QSB_PW_RARE == 0
+    /* QSB_OC_PW_Q33 (tree.cu): the same u64 qn = top + 977*th + xn + b3h (mod 2^64; th = top>>32, b3h = beta[3]>>32),
+     * with 977*th as an explicit mul.wide.u32 (a 32x32 -> 64 product) and xn + b3h summed first as a 33-bit value, so
+     * ptxas forms no 64-bit product of a zero-extended word (it added that zero high word from a uniform register).
+     * Every bit of qn is the base's, so the guard, the parity bit and the fallback choice are bit-identical. */
+    {
+        uint64_t p977;
+        asm("mul.wide.u32 %0, %1, 977;" : "=l"(p977) : "r"((uint32_t)(top>>32)));
+        const uint64_t qq=(top+p977)+((uint64_t)xn+(uint64_t)(uint32_t)(beta[3]>>32));
+        if(xn<0xfffffff9u && (uint32_t)qq<0xfffff47fu)
+            return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(qq>>32)^neg)&1u);
+    }
+#elif QSB_PW_RARE == 1
+    if(__all_sync(__activemask(), xn<0xfffffff9u && (uint32_t)qn<0xfffff47fu))
+        return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(qn>>32)^neg)&1u);
+    return qsb_parity_rare(a[0],a[1],a[2],a[3],b[0],b[1],b[2],b[3],beta[0],beta[1],beta[2],beta[3],neg);
+#elif QSB_PW_RARE == 2
+    /* warp vote only: the whole warp takes the original 27-product path below when any lane fails the narrow guard */
+    if(__all_sync(__activemask(), xn<0xfffffff9u && (uint32_t)qn<0xfffff47fu))
+        return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(qn>>32)^neg)&1u);
+#else
     if(xn<0xfffffff9u && (uint32_t)qn<0xfffff47fu)
         return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(qn>>32)^neg)&1u);
+#endif
     /* On a narrow rejection, execute the original 27-product decision and
      * original speculative fallback. This preserves the old result even on
      * directed operands where that fallback differs from exact field math. */
