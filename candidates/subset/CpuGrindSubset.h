@@ -2992,6 +2992,11 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 #ifndef QSB_CPU_EPOCH_CONTIG
 #define QSB_CPU_EPOCH_CONTIG 1      /* worker t walks a contiguous epoch range (fewer prefix blocks re-hashed per epoch, no unrank); 0 = epochs t, t+T, ... */
 #endif
+/* Independent implementation from meryl96sushna-eng's PR2484 public mechanism description.
+ * Consecutive epochs changing only their last omission replace one kept record, not the suffix. */
+#ifndef QSB_CPU_PREFIX_RECORD
+#define QSB_CPU_PREFIX_RECORD 1
+#endif
 #ifndef QSB_CPU_EPOCH_CAP
 #define QSB_CPU_EPOCH_CAP (~0ull)   /* at most this many epochs above the base are shared out by the contiguous ranges (tests set it small) */
 #endif
@@ -3121,15 +3126,28 @@ static void worker(Ctx *c, int tid) {
                     pv_epoch = epoch;
                     const size_t prl = dp->prefix_remainder_len;
                     size_t from = 0, pl = 0; int e2 = 0, i0 = 0;
-                    if (pv_ok) {
-                        int e = 0; while (e < c->early && early[e] == pv_early[e]) e++;
-                        const int lo = e < c->early ? (early[e] < pv_early[e] ? early[e] : pv_early[e]) : c->cut;
-                        from = prl + (size_t)(lo - e) * SIG_PUSH_SIZE;   /* the kept pushes below push lo are unchanged */
-                        i0 = lo; e2 = e; pl = (size_t)(lo - e) * SIG_PUSH_SIZE;   /* early[0..e-1] < lo: rebuild from push lo on */
-                    }
-                    for (int i = i0; i < c->cut; i++) {
-                        if (e2 < c->early && early[e2] == i) { e2++; continue; }
-                        memcpy(&pfx[prl + pl], dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pl += SIG_PUSH_SIZE;
+#if QSB_CPU_PREFIX_RECORD
+                    if (c->early > 0 && su == c->early - 1) {
+                        /* su came from a checked consecutive successor. Old omission x advances to x+1;
+                         * the old stream kept x+1 at offset x-(early-1), and the new stream keeps x there.
+                         * Every later retained record and the logical prefix length are unchanged. */
+                        const int x = pv_early[c->early - 1];
+                        from = prl + (size_t)(x - (c->early - 1)) * SIG_PUSH_SIZE;
+                        memcpy(&pfx[from], dp->dummy_sigs + (size_t)x * SIG_PUSH_SIZE, SIG_PUSH_SIZE);
+                        pl = (size_t)(c->cut - c->early) * SIG_PUSH_SIZE;
+                    } else
+#endif
+                    {
+                        if (pv_ok) {
+                            int e = 0; while (e < c->early && early[e] == pv_early[e]) e++;
+                            const int lo = e < c->early ? (early[e] < pv_early[e] ? early[e] : pv_early[e]) : c->cut;
+                            from = prl + (size_t)(lo - e) * SIG_PUSH_SIZE;   /* the kept pushes below push lo are unchanged */
+                            i0 = lo; e2 = e; pl = (size_t)(lo - e) * SIG_PUSH_SIZE;   /* early[0..e-1] < lo: rebuild from push lo on */
+                        }
+                        for (int i = i0; i < c->cut; i++) {
+                            if (e2 < c->early && early[e2] == i) { e2++; continue; }
+                            memcpy(&pfx[prl + pl], dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pl += SIG_PUSH_SIZE;
+                        }
                     }
                     const size_t lp = prl + pl, nfull = lp / 64;
                     SHA256_CTX pc;
