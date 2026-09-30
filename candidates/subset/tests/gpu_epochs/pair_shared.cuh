@@ -24,7 +24,7 @@
  * qsb_pair_finish3_value, qsb_pair_weave3_value read QSB_U2R from the constant bank; the front keeps its
  * ABI). QSB_R_TAIL_CBANK is the callee-side test, QSB_R_PASS_TAIL the caller-side argument list. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1   /* oc 09-30: on (bit-identical constant-bank R in the tails) */
 #endif
 #define QSB_R_TAIL_CBANK (QSB_R_CBANK || QSB_R_CBANK_TAILS)
 #if QSB_R_TAIL_CBANK
@@ -101,7 +101,10 @@ __device__ __forceinline__ void qsb_k2s_pre3(
 ) {
     uint64_t yb[4];
     QSB_PRE_FMUL(yb, yR, ZZZ);
-#if QSB_YNEG_FOLD
+#if QSB_YNEG_FOLD && QSB_FRONT_K32
+    qsb_fadd_k32(n, yb, Y);
+    qsb_fsub_k32(n + 4, yb, Y);
+#elif QSB_YNEG_FOLD
     /* QSB_YNEG_FOLD (tree.cu): the filter chain hands back s = -Y, so n1 = yb - Y = yb + s, n2 = yb + Y = yb - s. */
     QSB_PRE_FADD(n, yb, Y);
     QSB_PRE_FSUB(n + 4, yb, Y);
@@ -127,10 +130,17 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
             "subc.u64 %3, 0xFFFFFFFFFFFFFFFF, %7;"
             : "=l"(t[0]),"=l"(t[1]),"=l"(t[2]),"=l"(t[3])
             : "l"(ZZ[0]),"l"(ZZ[1]),"l"(ZZ[2]),"l"(ZZ[3]));
+#if QSB_FRONT_K32
+        qsb_fsub_k32(t, t, X_D);
+    } else {
+        qsb_fsub_k32(t, ZZ, X_D);
+    }
+#else
         QSB_PRE_FSUB(t, t, X_D);
     } else {
         QSB_PRE_FSUB(t, ZZ, X_D);
     }
+#endif
 #elif QSB_ISO_FAST_X
     (void)xR;
     /* Branchless selection of ZZ or p-ZZ.  This is the same complement/add-p
@@ -164,9 +174,9 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
     QSB_FMUL(m1, n, n + 8);
     QSB_FMUL(m2, n + 4, n + 8);
-    QSB_FADD(sum, m1, m2);
+    QSB_TFADD(sum, m1, m2);
 #if QSB_NEGFOLD_PARITY
-    QSB_FSUB(t, m1, cc);
+    QSB_TFSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
 #if QSB_K2S_PARITY_WINDOW
     uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
@@ -175,17 +185,22 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FADD(t, t, yR);            /* -y1 */
     uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
 #endif
-    QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
-    QSB_FSUB(t, m2, cc);
+    QSB_TFADD(x1, x1, xR);          /* x1 = p1 + xR */
+    QSB_TFSUB(t, m2, cc);
     QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
 #if QSB_K2S_PARITY_WINDOW
+#if QSB_PREFIX_PACK
+    /* QSB_PREFIX_PACK: both compressed-key prefix bytes, ready for the gate: byte 0 = 0x02|p1, byte 1 = 0x02|p2 */
+    parities = 0x0202u | parities | (qsb_parity_product_window(x2,m2,yR,0u) << 8);
+#else
     parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
+#endif
 #else
     QSB_FMUL(t, x2, m2);           /* p2*m2 */
     QSB_FADD(t, t, yR);            /* y2 */
     parities |= (uint32_t)((t[0] & 1ULL) << 1);
 #endif
-    QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
+    QSB_TFADD(x2, x2, xR);          /* x2 = p2 + xR */
 #else
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);
@@ -382,8 +397,12 @@ __device__ __forceinline__ void qsb_gate_block(uint32_t *pb, const uint64_t *qx,
     uint64_t sx0=qx[0], sx1=qx[1], sx2=qx[2], sx3=qx[3];
     uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
                      (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+#if QSB_PREFIX_PACK
+    pb[0]=__byte_perm(x32[7],parity,0x4321);     /* parity = the packed prefix word; the caller picks byte 0 or 1 */
+#else
     uint8_t prefix_byte = 0x2+(uint8_t)(parity&1u);
     pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+#endif
     pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
     pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
     pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
@@ -469,8 +488,13 @@ __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *
 __device__ __forceinline__ int qsb_k2s_gate_h0(
     uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
     uint32_t pb0[16],pb1[16],h0,h1;
+#if QSB_PREFIX_PACK
+    qsb_gate_block(pb0,q1x,y_parities);
+    qsb_gate_block(pb1,q2x,y_parities>>8);
+#else
     qsb_gate_block(pb0,q1x,y_parities);
     qsb_gate_block(pb1,q2x,y_parities>>1);
+#endif
 #if QSB_GATE_H0_FMA
     h0=_SHA256Pubkey33H0(pb0);
     h1=_SHA256Pubkey33H0(pb1);
@@ -565,7 +589,13 @@ __device__ __noinline__ int qsb_pair_verify_candidate(
 #endif
 #if ZLAB_K2S3M
 
+#if QSB_OK_DROP
+struct QsbPairFront3 {uint64_t words[16];};
+#else
 struct QsbPairFront3 {uint64_t words[16];int ok;};
+#endif
+#define QSB_FW_P 0   /* word slots of the paired front's product and n[12] in QsbPairFront3 */
+#define QSB_FW_N 4
 #if ZLAB_DUAL_EPOCH_SHA
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
     uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt
@@ -582,10 +612,14 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
 #endif
     uint64_t prod[5],n[12];QsbPairFront3 out;
+#if QSB_OK_DROP
+    (void)qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+#else
     out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
-    Load256(out.words,prod);
+#endif
+    Load256(out.words+QSB_FW_P,prod);
     #pragma unroll
-    for(int k=0;k<12;k++)out.words[4+k]=n[k];
+    for(int k=0;k<12;k++)out.words[QSB_FW_N+k]=n[k];
     return out;
 }
 #endif
@@ -595,7 +629,11 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
     uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
     uint64_t prod[5],n[12];QsbPairFront3 out;
+#if QSB_OK_DROP
+    (void)qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
+#else
     out.ok=qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
+#endif
     Load256(out.words,prod);
     #pragma unroll
     for(int k=0;k<12;k++)out.words[4+k]=n[k];
