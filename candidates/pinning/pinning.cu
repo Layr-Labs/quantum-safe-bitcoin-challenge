@@ -156,7 +156,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
- * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 3 x 4M here (4 x 4M, 2 x 8M before). */
+ * (64 B per candidate): QSB_SLOTS x QSB_BATCH = 4 x 4M here (3 x 4M, 2 x 8M before). */
 #ifndef QSB_GLV11
 #define QSB_GLV11 1
 #endif
@@ -433,7 +433,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 3           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 5           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
