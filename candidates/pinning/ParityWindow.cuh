@@ -106,11 +106,28 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a7,b0;\n"
         "add.u64 mid,mid,t;\n"
         "mov.b64 {mid0,mid1},mid;\n"
+/* QSB_PW_SPLIT_MAD: split the seven low-half parity MADs into two independent
+ * accumulators (addition mod 2^32 is associative; mid1 = acc_a + acc_b bit-exactly).
+ * Adapted from pochita0's PW_SPLIT_MAD for the 7-term FIN_CAP_IMAD chain. 0 = serial. */
+#ifndef QSB_PW_SPLIT_MAD
+#define QSB_PW_SPLIT_MAD 1
+#endif
 #if QSB_FIN_CAP_IMAD
         /* QSB_FIN_CAP_IMAD: only bit 0 of mid1 survives the final mask, and bit 0 of a sum is
          * the XOR of the addends' bit 0 (no carry reaches bit 0), while bit 0 of a_i*b_j is
          * a_i & b_j & 1. So mid1 + sum(a_i*b_j) has the same bit 0 as the XOR chain below,
          * and the seven steps run as IMAD on the multiply pipe instead of LOP3. */
+#if QSB_PW_SPLIT_MAD
+        ".reg .u32 paux;\n"
+        "mad.lo.u32 mid1,a1,b7,mid1;\n"
+        "mul.lo.u32 paux,a2,b6;\n"
+        "mad.lo.u32 mid1,a3,b5,mid1;\n"
+        "mad.lo.u32 paux,a4,b4,paux;\n"
+        "mad.lo.u32 mid1,a5,b3,mid1;\n"
+        "mad.lo.u32 paux,a6,b2,paux;\n"
+        "mad.lo.u32 mid1,a7,b1,mid1;\n"
+        "add.u32 mid1,mid1,paux;\n"
+#else
         "mad.lo.u32 mid1,a1,b7,mid1;\n"
         "mad.lo.u32 mid1,a2,b6,mid1;\n"
         "mad.lo.u32 mid1,a3,b5,mid1;\n"
@@ -118,6 +135,7 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mad.lo.u32 mid1,a5,b3,mid1;\n"
         "mad.lo.u32 mid1,a6,b2,mid1;\n"
         "mad.lo.u32 mid1,a7,b1,mid1;\n"
+#endif
 #else
         "and.b32 bit,a1,b7;\n"
         "xor.b32 mid1,mid1,bit;\n"
