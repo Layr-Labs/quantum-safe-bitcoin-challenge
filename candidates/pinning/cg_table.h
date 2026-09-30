@@ -172,7 +172,9 @@ static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const 
         if (done >= ne) break;
         /* next row: + TB_R G_j = kg[TB_R-1] */
         if (batch_add<F>(nx, ny, rowx, rowy, &kx[TB_R - 1], &ky[TB_R - 1], 1, TB_R, tmp)) return -1;
-        memcpy(rowx, nx, sizeof(fe4_t) * TB_R); memcpy(rowy, ny, sizeof(fe4_t) * TB_R);
+        /* The next row is complete in nx/ny; exchange local buffer roles instead of copying it. */
+        fe4_t *oldx = rowx; rowx = nx; nx = oldx;
+        fe4_t *oldy = rowy; rowy = ny; ny = oldy;
     }
     return 0;
 }
