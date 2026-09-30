@@ -1,3 +1,4 @@
+/* Package annotation: subset incumbent control, September 30. */
 #pragma once
 /* Host-CPU co-grinder for the subset track. The field arithmetic, the windowed host table and the
  * batch-affine additions derive from Ryun1's pinning CpuGrind.h (public submission 7a75fa50, GPL-3);
