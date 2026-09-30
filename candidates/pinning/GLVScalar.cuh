@@ -96,6 +96,16 @@
 #if QSB_QGLV5 && !(QSB_GLV11 && QSB_GLV_ZDEC && QSB_SEED_GLUE && QSB_DIGIT_LEAN)
 #error QSB_QGLV5 is written for the GLV11 table with the ZDEC decode and register seed glue
 #endif
+/* Local density experiment: logical banks are unchanged; only their hot offsets move. */
+#ifndef QSB_HOT_DENSITY
+#define QSB_HOT_DENSITY 1
+#endif
+#if QSB_HOT_DENSITY != 0 && QSB_HOT_DENSITY != 1
+#error "QSB_HOT_DENSITY must be 0 or 1"
+#endif
+#if QSB_HOT_DENSITY && !(QSB_BIGTBL && QSB_FOUR_HOT && QSB_GLV11 && !QSB_QGLV5)
+#error "QSB_HOT_DENSITY requires the promoted four-hot Q6/P5 table"
+#endif
 #if QSB_BIGTBL && QSB_FOUR_HOT
 #if QSB_GLV11
 #define QSB_GT_TOTAL 354501773u
@@ -142,8 +152,14 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
     if(c>=6) return c==6?153175181u:220284045u;
 #endif
 #if QSB_FOUR_HOT
+#if QSB_HOT_DENSITY
+    /* Physical order 0,2,3,1: high reference-density banks occupy the first 32 MiB. */
+    return c==0?0u:c==1?524288u:c==2?262144u:
+           c==3?393216u:c==4?786432u:67895296u;
+#else
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
+#endif
 #else
     return c==0?0u:c==1?262144u:c==2?524288u:c==3?6116425u:
            c==4?14505033u:786432u;

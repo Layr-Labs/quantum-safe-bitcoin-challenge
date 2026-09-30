@@ -2,8 +2,21 @@
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
 #define QSB_ROOT_FUSED 1
+#ifndef QSB_HOT_DENSITY
+#define QSB_HOT_DENSITY 1
+#endif
+#ifndef QSB_HOT_DENSITY_RANGE
+#define QSB_HOT_DENSITY_RANGE 0
+#endif
+#if QSB_HOT_DENSITY_RANGE != 0 && QSB_HOT_DENSITY_RANGE != 1
+#error "QSB_HOT_DENSITY_RANGE must be 0 or 1"
+#endif
 #ifndef QSB_PERSIST_WINDOW_CAP
+#if QSB_HOT_DENSITY
+#define QSB_PERSIST_WINDOW_CAP (32u<<20)
+#else
 #define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#endif
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #define QSB_GREEN 20
@@ -1417,6 +1430,9 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #ifndef QSB_TBL_POL_PRED
 #define QSB_TBL_POL_PRED 1
 #endif
+#if QSB_HOT_DENSITY && (QSB_TBL_L2POL != 1 || !QSB_TBL_POL_PRED)
+#error "QSB_HOT_DENSITY requires exact baseline cold policies and predicated pairs"
+#endif
 #if QSB_TBL_L2POL && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define QSB_TBL_L2POL_ON 1
 __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
@@ -1434,9 +1450,19 @@ __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
  * hot policy, so both descriptors stay compile-time constants in uniform registers instead of a
  * per-lane select copied into uniform registers for every load. Each lane issues exactly one load
  * of each pair, with the same policy qsb_tbl_policy returns; the bytes are unchanged. */
-__device__ __forceinline__ void qsb_tbl_policies(uint64_t &cold,uint64_t &hot) {
+__device__ __forceinline__ void qsb_tbl_policies(uint64_t &cold,uint64_t &hot
+#if QSB_HOT_DENSITY && QSB_HOT_DENSITY_RANGE
+                                                ,const uint8_t *table
+#endif
+                                                ) {
     asm("createpolicy.fractional.L2::evict_first.b64 %0, 1.0;" : "=l"(cold));
-#if QSB_TBL_L2POL == 2
+#if QSB_HOT_DENSITY && QSB_HOT_DENSITY_RANGE
+    /* Used only by @!c hot loads. Outside the 48 MiB hot range it is never consumed.
+     * Secondary is evict_unchanged; PTX has no evict_normal secondary for range policies. */
+    asm("{ .reg .u64 a; cvta.to.global.u64 a, %1;\n\t"
+        "createpolicy.range.global.L2::evict_last.L2::evict_unchanged.b64 %0, [a], 33554432, 50331648; }"
+        : "=l"(hot) : "l"(table));
+#elif QSB_TBL_L2POL == 2
     asm("createpolicy.fractional.L2::evict_last.b64 %0, 1.0;" : "=l"(hot));
 #else
     asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
@@ -1483,7 +1509,11 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
 #if QSB_TBL_L2POL_ON && QSB_TBL_POL_PRED
     ulonglong2 y1;
     uint64_t pc,ph;
+#if QSB_HOT_DENSITY && QSB_HOT_DENSITY_RANGE
+    qsb_tbl_policies(pc,ph,table);
+#else
     qsb_tbl_policies(pc,ph);
+#endif
     asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
         "@c  ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %6;\n\t"
@@ -1527,7 +1557,11 @@ __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_
 #if QSB_TBL_L2POL_ON && QSB_TBL_POL_PRED
     ulonglong2 x0,x1;
     uint64_t pc,ph;
+#if QSB_HOT_DENSITY && QSB_HOT_DENSITY_RANGE
+    qsb_tbl_policies(pc,ph,table);
+#else
     qsb_tbl_policies(pc,ph);
+#endif
     asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %6;\n\t"
