@@ -26,6 +26,41 @@
 #ifndef QSB_PAIR_ORD_G8
 #define QSB_PAIR_ORD_G8 0
 #endif
+/* QSB_FOLD_ALU (default QSB_PAIR_ORD_G8=0 path of qsb_mul2add only): bit 1 forms each first-fold
+ * term 977*x_k (x_k one of the eight high product words) as the zero-extended 64-bit shift-add
+ * (1025*x) - ((3*x) << 4) instead of mul.wide.u32 by 977, so ptxas lowers it to LEA / LEA.HI.X /
+ * SHF / IADD3 on the integer pipe instead of IMAD.WIDE.U32.X on the multiply pipe that bounds the
+ * prepare kernel. 1025*x - 48*x = 977*x < 2^42 for every 32-bit x, held in a 64-bit container
+ * (1025*x < 2^43, no wrap), so each 64-bit addend of the f/g carry chains is the same integer.
+ * Bit 2 (with bit 1) builds the same 977*x by the all-positive Horner chain 3x, 7x, 15x, 61x,
+ * 977x, each step (y << s) + x on a zero-extended 64-bit y (LEA / LEA.HI.X only), so no
+ * subtraction borrow is left for ptxas to place on IMAD.X; every step is < 2^42, no wrap.
+ * Bit 4: x16, the carry word of a*b + c*d < 2^513, is 0 or 1, so x16*954529 and x16*1954 are
+ * the masks (-x16) & 954529 and (-x16) & 1954 (LOP3 instead of two IMAD). 0 restores the
+ * multiply forms (default: both int-pipe forms measured below the multiply form on the 4090). */
+#ifndef QSB_FOLD_ALU
+#define QSB_FOLD_ALU 0
+#endif
+#if (QSB_FOLD_ALU & ~7) || ((QSB_FOLD_ALU & 2) && !(QSB_FOLD_ALU & 1))
+#error "QSB_FOLD_ALU takes bits 1, 2 (with 1) and 4"
+#endif
+#if (QSB_FOLD_ALU & 3) == 3
+#define QSB_FA977(X) "cvt.u64.u32 fq, " X "; shl.b64 fa, fq, 1; add.u64 fa, fa, fq; " \
+  "shl.b64 fa, fa, 1; add.u64 fa, fa, fq; shl.b64 fa, fa, 1; add.u64 fa, fa, fq; " \
+  "shl.b64 fa, fa, 2; add.u64 fa, fa, fq; shl.b64 fa, fa, 4; add.u64 t, fa, fq; "
+#define QSB_FAW(X, OP, F, R) QSB_FA977(X) OP " " F ", " R ", t;\n"
+#elif QSB_FOLD_ALU & 1
+#define QSB_FA977(X) "cvt.u64.u32 fq, " X "; shl.b64 fa, fq, 10; add.u64 fa, fa, fq; " \
+  "shl.b64 fb, fq, 1; add.u64 fb, fb, fq; shl.b64 fb, fb, 4; sub.u64 t, fa, fb; "
+#define QSB_FAW(X, OP, F, R) QSB_FA977(X) OP " " F ", " R ", t;\n"
+#else
+#define QSB_FAW(X, OP, F, R) "mul.wide.u32 t, " X ", 977; " OP " " F ", " R ", t;\n"
+#endif
+#if QSB_FOLD_ALU & 4
+#define QSB_FA_K "neg.s32 kl, x16; and.b32 kh, kl, 1954; and.b32 kl, kl, 954529; mov.b64 kx, {kl, kh};\n"
+#else
+#define QSB_FA_K "mul.lo.u32 kl, x16, 954529; mul.lo.u32 kh, x16, 1954; mov.b64 kx, {kl, kh};\n"
+#endif
 __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const uint64_t *b,
                                             const uint64_t *c,const uint64_t *d){
 #ifdef __CUDA_ARCH__
@@ -37,7 +72,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "\t.reg .u32 k0,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11,k12,k13,k14,k15;\n"
   "\t.reg .u64 ad0,ad1,ad2,ad3,ad4,ad5,ad6;\n"
   "\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15,x16,y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n"
-  "\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3,sfa,sft,kx;\n"
+  "\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3,sfa,sft,kx,fq,fa,fb;\n"
   "\t.reg .u32 z0,z1,z2,z3,z4,z5,z6,z7,z8,w0,w1,w2,w3,w4,w5,w6,w7,sfl,sfh,kl,kh,g8;\n"
   "\tmov.u32 zz, 0;\n"
   QSB_PO_ZDECL
@@ -410,14 +445,14 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.u32 x16, k15, " QSB_PO_Z ";\n"
   "mov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
   "mov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n"
-  "mul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n"
-  "mul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n"
-  "mul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n"
-  "mul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n"
-  "mul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n"
-  "mul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n"
-  "mul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n"
-  "mul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n"
+  QSB_FAW("x8",  "add.cc.u64", "f0", "r0")
+  QSB_FAW("x10", "addc.cc.u64", "f1", "r1")
+  QSB_FAW("x12", "addc.cc.u64", "f2", "r2")
+  QSB_FAW("x14", "addc.cc.u64", "f3", "r3")
+  QSB_FAW("x9",  "add.cc.u64", "g0", "h0")
+  QSB_FAW("x11", "addc.cc.u64", "g1", "h1")
+  QSB_FAW("x13", "addc.cc.u64", "g2", "h2")
+  QSB_FAW("x15", "addc.cc.u64", "g3", "h3")
   "mov.b64 {z0,z1}, f0; mov.b64 {z2,z3}, f1; mov.b64 {z4,z5}, f2; mov.b64 {z6,z7}, f3;\n"
   "mov.b64 {w0,w1}, g0; mov.b64 {w2,w3}, g1; mov.b64 {w4,w5}, g2; mov.b64 {w6,w7}, g3;\n"
   "add.cc.u32 z1, z1, w0;\n"
@@ -428,7 +463,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u32 z6, z6, w5;\n"
   "addc.cc.u32 z7, z7, w6;\n"
   "addc.u32 z8, 0, w7;\n"
-  "mul.lo.u32 kl, x16, 954529; mul.lo.u32 kh, x16, 1954; mov.b64 kx, {kl, kh};\n"
+  QSB_FA_K
   "mad.wide.u32 sft, z8, 977, kx;\n"
   "mov.b64 sfa, {z0, z1};\n"
   "add.cc.u64 sfa, sfa, sft;\n"
