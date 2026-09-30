@@ -269,7 +269,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #error "QSB_GATHER_L1_POLICY must be 0 to 3"
 #endif
 #ifndef QSB_GATHER_ONE_FORM
-#define QSB_GATHER_ONE_FORM 1
+#define QSB_GATHER_ONE_FORM 0
 #endif
 #if QSB_GATHER_ONE_FORM < 0 || QSB_GATHER_ONE_FORM > 2
 #error "QSB_GATHER_ONE_FORM must be 0, 1 or 2"
