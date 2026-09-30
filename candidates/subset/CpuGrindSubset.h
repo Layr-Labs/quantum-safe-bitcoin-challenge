@@ -1944,7 +1944,7 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
 #if QCPU_PFQ
                           , QPfRing *pq = nullptr
 #endif
-                          ) {
+                          , uint32_t shared_mask = 0) {
     __m128i S0[4], S1[4];
     if (!out) out = &st[0][0];                          /* out: lane l's final state at out + l * ostride (default: in place) */
 #pragma GCC unroll 4
@@ -1959,11 +1959,16 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
 #if QCPU_PFQ
         if (pq) qpf_drain(*pq, 2);                  /* R2-D: two queued row prefetches per block */
 #endif
-        const uint32_t *const w[4] = {rows[0][b], rows[1][b], rows[2][b], rows[3][b]};
+        const uint32_t *w[4]; w[0] = rows[0][b];
+        bool shared = QSB_CPU_X4PS && (shared_mask & (uint32_t(1) << b));
+        if (!shared) {
+            w[1] = rows[1][b]; w[2] = rows[2][b]; w[3] = rows[3][b];
+            shared = QSB_CPU_X4PS && w[0] == w[1] && w[0] == w[2] && w[0] == w[3];
+        }
         __m128i I0[4], I1[4];
 #pragma GCC unroll 4
         for (int l = 0; l < 4; l++) { I0[l] = S0[l]; I1[l] = S1[l]; }
-        if (QSB_CPU_X4PS && w[0] == w[1] && w[0] == w[2] && w[0] == w[3]) {   /* the same fixed block in all four lanes (the tail
+        if (shared) {   /* the same fixed block in all four lanes (the tail
                                                                                 blocks): each W+K pair is loaded once, into xmm0, for four rounds */
             const uint32_t *ws = w[0];
             __asm__("" : "+r"(ws));                     /* opaque copy: keeps the compiler from hoisting (and spilling) lane 0's loads */
@@ -2385,6 +2390,7 @@ struct Ctx {
      * The CPU patterns share few block-0 contents (groups) and few distinct later blocks. */
     bool hplan = false;
     int h_nb = 0, h_ng = 0;
+    uint32_t h_shared_mask = 0;    /* later-block index b-1: identical schedule across every pattern in this plan */
     uint8_t h_g0[286];              /* block-0 group of each CPU pattern */
     const uint32_t *h_wkp[286][16]; /* schedule of fixed block b = 1..nb-1 of each CPU pattern (index b-1) */
     uint64_t h_binom[256][8];       /* binom_u64(n, k) for the epoch unrank */
@@ -2792,6 +2798,7 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
 /* Plan the 4-lane hashing (after ncwin, mid_bytes): group the CPU patterns by block 0 and schedule
  * every distinct later block once. Leaves hplan false for an unexpected shape (old path then). */
 static void hash_plan(Ctx &c) {
+    c.h_shared_mask = 0;           /* hash_plan_cpu_patterns may rebuild after selecting its pattern family */
     const digest_params_t *dp = c.dp;
     const size_t prl = dp->prefix_remainder_len, pl = (size_t)(c.cut - c.early) * SIG_PUSH_SIZE,
                  wlen = (size_t)(dp->n - c.cut - 3) * SIG_PUSH_SIZE, tl = dp->tail_section_len, sl = dp->tx_suffix_len;
@@ -2826,6 +2833,12 @@ static void hash_plan(Ctx &c) {
     c.h_wk.assign(blocks.size(), 0);                    /* (blocks/64) x 64 words */
     for (size_t q = 0; q < blocks.size() / 64; q++) qsha_schedule(&c.h_wk[q * 64], &blocks[q * 64]);
     for (int wi = 0; wi < c.ncwin; wi++) for (int b = 1; b < nb; b++) c.h_wkp[wi][b - 1] = &c.h_wk[(size_t)sidx[(size_t)wi * 16 + b] * 64];
+    /* A common fixed block can skip the per-quad row loads/comparisons. States still differ across lanes. */
+    for (int b = 1; b < nb; b++) {
+        int wi = 1;
+        while (wi < c.ncwin && c.h_wkp[wi][b - 1] == c.h_wkp[0][b - 1]) wi++;
+        if (wi == c.ncwin) c.h_shared_mask |= uint32_t(1) << (b - 1);
+    }
     for (int n = 0; n < 256; n++) for (int k = 0; k < 8; k++) c.h_binom[n][k] = binom_u64(n, k);
     if (c.cut > 255 || c.early > 7) return;
     c.h_nb = nb; c.h_ng = ng; c.hplan = true;
@@ -3197,9 +3210,9 @@ static void worker(Ctx *c, int tid) {
                     if (j == 3) {                           /* four candidates ready: blocks 1..nb-1 (digests straight into the second
                                                                SHA-256's message words), then the second SHA-256 into z = h0 (MSW) .. h7 */
 #if QCPU_PFQ
-                        qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin, hpf ? &pfq : nullptr);
+                        qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin, hpf ? &pfq : nullptr, c->h_shared_mask);
 #else
-                        qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin);
+                        qsha_x4p(nullptr, lrow, nb - 1, &w2[0][0], 16, lin, c->h_shared_mask);
 #endif
 #if QSB_CPU_SHC
                         qsha_x4w_iv32((uint32_t (*)[8])&zb[(size_t)(kq - 3) * 8], w2);   /* w2[l][8..15]: the constant padding */
