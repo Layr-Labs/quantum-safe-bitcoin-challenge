@@ -1,4 +1,3 @@
-// GPU throughput has not been established by the CPU semantic tests.
 /*
 * This file is part of the VanitySearch distribution (https://github.com/JeanLucPons/VanitySearch).
 * Copyright (c) 2019 Jean Luc PONS.
@@ -17,7 +16,6 @@
 */
 
 // ---------------------------------------------------------------------------------
-// 256(+64) bits integer CUDA libray for SECPK1
 // ---------------------------------------------------------------------------------
 
 
