@@ -381,7 +381,7 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_z(
  * chunk 0: rec = (w0 ^ m) & (2^18-1), msk = m (its sign bit is s); chunk 1: rec = offset + idx
  * (the radix form before the sign XOR) and, inverted, ~msk = xs = -t' (msk = -(1 - t')). */
 __host__ __device__ __forceinline__ void q9_bigtbl_seed_z(const uint64_t w[2],uint32_t m32,int c,
-                                                          uint32_t *rec,uint32_t *msk) {
+                                                          uint32_t *rec,uint32_t *msk,int q5=0) {
     const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
     if(c==0) {
 #ifdef __CUDA_ARCH__
@@ -393,8 +393,11 @@ __host__ __device__ __forceinline__ void q9_bigtbl_seed_z(const uint64_t w[2],ui
         return;
     }
     /* chunk 1: Q's segment 1 (19 bits at shift 18), or under QSB_QGLV5 segment 6 (27 bits at
-     * the same shift 18). The window algebra above holds for any signed radix field. */
-#if QSB_QGLV5
+     * the same shift 18). The window algebra above holds for any signed radix field.
+     * q5 picks the five-term chunk at runtime for QSB_QMIX5's mixed blocks. */
+#if QSB_QMIX5
+    const unsigned bits=q5?27u:19u,seg=q5?6u:1u;
+#elif QSB_QGLV5
     const unsigned bits=27u,seg=6;
 #else
     const unsigned bits=19u,seg=1;
