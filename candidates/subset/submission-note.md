@@ -1,95 +1,31 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset: bridge four SHA-NI first-pass digests into the fixed second SHA block
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+Effort: medium. This is a new official remote measurement on the promoted Subset source e6715658, at Git commit 7813ffe1b7442f4a998e4978834d9ce2bd4559c6. That source was the repository's current main tip when this package was prepared and its official score was 720,332,123 verified candidates per second. The challenge needs about one percent more for promotion; no local throughput result is claimed. The sole functional optimization in this submission is an independent CPU SHA-256d data-flow change. The GPU kernel, its prebuilt native image, the CPU elliptic-curve arithmetic, the pattern split, the host producer, and the exact-hit verifier are inherited unchanged.
 
-## Summary
+## Why this path
 
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
+The promoted CPU planned path hashes four candidate messages together. Its qsha_x4p routine leaves each first SHA-256 digest in two 128-bit SHA-NI chaining registers. Previously it permuted those eight chaining registers into natural digest order and wrote four 32-byte digests to a 4-by-16-word w2 scratch array. The fixed 32-byte second SHA-256 path immediately read those same four digests back from w2 into the existing four-lane message ring. This was a short intermediate memory round trip on a per-four-candidate hot path. The first digest already exists in the exact register representation needed to create the second block's first eight words; its remaining words are the same fixed padding and 256-bit length that the promoted path already uses.
 
-## The change
+This package adds QSB_CPU_SHA_BRIDGE, default 1, to CpuGrindSubset.h. After the final feed-forward of qsha_x4p, it converts each ABEF/CDGH pair to the same natural word vectors the old qsha_x4p store generated and writes those vectors directly into the existing four-lane SHA-NI message ring. The other two ring vectors are the promoted constant padding vectors. It then calls the unchanged qsha_rounds4m<true> four-lane compression and unchanged qsha_st8 output shuffle. The normal intermediate-store path remains in the source and can be restored by setting QSB_CPU_SHA_BRIDGE=0. The new bridge is compiled only with the existing fixed-padding and four-lane SHA switches enabled; other configurations retain their former path.
 
-In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
+The mechanism is removal of one 128-byte first-digest store and one 128-byte digest reload per group of four candidates, plus the now unused w2 scratch in this configuration. It is not a claim about actual cache traffic: a compiler could have optimized the old round trip, could spill registers in the new inlined helper, or could produce larger code that hurts the instruction cache. We preserved the four-lane round interleave because changing it to two lanes would introduce a separate performance confound. The output z words and the later CPU key gate have the same layout and consumers as before.
 
-- **Ranges:** with `QSB_CPU_EPOCH_CONTIG` 1, worker t walks [base + t·span, base + (t+1)·span). Here span is the epoch space above the diagnostic base divided among the workers: about 2.6e8 epochs each at 32 workers (this package has no diagnostic base), against about 2.6e7 walked in 1,200 s.
-- **Prefix re-hash:** in lexicographic order, consecutive epochs differ in the last omission. I replayed both walks on this problem's prefix. The re-hash drops from about 6.1 SHA-256 blocks per epoch at stride 32 to about 3.4.
-- **No unrank:** the next epoch's omissions come from the previous epoch's by the usual next-combination step. The unrank runs only at the start of each range.
-- **Disjointness:** the ranges are disjoint, and the co-grinder's patterns (`QSB_CPU_PREFIX100`) stay the complement subset they are in `e6715658`. So no candidate is walked twice, and every hit still passes the exact OpenSSL gate.
-- **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
-- **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
+## Correctness and scope
 
-## Ranked draws of this exact package
+For each lane, the old qsha_x4p exit computed t=shuffle(S0,0x1B), b=shuffle(S1,0xB1), then stored blend(t,b,0xF0) as words 0 through 3 and alignr(b,t,8) as words 4 through 7. The bridge computes those exact two vectors from the same feed-forwarded S0/S1 registers, placing them in message-ring entries 0 and 1. Entries 2 and 3 are the promoted P2/P3 constants: SHA-256 padding for a 32-byte digest, ending in bit length 256. From there both old and new paths call the same qsha_rounds4m<true> and qsha_st8 routines, so the only algorithmic distinction is where the eight first-digest words live between the passes.
 
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
+The source diff changes only candidates/subset/CpuGrindSubset.h and this public note. No Pinning worktree, scorer, test vector, CUDA source, native image, or shared Git configuration is modified. The exact publication gates remain: CPU hits still pass gate_publish_exact and the existing host exact verifier; GPU nominations still undergo the inherited exact check. The SHA fallback selected when the planned path is unavailable is untouched. The old compile-time path remains selectable, which makes a later A/B comparison possible without reconstructing historical source.
 
-- **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
-- **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
-- **Walk:** `e6715658` has no diagnostic base (the smallest co-grinder hit is at epoch 53,476), so the 32 ranges start at t·C(137,6)/32.
+A pure-Python audit generated 2,000 sets of four random chaining-register pairs. For every lane, it compared the vectors that the old w2 store would have produced with the vectors sent to the new ring, and checked the resulting 16-word one-block SHA padding for a 32-byte first digest. It passed. A source-range check confirmed that the bridge is under QSB_CPU_SHA_BRIDGE, QSB_CPU_SHC and QSB_CPU_SHA4, while the fallback path is still present; git diff --check passed. These checks establish the data mapping and intended source scope, not a native compilation or runtime proof. The official remote verifier is the first actual execution of this exact package. No local C++ or CUDA compilation and no local GPU benchmark were run.
 
-## Ranked evidence (same change on terrapinelf's `a33e04c3` co-grinder with 100 patterns)
+## Relationship to public research
 
-| draw | total | GPU (hits) | co-grinder (hits) | co-grinder work, luck-free |
-|---|---:|---:|---:|---:|
-| `56b4b1f9` | 704.73 | 640.61 | 64.12 | 64.96 |
-| `30c24617` | 714.02 | 649.29 | 64.73 | 64.91 |
-| `7e55c5c2` | 709.13 | 644.00 | 65.14 | 64.86 |
+The reference that prompted this route was the user's read-only Pinning staging commit b0a450b. Its SHA-NI double-hash handoff keeps a first digest close to the second SHA block, but the Pinning message geometry and lane count are different. The Pinning 16-lane AVX-512 software SHA path and locktime packing are not imported. That staged Pinning candidate had no official throughput result when inspected, so this Subset submission does not cite it as speed evidence. The Subset bridge was independently adapted to its own promoted four-lane planned path and existing memory-ring compressor. The Plonky3 PR2345 mentioned in the research discussion is about BLAKE3, not SHA-256; only the general idea of overlapping independent chains and respecting register pressure was considered, with no code transplanted.
 
-- **Walk:** on all three draws the hits show 32 workers, each about 2.4e7 epochs into its range (±2%, no range exhausted), on the 9-window table (diagnostic code 6).
-- **Luck-free rate:** 32 × about 2.43e7 epochs × 100 patterns / 1,201.9 s. It reproduces to about 0.1% between the draws, while the hit counts scatter by Poisson around it.
+The promoted e6715658 source already includes SHA-NI four-lane compression, fixed-block W+K precomputation, shared schedule loads, fixed second-pass padding, an AVX-512 16-key schedule, and a GPU SHA schedule improvement. Those promoted components and their original GPL, secp256k1, and contributor notices remain in place. The inherited public note, archived separately with this run, describes the prior developers' longer optimization history; its old timings and source identity are historical and are not measurements of this candidate. In particular, the new bridge's performance is unknown before the official run.
 
-## Checks done here
+Substantive inherited source credit includes RealAdii's paired-chain and field work; kshitij-hash's promoted source e6715658 and host/GPU SHA scheduling; i34-9's host producer/co-grinder work; terrapinelf's Q_MIX and native image work; code-up-matrix's ping-pong and late-index research; cefika's contiguous epoch route; and the additional contributors named in the existing GPL and source notes. This credit documents lineage, not participation in this submission or endorsement. No additional co-author field is used.
 
-All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's toolkit.
+## Evaluation decision
 
-- **Emulation harness:** the co-grinder ran under `qemu-x86_64 -cpu max` (SHA-NI + scalar EC) in a CPU-only harness with tree.cu's loader and 128-pattern rule.
-- **Settings:** `QSB_ZEROS_N=12`, 40 s per run.
-- **Reference:** each run was compared against a brute-force `qsb_hv_check` oracle on the kept 100 patterns.
-
-| check | result |
-|---|---|
-| `build_carrier.sh 24` | cubin sha256 `e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea`, 473,376 bytes, byte-identical to `e6715658`'s; 0 spills. Only the informational source hash in the header changes |
-| the harness's build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) | builds with no errors |
-| image `qsb_carrier_knobs` against the host binary's `QSB_CARRIER_KNOBS` | byte-identical (2,534 bytes), so the native image loads |
-| next-combination step against the binomial unrank, 20,000,000 consecutive epochs from 400 starts | 0 mismatches; carries at every index 0..5 exercised |
-| 1 thread | all hits over epochs < 4,096 match the oracle (199 = 199), 0 missing, 0 extra, 0 duplicates |
-| 4 threads, ranges capped to 4 × 1,024 epochs (`-DQSB_CPU_EPOCH_CAP=4096`) | every worker stops at its range end: exactly 409,600 candidates, 199 = 199 hits |
-| 4 threads, full ranges | epochs < 4,096 (worker 0): exact. Worker 2's first 2,048 epochs (from 4,109,236,362): 87 = 87 against a separate oracle run. 0 duplicates |
-| `e6715658` unchanged, same harness | exact (the reference walk) |
-
-Emulated timings say nothing about Zen 4, so I did not measure speed here.
-
-## Kill switch
-
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
-
-## Reproducing
-
-```
-./setup.sh subset
-./benchmark.sh subset
-```
-
-To read the co-grinder's rate without hit noise from a ranked run:
-
-1. Take the co-grinder hits: the patterns outside the 128 most frequent `skip[6:9]`.
-2. Take each hit's lexicographic epoch rank of the first six skip indices.
-3. Group the hits into the 32 ranges; range t starts at base + t·(C(137,6) − base)/32, with base = the smallest rank with its low 19 bits cleared (0 for this package).
-4. Sum each range's last rank minus its start, × 100 patterns / `elapsed_s`.
-
-## Base and attribution
-
-- **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
-- **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
-- **Mine:**
-  - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.
-  - Earlier: the block-0 pattern selection that `QSB_CPU_PREFIX100` follows (`4a197f06`).
-
-All inherited source, GPLv3 notices and attributions are kept. Only `candidates/subset/` changes.
+Submit this one-change package once for the official Subset remote verifier and 1,200-second throughput measurement. Record its score against the actual evaluation reference, which may differ from the last observed 720,332,123 if another promotion lands first. If the official result is slower, revert this switch and return to the then-current promoted frontier; do not claim that the store/reload saving was realized in machine code. If it is positive but below the promotion threshold, retain it only as a completed route whose whole-package result and reference are explicitly recorded. The next useful experiment would inspect compiler spills and the CPU/GPU throughput breakdown on the official hardware, then compare the bridge against the old path without changing unrelated SHA or elliptic-curve switches.
