@@ -672,7 +672,7 @@ __device__ uint64_t BINOM_C[151][10];
  * unchanged. Needs the wave top (QSB_TREE_WAVE_TOP 1), ZLAB_K2S3M and ZLAB_DUAL_EPOCH_SHA (the
  * qsb_pair_front3_z_value path). 0 = the base byte for byte. */
 #ifndef QSB_PRE3_ROOT
-#define QSB_PRE3_ROOT 0   /* off */
+#define QSB_PRE3_ROOT 1   /* on (kshitij-hash exact pre3 root scheduling; needs PARK128 0) */
 #endif
 #if QSB_PRE3_ROOT < 0 || QSB_PRE3_ROOT > 2
 #error "QSB_PRE3_ROOT must be 0, 1 or 2"
@@ -741,13 +741,13 @@ __device__ uint64_t BINOM_C[151][10];
  * is written after both of the thread's gates (A's before B's, as before); hit slots come from atomicAdd
  * in completion order, as before. Needs ZLAB_K2S3M (the tail3 path). */
 #ifndef QSB_TAIL_STAGGER
-#define QSB_TAIL_STAGGER 0
+#define QSB_TAIL_STAGGER 1   /* on: FFGG in warps 4..7 */
 #endif
 #if QSB_TAIL_STAGGER < 0 || QSB_TAIL_STAGGER > 6
 #error "QSB_TAIL_STAGGER must be 0 to 6"
 #endif
 #ifndef QSB_TAIL_PARK
-#define QSB_TAIL_PARK 4
+#define QSB_TAIL_PARK 2
 #endif
 #if QSB_TAIL_PARK < 0 || QSB_TAIL_PARK > 4
 #error "QSB_TAIL_PARK must be 0 to 4"
@@ -814,7 +814,50 @@ __device__ uint64_t BINOM_C[151][10];
 #define QSB_XNEG_BRANCH 1
 #endif
 #ifndef QSB_PW_QN
-#define QSB_PW_QN 0
+#define QSB_PW_QN 2   /* b1: item 9 */
+#endif
+/* b1 micro-cuts (QSB_PW_RARE: parity rare path out of line behind a warp vote; QSB_TREE128: 16-byte tree rows;
+ * QSB_TAIL_K32: tail add/sub K fold on 32-bit halves; QSB_PREFIX_PACK: post3 hands the gate ready prefix bytes). */
+/* b2 (micro-cut backlog 09-29, batch 2). Each 0 = the b1 code.
+ * QSB_OK_DROP 1: front3 drops its prod != 0 result (the degenerate class d = 0 / P at infinity, ~2^-127 per
+ *   candidate: a zero leaf would make its block's tree inverse 0, which loses that block's tentative hits and can
+ *   never publish one, since every tentative hit is re-verified exactly); okA/okB become active/active&&hasB.
+ * QSB_FRONT_K32 1: qsb_k2s_pre3 and qsb_xyzz_finish_prepare_f use the K32 forms of the SHORT_CARRY4 sub/add
+ *   (bit-identical to them, see QSB_TAIL_K32).
+ * QSB_GLV_UNI 1: q9_coeff_high15's rare fallback as a warp-uniform branch (__any_sync), result selected per
+ *   lane: the same value in every lane (the fallback is the exact coefficient for any k).
+ * QSB_SEED_K_FOLD 1: the seed's h*K (h = minus the borrow count, in [-3, 0]) as {lo32(h)*977, lo32(h) + hi32(ext)}: the same
+ *   64-bit word for every h with 977*|h| < 2^32.
+ * QSB_GLV_RND_FOLD 1: the 2^31 rounding bias enters the high15 diagonal-10 umulhi sum as a sixth term (same value). */
+#ifndef QSB_OK_DROP
+#define QSB_OK_DROP 0
+#endif
+#ifndef QSB_FRONT_K32
+#define QSB_FRONT_K32 1
+#endif
+#ifndef QSB_GLV_UNI
+#define QSB_GLV_UNI 1
+#endif
+#ifndef QSB_SEED_K_FOLD
+#define QSB_SEED_K_FOLD 1
+#endif
+#ifndef QSB_GLV_RND_FOLD
+#define QSB_GLV_RND_FOLD 1
+#endif
+#ifndef QSB_NEG_PRED
+#define QSB_NEG_PRED 0
+#endif
+#ifndef QSB_PW_RARE
+#define QSB_PW_RARE 0   /* b1: dropped (the nested call moves the chain loop; the vote form adds code) */
+#endif
+#ifndef QSB_TREE128
+#define QSB_TREE128 0   /* off: conflicts with PARK128 0 (PRE3_ROOT) */
+#endif
+#ifndef QSB_TAIL_K32
+#define QSB_TAIL_K32 1
+#endif
+#ifndef QSB_PREFIX_PACK
+#define QSB_PREFIX_PACK 0   /* b1: dropped (+8 static) */
 #endif
 #ifndef QSB_TID_UNSIGNED
 #define QSB_TID_UNSIGNED 1
@@ -840,7 +883,7 @@ __device__ uint64_t BINOM_C[151][10];
  * accesses. Same shared bytes per thread (24 KiB per block), same words: bit-identical. Written for the shipped
  * tail path (ZLAB_K2S3M, ZLAB_DUAL_EPOCH_SHA, no tail stagger, weave or pre3-in-root). */
 #ifndef QSB_PARK128
-#define QSB_PARK128 1
+#define QSB_PARK128 0   /* required by PRE3_ROOT */
 #endif
 /* QSB_R_CBANK_TAILS: lane R's QSB_R_CBANK mechanism for the tails only. qsb_pair_tail3_value and
  * qsb_pair_finish3_value (and the B8 weave below) read the original R (QSB_U2R, the tree has applied 1/u:
@@ -895,7 +938,7 @@ __device__ uint64_t BINOM_C[151][10];
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
 #ifndef QSB_DIVSTEP_LOOKAHEAD
-#define QSB_DIVSTEP_LOOKAHEAD 0
+#define QSB_DIVSTEP_LOOKAHEAD 1   /* ks-cuts: on (measured +0.33%, 7/7 rounds, identical hit set) */
 #endif
 #if QSB_DIVSTEP_LOOKAHEAD < 0 || QSB_DIVSTEP_LOOKAHEAD > 1
 #error "QSB_DIVSTEP_LOOKAHEAD must be 0 or 1"
@@ -1736,7 +1779,15 @@ __host__ __device__ __forceinline__ uint32_t qsb_s3_code_zn(qsb_s3_walker &w, co
     #pragma unroll
     for (int i = 0; i < 3; i++) w.w[i] = qsb_s3_shr(w.w[i], w.w[i + 1], d.width);
     w.w[3] >>= d.width;
+#if QSB_NEG_PRED && defined(__CUDA_ARCH__)
+    /* QSB_NEG_PRED (device): nm carries the signed digit itself (qsb_s3_load_n tests its sign), and the index
+     * is (|dig| >> 1) + off = ((dig ^ (dig >> 31)) >> 1) + off (every dig is odd: the slots 1 - centre and
+     * signs are odd), one SASS fewer. The host self-check keeps the mask form. */
+    nm = dig;
+    return ((uint32_t)abs((int32_t)dig) >> 1) + d.off;
+#else
     return ((dig ^ nm) >> 1) + d.off;
+#endif
 }
 __host__ __device__ __forceinline__ void qsb_s3_psi_swap_z(qsb_s3_walker &w) {
     w.w[0] = w.w[4]; w.w[1] = w.w[5]; w.w[2] = w.w[6]; w.w[3] = w.w[7];
@@ -1865,9 +1916,25 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
     else      { x0 = __ldg(tx);  x1 = __ldg(tx + 1);  y0 = __ldg(ty);  y1 = __ldg(ty + 1);  }
 #endif
     gx[0] = x0.x; gx[1] = x0.y; gx[2] = x1.x; gx[3] = x1.y;
+#if QSB_NEG_PRED
+    /* QSB_NEG_PRED: nm is the signed digit here (qsb_s3_code_zn, device). The negation is predicated on its
+     * sign: limbs 0-1 as p_lo - y01 mod 2^64 (IADD3 -R / IADD3.X ~R), limbs 2-7 as ~y. Bit-identical to the mask
+     * form ((y01 ^ m) + (K' & m) = ~y01 + p_lo + 1 = p_lo - y01 mod 2^64; the upper limbs are y ^ m = ~y), so the
+     * same values in every case, including the base's dropped limb-1 borrow when y01 > p_lo. */
+    uint64_t r0 = y0.x, r1 = y0.y, r2 = y1.x, r3 = y1.y;
+    asm("{\n\t.reg .pred p;\n\t"
+        "setp.lt.s32 p, %4, 0;\n\t"
+        "@p sub.u64 %0, 0xFFFFFFFEFFFFFC2F, %0;\n\t"
+        "@p not.b64 %1, %1;\n\t"
+        "@p not.b64 %2, %2;\n\t"
+        "@p not.b64 %3, %3;\n\t}"
+        : "+l"(r0), "+l"(r1), "+l"(r2), "+l"(r3) : "r"(nm));
+    gy[0] = r0; gy[1] = r1; gy[2] = r2; gy[3] = r3;
+#else
     uint64_t m;   /* {nm, nm}: the 64-bit mask is the walker's register twice, no instruction */
     asm("mov.b64 %0, {%1,%1};" : "=l"(m) : "r"(nm));
     gy[0] = (y0.x ^ m) + (0xFFFFFFFEFFFFFC30ULL & m); gy[1] = y0.y ^ m; gy[2] = y1.x ^ m; gy[3] = y1.y ^ m;
+#endif
 }
 #endif
 /* z*A = r1*A + psi(r2*A): seed with Q's segments 0,1 (3M+2S), deferred madds for Q2..Q5, psi, P0..P4,
@@ -3082,7 +3149,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         QsbPairFront3 fa=qsb_pair_front3_value(e0,f0,lane,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
 #endif
         Load256(prodA,fa.words);prodA[4]=0;
+#if QSB_OK_DROP
+        okA=active;
+#else
         okA=fa.ok && active;
+#endif
 #if QSB_OK_FOLD == 2
         prodA[0]|=(uint64_t)(!okA);       /* QSB_OK_FOLD 2: low bit set on every lane without a usable candidate */
 #elif QSB_OK_FOLD == 1
@@ -3093,8 +3164,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if QSB_SC_PARK
         /*: park prodA in the product arena (idle until the tree) across B's front call instead
          * of holding its 8 registers over the CALL; reloaded before the leaf product below. */
-        #pragma unroll
-        for(int k=0;k<4;k++)qsb_sc_products[k][tid]=prodA[k];
+        TP_ST(qsb_sc_products,tid,prodA);
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && QSB_PARK128
         #pragma unroll
@@ -3142,7 +3212,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     QsbPairFront fb=qsb_pair_front_value(e1,f1,tid,d_gt,u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
     Load256(prodB,fb.words);prodB[4]=0;Load256(m1B,fb.words+4);Load256(m2B,fb.words+8);
 #endif
+#if QSB_OK_DROP
+    okB=active && hasB;
+#else
     okB=fb.ok && active && hasB;
+#endif
 #if QSB_OK_FOLD == 2
     prodB[0]|=(uint64_t)(!okB);           /* QSB_OK_FOLD 2 (see okA) */
 #elif QSB_OK_FOLD == 1
@@ -3152,8 +3226,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
 #if QSB_SC_PARK
     asm volatile("" ::: "memory");            /* the reload must not be forwarded from the store */
-    #pragma unroll
-    for(int k=0;k<4;k++)prodA[k]=qsb_sc_products[k][tid];
+    TP_LD(qsb_sc_products,tid,prodA);
 #endif
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);
@@ -5326,7 +5399,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
-    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128)
+    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128) QSB_CARRIER_KV(QSB_PW_RARE) QSB_CARRIER_KV(QSB_TREE128) QSB_CARRIER_KV(QSB_TAIL_K32) QSB_CARRIER_KV(QSB_PREFIX_PACK) QSB_CARRIER_KV(QSB_NEG_PRED) QSB_CARRIER_KV(QSB_OK_DROP) QSB_CARRIER_KV(QSB_FRONT_K32) QSB_CARRIER_KV(QSB_GLV_UNI) QSB_CARRIER_KV(QSB_SEED_K_FOLD) QSB_CARRIER_KV(QSB_GLV_RND_FOLD)
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
