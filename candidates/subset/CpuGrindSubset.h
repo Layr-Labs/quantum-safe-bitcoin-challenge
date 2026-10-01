@@ -344,6 +344,11 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #ifndef QSB_CPU_ILP2
 #define QSB_CPU_ILP2 1
 #endif
+/* Host-only cuts from jacklightChen b1c5e58e, immutable CPU source
+ * 843c82817bf2de27e7794bb6317d1d223d6fa1fd; no device/carrier change. */
+#ifndef QSB_CPU_INV_LAST
+#define QSB_CPU_INV_LAST 1
+#endif
 #ifndef QSB_CPU_NCH
 #define QSB_CPU_NCH 2
 #endif
@@ -1248,7 +1253,14 @@ Q8T static inline QCPU_AIF void fe8_canon64(uint64_t w[4][8], const fe8 &a) {
     _mm512_store_si512(w[3], _mm512_or_si512(_mm512_srli_epi64(r[3], 36), _mm512_slli_epi64(r[4], 16)));
 }
 /* parity of the canonical y of 8 lanes (p is odd: v - p flips v's parity) */
+#ifndef QSB_CPU_CANON_TOP
+#define QSB_CPU_CANON_TOP 1
+#endif
 Q8T static inline QCPU_AIF __mmask8 fe8_parity(const fe8 &a) {
+#if QSB_CPU_CANON_TOP
+    if (_mm512_cmp_epu64_mask(a.l[4], _mm512_set1_epi64(0x0FFFFFFFFFFFFULL), _MM_CMPINT_NLT) == 0)
+        return _mm512_test_epi64_mask(a.l[0], _mm512_set1_epi64(1));
+#endif
     return (__mmask8)(_mm512_test_epi64_mask(a.l[0], _mm512_set1_epi64(1)) ^ fe8_ge_p(a, nullptr));
 }
 /* x^(p-2) for one 8-lane element: libsecp256k1's secp256k1_fe_inv addition chain
@@ -1417,13 +1429,27 @@ static void fe_inv_var(fe &r, const fe &a) {
 Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
 Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
 Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
+#ifndef QSB_CPU_INV_LANE0
+#define QSB_CPU_INV_LANE0 1
+#endif
 Q8T static void fe8_inv_lanes(fe8 &x) {
     fe8 a1, p1, p2, t, i2;
     fe8_swap1(a1, x); fe8_mul(p1, x, a1);                 /* lanes 2k, 2k+1: a_2k * a_2k+1 */
     fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
     fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
+    fe pr, pi;
+#if QSB_CPU_INV_LANE0
+    /* Only lane 0 feeds the scalar inverse. Extract its normalized radix52
+     * limbs, then use the existing scalar canonicalizer; the other seven
+     * lanes have no consumer at this boundary. Keep all vector tree products. */
+    uint64_t l0[5];
+    for (int i = 0; i < 5; i++) l0[i] = (uint64_t)_mm_cvtsi128_si64(_mm512_castsi512_si128(t.l[i]));
+    fe8_lane_canon(pr, l0);
+#else
     alignas(64) uint64_t w[4][8]; fe8_canon64(w, t);
-    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    pr = fe{{w[0][0], w[1][0], w[2][0], w[3][0]}};
+#endif
+    fe_inv_var(pi, pr);
     fe8 I; fe8_bcast(I, pi);
     fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
     fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
@@ -1531,7 +1557,9 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8 lamA, lamB, x3A, x3B, tA, tB;
             fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
             qcpu_pf_rows(pA, 4, 8);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            if (!QSB_CPU_INV_LAST || g > 0) {          /* after g==0 both chains are dead; the current slopes already used run */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
             qcpu_pf_rows(pB, 0, 4);
             fe8_sqr_subdx(x3A, lamA, D[hA], X[hA]); fe8_sqr_subdx(x3B, lamB, D[hB], X[hB]);
             qcpu_pf_rows(pB, 4, 8);
@@ -1683,6 +1711,15 @@ Q8T static void ec8_final_cf(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G
  * interleaved (unpack of rounds 2p, 2p + 1) and runs the rounds with SHA-NI four keys at a time from those pairs (no sha256msg1/2,
  * four independent sha256rnds2 chains). Same messages, same rounds, same h0 as qsha_keyhash4_h0. */
 Q8T static inline QCPU_AIF void kh16_canon(__m512i w[4], const fe8 &a) {   /* canonical 4 x 64-bit limbs of 8 lanes */
+#if QSB_CPU_CANON_TOP
+    if (_mm512_cmp_epu64_mask(a.l[4], _mm512_set1_epi64(0x0FFFFFFFFFFFFULL), _MM_CMPINT_NLT) == 0) {
+        w[0] = _mm512_or_si512(a.l[0], _mm512_slli_epi64(a.l[1], 52));
+        w[1] = _mm512_or_si512(_mm512_srli_epi64(a.l[1], 12), _mm512_slli_epi64(a.l[2], 40));
+        w[2] = _mm512_or_si512(_mm512_srli_epi64(a.l[2], 24), _mm512_slli_epi64(a.l[3], 28));
+        w[3] = _mm512_or_si512(_mm512_srli_epi64(a.l[3], 36), _mm512_slli_epi64(a.l[4], 16));
+        return;
+    }
+#endif
     fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
     __m512i r[5];
     for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
@@ -1715,6 +1752,9 @@ Q8T static inline QCPU_AIF void kh16_store(uint32_t *m, const fe8 &x0, __mmask8 
 }
 /* ec8_final_cf with the key-hash message words as output (m16: 9 x 16 dwords per group) instead of qx/qp. The EC steps are
  * ec8_final_cf's line for line (a33e04c3 wrote the QSB_CPU_WPRE form; the other branch mirrors ec8_final_cf's). */
+#ifndef QSB_CPU_INV_FIRST
+#define QSB_CPU_INV_FIRST 1
+#endif
 Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, const fe &mx, const fe &my, uint32_t *m16) {
     fe8 MX, MY; fe8_bcast(MX, mx); fe8_bcast(MY, my);
     const int NC = QSB_CPU_NCH;                      /* R2-D: chains of the batch inversion (4: the code before) */
@@ -1723,11 +1763,14 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
         for (int c = 0; c < NC; c++) {
             const int h = g + c; fe8_sub_lz(D[h], MX, X[h]);
 #if QSB_CPU_WPRE
-            { fe8 t; fe8_sub_lz(t, MY, Y[h]); fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
+            { fe8 t; fe8_sub_lz(t, MY, Y[h]);
+              if (QSB_CPU_INV_FIRST && g == 0) fe8_cp(PRE[h], t);
+              else fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
 #else
             fe8_cp(PRE[h], run[c]);
 #endif
-            fe8_mul_lz(run[c], run[c], D[h]);
+            if (QSB_CPU_INV_FIRST && g == 0) fe8_cp(run[c], D[h]);
+            else fe8_mul_lz(run[c], run[c], D[h]);
         }
     QCPU_INVC(run);
 #if QSB_CPU_ILP2 & 1
@@ -1737,7 +1780,9 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
             const int hA = g + c, hB = hA - 1;
             fe8 tA, tB, lamA, lamB, x3A, x3B, y3A, y3B;
             fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            if (!QSB_CPU_INV_LAST || g > 0) {          /* after g==0 both chains are dead; the current slopes already used run */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
             fe8_sqr_sub2(x3A, lamA, X[hA], MX); fe8_sqr_sub2(x3B, lamB, X[hB], MX);
             fe8_sub_lz(tA, X[hA], x3A); fe8_sub_lz(tB, X[hB], x3B);
             fe8_mul_sub(y3A, lamA, tA, Y[hA]); fe8_mul_sub(y3B, lamB, tB, Y[hB]);
