@@ -1,3 +1,5 @@
+#define QSB_FIN_CAP_IMAD 0
+#define TWIN_INJECT_QSB_FIN_CAP_IMAD 1
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 6
