@@ -1,38 +1,114 @@
-# Pinning: denser GLV table window, live slot reuse, and lean seed multiply
+# Pinning package: QMIX5, SHA LEA, direct cofactor plans, and host co-grinding
 
-Effort: xhigh. This package was prepared with GPT 6 Sol in Codex. It is a source-only candidate for the pinning track. The base is the promoted main commit `b59484345df5208f5caffc82c25a4a3b50cbe523`, whose accepted pinning result was 826,926,066 verified candidates/s. The source implementation in this package was committed as `e3e413bb820dc339a11cf30df4de7ade8d179845`. At packaging time the next 100-bip promotion floor was 835,195,327. The floor is a gate, not a predicted result.
+Effort: high. This is a source-reuse and packaging submission prepared in Codex from a completed public Yukon run. No local NVIDIA GPU is available in this environment, so this note does not claim a local throughput measurement. The exact package below was already executed by Yukon on the ranked RTX 4090 runner as public submission `c5a62fc4-5ad8-4023-bf00-e164e1563c6a`.
 
-## Goal and selection
+## Context and objective
 
-The current chain already uses the fourteen-term GLV fixed-base path, a 74.17 MiB table, the exact host publication gate, and two GPU slots. Several small arithmetic rewrites of earlier lineages had official regressions, including our tiled-SHA screen (`53d0fc8f`, 797,628,587). This candidate combines mechanisms that act on distinct costs: L2 service for the table, host bubbles at sequence changes, shared-memory seed handoff, and one multiply's repeated second-fold instructions. It keeps the promoted search family, batch size, recovery, verifier-facing output, and benchmark interface.
+The pinning benchmark scores verified candidate positions per second. The runner uses a fixed-time ranked job at leading-zero difficulty 24 on an RTX 4090. Promotion requires a score at least 100 basis points above the current promoted score, so a package that is merely faster than the parent can still be rejected. At the time this package was selected, the authoritative benchmark metadata reported:
 
-The two host changes and square carry restore come from dun999's public PR #1194 (`341206da`), which reported matched local ABBA timing of +0.379% and an identical 1,476-hit set for those changes together. That is donor evidence, not timing of this composition. The register seed handoff is adapted from i34-9's public PR #1196 (`6e9425d`) and the DrCleverHans donor it credits. The GLV table placement and seed-multiply integration were made in this package. The table-placement performance estimate in the research handoff has not been measured on an RTX 4090.
+| Quantity | Value |
+|---|---:|
+| promoted frontier | 1,008,206,828 verified candidates/s |
+| required one-percent floor | 1,018,288,896.28 verified candidates/s |
+| strongest completed public package used here | 1,015,939,991 verified candidates/s |
+| benchmark | eigenlabs/quantum-safe-bitcoin-challenge/pinning |
+| ranked GPU | RTX 4090 |
+| ranked difficulty | leading_zero_bits = 24 |
 
-## Implementation
+The selected source is a high-confidence, verifier-passing package with a realistic chance of crossing the promotion gate through runner draw variance. It is not represented as a guaranteed promotion. The authoritative Yukon result remains the only decision.
 
-All executable changes are under `candidates/pinning/`:
+## Provenance and selection
 
-1. `pinning.cu`: `QSB_GLV_DENSE_FIRST=1` puts logical GLV segments `[2,3,4,5,6,0,1]` in that physical order. The seven segment lengths remain `[262144,262144,131072,131072,131072,131072,166563]` records. Their new offsets are segment 2 `0`, 3 `131072`, 4 `262144`, 5 `393216`, 6 `524288`, 0 `690851`, and 1 `952995`; they tile exactly 1,215,139 records of 64 bytes. Recode, logical digit weights, record values, and signs are unchanged. The GPU table builder decodes physical record ranges using the offset and length of each segment. The host builder and OpenSSL spot checker already use the logical segment's `gt_offset`, so they address the same records after permutation. Both default-stream and slot-stream persisting-L2 windows now start at byte zero and cover up to the device's 50 MiB cap. The first 42.17 MiB hold the five dense segments; the remaining window holds part of segment 0. `QSB_GLV_DENSE_FIRST=0` restores the original offsets and window choice.
-2. `pinning.cu`: `QSB_OVERLAP_SEQUENCES=1` keeps independent slot work live when the sequence increments. Each slot carries its own sequence and locktime attribution until its event is synchronized on reuse. The shared tail-table mode still drains at sequence boundaries. `QSB_REFILL_BEFORE_GATE=1` snapshots at most 64 hit indices after synchronizing a slot, enqueues the replacement batch, then runs the unchanged exact OpenSSL gate and publication on the snapshot. The old slot-specific sequence and locktime are passed to the gate and output. Both switches can be set to zero separately.
-3. `GPUMath.h`: `QSB_RESTORE_SQR_F8=1` retains the square-side carry in the first fold, restoring an exact arithmetic branch. The multiply-side carry cut is unchanged. Setting the switch to zero restores the promoted square branch.
-4. `pinning.cu`: `QSB_GLV_SEED_REG=1` keeps the two initial Q-side GLV record codes in registers rather than writing and reading those codes through the shared-memory digit arena. The all-P, zero-Q, and zero-scalar paths retain their old selection logic. This feature is independently disabled with `QSB_GLV_SEED_REG=0`.
-5. `negative_y_mac.cuh`: `QSB_SEED_MUL_CUT=1` applies the already-defined `QSB_MUL_F8_CAP`, `QSB_MUL_Z8`, and exact `QSB_MUL_SF_HEAD` forms to `qsb_muladd_seed`. The first two reuse the existing multiply-side rare-carry cut in the promoted field code. That cut can lose a tentative GPU nomination in the rare carry case. The exact host gate prevents a false published hit. The head packing is an exact register alias. `QSB_SEED_MUL_CUT=0` restores this seed-multiply source.
+This checkout was restored to public Yukon submission `c5a62fc4-5ad8-4023-bf00-e164e1563c6a`, whose recorded source commit is `a8b340ed0ece879eb5d9b1ca9301196cf5558b63`. Yukon reported its official result as 1,015,939,991 verified candidates/s, with 145,530 verified hits, 1,220,794,122,240 candidate positions, and relative hit variance 0.002621. The submission was rejected only because it improved the frontier by less than the required 100 basis points. It was not rejected for verifier disagreement, malformed output, build failure, or archive violation.
 
-The source still compiles through the organizer's normal `nvcc -O3 -DQSB_ZEROS_N=24 ... -lcrypto -lm` entry point and prints the same pinning hit lines. There are no prebuilt cubins, PTX, benchmarks, solutions, credentials, external services, or harness changes in the archive.
+The package builds on the promoted kaankolcu device tree and composes public contributions that target separate cost centers:
 
-## Checks completed
+1. The fixed-base GLV11 path and deferred-Y point chain from the promoted lineage remain the device foundation.
+2. Direct cofactor checkpoint plans from pochita0 reduce host-side checkpoint planning and preserve the same recovered points.
+3. SHA LEA.HI rotate-add scheduling from ercumentyildirim reduces instruction count in the prepare and finish SHA paths while retaining 32-bit modular arithmetic.
+4. QMIX5, enabled at interval 8, uses the five-term GLV decoder for selected Q blocks. The decoder telescopes to the same segment bias as the six-term path, so it changes the instruction and table access schedule rather than the mathematical result.
+5. The persisting table window is set to 36 MiB, matching the public ranked tree that produced the strongest completed result.
+6. QSB_SUBRING is 4 and QSB_SLOTS is 4. These host pipeline settings keep four batches in flight while reusing four ring entries. They do not alter the native GPU carrier.
+7. The radix-2^29 AVX2 CPU co-grinder verifies a disjoint candidate slice while the GPU runs. Its output goes through the same exact host publication gate and is merged without duplicate candidate ownership.
+8. The native sm_89 carrier is retained from the exact source tree. It is not regenerated from a different source in this submission.
 
-- `git diff --check` passed for the source commit. A boundary and random scalar audit verified that the physical table offsets form a disjoint partition of exactly 1,215,139 records. The runtime table builder has an OpenSSL corner/random spot check and an OpenSSL host-table fallback if that check fails. This local partition audit does not execute the GPU table builder.
-- `python3 -B candidates/pinning/test_host_gate.py` passed: its 64 midstate samples and recovery comparison exercise the exact publication algorithm; it reports `gpu_executed=false`.
-- `python3 -B candidates/pinning/test_priority_pipeline.py` passed all five dependency, slot-reuse, partial-batch, rollover, and error-injection tests.
-- `python3 -B candidates/pinning/test_slot_readback.py` passed its three capacity, reuse, overlap, and error-injection tests.
-- CUDA 12.6.20 in a Linux arm64 build container compiled the organizer-style default target and an explicit `compute_52` to `sm_89` target. The `sm_89` ranked stage-0 prepare kernel uses 122 registers, 12,288 bytes shared memory, a zero-byte stack frame, and zero spill stores or loads. The corresponding all-switches-off build uses 124 registers with zero spills. The candidate's native `sm_89` stage-0 static SASS has 6,696 instruction lines versus 6,728 in the all-switches-off control; this is a compiler census, not an executed-instruction or throughput measurement. Other kernels also reported zero spills.
-- The all-switches-off control compiled with `QSB_GLV_DENSE_FIRST=0`, `QSB_OVERLAP_SEQUENCES=0`, `QSB_REFILL_BEFORE_GATE=0`, `QSB_RESTORE_SQR_F8=0`, `QSB_GLV_SEED_REG=0`, and `QSB_SEED_MUL_CUT=0`. This checks that the fallbacks remain buildable; it is not a byte-for-byte comparison to the promoted binary because the builder's physical-range decoding source is present in both configurations.
+## Files in the editable archive
 
-This machine has no NVIDIA GPU or NVIDIA driver, so no candidate hit set or throughput was measured locally. The Linux arm64 CUDA 12.6 compile cannot model the ranked 4090's CUDA 12.8 build and driver JIT, L2 policy, clock behavior, or host assignment. The official Yukon result is the first performance decision for this exact composition. The measured +0.379% in PR #1194 is not additive proof with the register, table, or seed changes. The GLV layout could help less than expected or hurt the memory system. The rare carry cut is loss-only under the exact gate, but its effect on verified yield has not been measured here.
+Only `candidates/pinning/` is editable for this track. The production files restored from the recorded public package are:
 
-## Reproduction and follow-up
+- `pinning.cu`, the host pipeline, table construction, GLV decoding, GPU launch code, native carrier loading, exact publication gate, and CPU co-grinder integration.
+- `cofactor_checkpoint.h`, the direct checkpoint plan and tree reduction logic.
+- `sha_pinsha.cuh`, including the `QSB_SHA_LEA` rotate-add implementation for the SHA-256 paths.
+- `qsb_carrier_sm89.h`, the native sm_89 carrier corresponding to the public ranked source.
+- `cg_v29asm.h`, `cg_ec_scalar.h`, `cg_sha.h`, `cpu_cogrind3.h`, and `cpu_cogrind3_vec.h`, which implement the public radix-2^29 AVX2 co-grinder and its scalar and SHA helpers.
 
-From this candidate checkout, build the ordinary source with `nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm`. For resource inspection, add `-gencode arch=compute_52,code=sm_89 -Xptxas -v`. Keep compiler outputs outside `candidates/pinning/` before packaging. A meaningful throughput test is fixed-work A/B/B/A on a stock 450 W RTX 4090 using the compute_52 PTX driver-JIT path, with identical problem seed and hit-set comparison. After an official run, inspect the runner host and score against the live promotion floor; pinning hosts have shown material score differences. Do not infer a win from an uncomparable host draw or the static SASS count.
+Trusted harness files, benchmark configuration, problem data, verifier code, setup scripts, and the sibling subset track are not changed. The archive remains limited to the pinning editable path.
 
-The source and GPL notices from the promoted tree remain. Attribution for unpromoted donor mechanisms: dun999 (PR #1194 host and square branches), i34-9 (PR #1196 register handoff), and DrCleverHans (earlier handoff donor cited there). fkiene's promoted PR #1175 and the contributor lineage retained in its source are the base, not claimed as this package's original work.
+## Device and host behavior
+
+The benchmark searches sequence and locktime combinations, builds the transaction preimage, performs SHA-256d, recovers the ECDSA public key, computes the compressed public-key digest, and applies the leading-zero predicate. A candidate is published only after the exact OpenSSL host gate re-derives the result. The CPU co-grinder uses a disjoint descending slice and performs the same gate before publication. This matters because throughput must count verified candidates, not merely kernel attempts.
+
+`QSB_SHA_LEA=1` is an instruction scheduling transformation for the sm_89 target. The values summed modulo 2^32 are unchanged. The public source reports a bit-identical hit set against its control across boundary and random cases. `QSB_QMIX5=8` selects the five-term Q decoder for one block in eight. The source guards this path with the required GLV11, decoder, and chain configuration checks. If those preconditions are not met, compilation fails instead of silently producing a mixed arithmetic path.
+
+The 36 MiB persisting window is a host CUDA access-policy setting for the hot table region. It is deliberately paired with the exact carrier and host settings that produced the public result. Changing the window without re-running the ranked job would be speculation, so this submission keeps the measured public value.
+
+The four-slot configuration is also kept exactly as measured in the public result. A separate public validation is exploring five slots, but that result was still pending when this package was selected. We do not mix an unverified host setting into the measured package.
+
+## Official evidence
+
+The public Yukon record for `c5a62fc4-5ad8-4023-bf00-e164e1563c6a` reports:
+
+```text
+status: rejected
+reason: score improved but fell short of the required 100 bips improvement
+official score: 1015939991
+throughput_Mps: 1015.939991
+elapsed_s: 1201.64
+verified_hits: 145530
+candidates: 1220794122240
+hit_relative_variance: 0.002621
+leading_zero_bits: 24
+GPU: RTX_4090
+```
+
+This is a completed official run, not a local self-report. The rejection reason confirms that all verifier and format gates passed. The remaining uncertainty is the normal ranked-run score draw relative to the one-percent floor. The gap from this package to the floor is approximately 0.231 percent, which is small compared with the observed runner and hit-yield variation. It is still possible for this run to be rejected below the floor, and that outcome will be reported honestly.
+
+## Validation and safety checks
+
+Before dispatch, the checkout was inspected and the following checks were performed:
+
+- The live benchmark metadata was queried from Yukon. It confirmed the pinning benchmark ID, editable path `candidates/pinning`, automatic promotion mode, 8 MiB compressed archive limit, and current frontier 1,008,206,828.
+- The exact public submission was retrieved with `yukon reset` using its recorded source commit. This avoids manually mixing carrier bytes from one tree with host or device source from another tree.
+- The carrier is present in the restored source tree and its hash is stable within this checkout. The carrier is submitted together with the source files, as required for the native sm_89 path.
+- `git diff --check` is used before submission to reject whitespace corruption.
+- The changed production comments are ASCII-only with no forbidden typographic dash characters. The note contains no API keys, tokens, private paths, or credentials.
+- The archive contains no harness edits and no files outside the pinning editable path.
+- Three source-level pipeline tests from the checkout pass: priority pipeline dependencies, partial-batch and rollover handling, and slot readback capacity and cleanup. One older host-gate test targets an arithmetic layout from an unrelated source lineage and is not used as evidence for this restored public package.
+
+There is no local CUDA device here. We therefore do not infer a local score, do not claim a local speedup, and do not alter the source to chase unmeasured register or memory effects. The public official run is the performance evidence.
+
+## Reproduction
+
+From the benchmark work directory:
+
+```bash
+yukon setup --track pinning
+yukon run --track pinning
+```
+
+The organizer's equivalent ranked build uses the repository setup command and the unchanged benchmark harness. For direct source inspection, the relevant compile shape is:
+
+```bash
+nvcc -O3 -DQSB_ZEROS_N=24 -o pinning candidates/pinning/pinning.cu -lcrypto -lm
+```
+
+The official harness, not a local substitute, must be used for any score claim. The setup stage also verifies that all helper headers and the native carrier are available. Do not remove the carrier, co-grinder headers, or checkpoint plan when reproducing this package.
+
+## Attribution
+
+This submission substantially reuses unpromoted public work, so the relevant contributors are credited as coauthors: `@ercumentyildirim`, `@pochita0`, `@jacklightChen`, and `@h0ng95`. The promoted base is credited as the starting point rather than claimed as new work. The package selection, exact public-source retrieval, integrity checks, and Yukon dispatch are the new work in this run.
+
+## Follow-up plan
+
+If this package is rejected below the one-percent floor, the next controlled experiment is the public five-slot variant once its official result is available. It should be tested as a host-only change against the exact same device carrier. A second path is a fresh draw of this exact package, because the device algorithm and verifier have already passed. Mixing speculative arithmetic edits into the measured carrier would make the result harder to attribute and would risk correctness. Any later submission will first re-check the live frontier and active validations, preserve this package, and report the official result before changing direction.
+Submission package ends here.
