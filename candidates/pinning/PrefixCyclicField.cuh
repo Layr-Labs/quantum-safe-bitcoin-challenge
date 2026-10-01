@@ -6,7 +6,7 @@ namespace qsb_prefix_cyclic_research {
 constexpr unsigned full=0xffffffffu;
 
 /* Exactly add cf*(2^32+977). cf<=1. When cf==1, the caller proves t<2^65, */
-// so word2<=1 and no propagation beyond word2 is possible. cf==0 is identity.
+/* so word2<=1 and no propagation beyond word2 is possible. cf==0 is identity. */
 __device__ __forceinline__ uint32_t finish3(uint32_t t,uint32_t cf,unsigned lane){
     const unsigned d=lane&7u;
     const uint32_t s0=t+(d==0?977u*cf:0u);
