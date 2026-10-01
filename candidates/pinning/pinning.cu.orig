@@ -1,4 +1,3 @@
-/* redraw 4 of 90662a11 (same package): racing the open gate for an r5 run */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
@@ -11,15 +10,9 @@
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8 (via cefika c5a62fc4); HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
-#ifndef QSB_STATE_DROP_EARLY
-#define QSB_STATE_DROP_EARLY 1 /* pochita0 0dc1aacd via kaankolcu: release loaded state before root loads and register-only recovery */
-#endif
-#if QSB_STATE_DROP_EARLY != 0 && QSB_STATE_DROP_EARLY != 1
-#error "QSB_STATE_DROP_EARLY must be 0 or 1"
-#endif
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
@@ -263,29 +256,6 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #else
 #define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
 #endif
-/* QSB_QMIX5 (0 or a power of two K >= 2; default 0 = compiled out): the reverse of QSB_PMIX12.
- * Every K-th prepare block ((blockIdx.x & (K-1)) == 0, block-uniform) decodes Q with P's
- * five-term GLV11 decoder (segments 0, 6, 7, 4, 5; q11_bigtbl_code_z) instead of GLV12's six
- * (segments 0..5). Both decoders telescope to the same segment-0 bias (GLVScalar.cuh), so the
- * digits sum to the same Q component for every residual and the chain's point is identical.
- * Such a block runs 10 terms (9 additions instead of 10) and 8 cold-bank gathers instead of 6.
- * Layout: the block's five Q terms take slots 1..5 (term t in slot t+1; the two seeds stay in
- * registers) and P keeps slots GT_Q_TERMS.. untouched, so the chain simply starts at term 1
- * instead of 0 and phi still runs before term GT_Q_TERMS, exactly between the Q and the P sum.
- * Slots 4 and 5 hold the same codes in both decoders (segments 4 and 5), segment 7's field
- * ends at bit 72 like segment 3's (same top-aligned window), and segment 6 starts at bit 18
- * like segment 1: only the shift and offset constants of seed 1 and slot 3 depend on the block.
- * Slot 2 (segment 2) is still written and never read by such a block. */
-#ifndef QSB_QMIX5
-#define QSB_QMIX5 8
-#endif
-#if QSB_QMIX5 != 0 && (QSB_QMIX5 < 2 || (QSB_QMIX5 & (QSB_QMIX5-1)) != 0)
-#error "QSB_QMIX5 must be 0 or a power of two >= 2"
-#endif
-#if QSB_QMIX5 && (!QSB_GLV11 || QSB_QGLV5 || !QSB_PDEC_Z)
-#error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
-#endif
-#define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
 #ifndef QSB_BATCH
 #define QSB_BATCH 4194304    /* candidates per pipeline launch */
 #endif
@@ -1235,80 +1205,6 @@ __device__ __forceinline__ void qsb_decode_glv_side_z(const uint64_t w[2],uint32
     }
 }
 #endif
-#if QSB_QMIX5
-#if !(QSB_GLV_ZDEC && QSB_SEED_GLUE && QSB_DIGIT_LEAN && QSB_FOUR_HOT && QSB_BIGTBL)
-#error "QSB_QMIX5 is written for the ZDEC decode with the register seed glue (QSB_GLV_GLUE bits 2 and 8)"
-#endif
-// BEGIN QSB_QMIX5_HOST_EXACT
-/* The signed radix step of q9_bigtbl_code_z / q11_radix_code_z / q9_bigtbl_seed_z for field A
- * (shift sA, width bA, table offset oA) or, when q5, field B: u = the window of w top-aligned
- * at the field's top bit, xs = -(top bit), return offset + idx. The same instructions as the
- * base step with the window, the shift and the offset selected; fields ending at the same bit
- * share the window, and those selects fold. */
-__host__ __device__ __forceinline__ uint32_t qsb_qmix5_radix(const uint32_t ws[4],bool q5,
-        unsigned sA,unsigned bA,uint32_t oA,unsigned sB,unsigned bB,uint32_t oB,
-        uint32_t *u_out,uint32_t *xs_out) {
-    const unsigned rA=sA+bA-32u,rB=sB+bB-32u;
-    const uint32_t lo=q5?ws[rB>>5]:ws[rA>>5],hi=q5?ws[(rB>>5)+1u]:ws[(rA>>5)+1u];
-    const unsigned rs=q5?(rB&31u):(rA&31u),sh=q5?32u-bB:32u-bA;
-    const uint32_t off=q5?oB-(1u<<(bB-1u)):oA-(1u<<(bA-1u));
-#ifdef __CUDA_ARCH__
-    uint32_t u,xs,v;
-    asm("{\n\t.reg .u32 t;\n\t"
-        "shf.r.clamp.b32 %0,%3,%4,%5;\n\t"
-        "shr.s32 %1,%0,31;\n\t"
-        "lop3.b32 t,%0,%1,0,0xC3;\n\t"          /* u ^ ~xs */
-        "shr.u32 t,t,%6;\n\t"
-        "add.u32 %2,t,%7;\n\t}"                 /* offset + idx */
-        : "=r"(u),"=r"(xs),"=r"(v) : "r"(lo),"r"(hi),"r"(rs),"r"(sh),"r"(off));
-#else
-    const uint32_t u=q9_funnel_r(lo,hi,rs);
-    const uint32_t xs=(uint32_t)((int32_t)u>>31);
-    const uint32_t v=((u^~xs)>>sh)+off;
-#endif
-    *u_out=u;*xs_out=xs;
-    return v;
-}
-/* Q's term 1 as the register seed (rec, ~msk) of q9_bigtbl_seed_z chunk 1: segment 1 (19 bits
- * at shift 18), or segment 6 (27 bits at shift 18, the five-term decoder's term 1) when q5. */
-__host__ __device__ __forceinline__ void qsb_qmix5_seed1(const uint64_t w[2],bool q5,
-                                                         uint32_t *rec,uint32_t *msk) {
-    const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
-    uint32_t u;
-    *rec=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(1),19u,q9_bigtbl_offset(1),
-                         q9_bigtbl_shift(6),27u,q9_bigtbl_offset(6),&u,msk);
-}
-/* Slot 3's code: segment 3 (18 bits at shift 55), or segment 7 (28 bits at shift 45, the
- * five-term decoder's term 2) when q5; q9_bigtbl_code_z's final sign step v ^ (~u & 2^31). */
-__host__ __device__ __forceinline__ uint32_t qsb_qmix5_code3(const uint64_t w[2],bool q5) {
-    const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
-    uint32_t u,xs;
-    const uint32_t v=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(3),18u,q9_bigtbl_offset(3),
-                                     q9_bigtbl_shift(7),28u,q9_bigtbl_offset(7),&u,&xs);
-#ifdef __CUDA_ARCH__
-    uint32_t code;
-    asm("lop3.b32 %0,%1,%2,0x80000000,0xD2;" : "=r"(code) : "r"(v),"r"(u));  /* v ^ (~u & 2^31) */
-    return code;
-#else
-    return v^(~u&0x80000000u);
-#endif
-}
-// END QSB_QMIX5_HOST_EXACT
-/* Q's decode (qsb_decode_glv_side_z<1> with the register seed glue), five-term in a QMIX5
- * block (q5): terms 0, 1 in the seed registers, term t >= 2 in slot t+1 (segments 7, 4, 5 in
- * slots 3, 4, 5), so the block's chain starts at term 1. Slots 4 and 5 are the same codes in
- * both decoders; slot 2 (segment 2) is written as before and only the six-term chain reads it. */
-__device__ __forceinline__ void qsb_decode_q_qmix5(const uint64_t w[2],uint32_t top,uint32_t m32,
-        volatile uint32_t *codes,uint32_t *seed0,uint32_t *seed1,uint32_t *msk0,uint32_t *msk1,
-        bool q5) {
-    q9_bigtbl_seed_z(w,m32,0,seed0,msk0);
-    qsb_qmix5_seed1(w,q5,seed1,msk1);
-    codes[(size_t)2*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,2);
-    codes[(size_t)3*QSB_TREE_N+threadIdx.x]=qsb_qmix5_code3(w,q5);
-    codes[(size_t)4*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,4);
-    codes[(size_t)5*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,5);
-}
-#endif
 /* Materialize P=s1 then Q=s2 into their fixed planes; the accumulator consumes
  * the Q planes first. The bounded top digit is centered at333125, not a
  * power-of-two midpoint. Explicit specializations keep component selection
@@ -1341,9 +1237,7 @@ __device__ __forceinline__ unsigned qsb_decode_glv(const uint64_t *k
     qsb_decode_glv_side_z<0>(w[0],top[0],m[0],codes,seed0,seed1);
 #endif
     }
-#if QSB_QMIX5
-    qsb_decode_q_qmix5(w[1],top[1],m[1],codes,seed0,seed1,msk0,msk1,QSB_QMIX5_SEL());
-#elif QSB_SEED_GLUE
+#if QSB_SEED_GLUE
     qsb_decode_glv_side_z<1>(w[1],top[1],m[1],codes,seed0,seed1,msk0,msk1);
 #else
     qsb_decode_glv_side_z<1>(w[1],top[1],m[1],codes,seed0,seed1);
@@ -1925,16 +1819,7 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
     }
 #endif
     uint64_t x0[4],y0[4],x1[4],y1[4];
-#if QSB_QMIX5
-#if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP || !QSB_GLV_SEED_REG
-#error "QSB_QMIX5 runs the one-addition piped chain with register seeds (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
-#endif
-    /* A QMIX5 block's five Q terms are in slots 1..5 (seeds in registers): its chain starts at
-     * term 1, so it runs one trip fewer and phi still runs before term GT_Q_TERMS. */
-    int first=(nonzero&1u)?(QSB_QMIX5_SEL()?1:0):GT_Q_TERMS;
-#else
     int first=(nonzero&1u)?0:GT_Q_TERMS;
-#endif
 #if QSB_PMIX12
 #if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP
 #error "QSB_PMIX12 runs the one-addition piped chain (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
@@ -4322,17 +4207,6 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
         return;
     }
-#if QSB_STATE_DROP_EARLY && (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
-    /* All four state vectors are now register values. Keep the original zero-state
-     * exit and warp synchronization, then release the same dead 128-byte L2 lines
-     * before root loads and recovery so overlapping prepare can reuse L2 sooner. */
-    __syncwarp();
-    if((threadIdx.x&7u)==0u){
-        const ulonglong2 *dst=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
-        qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
-        qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
-    }
-#endif
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
 #if QSB_ROOT_V2
@@ -4368,7 +4242,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
-#if !QSB_STATE_DROP_EARLY && (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
      * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
      * warp's loads were one instruction per plane, so the whole 8-lane group has its data. */
