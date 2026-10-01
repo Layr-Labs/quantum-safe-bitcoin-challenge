@@ -4691,7 +4691,7 @@ static decltype(&cuDevResourceGenerateDesc) qsb_cuDevResourceGenerateDesc;
 static decltype(&cuGreenCtxCreate) qsb_cuGreenCtxCreate;
 static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
-#define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
+#define QSB_GREEN_SPLIT_FLAGS 0
 #endif
 static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t sB[2], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
