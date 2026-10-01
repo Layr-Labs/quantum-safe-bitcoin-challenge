@@ -4593,7 +4593,7 @@ static void qsb_subpipe_launch(
  * 32 adjacent table records; with it the default batch is 24. The unchanged 256-thread launch
  * covers whole warps. 0 = the consecutive-record batches below. */
 #ifndef QSB_GT_STRIPE
-#define QSB_GT_STRIPE 0
+#define QSB_GT_STRIPE 1
 #endif
 #if QSB_GT_STRIPE != 0 && QSB_GT_STRIPE != 1
 #error "QSB_GT_STRIPE must be 0 or 1"
