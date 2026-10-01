@@ -177,9 +177,9 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     // Only bit 32 and bits 0..31 of q are used. u64 overflow is harmless.
     const uint64_t q=top+977ULL*(top>>32)+x7+(beta[3]>>32);
 #if QSB_PARITY_WINDOW_NARROW
-    // B=2^32 and Dk=sum(a_i*b_j, i+j=k). Omitting D5 changes
+    /* B=2^32 and Dk=sum(a_i*b_j, i+j=k). Omitting D5 changes */
     // floor((D6+floor(D5/B))/B) by at most 6; omitting D12 changes
-    // floor((D13+floor(D12/B))/B) by at most 3. The old top word is
+    /* floor((D13+floor(D12/B))/B) by at most 3. The old top word is */
     // below B^2, so the old q exceeds this q by at most 6+3+977=986
     /* (the 977 term covers a carry into top's high limb). Keep x7 away */
     /* from its last seven values and q from its last 1959+986 values. */
