@@ -1,0 +1,33 @@
+{
+  "status": "PASS",
+  "validation_level": "actual inline PTX CPU semantic model",
+  "GPUMath_sha256": "9481632acdee26f7883de5673154f132d4442d6befe3c7b8e5888d6570443cf3",
+  "ptx_sha256": "85a1baf27b30b1f0bdcae5d8ffac1eee7a91c95089b19df3e66c98ea8bc2111e",
+  "semantic_model_sha256": "86d710ca2e82fbd14a9b291f4a65878f6f48129794a19540482a6295daa8c526",
+  "checker_sha256": "37cd2a1eb617e21fdc5f578e83f2c6d9544bc247c158ff62a999716b987f2681",
+  "full_product_and_reduction_cases": 20961,
+  "final_fold_carry_cases": 5,
+  "precanonical_outputs_ge_p": 90,
+  "mutations_rejected": [
+    "stale final carry flag",
+    "omitted narrow MAD carry-in"
+  ],
+  "ptx_opcodes": {
+    "mov.b64": 156,
+    "mul.wide.u32": 17,
+    "mad.lo.cc.u32": 14,
+    "madc.hi.cc.u32": 49,
+    "madc.lo.cc.u32": 42,
+    "madc.hi.u32": 7,
+    "addc.u32": 14,
+    "cvt.u64.u32": 6,
+    "add.cc.u32": 5,
+    "addc.cc.u32": 28,
+    "add.cc.u64": 2,
+    "addc.cc.u64": 6,
+    "mad.lo.u32": 1,
+    "mul.lo.u32": 1
+  },
+  "gpu_executed": false,
+  "limits": "No GPU correctness, runtime scheduling or timing. Host fallback and C++ canonicalization are unchanged."
+}
