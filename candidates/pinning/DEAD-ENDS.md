@@ -9,6 +9,7 @@ Official and public negatives that must not be retried without new evidence.
 | `f034a9c4` | `QSB_TAIL_TAB=1` + `QSB_SHA_SMEM_W1=1` on 7b0a15b | 750,065,705 | −3.67% | 107,375 verified hits, 89.41 hits/s. Relative drop matches LeaderGPU vs intel-r5 (~3.7%). Does **not** isolate the ST path as slower, and does **not** justify composing SHA into the next arithmetic submit. Keep both flags **0**. Stop pinning SHA work. |
 | `0227bc3` | older weaker lineage (2026-09-17) | 679,373,443 | n/a then | Built off the wrong base. Always start from the live promoted source. |
 | `2c85ba63` | PR #743 + `QSB_CARRY62` only | cancelled | n/a | Cancelled while validating so the host-gate + C31 bundle could take the slot against the 778 M floor. Do not requeue carry62-only unless this larger bundle is a large regression. |
+| `543bda87` | `QSB_CHAIN_ALU=1` on b9736ce1 | 850,444,699 | −15.7% | Official reject: score did not improve. 121,750 verified hits / 1200.9s. Do **not** retry CHAIN_ALU on this tip without new positive evidence. |
 
 ## Official, public, used as evidence
 
