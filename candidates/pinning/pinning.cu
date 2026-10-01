@@ -1378,7 +1378,7 @@ __device__ __forceinline__ const ulonglong2 *qsb_pipe_half(const uint8_t *table,
  * -> 771.1 M/s). A prefetch moves a whole 128 B line, twice the 64 B record fetch, and
  * the cold-bank gathers already sit near the DRAM limit; the chain is not latency-bound. */
 #ifndef QSB_CHAIN_L2PF
-#define QSB_CHAIN_L2PF 0
+#define QSB_CHAIN_L2PF 1
 #endif
 #if QSB_CHAIN_L2PF < 0 || QSB_CHAIN_L2PF > 3
 #error "QSB_CHAIN_L2PF must be 0..3"
