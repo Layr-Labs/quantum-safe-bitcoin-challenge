@@ -52,6 +52,9 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
+#if QSB_HALF_SUBPIPE
+    QK_RR512,    /* qsb_root_register512 (optional; selected by half packets) */
+#endif
     QK_N
 };
 
@@ -65,6 +68,18 @@ static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#ifndef QSB_CARRIER_HALF_SUBPIPE
+#define QSB_CARRIER_HALF_SUBPIPE 0
+#endif
+#if QSB_CARRIER_HALF_SUBPIPE != QSB_HALF_SUBPIPE
+#error "QSB_HALF_SUBPIPE requires a matching regenerated native carrier"
+#endif
+#ifndef QSB_CARRIER_FIN_T2EARLY
+#define QSB_CARRIER_FIN_T2EARLY 0
+#endif
+#if QSB_CARRIER_FIN_T2EARLY != QSB_FIN_T2EARLY
+#error "QSB_FIN_T2EARLY requires a matching regenerated native carrier"
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -127,6 +142,9 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     fixed[QK_RF] = rf_name;
     fixed[QK_RR] = "_Z17qsb_root_registerPmi";
     fixed[QK_PFC] = "_Z29qsb_prefix_field_check_kernelPj";
+#if QSB_HALF_SUBPIPE
+    fixed[QK_RR512] = "_Z20qsb_root_register512Pmi";
+#endif
     int all = 1;
     for (int i = 0; i < QK_N; i++) {
         g_qsb_carrier.k[i] = nullptr;
@@ -146,7 +164,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     e = cudaLibraryGetGlobal(&dz, &zb, g_qsb_carrier.lib, "qsb_carrier_zeros");
     if (e == cudaSuccess && zb == sizeof(int))
         e = cudaMemcpy(&zeros, dz, sizeof(int), cudaMemcpyDeviceToHost);
-    if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
+    if (e != cudaSuccess || zeros != QSB_CARRIER_FINGERPRINT) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
