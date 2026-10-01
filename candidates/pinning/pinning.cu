@@ -4600,9 +4600,9 @@ static void qsb_subpipe_launch(
 #endif
 #ifndef QSB_GT_BATCH
 #if QSB_GT_STRIPE
-#define QSB_GT_BATCH 24
+#define QSB_GT_BATCH 1
 #else
-#define QSB_GT_BATCH 12
+#define QSB_GT_BATCH 1
 #endif
 #endif
 static_assert(QSB_GT_BATCH >= 1 && QSB_GT_BATCH <= 32, "QSB_GT_BATCH range");
