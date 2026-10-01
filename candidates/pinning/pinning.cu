@@ -7,13 +7,20 @@
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
 /* l2state variant fkF20c8 + split retry */
-#define QSB_SUBPIPE 131072
-#define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
+#define QSB_SUBPIPE 65536 /* h0b (energy research step B): half the sub-batch -> half the prepare->finish state life
+                           * (live L2 state ~14.6 -> ~9 MiB); 131072 restores h0sde */
+#define QSB_SUBRING 8 /* h0b: 8 x 4 MiB ring (same 32 MiB range as 4 x 8 MiB), ring margin for twice the sub-batches in flight */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
+#ifndef QSB_STATE_DROP_EARLY
+#define QSB_STATE_DROP_EARLY 1 /* pochita0 0dc1aacd via kaankolcu: release loaded state before root loads and register-only recovery */
+#endif
+#if QSB_STATE_DROP_EARLY != 0 && QSB_STATE_DROP_EARLY != 1
+#error "QSB_STATE_DROP_EARLY must be 0 or 1"
+#endif
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
@@ -4316,6 +4323,17 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
         return;
     }
+#if QSB_STATE_DROP_EARLY && (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+    /* All four state vectors are now register values. Keep the original zero-state
+     * exit and warp synchronization, then release the same dead 128-byte L2 lines
+     * before root loads and recovery so overlapping prepare can reuse L2 sooner. */
+    __syncwarp();
+    if((threadIdx.x&7u)==0u){
+        const ulonglong2 *dst=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+        qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
+        qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
+    }
+#endif
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
 #if QSB_ROOT_V2
@@ -4351,7 +4369,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
-#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+#if !QSB_STATE_DROP_EARLY && (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
      * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
      * warp's loads were one instruction per plane, so the whole 8-lane group has its data. */
@@ -4532,6 +4550,21 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #if QSB_SUBPIPE && QSB_ROOT_FUSED
 #define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
 #endif
+#if QSB_SUBPIPE
+/* h0b host-side shape checks for the sub-batch size (all hold at 131072 too). */
+static_assert(QSB_SUBPIPE % QSB_TREE_N == 0, "sub-batches must be whole prepare/finish blocks");
+#if QSB_QMIX5
+static_assert((QSB_SUBPIPE / QSB_TREE_N) % QSB_QMIX5 == 0,
+              "sub-batch block count must keep the global QMIX5 block pattern (blockIdx.x % QSB_QMIX5)");
+#endif
+#if QSB_ASICBOOST
+static_assert(QSB_SUBPIPE % (QSB_AB_K * 256) == 0,
+              "ASICBOOST: every sub-batch start must be a 256-aligned locktime (off / QSB_AB_K)");
+#endif
+#if QSB_ROOT_FUSED
+static_assert(QSB_RF_K * QSB_RF_LANES * QSB_TREE_N == QSB_SUBPIPE, "fused root tree must tile the sub-batch exactly");
+#endif
+#endif
 #include "QsbCarrier.h"
 #if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
 #error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
@@ -4542,8 +4575,8 @@ static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t str
     constexpr int K=QSB_RF_K;
     if(g_qsb_register_roots){
         if(qsb_carrier_has(QK_RR))
-            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(QSB_RROOT_LANES),stream,roots,count);
-        else qsb_root_register<<<1,QSB_RROOT_LANES,0,stream>>>(roots,count);
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(QSB_RR_BLOCKS),dim3(QSB_RROOT_LANES),stream,roots,count);
+        else qsb_root_register<<<QSB_RR_BLOCKS,QSB_RROOT_LANES,0,stream>>>(roots,count);
     } else if(qsb_carrier_has(QK_RF))
         qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
     else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
@@ -4932,7 +4965,7 @@ static void qsb_subpipe_launch(
                 P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
             if (graph.root_count != blocks) {
                 if (g_qsb_register_roots)
-                    qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(1),
+                    qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(QSB_RR_BLOCKS),
                                    P.roots[r], blocks);
                 else
                     qsb_sg::update(qsb_root_fused<QSB_RF_K>, graph.exec, graph.root, graph.rp, dim3(1),
