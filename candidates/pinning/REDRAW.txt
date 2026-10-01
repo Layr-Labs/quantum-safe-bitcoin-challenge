@@ -1,0 +1,5 @@
+Redraw marker written by timed_submit.py.
+Inert: the build, the harness and the grinder never read this file. It only makes this draw an archive
+that differs from earlier draws of the same package, which Yukon would otherwise answer with the
+existing submission.
+package f4c723b276c65593 draw 1 2026-10-01T05:39:52Z 08d234d6
