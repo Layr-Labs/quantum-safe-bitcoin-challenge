@@ -7,8 +7,8 @@
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
 /* l2state variant fkF20c8 + split retry */
-#define QSB_SUBPIPE 131072
-#define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
+#define QSB_SUBPIPE 65536 /* half sub-batch: 512 roots per register-root launch (i34-9 42b9fc2f / terrapinelf h0b) */
+#define QSB_SUBRING 8 /* 8 x half sub-batches: the same 32 MiB state range as 4 x full (i34-9 42b9fc2f) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -4532,6 +4532,21 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #if QSB_SUBPIPE && QSB_ROOT_FUSED
 #define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
 #endif
+#if QSB_SUBPIPE
+/* h0b host-side shape checks for the sub-batch size (all hold at 131072 too). */
+static_assert(QSB_SUBPIPE % QSB_TREE_N == 0, "sub-batches must be whole prepare/finish blocks");
+#if QSB_QMIX5
+static_assert((QSB_SUBPIPE / QSB_TREE_N) % QSB_QMIX5 == 0,
+              "sub-batch block count must keep the global QMIX5 block pattern (blockIdx.x % QSB_QMIX5)");
+#endif
+#if QSB_ASICBOOST
+static_assert(QSB_SUBPIPE % (QSB_AB_K * 256) == 0,
+              "ASICBOOST: every sub-batch start must be a 256-aligned locktime (off / QSB_AB_K)");
+#endif
+#if QSB_ROOT_FUSED
+static_assert(QSB_RF_K * QSB_RF_LANES * QSB_TREE_N == QSB_SUBPIPE, "fused root tree must tile the sub-batch exactly");
+#endif
+#endif
 #include "QsbCarrier.h"
 #if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
 #error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
@@ -4542,8 +4557,8 @@ static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t str
     constexpr int K=QSB_RF_K;
     if(g_qsb_register_roots){
         if(qsb_carrier_has(QK_RR))
-            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(QSB_RROOT_LANES),stream,roots,count);
-        else qsb_root_register<<<1,QSB_RROOT_LANES,0,stream>>>(roots,count);
+            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(QSB_RR_BLOCKS),dim3(QSB_RROOT_LANES),stream,roots,count);
+        else qsb_root_register<<<QSB_RR_BLOCKS,QSB_RROOT_LANES,0,stream>>>(roots,count);
     } else if(qsb_carrier_has(QK_RF))
         qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
     else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
@@ -4932,7 +4947,7 @@ static void qsb_subpipe_launch(
                 P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
             if (graph.root_count != blocks) {
                 if (g_qsb_register_roots)
-                    qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(1),
+                    qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(QSB_RR_BLOCKS),
                                    P.roots[r], blocks);
                 else
                     qsb_sg::update(qsb_root_fused<QSB_RF_K>, graph.exec, graph.root, graph.rp, dim3(1),
