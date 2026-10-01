@@ -24,7 +24,7 @@
 
 namespace qcg_sha {
 
-static const uint32_t K256[64] = {
+static constexpr uint32_t K256[64] = {
     0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,
     0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,
     0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,
@@ -33,7 +33,7 @@ static const uint32_t K256[64] = {
     0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,
     0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,
     0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};
-static const uint32_t IV256[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
+static constexpr uint32_t IV256[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
 
 /* ---------------- portable scalar reference (also the no-AVX2 fallback) ---------------- */
 static inline uint32_t ror32(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
@@ -129,6 +129,115 @@ static QSB_SHA_AVX2 void s8_compress_full(v8u st[8], const v8u w_in[16]) {
 #undef WEXP8
     st[0] = s8_add(st[0], a); st[1] = s8_add(st[1], b); st[2] = s8_add(st[2], c); st[3] = s8_add(st[3], d);
     st[4] = s8_add(st[4], e); st[5] = s8_add(st[5], f); st[6] = s8_add(st[6], g); st[7] = s8_add(st[7], h);
+}
+
+/* ---------------- structured 8-lane compressions ----------------
+ * The co-grinder's three block shapes have message words that are the same in all 8 lanes of a call
+ * (problem constants, SHA padding) and a scalar initial state (per-sequence midstate, or the IV).
+ * s8_compress_plan<VM, H0ONLY> takes the varying words as vectors (bit j of VM: word j varies) and
+ * everything else from a precomputed s8_plan:
+ *   kw[t]  K_t + W_t for every message-independent W_t (no vector add in that round),
+ *   kc[t]  the message-independent part of schedule word t >= 16 (sigma terms of constant words
+ *          folded; terms of zero words vanish),
+ *   st0    the scalar initial state, with round 0 folded (a1 = W0 + a1c, e1 = W0 + e1c).
+ * Same function as s8_compress_full on the same message and state, bit for bit. */
+struct s8_plan { uint32_t kw[64], kc[64], st0[8], a1c, e1c; };
+static constexpr uint32_t c_ror(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+static constexpr uint32_t c_s0(uint32_t x) { return c_ror(x, 7) ^ c_ror(x, 18) ^ (x >> 3); }
+static constexpr uint32_t c_s1(uint32_t x) { return c_ror(x, 17) ^ c_ror(x, 19) ^ (x >> 10); }
+static constexpr uint32_t c_S0(uint32_t x) { return c_ror(x, 2) ^ c_ror(x, 13) ^ c_ror(x, 22); }
+static constexpr uint32_t c_S1(uint32_t x) { return c_ror(x, 6) ^ c_ror(x, 11) ^ c_ror(x, 25); }
+/* bit t: schedule word t depends on a varying message word */
+static constexpr uint64_t s8_varmask(uint32_t vm) {
+    uint64_t m = vm & 0xFFFFu;
+    for (int t = 16; t < 64; t++)
+        if (((m >> (t - 2)) | (m >> (t - 7)) | (m >> (t - 15)) | (m >> (t - 16))) & 1) m |= 1ull << t;
+    return m;
+}
+/* wc: the 16 message words (entries of varying words are ignored); st0: initial state */
+static constexpr s8_plan s8_make_plan(const uint32_t *wc, uint32_t vm, const uint32_t *st0) {
+    s8_plan p{};
+    const uint64_t V = s8_varmask(vm);
+    uint32_t w[64] = {};
+    for (int t = 0; t < 16; t++) w[t] = ((V >> t) & 1) ? 0u : wc[t];
+    for (int t = 16; t < 64; t++) {
+        uint32_t k = 0;
+        if (!((V >> (t - 2)) & 1)) k += c_s1(w[t - 2]);
+        if (!((V >> (t - 7)) & 1)) k += w[t - 7];
+        if (!((V >> (t - 15)) & 1)) k += c_s0(w[t - 15]);
+        if (!((V >> (t - 16)) & 1)) k += w[t - 16];
+        p.kc[t] = k;
+        w[t] = ((V >> t) & 1) ? 0u : k;
+    }
+    for (int t = 0; t < 64; t++) p.kw[t] = K256[t] + w[t];
+    for (int i = 0; i < 8; i++) p.st0[i] = st0[i];
+    const uint32_t a = st0[0], b = st0[1], c = st0[2], d = st0[3], e = st0[4], f = st0[5], g = st0[6], h = st0[7];
+    const uint32_t c1 = h + c_S1(e) + ((e & f) ^ (~e & g)) + K256[0];
+    const uint32_t c2 = c_S0(a) + ((a & b) ^ (a & c) ^ (b & c));
+    p.a1c = c1 + c2; p.e1c = d + c1;
+    return p;
+}
+static constexpr uint32_t S8_W_DIGEST[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
+static constexpr uint32_t S8_W_PUBKEY[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 264};
+static constexpr s8_plan S8_PLAN_DIGEST = s8_make_plan(S8_W_DIGEST, 0xFFu, IV256);      /* SHA256 of a 32-byte message */
+static constexpr s8_plan S8_PLAN_PUBKEY = s8_make_plan(S8_W_PUBKEY, 0x1FFu, IV256);     /* SHA256 of a 33-byte message */
+
+/* varying words Wv[j] (j with bit j of VM set; word 0 must vary); out: 8 state words, or only out[0]
+ * (= H0) with H0ONLY. Compact form: the message schedule and the per-round K + W go to a stack array
+ * first, then the 63 remaining rounds run as a rolled 8-round loop (small code: the co-grinder runs
+ * two or three of these back to back, and the unrolled forms overflow the decoded-op cache). */
+template <uint32_t VM, int H0ONLY>
+static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_plan &P) {
+    static_assert(VM & 1, "round 0 folding needs a varying word 0");
+    constexpr uint64_t V = s8_varmask(VM);
+    static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
+    v8u W[64], KW[64];
+    for (int j = 0; j < 16; j++) if ((V >> j) & 1) W[j] = Wv[j];
+    /* W16..W31 with the constant terms folded (compile-time structure) */
+#define S8P_W(t) do {                                                                                     \
+        v8u acc_; int has_ = 0;                                                                           \
+        if ((V >> ((t) - 2)) & 1) { acc_ = s8_s1(W[(t) - 2]); has_ = 1; }                               \
+        if ((V >> ((t) - 7)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 7]) : W[(t) - 7]; has_ = 1; }    \
+        if ((V >> ((t) - 15)) & 1) { const v8u s_ = s8_s0(W[(t) - 15]); acc_ = has_ ? s8_add(acc_, s_) : s_; has_ = 1; } \
+        if ((V >> ((t) - 16)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 16]) : W[(t) - 16]; has_ = 1; } \
+        if (!((((V >> ((t) - 2)) & (V >> ((t) - 7)) & (V >> ((t) - 15)) & (V >> ((t) - 16))) & 1))) acc_ = s8_add(acc_, s8_set1(P.kc[t])); \
+        W[t] = acc_; } while (0)
+    S8P_W(16); S8P_W(17); S8P_W(18); S8P_W(19); S8P_W(20); S8P_W(21); S8P_W(22); S8P_W(23);
+    S8P_W(24); S8P_W(25); S8P_W(26); S8P_W(27); S8P_W(28); S8P_W(29); S8P_W(30); S8P_W(31);
+#undef S8P_W
+    for (int t = 32; t < 64; t++) W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
+    /* K + W per round; message-independent words come precomputed */
+#define S8P_KW(t) KW[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]);
+    S8P_KW(1) S8P_KW(2) S8P_KW(3) S8P_KW(4) S8P_KW(5) S8P_KW(6) S8P_KW(7) S8P_KW(8)
+    S8P_KW(9) S8P_KW(10) S8P_KW(11) S8P_KW(12) S8P_KW(13) S8P_KW(14) S8P_KW(15)
+#undef S8P_KW
+    for (int t = 16; t < 64; t++) KW[t] = s8_add(s8_set1(K256[t]), W[t]);
+    /* round 0 from the scalar state: the new a is kept in h, the new e in d (S8_ROUND's naming) */
+    v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]), d = s8_add(W[0], s8_set1(P.e1c));
+    v8u e = s8_set1(P.st0[4]), f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
+    v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
+    S8_ROUND(h, a, b, c, d, e, f, g, KW[1], bc); S8_ROUND(g, h, a, b, c, d, e, f, KW[2], bc);
+    S8_ROUND(f, g, h, a, b, c, d, e, KW[3], bc); S8_ROUND(e, f, g, h, a, b, c, d, KW[4], bc);
+    S8_ROUND(d, e, f, g, h, a, b, c, KW[5], bc); S8_ROUND(c, d, e, f, g, h, a, b, KW[6], bc);
+    S8_ROUND(b, c, d, e, f, g, h, a, KW[7], bc);
+    for (int t = 8; t < 64; t += 8) {
+        S8_ROUND(a, b, c, d, e, f, g, h, KW[t + 0], bc); S8_ROUND(h, a, b, c, d, e, f, g, KW[t + 1], bc);
+        S8_ROUND(g, h, a, b, c, d, e, f, KW[t + 2], bc); S8_ROUND(f, g, h, a, b, c, d, e, KW[t + 3], bc);
+        S8_ROUND(e, f, g, h, a, b, c, d, KW[t + 4], bc); S8_ROUND(d, e, f, g, h, a, b, c, KW[t + 5], bc);
+        S8_ROUND(c, d, e, f, g, h, a, b, KW[t + 6], bc); S8_ROUND(b, c, d, e, f, g, h, a, KW[t + 7], bc);
+    }
+    out[0] = s8_add(s8_set1(P.st0[0]), a);
+    if (!H0ONLY) {
+        out[1] = s8_add(s8_set1(P.st0[1]), b); out[2] = s8_add(s8_set1(P.st0[2]), c); out[3] = s8_add(s8_set1(P.st0[3]), d);
+        out[4] = s8_add(s8_set1(P.st0[4]), e); out[5] = s8_add(s8_set1(P.st0[5]), f); out[6] = s8_add(s8_set1(P.st0[6]), g);
+        out[7] = s8_add(s8_set1(P.st0[7]), h);
+    }
+}
+
+/* generic block from a scalar state (out of line: the fallback of the structured tail block) */
+static QSB_SHA_AVX2F void s8_compress_mid(v8u out[8], const v8u W[16], const uint32_t st0[8]) {
+    for (int k = 0; k < 8; k++) out[k] = _mm256_set1_epi32((int)st0[k]);
+    s8_compress_full(out, W);
 }
 
 /* byte-swap of each 32-bit lane */
