@@ -233,6 +233,21 @@
 #if QSB_SAS_PRESUB != 0 && QSB_SAS_PRESUB != 1
 #error "QSB_SAS_PRESUB must be 0 or 1"
 #endif
+/* QSB_SAS_DBL_ADD (kill switch, default 1): _ModSqrAddSub2 doubles the 16-word cross sum with
+ * the carry chain x_k = x_k + x_k + cc (low word first) instead of the funnel-shift ladder
+ * x_k = (x_k << 1) | (x_{k-1} >> 31) (high word first). The carry out of x_{k-1} + x_{k-1} + c,
+ * c <= 1, is exactly bit 31 of x_{k-1}, and the sum mod 2^32 is (x_k << 1) | c, so every word
+ * is the funnel-shift value; the carry out of x15 is the bit the ladder drops. The 16 doubling
+ * ops leave the half-rate shift pipe for IADD3.X. 2: words x10..x15 keep the funnel shifts
+ * (issued first, from the undoubled x9..x15) and only x0..x9 take the carry chain, which then
+ * follows the QSB_SAS_PRESUB borrow chain over the same words; the carry out of x9 is the bit
+ * the x10 funnel shift already took. 0 restores the SHF.L.W ladder. */
+#ifndef QSB_SAS_DBL_ADD
+#define QSB_SAS_DBL_ADD 2
+#endif
+#if QSB_SAS_DBL_ADD < 0 || QSB_SAS_DBL_ADD > 2
+#error "QSB_SAS_DBL_ADD must be 0, 1 or 2"
+#endif
 #ifndef QSB_MUL_FOLD8_CUT
 #define QSB_MUL_FOLD8_CUT 1
 #endif
@@ -1984,6 +1999,40 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
         "\tsubc.cc.u32 x4, x4, pv4; subc.cc.u32 x5, x5, pv5; subc.cc.u32 x6, x6, pv6; subc.cc.u32 x7, x7, pv7;\n"
         "\tsubc.cc.u32 x8, x8, 0; subc.u32 x9, x9, " QZ "; }\n"
 #endif
+#if QSB_SAS_DBL_ADD == 2
+        "shf.l.wrap.b32 x15, x14, x15, 1; shf.l.wrap.b32 x14, x13, x14, 1;\n"
+        "\tshf.l.wrap.b32 x13, x12, x13, 1; shf.l.wrap.b32 x12, x11, x12, 1;\n"
+        "\tshf.l.wrap.b32 x11, x10, x11, 1; shf.l.wrap.b32 x10, x9, x10, 1;\n"
+#if QSB_SAS_PRESUB
+        "\tadd.cc.u32 x0, x0, x0; addc.cc.u32 x1, x1, x1;\n"
+#else
+        "\tadd.cc.u32 x1, x1, x1;\n"
+#endif
+        "\taddc.cc.u32 x2, x2, x2; addc.cc.u32 x3, x3, x3; addc.cc.u32 x4, x4, x4;\n"
+        "\taddc.cc.u32 x5, x5, x5; addc.cc.u32 x6, x6, x6; addc.cc.u32 x7, x7, x7;\n"
+        "\taddc.cc.u32 x8, x8, x8; addc.u32 x9, x9, x9;\n"
+#if QSB_SAS_PRESUB || !QSB_CARRY_GLUE
+        "\tmov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
+#else
+        "\t mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
+#endif
+#elif QSB_SAS_DBL_ADD
+#if QSB_SAS_PRESUB
+        "\tadd.cc.u32 x0, x0, x0; addc.cc.u32 x1, x1, x1;\n"
+#else
+        "\tadd.cc.u32 x1, x1, x1;\n"
+#endif
+        "\taddc.cc.u32 x2, x2, x2; addc.cc.u32 x3, x3, x3; addc.cc.u32 x4, x4, x4;\n"
+        "\taddc.cc.u32 x5, x5, x5; addc.cc.u32 x6, x6, x6; addc.cc.u32 x7, x7, x7;\n"
+        "\taddc.cc.u32 x8, x8, x8; addc.cc.u32 x9, x9, x9; addc.cc.u32 x10, x10, x10;\n"
+        "\taddc.cc.u32 x11, x11, x11; addc.cc.u32 x12, x12, x12; addc.cc.u32 x13, x13, x13;\n"
+        "\taddc.cc.u32 x14, x14, x14; addc.u32 x15, x15, x15;\n"
+#if QSB_SAS_PRESUB || !QSB_CARRY_GLUE
+        "\tmov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
+#else
+        "\t mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
+#endif
+#else
         "shf.l.wrap.b32 x15, x14, x15, 1; shf.l.wrap.b32 x14, x13, x14, 1;\n"
         "\tshf.l.wrap.b32 x13, x12, x13, 1; shf.l.wrap.b32 x12, x11, x12, 1;\n"
         "\tshf.l.wrap.b32 x11, x10, x11, 1; shf.l.wrap.b32 x10, x9, x10, 1;\n"
@@ -2000,6 +2049,7 @@ __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a
 #else
         "\tshf.l.wrap.b32 x1, x0, x1, 1;\n"
         "\tmov.b64 d0, {x0,x1}; mov.b64 d1, {x2,x3}; mov.b64 d2, {x4,x5}; mov.b64 d3, {x6,x7};\n"
+#endif
 #endif
         "\tmov.b64 d4, {x8,x9}; mov.b64 d5, {x10,x11}; mov.b64 d6, {x12,x13}; mov.b64 d7, {x14,x15};\n"
 #if QSB_CARRY_GLUE && !QSB_SAS_PRESUB
