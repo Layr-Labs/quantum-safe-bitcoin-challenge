@@ -1,6 +1,6 @@
 // QSB fusion integration: audited current interleaved square schedule.
 /* Derived from the upstream square and xlib fused reduction; see package provenance. */
-// GPU throughput has not been established by the CPU semantic tests.
+/* GPU throughput has not been established by the CPU semantic tests. */
 /*
 * This file is part of the VanitySearch distribution (https://github.com/JeanLucPons/VanitySearch).
 * Copyright (c) 2019 Jean Luc PONS.
@@ -19,7 +19,7 @@
 */
 
 /* --------------------------------------------------------------------------------- */
-// 256(+64) bits integer CUDA libray for SECPK1
+/* 256(+64) bits integer CUDA libray for SECPK1 */
 /* --------------------------------------------------------------------------------- */
 
 
@@ -178,7 +178,7 @@
 #define MM64 0xD838091DD2253531ULL
 
 
-// We need 1 extra block for ModInv
+/* We need 1 extra block for ModInv */
 #define NBBLOCK 5
 #define BIFULLSIZE 40
 
@@ -278,7 +278,7 @@ USUBC(r[2],0ULL,r[2]); \
 USUBC(r[3],0ULL,r[3]); \
 USUB(r[4],0ULL,r[4]); }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define UMult(r, a, b) {\
   UMULLO(r[0],a[0],b); \
@@ -290,7 +290,7 @@ USUB(r[4],0ULL,r[4]); }
   MADDC(r[3], a[2], b, r[3]); \
   MADD(r[4], a[3], b, 0ULL);}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define Load(r, a) {\
   (r)[0] = (a)[0]; \
@@ -315,7 +315,7 @@ USUB(r[4],0ULL,r[4]); }
   (r)[2] = (a)[2]; \
   (r)[3] = (a)[3];}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define Load256A(r, a) {\
   (r)[0] = (a)[IDX]; \
@@ -323,7 +323,7 @@ USUB(r[4],0ULL,r[4]); }
   (r)[2] = (a)[IDX+2*blockDim.x]; \
   (r)[3] = (a)[IDX+3*blockDim.x];}
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 #define Store256A(r, a) {\
   (r)[IDX] = (a)[0]; \
@@ -420,7 +420,7 @@ __device__ uint64_t _IMultC(uint64_t *r, uint64_t *a, int64_t b)
 
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 __device__ void _MulP(uint64_t *r, uint64_t a)
 {
@@ -456,7 +456,7 @@ __device__ void _ModNeg256(uint64_t *r, uint64_t *a)
 
 }
 
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 
 __device__ void _ModNeg256(uint64_t *r)
 {
@@ -532,7 +532,7 @@ __device__ __forceinline__ void _ModSub256(uint64_t *r,uint64_t *b) { _ModSub256
 /* Lazy add: r = a + b reduced only by folding the 2^256 carry as K. The */
 // result is in [0, 2^256) and congruent mod p, which every consumer in the
 /* fixed-base chain (_ModMultCore, _ModSqr, _ModSub256, this routine) accepts. */
-// The fold can carry again only when r >= 2^256 - K after a carry, a 2^-223
+/* The fold can carry again only when r >= 2^256 - K after a carry, a 2^-223 */
 /* event for field-random inputs, ignored like the existing 2^-224 exposure */
 /* of _ModSub256 to inputs above p. */
 #if QSB_C31 && QSB_SHORT_CARRY
@@ -602,7 +602,7 @@ __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, c
 #endif
 // Fused X3 = a + b - 2c (mod p) for the XYZZ addition (R^2 + PPP - 2V), in
 /* one carry chain: t = a + b + 2p - 2c lies in [0, 2^258) (the 2^-224 case */
-// c > p + (a+b)/2 is ignored), and its top two bits h fold as h*K. A second
+/* c > p + (a+b)/2 is ignored), and its top two bits h fold as h*K. A second */
 // carry needs t mod 2^256 >= 2^256 - 2^34, a 2^-222 event, ignored.
 __device__ __forceinline__ void _ModX3Fused(uint64_t *r, const uint64_t *a, const uint64_t *b, const uint64_t *c) {
     uint64_t r0,r1,r2,r3;
@@ -684,9 +684,9 @@ __device__ void _DivStep62(uint64_t u[5], uint64_t v[5],
 {
 
 
-    // u' = (uu*u + uv*v) >> bitCount
+    /* u' = (uu*u + uv*v) >> bitCount */
     /* v' = (vu*u + vv*v) >> bitCount */
-    // Do not maintain a matrix for r and s, the number of
+    /* Do not maintain a matrix for r and s, the number of */
     /* 'added P' can be easily calculated */
 
     *uu = 1; *uv = 0;
@@ -819,10 +819,10 @@ __device__ uint64_t _AddCh(uint64_t r[5], uint64_t a[5], uint64_t carry)
 __device__ __noinline__ void _ModInv(uint64_t *R)
 {
 
-    // Compute modular inverse of R mod P (using 320bits signed integer)
+    /* Compute modular inverse of R mod P (using 320bits signed integer) */
     /* 0 < this < P  , P must be odd */
     // Return 0 if no inverse
-    // See IntMod.cpp for more info.
+    /* See IntMod.cpp for more info. */
 
     uint64_t u[NBBLOCK];
     uint64_t v[NBBLOCK];
@@ -882,7 +882,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
         _ShiftR62(u);
         _ShiftR62(v);
 
-        // Update r
+        /* Update r */
         _MatrixVecMulHalf(tr, r, s, uu, uv, &carryR);
         mr0 = (tr[0] * MM64) & MSK62;
         _MulP(r0, mr0);
@@ -895,7 +895,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 
         } else {
 
-            // Update s
+            /* Update s */
             _MatrixVecMulHalf(ts, r, s, vu, vv, &carryS);
             ms0 = (ts[0] * MM64) & MSK62;
             _MulP(s0, ms0);
@@ -910,7 +910,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 
     /* u ends with gcd */
     if (!_IsOne(u)) {
-        // No inverse
+        /* No inverse */
         R[0] = 0ULL;
         R[1] = 0ULL;
         R[2] = 0ULL;
@@ -944,13 +944,13 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 /* Host (CPU verification): a __uint128_t transcription of the IDENTICAL schedule -- even chain */
 /* e0..e7, odd chain o0..o6, merge to 16 u32 limbs, then the same double fold. Validated against */
 // harness/crypto.py; the asm<->C line correspondence is documented in
-// notes/ce-tools/mm32-cref-map.md.
+/* notes/ce-tools/mm32-cref-map.md. */
 /* NOTE (rp): the device asm below now DELIBERATELY diverges from the host __uint128_t */
-// transcription. Two carries of the pseudo-Mersenne reduction tail (the carry out of the odd fold
+/* transcription. Two carries of the pseudo-Mersenne reduction tail (the carry out of the odd fold */
 /* and the carry it feeds into the second fold) are treated as zero, which is exact unless BOTH */
 // operands lie within 2^-22 of 2^256; the divergence is therefore bounded at 2^-44 per product.
 /* It is applied to the two _ModMultCore bodies ONLY, never to a square: a square needs only ONE */
-// extreme operand (2^-23), which is two million times more likely and is not admissible here.
+/* extreme operand (2^-23), which is two million times more likely and is not admissible here. */
 /* The host transcription is intentionally left exact, so the two are no longer bit-identical. */
 #if QSB_SHORT_CARRY
 __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, const uint64_t *b)
@@ -1241,7 +1241,7 @@ __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, con
 #endif
 /* --------------------------------------------------------------------------------------- */
 /* Compute a*b (mod p). Interface unchanged: uint64_t[4] little-endian, inputs < 2^256. */
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 __device__ void _ModMult(uint64_t *r, uint64_t *a, uint64_t *b)
 {
     _ModMultCore(r, a, b);
@@ -1255,9 +1255,9 @@ __device__ void _ModMult(uint64_t *r, uint64_t *a)
 
 // ---------------------------------------------------------------------------------------
 /* Dedicated secp256k1 square r = a^2 mod p. Triangular 8x32 schedule: 28 off-diagonal */
-// cross products a_i*a_j (even/odd column chains with multi-bit carries), doubled, plus
+/* cross products a_i*a_j (even/odd column chains with multi-bit carries), doubled, plus */
 // 8 diagonal squares, then the same double-fold as _ModMultCore. 45 IMAD.WIDE/square
-// (vs 73 for a*a via _ModMultCore). Output convention identical to _ModMultCore:
+/* (vs 73 for a*a via _ModMultCore). Output convention identical to _ModMultCore: */
 // [0,2^256), final 2^256 carry dropped. Device: inline PTX; host: __uint128_t C-ref of
 /* the IDENTICAL schedule. Independently validated (notes/research/sqr_ptx/VALIDATION.md): */
 /* 10^6 random + boundaries vs crypto.py, PTX row-schedule emulation, CE 45 IMAD.WIDE. */
@@ -1480,7 +1480,7 @@ __device__ __forceinline__ void _ModSqr(uint64_t r[4], const uint64_t a[4]) {
 /* Experimental genuine fused r*r+e-2q reduction. The dedicated 8x32 */
 /* square schedule is unchanged; 3p+e-2q enters its first 320-bit fold before */
 // the remaining folds. All four pointers may alias, and inputs may be any
-// 256-bit representatives. The result is congruent in [0, 2^256).
+/* 256-bit representatives. The result is congruent in [0, 2^256). */
 __device__ __forceinline__ void _ModSqrAddSub2(uint64_t out[4], const uint64_t a[4], const uint64_t e[4], const uint64_t q[4]) {
 #ifdef __CUDA_ARCH__
     uint64_t r0, r1, r2, r3;
@@ -1869,7 +1869,7 @@ __device__ int _BinarySearch(uint64_t *buffer, int hi, uint64_t target)
 #endif
 #include "negative_y_mac.cuh"
 /* Multipliers return a representative in [0,2^256). _ModNeg256 requires */
-// a representative <=p; normalize the exceptional [p,2^256) interval first.
+/* a representative <=p; normalize the exceptional [p,2^256) interval first. */
 __device__ __forceinline__ void qsb_negate_residue(uint64_t *r) {
     if ((r[1] & r[2] & r[3]) == UINT64_MAX &&
         r[0] >= 0xFFFFFFFEFFFFFC2FULL) {
@@ -1931,18 +1931,18 @@ __device__ void _PointAddSecp256k1(uint64_t *p1x, uint64_t *p1y, uint64_t *p1z, 
 /* necessarily < p. Outputs must not alias inputs. */
 //
 /* EFD "madd-2008-s" -- (X1,Y1,ZZ1,ZZZ1) += affine (X2,Y2) in place, 8M + 2S. */
-// This equivalent schedule anchors the final y formula at the affine addend:
+/* This equivalent schedule anchors the final y formula at the affine addend: */
 /*   U2 = X2*ZZ1, S2 = Y2*ZZZ1, P = U2-X1, R = S2-Y1, PP = P^2, PPP = P*PP, */
-//   V = U2*PP, X3 = R^2 + PPP - 2V,
-//   Y3 = R*(V-X3) - Y2*ZZZ3, ZZ3 = ZZ1*PP, ZZZ3 = ZZZ1*PPP.
+/*   V = U2*PP, X3 = R^2 + PPP - 2V, */
+/*   Y3 = R*(V-X3) - Y2*ZZZ3, ZZ3 = ZZ1*PP, ZZZ3 = ZZZ1*PPP. */
 // Y1 may be an affine-anchor-deferred ordinate: Yactual=Y1-Yoff*ZZZ1.
 /* Adding Yoff to Y2 only for the slope restores the ordinary numerator. If */
-// defer_y is true, return Ycore=R*(V-X3), making Y2 the next affine anchor;
-// otherwise subtract Y2*ZZZ3 and return the exact XYZZ ordinate.
-// P == 0 (x1 == x2) gives ZZ3 == ZZZ3 == 0: the point at infinity for P1 == -P2 and, as
+/* defer_y is true, return Ycore=R*(V-X3), making Y2 the next affine anchor; */
+/* otherwise subtract Y2*ZZZ3 and return the exact XYZZ ordinate. */
+/* P == 0 (x1 == x2) gives ZZ3 == ZZZ3 == 0: the point at infinity for P1 == -P2 and, as */
 /* with the homogeneous add this replaces, no valid answer for P1 == P2. Neither occurs in */
 /* the fixed-base multiply, whose table entries are distinct non-opposite multiples of G. */
-// ---------------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------------- */
 template<bool DEFER_Y>
 __device__ __forceinline__ void _PointAddXYZZT(
     uint64_t *X1, uint64_t *Y1, uint64_t *ZZ1, uint64_t *ZZZ1,
@@ -2071,7 +2071,7 @@ __device__ __forceinline__ void _PointAddXYZZT(
     Load256(Y1, Q);                    // actual Y3 = Y1 - Y2*ZZZ3
   } else {
 #if QSB_NEG_Y_MAC && QSB_YOFF
-    // Runtime/diagnostic callers may resolve here instead of after the loop.
+    /* Runtime/diagnostic callers may resolve here instead of after the loop. */
     uint64_t anchor[4], off[4]={0x800001E8ULL,0,0,0};
     _ModSub256(anchor,Y2,off);
     _ModMult(S2,anchor,ZZZ1);
@@ -2090,10 +2090,10 @@ __device__ __forceinline__ void _PointAddXYZZT(
 /* Direct-three-affine prefix based on EFD "mmadd-2008-s", 3M + 2S. X3, */
 // ZZ3, and ZZZ3 are the ordinary coordinates of P1+P2, while Y3 deliberately
 // holds only R*(Q-X3), omitting -Y1*ZZZ3. The caller adds Y1 only to the third
-// affine point's slope input for one affine-anchored madd. Its slope numerator
-// is then (Ythird+Y1)*ZZZ3-R*(Q-X3) = Ythird*ZZZ3-Y(P1+P2), while its final
+/* affine point's slope input for one affine-anchored madd. Its slope numerator */
+/* is then (Ythird+Y1)*ZZZ3-R*(Q-X3) = Ythird*ZZZ3-Y(P1+P2), while its final */
 /* affine anchor remains Ythird. The combined seed is therefore exact and costs */
-// 11M+4S rather than 12M+4S.
+/* 11M+4S rather than 12M+4S. */
 __device__ void _PointAddXYZZ_mm(uint64_t *X3, uint64_t *Y3, uint64_t *ZZ3, uint64_t *ZZZ3,
                                  const uint64_t *X1, const uint64_t *Y1,
                                  const uint64_t *X2, const uint64_t *Y2)

@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Python-validated integration; no local native compilation or GPU execution.
-// Four independent secp256k1 products per full warp, eight lanes/product.
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Python-validated integration; no local native compilation or GPU execution. */
+/* Four independent secp256k1 products per full warp, eight lanes/product. */
 // A and B each supply one 32-bit limb per lane. Return one noncanonical limb.
 /* All 32 lanes participate in EVERY shuffle and ballot. No divergent entry. */
 #pragma once
@@ -30,7 +30,7 @@ __device__ __forceinline__ uint32_t multiply8(uint32_t a,uint32_t b,unsigned lan
         const uint64_t product=(uint64_t)av*bv;
         const uint32_t lo=(uint32_t)product,hi=(uint32_t)(product>>32);
         /* Cyclic convolution: every physical product is useful. Its true */
-        // exponent is d when d>=i, or d+8 otherwise. Retain both halves.
+        /* exponent is d when d>=i, or d+8 otherwise. Retain both halves. */
         l0+=d>=i?lo:0u; l1+=d>=i?hi:0u;
         h0+=d<i?lo:0u;  h1+=d<i?hi:0u;
     }
