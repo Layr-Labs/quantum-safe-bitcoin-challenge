@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Python-validated integration; no local native compilation or GPU execution.
+/* Python-validated integration; no local native compilation or GPU execution. */
 // Four independent secp256k1 products per full warp, eight lanes/product.
-// A and B each supply one 32-bit limb per lane. Return one noncanonical limb.
+/* A and B each supply one 32-bit limb per lane. Return one noncanonical limb. */
 /* All 32 lanes participate in EVERY shuffle and ballot. No divergent entry. */
 #pragma once
 namespace qsb_cyclic_field_research {
