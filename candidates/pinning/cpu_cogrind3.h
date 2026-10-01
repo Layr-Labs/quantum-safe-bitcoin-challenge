@@ -24,7 +24,7 @@
  *
  * Contention safety (unchanged from the v1 co-grinder): SCHED_IDLE workers (fallback nice 19);
  * worker count min(affinity CPUs, cgroup quota) minus a reserve; a share check after the start
- * and a periodic GPU on/off A/B that sheds workers on a measured GPU loss. QSB_COGRIND=0 removes
+ * and periodic aligned on/off comparisons that shed on measured combined-rate loss. QSB_COGRIND=0 removes
  * all of it.
  */
 #ifndef QSB_CPU_COGRIND3_H
@@ -172,6 +172,9 @@ struct shared_t {
 };
 static shared_t *g_cg = NULL;
 static int g_ctl_verbose = 0;
+#if QSB_PK_JOINT
+static std::atomic<int> joint_hold{0};
+#endif
 
 static inline uint64_t thread_cpu_ns() {
     struct timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
@@ -493,7 +496,12 @@ static void *worker_main(void *arg) {
     else if (g_worker_set_on) pthread_setaffinity_np(pthread_self(), sizeof g_worker_set, &g_worker_set);
     set_idle_priority();
     worker_t *w = (worker_t *)aligned_alloc(64, (sizeof(worker_t) + 63) & ~(size_t)63);
-    if (!w) return NULL;
+    if (!w) {
+#if QSB_PK_JOINT
+        S->failed.store(1);
+#endif
+        return NULL;
+    }
     w->id = id; w->cur_seq_tag = 0;
     w->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     w->ctx = BN_CTX_new(); w->order = BN_new(); w->nri = BN_new(); w->rx = BN_new(); w->ry = BN_new();
@@ -506,6 +514,9 @@ static void *worker_main(void *arg) {
     void *vs = NULL;
 #if QSB_CG_HAVE_SIMD
     if (S->has_avx2) vs = aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
+#if QSB_PK_JOINT
+    if(S->has_avx2 && !vs){S->failed.store(1);return NULL;}
+#endif
 #endif
     void *vi = NULL;
 #if QSB_CG_HAVE_SIMD
@@ -513,7 +524,13 @@ static void *worker_main(void *arg) {
     if (S->has_ifma && !vi) { S->failed.store(1); return NULL; }
 #endif
     sstate *ss = (sstate *)aligned_alloc(64, (sizeof(sstate) + 63) & ~(size_t)63);
+#if QSB_PK_JOINT
+    if(!ss){S->failed.store(1);return NULL;}
+#endif
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load() || S->failed.load()) return NULL; usleep(2000); }
+#if QSB_PK_JOINT
+    if(S->failed.load() || S->stop.load())return NULL;
+#endif
     /* Worker 0 picks the SHA and EC paths on this CPU from timed real batches (their candidates
      * are real work and are counted); the others wait. Each (SHA, EC) combination runs 5 batches,
      * the first discarded; the minimum per-candidate time of each stage decides. The AVX2 EC
@@ -529,13 +546,25 @@ static void *worker_main(void *arg) {
             S->sha_mode.store(shs[a]);
             for (int b = 0; b < nec; b++) {
                 for (int rep = 0; rep < 5; rep++) {
+#if QSB_PK_JOINT
+                    S->running.fetch_add(1);
+                    if(S->failed.load() || S->stop.load()){S->running.fetch_sub(1);return NULL;}
+#endif
                     const uint64_t r0 = __rdtsc();
                     const int n = fill_batch(w);
-                    if (!n) break;
+                    if (!n) {
+#if QSB_PK_JOINT
+                        S->running.fetch_sub(1);
+#endif
+                        break;
+                    }
                     const uint64_t r1 = __rdtsc();
                     run_ec(w, ecs[b], vs, ss, vi);
                     const uint64_t r2 = __rdtsc();
                     S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
+#if QSB_PK_JOINT
+                    S->running.fetch_sub(1);
+#endif
                     if (rep == 0) continue;
                     const double ts = (double)(r1 - r0) / n, te = (double)(r2 - r1) / n;
                     if (ts < sha_best[shs[a]]) sha_best[shs[a]] = ts;
@@ -564,7 +593,14 @@ static void *worker_main(void *arg) {
                    (double)S->table_bytes / 1048576.0, S->lay.nwin, S->t_build);
         }
     }
-    while (S->ec_mode.load() < 0) { if (S->stop.load()) return NULL; usleep(1000); }
+    while (S->ec_mode.load() < 0) {
+        if (S->stop.load()
+#if QSB_PK_JOINT
+            || S->failed.load()
+#endif
+        ) return NULL;
+        usleep(1000);
+    }
     int ecm = S->ec_mode.load();
     /* dev probe: QSB_COGRIND_HETERO=1 runs odd workers on the scalar MULX path and even ones on
      * AVX2, so SMT siblings can issue on different execution ports */
@@ -572,6 +608,12 @@ static void *worker_main(void *arg) {
     while (!S->stop.load(std::memory_order_relaxed)) {
         if (id >= S->allowed.load(std::memory_order_relaxed)) { usleep(5000); continue; }
         S->running.fetch_add(1);
+#if QSB_PK_JOINT
+        /* A parked worker may have passed its first check before exposure changed. */
+        if(S->failed.load() || id>=S->allowed.load(std::memory_order_seq_cst)) {
+            S->running.fetch_sub(1);usleep(5000);continue;
+        }
+#endif
         const uint64_t c0 = thread_cpu_ns();
         const uint64_t r0 = __rdtsc();
         int n = fill_batch(w);
@@ -580,9 +622,16 @@ static void *worker_main(void *arg) {
         const uint64_t r2 = __rdtsc();
         S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
         S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
+#if QSB_PK_JOINT
+        /* Publish completed work before the final in-flight participant departs. */
+        if(n)S->cand_done.fetch_add((uint64_t)n,std::memory_order_relaxed);
+        S->running.fetch_sub(1);
+        if(!n)break;
+#else
         S->running.fetch_sub(1);
         if (!n) break;
         S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
+#endif
     }
     return NULL;
 }
@@ -637,16 +686,18 @@ static double mem_available_mib() {
 /* ---------------- controller (called from the GPU host loop) ---------------- */
 struct ctl_t {
     int wmax, cur, wcap, whw;   /* whw = hardware ceiling, independent of the quota guess */
-    int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
+    int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 net-value windows */
     double t_phase;
     double last_done;
-    int ab_left;
-    double ab_on_sum; int ab_on_n;
-    double ab_off_sum; int ab_off_n;
+    int ab_left, ab_reverse, ab_budget, ab_restore, ab_trial;
+    double ab_gpu[4], ab_cpu[4], ab_seconds[4];
+    int ab_n[4];
+    int ab_ec, ab_sha, ab_het;
     double next_ab;
     uint64_t busy0; double busy_t0;
-    uint64_t cand0; double cand_t0;
-    double win_t0; int win_n, win_skip, strikes;
+    uint64_t last_cpu;
+    double win_t0, settle_until;
+    int win_skip, strikes, profits, verdict_budget;
     int verbose;
 };
 static ctl_t g_ctl;
@@ -663,7 +714,11 @@ static uint64_t busy_total() { uint64_t s = 0; for (int i = 0; i < g_cg->nworker
 static void *het_calib_main(void *) {
     shared_t *S = g_cg;
     while (!S->stop.load()) {
-        if (S->ready.load(std::memory_order_acquire) && S->ec_mode.load() >= 0 && S->allowed.load() > 0) break;
+        if (S->ready.load(std::memory_order_acquire) && S->ec_mode.load() >= 0 && S->allowed.load() > 0
+#if QSB_PK_JOINT
+            && !joint_hold.load(std::memory_order_acquire)
+#endif
+        ) break;
         usleep(50000);
     }
     if (S->stop.load() || S->ec_mode.load() != 2) return NULL;
@@ -867,32 +922,73 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
      * that the same code reaches on 32-CPU hosts. Record the real hardware
      * ceiling so the A/B controller can climb toward it instead of treating
      * the guess as a maximum. Climbing only ever happens on a measured-clean
-     * window, and the existing shedding rule still backs off on real loss. */
+     * window, and the net-value shedding rule still backs off on real loss. */
     g_ctl.whw = S->nworkers;
     g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
     return S->nworkers;
 }
 
-static void set_allowed(int n) { if (g_cg) g_cg->allowed.store(n, std::memory_order_relaxed); g_ctl.cur = n; }
+static void set_allowed(int n) {
+    if(g_cg)g_cg->allowed.store(n,
+#if QSB_PK_JOINT
+                              std::memory_order_seq_cst
+#else
+                              std::memory_order_relaxed
+#endif
+    );
+    g_ctl.cur=n;
+}
+
+/* Prior algorithm: ssalmeock submission 19d3269b, source a3f5016c, aligned
+ * GPU/CPU completed-work ABBA accounting on f0's v1 controller. This V3 port
+ * keeps quota/affinity limits, adds alternating order and observed-repeat
+ * hysteresis, and permits net-negative recovery budgets to reach zero. */
+static int net_window_on(const ctl_t &C) {
+    const int k = 4 - C.ab_left;
+    const int on = k == 0 || k == 3;       /* ABBA; alternate BAAB next time */
+    return C.ab_reverse ? !on : on;
+}
+
+static void net_begin_window(ctl_t &C, double now) {
+    set_allowed(net_window_on(C) ? C.ab_budget : 0);
+    C.settle_until = now + 0.25;
+    C.win_t0 = now;
+    C.win_skip = 1;                       /* drop the boundary completion too */
+}
 
 /* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates.
- * (Unchanged logic from the v1 co-grinder.) */
+ * gpu_batch is the retained actual work for that completed slot, including
+ * partial sequence tails; no enqueued or nominal batch work is credited. */
 static void tick(double now, double gpu_batch) {
     shared_t *S = g_cg;
     if (!S) return;
     ctl_t &C = g_ctl;
     const double dt = C.last_done > 0 ? now - C.last_done : 0;
+    const uint64_t cpu_now = S->cand_done.load(std::memory_order_relaxed);
+    const uint64_t cpu_delta = cpu_now >= C.last_cpu ? cpu_now - C.last_cpu : 0;
     C.last_done = now;
-    if (!S->ready.load(std::memory_order_acquire) || S->failed.load()) return;
+    C.last_cpu = cpu_now;
+    if (!S->ready.load(std::memory_order_acquire) || S->failed.load()) {
+#if QSB_PK_JOINT
+        if(S->failed.load())set_allowed(0);
+#endif
+        return;
+    }
     if (S->tentative.load() >= 8 && S->hits.load() == 0) {   /* CPU path disagrees with the exact gate */
         if (C.cur) printf("  CPU co-grind: off (%llu tentative hits, none exact)\n", (unsigned long long)S->tentative.load());
-        C.wmax = 0; set_allowed(0); return;
+        C.wmax = 0; set_allowed(0);
+#if QSB_PK_JOINT
+        if(joint_hold.load(std::memory_order_acquire))S->failed.store(1);
+#endif
+        return;
     }
+#if QSB_PK_JOINT
+    if(joint_hold.load(std::memory_order_acquire))return;
+#endif
     if (C.phase == 0) {
         set_allowed(C.wmax);
         C.phase = 1; C.t_phase = now;
         C.busy0 = busy_total(); C.busy_t0 = now;
-        C.cand0 = S->cand_done.load(); C.cand_t0 = now;
         C.next_ab = now + 20.0;
         return;
     }
@@ -918,50 +1014,86 @@ static void tick(double now, double gpu_batch) {
         C.phase = 2; C.t_phase = now;
         return;
     }
-    if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
-        C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
+    if (C.phase == 2 && now >= C.next_ab &&
+        (C.cur > 0 || (QSB_CG_RECOVER && C.whw > 0))) {
+        C.phase = 3; C.ab_left = 4;
+        C.ab_restore = C.wmax;
+        C.ab_trial = C.wmax == 0;
+        C.ab_budget = C.ab_trial ? 1 : C.wmax;
+        memset(C.ab_gpu, 0, sizeof C.ab_gpu);
+        memset(C.ab_cpu, 0, sizeof C.ab_cpu);
+        memset(C.ab_seconds, 0, sizeof C.ab_seconds);
+        memset(C.ab_n, 0, sizeof C.ab_n);
+        C.ab_ec = S->ec_mode.load(); C.ab_sha = S->sha_mode.load();
+        C.ab_het = S->het_on.load();
+        net_begin_window(C, now);
         return;
     }
     if (C.phase == 3) {
-        const int on = (C.ab_left & 1) == 0;
-        if (C.win_skip) C.win_skip = 0;
-        else { if (on) { C.ab_on_sum += dt; C.ab_on_n++; } else { C.ab_off_sum += dt; C.ab_off_n++; } C.win_n++; }
-        if (C.win_n < 3 || now - C.win_t0 < 1.0) return;
-        C.ab_left--;
-        C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
-        if (C.ab_left > 0) { set_allowed(((C.ab_left & 1) == 0) ? C.wmax : 0); return; }
-        set_allowed(C.wmax);
-        const double on_t = C.ab_on_sum / (C.ab_on_n ? C.ab_on_n : 1);
-        const double off_t = C.ab_off_sum / (C.ab_off_n ? C.ab_off_n : 1);
-        const double loss = on_t / off_t - 1.0;
-        const uint64_t cd = S->cand_done.load();
-        const double cpu_rate = C.cand_t0 > 0 && now > C.cand_t0 ? (double)(cd - C.cand0) / (now - C.cand_t0) : 0;
-        C.cand0 = cd; C.cand_t0 = now;
-        if (C.verbose) printf("  [CPU] A/B: gpu batch on %.5fs off %.5fs (loss %+.3f%%), cpu %.0f cand/s, %d workers, hits %llu/%llu exact\n",
-                              on_t, off_t, 100 * loss, cpu_rate, C.wmax,
-                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
-        const double cpu_frac = on_t > 0 ? cpu_rate / (gpu_batch / on_t) : 0;
-        const int bad = loss > 0.015 && loss > cpu_frac;
-        if (bad && C.strikes >= 1) {
-            int nw = C.wmax - (C.wmax + 3) / 4; if (nw < 0) nw = 0;
-            const int floor_w = QSB_CG_RECOVER ? (C.wcap + 3) / 4 : 0;
-            if (nw < floor_w) nw = floor_w;
-            C.wmax = nw; set_allowed(nw); C.strikes = 0;
-            printf("  CPU co-grind: GPU batch time +%.2f%% with workers; using %d\n", 100 * loss, nw);
-            C.next_ab = now + 5.0;
-        } else if (bad) { C.strikes = 1; C.next_ab = now + 2.0; }
-        else if (QSB_CG_RECOVER && C.wmax < C.whw && loss < 0.005) {
-            /* Both shedding paths only ever lower wmax, so without this a single
-             * transient stall (a slow first table build, a thermal dip, one noisy
-             * A/B pair) strands those workers for the rest of the run. A window
-             * that measures clean hands one worker back and re-checks sooner than
-             * the steady-state interval, until we are up at the starting count
-             * again. Shedding is unchanged, so a real sustained loss still wins. */
-            C.strikes = 0; C.wmax++; set_allowed(C.wmax); C.next_ab = now + 10.0;
-            if (C.verbose) printf("  [CPU] worker ramp -> %d (cap %d, hw %d, loss %+.3f%%)\n", C.wmax, C.wcap, C.whw, 100 * loss);
+        if (C.ab_ec != S->ec_mode.load() || C.ab_sha != S->sha_mode.load() ||
+            C.ab_het != S->het_on.load()) {
+            /* Backend calibration is not a worker-value comparison. */
+            set_allowed(C.ab_restore); C.strikes = C.profits = 0;
+            C.phase = 2; C.next_ab = now + 5.0;
+            if (C.verbose) printf("  [CPU] NET abort: backend changed\n");
+            return;
         }
-        else { C.strikes = 0; C.next_ab = now + 60.0; }
+        if (now < C.settle_until) return;
+        if (C.win_skip) { C.win_skip = 0; C.win_t0 = now; return; }
+        if (!(dt > 0) || !(gpu_batch > 0)) return;
+        const int k = 4 - C.ab_left;
+        const int on = net_window_on(C);
+        C.ab_gpu[k] += gpu_batch;
+        C.ab_seconds[k] += dt;
+        if (on) C.ab_cpu[k] += (double)cpu_delta;
+        C.ab_n[k]++;
+        if (C.ab_n[k] < 3 || now - C.win_t0 < 1.0) return;
+        if (C.verbose) printf("  [CPU] NET window order=%s index=%d on=%d workers=%d gpu=%.0f cpu=%.0f seconds=%.9f n=%d\n",
+                              C.ab_reverse ? "BAAB" : "ABBA", k, on, C.ab_budget,
+                              C.ab_gpu[k], C.ab_cpu[k], C.ab_seconds[k], C.ab_n[k]);
+        C.ab_left--;
+        if (C.ab_left > 0) { net_begin_window(C, now); return; }
+        const int a = C.ab_reverse ? 1 : 0, b = C.ab_reverse ? 2 : 3;
+        const int c = C.ab_reverse ? 0 : 1, d = C.ab_reverse ? 3 : 2;
+        const double on_seconds = C.ab_seconds[a] + C.ab_seconds[b];
+        const double off_seconds = C.ab_seconds[c] + C.ab_seconds[d];
+        const double gpu_on = (C.ab_gpu[a] + C.ab_gpu[b]) / on_seconds;
+        const double gpu_off = (C.ab_gpu[c] + C.ab_gpu[d]) / off_seconds;
+        const double cpu_on = (C.ab_cpu[a] + C.ab_cpu[b]) / on_seconds;
+        const double delta = (gpu_on + cpu_on) / gpu_off - 1.0;
+        const double va = (C.ab_gpu[a] + C.ab_cpu[a]) / C.ab_seconds[a];
+        const double vb = (C.ab_gpu[b] + C.ab_cpu[b]) / C.ab_seconds[b];
+        const double vc = C.ab_gpu[c] / C.ab_seconds[c];
+        const double vd = C.ab_gpu[d] / C.ab_seconds[d];
+        /* Half the repeat spread is an observed hysteresis band, not a
+         * confidence interval or a promotion/local-margin requirement. */
+        const double noise = fmax(1e-12, fmax(fabs(va - vb) / (va + vb), fabs(vc - vd) / (vc + vd)));
+        if (C.verbose) printf("  [CPU] NET gpu_on=%.0f gpu_off=%.0f cpu_on=%.0f delta=%+.4f%% band=%.4f%% workers=%d trial=%d order=%s hits=%llu/%llu exact\n",
+                              gpu_on, gpu_off, cpu_on, 100 * delta, 100 * noise,
+                              C.ab_budget, C.ab_trial, C.ab_reverse ? "BAAB" : "ABBA",
+                              (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
+        if (C.verdict_budget != C.ab_budget) {
+            C.strikes = C.profits = 0; C.verdict_budget = C.ab_budget;
+        }
+        set_allowed(C.ab_restore);
+        const int bad = delta < -noise, good = delta > noise;
+        C.strikes = bad ? C.strikes + 1 : 0;
+        C.profits = good ? C.profits + 1 : 0;
+        if (bad && C.strikes >= 2 && !C.ab_trial) {
+            C.wmax -= (C.wmax + 3) / 4;   /* a measured loss has no worker floor */
+            set_allowed(C.wmax); C.strikes = C.profits = 0;
+            printf("  CPU co-grind: combined rate %+.3f%% with workers; using %d\n", 100 * delta, C.wmax);
+            C.next_ab = now + (C.wmax ? 5.0 : 60.0);
+        } else if (good && C.profits >= 2 && QSB_CG_RECOVER && C.wmax < C.whw) {
+            C.wmax++; set_allowed(C.wmax); C.strikes = C.profits = 0;
+            C.next_ab = now + 10.0;
+            if (C.verbose) printf("  [CPU] net-positive worker ramp -> %d (cap %d, hw %d)\n", C.wmax, C.wcap, C.whw);
+        } else if (C.ab_trial) {
+            /* Trial workers are parked between comparisons. A negative or
+             * ambiguous one-worker trial waits before trying again. */
+            C.next_ab = now + (good ? 10.0 : 60.0);
+        } else C.next_ab = now + (bad ? 2.0 : good && QSB_CG_RECOVER && C.wmax < C.whw ? 10.0 : 60.0);
+        C.ab_reverse ^= 1;
         C.phase = 2;
         return;
     }
