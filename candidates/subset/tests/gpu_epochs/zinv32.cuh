@@ -54,6 +54,85 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
 #else
 #define ZI_CONST static const
 #endif
+#ifndef QSB_ROOT_LUT32
+#define QSB_ROOT_LUT32 1
+#endif
+#if QSB_ROOT_LUT32 != 0 && QSB_ROOT_LUT32 != 1
+#error "QSB_ROOT_LUT32 must be 0 or 1"
+#endif
+#if QSB_ROOT_LUT32
+#define QSB_ROOT_LUT32_KNOB "QSB_ROOT_LUT32=1;"
+#if defined(QSB_ROOT_LUT_SMEM) && QSB_ROOT_LUT_SMEM
+#error "QSB_ROOT_LUT32 is isolated from the shared-table experiment"
+#endif
+/* Exact six-step records for odd delta, clamped to {-5,-3,-1,1,3,5}.
+ * Initial delta=1 and every six-step affine offset is even. The original
+ * -6/-5 and +5/+6 bands agree. One direct32 load; no index indirection.
+ * Bits0..27 hold signed7 (a/2,b/2,c,d), bits28..30 signed3 offset/2,
+ * bit31 the delta-negation flag. All shifts below start unsigned.
+ * Original64 table and generic decision helper remain for OFF/other callers. */
+ZI_CONST uint32_t ZI_BY_LUT32[384] = {
+    0x30200020u,0x302fc020u,0x302f8020u,0x302f4020u,0x302f0020u,0x302ec020u,0x302e8020u,0x302e4020u,
+    0x302e0020u,0x302dc020u,0x302d8020u,0x302d4020u,0x302d0020u,0x302cc020u,0x302c8020u,0x302c4020u,
+    0x302c0020u,0x302bc020u,0x302b8020u,0x302b4020u,0x302b0020u,0x302ac020u,0x302a8020u,0x302a4020u,
+    0x302a0020u,0x3029c020u,0x30298020u,0x30294020u,0x30290020u,0x3028c020u,0x30288020u,0x30284020u,
+    0x30280020u,0x3027c020u,0x30278020u,0x30274020u,0x30270020u,0x3026c020u,0x30268020u,0x30264020u,
+    0x30260020u,0x3025c020u,0x30258020u,0x30254020u,0x30250020u,0x3024c020u,0x30248020u,0x30244020u,
+    0x30240020u,0x3023c020u,0x30238020u,0x30234020u,0x30230020u,0x3022c020u,0x30228020u,0x30224020u,
+    0x30220020u,0x3021c020u,0x30218020u,0x30214020u,0x30210020u,0x3020c020u,0x30208020u,0x30204020u,
+    0x30200020u,0xf03fc11eu,0xf03f811cu,0xf03f411au,0xf03f0118u,0xf03ec116u,0xf03e8114u,0xf03e4112u,
+    0xf03e0110u,0xf03dc10eu,0xf03d810cu,0xf03d410au,0xf03d0108u,0xf03cc106u,0xf03c8104u,0xf03c4102u,
+    0xf03c0100u,0xe03bc08fu,0xe03b808eu,0xe03b408du,0xe03b008cu,0xe03ac08bu,0xe03a808au,0xe03a4089u,
+    0xe03a0088u,0xe039c087u,0xe0398086u,0xe0394085u,0xe0390084u,0xe038c083u,0xe0388082u,0xe0384081u,
+    0xe0380080u,0xf067411eu,0xf066811cu,0xf065c11au,0xf0650118u,0xf0644116u,0xf0638114u,0xf062c112u,
+    0xf0620110u,0xf061410eu,0xf060810cu,0xf07fc10au,0xf07f0108u,0xf07e4106u,0xf07d8104u,0xf07cc102u,
+    0xf07c0100u,0x3023c020u,0x30238020u,0x30234020u,0x30230020u,0x3022c020u,0x30228020u,0x30224020u,
+    0x30220020u,0x3021c020u,0x30218020u,0x30214020u,0x30210020u,0x3020c020u,0x30208020u,0x30204020u,
+    0x30200020u,0x903fc418u,0x903f8410u,0x903f4408u,0x903f0400u,0x803ec20cu,0x803e8208u,0x803e4204u,
+    0x803e0200u,0x0f7b4185u,0x0f7c8182u,0x0f7dc1ffu,0x0f7f01fcu,0xf03cc106u,0xf03c8104u,0xf03c4102u,
+    0xf03c0100u,0x1fbcc17eu,0x1fbd817cu,0x1fbe417au,0x1fbf0178u,0x8060420cu,0x807f8208u,0x807ec204u,
+    0x807e0200u,0x10a0c30au,0x10bf8304u,0x10be437eu,0x10bd0378u,0xe038c083u,0xe0388082u,0xe0384081u,
+    0xe0380080u,0x0f39c0ffu,0x0f3b80feu,0x0f3d40fdu,0x0f3f00fcu,0x80a1c20cu,0x80a08208u,0x80bf4204u,
+    0x80be0200u,0x90614418u,0x90608410u,0x907fc408u,0x907f0400u,0xf07e4106u,0xf07d8104u,0xf07cc102u,
+    0xf07c0100u,0x1ffc417eu,0x1ffc817cu,0x1ffcc17au,0x1ffd0178u,0x80e3420cu,0x80e18208u,0x80ffc204u,
+    0x80fe0200u,0x1ffe430au,0x1ffe8304u,0x1ffec37eu,0x1fff0378u,0x3020c020u,0x30208020u,0x30204020u,
+    0x30200020u,0xb03fd000u,0xa03f8800u,0x003f467cu,0x903f0400u,0x9e607d7eu,0x003e837cu,0x8da142fdu,
+    0x803e0200u,0x0f3fc27cu,0x00fe857cu,0x6c7fc1ffu,0x917f0400u,0x9f607f7au,0x7eff83feu,0x9e60ff7eu,
+    0xf03c0100u,0x7e3fc17eu,0x0f3f817cu,0x00fec67cu,0x91bf0400u,0x1fbfc478u,0xa07f8800u,0x907ec57au,
+    0x807e0200u,0x0f7f427cu,0xa0bf8800u,0x7f3f437eu,0x90ff0400u,0x8ee17ffdu,0x01be877cu,0x8ce1ffffu,
+    0xe0380080u,0x6c3fc0ffu,0x7e3f80feu,0x01be467cu,0x913f0400u,0x9f20fd7eu,0x0f7f837cu,0x10bf4c78u,
+    0x80be0200u,0x0fbec27cu,0x0fbf857cu,0xb07fd000u,0x907f0400u,0x9f3eff7au,0xa0ff8800u,0x9e207f7eu,
+    0xf07c0100u,0x7e7f417eu,0x0f7e817cu,0x0f7fc67cu,0x90bf0400u,0x8ea1feffu,0x7e7f81feu,0x9f20457au,
+    0x80fe0200u,0x0ffe427cu,0x7ebf82feu,0x7e7fc37eu,0x91ff0400u,0x1fff4478u,0x0fff877cu,0x1fffcc78u,
+    0x30200020u,0xb03fd000u,0xa03f8800u,0x6d7fc5ffu,0x903f0400u,0xb1bfd000u,0xa17f8800u,0x7effc77eu,
+    0x803e0200u,0x7f3fc97eu,0xa1bf8800u,0x6c7fc1ffu,0x917f0400u,0xb0bfd000u,0xa2ff8800u,0x6dffc7ffu,
+    0xf03c0100u,0x7e3fc17eu,0xa33f8800u,0x723f4b7eu,0x91bf0400u,0x7fbfcd7eu,0xa07f8800u,0x6cffc3ffu,
+    0x807e0200u,0x6d3fc4ffu,0xa0bf8800u,0x7f3f437eu,0x90ff0400u,0x7ebfc57eu,0xa1ff8800u,0x73bf4f7eu,
+    0xe0380080u,0x6c3fc0ffu,0xa23f8800u,0xb17fd000u,0x913f0400u,0x6dbfc6ffu,0xa37f8800u,0x70bf477eu,
+    0x80be0200u,0x717f497eu,0xa3bf8800u,0xb07fd000u,0x907f0400u,0x6cbfc2ffu,0xa0ff8800u,0xb1ffd000u,
+    0xf07c0100u,0x7e7f417eu,0xa13f8800u,0x7f7fcb7eu,0x90bf0400u,0x72ff4d7eu,0xa27f8800u,0xb0ffd000u,
+    0x80fe0200u,0xb13fd000u,0xa2bf8800u,0x7e7fc37eu,0x91ff0400u,0x7fff457eu,0xa3ff8800u,0x7fffcf7eu,
+    0x30200020u,0xb03fd000u,0xa03f8800u,0xb57fd000u,0x903f0400u,0xb1bfd000u,0xa17f8800u,0xb6ffd000u,
+    0x803e0200u,0xb73fd000u,0xa1bf8800u,0xb47fd000u,0x917f0400u,0xb0bfd000u,0xa2ff8800u,0xb5ffd000u,
+    0xf03c0100u,0xb63fd000u,0xa33f8800u,0xb37fd000u,0x91bf0400u,0xb7bfd000u,0xa07f8800u,0xb4ffd000u,
+    0x807e0200u,0xb53fd000u,0xa0bf8800u,0xb27fd000u,0x90ff0400u,0xb6bfd000u,0xa1ff8800u,0xb3ffd000u,
+    0xe0380080u,0xb43fd000u,0xa23f8800u,0xb17fd000u,0x913f0400u,0xb5bfd000u,0xa37f8800u,0xb2ffd000u,
+    0x80be0200u,0xb33fd000u,0xa3bf8800u,0xb07fd000u,0x907f0400u,0xb4bfd000u,0xa0ff8800u,0xb1ffd000u,
+    0xf07c0100u,0xb23fd000u,0xa13f8800u,0xb77fd000u,0x90bf0400u,0xb3bfd000u,0xa27f8800u,0xb0ffd000u,
+    0x80fe0200u,0xb13fd000u,0xa2bf8800u,0xb67fd000u,0x91ff0400u,0xb2bfd000u,0xa3ff8800u,0xb7ffd000u,
+};
+ZI_DEV void zi_lut32_decode(uint32_t w,int32_t *a,int32_t *b,int32_t *c,
+                            int32_t *d,int32_t *offset,int32_t *sm){
+    *a=(int32_t)(w<<25)>>24;
+    *b=((int32_t)(w<<18)>>24)&~1;
+    *c=(int32_t)(w<<11)>>25;
+    *d=(int32_t)(w<<4)>>25;
+    *offset=((int32_t)(w<<1)>>28)&~1;
+    *sm=(int32_t)w>>31;
+}
+#else
+#define QSB_ROOT_LUT32_KNOB ""
+#endif
 // Six-step extension of the PR296 table-driven divstep mechanism.
 // Odd rescaling preserves the decision sequence: index by g/f modulo64.
 // For odd f, f*(2-f*f) is its inverse modulo64. Five exact groups give30 steps.
@@ -284,18 +363,30 @@ ZI_DEV int32_t zi_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
     int32_t u=1-(int32_t)column,q=(int32_t)column;
     #pragma unroll
     for(int k=0;k<5;k++){
+#if QSB_ROOT_LUT32
+        const int32_t dc=delta<-5?-5:(delta>5?5:delta);
+        const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
+        const uint32_t packed=ZI_BY_LUT32[((uint32_t)(dc+5)<<5)|ratio];
+        int32_t a,b,c,d,offset,sm;
+        zi_lut32_decode(packed,&a,&b,&c,&d,&offset,&sm);
+#else
         const int32_t dc=delta<-6?-6:(delta>6?6:delta);
         const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
         const uint64_t packed=ZI_LUT(((uint32_t)(dc+6)<<6)|ratio);   /* QSB_ROOT_LUT_SMEM */
         const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
         const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
         const int32_t c=zi_by_signed_byte<2>(e),d=zi_by_signed_byte<3>(e);
+#endif
         const uint32_t nf=((uint32_t)a*f+(uint32_t)b*g)>>6;
         g=((uint32_t)c*f+(uint32_t)d*g)>>6;f=nf;
         const int32_t nu=a*u+b*q;
         q=c*u+d*q;u=nu;
+#if QSB_ROOT_LUT32
+        delta=((delta^sm)-sm)+offset;
+#else
         const int32_t sm=(int32_t)flags>>31;
         delta=((delta^sm)-sm)+zi_by_signed_byte<0>(flags);
+#endif
     }
     *top=u;*bottom=q;
     return delta;

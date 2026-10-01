@@ -47,6 +47,12 @@
 #define QSB_HP_BLOCKSYNC 1
 #endif
 #pragma once
+#ifndef QSB_HP_DEAD_DESCRIPTORS
+#define QSB_HP_DEAD_DESCRIPTORS 1
+#endif
+#if QSB_HP_DEAD_DESCRIPTORS && !(QSB_SLOT_PIPELINE && QSB_PAIR_SHARED && ZLAB_K2S3M && ZLAB_DUAL_EPOCH_SHA && QSB_HIT_NO_COMBO && QSB_HOST_VERIFY)
+#error "Descriptor omission requires the paired first-state-only digest and exact host publication path"
+#endif
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -409,6 +415,9 @@ QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, u
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
         const uint32_t w0 = be32(rem8[l]), w1 = be32(rem8[l] + 4);
+#if QSB_HP_DEAD_DESCRIPTORS
+        if (ep_out) {   /* batch-zero self-check remains complete; steady ring has no descriptor consumer */
+#endif
         uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
         alignas(16) uint8_t rec[64];
         memcpy(rec, F[l], 32);
@@ -417,6 +426,9 @@ QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, u
         memcpy(rec + 40, L.early, MAXK);
         memset(rec + 40 + P.K, 0, MAXK - P.K);
         for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+#if QSB_HP_DEAD_DESCRIPTORS
+        }
+#endif
         uint32_t *fo = fi_out + (size_t)L.idx * P.ncls * 8;
         const uint32_t *cr = cls_rows(P, cc, w0, w1);
         if (P.ncls == 8) {
@@ -465,6 +477,9 @@ static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
         const uint32_t w0 = be32(rem8[l]), w1 = be32(rem8[l] + 4);
+#if QSB_HP_DEAD_DESCRIPTORS
+        if (ep_out) {   /* batch-zero self-check remains complete; steady ring has no descriptor consumer */
+#endif
         uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
         alignas(16) uint8_t rec[64];
         memcpy(rec, F[l], 32);
@@ -474,6 +489,9 @@ static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_
         memset(rec + 40 + P.K, 0, MAXK - P.K);
         /* write-once output read by DMA: non-temporal stores (no read-for-ownership; +40% here) */
         for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+#if QSB_HP_DEAD_DESCRIPTORS
+        }
+#endif
         uint32_t *fo = fi_out + (size_t)L.idx * P.ncls * 8;
         first_sw(P, F[l], rem8[l], fo);
     }
@@ -660,7 +678,10 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
             if (a) {
                 const int p = a->npieces_ok;
                 lk.unlock();
-                bool ok = cudaHostAlloc((void **)&a->ep[p], (size_t)h->pe * 64, cudaHostAllocPortable) == cudaSuccess &&
+                bool ok =
+#if !QSB_HP_DEAD_DESCRIPTORS
+                          cudaHostAlloc((void **)&a->ep[p], (size_t)h->pe * 64, cudaHostAllocPortable) == cudaSuccess &&
+#endif
                           cudaHostAlloc((void **)&a->fi[p], (size_t)h->pe * h->P.ncls * 32, cudaHostAllocPortable) == cudaSuccess;
                 if (ok && p == 0) ok = cudaEventCreateWithFlags(&a->copied, cudaEventDisableTiming) == cudaSuccess;
                 lk.lock();
@@ -892,7 +913,9 @@ static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, 
         const int64_t lo = (int64_t)p * (int64_t)h->pe;
         if (lo >= n) break;
         const size_t np = (size_t)((int64_t)n - lo < (int64_t)h->pe ? (int64_t)n - lo : (int64_t)h->pe);
+#if !QSB_HP_DEAD_DESCRIPTORS
         e = cudaMemcpyAsync((uint8_t *)d_ep + (size_t)lo * 64, s->ep[p], np * 64, cudaMemcpyHostToDevice, st);
+#endif
         if (e == cudaSuccess)
             e = cudaMemcpy2DAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, fi_pitch, s->fi[p], w, w, np, cudaMemcpyHostToDevice, st);
     }

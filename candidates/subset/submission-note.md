@@ -1,95 +1,110 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# SUBSET: root inverse source and native image update
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+This is an exploratory SUBSET package. It retains the current CPU and host producer source and selects an updated GPU root inverse implementation, arithmetic helpers and inverse lookup source. The corresponding source defaults and native-image fingerprint are part of the package. The ordinary candidate entry point and output interfaces are retained.
 
-## Summary
-
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
-
-## The change
-
-In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
-
-- **Ranges:** with `QSB_CPU_EPOCH_CONTIG` 1, worker t walks [base + t·span, base + (t+1)·span). Here span is the epoch space above the diagnostic base divided among the workers: about 2.6e8 epochs each at 32 workers (this package has no diagnostic base), against about 2.6e7 walked in 1,200 s.
-- **Prefix re-hash:** in lexicographic order, consecutive epochs differ in the last omission. I replayed both walks on this problem's prefix. The re-hash drops from about 6.1 SHA-256 blocks per epoch at stride 32 to about 3.4.
-- **No unrank:** the next epoch's omissions come from the previous epoch's by the usual next-combination step. The unrank runs only at the start of each range.
-- **Disjointness:** the ranges are disjoint, and the co-grinder's patterns (`QSB_CPU_PREFIX100`) stay the complement subset they are in `e6715658`. So no candidate is walked twice, and every hit still passes the exact OpenSSL gate.
-- **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
-- **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
-
-## Ranked draws of this exact package
-
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
-
-- **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
-- **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
-- **Walk:** `e6715658` has no diagnostic base (the smallest co-grinder hit is at epoch 53,476), so the 32 ranges start at t·C(137,6)/32.
-
-## Ranked evidence (same change on terrapinelf's `a33e04c3` co-grinder with 100 patterns)
-
-| draw | total | GPU (hits) | co-grinder (hits) | co-grinder work, luck-free |
-|---|---:|---:|---:|---:|
-| `56b4b1f9` | 704.73 | 640.61 | 64.12 | 64.96 |
-| `30c24617` | 714.02 | 649.29 | 64.73 | 64.91 |
-| `7e55c5c2` | 709.13 | 644.00 | 65.14 | 64.86 |
-
-- **Walk:** on all three draws the hits show 32 workers, each about 2.4e7 epochs into its range (±2%, no range exhausted), on the 9-window table (diagnostic code 6).
-- **Luck-free rate:** 32 × about 2.43e7 epochs × 100 patterns / 1,201.9 s. It reproduces to about 0.1% between the draws, while the hit counts scatter by Poisson around it.
-
-## Checks done here
-
-All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's toolkit.
-
-- **Emulation harness:** the co-grinder ran under `qemu-x86_64 -cpu max` (SHA-NI + scalar EC) in a CPU-only harness with tree.cu's loader and 128-pattern rule.
-- **Settings:** `QSB_ZEROS_N=12`, 40 s per run.
-- **Reference:** each run was compared against a brute-force `qsb_hv_check` oracle on the kept 100 patterns.
-
-| check | result |
-|---|---|
-| `build_carrier.sh 24` | cubin sha256 `e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea`, 473,376 bytes, byte-identical to `e6715658`'s; 0 spills. Only the informational source hash in the header changes |
-| the harness's build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) | builds with no errors |
-| image `qsb_carrier_knobs` against the host binary's `QSB_CARRIER_KNOBS` | byte-identical (2,534 bytes), so the native image loads |
-| next-combination step against the binomial unrank, 20,000,000 consecutive epochs from 400 starts | 0 mismatches; carries at every index 0..5 exercised |
-| 1 thread | all hits over epochs < 4,096 match the oracle (199 = 199), 0 missing, 0 extra, 0 duplicates |
-| 4 threads, ranges capped to 4 × 1,024 epochs (`-DQSB_CPU_EPOCH_CAP=4096`) | every worker stops at its range end: exactly 409,600 candidates, 199 = 199 hits |
-| 4 threads, full ranges | epochs < 4,096 (worker 0): exact. Worker 2's first 2,048 epochs (from 4,109,236,362): 87 = 87 against a separate oracle run. 0 duplicates |
-| `e6715658` unchanged, same harness | exact (the reference walk) |
-
-Emulated timings say nothing about Zen 4, so I did not measure speed here.
-
-## Kill switch
-
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
-
-## Reproducing
-
-```
-./setup.sh subset
-./benchmark.sh subset
-```
-
-To read the co-grinder's rate without hit noise from a ranked run:
-
-1. Take the co-grinder hits: the patterns outside the 128 most frequent `skip[6:9]`.
-2. Take each hit's lexicographic epoch rank of the first six skip indices.
-3. Group the hits into the 32 ranges; range t starts at base + t·(C(137,6) − base)/32, with base = the smallest rank with its low 19 bits cleared (0 for this package).
-4. Sum each range's last rank minus its start, × 100 patterns / `elapsed_s`.
+The selected package consists of candidate source, its matching native image and this scope declaration. The source inventory below identifies the additions and retained surfaces. The release declarations distinguish candidate validation from the official evaluation status.
 
 ## Base and attribution
 
-- **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
-- **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
-- **Mine:**
-  - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.
-  - Earlier: the block-0 pattern selection that `QSB_CPU_PREFIX100` follows (`4a197f06`).
+The promoted base is cefika's submission fb6f5a8f-b29e-4506-a50c-c79a9c5a2a0e, source [ff27a2b66990a3eb554a1d4453e896c0397337ba](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/commit/ff27a2b66990a3eb554a1d4453e896c0397337ba). The entry wrapper, paired arithmetic, GPU hash helpers, host interfaces and existing source notices are retained from that lineage. The native image supplied with this package corresponds to the newly selected inverse source.
 
-All inherited source, GPLv3 notices and attributions are kept. Only `candidates/subset/` changes.
+The retained CPU arithmetic-boundary edits are attributed to jacklightChen's public submission b1c5e58e-210d-4353-addf-edc4474b8f33, immutable [CPU donor source843c82817bf2de27e7794bb6317d1d223d6fa1fd](https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/commit/843c82817bf2de27e7794bb6317d1d223d6fa1fd). Only the previously selected host edits from that source are retained. The current CPU key-message preparation, worker-local input scratch and host descriptor edits are also retained in this package.
+
+The root64 header, associated arithmetic helpers and inverse lookup source are zarar@1337 additions. No new external donor is claimed for these inverse additions. Attribution to cefika and jacklightChen identifies the retained base and host source; it does not attribute the new inverse files to either donor.
+
+The base promotion records acknowledgments to kshitij-hash, terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan and Meganpark980320. Those names are retained here as base provenance. The submission owner is i34-9. This is a solo submission. Existing VanitySearch and third-party notices remain in the candidate sources.
+
+## Updated candidate surfaces
+
+| File | Package contents |
+|---|---|
+| tests/gpu_epochs/inverse_limbs.cuh | The root inverse selection, source default and retained original inverse interface. |
+| tests/gpu_epochs/root64.cuh | The selected root inverse source and helper interface. |
+| tests/gpu_epochs/root64_products.cuh | Arithmetic helper declarations used by the selected root header. |
+| tests/gpu_epochs/zinv32.cuh | The selected inverse lookup declarations. The original lookup declarations remain present. |
+| tests/gpu_epochs/tree.cu | The native-image fingerprint entries corresponding to the selected inverse defaults. Existing host descriptor lines are retained. |
+| qsb_carrier_sm89.h | The packaged native image and metadata matching the selected candidate source. |
+| submission-note.md | This source-scope, attribution and release declaration. |
+
+The candidate preserves the existing inverse caller and output interface. The selected defaults are included in the matching native image. Existing carrier and fallback interfaces remain present.
+
+## Retained CPU and host surfaces
+
+| Surface | Package declaration |
+|---|---|
+| CpuGrindSubset.h | Retained current CPU arithmetic-boundary, key-message preparation and worker-local input scratch source. |
+| host_producers_v3.h | Retained current descriptor source and selected default. |
+| host_producers_v1.h | Retained alternative host producer source. |
+| host_producers.h | Retained producer interface and feature checks. |
+| qsb_host_verify.h | Retained candidate-side record verification source. |
+| CPU worker input and digest output | Existing planned route and digest-word interface retained. |
+| CPU table and scalar recovery | Existing declarations and runtime selection retained. |
+| Producer fallback | Existing fallback route remains available. |
+| Stream ownership and collection | Existing launch-slot ownership, record collection and drain interfaces retained. |
+| Candidate publication | Existing CPU and GPU output writers retained. |
+
+These retained host surfaces include the selected input scratch and descriptor edits from the current package. The GPU inverse additions do not replace the host input domain, omission records, recovery-ID interface or key-message layout. The existing CPU feature checks, producer selection and startup self-check remain present.
+
+## Retained device and library surfaces
+
+| Surface | Package declaration |
+|---|---|
+| subset.cu | Retained entry wrapper and candidate arguments. |
+| QsbCarrier.h | Retained carrier loader, selection checks and fallback interface. |
+| build_carrier.sh | Retained native-image build utility. |
+| GPUHash.h | Retained GPU hash source and existing notices. |
+| GPUMath.h | Retained general GPU field arithmetic source. |
+| GLVScalar.cuh | Retained scalar helper source. |
+| sha_gate_fma.cuh | Retained GPU hash helper and selected addition setting. |
+| square32.cuh | Retained general field square source. |
+| pair_shared.cuh | Retained paired arithmetic and recovery interface. |
+| tree_inverse.cuh | Retained tree organization and inverse caller. |
+| filter_tail_sc.cuh | Retained device filtering source. |
+| window_schedule_shared.cuh | Retained GPU input hash scheduling source. |
+| epoch_groups.cuh | Retained epoch grouping declarations. |
+
+The candidate retains the ordinary GPU geometry, paired candidate work, field and hash consumers, public-key output layout and record format. The inverse headers, selected defaults, fingerprint entries and matching native image are the updated device surfaces identified above. Existing copyright and license texts remain with their source files.
+
+## Scope and packaging declarations
+
+| Item | Package declaration |
+|---|---|
+| Selected competition track | SUBSET. |
+| Editable surface | candidates/subset as specified by benchmark.json. |
+| Changed candidate code | The inverse headers, source defaults and fingerprint entries listed above. |
+| Native artifact | Candidate image matching the selected inverse configuration. |
+| Runtime dependencies | Existing candidate dependencies retained. |
+| Runtime feature checks | Existing CPU and GPU feature checks retained. |
+| Benchmark manifest | Retained without modification. |
+| Protected benchmark and scoring code | Retained without modification. |
+| Protected verifier | Retained without modification. |
+| Repository workflows | Retained without modification. |
+| Sibling track | candidates/pinning retained without modification. |
+| Input source | Ordinary benchmark-supplied input. |
+| Candidate arguments | Existing command-line interface retained. |
+| Output records | Existing omission-list and recovery-ID interface retained. |
+| Archive contents | Restricted to the selected editable candidate surface. |
+| Source provenance | Base, selected host donor and owned inverse additions identified above. |
+| Authorship metadata | Solo submission. |
+| Public documentation | This candidate scope and release declaration. |
+
+The public package contains candidate source and the candidate's packaged native image. Collected hit records, local executable files, private logs, credentials, service configuration and development scratch are outside the archive. The final archived source and public note are subject to the ordinary allowed-path and packaging checks.
+
+## Release declarations
+
+| Release item | Declaration |
+|---|---|
+| Source scope | The archived changed and retained surfaces match this inventory. |
+| Ordinary compilation | The candidate builds with its selected defaults under the locked track toolchain. |
+| Native image | The packaged image, build fingerprint, executable body and caller interface match the archived source. |
+| Inverse outputs | The selected inverse and lookup composition satisfies the independent full-output checks. |
+| Native runtime | The combined ordinary candidate passes the normal native route and record checks. |
+| Fallback runtime | The combined candidate passes the normal fallback route and record checks. |
+| Record validation | All collected release-gate records satisfy the independent cryptographic verifier. |
+| Packaging | Allowed-path, archive-size, clean-source and public-text checks are complete. |
+| Public text | Attribution, scope and the selected solo signature are present. |
+| Official result | Official evaluation remains the authority for a score or promotion. |
+
+The declarations above apply to the supplied source and collected release records. The official evaluation determines the score and promotion status. This note records package scope and provenance; it does not report an official result.
+
+zarar@1337 <3 🎲

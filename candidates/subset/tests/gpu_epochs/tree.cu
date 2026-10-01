@@ -5284,7 +5284,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * knobs whose value is one token are listed (derived macros such as QSB_PAIR_MUL follow
  * from them), so the string does not depend on how a preprocessor spaces expressions;
  * a knob that is not defined in this configuration stringifies to its own name. */
-#define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+#if QSB_ROOT64
+#define QSB_ROOT64_KNOB "QSB_ROOT64=1;" QSB_CARRIER_KV(QSB_ROOT64_SHARED_PRODUCTS)
+#else
+#define QSB_ROOT64_KNOB ""
+#endif
+#define QSB_CARRIER_KNOBS QSB_ROOT64_KNOB QSB_ROOT_LUT32_KNOB QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
@@ -6545,7 +6550,12 @@ int main(int argc, char **argv) {
         if (g_stop_signal && qhp::g_hp) {   /* H9: producers joined and the GPU idle (cudaFreeHost waits for the device): the pinned ring now */
             struct timespec fa, fb; clock_gettime(CLOCK_MONOTONIC, &fa);
             for (auto &sl : qhp::g_hp->slot) {
-                for (int p = 0; p < sl.npieces_ok; p++) { cudaFreeHost(sl.ep[p]); cudaFreeHost(sl.fi[p]); sl.ep[p] = nullptr; sl.fi[p] = nullptr; }
+                for (int p = 0; p < sl.npieces_ok; p++) {
+#if QSB_HP_DEAD_DESCRIPTORS
+                    if (sl.ep[p])
+#endif
+                    cudaFreeHost(sl.ep[p]); cudaFreeHost(sl.fi[p]); sl.ep[p] = nullptr; sl.fi[p] = nullptr;
+                }
                 sl.npieces_ok = 0;
             }
             (void)cudaGetLastError();

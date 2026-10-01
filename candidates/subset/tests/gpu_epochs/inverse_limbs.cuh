@@ -5,11 +5,29 @@
 #ifndef QSB_INVERSE_BIAS
 #define QSB_INVERSE_BIAS 1
 #endif
+#ifndef QSB_ROOT64
+#define QSB_ROOT64 1
+#endif
+#ifndef QSB_ROOT64_TEST_STATS
+#define QSB_ROOT64_TEST_STATS 0
+#endif
+#if QSB_ROOT64 < 0 || QSB_ROOT64 > 1
+#error "QSB_ROOT64 must be 0 or 1"
+#endif
+#if QSB_ROOT64 && defined(QSB_DIVSTEP_LOOKAHEAD) && QSB_DIVSTEP_LOOKAHEAD
+#error "QSB_ROOT64 does not support QSB_DIVSTEP_LOOKAHEAD"
+#endif
+#if QSB_ROOT64
+#include "root64.cuh"
+#endif
 /* One full warp per inverse: four signed rows, eight low limbs per row.
  * Each row's signed ninth limb is replicated. Normalize independent limb
  * products with ballot carry/borrow lookahead, then perform the exact >>30.
  * The original cap, isomorphic scale and independent fallback are retained. */
 __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
+#if QSB_ROOT64
+    return zi_inverse_root64_bounded(R,lane);
+#else
     constexpr unsigned mask=0xffffffffu;
     const int digit=lane&7,row=lane>>3,start=lane&~7;
     const unsigned odd=row&1,rs=row>>1;
@@ -135,6 +153,7 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
     for(int i=0;i<4;i++)R[i]=(uint64_t)out[2*i]|((uint64_t)out[2*i+1]<<32);
     R[4]=0;
     return true;
+#endif
 }
 __device__ __forceinline__ void zi_inverse_limbs(uint64_t *R,int lane){
     if(zi_inverse_limbs_bounded(R,lane))return;
