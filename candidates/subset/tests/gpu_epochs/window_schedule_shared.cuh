@@ -9,12 +9,42 @@
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
+/* QSB_WSEC_L1LAST (screen arm, default 0; carrier image only, sm_80+): the window block's schedule loads
+ * (QSB_WINDOW_SECOND through QSB_WSEC_V4, 16 x 16 B per pair) and the paired first-state loads (d_first,
+ * 2 x 16 B per epoch) as ld.global.nc.L1::evict_last.v4.u32, so the 32 KiB schedule table stays L1-resident
+ * beside the evict-first record stream. Same addresses, same bytes: bit-identical. Both tables are read-only
+ * while a kernel reads them (the schedule is uploaded once at start-up; a batch's first states are written
+ * before the launch that reads them). The sm_52 pass of the ranked build line keeps the plain loads. 0 = the
+ * plain loads everywhere. */
+#ifndef QSB_WSEC_L1LAST
+#define QSB_WSEC_L1LAST 0
+#endif
+#if QSB_WSEC_L1LAST != 0 && QSB_WSEC_L1LAST != 1
+#error "QSB_WSEC_L1LAST must be 0 or 1"
+#endif
+#if QSB_WSEC_L1LAST && !QSB_SHA_SCHED_V4
+#error "QSB_WSEC_L1LAST is written for the 16 B rows of QSB_SHA_SCHED_V4"
+#endif
+__device__ __forceinline__ uint4 qsb_wsec_ld4(const uint4 *p) {
+#if QSB_WSEC_L1LAST && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    uint4 v;
+    asm("{ .reg .u64 g; cvta.to.global.u64 g, %4; ld.global.nc.L1::evict_last.v4.u32 {%0,%1,%2,%3}, [g]; }"
+        : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(p));
+    return v;
+#else
+    return *p;
+#endif
+}
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
 #if QSB_SHA_SCHED_V4
 /* QSB_SHA_SCHED_V4: W+K word r of second-block slot s at [r/4][s].{x,y,z,w}, so a block's 8 rounds
  * read two 16 B words per lane instead of eight 4 B words; same 32 KiB, same values. */
 __device__ uint4 QSB_WINDOW_SECOND[16][QSB_SE_PER_EPOCH];
+#if QSB_WSEC_L1LAST
+#define QSB_WSEC_V4(r, slot) (qsb_wsec_ld4(&QSB_WINDOW_SECOND[(r) >> 2][slot]))
+#else
 #define QSB_WSEC_V4(r, slot) (QSB_WINDOW_SECOND[(r) >> 2][slot])
+#endif
 #else
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
 #endif
@@ -232,7 +262,11 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
 #if QSB_950_PACK
     {   const uint4 *pA=reinterpret_cast<const uint4*>(firstA+first_slot*8);
         const uint4 *pB=reinterpret_cast<const uint4*>(firstB+first_slot*8);
+#if QSB_WSEC_L1LAST
+        const uint4 vA0=qsb_wsec_ld4(pA), vA1=qsb_wsec_ld4(pA+1), vB0=qsb_wsec_ld4(pB), vB1=qsb_wsec_ld4(pB+1);
+#else
         const uint4 vA0=pA[0], vA1=pA[1], vB0=pB[0], vB1=pB[1];
+#endif
         stateA[0]=vA0.x;stateA[1]=vA0.y;stateA[2]=vA0.z;stateA[3]=vA0.w;
         stateA[4]=vA1.x;stateA[5]=vA1.y;stateA[6]=vA1.z;stateA[7]=vA1.w;
         stateB[0]=vB0.x;stateB[1]=vB0.y;stateB[2]=vB0.z;stateB[3]=vB0.w;
