@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-// Generated from the pinned product schedules of _ModMultCore and qsb_muladd_seed.
+/* Generated from the pinned product schedules of _ModMultCore and qsb_muladd_seed. */
 /* schedule: bias2, tail: asm */
-// QSB_Y_PAIR: exact (a*b + c*d) mod p with ONE reduction. Both 512-bit products use pinned
+/* QSB_Y_PAIR: exact (a*b + c*d) mod p with ONE reduction. Both 512-bit products use pinned */
 /* product schedules (c*d: _ModMultCore renamed, unmerged; a*b: qsb_muladd_seed, whose even */
 /* and odd first rows absorb the low words of c*d inside the wide multiplies). The exact */
 /* 513-bit sum is reduced with every carry kept, so the result is in [0,2^256) and */
-// congruent to a*b + c*d for EVERY input a,b,c,d in [0,2^256).
+/* congruent to a*b + c*d for EVERY input a,b,c,d in [0,2^256). */
 #pragma once
-// QSB_RMAC_TAIL (kill switch, default 1): the reduction tail drops four carries that are set
-// with probability below 2^-21 each on the hashed operands (carry out of r3 + x14*977 and of
-// h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of
+/* QSB_RMAC_TAIL (kill switch, default 1): the reduction tail drops four carries that are set */
+/* with probability below 2^-21 each on the hashed operands (carry out of r3 + x14*977 and of */
+/* h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of */
 /* z8 = k16 + w7 and of {z0,z8+k16} + z8*977) and stops the second fold's carry at z3. A dropped */
 /* carry only changes that one candidate's recovered ordinate, which the host exact gate */
 /* would reject: a candidate lost with probability < 2^-19, never a false hit. 0 is the */
@@ -395,24 +395,24 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "mov.b64 h1, {x10,x11};\n"
   "mov.b64 h2, {x12,x13};\n"
   "mov.b64 h3, {x14,x15};\n"
-  "mul.wide.u32 t, x8, 977;\n"
+  "" QSB_FKW("t", "x8") "\n"
   "add.cc.u64 f0, r0, t;\n"
-  "mul.wide.u32 t, x10, 977;\n"
+  "" QSB_FKW("t", "x10") "\n"
   "addc.cc.u64 f1, r1, t;\n"
-  "mul.wide.u32 t, x12, 977;\n"
+  "" QSB_FKW("t", "x12") "\n"
   "addc.cc.u64 f2, r2, t;\n"
-  "mul.wide.u32 t, x14, 977;\n"
+  "" QSB_FKW("t", "x14") "\n"
   "addc.cc.u64 f3, r3, t;\n"
 #if !QSB_RMAC_TAIL
   "addc.u32 f8, k16, 0;\n"
 #endif
-  "mul.wide.u32 t, x9, 977;\n"
+  "" QSB_FKW("t", "x9") "\n"
   "add.cc.u64 g0, h0, t;\n"
-  "mul.wide.u32 t, x11, 977;\n"
+  "" QSB_FKW("t", "x11") "\n"
   "addc.cc.u64 g1, h1, t;\n"
-  "mul.wide.u32 t, x13, 977;\n"
+  "" QSB_FKW("t", "x13") "\n"
   "addc.cc.u64 g2, h2, t;\n"
-  "mul.wide.u32 t, x15, 977;\n"
+  "" QSB_FKW("t", "x15") "\n"
   "addc.cc.u64 g3, h3, t;\n"
 #if !QSB_RMAC_TAIL
   "addc.u32 g8, x16, 0;\n"
@@ -438,7 +438,7 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "addc.u32 z8, k16, w7;\n"
   "add.u32 sfq, z8, k16;\n"
   "mov.b64 sfz, {z0, sfq};\n"
-  "mul.wide.u32 sft, z8, 977;\n"
+  "" QSB_FKW("sft", "z8") "\n"
   "add.u64 sft, sft, sfz;\n"
   "mov.b64 {z0, sfhi}, sft;\n"
   "add.cc.u32 z1, z1, sfhi;\n"
@@ -451,7 +451,7 @@ __device__ __forceinline__ void qsb_muladd2_exact(uint64_t *r, const uint64_t *a
   "add.cc.u32 sfq, z8, k9;\n"
   "addc.u32 sfh, z9, 0;\n"
   "mov.b64 sfz, {z0, sfq};\n"
-  "mul.wide.u32 sft, z8, 977;\n"
+  "" QSB_FKW("sft", "z8") "\n"
   "add.cc.u64 sft, sft, sfz;\n"
   "addc.u32 sfc, sfh, 0;\n"
   "mov.b64 {z0, sfhi}, sft;\n"
