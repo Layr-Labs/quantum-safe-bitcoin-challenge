@@ -114,6 +114,23 @@ static QI_INL void fnorm(vfe *r) {
     t4 &= vs1(QI_M48);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
 }
+#ifndef QSB_CG_PARITY_ONLY
+#define QSB_CG_PARITY_ONLY 1 /* canonical y parity without materializing all limbs */
+#endif
+static QI_INL V fparity(const vfe *r) {
+    const V M = vs1(QI_M52);
+    V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4], m;
+    V x = t4 >> 48; t4 &= vs1(QI_M48);
+    t0 = QI_LO(t0, x, vs1(QI_C));
+    t1 += t0 >> 52; t0 &= M;
+    t2 += t1 >> 52; t1 &= M; m = t1;
+    t3 += t2 >> 52; t2 &= M; m &= t2;
+    t4 += t3 >> 52; t3 &= M; m &= t3;
+    /* value < 2p here; subtract p once if value >= p (limbs < 2^53: signed compares are exact) */
+    const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
+    x = (t4 >> 48) | ((V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48)) & (V)_mm256_cmpeq_epi64((__m256i)m, (__m256i)M) & ge & vs1(1));
+    return (t0 ^ x) & vs1(1); /* C is odd: the exact correction flips parity iff x=1. */
+}
 /* r = a + 2p - b (b in W form); limbs of r < a's + 2^54 */
 static QI_INL void fsub(vfe *r, const vfe *a, const vfe *b) {
     r->n[0] = a->n[0] + (vs1(QI_2P0) - b->n[0]);
@@ -200,8 +217,13 @@ static QI_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
         X[2 * k] = _mm256_blend_epi32(pl, ml, 0xF0);
         X[2 * k + 1] = _mm256_blend_epi32(ph, mh, 0xF0);
     }
-    __m256i par = _mm256_blend_epi32(_mm256_permutevar8x32_epi32((__m256i)yp->n[0], idx_lo),
-                                     _mm256_permutevar8x32_epi32((__m256i)ym->n[0], idx_lo), 0xF0);
+#if QSB_CG_PARITY_ONLY
+    const V yp0 = fparity(yp), ym0 = fparity(ym);
+#else
+    const V yp0 = yp->n[0], ym0 = ym->n[0];
+#endif
+    __m256i par = _mm256_blend_epi32(_mm256_permutevar8x32_epi32((__m256i)yp0, idx_lo),
+                                     _mm256_permutevar8x32_epi32((__m256i)ym0, idx_lo), 0xF0);
     par = _mm256_and_si256(par, _mm256_set1_epi32(1));
     v8u W[16];
     W[0] = _mm256_or_si256(_mm256_slli_epi32(_mm256_or_si256(par, _mm256_set1_epi32(2)), 24), _mm256_srli_epi32(X[7], 8));
@@ -378,7 +400,10 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             fmul(&ym, &lam, &t);
             fsub(&ym, &ym, &py[b]);
             vfe xp = px[b], yp = py[b];
-            fnorm(&xp); fnorm(&yp); fnorm(&xm); fnorm(&ym);
+            fnorm(&xp); fnorm(&xm);
+#if !QSB_CG_PARITY_ONLY || defined(QCG_EC_HOOK)
+            fnorm(&yp); fnorm(&ym);
+#endif
 #ifdef QCG_EC_HOOK
             { V a4[4], b4[4], c4[4], d4[4]; to_w(a4, &xp); to_w(b4, &yp); to_w(c4, &xm); to_w(d4, &ym);
               for (int l = 0; l < 4; l++) { uint64_t X0[4], Y0[4], X1[4], Y1[4];

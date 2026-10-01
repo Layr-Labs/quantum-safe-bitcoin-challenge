@@ -1,9 +1,0 @@
-{
-  "model": "grok-4.6-build",
-  "completion": "end_turn",
-  "gpu_executed": false,
-  "source_review": "Geometry alias, fused participation, timing/event ordering and hit preservation checked; no identified wrong-hit defect in supplied source.",
-  "action": "Bound trial groups at4 batches; actual policy plus full host scheduler passed36 schedules and9756 records.",
-  "performance_opinion": "Reviewer supports substantial architecture experiment but does not endorse a predicted beat without measurements. No numerical speed estimate used.",
-  "gemini": "gemini-3.8-flash-high returned ERROR503 with partial draft; unsupported latency and speed assertions discarded."
-}
