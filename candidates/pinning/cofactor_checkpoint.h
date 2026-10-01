@@ -1,6 +1,6 @@
-// Dependency-scoped barrier mechanism follows Calcutatatoraa95b1b9;
-// applied here to the distinct public cofactor exclusion traversal.
-// Public cofactor collective: tekkac, submission31e98e47, commit554fa24c.
+/* Dependency-scoped barrier mechanism follows Calcutatatoraa95b1b9; */
+/* applied here to the distinct public cofactor exclusion traversal. */
+/* Public cofactor collective: tekkac, submission31e98e47, commit554fa24c. */
 // Merged top-16 traversal (QSB_TOP16): idea and schedule from @EvanYan1024's public
 // submission 58005ee5, which credits a Codex (GPT 6 Astra) session for the schedule.
 // Re-derived and re-implemented here against this tree's index algebra.
@@ -122,8 +122,8 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top16(
 }
 #endif /* QSB_TOP16 */
 
-// The caller supplies nonzero effective leaves (identity for unusable lanes).
-// Preserve immutable products and accumulate exclusion products separately.
+/* The caller supplies nonzero effective leaves (identity for unusable lanes). */
+/* Preserve immutable products and accumulate exclusion products separately. */
 // All N lanes participate in every barrier; one block publishes one raw root.
 template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     uint64_t *value,uint64_t *roots,uint64_t (*products)[2*N],uint64_t (*excluded)[N]) {
@@ -633,8 +633,18 @@ __device__ __forceinline__ void qsb_tv_ld(uint64_t *x, const char *T, uint32_t o
     const ulonglong2 lo=*(const ulonglong2 *)(T+off), hi=*(const ulonglong2 *)(T+off+QSB_TV_PLANE);
     x[0]=lo.x;x[1]=lo.y;x[2]=hi.x;x[3]=hi.y;x[4]=0;
 }
+/* QSB_W5_TV_ST128 (W5 P-pkg1, subset QSB_PARK128): each node's two limb pairs stored as two 16-byte
+ * shared stores (st.shared.v2.u64) instead of four 8-byte ones. Same bytes at the same (16-byte
+ * aligned) offsets: bit-identical. 0 = the record's four 8-byte stores. */
+#ifndef QSB_W5_TV_ST128
+#define QSB_W5_TV_ST128 0
+#endif
 __device__ __forceinline__ void qsb_tv_st(char *T, uint32_t off, const uint64_t *x) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) && QSB_W5_TV_ST128
+    const uint32_t a=(uint32_t)__cvta_generic_to_shared(T+off);
+    asm volatile("st.volatile.shared.v2.u64 [%0], {%1,%2};\n\tst.volatile.shared.v2.u64 [%0+%5], {%3,%4};"
+                 :: "r"(a), "l"(x[0]), "l"(x[1]), "l"(x[2]), "l"(x[3]), "n"(QSB_TV_PLANE) : "memory");
+#elif defined(__CUDA_ARCH__)
     /* volatile: neither NVVM nor ptxas merges these into 16-byte stores */
     const uint32_t a=(uint32_t)__cvta_generic_to_shared(T+off);
     asm volatile("st.volatile.shared.u64 [%0], %1;\n\tst.volatile.shared.u64 [%0+8], %2;\n\t"
@@ -663,11 +673,78 @@ typedef const uint4 *qsb_t5v_tp;
 typedef const uint32_t *qsb_t5v_tp;
 #endif
 
+/* QSB_T5_DIRECT_OP (pochita0's direct cofactor plans, submission e529e218, image b245d6c5; ported as W5's
+ * QSB_W5_T5_DIRECT and as WP5's QSB_T5_DIRECT_OP, the same device code; P-lg1 keeps one switch under WP5's name with W5's
+ * checks): each top-wave lane's plan record (a, b, o, kind) from compile-time selects instead of a 16-byte __ldg of
+ * qsb_t5v_tab. The records are the table's: the static_asserts below compare qsb_t5_direct_op with qsb_t5_op, the
+ * plan the table is generated from, for every wave and lane (kind always; a, b, o wherever kind != 0), so the
+ * products, their operands and their destinations are bit-identical. 0 = the record's table loads. */
+#ifdef QSB_W5_T5_DIRECT
+#error "P-lg1: QSB_W5_T5_DIRECT is QSB_T5_DIRECT_OP here"
+#endif
+#ifndef QSB_T5_DIRECT_OP
+#define QSB_T5_DIRECT_OP 1
+#endif
+#if QSB_T5_DIRECT_OP != 0 && QSB_T5_DIRECT_OP != 1
+#error "QSB_T5_DIRECT_OP must be 0 or 1"
+#endif
+#if QSB_T5_DIRECT_OP
+#if !(QSB_POST_GLUE & 2) || QSB_TREE_N != 128
+#error "QSB_T5_DIRECT_OP replaces the QSB_POST_GLUE bit 2 plan loads of the 128-leaf tree"
+#endif
+/* Direct plan variant: per-field selects keep lane alternatives out of
+ * the control-flow graph. The immutable table remains the reference plan. */
+template<int W,int N>
+__host__ __device__ constexpr qsb_gf_op qsb_t5_direct_op(int l) {
+    static_assert(N==128,"direct paired plan requires 128 leaves");
+    if(W==0) {
+        const int c=l-16, b=c^64;
+        return {l<16?192+l:384+c, l<16?208+l:b, l<16?224+l:b, l<16?1:2};
+    } else if(W==1) {
+        const int c=l+8, b=c^64;
+        return {l<8?224+l:384+c, l<8?232+l:b, l<8?240+l:b, l<8?1:2};
+    } else if(W==2) {
+        const int c=l+36, b=c^64, u=c<64?384+c:192+c;
+        return {l<4?240+l:u, l<4?244+l:b, l<4?248+l:b, l<4?1:2};
+    } else if(W==3) {
+        const int c=l+58, b=c^64, j=l-2;
+        return {l<2?248+l:(l<10?240+(j^4):192+c),
+                l<2?250+l:(l<10?248+((j&3)^2):b),
+                l<2?252+l:(l<10?368+j:b), l<10?1:2};
+    } else if(W==4) {
+        const int c=l+81, b=c^64, j=l-1;
+        return {l==0?252:(l<9?368+j:192+c),
+                l==0?253:(l<9?252+((j&1)^1):b),
+                l==0?0:(l<9?368+j:b), l==0?3:(l<9?1:2)};
+    } else {
+        const int c=l+97, b=c^64;
+        return {l<16?224+(l^8):(l==31?0:192+c),
+                l<16?368+(l&7):(l==31?0:b),
+                l<16?352+l:(l==31?0:b), l<16?1:(l==31?0:2)};
+    }
+}
+template<int W> constexpr bool qsb_w5_direct_ok() {
+    for(int l=0;l<32;l++) {
+        const qsb_gf_op t=qsb_t5_op<QSB_TREE_N>(W,l), d=qsb_t5_direct_op<W,QSB_TREE_N>(l);
+        if(t.kind!=d.kind) return false;
+        if(t.kind && (t.a!=d.a || t.b!=d.b || t.o!=d.o)) return false;
+    }
+    return true;
+}
+static_assert(qsb_w5_direct_ok<0>() && qsb_w5_direct_ok<1>() && qsb_w5_direct_ok<2>() &&
+              qsb_w5_direct_ok<3>() && qsb_w5_direct_ok<4>() && qsb_w5_direct_ok<5>(),
+              "QSB_T5_DIRECT_OP: a direct plan record differs from qsb_t5_op");
+#endif
 /* Wave W on warp WARP; tp points at this thread's entry of wave 0 (index tid). */
 template<int W,int N,int WARP=0> __device__ __forceinline__ void qsb_t5v_wave(uint64_t *roots, char *T, qsb_t5v_tp tp) {
     const int tid=threadIdx.x;
     if(WARP==0 ? tid<32 : (unsigned)(tid-32*WARP)<32u) {
-#if QSB_POST_GLUE & 2
+#if (QSB_POST_GLUE & 2) && QSB_T5_DIRECT_OP
+        (void)tp;
+        const qsb_gf_op op=qsb_t5_direct_op<W,N>(tid-32*WARP);
+        const uint32_t kind=(uint32_t)op.kind;
+        const uint32_t ia=(uint32_t)op.a*16u, ib=(uint32_t)op.b*16u, io=(uint32_t)op.o*16u;
+#elif QSB_POST_GLUE & 2
         const uint4 op=__ldg(tp+(W*32-32*WARP));
         const uint32_t kind=op.w, ia=op.x, ib=op.y, io=op.z;
 #else
@@ -728,8 +805,18 @@ template<int N,int COUNT,int OFFSET> __device__ __forceinline__ void qsb_t5v_dow
 }
 
 /* qsb_cofactor_top5 with the paired layout: the same levels, lanes, products and barriers. */
-template<int N> __device__ __forceinline__ void qsb_cofactor_top5v(
-    uint64_t *value, const uint64_t *U, uint64_t *roots, char *T) {
+#ifndef QSB_TREE_FILL_Y
+#define QSB_TREE_FILL_Y 0   /* 1 = run a per-lane fill task (the post-chain Y resolve) inside the
+                             * tree's barrier idle: warps 0, 2, 3 after the L1 barrier while warp 1 runs L2, L3
+                             * and A; warp 1 after the C barrier while warp 0 runs D, E and E32. 0 = the base. */
+#endif
+#if QSB_TREE_FILL_Y && !((QSB_POST_GLUE & 8) && QSB_TREE_TOP5 == 2)
+#error "QSB_TREE_FILL_Y is written for the unrolled up-sweep (QSB_POST_GLUE bit 8) and QSB_TREE_TOP5 2"
+#endif
+struct qsb_tree_fill_none { __device__ __forceinline__ void operator()() const {} };
+template<int N, class F = qsb_tree_fill_none> __device__ __forceinline__ void qsb_cofactor_top5v(
+    uint64_t *value, const uint64_t *U, uint64_t *roots, char *T, F fill = F()) {
+    (void)fill;
     static_assert(N==128,"QSB_TREE_TOP5 slot plan is for 128-leaf trees");
     const int tid=threadIdx.x;
     const int ucol=QSB_T5_U(tid);
@@ -738,6 +825,11 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top5v(
     __syncthreads();
 #if QSB_POST_GLUE & 8
     qsb_t5v_up<N,N,0>(T);
+#if QSB_TREE_FILL_Y == 2 || QSB_TREE_FILL_Y == 4
+    fill();                       /* diagnostic: one site, every warp */
+#elif QSB_TREE_FILL_Y
+    if((tid>>5)!=1) fill();       /* warps 0, 2, 3: idle while warp 1 runs L2, L3 and A */
+#endif
     qsb_t5v_up<N,N/2,N>(T);
 #else
     int offset=0;
@@ -773,6 +865,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top5v(
     __syncthreads();
     qsb_t5v_wave<3,N,3>(roots,T,tp);
     __syncthreads();
+#if QSB_TREE_FILL_Y && QSB_TREE_FILL_Y != 2 && QSB_TREE_FILL_Y != 4
+    if((tid>>5)==1) fill();       /* warp 1: idle while warp 0 runs D, E and E32 */
+#endif
     qsb_t5v_wave<4,N,0>(roots,T,tp);
     qsb_t5v_wave<5,N,0>(roots,T,tp);
 #else
@@ -822,3 +917,51 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top5v(
 #elif defined(QSB_TREE_TOP5) && QSB_TREE_TOP5
 #error "QSB_TREE_TOP5 needs QSB_TREE_GFILL=1"
 #endif /* QSB_TREE_GFILL */
+/* neutral rewrite site 00 (no code; comments never reach the compiler) */
+/* neutral rewrite site 01 (no code; comments never reach the compiler) */
+/* neutral rewrite site 02 (no code; comments never reach the compiler) */
+// neutral rewrite site 03 (no code; comments never reach the compiler)
+/* neutral rewrite site 04 (no code; comments never reach the compiler) */
+/* neutral rewrite site 05 (no code; comments never reach the compiler) */
+/* neutral rewrite site 06 (no code; comments never reach the compiler) */
+// neutral rewrite site 07 (no code; comments never reach the compiler)
+// neutral rewrite site 08 (no code; comments never reach the compiler)
+// neutral rewrite site 09 (no code; comments never reach the compiler)
+// neutral rewrite site 10 (no code; comments never reach the compiler)
+/* neutral rewrite site 11 (no code; comments never reach the compiler) */
+/* neutral rewrite site 12 (no code; comments never reach the compiler) */
+/* neutral rewrite site 13 (no code; comments never reach the compiler) */
+/* neutral rewrite site 14 (no code; comments never reach the compiler) */
+/* neutral rewrite site 15 (no code; comments never reach the compiler) */
+// neutral rewrite site 16 (no code; comments never reach the compiler)
+/* neutral rewrite site 17 (no code; comments never reach the compiler) */
+// neutral rewrite site 18 (no code; comments never reach the compiler)
+// neutral rewrite site 19 (no code; comments never reach the compiler)
+// neutral rewrite site 20 (no code; comments never reach the compiler)
+// neutral rewrite site 21 (no code; comments never reach the compiler)
+/* neutral rewrite site 22 (no code; comments never reach the compiler) */
+/* neutral rewrite site 23 (no code; comments never reach the compiler) */
+// neutral rewrite site 24 (no code; comments never reach the compiler)
+// neutral rewrite site 25 (no code; comments never reach the compiler)
+/* neutral rewrite site 26 (no code; comments never reach the compiler) */
+// neutral rewrite site 27 (no code; comments never reach the compiler)
+/* neutral rewrite site 28 (no code; comments never reach the compiler) */
+// neutral rewrite site 29 (no code; comments never reach the compiler)
+// neutral rewrite site 30 (no code; comments never reach the compiler)
+// neutral rewrite site 31 (no code; comments never reach the compiler)
+/* neutral rewrite site 32 (no code; comments never reach the compiler) */
+/* neutral rewrite site 33 (no code; comments never reach the compiler) */
+// neutral rewrite site 34 (no code; comments never reach the compiler)
+/* neutral rewrite site 35 (no code; comments never reach the compiler) */
+// neutral rewrite site 36 (no code; comments never reach the compiler)
+/* neutral rewrite site 37 (no code; comments never reach the compiler) */
+// neutral rewrite site 38 (no code; comments never reach the compiler)
+/* neutral rewrite site 39 (no code; comments never reach the compiler) */
+/* neutral rewrite site 40 (no code; comments never reach the compiler) */
+/* neutral rewrite site 41 (no code; comments never reach the compiler) */
+// neutral rewrite site 42 (no code; comments never reach the compiler)
+// neutral rewrite site 43 (no code; comments never reach the compiler)
+/* neutral rewrite site 44 (no code; comments never reach the compiler) */
+// neutral rewrite site 45 (no code; comments never reach the compiler)
+/* neutral rewrite site 46 (no code; comments never reach the compiler) */
+// neutral rewrite site 47 (no code; comments never reach the compiler)

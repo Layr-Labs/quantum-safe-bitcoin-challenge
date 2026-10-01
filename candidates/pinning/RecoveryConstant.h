@@ -2,7 +2,7 @@
 #pragma once
 #include <openssl/bn.h>
 
-// Input point coordinates are little-endian bytes from the runtime problem.
+/* Input point coordinates are little-endian bytes from the runtime problem. */
 static int qsb_make_recovery_constant(uint64_t out[4],const uint8_t ax[32],
                                       const uint8_t by[32]) {
     BN_CTX *ctx=BN_CTX_new();

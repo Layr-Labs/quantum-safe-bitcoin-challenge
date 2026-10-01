@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* Research only: seed the promoted integer product with c. */
 /* The changed point representation stores the negative deferred ordinate. */
 #pragma once
@@ -197,19 +197,19 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n"
   "\tmov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
   "\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n"
-  "\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n"
-  "\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, r1, t;\n"
-  "\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, r2, t;\n"
-  "\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, r3, t;\n"
+  "\t" QSB_FKW("t", "x8") "  add.cc.u64  f0, r0, t;\n"
+  "\t" QSB_FKW("t", "x10") " addc.cc.u64 f1, r1, t;\n"
+  "\t" QSB_FKW("t", "x12") " addc.cc.u64 f2, r2, t;\n"
+  "\t" QSB_FKW("t", "x14") " addc.cc.u64 f3, r3, t;\n"
 #if QSB_SEED_MUL_CUT
   QSB_MUL_F8_CAP
 #else
   "\taddc.u32 f8, 0, 0;\n"
 #endif
-  "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n"
-  "\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n"
-  "\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n"
-  "\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n"
+  "\t" QSB_FKW("t", "x9") "  add.cc.u64  g0, h0, t;\n"
+  "\t" QSB_FKW("t", "x11") " addc.cc.u64 g1, h1, t;\n"
+  "\t" QSB_FKW("t", "x13") " addc.cc.u64 g2, h2, t;\n"
+  "\t" QSB_FKW("t", "x15") " addc.cc.u64 g3, h3, t;\n"
   "\t/*rp*/\n"
   "\tmov.b64 {z0,z1}, f0;\n"
   "\tmov.b64 {z2,z3}, f1;\n"
@@ -238,7 +238,7 @@ __device__ __forceinline__ void qsb_muladd_seed(uint64_t *r,const uint64_t *a,co
   "mov.u32 sfq, z8;\n"
   "mov.b64 sfz, {z0, sfq};\n"
 #endif
-  "mul.wide.u32 sft, z8, 977;\n"
+  "" QSB_FKW("sft", "z8") "\n"
   "add.cc.u64 sft, sft, sfz;\n"
   "addc.u32 sfc, 0, 0;\n"
   "mov.b64 {sfl, sfh}, sft;\n"

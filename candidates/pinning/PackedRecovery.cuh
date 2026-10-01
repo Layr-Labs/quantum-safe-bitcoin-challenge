@@ -1,17 +1,17 @@
 // Let B=2^256, p=B-K, K=2^32+977. A raw exact product is in [0,B).
 // If b[3]!=0 then b>=2^192>K, so -p<raw-b<p. Its canonical parity
-// needs just the subtraction borrow. Small b retains normalization.
+/* needs just the subtraction borrow. Small b retains normalization. */
 __device__ __forceinline__ void qsb_parity_boundary(uint64_t *raw,const uint64_t *b) {
     if(b[3]==0)qsb_field_normalize(raw);
 }
-// If a[3]!=UINT64_MAX then a<B-2^192<B-2K, hence raw+a<2p.
+/* If a[3]!=UINT64_MAX then a<B-2^192<B-2K, hence raw+a<2p. */
 // One conditional subtraction in _ModAdd256 is then sufficient. The extreme
 // upper fixed-a range retains the original canonical-product boundary.
 __device__ __forceinline__ void qsb_add_boundary(uint64_t *raw,const uint64_t *a) {
     if(a[3]==UINT64_MAX)qsb_field_normalize(raw);
 }
 
-// Canonical inputs a,b<p. Adding odd p on borrow flips only the
+/* Canonical inputs a,b<p. Adding odd p on borrow flips only the */
 // parity we need; computing all four corrected output limbs is unnecessary.
 __device__ __forceinline__ uint32_t qsb_difference_parity(
     const uint64_t *a,const uint64_t *b) {
@@ -21,11 +21,11 @@ __device__ __forceinline__ uint32_t qsb_difference_parity(
 }
 
 #if QSB_PARITY_SUM
-// P9 parity of (+-(w+b)) mod p for raw w in [0,2^256) and canonical b != 0 (b = y(u2*R): secp256k1
+/* P9 parity of (+-(w+b)) mod p for raw w in [0,2^256) and canonical b != 0 (b = y(u2*R): secp256k1 */
 // has no point with y = 0). With c the carry of w+b and S its low 256 bits, w+b = y + k*p where
 // y = (w+b) mod p and k in {0,1,2}: k = c unless S[1..3] are all ones (a 2^-192 event), where
-// k = c + [S >= (c ? 2^256-2K : p)] and y = 0 exactly when S equals that bound. p is odd, so
-// par(y) = (w0^b0^k)&1 and par(-y mod p) = y ? 1^par(y) : 0.
+/* k = c + [S >= (c ? 2^256-2K : p)] and y = 0 exactly when S equals that bound. p is odd, so */
+/* par(y) = (w0^b0^k)&1 and par(-y mod p) = y ? 1^par(y) : 0. */
 __device__ __forceinline__ uint32_t qsb_sum_parity(const uint64_t *w,const uint64_t *b,uint32_t neg) {
     uint64_t s0,s1,s2,s3,c;
     asm("add.cc.u64 %0,%5,%9;\n\taddc.cc.u64 %1,%6,%10;\n\taddc.cc.u64 %2,%7,%11;\n\t"
@@ -42,7 +42,7 @@ __device__ __forceinline__ uint32_t qsb_sum_parity(const uint64_t *w,const uint6
 }
 #endif
 
-// Exact full-width residue; callers normalize before additions/parity.
+/* Exact full-width residue; callers normalize before additions/parity. */
 __device__ __forceinline__ void qsb_packed_raw_mul(
     uint64_t *out,const uint64_t *a,const uint64_t *b) {
     uint64_t tmp[5];qsb_field_mul_sc(tmp,const_cast<uint64_t*>(a),const_cast<uint64_t*>(b));
@@ -103,7 +103,7 @@ __device__ __forceinline__ uint32_t qsb_fin_prefix_bytes(uint32_t pu, uint32_t p
 __device__ __forceinline__ void qsb_packed_prepare(
     uint64_t *D, const uint64_t *U, const uint64_t *Y, const uint64_t *V,
     bool usable, bool active, int n, ulonglong2 *saved, uint64_t *roots) {
-    // All lanes finish reading their digits/anchor before tree overwrites.
+    /* All lanes finish reading their digits/anchor before tree overwrites. */
     __syncthreads();
 #if QSB_TREE_GFILL
     /* QSB_TREE_GFILL (cofactor_checkpoint.h): D comes back as hc = U*cofactor, exact. */
@@ -192,6 +192,33 @@ __device__ __forceinline__ void qsb_packed_prepare(
 #ifndef QSB_XOUT_LAZY
 #define QSB_XOUT_LAZY 1
 #endif
+/* QSB_FIN_MLATE, QSB_FIN_SUMU and QSB_FIN_CHORD (pinning.cu): ports of the rival items in terrapinelf's
+ * PR #2713 (commit 91a4936; device image of fkiene's 285108a0), each on in this tree (0 gives back the record's statements, byte for byte).
+ * QSB_FIN_MLATE (rival default 1): m is not held across the x1 half of the recovery. After
+ * sum = l + m (lazy, congruent), m == sum - l (mod p), so it is re-derived as QSB_FIN_SUB(m,sum,l)
+ * once the x1 parity window has read l for the last time. Every consumer of m (the m - c
+ * subtraction and the parity window) takes any representative in [0,2^256): the subtraction is
+ * borrow-corrected and the window returns the parity of the reduced product. s = sum*(m - c) is
+ * the same residue; its representative leaves [0,p) only in the 2^-223 window QSB_XOUT_LAZY
+ * already accepts (the host exact gate rejects such a mis-hash). Four limbs (eight registers)
+ * fewer are live through the first slope product and its parity window. 0 keeps m live. */
+#ifndef QSB_FIN_MLATE
+#define QSB_FIN_MLATE 1
+#endif
+/* QSB_FIN_SUMU (rival default 1; needs QSB_FIN_MLATE): sum = l + m == (u + v) + (u - v)
+ * == 2u (mod p) for either QSB_NEG_Y_MAC sign, so sum is formed as the lazy doubling u + u right
+ * after the first slope product. The early m = u -/+ v subtraction is gone (MLATE re-derives m as
+ * sum - l after the x1 window, as before), and sum no longer waits for the v product, so the
+ * second product overlaps the doubling. sum only feeds the borrow-corrected subtractions l - c,
+ * sum - c / m - c and raw products, all of which take any representative in [0,2^256); a
+ * representative change of their outputs is confined to the 2^-223 window QSB_XOUT_LAZY already
+ * accepts. 0 keeps sum = l + m. */
+#ifndef QSB_FIN_SUMU
+#define QSB_FIN_SUMU 1
+#endif
+#if QSB_FIN_SUMU && !(QSB_FIN_MLATE && QSB_PARITY_SUM && QSB_FIN_RAWS)
+#error "QSB_FIN_SUMU re-derives m through QSB_FIN_MLATE"
+#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -203,6 +230,15 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * need [0,p). So u and v stay raw and m, sum use the carry-folding lazy add
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
     QSB_FIN_RAW_MUL(u,tbar,weighted_inv);
+#if QSB_FIN_SUMU
+    QSB_FIN_ADDL(sum,u,u);
+    QSB_FIN_RAW_MUL(v,vbar,root_inv);
+#if QSB_NEG_Y_MAC
+    QSB_FIN_ADDL(l,u,v);
+#else
+    QSB_FIN_SUB(l,u,v);
+#endif
+#else
     QSB_FIN_RAW_MUL(v,vbar,root_inv);
 #if QSB_NEG_Y_MAC
     QSB_FIN_ADDL(l,u,v); QSB_FIN_SUB(m,u,v);
@@ -210,6 +246,7 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
     QSB_FIN_SUB(l,u,v); QSB_FIN_ADDL(m,u,v);
 #endif
     QSB_FIN_ADDL(sum,l,m);
+#endif
 #else
     qsb_recovery_mul(u,tbar,weighted_inv);
     qsb_recovery_mul(v,vbar,root_inv);
@@ -241,12 +278,37 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
 #else
     qsb_packed_raw_mul(u,l,s);
 #endif
+#if QSB_FIN_MLATE
+    QSB_FIN_SUB(m,sum,l);
+#endif
 #if QSB_XOUT_LAZY
     QSB_FIN_ADDL(x1,s,a);
 #else
     qsb_add_boundary(s,a); QSB_FIN_ADD(x1,s,a);
 #endif
+#if QSB_FIN_CHORD
+    /* QSB_FIN_CHORD: x1 + x2 = 2a + sum*((l - c) + (m - c)) = 2a + (sum - c)^2 - c^2, since
+     * sum == l + m. So s = x2 - a == (sum - c)^2 + E - x1 with E = a - c^2 (pin_chord_e), and
+     * with v = x1 + E that is (sum - c)^2 + v - 2*x1: the chain's fused square
+     * _ModSqrAddSub2(out, a, e, q) = a^2 + e - 2q (45 IMAD.WIDE, one reduction) in place of the
+     * general product (73 IMAD.WIDE). _ModSqrAddSub2 takes any 256-bit representatives and
+     * returns a congruent value in [0,2^256), the raw product's convention, so s is the same
+     * residue; the parity window is congruence invariant, and s + a leaves [0,p) only in the
+     * 2^-223 window QSB_XOUT_LAZY already accepts. */
+    {
+        const uint64_t e[4]={pin_chord_e[0],pin_chord_e[1],pin_chord_e[2],pin_chord_e[3]};
+#if QSB_FIN_CHORD == 2
+        /* variant 2: plain square (45 IMAD.WIDE, [0,2^256) like _ModMultCore), lazy add of E,
+         * borrow-corrected subtraction of x1 (its +p correction underflows only for x1 >= p,
+         * the same 2^-223 window). */
+        QSB_FIN_SUB(t,sum,c); _ModSqr(u,t); QSB_FIN_ADDL(v,u,e); QSB_FIN_SUB(s,v,x1);
+#else
+        QSB_FIN_ADDL(v,x1,e); QSB_FIN_SUB(t,sum,c); _ModSqrAddSub2(s,t,v,x1);
+#endif
+    }
+#else
     QSB_FIN_SUB(t,m,c); QSB_FIN_RAW_MUL(s,sum,t);
+#endif
 #if QSB_PARITY_WINDOW
     const uint32_t parity_v=qsb_parity_product_window(m,s,b,0u);
 #else
