@@ -13,7 +13,7 @@
  * the digest kernel holds live across both fronts, the tree inverse and both tails.
  * Same __constant__ words, same field operations: bit-identical results. 0 = arguments. */
 #ifndef QSB_R_CBANK
-#define QSB_R_CBANK 0
+#define QSB_R_CBANK 1
 #endif
 #if QSB_R_CBANK
 #define QSB_R_PASS(rx,ry)
@@ -375,7 +375,7 @@ __device__ __forceinline__ int qsb_k2s_front_exact(
  * (two independent dependency chains -> ILP), then test ri=0 before ri=1 exactly as the loop did.
  * Same arithmetic per stream; the only difference is that ri=1 is also hashed when ri=0 passes (rare). */
 #ifndef QSB_GATE_PAIR
-#define QSB_GATE_PAIR 1
+#define QSB_GATE_PAIR 0
 #endif
 #if QSB_GATE_PAIR
 __device__ __forceinline__ void qsb_gate_block(uint32_t *pb, const uint64_t *qx, uint32_t parity) {
