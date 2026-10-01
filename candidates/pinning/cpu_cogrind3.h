@@ -41,6 +41,9 @@
 #include "cg_fe4.h"
 #include "cg_sha.h"
 #include "cg_v26asm.h"
+#ifndef QSB_CG_V29          /* see cg_sha.h (defined there first): 1 = V3 runs b62c41b8's radix-2^29 AVX2 co-grinder */
+#define QSB_CG_V29 1
+#endif
 
 namespace qcg {
 #ifndef QSB_FEED_BLOCK
@@ -188,6 +191,10 @@ struct worker_t {
     uint32_t seq, lt0;
     uint64_t cur_seq_tag;
     uint32_t mid1[8];                     /* state after suffix block 0 for cur seq */
+#if QSB_CG_V29
+    qcg_sha::s8_plan tplan;               /* suffix block 1 compression plan for cur seq (AVX2 SHA) */
+    int tfast;                            /* 1: the locktime bytes sit in block-1 words 0 and 1 (plan usable) */
+#endif
     alignas(64) uint64_t zq[4][QSB_CG_BMAX + 8];          /* z of the batch, word-major: zq[k][i] = word k (LE) of candidate i */
     alignas(64) uint32_t dig[QSB_CG_MAXWIN][QSB_CG_BMAX + 32];
     uint8_t zf[QSB_CG_MAXWIN][QSB_CG_BMAX / 4 + 8];
@@ -334,6 +341,12 @@ static void seq_midstate(worker_t *w, uint32_t seq) {
     for (int i = 0; i < 16; i++) wv[i] = (uint32_t)m[4 * i] << 24 | (uint32_t)m[4 * i + 1] << 16 | (uint32_t)m[4 * i + 2] << 8 | m[4 * i + 3];
     memcpy(w->mid1, pp->midstate, 32);
     qcg_sha::sha_compress_ref(w->mid1, wv);
+#if QSB_CG_V29
+    /* block 1: words 0 and 1 vary with the locktime, words 2..15 are problem constants */
+    w->tfast = 1;
+    for (int b = 0; b < 4; b++) if (S->lt_word[b] < 0 || S->lt_word[b] > 1) w->tfast = 0;
+    w->tplan = qcg_sha::s8_make_plan(S->w1_tmpl, 0x3u, w->mid1);
+#endif
 }
 
 /* generic (any layout) scalar z for one candidate */
@@ -373,6 +386,11 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
         W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
     }
     v8u st[8];
+#if QSB_CG_V29
+    if (w->tfast) s8_compress_plan<0x3u, 0>(st, W, w->tplan);      /* block 1 from the sequence midstate */
+    else s8_compress_mid(st, W, w->mid1);
+    s8_compress_plan<0xFFu, 0>(st, st, S8_PLAN_DIGEST);           /* SHA256 of the 32-byte digest */
+#else
     for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)w->mid1[k]);
     s8_compress_full(st, W);
     for (int k = 0; k < 8; k++) W[k] = st[k];
@@ -381,6 +399,7 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
     W[15] = _mm256_set1_epi32(256);
     for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)IV256[k]);
     s8_compress_full(st, W);
+#endif
     /* zq[k] for lanes: word k (LE 64-bit) = Z[7-2k-1] << 32 | Z[7-2k] (Z0 most significant) */
     for (int k = 0; k < 4; k++) {
         const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
@@ -461,7 +480,11 @@ static int fill_batch(worker_t *w) {
 
 /* ---------------- AVX2 EC back end ---------------- */
 #if defined(__x86_64__) && !defined(QSB_CG_NO_SIMD)
+#if QSB_CG_V29
+#include "cpu_cogrind3_vec29.h"
+#else
 #include "cpu_cogrind3_vec.h"
+#endif
 #include "cpu_cogrind3_ifma.h"
 #define QSB_CG_HAVE_SIMD 1
 #else
@@ -635,6 +658,12 @@ static double mem_available_mib() {
 }
 
 /* ---------------- controller (called from the GPU host loop) ---------------- */
+/* QSB_CG_AB_SKIP (R12 refine, host only): 1 = on a host with no cgroup CPU quota, skip the steady-state GPU
+ * on/off A/B while the worker count is at its hardware ceiling (wmax >= whw). The A/B and its RECOVER ramp still
+ * run under a quota or after a start-up clamp, until the ceiling is regained. 0 = the base controller. */
+#ifndef QSB_CG_AB_SKIP
+#define QSB_CG_AB_SKIP 1
+#endif
 struct ctl_t {
     int wmax, cur, wcap, whw;   /* whw = hardware ceiling, independent of the quota guess */
     int phase;              /* 0 warm-up, 1 cpu-share check, 2 steady; 3 A/B off-window */
@@ -647,6 +676,9 @@ struct ctl_t {
     uint64_t busy0; double busy_t0;
     uint64_t cand0; double cand_t0;
     double win_t0; int win_n, win_skip, strikes;
+#if QSB_CG_AB_SKIP
+    int has_quota;          /* QSB_CG_AB_SKIP: a cgroup CPU quota below the CPU count was found at start */
+#endif
     int verbose;
 };
 static ctl_t g_ctl;
@@ -869,6 +901,9 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
      * the guess as a maximum. Climbing only ever happens on a measured-clean
      * window, and the existing shedding rule still backs off on real loss. */
     g_ctl.whw = S->nworkers;
+#if QSB_CG_AB_SKIP
+    g_ctl.has_quota = (quota > 0 && quota < ncpu);
+#endif
     g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
     return S->nworkers;
 }
@@ -919,6 +954,9 @@ static void tick(double now, double gpu_batch) {
         return;
     }
     if (C.phase == 2 && now >= C.next_ab && C.cur > 0) {
+#if QSB_CG_AB_SKIP
+        if (!C.has_quota && C.wmax >= C.whw) { C.next_ab = now + 60.0; return; }
+#endif
         C.phase = 3; C.ab_left = 4; C.ab_on_sum = C.ab_off_sum = 0; C.ab_on_n = C.ab_off_n = 0;
         C.win_t0 = now; C.win_n = 0; C.win_skip = 1;
         return;
