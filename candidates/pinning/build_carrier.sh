@@ -2,18 +2,20 @@
 # Regenerate qsb_carrier_sm89.h, the native sm_89 image that QsbCarrier.h loads.
 # Development tool, never run by the ranked harness. Rerun after ANY edit to
 # pinning.cu or a header it includes, with the same CUDA toolkit as the runner (12.8).
-#   ./build_carrier.sh [QSB_ZEROS_N]
+#   ./build_carrier.sh [QSB_ZEROS_N] [QSB_FIN_T2EARLY=0]
 set -euo pipefail
 cd "$(dirname "$0")"
 Z=${1:-24}
+T2=${2:-0}
+case "$T2" in 0|1) ;; *) echo "QSB_FIN_T2EARLY must be 0 or 1" >&2; exit 2;; esac
 W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
-nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
+nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_FIN_T2EARLY="$T2" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
      -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
 cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
-python3 - "$Z" "$W" <<'PY'
+python3 - "$Z" "$W" "$T2" <<'PY'
 import base64, hashlib, re, sys
-zeros = int(sys.argv[1]); W = sys.argv[2]
+zeros = int(sys.argv[1]); W = sys.argv[2]; fin_t2early = int(sys.argv[3])
 syms = open(W + "/symbols.txt").read()
 want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_S0",    r"_Z23kernel_pinning_pipelineILb1ELi0EE\w+"),
@@ -58,6 +60,7 @@ with open("qsb_carrier_sm89.h", "w") as f:
     f.write(f" * built with -DQSB_CARRIER_BUILD=1 -DQSB_ZEROS_N={zeros} -arch=sm_89.\n")
     f.write(f" * cubin sha256 {sha}; {len(img)} bytes; prepare kernel LTC64B loads: {n_hint}. */\n")
     f.write("#pragma once\n#include <stddef.h>\n")
+    f.write(f"#define QSB_CARRIER_FIN_T2EARLY {fin_t2early}\n")
     f.write(f"static const size_t qsb_carrier_cubin_bytes = {len(img)};\n")
     f.write(f'static const char qsb_carrier_cubin_sha256[] = "{sha}";\n')
     f.write("static const char *const qsb_carrier_kernel_names[] = {\n")
