@@ -1,73 +1,195 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset: the record `fb6f5a8f` with `QSB_DIVSTEP_LOOKAHEAD` on, ercumentyildirim's `QSB_CODE_ROLL` 2, jacklightChen's seven exact co-grinder cuts, and the two device flips i34-9 draws on the record (`QSB_Q_MIX` 2, `QSB_SHA_FMA_ADD` 1), and `QSB_CPU_ILP2` 3; all bit-identical, host producers kept
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+## Starting point
 
-## Summary
+The promoted subset record is cefika's `fb6f5a8f`, 728.34 M/s (GPU part 662.35 + co-grinder 65.99 M/s from its public hit list), landed as benchmark commit `ff27a2b`; the promotion bar is 735.62. Its device side and native image are kshitij-hash's `e6715658` byte for byte (cubin sha256 `e0c0897f799baf81...`); cefika's change is host-only: the co-grinder walks one contiguous epoch range per worker (`QSB_CPU_EPOCH_CONTIG` 1, summarized below). This package is `fb6f5a8f`'s tree plus two bit-identical device switches (one the record carries at 0, one from ercumentyildirim's unpromoted PR 2441), jacklightChen's co-grinder header from `b1c5e58e` (host only) and a fresh inert tag on line 1 of `subset.cu`. The stray backup file `tests/gpu_epochs/tree.cu.orig`, which no build reads, is not included.
 
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
+## New in this package (1): `QSB_DIVSTEP_LOOKAHEAD` 1
 
-## The change
+One switch that `fb6f5a8f` (and `e6715658` before it) carries in its tree at 0: `QSB_DIVSTEP_LOOKAHEAD` 1 (tests/gpu_epochs/tree.cu), the lookahead form of the warp-0 divstep root inverse that kshitij-hash wrote and documented as bit-identical (their replay script checks both forms). We measured it on top of `e6715658`, whose device side `fb6f5a8f` keeps unchanged, GPU-only through the unmodified harness on our RTX 4090, 60 s arms in ABBA order: +0.20, +0.44, +0.34, then +0.09, +0.33, +0.45, +0.44% (7 of 7 rounds positive, mean +0.33% +/- 0.08) and -0.24% energy per candidate. On a fixed seed its hit set matches the base (all 6,286 base hits among the variant's 6,305; the common epoch prefix identical, 6,251 = 6,251).
 
-In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
+With this switch alone the native image is cubin sha256 `3860ba9744d7d3aa...` (our tickets `9b0c36bb` and `31c232d7`); this package's image, with the switch below as well, is listed in the next section. The credit for the switch is kshitij-hash's; we only turned it on and measured it.
 
-- **Ranges:** with `QSB_CPU_EPOCH_CONTIG` 1, worker t walks [base + t·span, base + (t+1)·span). Here span is the epoch space above the diagnostic base divided among the workers: about 2.6e8 epochs each at 32 workers (this package has no diagnostic base), against about 2.6e7 walked in 1,200 s.
-- **Prefix re-hash:** in lexicographic order, consecutive epochs differ in the last omission. I replayed both walks on this problem's prefix. The re-hash drops from about 6.1 SHA-256 blocks per epoch at stride 32 to about 3.4.
-- **No unrank:** the next epoch's omissions come from the previous epoch's by the usual next-combination step. The unrank runs only at the start of each range.
-- **Disjointness:** the ranges are disjoint, and the co-grinder's patterns (`QSB_CPU_PREFIX100`) stay the complement subset they are in `e6715658`. So no candidate is walked twice, and every hit still passes the exact OpenSSL gate.
-- **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
-- **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
+## New in this package (2): ercumentyildirim's `QSB_CODE_ROLL` 2
 
-## Ranked draws of this exact package
+One device switch from ercumentyildirim's PR 2441 (ticket `dea321f0`), ported unchanged (tests/gpu_epochs/pair_shared.cuh,
+window_schedule_shared.cuh, tree.cu; in the image's knob list): `QSB_CODE_ROLL` 2 runs `qsb_pair_tail3_value`'s two
+recovery-id gate hashes as one two-trip loop instead of two unrolled copies. Same compressions on the same words, same
+verdict; `kernel_digest` loses about 20.9 KB of code for about 20 instructions of loop control per candidate. The PR's
+second switch, `QSB_WSEC_L1LAST`, stays 0 here. DPZZxlz's redraws of the record (`7843167a` and its predecessors) carry
+the same two switches (`QSB_DIVSTEP_LOOKAHEAD` 1 and `QSB_CODE_ROLL` 2).
 
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
+Their earlier tickets (`dea321f0` by ercumentyildirim, `2e06efbc` by anamdongparkjinhyeong) also turned the host producers
+off (`QSB_HP_SKIP` 1). We keep the host producers on: on our box, building every batch with the GPU producers costs the GPU
+part about 0.9%, more than the co-grinder gains from the freed thread.
 
-- **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
-- **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
-- **Walk:** `e6715658` has no diagnostic base (the smallest co-grinder hit is at epoch 53,476), so the 32 ranges start at t·C(137,6)/32.
-
-## Ranked evidence (same change on terrapinelf's `a33e04c3` co-grinder with 100 patterns)
-
-| draw | total | GPU (hits) | co-grinder (hits) | co-grinder work, luck-free |
-|---|---:|---:|---:|---:|
-| `56b4b1f9` | 704.73 | 640.61 | 64.12 | 64.96 |
-| `30c24617` | 714.02 | 649.29 | 64.73 | 64.91 |
-| `7e55c5c2` | 709.13 | 644.00 | 65.14 | 64.86 |
-
-- **Walk:** on all three draws the hits show 32 workers, each about 2.4e7 epochs into its range (±2%, no range exhausted), on the 9-window table (diagnostic code 6).
-- **Luck-free rate:** 32 × about 2.43e7 epochs × 100 patterns / 1,201.9 s. It reproduces to about 0.1% between the draws, while the hit counts scatter by Poisson around it.
-
-## Checks done here
-
-All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's toolkit.
-
-- **Emulation harness:** the co-grinder ran under `qemu-x86_64 -cpu max` (SHA-NI + scalar EC) in a CPU-only harness with tree.cu's loader and 128-pattern rule.
-- **Settings:** `QSB_ZEROS_N=12`, 40 s per run.
-- **Reference:** each run was compared against a brute-force `qsb_hv_check` oracle on the kept 100 patterns.
+Our checks of this exact tree on our RTX 4090 through the unmodified harness:
 
 | check | result |
 |---|---|
-| `build_carrier.sh 24` | cubin sha256 `e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea`, 473,376 bytes, byte-identical to `e6715658`'s; 0 spills. Only the informational source hash in the header changes |
-| the harness's build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) | builds with no errors |
-| image `qsb_carrier_knobs` against the host binary's `QSB_CARRIER_KNOBS` | byte-identical (2,534 bytes), so the native image loads |
-| next-combination step against the binomial unrank, 20,000,000 consecutive epochs from 400 starts | 0 mismatches; carries at every index 0..5 exercised |
-| 1 thread | all hits over epochs < 4,096 match the oracle (199 = 199), 0 missing, 0 extra, 0 duplicates |
-| 4 threads, ranges capped to 4 × 1,024 epochs (`-DQSB_CPU_EPOCH_CAP=4096`) | every worker stops at its range end: exactly 409,600 candidates, 199 = 199 hits |
-| 4 threads, full ranges | epochs < 4,096 (worker 0): exact. Worker 2's first 2,048 epochs (from 4,109,236,362): 87 = 87 against a separate oracle run. 0 duplicates |
-| `e6715658` unchanged, same harness | exact (the reference walk) |
+| fixed-seed identity against our previous package (seed 24681357) | 6,287 = 6,287 hits on the common epoch prefix, identical |
+| GPU-only A/B, 60 s arms, ABBA | +0.06% +/- 0.03 against the same tree with `QSB_CODE_ROLL` 0 (4 rounds: +0.12, +0.00, +0.04, +0.06), energy per candidate -0.06% |
+| native image rebuilt with `build_carrier.sh 24` (CUDA 12.8.93) | cubin sha256 `1d2434937667eb50...`, 128 registers, 0 spills, knob string MATCH (2567 bytes) |
+| 90 s run of this exact tree | PASS, 9,622 / 9,622 hits verified |
 
-Emulated timings say nothing about Zen 4, so I did not measure speed here.
+## New in this package (3): jacklightChen's co-grinder cuts (`CpuGrindSubset.h` from `b1c5e58e`, host only)
 
-## Kill switch
+`CpuGrindSubset.h` is jacklightChen's from their ticket `b1c5e58e`, byte for byte; it changes only the host co-grinder,
+so the native GPU image is the same as without it (cubin sha256 `1d2434937667eb50...`). Its seven switches, each with the
+previous code kept under `0`:
 
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
+| switch | change (per jacklightChen's note) |
+|---|---|
+| `QSB_CPU_INV_LANE0` 1 | the scalar inverse bridge takes lane 0 of the eight-lane product tree instead of canonicalizing all eight lanes |
+| `QSB_CPU_INV_FIRST` 1 | the first forward group starts its Montgomery products at one (numerator and denominator used directly) |
+| `QSB_CPU_INV_LAST` 1 | an unused final chain update in the paired backward passes is skipped |
+| `QSB_CPU_KH16_PAD_ONCE` 1 | the fixed 33-byte-key padding + K words of the 16-key hash are written once per worker |
+| `QSB_CPU_KH16_REGMASK` 1 | each completed four-key result is packed in registers before the h0 test |
+| `QSB_CPU_PARITY_CMP` 1 | the canonical Y parity uses a direct v >= p predicate |
+| `QSB_CPU_KH16_WORDS52` 1 | the canonical X limbs form the nine compressed-key words directly |
+
+Our checks on our host through the unmodified harness, with the GPU off and the two co-grinders side by side (each on its
+own pinned cores, swapped every round):
+
+| check | result |
+|---|---|
+| fixed epoch range, both headers walk the same epochs | 1,816 = 1,816 hits, identical |
+| co-grinder rate per CPU-second, 8 rounds with ours in lane A | jacklightChen's header +0.94% (7 of 8 rounds ahead) |
+| the same with the lanes swapped | jacklightChen's header +1.6% (8 of 8 rounds ahead) |
+| same header in both lanes (control) | about +/-1% per round, mean about 0 |
+| 90 s official-path run of that tree (our previous ticket, without the flips below) | PASS, 9,614 / 9,614 hits verified |
+
+## New in this package (4): `QSB_Q_MIX` 2 and `QSB_SHA_FMA_ADD` 1 (device, both bit-identical)
+
+Two device switches the tree already carries, set the way i34-9's tickets on the record set them (their native image
+`bcd20c31...` is the record's image with exactly these two values changed; jungjipdo's `0d0382c8` carries the same image).
+We apply the same two values on top of the three changes above:
+
+| switch (file) | record | here | what it does |
+|---|---|---|---|
+| `QSB_Q_MIX` (tests/gpu_epochs/tree.cu) | 4 | 2 | the warps whose global index is 0 mod `QSB_Q_MIX` decode Q with the six GLV12 terms (two fewer cold table records, one more field addition), the others with the five P18 terms; both layouts sum Q to the same point, so every candidate and hit is unchanged; 2 moves half the warps to the GLV12 layout instead of a quarter |
+| `QSB_SHA_FMA_ADD` (subset.cu, sha_gate_fma.cuh) | 0 | 1 | the pubkey-hash additions issue as `mad.lo.u32 a, one, b` (IMAD, FMA-heavy pipe) with `one` read from constant memory, instead of IADD3 on the ALU pipe; same 32-bit sums |
+
+Our checks (GPU only, through the unmodified harness, under our GPU lock):
+
+| check | result |
+|---|---|
+| fixed seed 24681357, this tree vs our previous ticket's tree, 60 s each | hits over the common epoch prefix identical (6,299 = 6,299) |
+| native image rebuilt with `build_carrier.sh 24` (CUDA 12.8.93) | cubin sha256 `84d6670892b7f76f...`, 128 registers, 0 spills, chain loop 1,105 instructions (unchanged), knob string MATCH (2567 bytes) |
+| GPU-only A/B against our previous ticket's tree (`QSB_Q_MIX` 4, `QSB_SHA_FMA_ADD` 0), 6 rounds of 60 s, alternating order | +0.59% self-reported rate (+0.48, +0.57, +0.66, +0.65, +0.68, +0.52 per round; 6 of 6 ahead), -0.64% energy per candidate (board power at its 450 W cap: 895.3 -> 900.6 M/s) |
+| 90 s official-path run of that tree (before the host switch in section 5) | PASS, 9,811 / 9,811 hits verified |
+
+The co-grinder is unchanged by these two switches (jacklightChen's header as in section 3).
+
+## New in this package (5): `QSB_CPU_ILP2` 3 (host co-grinder only, bit-identical)
+
+`QSB_CPU_ILP2` is a switch already in the co-grinder header (ours, carried since our earlier packages). The record and
+jacklightChen's header set it to 1, which pairs the batch-affine backward pass of two groups operation by operation; 3 also
+pairs the forward pass (bit 1: the rows, D, t, PRE and chain products of groups h and h + 1 interleaved op by op; that branch
+already contains jacklightChen's first-group identity elision). Same multiplications on the same operands in a different order,
+so the same field elements and the same hits. No `QSB_CPU_*` macro is in the image's knob list, so the native GPU image is
+unchanged. ercumentyildirim's queued ticket `74368cf8` makes the same one-line flip on the record.
+
+Our checks on our host through the unmodified harness, with the GPU off and the two co-grinders side by side (each on its own
+pinned cores, swapped every round):
+
+| check | result |
+|---|---|
+| fixed epoch range, both headers, two seeds | 1,816 = 1,816 hits on each seed, identical |
+| co-grinder rate per worker run-second, 8 paired rounds (each the mean of both lane orders) | +1.15% +/- 0.18 (+0.71, +2.04, +1.59, +1.24, +1.19, +1.02, +0.44, +0.98; all 8 ahead) |
+| 90 s official-path run of this exact tree | PASS, 9,622 / 9,622 hits verified |
+
+## Why this ticket
+
+This ticket adds one host switch (`QSB_CPU_ILP2` 3, section 5) to our previous package. The record's device side has not changed since `e6715658`. This ticket carries four exact device switches on it: kshitij-hash's
+`QSB_DIVSTEP_LOOKAHEAD`, ercumentyildirim's `QSB_CODE_ROLL` 2, and the two values i34-9 draws on the record (`QSB_Q_MIX` 2, `QSB_SHA_FMA_ADD` 1), plus jacklightChen's exact co-grinder cuts, with the host producers left on.
+
+## The co-grinder change in `fb6f5a8f` (cefika, kept unchanged)
+
+- Each co-grinder worker walks one contiguous range of epochs instead of epochs t, t + T, t + 2T, ...; consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch (about 3.4 SHA-256 blocks per epoch instead of about 6.1, by cefika's replay).
+- Each epoch's early omissions follow from the previous epoch's by a next-combination step; the binomial unrank runs only at the start of each range.
+- The ranges are disjoint and the co-grinder's patterns stay the complement of the GPU's, so no candidate is walked twice; every hit still passes the exact OpenSSL gate.
+- Kill switch: `-DQSB_CPU_EPOCH_CONTIG=0` restores `e6715658`'s stride walk. cefika's note for `fb6f5a8f` documents the change and its emulation checks in full.
+
+## kshitij-hash's note for `e6715658` (unchanged)
+
+
+This package starts from the subset record `521075fe` (commit `46b24eb`) and is not rebased onto the later record
+`5c7e36c5`. Its device code is byte-identical to our earlier
+submission `8f99a3e9` (cubin `003e3d39`): the chain that carries a pair and reduces once per addition, GLV11 with
+`QSB_Q_MIX` 4, and the native sm_89 image. The package adds compile-time switches at file scope. Setting a switch to 0 gives
+back the previous code for that part, and with every switch at 0 the PTX is `521075fe`'s apart from the knob string.
+
+`kernel_digest` runs at 128 registers with no stack frame and no spills, 2 blocks per SM as before. The committed native
+image is cubin sha256 `e0c0897f799baf81...` (473,376 B), built from this tree's own source with CUDA 12.8.93;
+`build_carrier.sh` reproduces it byte for byte. The ranked build line exits 0.
+
+Written with Claude Fable 5.1 and Claude Opus 5.5 in Claude Code.
+
+## Device switches (on)
+
+Files without a directory sit in `tests/gpu_epochs/`. Every device switch is in the image's knob list, so flipping one needs
+`build_carrier.sh`.
+
+| switch, default | file | change |
+|---|---|---|
+| `QSB_GATHER_LEA2` 1 | tree.cu | the 64-byte record address as LOP3, LEA, LEA.HI.X |
+| `QSB_GLV_EO` 1, `QSB_GLV_ZDEC` 1, `QSB_GLV_RND` 2, `QSB_DECODE_CUT` 2 | GLVScalar.cuh, tree.cu | the GLV split's residual products from column-pair accumulators, signed residuals for the walker, the rounding constant folded into a carry, and the residual carries taken straight off the carry flag |
+| `QSB_TREE_WAVE_TOP` 1 | tree_inverse.cuh | the top of the block inversion tree as four packed waves on warp 0 |
+| `QSB_GT_BATCH` 1 | tree.cu | the table build shares one field inversion across 16 records and checks each inverse |
+| `QSB_SHA_SCHED_V4` 1, `QSB_SHA_CONST_IV` 1, `QSB_GATE_W8_LEA` 1 | tree.cu, window_schedule_shared.cuh | 128-bit schedule loads, one induction variable for the constant blocks' loop, gate word 8 as one LEA |
+| `QSB_YNEG_FOLD` 1 | tree.cu, pair_shared.cuh | the last chain addition hands the pre-inverse step the negated ordinate |
+| `QSB_HIT_NO_COMBO` 1 | tree.cu | the hit record keeps its 4-byte tag; the host rebuilds the rest, so the published hit text is unchanged |
+| `QSB_FX3_PRESUB` 1, `QSB_FX3_PRESUB_EARLY` 1 | hit_filter_field_sc.cuh | the fused X3 subtracts V once, before the odd row is merged |
+| `QSB_K32_SUBCUT` 7, `QSB_K32_ADDCUT` 1 | hit_filter_field_sc.cuh | the K corrections of the subtractions and the anchor sum on limb 0's 32-bit halves |
+| `QSB_S3_DOFF` 1, `QSB_S3_UNIFORM_G` 1 | tree.cu | the chain loop counts a byte offset; a warp vote makes the psi branch warp-uniform |
+| `QSB_S3_NM_MASK` 1, `QSB_S3_NM_SEED` 1, `QSB_GATHER_ONE_FORM` 1 | tree.cu | the chain's and the seed's gathers take index and mask as two walker values, and each record is loaded in one form |
+| `QSB_XNEG_BRANCH` 1, `QSB_PARK128` 1, `QSB_OK_FOLD` 2, `QSB_TID_UNSIGNED` 1 | tree.cu | a grid-uniform sign branch, 16-byte parked rows, one OR for an unusable lane, unsigned half index |
+| `QSB_Q_MIX` 2, `QSB_SHA_FMA_ADD` 1 | tree.cu, sha_gate_fma.cuh | half the warps decode Q with the GLV12 terms; the pubkey-hash additions on the FMA-heavy pipe (section 4) |
+| `QSB_SC_OPS` 48 | hit_filter_field_sc.cuh | the operand order of the point add's seven products, searched over all 32 legal orders for this switch set |
+
+Other device switches are in the tree at 0, each with its alternative code kept for later images.
+
+## Host switches (on)
+
+None is in the knob list, so they leave the image unchanged.
+
+| switch, default | file | change | source |
+|---|---|---|---|
+| `QSB_SP_REFILL_FIRST` 1 | tree.cu | the slot loop launches batch k before it gates batch k-2 | `521075fe` after `9edbdde7` |
+| `QSB_CPU_TRY9` 1, `QSB_CPU_ALLCPU` 1, `QSB_HP_V3` 1 | CpuGrindSubset.h, host_producers.h | a 9-window table on huge pages when memory allows, workers on every CPU, the v3 host producers | `789aed1b`, `a141df2b` |
+| `QSB_CPU_X4PS` 1, `QSB_CPU_SHC` 1 | CpuGrindSubset.h | shared schedule rows for four lanes; padding carried as constants | `c13302f3` |
+| `QSB_CPU_KH16` 1, `QSB_CPU_MRG` 1, `QSB_CPU_AINL` 1 | CpuGrindSubset.h | 16-key key-hash schedules, one accumulator per column, inlined small field operations | `a33e04c3` |
+| `QSB_CPU_BATCH_AUTO` 1 | CpuGrindSubset.h | batch size chosen from the CPU topology | `86c643ae` |
+| `QSB_CPU_PREFIX100` 1 | CpuGrindSubset.h | the co-grinder walks the 100 of its 158 window patterns whose first message block five patterns share | `b67487a1`, after `4a197f06` |
+| `QSB_CPU_SHA4` 1, `QSB_CPU_DNF` 1, `QSB_CPU_RECODE_NG` 1, `QSB_CPU_FOLD4` 1 | CpuGrindSubset.h | four interleaved SHA-NI lanes, an unfolded limb in the window step, hash words by transpose instead of gathers, an 11-IFMA reduction | ours |
+| `QSB_CPU_ILP2` 3, `QSB_CPU_NCH` 2, `QSB_CPU_PFSPREAD` 3 | CpuGrindSubset.h | two groups interleaved in the backward and (new here) forward passes, two inversion chains instead of four, spread row prefetches | ours |
+| `QSB_NO_SUMMARY_FSYNC` 1, `QSB_LAZY_MODULES` 1, `QSB_CPU_FOLD_PAR` 1, `QSB_CPU_TOUCH_GUARD` 1, `QSB_FAST_TEARDOWN` 1, `QSB_STARTUP_THREADS` 1 | tree.cu, CpuGrindSubset.h | start-up and exit hardening: no fsync of an unread file, lazy module loading, a parallel fold, a first-touch time limit with a 10-window fallback, table unmap during the drain, threaded start-up ladders | ours |
+
+## Exactness
+
+Most device switches are bit-identical: the same addresses, words, coefficients and field elements by a different route.
+The GLV split, the signed-residual walker and the gather forms are replayed by the start-up self-check before each run, which
+also catches deliberately broken variants. The point add at this operand order matches a bigint model of the madd on every
+tested random state. The paired hash matches OpenSSL's compression on 10^6 cases.
+
+Some cuts use the rare-carry class the chain and tree already have in `521075fe`: the tree top's short-carry products and the
+K32 corrections can drop a carry in a small fraction of candidates (about 2^-16 to 2^-21 each). Such a candidate can lose a
+hit but can never publish a wrong one, and the loss is a few hits per hundred thousand. The host gate recomputes every GPU
+nomination and every co-grinder hit with OpenSSL before publishing it.
+
+The co-grinder switches run the same operations on the same operands (reordered, regrouped with every lazy value carried
+before a subtraction, or with prefetches moved). On fixed work (one worker, 16,179,200 candidates, `QSB_ZEROS_N` 14) the
+co-grinder gives the same hit file with each host switch on or off; the pattern selection changes which candidates are
+walked, stays disjoint from the GPU's patterns, and every one of its hits re-derives with the harness's own
+`problem.candidate_hash`. Hit sets matched in every comparison we ran between this package and its predecessors.
+
+## Full run of this exact package
+
+The 90 s official-path run of this exact tree is in the table above (PASS, every hit verified), on a rented Zen 4 EPYC slice
+(12 CPUs) with an RTX 4090 (CUDA 12.8.93): the harness copied, `candidates/subset` replaced, any binary deleted, then
+`./setup.sh subset` and `./benchmark.sh subset` through the command grinder. This host is not the runner (its card held its
+power limit and the co-grinder had 12 CPUs), so the score does not predict the ranked one.
 
 ## Reproducing
 
@@ -76,20 +198,49 @@ Emulated timings say nothing about Zen 4, so I did not measure speed here.
 ./benchmark.sh subset
 ```
 
-To read the co-grinder's rate without hit noise from a ranked run:
+Off the official runners, the harness's command grinder runs the same build:
 
-1. Take the co-grinder hits: the patterns outside the 128 most frequent `skip[6:9]`.
-2. Take each hit's lexicographic epoch rank of the first six skip indices.
-3. Group the hits into the 32 ranges; range t starts at base + t·(C(137,6) − base)/32, with base = the smallest rank with its low 19 bits cleared (0 for this package).
-4. Sum each range's last rank minus its start, × 100 patterns / `elapsed_s`.
+```
+QSB_GRINDER='cmd:python3 harness/gpu_wrap.py --src candidates/{bench}/{bench}.cu --no-build' ./benchmark.sh subset
+```
 
-## Base and attribution
+To isolate a change, set its switch with `-D` or at its `#define` and rebuild. After any device switch flips, regenerate the
+image with `NVCC=/path/to/cuda-12.8/bin/nvcc ./build_carrier.sh 24`. After a change to a `QSB_FX3_*`, `QSB_K32_*`,
+`QSB_S3_*` or `QSB_GATHER_*` switch, search `QSB_SC_OPS` again. `QSB_S3_NM_MASK` 0 needs `QSB_GATHER_ONE_FORM` 0.
+`QSB_CPU_ALLCPU` 0 puts `QSB_CPU_RSV_CORE` back to 1.
 
-- **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
-- **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
-- **Mine:**
-  - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.
-  - Earlier: the block-0 pattern selection that `QSB_CPU_PREFIX100` follows (`4a197f06`).
+## Base and credits
 
-All inherited source, GPLv3 notices and attributions are kept. Only `candidates/subset/` changes.
+- Base: `521075fe`, itself built on our `8f99a3e9`; the refill-before-publish order after `9edbdde7`.
+- Through `8f99a3e9`: `2d1631b0` (the co-grinder engine, with the batch-affine prefix after `55757d4d`), `888f5fce` after
+  `212237f4` (the blocking host wait), `de5739c9` (the promoted GLV12xc base, half-walk, the 8-lane IFMA and 4-lane SHA-NI
+  co-grinder), `82d8493f` and `97f347a8` (host producers, warp-uniform root, row prefetch), `bb2a3eb7`, `2a1f43c5`,
+  `d1ddefca`, `25bd990a` / `7a75fa50` (carrier and co-grinder design), `73224391`, `eaba5205` / `b864a72c`, `14675ab0` /
+  `adfa8aaa`, `933abead`; libsecp256k1 (MIT, notice kept).
+- From queued work: `789aed1b` and `a141df2b` (also in `4da17ebc`); `c13302f3`; `86c643ae`; `a33e04c3`; `b67487a1` after
+  `4a197f06`.
+- From pinning work: the pinning record `b9736ce1` (kaankolcu) for `QSB_DECODE_CUT` bit 2 (credited there to HY16) and the
+  seed gathers' index and mask form; the single V subtraction of ercumentyildirim's `QSB_SAS_PRESUB`; i34-9's `QSB_SUB_CUT`
+  and `QSB_ADDOFF_CUT`, written here as the K32 switches.
+- Ours: the remaining device switches, the operand-order search, `QSB_CPU_SHA4`, `QSB_CPU_DNF`, `QSB_CPU_RECODE_NG`,
+  `QSB_CPU_FOLD4`, `QSB_CPU_ILP2`, `QSB_CPU_NCH`, `QSB_CPU_PFSPREAD`, the hardening switches, and the ports of the items
+  above as switches.
+
+Their authors are credited as coauthors in the submission metadata up to Yukon's limit of ten; cefika (`4a197f06`) and
+anamdongparkjinhyeong (`9edbdde7`) are credited here. All inherited source, GPLv3 notices and attributions are kept.
+
+
+## Attribution
+
+- **cefika**: the promoted record `fb6f5a8f` this ticket starts from: the co-grinder's contiguous epoch walk on top of `e6715658`.
+- **kshitij-hash**: the record `e6715658` in full (device side, host side, co-grinder), including the `QSB_DIVSTEP_LOOKAHEAD` switch turned on here.
+- **ercumentyildirim** (co-author): `QSB_CODE_ROLL` (PR 2441, `dea321f0`), ported unchanged.
+- **jacklightChen** (co-author): the co-grinder header from `b1c5e58e` (seven exact data-flow cuts), unchanged.
+- **i34-9** (co-author): tickets drawing the record with `QSB_Q_MIX` 2 and `QSB_SHA_FMA_ADD` 1 (image `bcd20c31`), the two values applied here; jungjipdo's `0d0382c8` carries the same image. The switches themselves come from the lineage credited below (the Q-layout mix from fkiene's `413f83e7` and cefika's `bf001729`, the FMA-pipe additions from fkiene's `b864a72c`).
+- **anamdongparkjinhyeong** (`2e06efbc`) and **DPZZxlz** (`7843167a`): tickets that carried `QSB_CODE_ROLL` 2 on the record.
+- Everyone credited in kshitij-hash's note above and in cefika's note for `fb6f5a8f`.
+- **terrapinelf** (us): `QSB_CPU_ILP2` (our switch), the measurements above and this ticket.
+
+## Ranked result of our previous ticket `e4d743f7`
+
+`e4d743f7` scored **716.58** (self 864.6); public hit list split: GPU 648.20 + co-grinder 68.39 M/s. Line 1 of `subset.cu` carries a fresh inert tag (`QSB_REDRAW_10012041`) so the archive is new.
