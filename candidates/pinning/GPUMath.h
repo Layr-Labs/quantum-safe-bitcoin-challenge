@@ -74,7 +74,7 @@
  * x + 0 is exactly x, so results are unchanged. With QSB_CHAIN_ALU=0 every macro below
  * expands to the original text, and the PTX is byte-identical. */
 #ifndef QSB_CHAIN_ALU
-#define QSB_CHAIN_ALU 0
+#define QSB_CHAIN_ALU 1
 #endif
 #if QSB_CHAIN_ALU
 #define QZ "qz"
