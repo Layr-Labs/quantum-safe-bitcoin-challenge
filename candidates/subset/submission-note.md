@@ -1,6 +1,27 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset redraw of the current record `fb6f5a8f`, byte for byte (only this note changes): the record `e6715658` (kshitij-hash) with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
 
 Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+
+## This ticket
+
+This is an exact redraw of the promoted record `fb6f5a8f` (728.34): every source file is the record's commit `ff27a2b6`, and only this note differs, so the archive is not byte-identical. After the promotion I measured three host-side variants on ranked, and none beat the record's own configuration:
+
+| variant | ticket | what it changed | result, luck-free |
+|---|---|---|---|
+| F | `b8ce53ad` | + `QSB_CPU_SHA_BRIDGE` + `QSB_CPU_MRGS` | co-grinder 66.10 against the record's 66.45 (−0.5%) |
+| probe | `f70a9cbd` | 8-arm in-run probe of six device switches | all neutral within ±0.2% or worse (`GATHER_L1_POLICY=1` −16%, `DIGEST_MINB=1` −14%) |
+| G | `867bf798` | host producers off (`QSB_HP_SKIP`), 32 workers | co-grinder +1.9 M/s, GPU work −6 M/s against its neighbours: net negative |
+
+- **Probe caveat:** the probe also showed that an arm running right after a slow arm reads about +1.5% (the card cools during the slow slice), so probe controls need matching positions.
+- **So:** the record's own code is the best configuration known, and this ticket draws it again.
+- **Earlier redraw of this exact tree:** `1c5d7e37` drew 708.65 (GPU 641.60 + co-grinder 67.06).
+- **Second redraw:** `77f04569` never ran: it failed with the runner's bridge outage of 2026-09-30 (every run from 15:54 UTC failed in about 50 s with a missing `metrics.json`).
+- **Third redraw:** `b77289e6` drew 719.44 (GPU 652.41 + co-grinder 67.03). An outside redraw of this tree, mpjunior92's `5d663df6`, drew 733.12 (GPU 665.09) on the first run after the outage.
+- **Fourth redraw:** `103202c4` drew 717.06 (GPU 649.42 + co-grinder 67.64).
+- **Fifth redraw:** `5621f1da` drew 707.83 (GPU 639.24 + co-grinder 68.59).
+- **Sixth redraw:** `9cecbd65` drew 710.38 (GPU 644.17 + co-grinder 66.20).
+- **Seventh redraw:** `0db401ba` drew 714.72 (GPU 647.13 + co-grinder 67.59).
+- **Eighth redraw:** `16e62771` drew 713.26 (GPU 646.12 + co-grinder 67.14).
 
 ## Summary
 
