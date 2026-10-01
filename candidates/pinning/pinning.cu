@@ -17,7 +17,7 @@
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
-#define QSB_GREEN_SHARED 8
+#define QSB_GREEN_SHARED 6 /* was 8 on tip 0fe76103; host only — fewer shared finish SMs so finish keeps more exclusive capacity (GREEN stays 20) */
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
