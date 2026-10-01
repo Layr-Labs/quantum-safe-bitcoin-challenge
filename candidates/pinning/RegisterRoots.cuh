@@ -4,26 +4,55 @@
 #include "WarpInverse.cuh"
 #include "CyclicField.cuh"
 #include "PrefixCyclicField.cuh"
+#ifndef QSB_RROOT_SCRATCH_V2
+#define QSB_RROOT_SCRATCH_V2 1 /* two volatile 128-bit scratch reads instead of four scalar reads */
+#endif
+#if QSB_RROOT_SCRATCH_V2 != 0 && QSB_RROOT_SCRATCH_V2 != 1
+#error "QSB_RROOT_SCRATCH_V2 must be 0 or 1"
+#endif
 static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE==131072,
               "register roots require promoted 128-lane / 1024-root shape");
+#ifndef QSB_RROOT_INPUT_V2
+#define QSB_RROOT_INPUT_V2 1 /* two ordinary 128-bit input reads instead of four scalar reads */
+#endif
+#if QSB_RROOT_INPUT_V2 != 0 && QSB_RROOT_INPUT_V2 != 1
+#error "QSB_RROOT_INPUT_V2 must be 0 or 1"
+#endif
 __device__ __forceinline__ bool qbw_root_load(
     uint64_t x[5],const uint64_t *roots,unsigned i,unsigned count) {
     x[0]=1;x[1]=x[2]=x[3]=x[4]=0;
     if(i>=count)return false;
+#if QSB_RROOT_INPUT_V2 && defined(__CUDA_ARCH__)
+    /* Valid inputs are 32-byte rows; preserve ordinary default-cache loads. */
+    const uint64_t *p=roots+(size_t)i*4u;
+    asm volatile("ld.global.v2.u64 {%0,%1}, [%4];\n\t"
+                 "ld.global.v2.u64 {%2,%3}, [%4+16];"
+                 : "=&l"(x[0]), "=&l"(x[1]), "=&l"(x[2]), "=&l"(x[3])
+                 : "l"(p) : "memory");
+#else
     #pragma unroll
     for(int k=0;k<4;++k)x[k]=roots[(size_t)i*4u+k];
+#endif
     qsb_field_normalize(x);
     const bool nz=(x[0]|x[1]|x[2]|x[3])!=0;
     if(!nz)x[0]=1;
     return nz;
 }
+#ifndef QSB_RROOT_WEIGHT_FIRST
+#define QSB_RROOT_WEIGHT_FIRST 1
+#endif
+#if QSB_RROOT_WEIGHT_FIRST != 0 && QSB_RROOT_WEIGHT_FIRST != 1
+#error "QSB_RROOT_WEIGHT_FIRST must be 0 or 1"
+#endif
 __device__ __forceinline__ void qbw_root_store(
     uint64_t *roots,unsigned count,unsigned i,uint64_t x[5],bool nonzero) {
     if(i>=count)return;
     qsb_field_normalize(x);
     if(!nonzero)x[0]=x[1]=x[2]=x[3]=0;
+#if !defined(__CUDA_ARCH__) || !QSB_RROOT_WEIGHT_FIRST
     #pragma unroll
     for(int k=0;k<4;++k)roots[(size_t)i*4u+k]=x[k];
+#endif
     uint64_t b[5]={
 #if QSB_ISO_XR
         pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],
@@ -34,6 +63,10 @@ __device__ __forceinline__ void qbw_root_store(
 #endif
     };
     uint64_t weighted[5];qsb_field_mul(weighted,x,b);
+#if defined(__CUDA_ARCH__) && QSB_RROOT_WEIGHT_FIRST
+    #pragma unroll
+    for(int k=0;k<4;++k)roots[(size_t)i*4u+k]=x[k];
+#endif
     #pragma unroll
     for(int k=0;k<4;++k)roots[((size_t)count+i)*4u+k]=weighted[k];
 }
@@ -48,8 +81,16 @@ __device__ __forceinline__ void qbw_scratch_put(
 __device__ __forceinline__ void qbw_scratch_get(
     uint64_t v[5],const uint64_t *roots,unsigned count,unsigned row) {
     const volatile uint64_t *p=roots+(count+row)*4u;
+#if QSB_RROOT_SCRATCH_V2 && defined(__CUDA_ARCH__)
+    /* Each four-word row is 32-byte aligned. Keep volatile reloads and the same words. */
+    asm volatile("ld.volatile.global.v2.u64 {%0,%1}, [%4];\n\t"
+                 "ld.volatile.global.v2.u64 {%2,%3}, [%4+16];"
+                 : "=&l"(v[0]), "=&l"(v[1]), "=&l"(v[2]), "=&l"(v[3])
+                 : "l"(p) : "memory");
+#else
     #pragma unroll
     for(unsigned k=0;k<4;++k)v[k]=p[k];
+#endif
     v[4]=0;
 }
 
@@ -128,7 +169,7 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     for(int k=0;k<4;++k){aa[k]=inverses[k][ib+(lane&15u)];bb[k]=products[k][pb+(lane^16u)];}
     aa[4]=bb[4]=0;QSB_RF_MUL(value,aa,bb);qsb_field_normalize(value);
 }
-// Launch exactly <<<1,128>>> with 1<=count<=1024.
+/* Launch exactly <<<1,128>>> with 1<=count<=1024. */
 /* Physical capacity is 2048 four-word rows even for a partial final tile. */
 __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int count) {
     if (count<=0 || count>1024) return; // uniform, before any block barrier
