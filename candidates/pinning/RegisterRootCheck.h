@@ -9,7 +9,12 @@ __global__ void qsb_prefix_field_check_kernel(uint32_t *data){
     data[(512u+field)*8+d]=qsb_prefix_cyclic_research::multiply8(a,b,lane);
 }
 static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
-    constexpr size_t words=2048u*4u;
+    /* h0b: the check runs in the ring's root buffer P.roots[0], 2*QSB_RR_MAX four-word rows
+     * (QSB_RR_MAX roots + their weighted rows), so its working set is sized from the same bound
+     * (2048 rows at the promoted 1024 roots; 1024 rows at 512). The field check below needs
+     * 768 rows (3 x 256 eight-word fields). */
+    constexpr size_t words=2u*(size_t)QSB_RR_MAX*4u;
+    static_assert(words>=768u*4u,"field check needs 768 rows");
     uint64_t *raw=(uint64_t*)calloc(words,sizeof(uint64_t));
     uint64_t *got=(uint64_t*)malloc(words*sizeof(uint64_t));
     BN_CTX *ctx=BN_CTX_new();
@@ -70,7 +75,9 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
     const int counts[]={1,31,32,33,63,64,65,95,96,97,127,128,129,255,256,257,511,512,513,557,767,768,769,1023,1024};
     for(int case_id=0;case_id<(int)(sizeof(counts)/sizeof(counts[0]))+4;++case_id){
         const int mixed=(int)(sizeof(counts)/sizeof(counts[0]));
-        const int count=case_id<mixed?counts[case_id]:(case_id&1?1024:1);
+        /* counts above the launch bound QSB_RR_MAX are skipped (none at the promoted 1024) */
+        const int count=case_id<mixed?counts[case_id]:(case_id&1?QSB_RR_MAX:1);
+        if(count>QSB_RR_MAX)continue;
         if(!ok||error!=cudaSuccess)break;
         memset(raw,0,words*sizeof(uint64_t));
         for(int i=0;i<count;++i){
@@ -97,9 +104,9 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
         error=cudaMemcpyAsync(device,raw,words*sizeof(uint64_t),cudaMemcpyHostToDevice,stream);
         if(error==cudaSuccess){
             if(qsb_carrier_has(QK_RR))
-                qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,device,count);
+                qsb_carrier_launch(qsb_root_register,QK_RR,dim3(QSB_RR_BLOCKS),dim3(QSB_RROOT_LANES),stream,device,count);
             else
-                qsb_root_register<<<1,128,0,stream>>>(device,count);
+                qsb_root_register<<<QSB_RR_BLOCKS,QSB_RROOT_LANES,0,stream>>>(device,count);
             error=cudaGetLastError();
         }
         if(error==cudaSuccess)error=cudaMemcpyAsync(got,device,words*sizeof(uint64_t),cudaMemcpyDeviceToHost,stream);
