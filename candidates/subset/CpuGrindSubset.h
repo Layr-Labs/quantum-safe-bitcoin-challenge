@@ -342,7 +342,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  *   retirement until a walker returns (C1: +6.9 ns per candidate in a hashing phase that reads no row); at most a few in flight
  *   instead of 16 lets each walk finish under the SHA rounds. Prefetches only. */
 #ifndef QSB_CPU_ILP2
-#define QSB_CPU_ILP2 1
+#define QSB_CPU_ILP2 3
 #endif
 #ifndef QSB_CPU_NCH
 #define QSB_CPU_NCH 2

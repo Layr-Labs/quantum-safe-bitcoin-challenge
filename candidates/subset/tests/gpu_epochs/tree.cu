@@ -231,7 +231,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #error "QSB_SHA_SCHED_V4 must be 0 or 1"
 #endif
 #ifndef QSB_OUTER_LITK
-#define QSB_OUTER_LITK 0
+#define QSB_OUTER_LITK 1
 #endif
 #if QSB_OUTER_LITK != 0 && QSB_OUTER_LITK != 1
 #error "QSB_OUTER_LITK must be 0 or 1"
@@ -545,7 +545,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 4
+#define QSB_Q_MIX 2
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -895,7 +895,7 @@ __device__ uint64_t BINOM_C[151][10];
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
 #ifndef QSB_DIVSTEP_LOOKAHEAD
-#define QSB_DIVSTEP_LOOKAHEAD 0
+#define QSB_DIVSTEP_LOOKAHEAD 1
 #endif
 #if QSB_DIVSTEP_LOOKAHEAD < 0 || QSB_DIVSTEP_LOOKAHEAD > 1
 #error "QSB_DIVSTEP_LOOKAHEAD must be 0 or 1"
