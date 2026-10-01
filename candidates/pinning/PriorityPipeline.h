@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 #pragma once
 #include <cuda_runtime.h>
 
 namespace qsb {
 
-// Host scheduling only. Events establish dependencies; stream priority is
+/* Host scheduling only. Events establish dependencies; stream priority is */
 // merely a scheduling hint and is never relied on for correctness.
 class CompletionLane {
  public:

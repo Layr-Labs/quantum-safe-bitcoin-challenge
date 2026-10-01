@@ -9,7 +9,7 @@
 #endif
 
 // Four-bank cache geometry from 0xCramJam c13f3832 / 90f89008.
-// Keep the promoted GLV12 geometry as an independently compilable control.
+/* Keep the promoted GLV12 geometry as an independently compilable control. */
 #ifndef QSB_FOUR_HOT
 #define QSB_FOUR_HOT 1
 #endif
@@ -421,7 +421,7 @@ __host__ __device__ __forceinline__ void q9_bigtbl_seed_z(const uint64_t w[2],ui
 }
 #endif
 
-// QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction.
+/* QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction. */
 __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],const uint64_t b[4]){
     uint64_t r0,r1,r2,r3,r4,r5,r6,r7;
     asm(

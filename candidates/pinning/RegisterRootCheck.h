@@ -31,7 +31,7 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
            BN_lebin2bn((const unsigned char*)weight_words,32,weight)!=nullptr;
     }
     /* First 64 products are the complete 8x8 edge Cartesian product; remaining */
-    // 192 use deterministic full-width values. Compare every result to OpenSSL.
+    /* 192 use deterministic full-width values. Compare every result to OpenSSL. */
     if(ok&&error==cudaSuccess){
         const uint64_t edges[8][4]={
             {0,0,0,0},{1,0,0,0},
@@ -97,9 +97,9 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
         error=cudaMemcpyAsync(device,raw,words*sizeof(uint64_t),cudaMemcpyHostToDevice,stream);
         if(error==cudaSuccess){
             if(qsb_carrier_has(QK_RR))
-                qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(128),stream,device,count);
+                qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(QSB_RROOT_LANES),stream,device,count);
             else
-                qsb_root_register<<<1,128,0,stream>>>(device,count);
+                qsb_root_register<<<1,QSB_RROOT_LANES,0,stream>>>(device,count);
             error=cudaGetLastError();
         }
         if(error==cudaSuccess)error=cudaMemcpyAsync(got,device,words*sizeof(uint64_t),cudaMemcpyDeviceToHost,stream);
