@@ -231,7 +231,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #error "QSB_SHA_SCHED_V4 must be 0 or 1"
 #endif
 #ifndef QSB_OUTER_LITK
-#define QSB_OUTER_LITK 0
+#define QSB_OUTER_LITK 1
 #endif
 #if QSB_OUTER_LITK != 0 && QSB_OUTER_LITK != 1
 #error "QSB_OUTER_LITK must be 0 or 1"
