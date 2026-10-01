@@ -644,7 +644,7 @@ __device__ uint64_t BINOM_C[151][10];
  * tree_audit.cu's direct-root kernels (audit_warp_roots, audit_bounded_status) fill the table themselves.
  * 0 = the base byte for byte (the constant-bank lookups). */
 #ifndef QSB_ROOT_LUT_SMEM
-#define QSB_ROOT_LUT_SMEM 0
+#define QSB_ROOT_LUT_SMEM 1
 #endif
 #if QSB_ROOT_LUT_SMEM != 0 && QSB_ROOT_LUT_SMEM != 1
 #error "QSB_ROOT_LUT_SMEM must be 0 or 1"
