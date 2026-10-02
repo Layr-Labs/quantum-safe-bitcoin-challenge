@@ -131,6 +131,13 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
 #endif
+/* Roll the two recovery-id SHA gates through one warp-uniform loop. */
+#ifndef QSB_CODE_ROLL
+#define QSB_CODE_ROLL 2
+#endif
+#if QSB_CODE_ROLL != 0 && QSB_CODE_ROLL != 2
+#error "QSB_CODE_ROLL supports only the original path (0) or the two-trip recovery gate (2)"
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #ifndef QSB_STARTUP_TRIM
@@ -267,6 +274,14 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #endif
 #if QSB_SEED_K32_SUB != 0 && QSB_SEED_K32_SUB != 1
 #error "QSB_SEED_K32_SUB must be 0 or 1"
+#endif
+/* QSB_S3_HINT_MODE (default 0; carrier image only): 2 puts the .L2::64B fetch hint on all four 16-byte loads of a
+ * cold table record in qsb_s3_load_n, not only on X's first; the loads read the same bytes with the same .cs.nc operator. */
+#ifndef QSB_S3_HINT_MODE
+#define QSB_S3_HINT_MODE 0
+#endif
+#if QSB_S3_HINT_MODE != 0 && QSB_S3_HINT_MODE != 2
+#error "QSB_S3_HINT_MODE must be 0 or 2"
 #endif
 #ifndef QSB_GATHER_L1_POLICY
 #define QSB_GATHER_L1_POLICY 0
@@ -558,6 +573,25 @@ __device__ uint64_t BINOM_C[151][10];
 #endif
 #if QSB_Q_MIX && !QSB_Q_P18
 #error "QSB_Q_MIX mixes the GLV12 Q layout into the QSB_Q_P18 chain"
+#endif
+/* QSB_DIRECT10 replaces the signed GLV split with ten biased fields of the original 256-bit scalar. */
+#ifndef QSB_DIRECT10
+#define QSB_DIRECT10 0
+#endif
+#if QSB_DIRECT10 != 0 && QSB_DIRECT10 != 1
+#error "QSB_DIRECT10 must be 0 or 1"
+#endif
+#if QSB_DIRECT10 && (!QSB_S3 || !QSB_TABLE_BASE_A)
+#error "QSB_DIRECT10 requires the XYZZ chain and a table on base A"
+#endif
+#ifndef QSB_D10_COMPACT_AUDIT
+#define QSB_D10_COMPACT_AUDIT 0
+#endif
+#if QSB_D10_COMPACT_AUDIT != 0 && QSB_D10_COMPACT_AUDIT != 1
+#error "QSB_D10_COMPACT_AUDIT must be 0 or 1"
+#endif
+#if QSB_D10_COMPACT_AUDIT && !QSB_DIRECT10
+#error "QSB_D10_COMPACT_AUDIT requires QSB_DIRECT10"
 #endif
 /* QSB_Q_SPREAD (exploratory; needs QSB_Q_MIX 4 and QSB_SE_BLOCK 256): the same one warp in four decodes
  * Q with the six GLV12 terms, but a block's two such warps are warps 0 and 7 instead of 0 and 4. A block's
@@ -1182,7 +1216,11 @@ __device__ __constant__ unsigned QSB_GATE_FMA_C = 1u;
 __device__ __constant__ unsigned QSB_QMIX_MASK_C = QSB_Q_MIX - 1u;
 #endif
 #include "../../GLVScalar.cuh"
-#if QSB_GLV11
+#if QSB_DIRECT10
+#define GT_CHUNKS 10
+#define GT_TOTAL_ENTRIES 285212672u
+#define GT_GLV_TERMS 10
+#elif QSB_GLV11
 #define GT_CHUNKS 8
 #define GT_TOTAL_ENTRIES 354501773u
 #define GT_GLV_TERMS (QSB_Q_P18 ? 10 : 11)
@@ -1195,7 +1233,11 @@ __device__ __constant__ unsigned QSB_QMIX_MASK_C = QSB_Q_MIX - 1u;
 #define GT_LO 4096
 #define GT_HI 4096
 #define GT_H2 16
+#if QSB_DIRECT10
+#define GT_DENSE_ENTRIES 0u
+#else
 #define GT_DENSE_ENTRIES 786432u
+#endif
 /* QSB_GT_HEAL (see gt_heal): rewrite the builder's rare off-curve records from OpenSSL before the
  * spot check. 0 restores the unhealed table. */
 #ifndef QSB_GT_HEAL
@@ -1205,23 +1247,48 @@ __device__ __constant__ unsigned QSB_QMIX_MASK_C = QSB_Q_MIX - 1u;
 #error "QSB_GT_HEAL must be 0 or 1"
 #endif
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
-#if QSB_GLV11
+#if QSB_DIRECT10
+    return c <= 6 ? 33554432u : 16777216u;
+#elif QSB_GLV11
     if(c>=6) return c==6 ? 67108864u : 134217728u;
 #endif
     return q9_bigtbl_entries(c);
 }
 __host__ __device__ __forceinline__ unsigned gt_offset(int c) {
-#if QSB_GLV11
+#if QSB_DIRECT10
+    return c <= 6 ? (unsigned)c * 33554432u : 234881024u + (unsigned)(c - 7) * 16777216u;
+#elif QSB_GLV11
     if(c>=6) return c==6 ? 153175181u : 220284045u;
 #endif
     return q9_bigtbl_offset(c);
 }
 __host__ __device__ __forceinline__ int gt_shift(int c) {
-#if QSB_GLV11
+#if QSB_DIRECT10
+    if(c==0) return 0;
+    if(c==1) return 25;
+    if(c==2) return 51;
+    if(c==3) return 77;
+    if(c==4) return 103;
+    if(c==5) return 129;
+    if(c==6) return 155;
+    if(c==7) return 181;
+    if(c==8) return 206;
+    return 231;
+#elif QSB_GLV11
     if(c>=6) return c==6 ? 18 : 45;
 #endif
     return (int)q9_bigtbl_shift(c);
 }
+#if QSB_DIRECT10
+static_assert(GT_TOTAL_ENTRIES*64ULL == 18253611008ULL,
+              "direct ten-term table must contain exactly 18,253,611,008 bytes");
+static_assert(7u*33554432u+3u*16777216u == GT_TOTAL_ENTRIES,
+              "direct ten-term table segment sizes must sum to 285,212,672 records");
+static_assert(7u*33554432u==234881024u &&
+              7u*33554432u+2u*16777216u==268435456u &&
+              25u+6u*26u+3u*25u==256u,
+              "direct ten-term offsets and shifts must match the decoder");
+#else
 static_assert(GT_TOTAL_ENTRIES*64ULL == (QSB_GLV11 ? 22688113472ULL : 9803211584ULL),
               "GLV12 table must contain exactly 9,803,211,584 bytes");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use the sign bit");
@@ -1234,6 +1301,7 @@ static_assert(((2u*67108864u-1u)>>24) < GT_H2 && ((2u*85279885u-1u)>>24) < GT_H2
               "H2 ladder must cover the largest odd multiplier");
 #if QSB_GLV11
 static_assert(((2u*134217728u-1u)>>24) < GT_H2, "P18 high ladder must cover m=2^28-1");
+#endif
 #endif
 #elif ZLAB_T14
 #define GT_CHUNKS 14
@@ -2163,7 +2231,14 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
     if (cold) {
         asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
             : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
+#if QSB_S3_HINT_MODE == 2
+#define QSB_S3_HINT_LOAD(v, p) asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }" \
+                                    : "=l"((v).x), "=l"((v).y) : "l"(p))
+        QSB_S3_HINT_LOAD(x1, tx + 1); QSB_S3_HINT_LOAD(y0, ty); QSB_S3_HINT_LOAD(y1, ty + 1);
+#undef QSB_S3_HINT_LOAD
+#else
         x1 = __ldcs(tx + 1); y0 = __ldcs(ty); y1 = __ldcs(ty + 1);
+#endif
     }
     else    { x0 = __ldg(tx);  x1 = __ldg(tx + 1);  y0 = __ldg(ty);  y1 = __ldg(ty + 1);  }
 #endif
@@ -2181,7 +2256,85 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
 #endif
 }
 #endif
-/* z*A = r1*A + psi(r2*A): seed with Q's segments 0,1 (3M+2S), deferred madds for Q2..Q5, psi, P0..P4,
+#if QSB_DIRECT10
+template<unsigned START, unsigned WIDTH, bool CROSS>
+struct qsb_d10_extract_impl;
+template<unsigned START, unsigned WIDTH>
+struct qsb_d10_extract_impl<START, WIDTH, false> {
+    __host__ __device__ __forceinline__ static uint32_t get(const uint64_t k[4]) {
+        const unsigned wi32 = START >> 5;
+        const unsigned bit = START & 31u;
+        const uint64_t w = k[wi32 >> 1];
+        const uint32_t lo = (wi32 & 1u) ? (uint32_t)(w >> 32) : (uint32_t)w;
+        return (lo >> bit) & ((1u << WIDTH) - 1u);
+    }
+};
+template<unsigned START, unsigned WIDTH>
+struct qsb_d10_extract_impl<START, WIDTH, true> {
+    __host__ __device__ __forceinline__ static uint32_t get(const uint64_t k[4]) {
+        const unsigned wi32 = START >> 5;
+        const unsigned bit = START & 31u;
+        const unsigned wi64 = wi32 >> 1;
+        const uint64_t w = k[wi64];
+        const uint32_t lo = (wi32 & 1u) ? (uint32_t)(w >> 32) : (uint32_t)w;
+        const uint32_t hi = (wi32 & 1u) ? (uint32_t)k[wi64 + 1u] : (uint32_t)(w >> 32);
+#if defined(__CUDA_ARCH__)
+        const uint32_t v = __funnelshift_r(lo, hi, bit);
+#else
+        const uint32_t v = (uint32_t)((((uint64_t)hi << 32) | lo) >> bit);
+#endif
+        return v & ((1u << WIDTH) - 1u);
+    }
+};
+template<unsigned START, unsigned WIDTH>
+__host__ __device__ __forceinline__ uint32_t qsb_d10_extract(const uint64_t k[4]) {
+    return qsb_d10_extract_impl<START, WIDTH, ((START & 31u) + WIDTH > 32u)>::get(k);
+}
+template<unsigned START, unsigned WIDTH>
+__host__ __device__ __forceinline__ uint32_t qsb_d10_signed_index(const uint64_t k[4], uint32_t &nm) {
+    const uint32_t f = qsb_d10_extract<START, WIDTH>(k);
+    const uint32_t half_mask = (1u << (WIDTH - 1u)) - 1u;
+    const uint32_t neg = 1u ^ (f >> (WIDTH - 1u));
+    nm = 0u - neg;
+    return (f & half_mask) ^ (half_mask & nm);
+}
+__host__ __device__ __forceinline__ bool qsb_d10_incomplete_exception(const uint64_t k[4]) {
+    const bool zero = (k[0] | k[1] | k[2] | k[3]) == 0;
+    const bool order_prefix = k[0] == 0xBFD25E8CD0364141ULL && k[1] == 0xBAAEDCE6AF48A03BULL &&
+                              k[2] == 0xFFFFFFFFFFFFFFFEULL;
+    const uint32_t top_lo = (uint32_t)k[3];
+    const uint32_t top_hi = (uint32_t)(k[3] >> 32);
+    const bool order_or_wrap_double = order_prefix && top_lo == 0xFFFFFFFFu &&
+                                      (top_hi == 0xFFFFFFFFu || top_hi == 0x0000007Fu);
+    const bool double_case = k[0] == 0xFFFFFFFFFFFFFFFFULL && k[1] == 0xFFFFFFFFFFFFFFFFULL &&
+                             k[2] == 0xFFFFFFFFFFFFFFFFULL && k[3] == 0xFFFFFF8000000000ULL;
+    return zero || order_or_wrap_double || double_case;
+}
+template<unsigned START, unsigned WIDTH, unsigned SEG, unsigned OFF>
+__device__ __forceinline__ void qsb_d10_load(const uint64_t k[4], const uint8_t *gTable,
+                                              uint64_t *gx, uint64_t *gy) {
+    uint32_t nm;
+    const uint32_t idx = qsb_d10_signed_index<START, WIDTH>(k, nm);
+#if QSB_D10_COMPACT_AUDIT
+    (void)idx;
+    qsb_s3_load_n(gTable, SEG, nm, true, gx, gy);
+#else
+    qsb_s3_load_n(gTable, OFF + idx, nm, true, gx, gy);
+#endif
+}
+template<unsigned START, unsigned WIDTH, unsigned SEG, unsigned OFF>
+__device__ __forceinline__ void qsb_d10_add(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
+                                             const uint64_t k[4], const uint8_t *gTable,
+                                             uint64_t *y0, uint64_t *cx, uint64_t *cy,
+                                             uint32_t &bad, uint64_t *RP) {
+    qsb_d10_load<START, WIDTH, SEG, OFF>(k, gTable, cx, cy);
+    qsb_filter_point_add<true>(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#if !QSB_CHAIN_ANCHOR_UPDATE
+    Load256(y0, cy);
+#endif
+}
+#endif
+/* Default GLV path: z*A = r1*A + psi(r2*A), with Q's segments 0,1 (3M+2S), deferred madds for Q2..Q5, psi, P0..P4,
  * and the Y-resolving last add for P5 -- 12 gathers, 11 additions (was 15 and 14). Q goes first: its
  * segment-0 bias K ~ 2^126.3 dominates every partial sum of the Q half, so none of its additions can meet
  * +-its own addend; the P half's partial sums are offset by lambda*r2*A. A zero component (|r2| = 0 or
@@ -2197,6 +2350,37 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
 #endif
 __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ,
                                        const uint64_t k[4], const uint8_t *gTable, uint32_t &bad) {
+#if QSB_DIRECT10
+    if (qsb_d10_incomplete_exception(k)) {
+        #pragma unroll
+        for (int i = 0; i < 4; i++) X[i] = Y[i] = ZZ[i] = ZZZ[i] = 0;
+        bad |= 1u;
+        return;
+    }
+    const uint32_t f0 = qsb_d10_extract<0u, 25u>(k);
+#if QSB_D10_COMPACT_AUDIT
+    (void)f0;
+#endif
+    uint64_t x0[4], y0[4], x1[4], y1[4];
+#if QSB_D10_COMPACT_AUDIT
+    qsb_s3_load_n(gTable, 0u, 0u, true, x0, y0);
+#else
+    qsb_s3_load_n(gTable, f0, 0u, true, x0, y0);
+#endif
+    qsb_d10_load<25u, 26u, 1u, 33554432u>(k, gTable, x1, y1);
+    uint64_t RP[4];
+    qsb_filter_point_seed(X, Y, ZZ, ZZZ, x0, y0, x1, y1, bad, RP);
+    uint64_t cx[4], cy[4];
+    qsb_d10_add<51u, 26u, 2u, 67108864u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_add<77u, 26u, 3u, 100663296u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_add<103u, 26u, 4u, 134217728u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_add<129u, 26u, 5u, 167772160u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_add<155u, 26u, 6u, 201326592u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_add<181u, 25u, 7u, 234881024u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_add<206u, 25u, 8u, 251658240u>(X, Y, ZZ, ZZZ, k, gTable, y0, cx, cy, bad, RP);
+    qsb_d10_load<231u, 25u, 9u, 268435456u>(k, gTable, cx, cy);
+    qsb_filter_last_add(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#else
 #if QSB_GLV_ZDEC
     uint64_t vz[2][2]; uint32_t mz[2];
     q9_glv_split_z(k, vz[0], vz[1], &mz[0], &mz[1]);   /* signed residuals: v = z - s*(1 + D*2^100), m = -s */
@@ -2478,6 +2662,7 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     code = QSB_S3_CODE(w, GT_GLV_TERMS - 1, QSB_S3_DESC[GT_GLV_TERMS - 1]);
     qsb_s3_load(gTable, code, true, cx, cy);
     qsb_filter_last_add(X, Y, ZZ, ZZZ, cx, cy, y0, bad, RP);
+#endif
 #endif
 }
 #else /* !QSB_S3 */
@@ -4583,9 +4768,15 @@ static void gt_point_to_limbs(EC_GROUP *grp, EC_POINT *pt, BIGNUM *x, BIGNUM *y,
 
 #if QSB_S3
 // BEGIN QSB_S3_HOST_BUILDER
-/* GLV12 host ladders (pinning P1's builder, same base A = neg_r_inv*G).
- * Batch-affine ladder build (delta C, jacklightChen e582bda4, after PR46): the point sequence is
- * unchanged; EC_POINTs_make_affine replaces one inversion per point by one batched inversion. */
+static void gt_set_segment0_bias(BIGNUM *k) {
+#if QSB_DIRECT10
+    BN_one(k); BN_lshift(k,k,255); BN_sub_word(k,1u<<24);
+#else
+    BN_set_word(k,170559770); BN_lshift(k,k,99); BN_sub_word(k,1u<<17);
+#endif
+}
+/* Host ladders for the problem-specific base A = neg_r_inv*G. Batch-affine conversion preserves the
+ * point sequence while replacing one inversion per point with one batched inversion. */
 static void gt_batch_ladder(EC_GROUP *grp, const EC_POINT *step, int count,
                             uint64_t *out, BIGNUM *x, BIGNUM *y,
                             const BIGNUM *alpha, const BIGNUM *beta,
@@ -4652,7 +4843,7 @@ static void gt_build_ladders(uint64_t *hL, uint64_t *hH, uint64_t *hH2,
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
-    BN_set_word(bias,170559770); BN_lshift(bias,bias,99); BN_sub_word(bias,1u<<17);   /* K */
+    gt_set_segment0_bias(bias);
     memset(hH2,0,(size_t)GT_CHUNKS*GT_H2*8*sizeof(uint64_t));
     memset(hL,0,(size_t)GT_CHUNKS*GT_LO*8*sizeof(uint64_t));
     memset(hH,0,(size_t)GT_CHUNKS*GT_HI*8*sizeof(uint64_t));
@@ -4714,7 +4905,7 @@ static void gt_build_ladders_seg(int ch, uint64_t *hL, uint64_t *hH, uint64_t *h
     BN_lebin2bn((const uint8_t*)alpha_le,32,alpha);
     BN_lebin2bn((const uint8_t*)beta_le,32,beta);
     BN_lebin2bn(neg_r_inv,32,nri);
-    BN_set_word(bias,170559770); BN_lshift(bias,bias,99); BN_sub_word(bias,1u<<17);   /* K */
+    gt_set_segment0_bias(bias);
     if(ch==0) {
         /* base=A, L[lo]=(K+lo)A, H[h1]=h1*2^12*A. */
         EC_POINT_mul(grp,base,nri,NULL,NULL,ctx);
@@ -4767,13 +4958,138 @@ static void gt_build_ladders_mt(uint64_t *hL, uint64_t *hH, uint64_t *hH2,
 /* Record (ch,index) holds gt_table_scalar(ch,index) * A. */
 static void gt_table_scalar(BIGNUM *k,int ch,unsigned index) {
     if(ch==0) {
-        BN_set_word(k,170559770); BN_lshift(k,k,99);
-        BN_sub_word(k,1u<<17); BN_add_word(k,index);
+        gt_set_segment0_bias(k); BN_add_word(k,index);
     } else {
         BN_one(k); BN_lshift(k,k,gt_shift(ch)-1);
         BN_mul_word(k,(BN_ULONG)(2*index+1));
     }
 }
+#if QSB_DIRECT10
+static uint32_t qsb_d10_field_reference(const uint64_t k[4], unsigned start, unsigned width) {
+    uint32_t f = 0;
+    for (unsigned b = 0; b < width; b++)
+        f |= (uint32_t)((k[(start + b) >> 6] >> ((start + b) & 63u)) & 1u) << b;
+    return f;
+}
+static bool qsb_d10_increment(uint64_t k[4]) {
+    for (int i = 0; i < 4; i++) if (++k[i]) return true;
+    return false;
+}
+static bool qsb_d10_decrement(uint64_t k[4]) {
+    for (int i = 0; i < 4; i++) {
+        const uint64_t old = k[i]--;
+        if (old) return true;
+    }
+    return false;
+}
+static void qsb_d10_push_boundary(uint64_t cases[][4], unsigned &count, uint32_t value, unsigned shift) {
+    uint64_t k[4] = {0,0,0,0};
+    const unsigned wi = shift >> 6, bit = shift & 63u;
+    const __uint128_t shifted = (__uint128_t)value << bit;
+    k[wi] = (uint64_t)shifted;
+    if (wi + 1u < 4u) k[wi + 1u] = (uint64_t)(shifted >> 64);
+    memcpy(cases[count++], k, sizeof k);
+    uint64_t near[4]; memcpy(near, k, sizeof near);
+    if (qsb_d10_decrement(near)) memcpy(cases[count++], near, sizeof near);
+    memcpy(near, k, sizeof near);
+    if (qsb_d10_increment(near)) memcpy(cases[count++], near, sizeof near);
+}
+static int qsb_d10_check_scalar(const uint64_t k[4], BIGNUM *scalar, BIGNUM *acc,
+                                BIGNUM *term, BIGNUM *reference) {
+    static const unsigned shifts[10] = {0,25,51,77,103,129,155,181,206,231};
+    const uint32_t f0 = qsb_d10_extract<0u,25u>(k);
+    if (f0 != qsb_d10_field_reference(k,0,25)) return 0;
+    BN_one(acc); BN_lshift(acc,acc,255); BN_sub_word(acc,1u<<24); BN_add_word(acc,f0);
+    gt_table_scalar(reference,0,f0);
+    if (BN_cmp(acc,reference) != 0) return 0;
+#define QSB_D10_RECONSTRUCT(C,S,W) do { \
+    const uint32_t f=qsb_d10_extract<S##u,W##u>(k); \
+    if(f!=qsb_d10_field_reference(k,shifts[C],W)) return 0; \
+    uint32_t nm; const uint32_t idx=qsb_d10_signed_index<S##u,W##u>(k,nm); \
+    const int32_t d=(int32_t)(2u*f+1u-(1u<<W)); \
+    const uint32_t mag=(uint32_t)(d<0?-d:d); \
+    if(idx!=(mag-1u)/2u || nm!=(d<0?0xFFFFFFFFu:0u)) return 0; \
+    BN_set_word(term,(BN_ULONG)mag); BN_lshift(term,term,(int)shifts[C]-1); \
+    gt_table_scalar(reference,C,idx); if(BN_cmp(term,reference)!=0) return 0; \
+    if(d<0) { if(!BN_sub(acc,acc,term)) return 0; } else if(!BN_add(acc,acc,term)) return 0; \
+} while(0)
+    QSB_D10_RECONSTRUCT(1,25,26);
+    QSB_D10_RECONSTRUCT(2,51,26);
+    QSB_D10_RECONSTRUCT(3,77,26);
+    QSB_D10_RECONSTRUCT(4,103,26);
+    QSB_D10_RECONSTRUCT(5,129,26);
+    QSB_D10_RECONSTRUCT(6,155,26);
+    QSB_D10_RECONSTRUCT(7,181,25);
+    QSB_D10_RECONSTRUCT(8,206,25);
+    QSB_D10_RECONSTRUCT(9,231,25);
+#undef QSB_D10_RECONSTRUCT
+    BN_lebin2bn((const unsigned char*)k,32,scalar);
+    return BN_cmp(acc,scalar)==0;
+}
+static int qsb_direct10_selfcheck(void) {
+    static const unsigned widths[10]={25,26,26,26,26,26,26,25,25,25};
+    static const unsigned shifts[10]={0,25,51,77,103,129,155,181,206,231};
+    unsigned off=0;
+    for(int c=0;c<10;c++) {
+        const unsigned entries=c==0?1u<<25:1u<<(widths[c]-1u);
+        if(gt_offset(c)!=off || gt_entries(c)!=entries || gt_shift(c)!=(int)shifts[c]) return 0;
+        off+=entries;
+    }
+    if(off!=GT_TOTAL_ENTRIES || GT_DENSE_ENTRIES!=0u ||
+       GT_TOTAL_ENTRIES*64ULL!=18253611008ULL) return 0;
+    const uint64_t zero[4]={0,0,0,0};
+    const uint64_t order[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,
+                             0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
+    const uint64_t double_case[4]={0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL,
+                                   0xFFFFFFFFFFFFFFFFULL,0xFFFFFF8000000000ULL};
+    const uint64_t one[4]={1,0,0,0};
+    const uint64_t order_minus_one[4]={0xBFD25E8CD0364140ULL,0xBAAEDCE6AF48A03BULL,
+                                       0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
+    const uint64_t order_plus_one[4]={0xBFD25E8CD0364142ULL,0xBAAEDCE6AF48A03BULL,
+                                      0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
+    const uint64_t double_minus_one[4]={0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL,
+                                        0xFFFFFFFFFFFFFFFFULL,0xFFFFFF8000000000ULL};
+    const uint64_t double_plus_one[4]={0,0,0,0xFFFFFF8000000001ULL};
+    const uint64_t max_scalar[4]={~0ULL,~0ULL,~0ULL,~0ULL};
+    const uint64_t wrap_double_case[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,
+                                        0xFFFFFFFFFFFFFFFEULL,0x0000007FFFFFFFFFULL};
+    const uint64_t wrap_double_minus_one[4]={0xBFD25E8CD0364140ULL,0xBAAEDCE6AF48A03BULL,
+                                             0xFFFFFFFFFFFFFFFEULL,0x0000007FFFFFFFFFULL};
+    const uint64_t wrap_double_plus_one[4]={0xBFD25E8CD0364142ULL,0xBAAEDCE6AF48A03BULL,
+                                            0xFFFFFFFFFFFFFFFEULL,0x0000007FFFFFFFFFULL};
+    if(!qsb_d10_incomplete_exception(zero) || !qsb_d10_incomplete_exception(order) ||
+       !qsb_d10_incomplete_exception(double_case) || !qsb_d10_incomplete_exception(wrap_double_case) ||
+       qsb_d10_incomplete_exception(one) ||
+       qsb_d10_incomplete_exception(order_minus_one) || qsb_d10_incomplete_exception(order_plus_one) ||
+       qsb_d10_incomplete_exception(double_minus_one) || qsb_d10_incomplete_exception(double_plus_one) ||
+       qsb_d10_incomplete_exception(wrap_double_minus_one) || qsb_d10_incomplete_exception(wrap_double_plus_one) ||
+       qsb_d10_incomplete_exception(max_scalar)) return 0;
+    uint64_t cases[176][4]; unsigned count=0;
+    memcpy(cases[count++],zero,sizeof zero); memcpy(cases[count++],order_minus_one,sizeof order_minus_one);
+    memcpy(cases[count++],order,sizeof order); memcpy(cases[count++],order_plus_one,sizeof order_plus_one);
+    memcpy(cases[count++],double_minus_one,sizeof double_minus_one); memcpy(cases[count++],double_case,sizeof double_case);
+    memcpy(cases[count++],double_plus_one,sizeof double_plus_one); memcpy(cases[count++],max_scalar,sizeof max_scalar);
+    memcpy(cases[count++],one,sizeof one); memcpy(cases[count++],wrap_double_minus_one,sizeof wrap_double_minus_one);
+    memcpy(cases[count++],wrap_double_case,sizeof wrap_double_case);
+    memcpy(cases[count++],wrap_double_plus_one,sizeof wrap_double_plus_one);
+    for(int c=0;c<10;c++) {
+        const uint32_t half=1u<<(widths[c]-1u), max=(1u<<widths[c])-1u;
+        const uint32_t values[5]={0,1,half-1u,half,max};
+        for(int j=0;j<5;j++) qsb_d10_push_boundary(cases,count,values[j],shifts[c]);
+    }
+    BN_CTX *ctx=BN_CTX_new(); BIGNUM *scalar=BN_new(),*acc=BN_new(),*term=BN_new(),*reference=BN_new();
+    int ok=ctx&&scalar&&acc&&term&&reference;
+    for(unsigned i=0;ok&&i<count;i++) ok=qsb_d10_check_scalar(cases[i],scalar,acc,term,reference);
+    uint64_t seed=0x243F6A8885A308D3ULL;
+    for(int it=0;ok&&it<4096;it++) {
+        uint64_t k[4];
+        for(int j=0;j<4;j++) { seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;k[j]=seed; }
+        ok=qsb_d10_check_scalar(k,scalar,acc,term,reference);
+    }
+    BN_free(scalar);BN_free(acc);BN_free(term);BN_free(reference);BN_CTX_free(ctx);
+    return ok;
+}
+#endif
 // END QSB_S3_HOST_BUILDER
 
 /* Spot-check sample sequence (same in the gather loop and the check): per segment 0,1,2 and the last
@@ -4891,7 +5207,7 @@ static int gt_spot_check_mt(int samples, const uint8_t neg_r_inv[32],
 #endif
 
 #if QSB_GT_HEAL
-/* Heal the GPU-built table before it is spot-checked (pinning P1's pass). The builder's field arithmetic
+/* Heal the GPU-built table before it is spot-checked. The builder's field arithmetic
  * leaves a few records per million wrong, all off the curve. Harmless for the search (the exact host gate
  * drops any result built on one), but a 240-sample spot check would trip on one with probability ~3e-4
  * per run, and the host builder it falls back to cannot rebuild 153M records inside a ranked window. So
@@ -4967,9 +5283,7 @@ static int gt_heal(uint8_t *d_gTable, const uint8_t neg_r_inv[32],
 }
 #endif
 
-/* OpenSSL fallback builder (only if the GPU build is rejected), same coefficients as the GPU builder.
- * 153M records: far too slow for a ranked window -- a rejected GPU build is a lost draw either way; this
- * keeps the run exact rather than fast. */
+/* OpenSSL fallback builder (only if the GPU build is rejected), with the same coefficients as the GPU builder. */
 static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
                            const uint64_t alpha_le[4], const uint64_t beta_le[4]) {
     printf("  Computing GLV12 GTable (OpenSSL fallback)...\n");
@@ -5867,7 +6181,17 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_XSHA_KNOBS
 #endif
-#define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+#if QSB_S3_HINT_MODE
+#define QSB_HINT_KNOBS QSB_CARRIER_KV(QSB_S3_HINT_MODE)
+#else
+#define QSB_HINT_KNOBS
+#endif
+#if QSB_CODE_ROLL
+#define QSB_CODE_ROLL_KNOBS QSB_CARRIER_KV(QSB_CODE_ROLL)
+#else
+#define QSB_CODE_ROLL_KNOBS
+#endif
+#define QSB_CARRIER_KNOBS QSB_CODE_ROLL_KNOBS QSB_HINT_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
@@ -5905,7 +6229,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_SHA_SCHED_V4) QSB_CARRIER_KV(QSB_OUTER_LITK) QSB_CARRIER_KV(QSB_S3_NM_MASK) \
     QSB_CARRIER_KV(QSB_SHA_CONST_IV) QSB_CARRIER_KV(QSB_SHA_CONST_PEEL) QSB_CARRIER_KV(QSB_GATE_W8_LEA) \
     QSB_CARRIER_KV(QSB_SEED_K32_SUB) QSB_CARRIER_KV(QSB_GATHER_L1_POLICY) QSB_CARRIER_KV(QSB_GATHER_ONE_FORM) \
-    QSB_CARRIER_KV(QSB_HIT_NO_COMBO) QSB_CARRIER_KV(QSB_R_CBANK_TAILS) QSB_CARRIER_KV(QSB_TAIL_WEAVE) QSB_CARRIER_KV(QSB_DIVSTEP_LOOKAHEAD) \
+    QSB_CARRIER_KV(QSB_HIT_NO_COMBO) QSB_CARRIER_KV(QSB_R_CBANK_TAILS) QSB_CARRIER_KV(QSB_TAIL_WEAVE) QSB_CARRIER_KV(QSB_DIVSTEP_LOOKAHEAD) QSB_CARRIER_KV(QSB_DIRECT10) QSB_CARRIER_KV(QSB_D10_COMPACT_AUDIT) \
     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
@@ -6913,7 +7237,11 @@ int main(int argc, char **argv) {
     if (se_mode) {
         printf("  Using short-epoch producer/consumer path (%d epochs per launch)\n",
                QSB_SE_LAUNCH_BLOCKS);
-#if QSB_S3
+#if QSB_DIRECT10
+        if (!qsb_direct10_selfcheck()) {
+            fprintf(stderr, "ERROR: direct ten-term decoder or table geometry mismatch\n"); return 1;
+        }
+#elif QSB_S3
         if (!qsb_s3_selfcheck()) {
             fprintf(stderr, "ERROR: GLV12 decode tables do not match the geometry\n"); return 1;
         }
