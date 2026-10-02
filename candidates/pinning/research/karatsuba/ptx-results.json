@@ -1,0 +1,54 @@
+{
+  "status": "PASS",
+  "validation_level": "actual generated PTX interpreted with independently modeled integer semantics",
+  "gpu_executed": false,
+  "GPUMath_sha256": "eb420bb42c2881de41d0533f0a42f8cb73bb6e5ea623f5b065e6e5f52a81eb8d",
+  "ptx_sha256": "63a73731561b5fbc167c608cc220eb6305c7e0c42a38449a856a2509125d585a",
+  "full_product_and_reduction_cases": 21465,
+  "difference_sign_combinations": [
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      1,
+      1
+    ]
+  ],
+  "cases_with_257bit_middle": 1528,
+  "final_fold_carry_cases": 9,
+  "precanonical_outputs_ge_p": 52,
+  "mutations_rejected": [
+    "stale final carry flag",
+    "incorrect difference-product sign"
+  ],
+  "ptx_opcodes": {
+    "mov.b64": 50,
+    "sub.cc.u32": 2,
+    "subc.cc.u32": 6,
+    "subc.u32": 2,
+    "xor.b32": 17,
+    "and.b32": 3,
+    "add.cc.u32": 13,
+    "addc.cc.u32": 68,
+    "mul.wide.u32": 57,
+    "add.cc.u64": 20,
+    "addc.u64": 9,
+    "addc.cc.u64": 15,
+    "addc.u32": 21,
+    "cvt.u64.u32": 6,
+    "not.b32": 1,
+    "mov.u32": 16,
+    "mad.lo.u32": 1,
+    "mul.lo.u32": 1
+  },
+  "limits": "No GPU PTX execution, inline-asm constraint/alias runtime validation, scheduling or performance. Host fallback is unchanged; C++ canonicalization applied in oracle."
+}

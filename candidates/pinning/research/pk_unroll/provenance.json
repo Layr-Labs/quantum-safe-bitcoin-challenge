@@ -1,0 +1,25 @@
+{
+  "base_commit": "067302c",
+  "hypothesis": "unrolling the two independent recovered-pubkey SHA chains exposes ILP without changing work",
+  "control_sha256": {
+    "pinning.cu": "f0de8bce0750ce9cf9a6bdd3b9fc5b5097a88d8a0a3493a81874218e3b8e379b",
+    "GPUMath.h": "b22af2e24f8c2aa503b623447acf9292c44b6c68452aa22ab578c191e238cd0b",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "candidate_sha256": {
+    "pinning.cu": "dd0890975afe2fcf5f30c760315ba879a69e186150092f08dbd0edf8c67ffe7a",
+    "GPUMath.h": "b22af2e24f8c2aa503b623447acf9292c44b6c68452aa22ab578c191e238cd0b",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "changed_files": [
+    "pinning.cu"
+  ],
+  "production_default_changed": {
+    "QSB_PK_UNROLL": [
+      0,
+      1
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "source_base": "pr64_corrected",
+  "validation_level": "CPU-extracted wide chain with selected base recoder and point expressions; OpenSSL field/table/oracle",
+  "recoding_cases": 12769,
+  "curve_chains": 414,
+  "geometry_cases": 10,
+  "table_bytes": 17179869184,
+  "point_chain_operations": {
+    "multiplications": 60,
+    "squares": 18
+  },
+  "source_sha256": {
+    "pr64_corrected/pinning.cu": "d41f15a686e70a5f1e200c6ca0c5a53ae1138d28b2cb685c7a6997493bcf32f2",
+    "pr64_corrected/GPUMath.h": "7f7a518c2021c2f104e2ce9b014d03108e6c858576341779c240595260405187",
+    "wide_windows/wide_geometry.cuh": "985e935e371842eceabe05245b8d28237bfd19e2987c75894c59e389766eabbb",
+    "wide_windows/wide_probe.cu": "43c697dbc56ef16d028a7114002c1ec4ddafb1fdae7e6e8cecbdea3387d90fde"
+  },
+  "gpu_executed": false,
+  "limits": "No 16GiB table allocation, GPU memory traffic, GPU execution or performance measured. Virtual table loader checks bases/indices and generates only referenced entries. PR64 selection tests composition with its new recoder/sign decoder; the current native wide probe still includes PR24."
+}
