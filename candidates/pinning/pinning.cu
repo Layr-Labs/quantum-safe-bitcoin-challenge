@@ -5771,13 +5771,25 @@ static int qsb_host_zeros(const uint8_t *h) {
 
 /* Exact CPU re-derivation of one (sequence, locktime, recid) against the
  * problem constants. Matches harness/crypto.py and harness/problem.py:
- * z = SHA256d(prefix||suffix), Q = u1·G ± u2R with + for recid 0,
+ * z = SHA256d(prefix||suffix), Q = u1*G +/- u2R with + for recid 0,
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
- * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+ * GPU uses for suffix_len=75.
+ *
+ * QSB_HOST_EC_BASE_REUSE=1 keeps the recid-independent SHA256d and u1*G
+ * work outside the first/alternate recid checks.  The two recids differ
+ * only by the sign of Ru2, so both exact checks consume the same P=u1*G.
+ * Setting the switch to 0 restores the promoted two-wrapper path. */
+#ifndef QSB_HOST_EC_BASE_REUSE
+#define QSB_HOST_EC_BASE_REUSE 1
+#endif
+#if QSB_HOST_EC_BASE_REUSE != 0 && QSB_HOST_EC_BASE_REUSE != 1
+#error "QSB_HOST_EC_BASE_REUSE must be 0 or 1"
+#endif
+
+static int qsb_host_prepare_point(const pinning2_params_t *pp, uint32_t seq, uint32_t lt,
+                                  EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                  const BIGNUM *nri, EC_POINT *P) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5806,45 +5818,56 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     SHA256_Transform(&sc, buf);
     if (nblk == 2) SHA256_Transform(&sc, buf + 64);
 
-    uint8_t d1[32];
+    uint8_t d1[32], d2[32];
     for (int i = 0; i < 8; i++) {
         d1[i * 4]     = (uint8_t)(sc.h[i] >> 24);
         d1[i * 4 + 1] = (uint8_t)(sc.h[i] >> 16);
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
 
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
-    EC_POINT *P = EC_POINT_new(grp);
-    EC_POINT *Q = EC_POINT_new(grp);
-    EC_POINT *R = EC_POINT_dup(Ru2, grp);
-    int ok = 0;
-    if (z && u1 && P && Q && R &&
-        BN_mod_mul(u1, z, nri, order, ctx) &&
-        EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
-        if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
-            BIGNUM *qx = BN_new(), *qy = BN_new();
-            if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
-                uint8_t pub[33], xb[32];
-                memset(xb, 0, 32);
-                int nbytes = BN_num_bytes(qx);
-                if (nbytes > 0 && nbytes <= 32) BN_bn2bin(qx, xb + (32 - nbytes));
-                pub[0] = (uint8_t)(0x02 + (BN_is_odd(qy) ? 1 : 0));
-                memcpy(pub + 1, xb, 32);
-                uint8_t hh[32];
-                SHA256(pub, 33, hh);
-                ok = qsb_host_zeros(hh) >= QSB_ZEROS_N;
-            }
-            BN_free(qx);
-            BN_free(qy);
-        }
-    }
+    int ok = z && u1 &&
+             BN_mod_mul(u1, z, nri, order, ctx) &&
+             EC_POINT_mul(grp, P, u1, NULL, NULL, ctx);
     BN_free(z);
     BN_free(u1);
+    return ok;
+}
+
+static int qsb_host_exact_from_point(const EC_POINT *P, int recid,
+                                     EC_GROUP *grp, BN_CTX *ctx, const EC_POINT *Ru2,
+                                     EC_POINT *Q, EC_POINT *R, BIGNUM *qx, BIGNUM *qy) {
+    if (!EC_POINT_copy(R, Ru2)) return 0;
+    if (recid && !EC_POINT_invert(grp, R, ctx)) return 0;
+    if (!EC_POINT_add(grp, Q, P, R, ctx)) return 0;
+    if (!EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) return 0;
+
+    uint8_t pub[33], xb[32];
+    memset(xb, 0, sizeof(xb));
+    int nbytes = BN_num_bytes(qx);
+    if (nbytes > 0 && nbytes <= 32) BN_bn2bin(qx, xb + (32 - nbytes));
+    pub[0] = (uint8_t)(0x02 + (BN_is_odd(qy) ? 1 : 0));
+    memcpy(pub + 1, xb, 32);
+    uint8_t hh[32];
+    SHA256(pub, 33, hh);
+    return qsb_host_zeros(hh) >= QSB_ZEROS_N;
+}
+
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    EC_POINT *P = EC_POINT_new(grp);
+    EC_POINT *Q = EC_POINT_new(grp);
+    EC_POINT *R = EC_POINT_new(grp);
+    BIGNUM *qx = BN_new(), *qy = BN_new();
+    int ok = P && Q && R && qx && qy &&
+             qsb_host_prepare_point(pp, seq, lt, grp, ctx, order, nri, P) &&
+             qsb_host_exact_from_point(P, recid, grp, ctx, Ru2, Q, R, qx, qy);
+    BN_free(qx);
+    BN_free(qy);
     EC_POINT_free(P);
     EC_POINT_free(Q);
     EC_POINT_free(R);
@@ -5857,9 +5880,30 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_EC_BASE_REUSE
+    EC_POINT *P = EC_POINT_new(grp);
+    EC_POINT *Q = EC_POINT_new(grp);
+    EC_POINT *R = EC_POINT_new(grp);
+    BIGNUM *qx = BN_new(), *qy = BN_new();
+    int out = -1;
+    if (P && Q && R && qx && qy &&
+        qsb_host_prepare_point(pp, seq, lt, grp, ctx, order, nri, P)) {
+        if (qsb_host_exact_from_point(P, ri, grp, ctx, Ru2, Q, R, qx, qy))
+            out = ri;
+        else if (qsb_host_exact_from_point(P, 1 - ri, grp, ctx, Ru2, Q, R, qx, qy))
+            out = 1 - ri;
+    }
+    BN_free(qx);
+    BN_free(qy);
+    EC_POINT_free(P);
+    EC_POINT_free(Q);
+    EC_POINT_free(R);
+    return out;
+#else
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
     return -1;
+#endif
 }
 #endif
 
