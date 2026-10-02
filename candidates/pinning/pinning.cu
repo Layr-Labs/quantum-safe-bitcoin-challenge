@@ -6139,6 +6139,10 @@ static int start(size_t batch) {
     const double quota=quota_cpus();
     const bool limited=quota>0. && quota<(double)ncpu;
     if(limited) {int cap=(int)floor(quota)-1;if(cap<1)cap=1;if(nw>cap)nw=cap;}
+    /* Share a finite quota with the feeder and EC co-grinder. The existing
+     * offload trial still disables admission if fewer SHA workers lose work;
+     * explicit worker overrides and unquotaed hosts keep their old policy. */
+    if(limited && !env && nw>6)nw=6;
     if (env) nw = atoi(env);
     if(nw<1)nw=1;if(nw>QSB_PK_WMAX)nw=QSB_PK_WMAX;
     if(limited && !getenv("QSB_COGRIND_THREADS")) {
