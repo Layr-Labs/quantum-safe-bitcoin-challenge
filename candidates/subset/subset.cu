@@ -8,4 +8,6 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Cold table records: all four 16-byte loads carry the .L2::64B fetch hint (tree.cu qsb_s3_load_n). */
+#define QSB_S3_HINT_MODE 2
 #include "tests/gpu_epochs/tree.cu"
