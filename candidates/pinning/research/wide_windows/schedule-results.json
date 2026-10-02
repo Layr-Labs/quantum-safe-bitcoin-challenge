@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "source_sha256": {
+    "pinning.cu": "a30d5228ed06d01807d3197275b3998f0b4cd3f91ad103c82fbf1df2d39faf03",
+    "wide_fused_kernel.cuh": "9151385a09c76c9067616c53f0b1e664ab86aa4332ff846524589a83fc4e70ba",
+    "wide_search_tuner.cuh": "acb985958deea7644189ca749ca78220010b4ec803efe9053361b01feb6b451d"
+  },
+  "gpu_executed": false,
+  "ubsan": true,
+  "summary": "AUDIT 11 20 20 35",
+  "synthetic_timing_cases": "fast/slow/tie/inside and outside2% margin; distinct work counts; ignored warmups; invalid/zero timings; disabled generic mode; event lifetime",
+  "limits": "CPU timing-policy behavior and exact split/fused source-expression correspondence only; no CUDA events or curve collective executed."
+}

@@ -114,27 +114,6 @@ static QI_INL void fnorm(vfe *r) {
     t4 &= vs1(QI_M48);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
 }
-/* QCG_Y_PARITY_PASS (kill switch, default 1): hash_block reads only bit 0 of a y's limb 0 (the
- * 02/03 prefix byte). fparity returns that bit of fnorm's canonical result without the second
- * carry pass: fnorm's final t0 is (t0 + x*C) mod 2^52 with x in {0, 1} its >= p flag and
- * C = 2^256 - p odd, so bit 0 is (t0 ^ x) & 1, and the later carries and masks never touch
- * bit 0 of limb 0. Same inputs (limbs < 2^62), same parity for every value. */
-#ifndef QCG_Y_PARITY_PASS
-#define QCG_Y_PARITY_PASS 1
-#endif
-static QI_INL V fparity(const vfe *r) {
-    const V M = vs1(QI_M52);
-    V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4], m;
-    V x = t4 >> 48; t4 &= vs1(QI_M48);
-    t0 = QI_LO(t0, x, vs1(QI_C));
-    t1 += t0 >> 52; t0 &= M;
-    t2 += t1 >> 52; t1 &= M; m = t1;
-    t3 += t2 >> 52; t2 &= M; m &= t2;
-    t4 += t3 >> 52; t3 &= M; m &= t3;
-    const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
-    x = (t4 >> 48) | ((V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48)) & (V)_mm256_cmpeq_epi64((__m256i)m, (__m256i)M) & ge & vs1(1));
-    return (t0 ^ x) & vs1(1);
-}
 /* r = a + 2p - b (b in W form); limbs of r < a's + 2^54 */
 static QI_INL void fsub(vfe *r, const vfe *a, const vfe *b) {
     r->n[0] = a->n[0] + (vs1(QI_2P0) - b->n[0]);
@@ -399,12 +378,7 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             fmul(&ym, &lam, &t);
             fsub(&ym, &ym, &py[b]);
             vfe xp = px[b], yp = py[b];
-#if QCG_Y_PARITY_PASS && !defined(QCG_EC_HOOK)
-            fnorm(&xp); fnorm(&xm);
-            yp.n[0] = fparity(&py[b]); ym.n[0] = fparity(&ym);
-#else
             fnorm(&xp); fnorm(&yp); fnorm(&xm); fnorm(&ym);
-#endif
 #ifdef QCG_EC_HOOK
             { V a4[4], b4[4], c4[4], d4[4]; to_w(a4, &xp); to_w(b4, &yp); to_w(c4, &xm); to_w(d4, &ym);
               for (int l = 0; l < 4; l++) { uint64_t X0[4], Y0[4], X1[4], Y1[4];
