@@ -39,7 +39,7 @@
  * the masks (-x16) & 954529 and (-x16) & 1954 (LOP3 instead of two IMAD). 0 restores the
  * multiply forms (default: both int-pipe forms measured below the multiply form on the 4090). */
 #ifndef QSB_FOLD_ALU
-#define QSB_FOLD_ALU 0
+#define QSB_FOLD_ALU 1
 #endif
 #if (QSB_FOLD_ALU & ~7) || ((QSB_FOLD_ALU & 2) && !(QSB_FOLD_ALU & 1))
 #error "QSB_FOLD_ALU takes bits 1, 2 (with 1) and 4"
