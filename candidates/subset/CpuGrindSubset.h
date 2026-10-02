@@ -96,7 +96,7 @@
  * the previous file's behaviour. (1) QSB_CPU_BATCH_AUTO (the rule of 86c643ae's QSB_CPU_BATCH_SOLO, core_sharing and batch_choose,
  * taken as written): the candidates per batch are chosen in start() from the thread_siblings_list of the workers' CPUs, 4,096
  * (QSB_CPU_BATCH_SOLO) when no two workers can share a physical core (at most one worker per CPU and no two of their CPUs SMT
- * siblings; also with one worker), QSB_CPU_BATCH (1,024) whenever siblings are among the workers' CPUs, the topology is unreadable or
+ * siblings; also with one worker), QSB_CPU_BATCH (2,048; 1,024 before) whenever siblings are among the workers' CPUs, the topology is unreadable or
  * there are more workers than CPUs; QSB_CPU_BATCH_RT=<n> (dev) overrides. A larger batch spreads each window step's shared inversion
  * over more candidates; 1,024 was sized for two SMT threads' batch state in one 1 MB L2. The batch only regroups the same candidates
  * (the walk order and the hit set are unchanged). (2) QSB_CPU_KH16, QSB_CPU_MRG and QSB_CPU_AINL (a33e04c3's three items, taken as
@@ -187,7 +187,10 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* candidates per batch when SMT siblings share a core: both threads' EC state (2 x 0.5 MB) fills
+                                    * the 1 MB L2 and overflow goes to L3 (16 MB per core on a 2-core-CCD Zen 4); each window step's
+                                    * shared inversion and per-batch setup are spread over twice the candidates. 1024: the previous
+                                    * value (state 2 x 0.25 MB, L2-resident) */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
