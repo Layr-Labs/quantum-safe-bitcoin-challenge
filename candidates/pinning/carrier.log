@@ -1,0 +1,6 @@
+qsb_carrier_sm89.h: 547040 B cubin, sha256 8b4f856143e5568c, 6079 lines, LTC64B loads in prepare: 5
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi2EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+ptxas info    : Used 64 registers, used 0 barriers, 572 bytes cmem[0]
+ptxas info    : Function properties for _Z23kernel_pinning_pipelineILb1ELi0EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre
+ptxas info    : Used 128 registers, used 1 barriers, 14336 bytes smem, 572 bytes cmem[0]
+build logs: /tmp/tmp.rv3Xu6PzI4
