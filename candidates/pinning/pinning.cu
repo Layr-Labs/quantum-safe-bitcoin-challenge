@@ -1,4 +1,4 @@
-#define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
+#define QSB_DRAW_TAG 0x77a950d3u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
@@ -11,7 +11,7 @@
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #ifndef QSB_GREEN
@@ -154,7 +154,7 @@
 #if QSB_ASICBOOST && (!(QSB_UNIF_DP & 1) || QSB_TAIL_TAB || QSB_SHA_SMEM_W1)
 #error "QSB_ASICBOOST replaces the QSB_UNIF_DP tail transform; it does not combine with QSB_TAIL_TAB or QSB_SHA_SMEM_W1"
 #endif
-#define QSB_AB_K 4       /* sequences per launch under QSB_ASICBOOST: one per warp of a 128-thread block */
+#define QSB_AB_K 8       /* sequences per launch under QSB_ASICBOOST: one per warp of a 128-thread block */
 #ifndef QSB_SHA_OPT
 #define QSB_SHA_OPT 1    /* constant-folded SHA transforms (sha_pinsha.cuh): literal K, IV round-1 Maj,
                           * feed-forward folded into round 63, word-0-only pubkey hash */
@@ -250,13 +250,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_PDEC_Z && !(QSB_GLV11 && !QSB_QGLV5)
 #error "QSB_PDEC_Z decodes GLV11 P (QSB_GLV11=1, QSB_QGLV5=0)"
 #endif
-#if QSB_PMIX12_WARP
-#define QSB_PMIX12_SEL() \
-    ((((blockIdx.x*(unsigned)(QSB_TREE_N/32)+(threadIdx.x>>5))*(unsigned)QSB_PMIX12_N) \
-      &(QSB_PMIX12-1u))<(unsigned)QSB_PMIX12_N)
-#else
-#define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
-#endif
+
 /* QSB_QMIX5 (0 or a power of two K >= 2; default 0 = compiled out): the reverse of QSB_PMIX12.
  * Every K-th prepare block ((blockIdx.x & (K-1)) == 0, block-uniform) decodes Q with P's
  * five-term GLV11 decoder (segments 0, 6, 7, 4, 5; q11_bigtbl_code_z) instead of GLV12's six
@@ -280,6 +274,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
 #endif
 #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
+
+#if QSB_PMIX12_WARP
+#define QSB_PMIX12_SEL() \
+    ((((blockIdx.x*(unsigned)(QSB_TREE_N/32)+(threadIdx.x>>5))*(unsigned)QSB_PMIX12_N) \
+      &(QSB_PMIX12-1u))<(unsigned)QSB_PMIX12_N)
+#else
+#define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
+#endif
 #ifndef QSB_BATCH
 #define QSB_BATCH 4194304    /* candidates per pipeline launch */
 #endif
@@ -1920,11 +1922,9 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #endif
     uint64_t x0[4],y0[4],x1[4],y1[4];
 #if QSB_QMIX5
-#if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP || !QSB_GLV_SEED_REG
-#error "QSB_QMIX5 runs the one-addition piped chain with register seeds (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
+#if !(QSB_CHAIN_PIPE && !QSB_CHAIN_ROLES)
+#error "QMIX5 requires the piped chain with fixed roles"
 #endif
-    /* A QMIX5 block's five Q terms are in slots 1..5 (seeds in registers): its chain starts at
-     * term 1, so it runs one trip fewer and phi still runs before term GT_Q_TERMS. */
     int first=(nonzero&1u)?(QSB_QMIX5_SEL()?1:0):GT_Q_TERMS;
 #else
     int first=(nonzero&1u)?0:GT_Q_TERMS;
@@ -2922,7 +2922,7 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
  * of the locktime alone and equal for every sequence at that locktime (AsicBoost's observation).
  * Under the switch the four warps of a prepare block hash the same 32 locktimes for four
  * sequences. Warp 0 expands the schedule once per locktime and stores the 48 words lane-major as
- * twelve 16-byte quads (quad q of lane l at sw[q*32 + l]: conflict-free STS.128/LDS.128); after one
+ * twelve 16-byte quads (quad q of lane l at sw[q*16 + l]: conflict-free STS.128/LDS.128); after one
  * block barrier every warp, warp 0 included, loads them. Every warp runs the same rounds on the same
  * words; only where W16..W63 come from differs. The words are the U transform's own sums (mod 2^32,
  * so the association does not change a bit). */
@@ -2933,7 +2933,7 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
 /* The arena holds only the GLV codes (u32 slots below GT_Q_TERMS+GT_CHUNKS) until the post-chain
  * __syncthreads that precedes the tree; the schedule's 6 KiB sit above them and below 14 KiB. */
 static_assert((GT_Q_TERMS + GT_CHUNKS) * QSB_TREE_N * 4 <= QSB_AB_SW_OFF &&
-              QSB_AB_SW_OFF + 12 * 32 * 16 <= 14 * QSB_TREE_N * 8, "QSB_ASICBOOST arena layout");
+              QSB_AB_SW_OFF + 12 * 16 * 16 <= 14 * QSB_TREE_N * 8, "QSB_ASICBOOST arena layout");
 __device__ __forceinline__ void qsb_ab_schedule_store(
     uint32_t lane, uint32_t u0, uint32_t w1, uint32_t w2, uint32_t v5, uint4 *sw)
 {
@@ -2961,13 +2961,13 @@ __device__ __forceinline__ void qsb_ab_schedule_store(
     w[14] = s1(w[12]) + w[7] + s0(L);
     w[15] += s1(w[13]) + w[8] + s0(w[0]);
 #pragma unroll
-    for (int q = 0; q < 4; q++) sw[q*32 + lane] = make_uint4(w[4*q], w[4*q+1], w[4*q+2], w[4*q+3]);
+    for (int q = 0; q < 4; q++) sw[q*16 + lane] = make_uint4(w[4*q], w[4*q+1], w[4*q+2], w[4*q+3]);
     QSB_WMIX_Z();
 #pragma unroll
-    for (int q = 0; q < 4; q++) sw[(4+q)*32 + lane] = make_uint4(w[4*q], w[4*q+1], w[4*q+2], w[4*q+3]);
+    for (int q = 0; q < 4; q++) sw[(4+q)*16 + lane] = make_uint4(w[4*q], w[4*q+1], w[4*q+2], w[4*q+3]);
     QSB_WMIX_Z();
 #pragma unroll
-    for (int q = 0; q < 4; q++) sw[(8+q)*32 + lane] = make_uint4(w[4*q], w[4*q+1], w[4*q+2], w[4*q+3]);
+    for (int q = 0; q < 4; q++) sw[(8+q)*16 + lane] = make_uint4(w[4*q], w[4*q+1], w[4*q+2], w[4*q+3]);
 }
 
 /* _SHA256TransformFastTail11U's rounds with W16..W63 read from sw (written by warp 0 before the
@@ -3016,7 +3016,7 @@ __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     uint32_t w[16];
 #define QSB_AB_LOAD(blk) { \
     _Pragma("unroll") for (int q = 0; q < 4; q++) { \
-        const uint4 v = sw[(4*(blk)+q)*32 + lane]; \
+        const uint4 v = sw[(4*(blk)+q)*16 + lane]; \
         w[4*q] = v.x; w[4*q+1] = v.y; w[4*q+2] = v.z; w[4*q+3] = v.w; } }
     QSB_AB_LOAD(0);
     QSB_RND16L(16);
@@ -4014,7 +4014,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
  * the same 33-byte message and H0 gate, mirroring the GPU's recid-0-first early exit, and publish
  * through the same exact OpenSSL gate. A null plane (runtime fallback) hashes on the GPU as before. */
 #ifndef QSB_HOST_PKSHA
-#define QSB_HOST_PKSHA 4
+#define QSB_HOST_PKSHA 0
 #endif
 /* QSB_PK_YIELD (kill switch, default 1): when a batch's plane still holds an unfinished host job
  * (the host workers are behind), the feeder no longer waits for, or helps with, that job: the
@@ -4118,12 +4118,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         /* tid through volatile asm: this warp/lane must not be CSE'd with the tree's lane/warp
          * arithmetic after the chain, which would keep them live across the chain loop. */
         uint32_t ab_tid; asm volatile("mov.u32 %0, %%tid.x;" : "=r"(ab_tid));
-        const uint32_t ab_warp = ab_tid >> 5, ab_lane = ab_tid & 31u;
+        const uint32_t ab_warp = ab_tid >> 4, ab_lane = ab_tid & 15u;
         uint32_t u0, w1;
         {
             const uint32_t bid = blockIdx.x;
-            u0 = pin_tail_words[0] | ((bid & 7u) << 5);
-            w1 = __byte_perm((start_lt >> 8) + (bid >> 3), pin_tail_words[1], 0x0124);
+            u0 = pin_tail_words[0] | ((bid & 15u) << 4);
+            w1 = __byte_perm((start_lt >> 8) + (bid >> 4), pin_tail_words[1], 0x0124);
         }
         uint4 *ab_sw = (uint4 *)((char *)qsb_digit_arena() + QSB_AB_SW_OFF);
         if (ab_warp == 0)
@@ -7109,8 +7109,8 @@ int main(int argc, char **argv) {
 #if QSB_ASICBOOST
                     /* candidate hi: block hi>>7 (32 locktimes), warp (hi>>5)&3 = sequence
                      * base_seq + warp*effective_total, lane hi&31 */
-                    const uint32_t lt = base_lt + ((hi >> 7) << 5) + (hi & 31u);
-                    const uint32_t hs = base_seq + ((hi >> 5) & (uint32_t)(QSB_AB_K - 1)) * (uint32_t)effective_total;
+                    const uint32_t lt = base_lt + ((hi >> 7) << 4) + (hi & 15u);
+                    const uint32_t hs = base_seq + ((hi >> 4) & (uint32_t)(QSB_AB_K - 1)) * (uint32_t)effective_total;
 #else
                     const uint32_t lt = base_lt + hi;
                     const uint32_t hs = base_seq;
