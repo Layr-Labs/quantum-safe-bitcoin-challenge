@@ -166,6 +166,155 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
     d += t1; \
     h = t1 + t2;
 
+/* QSB_SHA_LEA (lane LEA, 2026-09-30; the rotate-add round is ercumentyildirim's, public pinning source b62c41b8; the
+ * split form is skeptic 39's arm a5). Each Sigma factors through one outer rotation,
+ *   S1(e) = ROR6(e ^ ROR5(e) ^ ROR19(e)),  S0(a) = ROR2(a ^ ROR11(a) ^ ROR20(a))
+ * (ROR distributes over XOR: an identity for every 32-bit word), so ptxas folds each outer rotation and the add that
+ * takes it into one LEA.HI (x + ROL(y, n)): 13 issue slots per round instead of 14, with the same 32-bit sums.
+ *   QSB_LEA_RLM (only e' = T - Maj + d in PTX, ptxas reassociates the rest): the window and constant blocks (S2Round).
+ *   QSB_LEA_RLA (the whole add chain in PTX): the outer SHA256d rounds (S2RoundO in SHA256_RND) and QSB_RL.
+ *   sha_gate_fma.cuh adds the gate's round 1 and round 63 and the cap-phase FMA form (QSB_LEA_PARTS).
+ * The PTX keeps +Maj/-Maj, which the front end would cancel in C. 0 = the rounds above; in the knob string only when
+ * non-zero, so the image at 0 is the base's byte for byte. */
+#ifndef QSB_SHA_LEA
+#define QSB_SHA_LEA 1
+#endif
+#if QSB_SHA_LEA != 0 && QSB_SHA_LEA != 1
+#error "QSB_SHA_LEA must be 0 or 1"
+#endif
+#if QSB_SHA_LEA
+/* QSB_LEA_PARTS (with QSB_SHA_LEA 1): bit 0 the gate's IV round 1, bit 1 the gate's a-only round 63, bit 2 the gate's
+ * rounds 2 and 3 with the literal d as an immediate, bit 3 the cap-phase FMA form (QSB_GATE_FMA_RT). */
+#ifndef QSB_LEA_PARTS
+#define QSB_LEA_PARTS 11
+#endif
+/* QSB_LEA_ORD (with QSB_SHA_LEA 1): operand-order variant of the rounds (register reads and reuse hits only). */
+#ifndef QSB_LEA_ORD
+#define QSB_LEA_ORD 536
+#endif
+/* QSB_LEA_ORD bits (register reads only; every variant is the same sums): 1 the Sigma XORs in reverse order; 2 the
+ * rotations as __funnelshift_r (shf.r.wrap) instead of the shift-or form; 4 in QSB_LEA_RLM, Maj added after the S1
+ * rotation; 8 in QSB_LEA_RLM, Ch and Maj before the Sigma factors; 16 in QSB_LEA_RLA, the PTX adds with their operands
+ * swapped and a' before e'; 32 in QSB_LEA_RLM, S0 after T and e'; 256 or 512 in QSB_LEA_RLM, T summed
+ * with the rotation first or Maj second (over bit 4); 64 in QSB_LEA_RLM, e' = (d + T) - Maj; 128 the
+ * Sigma XORs of the PTX-chain forms in reverse order. */
+#if QSB_LEA_ORD & 2
+#define QSB_LEA_ROR(x,n) __funnelshift_r((x), (x), (n))
+#else
+#define QSB_LEA_ROR(x,n) (((x)>>(n))|((x)<<(32-(n))))
+#endif
+#define QSB_LEA_S1P_FWD(x) ((x) ^ QSB_LEA_ROR(x,5) ^ QSB_LEA_ROR(x,19))
+#define QSB_LEA_S0P_FWD(x) ((x) ^ QSB_LEA_ROR(x,11) ^ QSB_LEA_ROR(x,20))
+#define QSB_LEA_S1P_REV(x) (QSB_LEA_ROR(x,19) ^ QSB_LEA_ROR(x,5) ^ (x))
+#define QSB_LEA_S0P_REV(x) (QSB_LEA_ROR(x,20) ^ QSB_LEA_ROR(x,11) ^ (x))
+/* QSB_LEA_S1P / S0P serve QSB_LEA_RLM (bit 1 reverses them); QSB_LEA_S1PA / S0PA serve the PTX-chain forms (RLA, RLD,
+ * the gate's round 1 and round 63, the cap-phase FMA form; bit 128 reverses them). */
+#if QSB_LEA_ORD & 1
+#define QSB_LEA_S1P(x) QSB_LEA_S1P_REV(x)
+#define QSB_LEA_S0P(x) QSB_LEA_S0P_REV(x)
+#else
+#define QSB_LEA_S1P(x) QSB_LEA_S1P_FWD(x)
+#define QSB_LEA_S0P(x) QSB_LEA_S0P_FWD(x)
+#endif
+#if QSB_LEA_ORD & 128
+#define QSB_LEA_S1PA(x) QSB_LEA_S1P_REV(x)
+#define QSB_LEA_S0PA(x) QSB_LEA_S0P_REV(x)
+#else
+#define QSB_LEA_S1PA(x) QSB_LEA_S1P_FWD(x)
+#define QSB_LEA_S0PA(x) QSB_LEA_S0P_FWD(x)
+#endif
+#if QSB_LEA_ORD & 16
+#define QSB_LEA_RLA(a, b, c, d, e, f, g, h, kw) { \
+    const uint32_t qy_ = QSB_LEA_S1PA(e), qz_ = QSB_LEA_S0PA(a); \
+    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
+    const uint32_t qx_ = (h) + (kw); \
+    asm("{\n\t.reg .u32 x2, t, r, s;\n\t" \
+        "add.u32 x2, %3, %2;\n\t" \
+        "add.u32 x2, %4, x2;\n\t" \
+        "shf.r.wrap.b32 r, %5, %5, 6;\n\t" \
+        "add.u32 t, r, x2;\n\t" \
+        "shf.r.wrap.b32 s, %6, %6, 2;\n\t" \
+        "add.u32 %1, s, t;\n\t" \
+        "sub.u32 r, t, %4;\n\t" \
+        "add.u32 %0, %0, r;\n\t}" \
+        : "+r"(d), "=r"(h) : "r"(qx_), "r"(qch_), "r"(qmj_), "r"(qy_), "r"(qz_)); }
+#else
+#define QSB_LEA_RLA(a, b, c, d, e, f, g, h, kw) { \
+    const uint32_t qy_ = QSB_LEA_S1PA(e), qz_ = QSB_LEA_S0PA(a); \
+    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
+    const uint32_t qx_ = (h) + (kw); \
+    asm("{\n\t.reg .u32 x2, t, r, s;\n\t" \
+        "add.u32 x2, %2, %3;\n\t" \
+        "add.u32 x2, x2, %4;\n\t" \
+        "shf.r.wrap.b32 r, %5, %5, 6;\n\t" \
+        "add.u32 t, x2, r;\n\t" \
+        "shf.r.wrap.b32 s, %6, %6, 2;\n\t" \
+        "sub.u32 r, t, %4;\n\t" \
+        "add.u32 %1, t, s;\n\t" \
+        "add.u32 %0, r, %0;\n\t}" \
+        : "+r"(d), "=r"(h) : "r"(qx_), "r"(qch_), "r"(qmj_), "r"(qy_), "r"(qz_)); }
+#endif
+/* the same round when d is still the literal DLIT (the gate's rounds 2 and 3 from the IV): d' = T - Maj + DLIT */
+#define QSB_LEA_RLD(a, b, c, d, e, f, g, h, kw, DLIT) { \
+    const uint32_t qy_ = QSB_LEA_S1PA(e), qz_ = QSB_LEA_S0PA(a); \
+    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
+    const uint32_t qx_ = (h) + (kw); \
+    asm("{\n\t.reg .u32 x2, t, r, s;\n\t" \
+        "add.u32 x2, %2, %3;\n\t" \
+        "add.u32 x2, x2, %4;\n\t" \
+        "shf.r.wrap.b32 r, %5, %5, 6;\n\t" \
+        "add.u32 t, x2, r;\n\t" \
+        "shf.r.wrap.b32 s, %6, %6, 2;\n\t" \
+        "sub.u32 r, t, %4;\n\t" \
+        "add.u32 %1, t, s;\n\t" \
+        "add.u32 %0, r, %7;\n\t}" \
+        : "=r"(d), "=r"(h) : "r"(qx_), "r"(qch_), "r"(qmj_), "r"(qy_), "r"(qz_), "n"(DLIT)); }
+#if QSB_LEA_ORD & 8
+#define QSB_LEA_RLM_H(a, b, c, e, f, g) const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
+    const uint32_t qy_ = QSB_LEA_S1P(e), qz_ = QSB_LEA_S0P(a);
+#else
+#define QSB_LEA_RLM_H(a, b, c, e, f, g) const uint32_t qy_ = QSB_LEA_S1P(e), qz_ = QSB_LEA_S0P(a); \
+    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c);
+#endif
+#if QSB_LEA_ORD & 256
+#define QSB_LEA_RLM_T(h, kw) (QSB_LEA_ROR(qy_, 6) + (h) + (kw) + qch_ + qmj_)
+#elif QSB_LEA_ORD & 512
+#define QSB_LEA_RLM_T(h, kw) ((h) + qmj_ + (kw) + qch_ + QSB_LEA_ROR(qy_, 6))
+#elif QSB_LEA_ORD & 4
+#define QSB_LEA_RLM_T(h, kw) ((h) + (kw) + qch_ + QSB_LEA_ROR(qy_, 6) + qmj_)
+#else
+#define QSB_LEA_RLM_T(h, kw) ((h) + (kw) + qch_ + qmj_ + QSB_LEA_ROR(qy_, 6))
+#endif
+#if QSB_LEA_ORD & 64
+#define QSB_LEA_RLM_D(d, qt_, qmj_) \
+    asm("{\n\t.reg .u32 r;\n\tadd.u32 r, %0, %1;\n\tsub.u32 %0, r, %2;\n\t}" : "+r"(d) : "r"(qt_), "r"(qmj_));
+#else
+#define QSB_LEA_RLM_D(d, qt_, qmj_) \
+    asm("{\n\t.reg .u32 r;\n\tsub.u32 r, %1, %2;\n\tadd.u32 %0, r, %0;\n\t}" : "+r"(d) : "r"(qt_), "r"(qmj_));
+#endif
+#if QSB_LEA_ORD & 32
+#define QSB_LEA_RLM(a, b, c, d, e, f, g, h, kw) { \
+    const uint32_t qy_ = QSB_LEA_S1P(e), qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
+    const uint32_t qt_ = QSB_LEA_RLM_T(h, kw); \
+    QSB_LEA_RLM_D(d, qt_, qmj_) \
+    const uint32_t qz_ = QSB_LEA_S0P(a); \
+    h = qt_ + QSB_LEA_ROR(qz_, 2); }
+#else
+#define QSB_LEA_RLM(a, b, c, d, e, f, g, h, kw) { \
+    QSB_LEA_RLM_H(a, b, c, e, f, g) \
+    const uint32_t qt_ = QSB_LEA_RLM_T(h, kw); \
+    h = qt_ + QSB_LEA_ROR(qz_, 2); \
+    QSB_LEA_RLM_D(d, qt_, qmj_) }
+#endif
+#undef S2Round
+#define S2Round(a, b, c, d, e, f, g, h, k, w) QSB_LEA_RLM(a, b, c, d, e, f, g, h, (k) + (w))
+#define S2RoundO(a, b, c, d, e, f, g, h, k, w) QSB_LEA_RLA(a, b, c, d, e, f, g, h, (k) + (w))
+#define QSB_LEA_KNOBS QSB_CARRIER_KV(QSB_SHA_LEA) QSB_CARRIER_KV(QSB_LEA_PARTS) QSB_CARRIER_KV(QSB_LEA_ORD)
+#else
+#define S2RoundO S2Round
+#define QSB_LEA_KNOBS
+#endif
+
 // WMIX
 #define WMIX() { \
 w[0] += s1(w[14]) + w[9] + s0(w[1]);\
@@ -188,22 +337,22 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]);\
 
 // ROUND
 #define SHA256_RND(k) {\
-S2Round(a, b, c, d, e, f, g, h, K[k], w[0]);\
-S2Round(h, a, b, c, d, e, f, g, K[k + 1], w[1]);\
-S2Round(g, h, a, b, c, d, e, f, K[k + 2], w[2]);\
-S2Round(f, g, h, a, b, c, d, e, K[k + 3], w[3]);\
-S2Round(e, f, g, h, a, b, c, d, K[k + 4], w[4]);\
-S2Round(d, e, f, g, h, a, b, c, K[k + 5], w[5]);\
-S2Round(c, d, e, f, g, h, a, b, K[k + 6], w[6]);\
-S2Round(b, c, d, e, f, g, h, a, K[k + 7], w[7]);\
-S2Round(a, b, c, d, e, f, g, h, K[k + 8], w[8]);\
-S2Round(h, a, b, c, d, e, f, g, K[k + 9], w[9]);\
-S2Round(g, h, a, b, c, d, e, f, K[k + 10], w[10]);\
-S2Round(f, g, h, a, b, c, d, e, K[k + 11], w[11]);\
-S2Round(e, f, g, h, a, b, c, d, K[k + 12], w[12]);\
-S2Round(d, e, f, g, h, a, b, c, K[k + 13], w[13]);\
-S2Round(c, d, e, f, g, h, a, b, K[k + 14], w[14]);\
-S2Round(b, c, d, e, f, g, h, a, K[k + 15], w[15]);\
+S2RoundO(a, b, c, d, e, f, g, h, K[k], w[0]);\
+S2RoundO(h, a, b, c, d, e, f, g, K[k + 1], w[1]);\
+S2RoundO(g, h, a, b, c, d, e, f, K[k + 2], w[2]);\
+S2RoundO(f, g, h, a, b, c, d, e, K[k + 3], w[3]);\
+S2RoundO(e, f, g, h, a, b, c, d, K[k + 4], w[4]);\
+S2RoundO(d, e, f, g, h, a, b, c, K[k + 5], w[5]);\
+S2RoundO(c, d, e, f, g, h, a, b, K[k + 6], w[6]);\
+S2RoundO(b, c, d, e, f, g, h, a, K[k + 7], w[7]);\
+S2RoundO(a, b, c, d, e, f, g, h, K[k + 8], w[8]);\
+S2RoundO(h, a, b, c, d, e, f, g, K[k + 9], w[9]);\
+S2RoundO(g, h, a, b, c, d, e, f, K[k + 10], w[10]);\
+S2RoundO(f, g, h, a, b, c, d, e, K[k + 11], w[11]);\
+S2RoundO(e, f, g, h, a, b, c, d, K[k + 12], w[12]);\
+S2RoundO(d, e, f, g, h, a, b, c, K[k + 13], w[13]);\
+S2RoundO(c, d, e, f, g, h, a, b, K[k + 14], w[14]);\
+S2RoundO(b, c, d, e, f, g, h, a, K[k + 15], w[15]);\
 }
 
 //Take the last 8 bytes of 20-byte Hash160 byte array
