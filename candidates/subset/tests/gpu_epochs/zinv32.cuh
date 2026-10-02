@@ -205,6 +205,7 @@ ZI_CONST uint64_t ZI_BY_LUT[832]=ZI_BY_LUT_INIT;
  * only its own (host) copy of the divstep code keeps reading ZI_BY_LUT. */
 #if defined(QSB_ROOT_LUT_SMEM) && QSB_ROOT_LUT_SMEM
 __device__ __align__(16) const uint64_t ZI_BY_LUT_G[832]=ZI_BY_LUT_INIT;   /* global mirror, cp.async source */
+// LUT needs 832 words even when the inverse tree has only 128 leaves.
 __shared__ __align__(16) uint64_t qsb_tree_inverses_smem[4][256];         /* the tree's inverses rows */
 /* Issue this thread's share of the 416 16-byte chunks (flat word 2i..2i+1 of the table to flat word
  * 2i..2i+1 of the rows) and commit them as one group. No register holds table data. cp.async needs sm_80:

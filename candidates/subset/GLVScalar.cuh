@@ -646,7 +646,11 @@ struct q9_u129 { uint64_t lo,hi;uint32_t top; };
  * and bit-identical; bit 1 in this tree's walker form is +3 slots (ptxas splits the 64-bit words it had fused with
  * the walker's field extraction: +6 LOP3, +4 IMAD.IADD against -8 IADD3/IADD3.X), so it stays off. */
 #ifndef QSB_DECODE_CUT
+#if QSB_LOCAL_SM86
+#define QSB_DECODE_CUT 0   /* dev-only sm_86 rig: needs the ZDEC walker */
+#else
 #define QSB_DECODE_CUT 2
+#endif
 #endif
 #if QSB_DECODE_CUT < 0 || QSB_DECODE_CUT > 3
 #error "QSB_DECODE_CUT is a mask of bits 1 and 2"
@@ -861,7 +865,11 @@ __device__ __forceinline__ void q9_glv_split(const uint64_t input[4],uint64_t r1
  * code the chain gathers is identical (qsb_s3_selfcheck replays the z walker against q9_bigtbl_code /
  * q11_bigtbl_code). 0 = q9_glv_split and the (|r|, sign) walker byte for byte. */
 #ifndef QSB_GLV_ZDEC
+#if QSB_LOCAL_SM86
+#define QSB_GLV_ZDEC 0   /* dev-only sm_86 rig: needs the GLV11/Q_MIX walk */
+#else
 #define QSB_GLV_ZDEC 1
+#endif
 #endif
 #if QSB_GLV_ZDEC != 0 && QSB_GLV_ZDEC != 1
 #error "QSB_GLV_ZDEC must be 0 or 1"
