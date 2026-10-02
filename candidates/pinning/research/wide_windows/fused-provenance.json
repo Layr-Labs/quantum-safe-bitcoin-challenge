@@ -1,0 +1,7 @@
+{
+  "source_sha256": "9150b7225e765df96a3bb41fdff30993b2afa7cdd2c2406ed1db429800bb8110",
+  "probe_sha256": "6fdd3dee0d64b10af3c4fd2905f124310377085096e31445dec7666c69bee826",
+  "change": "Keep four recovery fields in registers across the original CTA product-tree inverse; remove search state and tree checkpoints.",
+  "tradeoff": "One root inversion per256 candidates instead of one per16M; shared barriers and live registers may dominate.",
+  "gpu_executed": false
+}
