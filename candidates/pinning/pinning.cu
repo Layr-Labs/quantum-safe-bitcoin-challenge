@@ -538,6 +538,9 @@ static_assert(QSB_SUBPIPE % 256 == 0, "sub-batch must keep start_lt a multiple o
 #if QSB_REFILL_BEFORE_GATE != 0 && QSB_REFILL_BEFORE_GATE != 1
 #error "QSB_REFILL_BEFORE_GATE must be 0 or 1"
 #endif
+#ifndef QSB_HOST_HIT_OUTPUT_BUFFER
+#define QSB_HOST_HIT_OUTPUT_BUFFER 1
+#endif
 #ifndef QSB_COMPACT_READBACK
 #define QSB_COMPACT_READBACK 1 /* one count+64-index D2H instead of two adjacent transfers */
 #endif
@@ -5967,6 +5970,20 @@ static inline void message(uint32_t w[16], const uint64_t *x, uint32_t prefix) {
     for (int i = 9; i < 15; i++) w[i] = 0;
     w[15] = 0x108u;
 }
+#ifndef QSB_HOST_PK_DIRECT_WORDS
+#define QSB_HOST_PK_DIRECT_WORDS 1
+#endif
+#if QSB_HOST_PK_DIRECT_WORDS
+static inline void message_lane(uint32_t w[16][8], const uint64_t *x, uint32_t prefix, int lane) {
+    uint32_t s[8];
+    for (int i = 0; i < 4; i++) { s[2 * i] = (uint32_t)x[i]; s[2 * i + 1] = (uint32_t)(x[i] >> 32); }
+    w[0][lane] = (prefix << 24) | (s[7] >> 8);
+    for (int i = 1; i < 8; i++) w[i][lane] = (s[8 - i] << 24) | (s[7 - i] >> 8);
+    w[8][lane] = (s[0] << 24) | 0x800000u;
+    for (int i = 9; i < 15; i++) w[i][lane] = 0;
+    w[15][lane] = 0x108u;
+}
+#endif
 static inline uint32_t prefix_of(uint32_t yp, int ri) {
 #if QSB_FIN_BAL2 & 2
     return (yp >> (8 * ri)) & 0xFFu;
@@ -6020,8 +6037,16 @@ static void hash_record(Job &J, uint32_t j) {
             if (y != 0u && base + (uint32_t)l < J.batch_sz) {
                 uint64_t x0[4], x1[4];
                 lane_keys(rec, l, x0, x1);
-                message(m0, x0, prefix_of(y, 0));
-                message(m1, x1, prefix_of(y, 1));
+#if QSB_HOST_PK_DIRECT_WORDS
+                if (mode == 1) {
+                    message_lane(w0, x0, prefix_of(y, 0), t);
+                    message_lane(w1, x1, prefix_of(y, 1), t);
+                } else
+#endif
+                {
+                    message(m0, x0, prefix_of(y, 0));
+                    message(m1, x1, prefix_of(y, 1));
+                }
                 live |= 1u << t;
                 if (mode == 2) {
                     hash2_ni(m0, m1, &h0[t], &h1[t]);
@@ -6032,10 +6057,19 @@ static void hash_record(Job &J, uint32_t j) {
                     h0[t] = s0[0]; h1[t] = s1[0];
                 }
             } else {
-                memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+#if QSB_HOST_PK_DIRECT_WORDS
+                if (mode == 1) {
+                    for (int k = 0; k < 16; k++) { w0[k][t] = 0; w1[k][t] = 0; }
+                } else
+#endif
+                {
+                    memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+                }
             }
+#if !QSB_HOST_PK_DIRECT_WORDS
             if (mode == 1)
                 for (int k = 0; k < 16; k++) { w0[k][t] = m0[k]; w1[k][t] = m1[k]; }
+#endif
         }
         if (!live) continue;
         if (mode == 1) hash8_avx2(w0, w1, h0, h1);
@@ -7098,6 +7132,10 @@ int main(int argc, char **argv) {
             FILE *f = fopen(fname, "a");
             int wrote = 0;
             if (f) {
+#if defined(QSB_HOST_HIT_OUTPUT_BUFFER) && QSB_HOST_HIT_OUTPUT_BUFFER
+                char hit_lines[64 * 96];
+                size_t hit_bytes = 0;
+#endif
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
 #if QSB_REFILL_BEFORE_GATE
@@ -7128,9 +7166,28 @@ int main(int argc, char **argv) {
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
                     if (ri < 0) continue;
 #endif
+#if defined(QSB_HOST_HIT_OUTPUT_BUFFER) && QSB_HOST_HIT_OUTPUT_BUFFER
+                    const int line_bytes = snprintf(hit_lines + hit_bytes,
+                        sizeof(hit_lines) - hit_bytes,
+                        "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
+                    if (line_bytes < 0 || (size_t)line_bytes >= sizeof(hit_lines) - hit_bytes) {
+                        fprintf(stderr, "Hit output buffer overflow\n");
+                        fclose(f);
+                        return 1;
+                    }
+                    hit_bytes += (size_t)line_bytes;
+#else
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
+#endif
                     wrote = 1;
                 }
+#if defined(QSB_HOST_HIT_OUTPUT_BUFFER) && QSB_HOST_HIT_OUTPUT_BUFFER
+                if (hit_bytes && fwrite(hit_lines, 1, hit_bytes, f) != hit_bytes) {
+                    fprintf(stderr, "Hit output write failed\n");
+                    fclose(f);
+                    return 1;
+                }
+#endif
                 fclose(f);
             }
             if (wrote) found = 1;
