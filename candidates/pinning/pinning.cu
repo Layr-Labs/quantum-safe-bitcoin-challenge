@@ -683,6 +683,23 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
     0x00,0x7F,0xFF,0x09,0x0D
 };
 
+/* Direct TOP5 plan fields from pochita0 e529e218, via public kshitij b508fe55.
+ * Default 0 keeps the promoted b59 plan-load path and native carrier. */
+#ifndef QSB_T5_DIRECT
+#define QSB_T5_DIRECT 1
+#endif
+#if QSB_T5_DIRECT != 0 && QSB_T5_DIRECT != 1
+#error "QSB_T5_DIRECT must be 0 or 1"
+#endif
+/* Earlier lifetime end for already-loaded finish state, after pochita0's
+ * unpromoted early-discard design (publicly described by i34-9).
+ * 0 retains the promoted b59 timing and its native carrier. */
+#ifndef QSB_STATE_DROP_EARLY
+#define QSB_STATE_DROP_EARLY 1
+#endif
+#if QSB_STATE_DROP_EARLY != 0 && QSB_STATE_DROP_EARLY != 1
+#error "QSB_STATE_DROP_EARLY must be 0 or 1"
+#endif
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
@@ -1468,7 +1485,7 @@ __device__ __forceinline__ void qsb_load_glv(const uint8_t *table,unsigned term,
  * Off: on the 1004f554 tree it measured +0.532 % against that tree's +0.635 %
  * (RTX 4090, ABBA), so the C address stays. */
 #ifndef QSB_PIPE_LEA
-#define QSB_PIPE_LEA 0
+#define QSB_PIPE_LEA 1
 #endif
 #if QSB_PIPE_LEA != 0 && QSB_PIPE_LEA != 1
 #error "QSB_PIPE_LEA must be 0 or 1"
@@ -2266,7 +2283,20 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #define QSB_ZEROS_N 24
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
-__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+#if QSB_T5_DIRECT && (QSB_TREE_N != 128 || QSB_PROBE_NOSTATE || QSB_PROBE_NOS2 || \
+    QSB_ZEROS_N < 0 || QSB_ZEROS_N > 256)
+#error "QSB_T5_DIRECT requires the safe b59 paired TOP5 N128 plan and valid SHA-256 zeros"
+#endif
+/* Feature bit10 is unused in b59 and disjoint from SHA-256 zeros0..256. */
+#if QSB_STATE_DROP_EARLY && (QSB_L2STATE != 1033 || QSB_PREP_STATE != 2 || \
+    QSB_TREE_N != 128 || QSB_S2_THREADS != 128 || QSB_STATE_PLANES != 4u || \
+    QSB_PROBE_NOSTATE || QSB_PROBE_NOS2 || QSB_ZEROS_N < 0 || QSB_ZEROS_N > 256)
+#error "QSB_STATE_DROP_EARLY requires the b59 four-plane N128 finish and valid SHA-256 zeros"
+#endif
+/* Bits9/10 authenticate the independently selected F/P mechanisms. */
+#define QSB_CARRIER_FINGERPRINT (QSB_ZEROS_N | \
+    (QSB_STATE_DROP_EARLY ? 0x00000200 : 0) | (QSB_T5_DIRECT ? 0x00000400 : 0))
+__device__ __constant__ int qsb_carrier_zeros = QSB_CARRIER_FINGERPRINT;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -3442,8 +3472,9 @@ __device__ __forceinline__ void qsb_block_product_checkpoint(
     }
 
     if(tid==0){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4u+k]=products[k][2*N-2];
+        uint64_t *root_out=roots+(size_t)blockIdx.x*4u;
+        qsb_st_v2((ulonglong2*)root_out,products[0][2*N-2],products[1][2*N-2]);
+        qsb_st_v2((ulonglong2*)(root_out+2),products[2][2*N-2],products[3][2*N-2]);
     }
 }
 template<int N>
@@ -3555,8 +3586,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
                    active?roots[(size_t)i*4u+3]:0ULL,0};
     qsb_block_inverse_checkpoint<256>(r,super_roots,root_checkpoint);
     if(active){
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[(size_t)i*4u+k]=r[k];
+        uint64_t *root_out=roots+(size_t)i*4u;
+        qsb_st_v2((ulonglong2*)root_out,r[0],r[1]);
+        qsb_st_v2((ulonglong2*)(root_out+2),r[2],r[3]);
         // One fixed-ordinate multiplication per128-leaf tree, instead of
         // one per leaf in finish. Keep both inverse representatives.
         uint64_t b[5]={
@@ -3568,8 +3600,9 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
 #endif
         };
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
-        #pragma unroll
-        for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
+        uint64_t *wroot_out=roots+((size_t)count+i)*4u;
+        qsb_st_v2((ulonglong2*)wroot_out,weighted[0],weighted[1]);
+        qsb_st_v2((ulonglong2*)(wroot_out+2),weighted[2],weighted[3]);
     }
 }
 
@@ -3900,6 +3933,9 @@ __device__ __constant__ uint64_t pin_chord_e[4];
 
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
+#if QSB_T5_DIRECT && (!(QSB_POST_GLUE & 2) || !QSB_TREE_GFILL || !QSB_TREE_TOP5)
+#error "QSB_T5_DIRECT requires the paired GFILL TOP5 plan"
+#endif
 #include "PackedRecovery.cuh"
 static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 #if QSB_PREP_STATE
@@ -4310,6 +4346,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
+#if QSB_STATE_DROP_EARLY
+#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+    /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
+     * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
+     * warp's loads were one instruction per plane, so the whole 8-lane group has its data. */
+    asm volatile("membar.cta; bar.warp.sync 0xffffffff;" ::: "memory");
+    if((threadIdx.x&7u)==0u){
+        const ulonglong2 *dst=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+        qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
+        qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
+    }
+#endif
+#endif
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
 #if QSB_PK_ON
         if(pk_rec)((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=0u;
@@ -4351,6 +4400,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+#if !QSB_STATE_DROP_EARLY
 #if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
      * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
@@ -4361,6 +4411,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
         qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
     }
+#endif
 #endif
 
 #if QSB_PK_ON
