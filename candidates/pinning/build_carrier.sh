@@ -6,14 +6,19 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 Z=${1:-24}
+FIN_FULL_TILE=0
+if grep -Eq '^[[:space:]]*#define[[:space:]]+QSB_FIN_FULL_TILE[[:space:]]+1([[:space:]]|$)' pinning.cu; then
+    FIN_FULL_TILE=1
+fi
 W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
 nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
      -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
 cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
-python3 - "$Z" "$W" <<'PY'
+python3 - "$Z" "$W" "$FIN_FULL_TILE" <<'PY'
 import base64, hashlib, re, sys
 zeros = int(sys.argv[1]); W = sys.argv[2]
+finish_full_tile = sys.argv[3] == "1"
 syms = open(W + "/symbols.txt").read()
 want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_S0",    r"_Z23kernel_pinning_pipelineILb1ELi0EE\w+"),
@@ -27,6 +32,8 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_RR",    r"_Z17qsb_root_register\w+"),             # optional
     ("QK_PFC",   r"_Z29qsb_prefix_field_check_kernel\w+"),  # optional
 ]
+if finish_full_tile:
+    want.append(("QK_S2_FULL", r"_Z\d+kernel_pinning_finish_full_tileILb1EE\w+"))
 optional = {"QK_RF", "QK_RR", "QK_PFC"}
 names = []
 for kid, pat in want:

@@ -8,6 +8,10 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
+/* Complete 131,072-candidate tiles run a finish kernel specialised for a full tile (no partial-tile guards). */
+#ifndef QSB_FIN_FULL_TILE
+#define QSB_FIN_FULL_TILE 1
+#endif
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
@@ -174,6 +178,9 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #if QSB_TREE_N != 256 && QSB_TREE_N != 128 && QSB_TREE_N != 64
 #error "QSB_TREE_N must be 256, 128 or 64"
+#endif
+#if QSB_FIN_FULL_TILE && (QSB_SUBPIPE != 131072 || QSB_TREE_N != 128)
+#error "QSB_FIN_FULL_TILE requires 131072-candidate tiles and 128-leaf trees"
 #endif
 /* GLV11 (GLVScalar.cuh): P reads five table terms, ten additions per candidate.
  * Its 21.1 GiB table leaves room for 1 GiB of pipeline state on a 24 GiB card
@@ -2383,11 +2390,24 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
  *   v[2] = g+K1, v[3] = f+K2+W2, v[4] = e+K3 (the "h" inputs of rounds 1..3)
  *   v[5] = s1(L)+s0(W2) (the constant part of schedule word 17).
  * Passed by value as a kernel parameter together with the midstate (constant bank). */
+/* Use five aligned vector loads for the per-warp tail precompute. */
+#ifndef QSB_TAIL_PRE_VEC
+#define QSB_TAIL_PRE_VEC 1
+#endif
+/* Keep each per-warp precompute on a 16-byte boundary for vector loads. */
+#if QSB_TAIL_PRE_VEC
+struct alignas(16) qsb_tail_pre { uint32_t mid[8]; uint32_t v[6];
+#else
 struct qsb_tail_pre { uint32_t mid[8]; uint32_t v[6];
+#endif
     /* QSB_SHA_OPT extras: round 1 with Maj(A1,a,b) = (A1&(a^b)) + (a&b) and Ch(E1,e,f) =
      * (E1&e) + (~E1&f): v2y = v2 + (a&b), c2y = c - (a&b), mx = a^b; round 63 with the
      * feed-forward of words 0/4 folded: km63 = K63 + mid0, d4 = mid4 - mid0. */
     uint32_t v2y, c2y, mx, km63, d4; };
+#if QSB_TAIL_PRE_VEC
+static_assert(sizeof(qsb_tail_pre) == 80, "vector tail precompute stride");
+static_assert(alignof(qsb_tail_pre) == 16, "vector tail precompute alignment");
+#endif
 __device__ __forceinline__ void _SHA256TransformFastTail11P(
     uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2, const qsb_tail_pre &tp)
 {
@@ -4046,6 +4066,31 @@ static_assert(QSB_SUBPIPE % (QSB_S2_THREADS * QSB_HOST_PKSHA) == 0, "offload blo
 #else
 #define QSB_PK_ON 0
 #endif
+#if QSB_FIN_FULL_TILE
+#define QSB_PIPELINE_PARAMETERS \
+    const uint32_t *d_midstate, \
+    const uint8_t *d_suffix, \
+    int suffix_len, \
+    int seq_offset, \
+    int lt_offset, \
+    int total_preimage_len, \
+    uint32_t seq_value, \
+    uint32_t start_lt, \
+    const uint64_t *d_neg_r_inv, \
+    const uint64_t *d_u2rx, const uint64_t *d_u2ry, \
+    const uint64_t *d_neg2u2rx, const uint64_t *d_neg2u2ry, \
+    uint8_t *d_gt, \
+    uint32_t *d_hit_cnt, uint32_t *d_hit_idx, \
+    int batch_size, int easy_mode, int single_hash, \
+    ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
+#define QSB_PIPELINE_ARGUMENTS \
+    d_midstate, d_suffix, suffix_len, seq_offset, lt_offset, total_preimage_len, \
+    seq_value, start_lt, d_neg_r_inv, d_u2rx, d_u2ry, d_neg2u2rx, d_neg2u2ry, \
+    d_gt, d_hit_cnt, d_hit_idx, batch_size, easy_mode, single_hash, saved, roots, tree, tp
+template<bool FAST_TAIL, int STAGE, bool FULL_TILE>
+__device__ __forceinline__ void kernel_pinning_pipeline_body(QSB_PIPELINE_PARAMETERS) {
+    const int pipeline_batch_size = FULL_TILE ? QSB_SUBPIPE : batch_size;
+#else
 template<bool FAST_TAIL, int STAGE>
 __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
                                   STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
@@ -4065,6 +4110,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     int batch_size, int easy_mode, int single_hash,
     ulonglong2 *saved, uint64_t *roots, uint64_t *tree, qsb_tail_pre tp
 ) {
+#endif
 #if QSB_UNIF_DP & 1
     /* QSB_UNIF_DP bit 1 (prepare only): the prologue's uses of blockIdx.x (the active bound and
      * the tail words) all take it as an operand a uniform register can supply, so ptxas reads it
@@ -4075,13 +4121,24 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * never fired. With that bound, idx < batch_size <=> threadIdx.x < batch_size-128*blockIdx.x
      * (no wrap: 0 < batch_size-128*blockIdx.x <= batch_size). */
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+#if QSB_FIN_FULL_TILE
+    if (STAGE != 0 && !FULL_TILE && blockIdx.x * blockDim.x >= pipeline_batch_size) return;
+    int active = FULL_TILE ? 1 : STAGE != 0 ? idx < pipeline_batch_size
+        : threadIdx.x < (uint32_t)batch_size - blockIdx.x * (uint32_t)QSB_S0_THREADS;
+#else
     if (STAGE != 0 && blockIdx.x * blockDim.x >= batch_size) return;
     int active = STAGE != 0 ? idx < batch_size
                             : threadIdx.x < (uint32_t)batch_size - blockIdx.x * (uint32_t)QSB_S0_THREADS;
+#endif
 #else
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+#if QSB_FIN_FULL_TILE
+    if (!FULL_TILE && blockIdx.x * blockDim.x >= pipeline_batch_size) return;
+    int active = FULL_TILE ? 1 : idx < pipeline_batch_size;
+#else
     if (blockIdx.x * blockDim.x >= batch_size) return;
     int active = idx < batch_size;
+#endif
 #endif
     uint32_t lt = start_lt + (uint32_t)(active ? idx : 0);
 #if QSB_PROBE_NOS2
@@ -4132,10 +4189,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         /* The launch's four sequences' precomputes, one qsb_tail_pre per warp (host: d_mid_slot). */
         qsb_tail_pre ab_tp;
         {
+#if QSB_TAIL_PRE_VEC
+            const qsb_tail_pre *src_tp = reinterpret_cast<const qsb_tail_pre *>(d_midstate) + ab_warp;
+            const uint4 *src = reinterpret_cast<const uint4 *>(src_tp);
+            uint4 *dst = reinterpret_cast<uint4 *>(&ab_tp);
+            #pragma unroll
+            for (int i = 0; i < 5; i++) dst[i] = __ldg(src + i);
+#else
             const uint32_t *src = d_midstate + ab_warp * (uint32_t)(sizeof(qsb_tail_pre) / 4);
             uint32_t *dst = (uint32_t *)&ab_tp;
             #pragma unroll
             for (int i = 0; i < (int)(sizeof(qsb_tail_pre) / 4); i++) dst[i] = __ldg(src + i);
+#endif
         }
         (void)lt;
 #elif QSB_UNIF_DP & 1
@@ -4299,7 +4364,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     ulonglong2 v01=qsb_ld_v2(st+2*QSB_TREE_N),v23=qsb_ld_v2(st+3*QSB_TREE_N);
 #endif
 #else
-    size_t i=(size_t)idx,s=(size_t)batch_size;
+    size_t i=(size_t)idx,s=(size_t)
+#if QSB_FIN_FULL_TILE
+        pipeline_batch_size;
+#else
+        batch_size;
+#endif
 #if QSB_STREAM2
     ulonglong2 y01=qsb_ld_v2(&saved[0*s+i]),y23=qsb_ld_v2(&saved[1*s+i]);
     ulonglong2 v01=qsb_ld_v2(&saved[2*s+i]),v23=qsb_ld_v2(&saved[3*s+i]);
@@ -4317,7 +4387,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         return;
     }
     uint64_t weighted_inv[4];
+#if QSB_FIN_FULL_TILE
+    size_t root_count=FULL_TILE ? ((size_t)QSB_SUBPIPE+QSB_TREE_N-1)/QSB_TREE_N
+                                : ((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+#else
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
+#endif
 #if QSB_ROOT_V2
     {   /* roots is cudaMalloc'd (256-byte aligned) and indexed in 4-limb (32-byte) records */
         const ulonglong2 *r2=(const ulonglong2 *)roots;
@@ -4327,7 +4402,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
          * batch_size+QSB_TREE_N-1 < 2^32 and root_count+blockIdx.x < 2^24+2^31: the 32-bit sums
          * equal the size_t ones, and the record address is one IMAD.WIDE.U32 in place of the
          * 64-bit add, shift, add and LEA pair on the ALU pipe. */
+#if QSB_FIN_FULL_TILE
+        const uint32_t root_row=(FULL_TILE ? QSB_SUBPIPE / QSB_TREE_N
+                                            : ((uint32_t)batch_size+QSB_TREE_N-1u)/QSB_TREE_N)+blockIdx.x;
+#else
         const uint32_t root_row=((uint32_t)batch_size+QSB_TREE_N-1u)/QSB_TREE_N+blockIdx.x;
+#endif
         (void)root_count;
         ulonglong2 b01=r2[2ull*root_row],b23=r2[2ull*root_row+1];
 #else
@@ -4477,6 +4557,27 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     }
 }
+
+#if QSB_FIN_FULL_TILE
+template<bool FAST_TAIL, int STAGE>
+__global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
+                                  STAGE == 0 ? QSB_S0_BLOCKS : QSB_S2_BLOCKS) kernel_pinning_pipeline(
+    QSB_PIPELINE_PARAMETERS
+) {
+    kernel_pinning_pipeline_body<FAST_TAIL, STAGE, false>(QSB_PIPELINE_ARGUMENTS);
+}
+
+template<bool FAST_TAIL>
+__global__ void __launch_bounds__(QSB_S2_THREADS, QSB_S2_BLOCKS) kernel_pinning_finish_full_tile(
+    QSB_PIPELINE_PARAMETERS
+) {
+    static_assert(QSB_SUBPIPE == 131072 && QSB_TREE_N == 128 && QSB_S2_THREADS == 128,
+                  "full-tile finish requires 1024 complete 128-lane blocks");
+    kernel_pinning_pipeline_body<FAST_TAIL, 2, true>(QSB_PIPELINE_ARGUMENTS);
+}
+#undef QSB_PIPELINE_PARAMETERS
+#undef QSB_PIPELINE_ARGUMENTS
+#endif
 
 #if QSB_TREE_OFFLOAD
 /* Dense product-tree kernel: one 256-leaf tree per CTA over the saved W plane.
@@ -4853,7 +4954,12 @@ static int qsb_subpipe_init(cudaStream_t like) {
     fflush(stdout);
     /* QSB_SUBGRAPH (QsbSubGraph.h, default 0): one CUDA graph per state ring for
      * prepare -> root inverse -> finish, on the same streams' contexts. */
+#if QSB_FIN_FULL_TILE
+    /* Graph nodes fix their kernel entry; the tile-specific finish uses stream launches. */
+    qsb_sg::enabled = false;
+#else
     qsb_sg::enabled = qsb_sg::init(P.s0, P.rtb, P.s2b, g_qsb_register_roots);
+#endif
 #endif
 #if QSB_ROOT_FUSED
     if (getenv("QSB_RF_BENCH")) {   /* dev only: standalone root-kernel latency on an idle GPU */
@@ -4919,6 +5025,9 @@ static void qsb_subpipe_launch(
 #endif
         uint64_t *hit_base = (uint64_t *)(uintptr_t)(uint32_t)off;   /* finish: QSB_HIT_BASE */
         const int blocks = (n + QSB_TREE_N - 1) / QSB_TREE_N;
+#if QSB_FIN_FULL_TILE
+        const bool full_finish = n == QSB_SUBPIPE;
+#endif
 #if QSB_ROOT_FUSED
         qsb_sg::Ring &graph = qsb_sg::rings[r];
         if (qsb_sg::enabled && graph.exec) {
@@ -4997,6 +5106,22 @@ static void qsb_subpipe_launch(
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_rt[r], root_st);
         if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2, P.ev_rt[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("roots", e);
+#if QSB_FIN_FULL_TILE
+        if (full_finish) {
+            if (qsb_carrier_has(QK_S2_FULL))
+                qsb_carrier_launch(kernel_pinning_finish_full_tile<true>,QK_S2_FULL,dim3(blocks),dim3(QSB_S2_THREADS),P.s2,
+                    d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                    seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                    QSB_PK_ON ? pk_plane : d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                    P.state[r],P.roots[r],hit_base,tp);
+            else
+                kernel_pinning_finish_full_tile<true><<<blocks,QSB_S2_THREADS,0,P.s2>>>(
+                    d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
+                    seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
+                    QSB_PK_ON ? pk_plane : d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
+                    P.state[r],P.roots[r],hit_base,tp);
+        } else
+#endif
         if (qsb_carrier_has(QK_S2))
             qsb_carrier_launch(kernel_pinning_pipeline<true,2>,QK_S2,dim3(blocks),dim3(QSB_S2_THREADS),P.s2,
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
