@@ -538,6 +538,9 @@ static_assert(QSB_SUBPIPE % 256 == 0, "sub-batch must keep start_lt a multiple o
 #if QSB_REFILL_BEFORE_GATE != 0 && QSB_REFILL_BEFORE_GATE != 1
 #error "QSB_REFILL_BEFORE_GATE must be 0 or 1"
 #endif
+#ifndef QSB_HOST_HIT_OUTPUT_BUFFER
+#define QSB_HOST_HIT_OUTPUT_BUFFER 1
+#endif
 #ifndef QSB_COMPACT_READBACK
 #define QSB_COMPACT_READBACK 1 /* one count+64-index D2H instead of two adjacent transfers */
 #endif
@@ -7098,6 +7101,10 @@ int main(int argc, char **argv) {
             FILE *f = fopen(fname, "a");
             int wrote = 0;
             if (f) {
+#if defined(QSB_HOST_HIT_OUTPUT_BUFFER) && QSB_HOST_HIT_OUTPUT_BUFFER
+                char hit_lines[64 * 96];
+                size_t hit_bytes = 0;
+#endif
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
 #if QSB_REFILL_BEFORE_GATE
@@ -7128,9 +7135,28 @@ int main(int argc, char **argv) {
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
                     if (ri < 0) continue;
 #endif
+#if defined(QSB_HOST_HIT_OUTPUT_BUFFER) && QSB_HOST_HIT_OUTPUT_BUFFER
+                    const int line_bytes = snprintf(hit_lines + hit_bytes,
+                        sizeof(hit_lines) - hit_bytes,
+                        "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
+                    if (line_bytes < 0 || (size_t)line_bytes >= sizeof(hit_lines) - hit_bytes) {
+                        fprintf(stderr, "Hit output buffer overflow\n");
+                        fclose(f);
+                        return 1;
+                    }
+                    hit_bytes += (size_t)line_bytes;
+#else
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
+#endif
                     wrote = 1;
                 }
+#if defined(QSB_HOST_HIT_OUTPUT_BUFFER) && QSB_HOST_HIT_OUTPUT_BUFFER
+                if (hit_bytes && fwrite(hit_lines, 1, hit_bytes, f) != hit_bytes) {
+                    fprintf(stderr, "Hit output write failed\n");
+                    fclose(f);
+                    return 1;
+                }
+#endif
                 fclose(f);
             }
             if (wrote) found = 1;
