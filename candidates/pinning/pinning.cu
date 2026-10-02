@@ -683,6 +683,14 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
     0x00,0x7F,0xFF,0x09,0x0D
 };
 
+/* Direct TOP5 plan fields from pochita0 e529e218, via public kshitij b508fe55.
+ * Default 0 keeps the promoted b59 plan-load path and native carrier. */
+#ifndef QSB_T5_DIRECT
+#define QSB_T5_DIRECT 1
+#endif
+#if QSB_T5_DIRECT != 0 && QSB_T5_DIRECT != 1
+#error "QSB_T5_DIRECT must be 0 or 1"
+#endif
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
@@ -2266,7 +2274,13 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #define QSB_ZEROS_N 24
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
-__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+#if QSB_T5_DIRECT && (QSB_TREE_N != 128 || QSB_PROBE_NOSTATE || QSB_PROBE_NOS2 || \
+    QSB_ZEROS_N < 0 || QSB_ZEROS_N > 256)
+#error "QSB_T5_DIRECT requires the safe b59 paired TOP5 N128 plan and valid SHA-256 zeros"
+#endif
+/* Bit10 authenticates the independently selected direct TOP5 mechanism. */
+#define QSB_CARRIER_FINGERPRINT (QSB_ZEROS_N | (QSB_T5_DIRECT ? 0x00000400 : 0))
+__device__ __constant__ int qsb_carrier_zeros = QSB_CARRIER_FINGERPRINT;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -3900,6 +3914,9 @@ __device__ __constant__ uint64_t pin_chord_e[4];
 
 #include "LeafRecovery.cuh"
 #include "cofactor_checkpoint.h"
+#if QSB_T5_DIRECT && (!(QSB_POST_GLUE & 2) || !QSB_TREE_GFILL || !QSB_TREE_TOP5)
+#error "QSB_T5_DIRECT requires the paired GFILL TOP5 plan"
+#endif
 #include "PackedRecovery.cuh"
 static_assert(QSB_RECOVERY_N==128 && QSB_TREE_N==128 && QSB_S0_THREADS==128 && QSB_S2_THREADS==128 && QSB_SYM_FINISH && !QSB_TREE_OFFLOAD && !QSB_TREE_OFFLOAD2,"cofactor geometry");   /* K = 3*xR^2 (delta E) */
 #if QSB_PREP_STATE

@@ -65,6 +65,12 @@ static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#ifndef QSB_CARRIER_T5_DIRECT
+#define QSB_CARRIER_T5_DIRECT 0
+#endif
+#if QSB_CARRIER_T5_DIRECT != QSB_T5_DIRECT
+#error "QSB_T5_DIRECT requires a matching regenerated native carrier"
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -146,7 +152,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     e = cudaLibraryGetGlobal(&dz, &zb, g_qsb_carrier.lib, "qsb_carrier_zeros");
     if (e == cudaSuccess && zb == sizeof(int))
         e = cudaMemcpy(&zeros, dz, sizeof(int), cudaMemcpyDeviceToHost);
-    if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
+    if (e != cudaSuccess || zeros != QSB_CARRIER_FINGERPRINT) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
