@@ -175,7 +175,10 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
  *   QSB_LEA_RLA (the whole add chain in PTX): the outer SHA256d rounds (S2RoundO in SHA256_RND) and QSB_RL.
  *   sha_gate_fma.cuh adds the gate's round 1 and round 63 and the cap-phase FMA form (QSB_LEA_PARTS).
  * The PTX keeps +Maj/-Maj, which the front end would cancel in C. 0 = the rounds above; in the knob string only when
- * non-zero, so the image at 0 is the base's byte for byte. */
+ * non-zero, so the image at 0 is the base's byte for byte.
+ * Port (q2lea): this block and SHA256_RND's S2RoundO verbatim from kshitij-hash's public 21af7f34 (which carries the
+ * switch above); in sha_gate_fma.cuh only QSB_LEA_PARTS bits 0-2. This tree has no QSB_GATE_FMA_RT, so bit 3's
+ * cap-phase FMA form is not here (an #error below rejects it); with QSB_SHA_FMA_ADD 0 it would be dead code anyway. */
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1
 #endif
@@ -184,9 +187,13 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
 #endif
 #if QSB_SHA_LEA
 /* QSB_LEA_PARTS (with QSB_SHA_LEA 1): bit 0 the gate's IV round 1, bit 1 the gate's a-only round 63, bit 2 the gate's
- * rounds 2 and 3 with the literal d as an immediate, bit 3 the cap-phase FMA form (QSB_GATE_FMA_RT). */
+ * rounds 2 and 3 with the literal d as an immediate (bit 3, the cap-phase FMA form of QSB_GATE_FMA_RT, is not in this
+ * tree). */
 #ifndef QSB_LEA_PARTS
-#define QSB_LEA_PARTS 11
+#define QSB_LEA_PARTS 7
+#endif
+#if QSB_LEA_PARTS < 0 || QSB_LEA_PARTS > 7
+#error "QSB_LEA_PARTS takes bits 0-2 here (bit 3, the QSB_GATE_FMA_RT cap-phase form, is not ported)"
 #endif
 /* QSB_LEA_ORD (with QSB_SHA_LEA 1): operand-order variant of the rounds (register reads and reuse hits only). */
 #ifndef QSB_LEA_ORD

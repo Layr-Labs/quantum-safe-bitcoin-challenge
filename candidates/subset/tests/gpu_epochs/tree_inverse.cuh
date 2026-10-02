@@ -4,12 +4,6 @@
 // One work-efficient binary product tree per block. The caller supplies
 // a power-of-two block size at most 256 and identity factors for inactive lanes.
 #pragma once
-/* QSB_LOSS_ROOTLAZY (default 0 = the text below byte for byte): the wave-top root skips qsb_field_normalize before the
- * divsteps. The lean tree product leaves the root below 2^256; it is at least p only with probability about 2^-224, and
- * the divsteps take any 256-bit g. */
-#ifndef QSB_LOSS_ROOTLAZY
-#define QSB_LOSS_ROOTLAZY 1
-#endif
 #ifndef QSB_ISO_FUSED_ROOT_SCALE
 #define QSB_ISO_FUSED_ROOT_SCALE 1
 #endif
@@ -193,36 +187,19 @@ __shared__ uint64_t qsb_sc_products[4][512];
 #endif
 #endif
 #if QSB_TREE_ROW128
+#if !QSB_SC_PARK
+#error "QSB_TREE_ROW128 (tree.cu) keeps the product rows in the file-scope arena (QSB_SC_PARK 1)"
+#endif
 #define QTR_LD4(A,col,v) do{const ulonglong2 qtr0_=(A)[0][(col)],qtr1_=(A)[1][(col)];(v)[0]=qtr0_.x;(v)[1]=qtr0_.y;(v)[2]=qtr1_.x;(v)[3]=qtr1_.y;}while(0)
 #define QTR_ST4(A,col,v) do{(A)[0][(col)]=make_ulonglong2((v)[0],(v)[1]);(A)[1][(col)]=make_ulonglong2((v)[2],(v)[3]);}while(0)
 #endif
-/* QSB_ROOT_COMBINE (tree.cu switch block): the protocol lives in root_combine.cuh and is compiled only into the
- * native sm_89 image (sm_70+ atomics with .acquire/.release and __nanosleep). The JIT / ranked sm_52 pass keeps the
- * solo zi_inverse_limbs call below, which is the same inverse. */
-#if QSB_ROOT_COMBINE && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-#define QSB_RC_ACTIVE 1
-#include "root_combine.cuh"
-#else
-#define QSB_RC_ACTIVE 0
-#endif
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
 /*. LUT_ISSUED (QSB_ROOT_LUT_SMEM): 1 = the caller already issued qsb_root_lut_issue (kernel_digest
  * does it at kernel start), 0 = the tree issues it here. Idle (QSB_PRE3_ROOT): work that warps 1..n/32-1 run
  * on the wave-top branch while warp 0 runs the root, before the down-sweep barrier they wait at anyway. */
-#if QSB_ROOT_FILL
-struct QsbTreeNoIdle{__device__ __forceinline__ void operator()()const{} __device__ __forceinline__ void waves_done()const{}
-                     __device__ __forceinline__ void after_down32()const{} __device__ __forceinline__ void root_done()const{}};
-#else
 struct QsbTreeNoIdle{__device__ __forceinline__ void operator()()const{}};
-#endif
 #if QSB_ROOT_LUT_SMEM
 #define inverses qsb_tree_inverses_smem   /* file-scope rows (zinv32.cuh): the divstep LUT rides in them */
-#endif
-#if QSB_ROOT_FILL
-/* QSB_ROOT_FILL (tree.cu): the inverse rows are file-scope, because kernel_digest parks the next unit's window-block
- * states in their dead columns (0..223 after the leaf step; 240..255, which the tree never uses) */
-__shared__ uint64_t qsb_rf_inv[4][256];
-#define inverses qsb_rf_inv
 #endif
 /* RW (QSB_ROOT_WARP, tree.cu): the warp whose lanes form the top of the tree (up levels with at
  * most 32 writers, the waves, the root, down level 32). Node and inverse indices use the lane's index in that
@@ -241,7 +218,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #else
     __shared__ uint64_t products[4][512];
 #endif
-#if !QSB_ROOT_LUT_SMEM && !QSB_ROOT_FILL
+#if !QSB_ROOT_LUT_SMEM
     __shared__ uint64_t inverses[4][256];
 #endif
 #endif
@@ -275,7 +252,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     for(int count=n;count>(QSB_TREE_WAVE_TOP?16:2);count>>=1){
         int half=count>>1;
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
         const int ut=(RW && half<=32)?tid-32*RW:tid;   /*: levels with <= 32 writers on warp RW */
         if(RW?(unsigned)ut<(unsigned)half:tid<half){
 #else
@@ -345,7 +322,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // QSB_TREE_WAVE_TOP (tree.cu): the base root block above is compiled out; offset == 2n-32, the
     // sixteen L16 nodes x[j]. P8, P4, P2 go to their base columns (the base's up levels 16, 8, 4);
     // c, d and E16 stay in the registers of lanes 0..15.
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
     if(__all_sync(0xffffffffu,RW?(unsigned)(tid-32*RW)<32u:tid<32)){
         const int lt=RW?tid-32*RW:tid;   /*: lane index inside the root warp RW */
 #else
@@ -436,21 +413,12 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
             b[4]=0;QSB_TREE_MUL(r,r,b);
         }
-#if QSB_ROOT_FILL
-        idle.waves_done();   /* QSB_ROOT_FILL: product columns 480..511 are dead from here on (bar.arrive) */
-#endif
         uint64_t root[5];
         #pragma unroll
         for(int k=0;k<4;k++)root[k]=__shfl_sync(0xffffffffu,r[k],16);
-#if !QSB_LOSS_ROOTLAZY
         qsb_field_normalize(root);
-#endif
         root[4]=0;
-#if QSB_RC_ACTIVE
-        qsb_root_combine_invert(root,lt);   /* QSB_ROOT_COMBINE: the same canonical inverse, shared with a partner block */
-#else
         zi_inverse_limbs(root,lt);
-#endif
         if(lt==0)QSB_ISO_SCALE_ROOT(root);
         #pragma unroll
         for(int k=0;k<4;k++)root[k]=__shfl_sync(0xffffffffu,root[k],0);
@@ -467,11 +435,8 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         }
         }
 #undef QSB_TLM
-#if QSB_ROOT_FILL
-        idle.root_done();
-#endif
     }
-#if QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_PRE3_ROOT
     else idle();   /* warps 1..: QSB_PRE3_ROOT (tree.cu), before the down-sweep barrier below */
 #endif
 #endif
@@ -540,7 +505,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     for(int count=QSB_TREE_WAVE_TOP?32:4;count<n;count<<=1){
         int half=count>>1;
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
         const int ut=(RW && count<=32)?tid-32*RW:tid;   /*: down level 32 on warp RW (it reads RW's inverses) */
         if(RW?(unsigned)ut<(unsigned)count:tid<count){
 #else
@@ -568,9 +533,6 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         }
         offset-=count<<1;
         if((count<<1)>32)__syncthreads();else __syncwarp();
-#if QSB_ROOT_FILL
-        if(count==32)idle.after_down32();   /* QSB_ROOT_FILL: the level-16 inverse columns are dead now */
-#endif
     }
     // offset == 0 would be the leaf level; lanes form their own leaf inverse.
     {
@@ -590,8 +552,8 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
-#if QSB_ROOT_LUT_SMEM || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+#if QSB_ROOT_LUT_SMEM
 #undef inverses
 #endif
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){

@@ -297,92 +297,7 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     out[7] = QSB_IV7 + h;
 }
 
-#if defined(QSB_SHA_W0FOLD) && QSB_SHA_W0FOLD
-/* QSB_SHA_W0FOLD (lane SHA, tree.cu): _SHA256TransformDigest32Q with W0 = m[0] + w0x never formed. W0 is used only
- * additively (round 0's T1 and W16 = W0 + s0(W1)), so each use takes m[0] and w0x as two operands of one add chain.
- * The chains are written as inline-PTX adds with different first pairs, so neither LLVM nor ptxas sees a common
- * m[0] + w0x to rebuild. Round 0's IV terms are folded here as constexpr. Same sums mod 2^32: bit-identical. */
-__host__ __device__ __forceinline__ constexpr uint32_t qsb_cx_ror(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
-__host__ __device__ __forceinline__ constexpr uint32_t qsb_cx_S1(uint32_t x) { return qsb_cx_ror(x,6) ^ qsb_cx_ror(x,11) ^ qsb_cx_ror(x,25); }
-__host__ __device__ __forceinline__ constexpr uint32_t qsb_cx_S0(uint32_t x) { return qsb_cx_ror(x,2) ^ qsb_cx_ror(x,13) ^ qsb_cx_ror(x,22); }
-/* round 0 from the IV: T1 = IV7 + S1(IV4) + Ch(IV4,IV5,IV6) + K0 + W0, T2 = S0(IV0) + Maj(IV0,IV1,IV2) */
-#define QSB_W0F_T1C (QSB_IV7 + qsb_cx_S1(QSB_IV4) + (QSB_IV6 ^ (QSB_IV4 & (QSB_IV5 ^ QSB_IV6))) + qsb_klit(0))
-#define QSB_W0F_T2C (qsb_cx_S0(QSB_IV0) + ((QSB_IV0 & QSB_IV1) | (QSB_IV2 & (QSB_IV0 | QSB_IV1))))
-#define QSB_W0F_ADD(x, y) ({ uint32_t r_; asm("add.u32 %0, %1, %2;" : "=r"(r_) : "r"(x), "r"(y)); r_; })
-#define QSB_W0F_ADDK(x, k) ({ uint32_t r_; asm("add.u32 %0, %1, %2;" : "=r"(r_) : "r"(x), "n"(k)); r_; })
-__device__ __forceinline__ void _SHA256TransformDigest32Q_W0F(
-    uint32_t out[8], const uint32_t m[8], uint32_t w0x)
-{
-    uint32_t t1;
-    uint32_t t2;
-    uint32_t a = QSB_IV0, b = QSB_IV1, c = QSB_IV2, d = QSB_IV3;
-    uint32_t e = QSB_IV4, f = QSB_IV5, g = QSB_IV6, h = QSB_IV7;
-
-    uint32_t w[16];
-#pragma unroll
-    for (int i = 0; i < 8; i++) w[i] = m[i];
-
-    /* round 0 (QSB_RL(a..h, K0 + W0) with the IV folded): d += T1, h = T1 + T2 */
-    t1 = QSB_W0F_ADD(QSB_W0F_ADDK(w[0], QSB_W0F_T1C), w0x);
-    d = QSB_IV3 + t1;
-    h = t1 + QSB_W0F_T2C;
-    /* round 1: the second half of QSB_IV_ROUNDS01, verbatim */
-    t1 = g + S1(d) + Ch(d,e,f) + (qsb_klit(1) + (QSB_IV0 & QSB_IV1)) + (w[1]);
-    t2 = S0(h) + (h & (QSB_IV0 ^ QSB_IV1));
-    c = (QSB_IV2 - (QSB_IV0 & QSB_IV1)) + t1;
-    g = t1 + t2;
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
-
-    {
-        w[0] = QSB_W0F_ADD(QSB_W0F_ADD(w[0], s0(w[1])), w0x);   /* W16 = W0 + s0(W1) */
-        w[1] += s1(256u) + s0(w[2]);
-        w[2] += s1(w[0]) + s0(w[3]);
-        w[3] += s1(w[1]) + s0(w[4]);
-        w[4] += s1(w[2]) + s0(w[5]);
-        w[5] += s1(w[3]) + s0(w[6]);
-        w[6] += s1(w[4]) + 256u + s0(w[7]);
-        w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
-        w[8]  = 0x80000000u + s1(w[6]) + w[1] + QSB_Z;
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(256u);
-        w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
-    }
-
-    QSB_RND16L(16);
-    WMIX();
-    QSB_RND16L(32);
-    WMIX();
-    QSB_RND15L(48);
-    QSB_R63_FF04(qsb_klit(63) + w[15] + QSB_IV0, QSB_IV4 - QSB_IV0, out[0], out[4]);
-    out[1] = QSB_IV1 + b;
-    out[2] = QSB_IV2 + c;
-    out[3] = QSB_IV3 + d;
-    out[5] = QSB_IV5 + f;
-    out[6] = QSB_IV6 + g;
-    out[7] = QSB_IV7 + h;
-}
-#undef QSB_W0F_ADD
-#undef QSB_W0F_ADDK
-#endif
-
-#if QSB_SHA_FMA_ADD || (defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT)
+#if QSB_SHA_FMA_ADD
 #if QSB_SHA_FMA_ROT & 1
 #define QSB_S1M(x) S1F(x)
 #else
@@ -393,31 +308,12 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q_W0F(
 #else
 #define QSB_S0M(x) S0(x)
 #endif
-/* QSB_SHA_LEA part 8, in the FMA-pipe form (the QSB_FIN_LEA shape of ercumentyildirim b62c41b8): x + S1(e) and
- * x + S0(a) are one ALU-pipe LEA.HI each (x + ROR6(S1P(e)), x + ROR2(S0P(a))) in place of the Sigma's outer SHF and an
- * FMA-pipe add; the shf.wrap + add pair sits in one asm block so that ptxas fuses it. The same sums. */
-#if QSB_SHA_LEA && (QSB_LEA_PARTS & 8)
-#if QSB_SHA_FMA_ROT & 3
-#error "QSB_SHA_LEA's FMA form is written for QSB_SHA_FMA_ROT bits 0 and 1 clear"
-#endif
-__device__ __forceinline__ uint32_t qsb_add_ror6(uint32_t x, uint32_t y) {
-    uint32_t r; asm("{\n\t.reg .u32 t;\n\tshf.r.wrap.b32 t, %2, %2, 6;\n\tadd.u32 %0, %1, t;\n\t}" : "=r"(r) : "r"(x), "r"(y)); return r;
-}
-__device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
-    uint32_t r; asm("{\n\t.reg .u32 t;\n\tshf.r.wrap.b32 t, %2, %2, 2;\n\tadd.u32 %0, %1, t;\n\t}" : "=r"(r) : "r"(x), "r"(y)); return r;
-}
-#define QSB_FADD_S1(x, e) qsb_add_ror6((x), QSB_LEA_S1PA(e))
-#define QSB_FADD_S0(x, a) qsb_add_ror2((x), QSB_LEA_S0PA(a))
-#else
-#define QSB_FADD_S1(x, e) qsb_fadd((x), one, QSB_S1M(e))
-#define QSB_FADD_S0(x, a) qsb_fadd((x), one, QSB_S0M(a))
-#endif
 #define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
     t1 = qsb_fadd(h, one, (kw)); \
-    t1 = QSB_FADD_S1(t1, e); \
+    t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
     t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
     d  = qsb_fadd(d, one, t1); \
-    t2 = QSB_FADD_S0(t1, a); \
+    t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
 #define QSB_RND15L_F(k) {\
 QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(k) + w[0]);\
@@ -531,9 +427,9 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[15] = qsb_fadd(w[15], one, s0(w[0]));
         uint32_t r = qsb_fadd(a, one, w[15]);
         r = qsb_fadd(r, one, qsb_klit(63) + QSB_IV0);
-        r = QSB_FADD_S1(r, f);
+        r = qsb_fadd(r, one, QSB_S1M(f));
         r = qsb_fadd(r, one, Ch(f,g,h));
-        r = QSB_FADD_S0(r, b);
+        r = qsb_fadd(r, one, QSB_S0M(b));
         r = qsb_fadd(r, one, Maj(b,c,d));
         return r;
     }
@@ -563,227 +459,6 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 #endif
 #endif
 }
-
-#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT
-#if QSB_SHA_FMA_ROT || QSB_SHA_ALU_ADD
-#error "QSB_GATE_FMA_RT's second form is QSB_SHA_FMA_ADD 1's: written for QSB_SHA_FMA_ROT 0 and QSB_SHA_ALU_ADD 0"
-#endif
-/* QSB_GATE_FMA_RT (tree.cu): _SHA256Pubkey33H0 as QSB_SHA_FMA_ADD 1 compiles it (rounds 0..15 and the schedule as
- * above; rounds 16..63 and the round-63 output with every two-input add on the FMA-heavy pipe). Same word 0. */
-__device__ __forceinline__ uint32_t _SHA256Pubkey33H0_fma(const uint32_t m[9])
-{
-    uint32_t t1;
-    uint32_t t2;
-    uint32_t a = QSB_IV0, b = QSB_IV1, c = QSB_IV2, d = QSB_IV3;
-    uint32_t e = QSB_IV4, f = QSB_IV5, g = QSB_IV6, h = QSB_IV7;
-
-    uint32_t w[16];
-#pragma unroll
-    for (int i = 0; i < 9; i++) w[i] = m[i];
-
-    QSB_IV_ROUNDS01(w[0], w[1]);
-#if defined(QSB_GATE_FMA_RT_HEAD) && QSB_GATE_FMA_RT_HEAD
-    /* QSB_GATE_FMA_RT_HEAD (tree.cu): fkiene's QSB_PK_HEAD_FMA (public source 8c07297bb79a8340632b1101e5704ac1294f2b13,
-     * credit fkiene), as i34-9's 78691035 carries it: rounds 2..15 and the schedule head W16..W31 with every two-input
-     * add on the FMA-heavy pipe. The same terms as the #else block, regrouped (addition mod 2^32 is associative). */
-    {
-        const uint32_t one = pin_one_mul;
-        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
-        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
-        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
-        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
-        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
-        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-        QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(8) + w[8]);
-        QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(9));
-        QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(10));
-        QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(11));
-        QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(12));
-        QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(13));
-        QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(14));
-        QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(15) + 0x108u);
-
-        w[0]  = qsb_fadd(w[0], one, QSB_s0M(w[1]));
-        w[1]  = qsb_fadd(qsb_fadd(w[1], one, QSB_s0M(w[2])), one, s1(0x108u));
-        w[2]  = qsb_fadd(qsb_fadd(w[2], one, QSB_s1M(w[0])), one, QSB_s0M(w[3]));
-        w[3]  = qsb_fadd(qsb_fadd(w[3], one, QSB_s1M(w[1])), one, QSB_s0M(w[4]));
-        w[4]  = qsb_fadd(qsb_fadd(w[4], one, QSB_s1M(w[2])), one, QSB_s0M(w[5]));
-        w[5]  = qsb_fadd(qsb_fadd(w[5], one, QSB_s1M(w[3])), one, QSB_s0M(w[6]));
-        w[6]  = qsb_fadd(qsb_fadd(w[6], one, QSB_s1M(w[4])), one, QSB_s0M(w[7]) + 0x108u);
-        w[7]  = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]), one, QSB_s0M(w[8]));
-        w[8]  = qsb_fadd(qsb_fadd(w[8], one, QSB_s1M(w[6])), one, w[1]);
-        w[9]  = qsb_fadd(QSB_s1M(w[7]), one, w[2]);
-        w[10] = qsb_fadd(QSB_s1M(w[8]), one, w[3]);
-        w[11] = qsb_fadd(QSB_s1M(w[9]), one, w[4]);
-        w[12] = qsb_fadd(QSB_s1M(w[10]), one, w[5]);
-        w[13] = qsb_fadd(QSB_s1M(w[11]), one, w[6]);
-        w[14] = qsb_fadd(qsb_fadd(QSB_s1M(w[12]), one, w[7]), one, s0(0x108u));
-        w[15] = qsb_fadd(qsb_fadd(qsb_fadd(QSB_s1M(w[13]), one, w[8]), one, QSB_s0M(w[0])), one, 0x108u);
-    }
-#else
-    QSB_RLKD(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2], QSB_IV1);
-    QSB_RLKD(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3], QSB_IV0);
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8) + w[8]);
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 0x108u);
-
-    {
-        w[0] += s0(w[1]);
-        w[1] += s1(0x108u) + s0(w[2]);
-        w[2] += s1(w[0]) + s0(w[3]);
-        w[3] += s1(w[1]) + s0(w[4]);
-        w[4] += s1(w[2]) + s0(w[5]);
-        w[5] += s1(w[3]) + s0(w[6]);
-        w[6] += s1(w[4]) + 0x108u + s0(w[7]);
-        w[7] += s1(w[5]) + w[0] + s0(w[8]);
-        w[8] += s1(w[6]) + w[1];
-        w[9]  = s1(w[7]) + w[2];
-        w[10] = s1(w[8]) + w[3];
-        w[11] = s1(w[9]) + w[4];
-        w[12] = s1(w[10]) + w[5];
-        w[13] = s1(w[11]) + w[6];
-        w[14] = s1(w[12]) + w[7] + s0(0x108u);
-        w[15] = 0x108u + s1(w[13]) + w[8] + s0(w[0]);
-    }
-
-#endif
-    {
-        const uint32_t one = pin_one_mul;
-        QSB_RND16L_F(16);
-        QSB_INTERLEAVED16L_F(32);
-        QSB_INTERLEAVED15L_F(48);
-        w[15] = qsb_fadd(w[15], one, s1(w[13]));
-        w[15] = qsb_fadd(w[15], one, w[8]);
-        w[15] = qsb_fadd(w[15], one, s0(w[0]));
-        uint32_t r = qsb_fadd(a, one, w[15]);
-        r = qsb_fadd(r, one, qsb_klit(63) + QSB_IV0);
-        r = QSB_FADD_S1(r, f);
-        r = qsb_fadd(r, one, Ch(f,g,h));
-        r = QSB_FADD_S0(r, b);
-        r = qsb_fadd(r, one, Maj(b,c,d));
-        return r;
-    }
-}
-#if defined(QSB_OUTER_FMA_RT) && QSB_OUTER_FMA_RT
-/* Composition with QSB_SHA_LEA (lane LEA): QSB_FADD_S1 / S0 (above) are LEA's FMA-form Sigma adds when QSB_SHA_LEA and
- * QSB_LEA_PARTS bit 3 are set, the plain FMA-form adds otherwise; QSB_RLK is QSB_RL (LEA's PTX round when on). */
-#ifndef QSB_RLK
-#define QSB_RLK(a, b, c, d, e, f, g, h, kw) QSB_RL(a, b, c, d, e, f, g, h, kw)
-#endif
-/* QSB_OUTER_FMA_RT (tree.cu): the cap-phase form of the pair's outer SHA256d compression, in the literal-K shape of
- * _SHA256TransformDigest32Q (32-byte message m[0..7], pad W8 = 0x80000000, W9..14 = 0, W15 = 256, from the IV; all eight
- * output words with the feed-forward). 1: rounds 16..63 and the schedule from W32 on with every two-input add on the
- * FMA-heavy pipe (the gate's QSB_SHA_FMA_ADD shape); 2: rounds 2..15 and the schedule head W16..W31 too. Every sum keeps
- * its terms, only grouped differently, and a * 1 + b = a + b mod 2^32: the same eight words as _SHA256Transform. */
-__device__ __forceinline__ void _SHA256TransformDigest32Q_fma(uint32_t out[8], const uint32_t m[8])
-{
-    uint32_t t1;
-    uint32_t t2;
-    uint32_t a = QSB_IV0, b = QSB_IV1, c = QSB_IV2, d = QSB_IV3;
-    uint32_t e = QSB_IV4, f = QSB_IV5, g = QSB_IV6, h = QSB_IV7;
-
-    uint32_t w[16];
-#pragma unroll
-    for (int i = 0; i < 8; i++) w[i] = m[i];
-    const uint32_t one = pin_one_mul;
-
-    QSB_IV_ROUNDS01(w[0], w[1]);
-#if QSB_OUTER_FMA_RT >= 2
-    QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
-    QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
-    QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
-    QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
-    QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
-    QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-    QSB_RL_F(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
-    QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL_F(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL_F(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL_F(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL_F(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
-
-    w[0]  = qsb_fadd(w[0], one, s0(w[1]));
-    w[1]  = qsb_fadd(qsb_fadd(w[1], one, s0(w[2])), one, s1(256u));
-    w[2]  = qsb_fadd(qsb_fadd(w[2], one, s1(w[0])), one, s0(w[3]));
-    w[3]  = qsb_fadd(qsb_fadd(w[3], one, s1(w[1])), one, s0(w[4]));
-    w[4]  = qsb_fadd(qsb_fadd(w[4], one, s1(w[2])), one, s0(w[5]));
-    w[5]  = qsb_fadd(qsb_fadd(w[5], one, s1(w[3])), one, s0(w[6]));
-    w[6]  = qsb_fadd(qsb_fadd(w[6], one, s1(w[4])), one, s0(w[7]) + 256u);
-    w[7]  = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, s1(w[5])), one, w[0]), one, s0(0x80000000u));
-    w[8]  = qsb_fadd(qsb_fadd(s1(w[6]), one, w[1]), one, 0x80000000u);
-    w[9]  = qsb_fadd(s1(w[7]), one, w[2]);
-    w[10] = qsb_fadd(s1(w[8]), one, w[3]);
-    w[11] = qsb_fadd(s1(w[9]), one, w[4]);
-    w[12] = qsb_fadd(s1(w[10]), one, w[5]);
-    w[13] = qsb_fadd(s1(w[11]), one, w[6]);
-    w[14] = qsb_fadd(qsb_fadd(s1(w[12]), one, w[7]), one, s0(256u));
-    w[15] = qsb_fadd(qsb_fadd(qsb_fadd(s1(w[13]), one, w[8]), one, s0(w[0])), one, 256u);
-#else
-    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
-    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
-    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
-
-    w[0] += s0(w[1]);
-    w[1] += s1(256u) + s0(w[2]);
-    w[2] += s1(w[0]) + s0(w[3]);
-    w[3] += s1(w[1]) + s0(w[4]);
-    w[4] += s1(w[2]) + s0(w[5]);
-    w[5] += s1(w[3]) + s0(w[6]);
-    w[6] += s1(w[4]) + 256u + s0(w[7]);
-    w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
-    w[8]  = 0x80000000u + s1(w[6]) + w[1];
-    w[9]  = s1(w[7]) + w[2];
-    w[10] = s1(w[8]) + w[3];
-    w[11] = s1(w[9]) + w[4];
-    w[12] = s1(w[10]) + w[5];
-    w[13] = s1(w[11]) + w[6];
-    w[14] = s1(w[12]) + w[7] + s0(256u);
-    w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
-#endif
-    QSB_RND16L_F(16);
-    QSB_INTERLEAVED16L_F(32);
-    QSB_INTERLEAVED15L_F(48);
-    w[15] = qsb_fadd(w[15], one, s1(w[13]));
-    w[15] = qsb_fadd(w[15], one, w[8]);
-    w[15] = qsb_fadd(w[15], one, s0(w[0]));
-    /* round 63 with the feed-forward of words 0 and 4 folded in (QSB_R63_FF04) */
-    t1 = qsb_fadd(a, one, w[15]);
-    t1 = qsb_fadd(t1, one, qsb_klit(63) + QSB_IV0);
-    t1 = QSB_FADD_S1(t1, f);
-    t1 = qsb_fadd(t1, one, Ch(f,g,h));
-    out[0] = qsb_fadd(QSB_FADD_S0(t1, b), one, Maj(b,c,d));
-    out[4] = qsb_fadd(qsb_fadd(e, one, t1), one, QSB_IV4 - QSB_IV0);
-    out[1] = QSB_IV1 + b;
-    out[2] = QSB_IV2 + c;
-    out[3] = QSB_IV3 + d;
-    out[5] = QSB_IV5 + f;
-    out[6] = QSB_IV6 + g;
-    out[7] = QSB_IV7 + h;
-}
-#endif
-#endif
 
 /* Ranked gate on digest word 0 (QSB_ZEROS_N <= 32). */
 __device__ __forceinline__ int gpu_bench_valid_h0(uint32_t h0) {
