@@ -1595,7 +1595,18 @@ static void fe_inv_var(fe &r, const fe &a) {
 /* x = x^-1 lane-wise: Montgomery's trick across the 8 lanes (a 3-level tree of permuted multiplications:
  * 3 to combine, 3 to split), one scalar inversion of the lanes' product. A zero lane zeroes every lane's
  * result, as the Fermat inversion did (x-collisions, probability 2^-240; the exact gate absorbs them). */
-Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1); }   /* lanes 2k <-> 2k+1 */
+#ifndef QSB_CPU_SWAP1_SHUF
+#define QSB_CPU_SWAP1_SHUF 1
+#endif
+Q8T static inline void fe8_swap1(fe8 &r, const fe8 &a) {
+    for (int i = 0; i < 5; i++) {
+#if QSB_CPU_SWAP1_SHUF
+        r.l[i] = _mm512_shuffle_epi32(a.l[i], (_MM_PERM_ENUM)0x4E);
+#else
+        r.l[i] = _mm512_permutex_epi64(a.l[i], 0xB1);
+#endif
+    }
+}   /* lanes 2k <-> 2k+1 */
 Q8T static inline void fe8_swap2(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_permutex_epi64(a.l[i], 0x4E); }   /* pairs 4k <-> 4k+2 */
 Q8T static inline void fe8_swap4(fe8 &r, const fe8 &a) { for (int i = 0; i < 5; i++) r.l[i] = _mm512_shuffle_i64x2(a.l[i], a.l[i], 0x4E); }  /* halves */
 Q8T static void fe8_inv_lanes(fe8 &x) {
