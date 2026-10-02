@@ -1,0 +1,26 @@
+{
+  "status": "PASS CPU fragment/carry model",
+  "created_at": "2026-09-16T23:12:55.269266+00:00",
+  "source_sha256": {
+    "fragment.cuh": "6c3f069bd6389e07aed4924b31c7bd89c8641c5dc106ef96afd1845d1b84e46b",
+    "micro.cu": "0a23b9749c09379ac59ba2bf5b30fce772f759a2c012577b4a11d67b5805136e",
+    "control_math.h": "c8e2ed83df510bfd5ca42e1ba1719e742ded4fb7da55c221e805393d1b308409",
+    "check_fragments.py": "cf69859b834d11158a82f98081d030951d871dc77cd45861e967561faffe0678",
+    "screen.py": "c7b6d2f074b191e95047e7b493ed2f116cc5d598263380ea2e13b8bbeb4da2ec"
+  },
+  "source_extracted_fragment_expressions": {
+    "a0": "k-g",
+    "a1": "k-g-8",
+    "a2": "k+16-g",
+    "a3": "k+8-g",
+    "b0": "4+8*g-k",
+    "b1": "4+8*g-k-16"
+  },
+  "full_product_cases": 2192,
+  "independent_carry_cases": 8688,
+  "mutations_rejected": [
+    "wrong_A_fragment_row"
+  ],
+  "gpu_executed": false,
+  "limits": "CPU model with source-extracted fragment indices, documented matrix ownership and separately modeled collectives. Does not execute the C++/CUDA header or validate device intrinsic/runtime behavior."
+}
