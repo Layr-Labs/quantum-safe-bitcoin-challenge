@@ -168,9 +168,12 @@ static __attribute__((noinline)) void ec_scalar(worker_t *w, sstate *ss) {
 
 __attribute__((target("avx2"), noinline)) static void pub_hash8_avx2(const uint32_t W9[8][9], uint32_t h0[8]) {
     using namespace qcg_sha;
-    v8u W[9], st[8];
+    v8u W[16], st[8];
     for (int j = 0; j < 9; j++) W[j] = _mm256_setr_epi32((int)W9[0][j], (int)W9[1][j], (int)W9[2][j], (int)W9[3][j], (int)W9[4][j], (int)W9[5][j], (int)W9[6][j], (int)W9[7][j]);
-    s8_compress_plan<0x1FFu, 1>(st, W, S8_PLAN_PUBKEY);           /* H0 of SHA256 of the 33-byte key */
+    for (int j = 9; j < 15; j++) W[j] = _mm256_setzero_si256();
+    W[15] = _mm256_set1_epi32(264);
+    for (int j = 0; j < 8; j++) st[j] = _mm256_set1_epi32((int)IV256[j]);
+    s8_compress_full(st, W);
     _mm256_storeu_si256((__m256i *)h0, st[0]);
 }
 __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani(const uint32_t W9[8][9], uint32_t h0[8]) {
