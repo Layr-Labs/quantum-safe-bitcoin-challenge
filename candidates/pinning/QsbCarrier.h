@@ -52,8 +52,19 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
+#if QSB_FIN_FULL_TILE
+    QK_S2_FULL,       /* complete-tile finish specialization */
+#else
+    QK_S2_FULL_SLOT,  /* reserve this slot to keep the T1 scheduler index stable */
+#endif
+    QK_T1SCHED,       /* qsb_tail_sched_batch           (optional) */
     QK_N
 };
+#if QSB_FIN_FULL_TILE
+#define QK_S2_FULL_RESERVED_INDEX (-1)
+#else
+#define QK_S2_FULL_RESERVED_INDEX QK_S2_FULL_SLOT
+#endif
 
 struct QsbCarrierState {
     int on;
@@ -133,9 +144,14 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
         const char *name = i < n_gen ? qsb_carrier_kernel_names[i] : fixed[i];
         if (i >= QK_RF) {
             if (!name || !name[0]) name = fixed[i];
-            if (!name || !name[0]) { all = 0; continue; }
+            if (!name || !name[0]) {
+                if (i != QK_T1SCHED && i != QK_S2_FULL_RESERVED_INDEX) all = 0;
+                continue;
+            }
             if (cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, name) != cudaSuccess) {
-                g_qsb_carrier.k[i] = nullptr; all = 0; cudaGetLastError();
+                g_qsb_carrier.k[i] = nullptr;
+                if (i != QK_T1SCHED && i != QK_S2_FULL_RESERVED_INDEX) all = 0;
+                cudaGetLastError();
             }
             continue;
         }

@@ -436,7 +436,15 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
 #ifndef QSB_FIN_RASSOC
 #define QSB_FIN_RASSOC 0
 #endif
-#if QSB_FIN_RASSOC & 1
+/* Combine h, K+W and Ch in one three-input addition. */
+#ifndef QSB_FIN_X1
+#define QSB_FIN_X1 0
+#endif
+#if QSB_FIN_X1
+#define QSB_RL_T1(h, e, f, g, kw) \
+    t1 = h + (kw) + Ch(e,f,g); \
+    t1 = QSB_FADD_S1(t1, e);
+#elif QSB_FIN_RASSOC & 1
 #define QSB_RL_T1(h, e, f, g, kw) \
     t1 = qsb_fadd(h, one, (kw)); \
     t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
@@ -486,12 +494,23 @@ QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 14), w[14]));\
 QSB_RND15L_F(k);\
 QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 }
+#ifndef QSB_FIN_X2
+#define QSB_FIN_X2 0
+#endif
+/* Form each four-term schedule update with one IADD3 and one IMAD.IADD. */
+#if QSB_FIN_X2
+#define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
+    w[j] += QSB_s1M(w[((j)+14)&15]) + w[((j)+9)&15] + QSB_s0M(w[((j)+1)&15]); \
+    QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
+} while (0)
+#else
 #define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
     w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
     w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
     w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
     QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
 } while (0)
+#endif
 #define QSB_INTERLEAVED15L_F(base) do { \
     QSB_STEPL_F(0,a,b,c,d,e,f,g,h,base); \
     QSB_STEPL_F(1,h,a,b,c,d,e,f,g,base); \
@@ -532,8 +551,20 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #ifndef QSB_FIN_W8S0
 #define QSB_FIN_W8S0 1
 #endif
+#ifndef QSB_FIN_X3
+#define QSB_FIN_X3 1
+#endif
 #if QSB_SHA_FMA_ADD
 /* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
+#if QSB_FIN_X3
+#define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
+    t1 = qsb_fadd((W), one, (KH)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = qsb_add_ror6(t1, QSB_S1P(e)); \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = qsb_add_ror2(t1, QSB_S0P(a)); \
+    h  = qsb_fadd(t2, one, Maj(a,b,c));
+#else
 #define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
     t1 = qsb_fadd((W), one, (KH)); \
     t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
@@ -541,6 +572,7 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
     d  = qsb_fadd(d, one, t1); \
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
 #endif
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
