@@ -1,4 +1,5 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_ERC_1002142747 1   /* inert tag; unreferenced */
+#define QSB_QMIX_RT 1   /* the record's run-time Q-layout switch, on (its rate trigger and target unchanged) */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
