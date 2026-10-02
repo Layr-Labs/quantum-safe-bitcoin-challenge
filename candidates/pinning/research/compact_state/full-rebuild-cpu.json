@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "gpu_executed": false,
+  "source_sha256": {
+    "wide_table_kernels.cuh": "811668b4a00b8fb35716392b7c60d79e952c511eeb3f08a5a6c9321b4057c8d2",
+    "pinning.cu": "63b6505c100e6bc7de5a679d32667c4f7f1fd135f04da14716306b7f5bb286c0",
+    "wide_geometry.cuh": "985e935e371842eceabe05245b8d28237bfd19e2987c75894c59e389766eabbb",
+    "three_state.cuh": "8674d73b4be1f198c49e6b13d3e5589b43422567015a9d693b5e0efa7b4c3ca6",
+    "wide_fused_kernel.cuh": "9151385a09c76c9067616c53f0b1e664ab86aa4332ff846524589a83fc4e70ba",
+    "GPUHash.h": "8cf9b303b6f5a09051e433a8bc21e2f3a66631e3bd22b2b1a10e71fe0b21b2bc",
+    "GPUMath.h": "7f7a518c2021c2f104e2ce9b014d03108e6c858576341779c240595260405187",
+    "wide_search_tuner.cuh": "acb985958deea7644189ca749ca78220010b4ec803efe9053361b01feb6b451d",
+    "wide_table_host.cuh": "ac27e68bbc52f7cb8d9c00faba61f96f75545af0aa22d2a8d0adf4ffd41e8e4b"
+  },
+  "counts": {
+    "arbitrary_scaled_recovery_cases": 5000,
+    "leaf_inverse_cases": 2048,
+    "tree_product_counts": {
+      "prepare": 255,
+      "finish": 764
+    },
+    "pipeline_sizes": [
+      1,
+      31,
+      32,
+      255,
+      256,
+      257,
+      511,
+      513
+    ],
+    "pipeline_active_candidates": 1856
+  },
+  "limits": "Actual source kernel/control/collectives on CPU threads with OpenSSL fields and controlled EC producer. SHA uses CPU header path. No CUDA/PTX arithmetic, GPU ordering, memory traffic or speed result."
+}
