@@ -46,6 +46,11 @@
 #ifndef QSB_HP_BLOCKSYNC
 #define QSB_HP_BLOCKSYNC 1
 #endif
+/* Group pending epochs by their suffix compression count. Only the host
+ * producer schedule changes; descriptor indexes and every SHA input stay exact. */
+#ifndef QSB_HP_TAIL_BUCKETS
+#define QSB_HP_TAIL_BUCKETS 1
+#endif
 #pragma once
 #include <atomic>
 #include <thread>
@@ -423,6 +428,12 @@ QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, u
     }
     for (int b = 0; b < maxnb; b++)
         for (int l = 0; l < 4; l++) if (b >= nb[l]) rows[4 * b + l] = P.tail_rows;   /* idle lane: any row */
+#if QSB_HP_TAIL_BUCKETS
+    if (nl == 4 && nb[0] == nb[1] && nb[0] == nb[2] && nb[0] == nb[3]) {
+        sha_pre4(S, rows, maxnb);
+        memcpy(F, S, sizeof F);
+    } else
+#endif
     sha_pre4_var(S, rows, nb, maxnb, F);
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
@@ -478,8 +489,14 @@ static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_
         const uint8_t *bp[4];
         for (int l = 0; l < 4; l++) bp[l] = b >= nb[l] ? dummy : b == 0 ? fb[l] : tail[l] + 64 * b;
         compress4(S, bp);
+#if QSB_HP_TAIL_BUCKETS
+        if (!(nl == 4 && nb[0] == nb[1] && nb[0] == nb[2] && nb[0] == nb[3]))
+#endif
         for (int l = 0; l < 4; l++) if (b == nb[l] - 1) memcpy(F[l], S[l], 32);
     }
+#if QSB_HP_TAIL_BUCKETS
+    if (nl == 4 && nb[0] == nb[1] && nb[0] == nb[2] && nb[0] == nb[3]) memcpy(F, S, sizeof F);
+#endif
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
         const uint32_t w0 = be32(rem8[l]), w1 = be32(rem8[l] + 4);
@@ -513,11 +530,27 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
     }
     static thread_local ClsCache cc = {};
     Lane L[4]; int nl = 0;
+#if QSB_HP_TAIL_BUCKETS
+    Lane pending[Params::TAILMAX + 1][4];
+    unsigned char pending_count[Params::TAILMAX + 1] = {};
+#endif
     for (uint64_t e = e0; e < e1; e++) {
+#if QSB_HP_TAIL_BUCKETS
+        const int suffix_blocks = (ctx[K].len + (N - 1 - o[K - 1]) * SIG_PUSH_SIZE) >> 6;
+        const bool bucketed = suffix_blocks >= 0 && suffix_blocks <= Params::TAILMAX;
+        Lane &x = bucketed ? pending[suffix_blocks][pending_count[suffix_blocks]++] : L[nl++];
+#else
         Lane &x = L[nl++];
+#endif
         memcpy(x.c.st, ctx[K].st, 32); x.c.len = ctx[K].len; memcpy(x.c.buf, ctx[K].buf, 64);
         x.o6 = o[K - 1]; x.o5 = o[K - 2]; x.idx = (uint32_t)(e - base);
         memcpy(x.early, o, MAXK);
+#if QSB_HP_TAIL_BUCKETS
+        if (bucketed && pending_count[suffix_blocks] == 4) {
+            flush(P, cc, pending[suffix_blocks], 4, ep_out, fi_out);
+            pending_count[suffix_blocks] = 0;
+        }
+#endif
         if (nl == 4) { flush(P, cc, L, 4, ep_out, fi_out); nl = 0; }
         if (e + 1 == e1) break;
         int i = K - 1;
@@ -527,6 +560,16 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
         o[i]++;
         for (int j = i + 1; j < K; j++) { o[j] = o[j - 1] + 1; ctx[j + 1] = ctx[j]; }
     }
+#if QSB_HP_TAIL_BUCKETS
+    /* Drain at most three leftovers per count through the original flush.
+     * The consumer sees this chunk only after the existing completion fence. */
+    for (int b = 0; b <= Params::TAILMAX; b++) {
+        for (unsigned int j = 0; j < pending_count[b]; j++) {
+            L[nl++] = pending[b][j];
+            if (nl == 4) { flush(P, cc, L, 4, ep_out, fi_out); nl = 0; }
+        }
+    }
+#endif
     if (nl) flush(P, cc, L, nl, ep_out, fi_out);
     _mm_sfence();                                            /* order the streamed stores before "chunk done" */
 }
