@@ -1,0 +1,235 @@
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../chain_replay_field.cuh(11): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3;uint32_t carry;
+                                    ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../chain_replay_field.cuh(42): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../chain_replay_field.cuh(58): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../chain_replay_field.cuh(1694): warning #550-D: variable "high" was set but never used
+      uint64_t r0,r1,r2,r3,high;
+                           ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../hit_filter_field_sc.cuh(253): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3;uint32_t carry;
+                                    ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../hit_filter_field_sc.cuh(284): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../hit_filter_field_sc.cuh(309): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../hit_filter_field_sc.cuh(3978): warning #550-D: variable "high" was set but never used
+      uint64_t r0,r1,r2,r3,high;
+                           ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(99): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(107): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(110): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(113): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(126): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(217): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(228): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(230): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(232): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(238): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(241): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(252): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(264): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(266): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(268): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(274): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(294): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(296): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(298): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(304): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(317): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/host_producers_v3.h(865): warning #177-D: variable "w" was declared but never referenced
+      const size_t n = (size_t)batch_len(h, 0), w = (size_t)h->P.ncls * 32;
+                                                ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../CpuGrindSubset.h(2556): warning #177-D: variable "b8" was declared but never referenced
+              Build8 b8; bool okb = false;
+                     ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/../../CpuGrindSubset.h(2556): warning #177-D: variable "okb" was declared but never referenced
+              Build8 b8; bool okb = false;
+                              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6450): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6547): warning #177-D: variable "f" was declared but never referenced
+              int f = (int)tile_first[t];
+                  ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6599): warning #177-D: variable "zh_cnt" was declared but never referenced
+          uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
+                    ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6600): warning #177-D: variable "zh_idx" was declared but never referenced
+          uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
+                    ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6601): warning #177-D: variable "zh_combos" was declared but never referenced
+          uint8_t *zh_combos = d_hitbuf + 8;
+                   ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6608): warning #177-D: variable "zh_host" was declared but never referenced
+          uint8_t zh_host[4 + 64 * 16];
+                  ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6616): warning #177-D: variable "hv_pend" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                         ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6616): warning #177-D: variable "hv_pend_n" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                                                          ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6616): warning #177-D: variable "hv_pend_base" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                                                                                  ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6616): warning #177-D: variable "hv_pend_epochs" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                                                                                                        ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(5881): warning #177-D: variable "epoch_mid" was declared but never referenced
+      uint32_t epoch_mid[8];
+               ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(5882): warning #177-D: variable "epoch_rem_len" was declared but never referenced
+      int epoch_rem_len = 0;
+          ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6401): warning #177-D: variable "BLKSZ" was declared but never referenced
+      int BLKSZ = 256;
+          ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6458): warning #550-D: variable "t_last_report" was set but never used
+      struct timespec t0, t1, t_last_report;
+                              ^
+
+/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/tests/gpu_epochs/tree.cu(6567): warning #177-D: variable "found" was declared but never referenced
+      int found = 0;
+          ^
+
+ptxas info    : 56864 bytes gmem, 12588 bytes cmem[3], 64 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z19kernel_gt_heal_scanPKhPKmPjj' for 'sm_89'
+ptxas info    : Function properties for _Z19kernel_gt_heal_scanPKhPKmPjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 54 registers, used 0 barriers, 380 bytes cmem[0]
+ptxas info    : Compile time = 12.287 ms
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z19kernel_build_gtablePKmS0_S0_Ph' for 'sm_89'
+ptxas info    : Function properties for _Z19kernel_build_gtablePKmS0_S0_Ph
+    2272 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 122 registers, used 0 barriers, 2272 bytes cumulative stack size, 384 bytes cmem[0]
+ptxas info    : Compile time = 152.096 ms
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i' for 'sm_89'
+ptxas info    : Function properties for _Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 24576 bytes smem, 628 bytes cmem[0], 16 bytes cmem[2]
+ptxas info    : Compile time = 646.190 ms
+ptxas info    : Function properties for _Z15qsb_root_fermat15QsbInverseWords
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z23qsb_pair_front3_z_valuemmmmPKhmmmmmmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj' for 'sm_89'
+ptxas info    : Function properties for _Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj
+    96 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 96 bytes cumulative stack size, 424 bytes cmem[0]
+ptxas info    : Compile time = 40.903 ms
+ptxas info    : Compiling entry function '_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm' for 'sm_89'
+ptxas info    : Function properties for _Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm
+    112 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 112 bytes cumulative stack size, 440 bytes cmem[0]
+ptxas info    : Compile time = 87.932 ms
+ptxas info    : Compiling entry function '_Z23kernel_build_first_flatPK12epoch_desc_tPjjj' for 'sm_89'
+ptxas info    : Function properties for _Z23kernel_build_first_flatPK12epoch_desc_tPjjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 47 registers, used 0 barriers, 376 bytes cmem[0]
+ptxas info    : Compile time = 27.800 ms

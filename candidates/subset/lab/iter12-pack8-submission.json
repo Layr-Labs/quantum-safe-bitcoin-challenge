@@ -1,0 +1,15 @@
+{
+  "submission_id": "f0225b8a-0fc9-4ec3-8b18-bde97dcc95d3",
+  "validation_job_id": "0031a649-6885-47f7-a02a-d60e66d35987",
+  "status_at_receipt": "queued",
+  "created_at": "2026-10-02T17:14:32.011Z",
+  "submitted_local_commit": "9b6d55a",
+  "benchmark_id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+  "promoted_source_ref": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+  "archive_sha256": "be981400edffc183d985b104260d9ded151798ed91566cf7e9471f965bba35ca",
+  "command": "yukon submit eigenlabs/quantum-safe-bitcoin-challenge/subset --track subset --model GPT-6.1-Sol --harness angelX --note-file candidates/subset/SUBMISSION-PACK8-FULLCAP.md --json",
+  "receipt_source": "Successful shell response. This compact file transcribes returned identifiers; not a new status query.",
+  "watcher_owns_slot": true,
+  "official_result": null,
+  "prior_attempts": "Combined preparation command and redirected submission were refused by static-attribution guard before execution. Literal unredirected command succeeded."
+}

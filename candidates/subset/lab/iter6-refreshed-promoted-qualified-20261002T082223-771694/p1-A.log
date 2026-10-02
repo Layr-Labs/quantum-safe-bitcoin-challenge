@@ -1,0 +1,16 @@
+  run: stdbuf -oL timeout 120 /work/comps/yukon-glm-night/qsb-subset/candidates/subset/lab/n24L_iter9leader /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/subset.bin 0 4081224 970060878 1 0 single_hash
+  → /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json: 0.0M/s, 0 candidates, 0 hits
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 0  in 1.7s (harness clock)
+  candidates (from N verified hits): 0
+  grinder self-reported: 1.6s, 0.0 M/s (not scored)
+  verified hits: 0 / 0
+    ✗ fixed-time run ended early: 1.7s (minimum 119.0s)
+--------------------------------------------------------
+  SCORE (throughput) : 0.0000 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 0.000000 hits/s
+  RESULT: REJECT ❌ (not scored)
+========================================================

@@ -1,0 +1,80 @@
+{
+  "Mps": {
+    "A": 391.58598,
+    "B": 394.201799
+  },
+  "runs": {
+    "A": [
+      391.58598
+    ],
+    "B": [
+      394.201799
+    ]
+  },
+  "verified_hits": {
+    "A": [
+      5658
+    ],
+    "B": [
+      5725
+    ]
+  },
+  "delta_percent": 0.6680062958331678,
+  "all_verified": true,
+  "purpose": "capacity-only default-off producer-scratch lifetime overlay; single exact-hit pair, not speed qualification",
+  "pair_path": "candidates/subset/lab/iter6-producerscratch-screen-20261002T073951-528695",
+  "N": 24,
+  "seconds": 120,
+  "problem_seed": 1789110211,
+  "requested_VRAM_saving_bytes": 109462784,
+  "requested_VRAM_saving_MiB": 104.391845703125,
+  "per_slot": {
+    "epochs": 2097152,
+    "group_records": 362053,
+    "group_bytes": 46342784,
+    "map_bytes": 8388608,
+    "map_offset": 46342912,
+    "first_bytes": 1073741824,
+    "fits": true
+  },
+  "NVML_process_MiB": {
+    "n24L_current": {
+      "samples": 34,
+      "min": 12244,
+      "max": 12244,
+      "median": 12244.0
+    },
+    "n24L_producerscratch": {
+      "samples": 60,
+      "min": 12136,
+      "max": 12136,
+      "median": 12136.0
+    }
+  },
+  "measured_process_delta_MiB": 108.0,
+  "accounting_only_ranked_headroom_MiB": 562.9288940429688,
+  "accounting_only_with_separate_default_off_combo_trim_MiB": 634.9288940429688,
+  "device_identity": {
+    "current": {
+      "size": 1126120,
+      "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+    },
+    "producerscratch": {
+      "size": 1126120,
+      "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+    },
+    "local_device_payload_byte_identical": true,
+    "unchanged_qualified_carrier_header_sha256": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20"
+  },
+  "production_enabled": false,
+  "submission_id_unchanged": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+  "submission_last_receipt_status": "validating, watcher-owned",
+  "caveats": [
+    "One paired run cannot establish +0.668% speedup; no confirmation gate or adoption.",
+    "104.392 MiB is requested allocation reduction; 108 MiB is local process footprint reduction, not 4090 memory proof.",
+    "Ranked total excludes context, module, runtime and small allocations.",
+    "Existing benchmark warnings compare GPU self-count with GPU+CPU hits; exact published-hit verification passed.",
+    "No raw startup-checker stdout is retained by the existing gpu_wrap benchmark; do not assert checker PASS from this artifact alone.",
+    "No added fixture or stacked broader verifier after exact PASS."
+  ]
+}

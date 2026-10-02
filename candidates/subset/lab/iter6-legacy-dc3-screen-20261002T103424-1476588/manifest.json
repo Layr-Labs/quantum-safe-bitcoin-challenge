@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_iter11control.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"/work/tmp/qsb-it11-budget.4bgwef/candidates/subset/subset.cu\"\n",
+    "source_sha256": "76e1aecb6aacb736d972d433a5f96037f59f3e9078f84639f18e101180e07313",
+    "binary_sha256": "3bff1ff6098cd50fc1168a70df4bc3afe728308d611032062101eae7c54861af",
+    "stamp": "QSB_ZEROS_N=24 1790952976877163385"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_iter12dc3.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_YP_LEGACY_DC 3\n#include \"../subset.cu\"\n",
+    "source_sha256": "43c0adb5726ce5dbd00bbf9593689e6df4aba5813a1fce9e0971e3c45293b3d9",
+    "binary_sha256": "fee55e842491e5c217637cbf70eba7748492b45531f946c41e04b87f4f73f727",
+    "stamp": "QSB_ZEROS_N=24 1790955197810786283"
+  }
+}

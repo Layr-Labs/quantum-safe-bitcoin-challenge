@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-combined-final.wh8dSx/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "e251680b8587b7303f46d9021b03fb2476e565a7cba118cb1a68356b793c3980",
+    "binary_sha256": "549dac501bf4dd2400693c2654e3e9188dfff045a2affa4c42e539a96f3260a6",
+    "stamp": "QSB_ZEROS_N=24 1790937658817568803"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_centerunsigned.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_K2S_CENTER_FUSED 2\n#include \"../subset.cu\"\n",
+    "source_sha256": "2cd2a82c231e3b292f12f151b09b8ac7050e01f5c5602388cc498c8a8910cda4",
+    "binary_sha256": "d11632cdd9a21074ba6d52bb18a3e41371bba636877cb94449cdc67f0eefd4e1",
+    "stamp": "QSB_ZEROS_N=24 1790943114586204985"
+  }
+}

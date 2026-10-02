@@ -1,0 +1,20 @@
+{
+  "default": {
+    "all": 14520,
+    "NOP": 14,
+    "BR": 41,
+    "useful_non_NOP": 14506
+  },
+  "signed": {
+    "all": 14512,
+    "NOP": 12,
+    "BR": 41,
+    "useful_non_NOP": 14500
+  },
+  "unsigned": {
+    "all": 14504,
+    "NOP": 9,
+    "BR": 41,
+    "useful_non_NOP": 14495
+  }
+}

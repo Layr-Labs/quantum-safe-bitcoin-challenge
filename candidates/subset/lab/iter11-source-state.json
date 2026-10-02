@@ -1,0 +1,9 @@
+{
+  "enabled_in_production": false,
+  "production_wrapper_unchanged": true,
+  "changed_default_off_probe": "tests/gpu_epochs/launch_budget.h",
+  "logical_review": "lab/iter11-budget-design.md",
+  "verifier_result": "both N24 arms PASS",
+  "adoption": "rejected by -7.093103% screen",
+  "summary_path": "candidates/subset/lab/iter6-launchbudget-screen-20261002T095636-1283710/summary.json"
+}

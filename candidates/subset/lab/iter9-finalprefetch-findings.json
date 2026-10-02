@@ -1,0 +1,28 @@
+{
+  "Mps": {
+    "A": 410.106447,
+    "B": 395.756486
+  },
+  "runs": {
+    "A": [
+      410.106447
+    ],
+    "B": [
+      395.756486
+    ]
+  },
+  "verified_hits": {
+    "A": [
+      5925
+    ],
+    "B": [
+      5726
+    ]
+  },
+  "delta_percent": -3.499082032231504,
+  "all_verified": true,
+  "artifact_directory": "candidates/subset/lab/iter6-finalprefetch-screen-20261002T081559-730717",
+  "probe": "QSB_S3_FINAL_PREFETCH=1",
+  "decision": "default-off; single-pair negative screen, not confirmed regression",
+  "native": "iter9-native-census.json"
+}

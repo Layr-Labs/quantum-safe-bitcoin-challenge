@@ -1,0 +1,13 @@
+{
+  "cubin_bytes": 473504,
+  "sha256": "a724399a04db515f8bebd836b1af866e6e7a1b778a98ce73a384c6f7704de147",
+  "equals_measured_native": true,
+  "prepared_vs_live_changed_sources": {
+    "subset.cu": {
+      "prepared_sha256": "24ff88eb059119f6897ea541423c408ed1d5d1bb116e69ce5b34ad83a31a03b8",
+      "live_sha256": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313"
+    }
+  },
+  "carrier_header_sha256": "1f6d4c1a85e25aad81ce79dbac6b539296bb83d1709dd03622d8f4b2ce827708",
+  "status": "Ready outside production; pending all3promotedpairs"
+}

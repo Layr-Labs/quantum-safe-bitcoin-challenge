@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_iter11control.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"/work/tmp/qsb-it11-budget.4bgwef/candidates/subset/subset.cu\"\n",
+    "source_sha256": "76e1aecb6aacb736d972d433a5f96037f59f3e9078f84639f18e101180e07313",
+    "binary_sha256": "3bff1ff6098cd50fc1168a70df4bc3afe728308d611032062101eae7c54861af",
+    "stamp": "QSB_ZEROS_N=24 1790952976877163385"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_iter12pack8.cu",
+    "text": "/* Iteration12 full-capacity compact first-state pitch screen.\n * Reuses the audited lossless schedule packing with current centered-square\n * arithmetic; does not shrink ZLAB_LAUNCH_BLOCKS or pipeline capacity. */\n#define QSB_LOCAL_SM86 1\n#define QSB_FIRST_PACK8 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "b244c6128dbacd5c182f669efa199f05f7c815c25a6e850a77cef29d76eea465",
+    "binary_sha256": "1943167858582ffcc2b402051407ff8cd0a8f7012688ba6a625c8851c73735e0",
+    "stamp": "QSB_ZEROS_N=24 1790956298209317749"
+  }
+}

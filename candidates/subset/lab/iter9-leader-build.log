@@ -1,0 +1,797 @@
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/zinv32.cuh(373): warning #20091-D: a __constant__ variable "QSB_ISO_INVU" cannot be directly read in a host function
+          const uint32_t scaled=i<8?(uint32_t)(QSB_ISO_INVU[i>>1]>>(32*(i&1))):0u;
+                                               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(111): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(119): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(122): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(125): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(138): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(229): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(240): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(242): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(244): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(250): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(253): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(264): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(276): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(278): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(280): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(286): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(306): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(308): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(310): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(316): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(329): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2158): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2166): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2169): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2172): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2185): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2214): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2228): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2234): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2237): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2240): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2244): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2246): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2253): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2256): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2284): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2322): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2329): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2332): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2335): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2348): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2367): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2370): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2373): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2376): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2389): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2401): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2403): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2406): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2422): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2428): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2431): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2444): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2457): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2464): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2481): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2544): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 9
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2549): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 64
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2583): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 1
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2587): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2589): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2591): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2593): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2628): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../GPUHash.h(387): warning #177-D: variable "t1" was declared but never referenced
+   uint32_t t1;
+            ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../GPUHash.h(388): warning #177-D: variable "t2" was declared but never referenced
+   uint32_t t2;
+            ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../GPUHash.h(509): warning #177-D: variable "t1" was declared but never referenced
+   uint32_t t1;
+            ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../GPUHash.h(510): warning #177-D: variable "t2" was declared but never referenced
+   uint32_t t2;
+            ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../GPUHash.h(615): warning #177-D: variable "t1" was declared but never referenced
+   uint32_t t1;
+            ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../GPUHash.h(616): warning #177-D: variable "t2" was declared but never referenced
+   uint32_t t2;
+            ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(438): warning #177-D: variable "t1" was declared but never referenced
+          uint32_t e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
+                                                                   ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(438): warning #177-D: variable "t2" was declared but never referenced
+          uint32_t e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
+                                                                      ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(11): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3;uint32_t carry;
+                                    ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(42): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(58): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(1694): warning #550-D: variable "high" was set but never used
+      uint64_t r0,r1,r2,r3,high;
+                           ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(358): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3;uint32_t carry;
+                                    ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(389): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(422): warning #550-D: variable "carry" was set but never used
+      uint64_t r0,r1,r2,r3; uint32_t carry;
+                                     ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(3823): warning #550-D: variable "high" was set but never used
+      uint64_t r0,r1,r2,r3,high;
+                           ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh(173): warning #177-D: variable "t1" was declared but never referenced
+      uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
+                                                           ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh(173): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t e=state[4],f=state[5],g=state[6],h=state[7],t1,t2;
+                                                              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh(246): warning #177-D: variable "t1" was declared but never referenced
+      uint32_t a0,b0,c0,d0,e0,f0,g0,h0,a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
+                                                               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh(246): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t a0,b0,c0,d0,e0,f0,g0,h0,a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
+                                                                  ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh(364): warning #177-D: variable "t1" was declared but never referenced
+      uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
+                                       ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh(364): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
+                                          ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../sha_gate_fma.cuh(243): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t t2;
+               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../sha_gate_fma.cuh(476): warning #177-D: variable "t1" was declared but never referenced
+      uint32_t t1;
+               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../sha_gate_fma.cuh(477): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t t2;
+               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/pair_shared.cuh(523): warning #177-D: variable "t1" was declared but never referenced
+      uint32_t t1, t2;
+               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/pair_shared.cuh(523): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t t1, t2;
+                   ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/pair_shared.cuh(538): warning #177-D: variable "t1" was declared but never referenced
+      uint32_t t1, t2;
+               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/pair_shared.cuh(538): warning #177-D: variable "t2" was declared but never referenced
+      uint32_t t1, t2;
+                   ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(111): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(119): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(122): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(125): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(138): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(229): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(240): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(242): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(244): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(250): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(253): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(264): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(276): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(278): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(280): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(286): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(306): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(308): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(310): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(316): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 4
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h(329): warning #1675-D: unrecognized GCC pragma
+  #pragma GCC unroll 16
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2871): warning #177-D: variable "b8" was declared but never referenced
+              Build8 b8; bool okb = false;
+                     ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2871): warning #177-D: variable "okb" was declared but never referenced
+              Build8 b8; bool okb = false;
+                              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6789): warning #550-D: variable "debug_idx" was set but never used
+          int debug_idx = -1;
+              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6886): warning #177-D: variable "f" was declared but never referenced
+              int f = (int)tile_first[t];
+                  ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6938): warning #177-D: variable "zh_cnt" was declared but never referenced
+          uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
+                    ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6939): warning #177-D: variable "zh_idx" was declared but never referenced
+          uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
+                    ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6940): warning #177-D: variable "zh_combos" was declared but never referenced
+          uint8_t *zh_combos = d_hitbuf + 8;
+                   ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6947): warning #177-D: variable "zh_host" was declared but never referenced
+          uint8_t zh_host[4 + 64 * 16];
+                  ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6955): warning #177-D: variable "hv_pend" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                         ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6955): warning #177-D: variable "hv_pend_n" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                                                          ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6955): warning #177-D: variable "hv_pend_base" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                                                                                  ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6955): warning #177-D: variable "hv_pend_epochs" was declared but never referenced
+          static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+                                                                                                        ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6255): warning #177-D: variable "epoch_mid" was declared but never referenced
+      uint32_t epoch_mid[8];
+               ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6256): warning #177-D: variable "epoch_rem_len" was declared but never referenced
+      int epoch_rem_len = 0;
+          ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6743): warning #177-D: variable "BLKSZ" was declared but never referenced
+      int BLKSZ = 256;
+          ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6797): warning #550-D: variable "t_last_report" was set but never used
+      struct timespec t0, t1, t_last_report;
+                              ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(6906): warning #177-D: variable "found" was declared but never referenced
+      int found = 0;
+          ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(365): warning #177-D: variable "t1" was declared but never referenced
+   uint32_t a=output[0],b=output[1],c=output[2],d=output[3],e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
+                                                                                                            ^
+
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu(365): warning #177-D: variable "t2" was declared but never referenced
+   uint32_t a=output[0],b=output[1],c=output[2],d=output[3],e=output[4],f=output[5],g=output[6],h=output[7],t1,t2;
+                                                                                                               ^
+
+ptxas info    : 56864 bytes gmem, 9500 bytes cmem[3], 64 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z19kernel_gt_heal_scanPKhPKmPjj' for 'sm_52'
+ptxas info    : Function properties for _Z19kernel_gt_heal_scanPKhPKmPjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 62 registers, used 0 barriers, 348 bytes cmem[0]
+ptxas info    : Compile time = 36.339 ms
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z18kernel_gt_offset_yPh' for 'sm_52'
+ptxas info    : Function properties for _Z18kernel_gt_offset_yPh
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 15 registers, used 0 barriers, 328 bytes cmem[0]
+ptxas info    : Compile time = 1.299 ms
+ptxas info    : Compiling entry function '_Z19kernel_build_gtablePKmS0_S0_Ph' for 'sm_52'
+ptxas info    : Function properties for _Z19kernel_build_gtablePKmS0_S0_Ph
+    2272 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 119 registers, used 0 barriers, 2272 bytes cumulative stack size, 352 bytes cmem[0], 12 bytes cmem[2]
+ptxas info    : Compile time = 496.529 ms
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z7_ModInvPm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i' for 'sm_52'
+ptxas info    : Function properties for _Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 49152 bytes smem, 596 bytes cmem[0], 400 bytes cmem[2]
+ptxas info    : Compile time = 1569.429 ms
+ptxas info    : Function properties for _Z15qsb_pair_const410QsbPairS16
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z15qsb_root_fermat15QsbInverseWords
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z23qsb_pair_front3_z_valuemmmmPKhmmmmmmmm
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj' for 'sm_52'
+ptxas info    : Function properties for _Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj
+    96 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 96 bytes cumulative stack size, 392 bytes cmem[0]
+ptxas info    : Compile time = 35.952 ms
+ptxas info    : Compiling entry function '_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm' for 'sm_52'
+ptxas info    : Function properties for _Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm
+    112 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 0 barriers, 112 bytes cumulative stack size, 408 bytes cmem[0]
+ptxas info    : Compile time = 76.992 ms
+ptxas info    : Compiling entry function '_Z23kernel_build_first_flatPK12epoch_desc_tPjjj' for 'sm_52'
+ptxas info    : Function properties for _Z23kernel_build_first_flatPK12epoch_desc_tPjjj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 40 registers, used 0 barriers, 344 bytes cmem[0]
+ptxas info    : Compile time = 24.508 ms
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void gt_point_to_limbs(EC_GROUP*, EC_POINT*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*, uint64_t*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4573:36: warning: 'int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4573 |     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:675:52: note: declared here
+  675 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP *group, const EC_POINT *p,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void gt_batch_ladder(EC_GROUP*, const EC_POINT*, int, uint64_t*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4602:28: warning: 'int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4602 |     if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+      |       ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:857:52: note: declared here
+  857 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void gt_biased_ladder(EC_GROUP*, const EC_POINT*, const EC_POINT*, int, uint64_t*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4628:28: warning: 'int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4628 |     if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+      |       ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:857:52: note: declared here
+  857 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void gt_build_ladders(uint64_t*, uint64_t*, uint64_t*, const uint8_t*, const uint64_t*, const uint64_t*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4651:23: warning: 'int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4651 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void gt_build_ladders_seg(int, uint64_t*, uint64_t*, uint64_t*, const uint8_t*, const uint64_t*, const uint64_t*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4713:23: warning: 'int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4713 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'int gt_spot_check(const uint8_t*, int, const uint8_t*, const uint64_t*, const uint64_t*, const uint8_t*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4815:23: warning: 'int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4815 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void gt_spot_check_range(int, int, const int*, const int*, const uint8_t*, const uint64_t*, const uint64_t*, const uint8_t*, int*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4854:23: warning: 'int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4854 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'int gt_heal(uint8_t*, const uint8_t*, const uint64_t*, const uint64_t*, unsigned int*, unsigned int*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4914:23: warning: 'int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4914 |     EC_GROUP_get_curve_GFp(grp, field_p, NULL, NULL, ctx);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void compute_gtable(uint8_t*, const uint8_t*, const uint64_t*, const uint64_t*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:4980:60: warning: 'int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 4980 |     EC_GROUP_get_order(grp,order,ctx); EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+      |                                      ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     
+/usr/include/openssl/ec.h:357:52: note: declared here
+  357 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~  
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/qsb_host_verify.h: In function 'int qsb_hv_check(const qsb_hv_t*, const uint8_t*, int)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/qsb_host_verify.h:109:27: warning: 'int SHA256_Init(SHA256_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+  109 |     SHA256_CTX sc; SHA256_Init(&sc);
+      |                ~~~~~~~~~~~^~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/qsb_host_verify.h:111:66: warning: 'void SHA256_Transform(SHA256_CTX*, const unsigned char*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+  111 |     for (size_t off = 0; off < len; off += 64) SHA256_Transform(&sc, buf + off);
+      |                                                  ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~ 
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h: In function 'void qhp::sha_sw(uint32_t*, const uint8_t*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/host_producers_v3.h:156:17: warning: 'void SHA256_Transform(SHA256_CTX*, const unsigned char*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+  156 |     SHA256_Transform(&c, blk);
+      |     ~~~~~~~~~~~~^~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function 'bool qcpu::table_check(const Ctx&)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:2942:139: warning: 'int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2942 |         ok = cxb && cyb && BN_lebin2bn(c.dp->u2r_x, 32, cxb) && BN_lebin2bn(c.dp->u2r_y, 32, cyb) &&
+      |                                                                                                                                           ^                      
+/usr/include/openssl/ec.h:663:52: note: declared here
+  663 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP *group, EC_POINT *p,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:2952:295: warning: 'int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 2952 |             ok = BN_set_word(k, (BN_ULONG)j + 1) && BN_lshift(k, k, c.g.off[i]) && BN_mod_mul(k, k, nri, ord, bx) &&
+      |                                                                                                                                                                                                                                                                                                       ^                   
+/usr/include/openssl/ec.h:675:52: note: declared here
+  675 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP *group, const EC_POINT *p,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function 'bool qcpu::gate_publish(Ctx*, uint8_t*, const uint8_t*, int, const fe&, unsigned int)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3211:27: warning: 'int SHA256_Init(SHA256_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3211 |     SHA256_CTX s3; SHA256_Init(&s3); SHA256_Transform(&s3, pk);
+      |                ~~~~~~~~~~~^~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3211:50: warning: 'void SHA256_Transform(SHA256_CTX*, const unsigned char*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3211 |     SHA256_CTX s3; SHA256_Init(&s3); SHA256_Transform(&s3, pk);
+      |                                  ~~~~~~~~~~~~~~~~^~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function 'void qcpu::worker(Ctx*, int)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3492:17: warning: 'void SHA256_Transform(SHA256_CTX*, const unsigned char*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3492 |                         SHA256_Transform(&pc, &pfx[b * 64]);
+      |                 ^       ~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3537:12: warning: 'int SHA256_Init(SHA256_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3537 |                 SHA256_Init(&ectx);
+      |            ^    ~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3541:46: warning: 'int SHA256_Update(SHA256_CTX*, const void*, size_t)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3541 |                 if (dp->prefix_remainder_len) SHA256_Update(&ectx, dp->prefix_remainder, dp->prefix_remainder_len);
+      |                                 ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:74:52: note: declared here
+   74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+      |                                                    ^~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3547:14: warning: 'int SHA256_Update(SHA256_CTX*, const void*, size_t)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3547 |                 SHA256_Update(&ectx, pbuf.data(), pl);
+      |              ^  ~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:74:52: note: declared here
+   74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+      |                                                    ^~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3642:14: warning: 'int SHA256_Update(SHA256_CTX*, const void*, size_t)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3642 |             SHA256_Update(&s, wbuf, wl);
+      |             ~^~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:74:52: note: declared here
+   74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+      |                                                    ^~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3643:14: warning: 'int SHA256_Update(SHA256_CTX*, const void*, size_t)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3643 |             SHA256_Update(&s, dp->tail_section, dp->tail_section_len);
+      |             ~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:74:52: note: declared here
+   74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+      |                                                    ^~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3644:14: warning: 'int SHA256_Update(SHA256_CTX*, const void*, size_t)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3644 |             SHA256_Update(&s, dp->tx_suffix, dp->tx_suffix_len);
+      |             ~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/sha.h:74:52: note: declared here
+   74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+      |                                                    ^~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3645:13: warning: 'int SHA256_Final(unsigned char*, SHA256_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3645 |             SHA256_Final(blk2, &s);                     /* first digest into the second block */
+      |             ^~~~~~~~~~
+/usr/include/openssl/sha.h:76:52: note: declared here
+   76 | OSSL_DEPRECATEDIN_3_0 int SHA256_Final(unsigned char *md, SHA256_CTX *c);
+      |                                                    ^~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3646:27: warning: 'int SHA256_Init(SHA256_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3646 |             SHA256_CTX s2; SHA256_Init(&s2); SHA256_Transform(&s2, blk2);
+      |                ~~~~~~~~~~~^~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3646:50: warning: 'void SHA256_Transform(SHA256_CTX*, const unsigned char*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3646 |             SHA256_CTX s2; SHA256_Init(&s2); SHA256_Transform(&s2, blk2);
+      |                                  ~~~~~~~~~~~~~~~~^~~~~~~~~~~
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function 'void qcpu::start(const digest_params_t*, const uint8_t (*)[3], int, int, int)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3984:99: warning: 'int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 3984 |     if (!EC_POINT_mul(grp, A, nri, NULL, NULL, bctx) ||
+      |                                                                                                   ^                     
+/usr/include/openssl/ec.h:675:52: note: declared here
+  675 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP *group, const EC_POINT *p,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'void build_epoch_prefix(const digest_params_t*, int, int, const uint8_t*, uint8_t*, uint32_t*, uint8_t*, int*)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:5662:12: warning: 'int SHA256_Init(SHA256_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 5662 |     SHA256_Init(&ctx);
+      |     ~~~~~~~^~~~~~
+/usr/include/openssl/sha.h:73:52: note: declared here
+   73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+      |                                                    ^~         
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:5665:57: warning: 'void SHA256_Transform(SHA256_CTX*, const unsigned char*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 5665 |     for (size_t i = 0; i < blocks; ++i) SHA256_Transform(&ctx, scratch + i * 64);
+      |                                         ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~   
+/usr/include/openssl/sha.h:77:53: note: declared here
+   77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+      |                                                     ^~~~~~          
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu: In function 'int main(int, char**)':
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:6708:36: warning: 'int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 6708 |         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:663:52: note: declared here
+  663 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP *group, EC_POINT *p,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/tests/gpu_epochs/tree.cu:6713:36: warning: 'int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)' is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+ 6713 |         EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/openssl/ec.h:675:52: note: declared here
+  675 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP *group, const EC_POINT *p,
+      |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+nvlink warning : Skipping incompatible '/work/comps/bitcoin/.fakeroot/lib64/libcudadevrt.a' when searching for -lcudadevrt

@@ -1,0 +1,10 @@
+benchmark.sh: benches=subset N=24 mode=fixed_time grinder=cmd:python3 harness/gpu_wrap.py --src mismatch in s;assert self-check seed=1789110211
+benchmark.sh: === subset ===
+  pinning: /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=1789110211 — no real coin material)
+▶ grinder: python3 harness/gpu_wrap.py --src mismatch in s;assert self-check --bench subset --zeros 24 --mode fixed_time --out /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json --seconds 60.0 --hits 200
+usage: gpu_wrap.py [-h] --src SRC --bench BENCH --zeros ZEROS [--mode MODE]
+                   [--seconds SECONDS] [--hits HITS] --out OUT [--no-build]
+gpu_wrap.py: error: unrecognized arguments: in s;assert self-check
+grinder exited 2

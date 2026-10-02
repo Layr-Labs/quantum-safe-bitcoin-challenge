@@ -1,0 +1,136 @@
+{
+  "all_jobs_complete_before_move": true,
+  "artifacts": [
+    {
+      "original": "candidates/subset/lab/n24L_centerfused",
+      "sha256": "de4dc94a2406bb3b9751ec19c79fd3a737ef9aac017c04fead550eb93b633910",
+      "bytes": 2380432
+    },
+    {
+      "original": "candidates/subset/lab/n24L_centerunsigned",
+      "sha256": "d11632cdd9a21074ba6d52bb18a3e41371bba636877cb94449cdc67f0eefd4e1",
+      "bytes": 2380560
+    },
+    {
+      "original": "candidates/subset/lab/n24L_current",
+      "sha256": "a36878f07139887dffea1b1bdc3a525e24bea3e689f426a9ec03cdf123563b31",
+      "bytes": 2380424
+    },
+    {
+      "original": "candidates/subset/lab/n24L_finalprefetch",
+      "sha256": "36c3f73800ad09461be8170b971c467a05bcf2b000fffe7324ec02c2b0a11edb",
+      "bytes": 2380432
+    },
+    {
+      "original": "candidates/subset/lab/n24L_finalprefetch.cu",
+      "sha256": "1e33e450430d6f7d3d360e7a82e9251f7a75f4c155f41d101c68ebb2c62e7203",
+      "bytes": 125
+    },
+    {
+      "original": "candidates/subset/lab/n24L_iter9current",
+      "sha256": "32b2a3377b9a622900d655c21f64a58bf8c0b79e4bf851a79288ef18fd896636",
+      "bytes": 2380432
+    },
+    {
+      "original": "candidates/subset/lab/n24L_iter9current.cu",
+      "sha256": "2f887ddda967c46ba3d2a554bf6b3463ee3829fa97764f3643429fd7e098b5f6",
+      "bytes": 125
+    },
+    {
+      "original": "candidates/subset/lab/n24L_iter9leader",
+      "sha256": "5950f99e88f0a36fa2bd3131dd14e4bf52b9821a3bf161853e4c91bf72743bb9",
+      "bytes": 2634592
+    },
+    {
+      "original": "candidates/subset/lab/n24L_iter9leader.cu",
+      "sha256": "48dd25f48ad3cd1daffccc4473f499d1bc01974562f7e58c98b8e45616fba459",
+      "bytes": 284
+    },
+    {
+      "original": "candidates/subset/lab/n24L_producerscratch",
+      "sha256": "761beed3ee00eea607219be37ffb7a70123458012442561ecfedec44457f338f",
+      "bytes": 2380496
+    },
+    {
+      "original": "candidates/subset/lab/n24L_rotateadd",
+      "sha256": "9df22b6a115c352e74fbb91ac9d4cacfef1ef6612d15dbcaeba51ecca2ab201e",
+      "bytes": 2409096
+    },
+    {
+      "original": "candidates/subset/lab/n24L_rotateadd.cu",
+      "sha256": "708f2ca61fc8dd50dea6d98a4fc77b62988bd29c27acb9aef70fa3d652c2444c",
+      "bytes": 167
+    },
+    {
+      "original": "candidates/subset/lab/n24L_rotateaddgate",
+      "sha256": "d88b2b5b4f7a04203d072b04e9c4eb87908b7331b77b4bb1a686f2d6dfecf8f5",
+      "bytes": 2417296
+    },
+    {
+      "original": "candidates/subset/lab/n24L_rotateaddgate.cu",
+      "sha256": "3963cea6b42041aec726a2dbb68977947f7fb92a1c68ff705e66b416329c9a4c",
+      "bytes": 198
+    },
+    {
+      "original": "candidates/subset/lab/n24L_stagedscoped",
+      "sha256": "10853a2fb7545399dca0c26d30affff61c680233157ec495dff136ea8e01cece",
+      "bytes": 2392720
+    },
+    {
+      "original": "candidates/subset/lab/n24L_stagedscoped.cu",
+      "sha256": "a13daac1d473f79f13a2dc25e5813afc637483c5df9616d8755e4a228e33a847",
+      "bytes": 92
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_centerfused.build",
+      "text": "QSB_ZEROS_N=24 1790942435268797739",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_centerunsigned.build",
+      "text": "QSB_ZEROS_N=24 1790943114586204985",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_current.build",
+      "text": "QSB_ZEROS_N=24 1790940000189197462",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_producerscratch.build",
+      "text": "QSB_ZEROS_N=24 1790944699341671066",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_iter9current.build",
+      "text": "QSB_ZEROS_N=24 1790946935304829367",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_finalprefetch.build",
+      "text": "QSB_ZEROS_N=24 1790946935304866717",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_iter9leader.build",
+      "text": "QSB_ZEROS_N=24 1790947574846885556",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_rotateadd.build",
+      "text": "QSB_ZEROS_N=24 1790947272323729360",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_rotateaddgate.build",
+      "text": "QSB_ZEROS_N=24 1790947789837556306",
+      "bytes": 34
+    },
+    {
+      "original": "candidates/subset/lab/.n24L_stagedscoped.build",
+      "text": "QSB_ZEROS_N=24 1790948568959596713",
+      "bytes": 34
+    }
+  ],
+  "retention": "temporary work storage, no tracked measured code or receipt deleted"
+}

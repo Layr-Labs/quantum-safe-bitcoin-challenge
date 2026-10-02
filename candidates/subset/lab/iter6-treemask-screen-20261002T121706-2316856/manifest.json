@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_iter12final.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "e251680b8587b7303f46d9021b03fb2476e565a7cba118cb1a68356b793c3980",
+    "binary_sha256": "5ccb472dcadb2ef425072010cd292c951f5ab416516074ea7dac60fa006e3b94",
+    "stamp": "QSB_ZEROS_N=24 1790961065422817689"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_iter12treemask.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_TREE_LIVE_MASK 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "38f9370006d82f3e6751e37f75714a6fc780f2ffb10345f4f8d0c28f2a51c410",
+    "binary_sha256": "7d1db95913203a4924ce3ccd845b92fee26a2ff5f1f11c6936049830e9636e88",
+    "stamp": "QSB_ZEROS_N=24 1790961398549628138"
+  }
+}

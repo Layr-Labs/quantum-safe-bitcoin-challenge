@@ -1,0 +1,13 @@
+{
+  "rates_Mps": {
+    "A": [
+      406.152518
+    ],
+    "B": [
+      394.256431
+    ]
+  },
+  "delta_percent": -2.9289703923490062,
+  "all_verified": true,
+  "note": "Both scored arms completed PASS. Automated summary interrupted by in-place editing of running shell script; retained per-arm receipts audited directly; no repeat of valid pair."
+}

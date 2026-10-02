@@ -1,0 +1,16 @@
+{
+  "benchmark": {
+    "id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+    "name": "eigenlabs/quantum-safe-bitcoin-challenge/subset",
+    "minScoreImprovementBips": 100,
+    "currentBestScore": 736585478
+  },
+  "leader_4cc9d2d8": [
+    {
+      "id": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+      "solverUsername": "kshitij-hash",
+      "status": "accepted"
+    }
+  ],
+  "our_inflight": []
+}

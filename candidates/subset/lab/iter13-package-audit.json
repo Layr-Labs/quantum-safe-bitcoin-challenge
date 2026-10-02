@@ -1,0 +1,11 @@
+{
+  "scope": "all filesystem files under editable path, including ignored and untracked",
+  "files": 985,
+  "expanded_regular_file_bytes": 6923396,
+  "limit_bytes": 8388608,
+  "removed_generated_files": 99,
+  "removed_bytes": 103140360,
+  "tracked_regular_files_preserved": true,
+  "device_image_sha256": "a724399a04db515f8bebd836b1af866e6e7a1b778a98ce73a384c6f7704de147",
+  "reason_for_no_gpu_repeat": "packaging only; unchanged qualified executable path and native payload"
+}

@@ -1,0 +1,11 @@
+{
+  "qualified": {
+    "bytes": 473504,
+    "sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad"
+  },
+  "budget_on": {
+    "bytes": 473504,
+    "sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad"
+  },
+  "byte_identical": true
+}

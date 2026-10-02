@@ -1,0 +1,23 @@
+{
+  "native_geometry": {
+    "job": 1599,
+    "status": "REJECT before scored work",
+    "elapsed_seconds": 1.7,
+    "hits": 0,
+    "cause": "leader has no local geometry shim; GLV11 stayed1",
+    "artifacts": "iter6-refreshed-promoted-qualified-20261002T082223-771694"
+  },
+  "zdec_guard": {
+    "job": 1600,
+    "status": "compile failed, no GPU use",
+    "cause": "QSB_DECODE_CUT requires ZDEC; local six-term walker disables ZDEC"
+  },
+  "fixed_control": {
+    "job": 1601,
+    "first_arm_score": 351738638,
+    "first_arm_verified_hits": 5063,
+    "first_arm_verified": true,
+    "qualified": false,
+    "reason": "only first arm completed at snapshot; no paired gate yet"
+  }
+}

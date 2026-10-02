@@ -1,0 +1,6 @@
+{
+  "selfcheck_observed": true,
+  "corrupt": false,
+  "normal_shutdown_rc": 0,
+  "log": "candidates/subset/lab/iter5-alias-clean-actual-selfcheck.log"
+}

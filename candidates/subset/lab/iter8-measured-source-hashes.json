@@ -1,0 +1,6 @@
+{
+  "candidates/subset/subset.cu": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313",
+  "candidates/subset/tests/gpu_epochs/tree.cu": "51009b259982c7e6097992f920addcac98d0afc696f3b6698e3e542c8642c3b2",
+  "candidates/subset/tests/gpu_epochs/host_producers_v3.h": "170bc772b47c826e3bea2b3e41b24ef35488b6c0b4465753a63b60886c1539f8",
+  "candidates/subset/qsb_carrier_sm89.h": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20"
+}

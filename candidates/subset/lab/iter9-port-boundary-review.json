@@ -1,0 +1,13 @@
+{
+  "ported_helper_equals_public_except_default_enable_and_parts": true,
+  "upstream_commit": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+  "all_upstream_parameter_orders_preserved": true,
+  "current_defaults": {
+    "QSB_SHA_LEA": 0,
+    "QSB_SHA_LEA_GATE": 0,
+    "QSB_S3_FINAL_PREFETCH": 0
+  },
+  "no_specialized_gate_rounds_ported": true,
+  "QSB_LEA_PARTS_is_only_fingerprint_without_specialized_gate_integration": true,
+  "not_all_domain_proof": "Review+unchanged exact integration benchmark; no new verifier fixtures"
+}

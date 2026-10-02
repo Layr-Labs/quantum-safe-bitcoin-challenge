@@ -1,0 +1,22 @@
+{
+  "control": "launch4",
+  "pairs": 1,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_launch4.cu",
+      "source_text": "// Production launch4 with the identical dev-only GLV12 geometry as controls.\n#define QSB_LOCAL_SM86 1\n#include \"subset.cu\"\n",
+      "source_sha256": "9a95500a1ef2a85b04cbd2d9ac477f1a6fdbb68ae781eaffd0d14d7bb22dc565",
+      "binary_sha256": "0a98f991bd59dfef53b84dc6bc66e22c7df83d65dffb4bab8b8d12aae672f7c9",
+      "build_stamp": "QSB_ZEROS_N=24 1790925151241605429"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-it4-dencrossidle.RKnOcg/candidates/subset/lab/n24L_dencrossidle.cu",
+      "source_text": "// Root-window overlap of the confirmed denominator relocation.\n#define QSB_LOCAL_SM86 1\n#define QSB_DEN_CROSS_PRE 1\n#define QSB_DEN_CROSS_IDLE 1\n#include \"../subset.cu\"\n",
+      "source_sha256": "c2dcf3ecf37196dcdbb6d1d0ecff24f92605dd7dca4b49fcea4ca368cf18534c",
+      "binary_sha256": "eac35fb5bd119fad61363165ba39e603e49493cfcbbc815501d31e0f49a3965a",
+      "build_stamp": "QSB_ZEROS_N=24 1790929931827709026"
+    }
+  }
+}

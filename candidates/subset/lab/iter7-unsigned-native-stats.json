@@ -1,0 +1,8 @@
+{
+  "cubin_sha256": "34d4f5608a75f216b0823794a465ac497c028943000c6742cdb327146680939f",
+  "cubin_bytes": 473248,
+  "digest_instructions": 14504,
+  "baseline_digest_instructions": 14520,
+  "delta_instructions_same_cuobjdump": -16,
+  "count_caveat": "Same CUDA12.8 cuobjdump regex counts. Earlier 14503 notebook was a different census, not an apples-to-apples count."
+}

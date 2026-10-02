@@ -1,0 +1,18 @@
+{
+  "2097152": {
+    "epoch_count": 2097152,
+    "group_capacity": 362053,
+    "slots_bytes": 2525381888,
+    "slots_MiB": 2408.391845703125
+  },
+  "1048576": {
+    "epoch_count": 1048576,
+    "group_capacity": 181498,
+    "slots_bytes": 1262811648,
+    "slots_MiB": 1204.31103515625
+  },
+  "saved_bytes": 1262570240,
+  "saved_MiB": 1204.080810546875,
+  "ranked_major_headroom_MiB_after": 1662.6178588867188,
+  "ranked_fit_proven": false
+}

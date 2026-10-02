@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_iter9current.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_S3_FINAL_PREFETCH 0\n#include \"/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/subset.cu\"\n",
+    "source_sha256": "2f887ddda967c46ba3d2a554bf6b3463ee3829fa97764f3643429fd7e098b5f6",
+    "binary_sha256": "32b2a3377b9a622900d655c21f64a58bf8c0b79e4bf851a79288ef18fd896636",
+    "stamp": "QSB_ZEROS_N=24 1790946935304829367"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_finalprefetch.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_S3_FINAL_PREFETCH 1\n#include \"/work/tmp/qsb-it9-finalprefetch.HZHpeD/current/subset.cu\"\n",
+    "source_sha256": "1e33e450430d6f7d3d360e7a82e9251f7a75f4c155f41d101c68ebb2c62e7203",
+    "binary_sha256": "36c3f73800ad09461be8170b971c467a05bcf2b000fffe7324ec02c2b0a11edb",
+    "stamp": "QSB_ZEROS_N=24 1790946935304866717"
+  }
+}

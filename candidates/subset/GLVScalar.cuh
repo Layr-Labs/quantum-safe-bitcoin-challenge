@@ -425,21 +425,6 @@ __device__ __forceinline__ void q9_round_coeff(uint64_t out[2],uint64_t lo,uint6
 #if QSB_GLV_RND < 0 || QSB_GLV_RND > 2
 #error "QSB_GLV_RND must be 0, 1 or 2"
 #endif
-/* QSB_HIGH15_NOFB (default 0 = the previous text byte for byte; the pinning track's switch of the same name, pinning
- * record b9736ce1 GLVScalar.cuh): q9_coeff_high15's RND 2 form always takes w12..w15 and drops the band test and its exact
- * fallback (inlined under QSB_GLV_FALLBACK_INLINE). Inside the band (w11' in [2^32 - 8, 2^32) for g1, [2^32 - 7, 2^32) for
- * g2, about 2^-28.1 of candidates) the coefficient can be off by one, about 2^-29.3 per candidate: the residual moves by a
- * lattice vector, the point is unchanged or wrong and a wrong one only loses its hit (ADR 0005; the exact host gate
- * re-derives every nomination). Every table code stays below 354,501,773 for any walker bits (largest 251,050,866). */
-#ifndef QSB_HIGH15_NOFB
-#define QSB_HIGH15_NOFB 1
-#endif
-#if QSB_HIGH15_NOFB != 0 && QSB_HIGH15_NOFB != 1
-#error "QSB_HIGH15_NOFB must be 0 or 1"
-#endif
-#if QSB_HIGH15_NOFB && QSB_GLV_RND != 2
-#error "QSB_HIGH15_NOFB is written for the QSB_GLV_RND 2 form (w12..w15 already rounded)"
-#endif
 
 template<int WHICH,uint32_t FALLBACK_WORD>
 __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
@@ -490,12 +475,6 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     w14=(uint32_t)acc;w15=(uint32_t)(acc>>32);
     (void)w10;
 
-#if QSB_HIGH15_NOFB
-    /* QSB_HIGH15_NOFB: no band test, no fallback; w12..w15 carry the rounding bit (RND 2). */
-    (void)w11;
-    out[0]=(uint64_t)w12|((uint64_t)w13<<32);
-    out[1]=(uint64_t)w14|((uint64_t)w15<<32);
-#else
 #if QSB_GLV_RND == 2
     /* w11 here is w11 + 2^31 mod 2^32 and w12..w15 already carry the rounding bit. */
     if(__builtin_expect(w11<0x80000000U+FALLBACK_WORD,1)){
@@ -522,7 +501,6 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
         ulonglong2 r=q9_coeff_fallback<WHICH>(k[0],k[1],k[2],k[3]);
         out[0]=r.x;out[1]=r.y;
     }
-#endif /* QSB_HIGH15_NOFB */
 }
 
 __device__ __forceinline__ void q9_coeff_g1(uint64_t out[2],const uint64_t k[4],const uint64_t g[4]){
@@ -668,7 +646,11 @@ struct q9_u129 { uint64_t lo,hi;uint32_t top; };
  * and bit-identical; bit 1 in this tree's walker form is +3 slots (ptxas splits the 64-bit words it had fused with
  * the walker's field extraction: +6 LOP3, +4 IMAD.IADD against -8 IADD3/IADD3.X), so it stays off. */
 #ifndef QSB_DECODE_CUT
+#if QSB_LOCAL_SM86
+#define QSB_DECODE_CUT 0   /* dev-only sm_86 rig: needs the ZDEC walker */
+#else
 #define QSB_DECODE_CUT 2
+#endif
 #endif
 #if QSB_DECODE_CUT < 0 || QSB_DECODE_CUT > 3
 #error "QSB_DECODE_CUT is a mask of bits 1 and 2"
@@ -883,7 +865,11 @@ __device__ __forceinline__ void q9_glv_split(const uint64_t input[4],uint64_t r1
  * code the chain gathers is identical (qsb_s3_selfcheck replays the z walker against q9_bigtbl_code /
  * q11_bigtbl_code). 0 = q9_glv_split and the (|r|, sign) walker byte for byte. */
 #ifndef QSB_GLV_ZDEC
+#if QSB_LOCAL_SM86
+#define QSB_GLV_ZDEC 0   /* dev-only sm_86 rig: needs the GLV11/Q_MIX walk */
+#else
 #define QSB_GLV_ZDEC 1
+#endif
 #endif
 #if QSB_GLV_ZDEC != 0 && QSB_GLV_ZDEC != 1
 #error "QSB_GLV_ZDEC must be 0 or 1"

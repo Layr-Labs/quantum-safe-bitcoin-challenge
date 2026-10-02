@@ -1,0 +1,207 @@
+{
+  "iteration": 12,
+  "start_HEAD": "289e988",
+  "probes": {
+    "legacy_odd": {
+      "summary": {
+        "Mps": {
+          "A": 389.775892,
+          "B": 355.265565
+        },
+        "runs": {
+          "A": [
+            389.775892
+          ],
+          "B": [
+            355.265565
+          ]
+        },
+        "verified_hits": {
+          "A": [
+            5634
+          ],
+          "B": [
+            5172
+          ]
+        },
+        "delta_percent": -8.853889557643557,
+        "all_verified": true
+      },
+      "verifier_runs": [
+        {
+          "arm": "A",
+          "score": 389775892.0,
+          "verified_hits": 5634,
+          "verifier": "RESULT: PASS",
+          "score_sha256": "47dff16e96d86ac234f0e999dfab904a3bd499e18c90bd5fd52f42af4ff3d895"
+        },
+        {
+          "arm": "B",
+          "score": 355265565.0,
+          "verified_hits": 5172,
+          "verifier": "RESULT: PASS",
+          "score_sha256": "8280f0183ded83c707cfe5150841c7c81d2e04025e05c4dd9ff04e72a73d4bc8"
+        }
+      ],
+      "artifact_dir": "candidates/subset/lab/iter6-legacy-dc-screen-20261002T103043-1457767",
+      "decision": "reject negative screen"
+    },
+    "legacy_both": {
+      "summary": {
+        "Mps": {
+          "A": 395.751801,
+          "B": 352.340156
+        },
+        "runs": {
+          "A": [
+            395.751801
+          ],
+          "B": [
+            352.340156
+          ]
+        },
+        "verified_hits": {
+          "A": [
+            5722
+          ],
+          "B": [
+            5121
+          ]
+        },
+        "delta_percent": -10.969411861248869,
+        "all_verified": true
+      },
+      "verifier_runs": [
+        {
+          "arm": "A",
+          "score": 395751801.0,
+          "verified_hits": 5722,
+          "verifier": "RESULT: PASS",
+          "score_sha256": "4a5172c74d188868be3651594ac555cf1ca7fcf9a3d03a5865246590a01be506"
+        },
+        {
+          "arm": "B",
+          "score": 352340156.0,
+          "verified_hits": 5121,
+          "verifier": "RESULT: PASS",
+          "score_sha256": "d3b4b0ca9e49aec8bfae92c9905bf4578ae7e6e2556226b023fa44dfe9161229"
+        }
+      ],
+      "artifact_dir": "candidates/subset/lab/iter6-legacy-dc3-screen-20261002T103424-1476588",
+      "decision": "reject negative screen"
+    },
+    "leader_mac": {
+      "summary": {
+        "Mps": {
+          "A": 358.775324,
+          "B": 360.086933
+        },
+        "runs": {
+          "A": [
+            358.775324
+          ],
+          "B": [
+            360.086933
+          ]
+        },
+        "verified_hits": {
+          "A": [
+            5216
+          ],
+          "B": [
+            5244
+          ]
+        },
+        "delta_percent": 0.3655794900766285,
+        "all_verified": true
+      },
+      "verifier_runs": [
+        {
+          "arm": "A",
+          "score": 358775324.0,
+          "verified_hits": 5216,
+          "verifier": "RESULT: PASS",
+          "score_sha256": "879558a52c342432d84d04bfea83cd602212ae37e035c7290440d9286d5ad374"
+        },
+        {
+          "arm": "B",
+          "score": 360086933.0,
+          "verified_hits": 5244,
+          "verifier": "RESULT: PASS",
+          "score_sha256": "c4ba810331764861b831245651b7c272c86c966e42b45f9f122985c456d76a52"
+        }
+      ],
+      "artifact_dir": "candidates/subset/lab/iter6-leader-mac-screen-20261002T103901-1500617",
+      "decision": "not qualified; positive singlepair +0.36558% below noise and adoption gate"
+    }
+  },
+  "all_six_existing_N24_runs_passed": true,
+  "measurement": "benchmark.sh subset; N24;120s;seed1789110211;actualsm86GLV12;per-armflock;singlepairs,not qualification",
+  "native": {
+    "0": {
+      "cubin_sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad",
+      "cubin_bytes": 473504,
+      "all_instructions": 14520,
+      "NOP": 20,
+      "non_NOP": 14500,
+      "registers": 128,
+      "shared_bytes": 24576,
+      "stack_frame_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0,
+      "local_stack_ops": {},
+      "constant_bank_carry_adds": 24
+    },
+    "1": {
+      "cubin_sha256": "f3d313bd57c6c35d563b1b43277633a82a0acafafac94dd6d849f10889bf2dc0",
+      "cubin_bytes": 474144,
+      "all_instructions": 14552,
+      "NOP": 21,
+      "non_NOP": 14531,
+      "registers": 128,
+      "shared_bytes": 24576,
+      "stack_frame_bytes": 8,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0,
+      "local_stack_ops": {
+        "LDL.LU.64": 1,
+        "STL.64": 1
+      },
+      "constant_bank_carry_adds": 27
+    },
+    "3": {
+      "cubin_sha256": "ad871f600221338ef0b4e330f203a3b0d840a011ecb2da08ffcf8dee9a562a90",
+      "cubin_bytes": 474272,
+      "all_instructions": 14560,
+      "NOP": 14,
+      "non_NOP": 14546,
+      "registers": 128,
+      "shared_bytes": 24576,
+      "stack_frame_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0,
+      "local_stack_ops": {},
+      "constant_bank_carry_adds": 30
+    },
+    "mac": {
+      "cubin_sha256": "2c94532ad3bafcee7ae39f41799c4de656fff7b1dc418128cd887265f705b0e2",
+      "cubin_bytes": 472736,
+      "all_instructions": 14464,
+      "NOP": 18,
+      "non_NOP": 14446,
+      "registers": 128,
+      "shared_bytes": 24576,
+      "stack_frame_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0,
+      "local_stack_ops": {},
+      "constant_bank_carry_adds": 48
+    },
+    "final_default_sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad",
+    "final_default_matches_qualified": true,
+    "census_definition": "Every address-bearing instruction within kernel_digest, including predicated NOPs; continuation encoding lines excluded."
+  },
+  "production": "subset.cu/qsb_carrier_sm89.h unchanged; all new probe defaults0; finaldefaultCUBIN byte-identical to9c9aab2...",
+  "submission": "No new bat: none of these probes qualified. Prior414fe58f failed officialBenchmark atstartup; rootcause not established. Do not resubmit unchanged known failure.",
+  "next_lead": "MAC-only integration did not screen significant. Opaque-zero legacy spelling harmful to codegen; avoid sweeps. Startup capacity fit is unproved; distinct remaining lead is full2Mlaunch with compact8firstpitch (current arithmetic) or obtain raw officialstderr."
+}

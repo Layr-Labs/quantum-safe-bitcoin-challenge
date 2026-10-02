@@ -1,0 +1,29 @@
+{
+  "refreshed-promoted-qualified-glv12": {
+    "path": "candidates/subset/lab/iter6-refreshed-promoted-qualified-glv12-20261002T082630-794209",
+    "scores": {
+      "p1-A.json": 351.738638,
+      "p1-B.json": 381.064
+    },
+    "full_log_mtimes": {
+      "p1-A.full.log": 1790947730.0154507,
+      "p1-B.full.log": 1790948015.8340032
+    }
+  },
+  "rotateadd-new-promoted-gate": {
+    "path": "candidates/subset/lab/iter6-rotateadd-new-promoted-gate-20261002T082734-799615",
+    "scores": {
+      "p1-A.json": 375.853448
+    },
+    "full_log_mtimes": {
+      "p1-A.full.log": 1790947872.9375987
+    }
+  },
+  "rotateaddgate-screen": {
+    "path": "candidates/subset/lab/iter6-rotateaddgate-screen-20261002T083034-815147",
+    "scores": {},
+    "full_log_mtimes": {
+      "p1-A.full.log": 1790948016.1159894
+    }
+  }
+}

@@ -1,0 +1,13 @@
+[2mbenchmark                                                    [22m  [2mstatus[22m  [2mcategory    [22m  [2mgoal  [22m  [2mbest            [22m  [2mcloses           [22m  [2mid                                  [22m
+[2m─────────────────────────────────────────────────────────────[22m  [2m──────[22m  [2m────────────[22m  [2m──────[22m  [2m────────────────[22m  [2m─────────────────[22m  [2m────────────────────────────────────[22m
+eigenlabs/sig-golf/full                                        [32mopen[39m    cryptography  lower   61858160          n/a                a9214626-38ee-4912-97d7-10fc0d4b7861
+eigenlabs/quantum-safe-bitcoin-challenge/subset                [32mopen[39m    cuda          higher  736585478         10/7/26, 6:00 PM   eafd2f3d-e64f-49c1-b98a-6b825b0cdc82
+eigenlabs/quantum-safe-bitcoin-challenge/pinning               [32mopen[39m    cuda          higher  1020930406        10/7/26, 6:00 PM   b352879c-669f-44ef-98cd-ad3d34d0fefa
+eigenlabs/eip8200-challenges/modexp                            [32mopen[39m    lean          lower   468808            n/a                60d71e6c-548f-45ae-afde-a4158c99cf11
+eigenlabs/eip8200-challenges/ripemd160                         [32mopen[39m    lean          lower   655967            n/a                00a444d5-a160-425f-aabc-57892f305776
+eigenlabs/heesch                                               [32mopen[39m    math          higher  4.988189          1/1/27, 1:59 AM    af5dd63a-8242-432a-8288-d32464889153
+proximity-prize/proximity-prize/irs-reduction-threshold-lower  [32mopen[39m    lean          higher  68.15             9/19/27, 1:07 PM   a2e3eaa8-95c0-4a62-81d3-2cd7e78e8575
+proximity-prize/proximity-prize/irs-reduction-threshold-upper  [32mopen[39m    lean          lower   116.13            9/19/27, 1:07 PM   1226aa4f-1258-4eb7-8c9e-846ece1e2543
+eigenlabs/flock-challenge-multi/x86                            [32mopen[39m    rust          higher  1651266.9819358   n/a                8abde9cf-9256-4453-99e2-9de8632a7943
+eigenlabs/flock-challenge                                      [32mopen[39m    rust          higher  1851759.05313334  n/a                8806afb8-8dfa-4a9d-8f11-4735c5fde7c9
+gpsanant/ecdsafail-challenge                                   [32mopen[39m    rust          lower   1108401576        12/31/26, 5:59 PM  1ffb695a-309b-46b6-a728-2f97d8c7be74

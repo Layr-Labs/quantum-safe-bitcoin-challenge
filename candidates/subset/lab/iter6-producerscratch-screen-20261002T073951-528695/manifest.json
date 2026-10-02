@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_current.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "e251680b8587b7303f46d9021b03fb2476e565a7cba118cb1a68356b793c3980",
+    "binary_sha256": "5cf955467fd8b8285c507977dabfae316673421b60b0563e51859bd59dfa358f",
+    "stamp": "QSB_ZEROS_N=24 1790940000189197462"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_producerscratch.cu",
+    "text": "// Same qualified device geometry; host-only producer scratch lifetime overlay.\n#define QSB_LOCAL_SM86 1\n#define QSB_FIRST_PRODUCER_SCRATCH 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "4104c988c570115a3034051ee6cc42218111462efb077b5ef085b30bf9a3b813",
+    "binary_sha256": "f16d16d85363fee56967186db67c7df66e1c71192d54112511d3a2889f576294",
+    "stamp": "QSB_ZEROS_N=24 1790944699341671066"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-groupcap.1z5wMy/candidates/subset/lab/n24L_denbest.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "sha256": "b9d0c335d23e561a3b0d4f4a36a0774bb864cff6e6d880020a88526e493fbe0c",
+    "stamp": "QSB_ZEROS_N=24 1790935975144089807"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it5-groupcap.1z5wMy/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_GROUP_CAP_TIGHT 1\n#include \"../subset.cu\"\n",
+    "sha256": "50005fb6dc0e905338e74efd21e6b6de742b8216874801e268dc5c6a2b11df49",
+    "stamp": "QSB_ZEROS_N=24 1790935975141089785"
+  },
+  "tests/gpu_epochs/tree.cu": "a6d1bfbd5d486b7a2b2929ca6c62a9157c334c51da2d335fcdf550f387a13161",
+  "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+  "subset.cu": "a7fb3d0079942da6e68200fe97b7c02d2a3209c7908781937942cc25904ccc93"
+}

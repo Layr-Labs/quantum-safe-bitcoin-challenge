@@ -58,15 +58,8 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         if(batches==ZI_ROOT_MAX_BATCHES)return false;
         ++batches;
         const uint32_t f0=__shfl_sync(mask,x,0),g0=__shfl_sync(mask,x,8);
-#if QSB_DIVSTEP_4LANE
-        /* QSB_DIVSTEP_4LANE (tree.cu): the decision runs only on lanes 0, 8, 16
-         * and 24, the four lanes whose top/bottom the shuffles below read; delta is read nowhere else. */
-        int32_t top=0,bottom=0;
-        if(digit==0)delta=zi_divstep30_column(delta,f0,g0,rs,&top,&bottom);
-#else
         int32_t top,bottom;
         delta=zi_divstep30_column(delta,f0,g0,rs,&top,&bottom);
-#endif
         const int32_t selected=odd?bottom:top;
         const int32_t a=__shfl_sync(mask,selected,odd?24:0);
         const int32_t b=__shfl_sync(mask,selected,odd?8:16);

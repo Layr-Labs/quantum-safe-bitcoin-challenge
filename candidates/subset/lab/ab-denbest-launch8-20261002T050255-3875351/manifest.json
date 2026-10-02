@@ -1,0 +1,17 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-launch8/candidates/subset/lab/n24L_denbest.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "sha256": "c05a88b9c6b7a90ac0b634c8948f3ff1cadc7cc064fe5f953e88ecce8ee22996",
+    "stamp": "QSB_ZEROS_N=24 1790935314580900689"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it5-launch8/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define ZLAB_LAUNCH_BLOCKS 2097152\n#include \"../subset.cu\"\n",
+    "sha256": "6d5b59e9c3c0629bf382a68be15c7dcc2f0d6d5e668d48c6562a77e22dbba692",
+    "stamp": "QSB_ZEROS_N=24 1790935314580822232"
+  },
+  "tests/gpu_epochs/tree.cu": "5cb66532f8222deb2ddce0e7e98f98790dd9d00adf2a15ddc10de5dd7d95384c",
+  "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+  "subset.cu": "a7fb3d0079942da6e68200fe97b7c02d2a3209c7908781937942cc25904ccc93"
+}

@@ -1,0 +1,63 @@
+{
+  "signed": {
+    "Mps": {
+      "A": 408.23994,
+      "B": 400.125573
+    },
+    "runs": {
+      "A": [
+        408.23994
+      ],
+      "B": [
+        400.125573
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        5898
+      ],
+      "B": [
+        5800
+      ]
+    },
+    "delta_percent": -1.9876465296364776,
+    "all_verified": true
+  },
+  "unsigned": {
+    "Mps": {
+      "A": 407.54294,
+      "B": 399.423982
+    },
+    "runs": {
+      "A": [
+        407.54294
+      ],
+      "B": [
+        399.423982
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        5898
+      ],
+      "B": [
+        5803
+      ]
+    },
+    "delta_percent": -1.992172407648618,
+    "all_verified": true
+  },
+  "adopted": false,
+  "production_knob": 0,
+  "production_carrier_unchanged": true,
+  "current_submission": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+  "submission_status_at_iteration_start": "validating",
+  "watcher_owned": true,
+  "caveats": [
+    "One paired screen per probe; not established regression",
+    "All successful hits verified by existing harness; not all-domain exact field proof",
+    "Same-tool instruction counts correct earlier mixed census",
+    "Score JSON GPU name RTX_4090 inherited; actual local GPU RTX_3090",
+    "Existing self-report Poisson warnings retained in logs"
+  ]
+}

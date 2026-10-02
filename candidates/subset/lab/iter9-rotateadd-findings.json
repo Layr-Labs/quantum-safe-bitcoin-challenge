@@ -1,0 +1,27 @@
+{
+  "Mps": {
+    "A": 392.855587,
+    "B": 398.051871
+  },
+  "runs": {
+    "A": [
+      392.855587
+    ],
+    "B": [
+      398.051871
+    ]
+  },
+  "verified_hits": {
+    "A": [
+      5698
+    ],
+    "B": [
+      5790
+    ]
+  },
+  "delta_percent": 1.322695711083277,
+  "all_verified": true,
+  "probe": "QSB_SHA_LEA1 scoped GPUHash only, PARTS0",
+  "artifacts": "candidates/subset/lab/iter6-rotateadd-screen-20261002T082129-766994",
+  "decision": "Not qualified for adoption: direct newpromoted3pair+0.750356% below4%; allsixPASS. Initial1.32% was only singlepair lead."
+}

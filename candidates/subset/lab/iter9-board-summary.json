@@ -1,0 +1,17 @@
+{
+  "raw_sha256": "00faa05d89f9fc238a0ad478002eace1f9cb7665e35c0e1d8f082407c3ffada5",
+  "leader": {
+    "id": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+    "status": "accepted",
+    "officialScore": 736585478,
+    "submissionCommitSha": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+    "solverUsername": "kshitij-hash"
+  },
+  "bat": {
+    "id": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+    "status": "validating",
+    "officialScore": null,
+    "validationJobId": null
+  },
+  "note": "one iteration-start snapshot, no official result yet; watcher owns bat"
+}

@@ -177,7 +177,7 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
  * The PTX keeps +Maj/-Maj, which the front end would cancel in C. 0 = the rounds above; in the knob string only when
  * non-zero, so the image at 0 is the base's byte for byte. */
 #ifndef QSB_SHA_LEA
-#define QSB_SHA_LEA 1
+#define QSB_SHA_LEA 0
 #endif
 #if QSB_SHA_LEA != 0 && QSB_SHA_LEA != 1
 #error "QSB_SHA_LEA must be 0 or 1"
@@ -186,7 +186,7 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
 /* QSB_LEA_PARTS (with QSB_SHA_LEA 1): bit 0 the gate's IV round 1, bit 1 the gate's a-only round 63, bit 2 the gate's
  * rounds 2 and 3 with the literal d as an immediate, bit 3 the cap-phase FMA form (QSB_GATE_FMA_RT). */
 #ifndef QSB_LEA_PARTS
-#define QSB_LEA_PARTS 11
+#define QSB_LEA_PARTS 0
 #endif
 /* QSB_LEA_ORD (with QSB_SHA_LEA 1): operand-order variant of the rounds (register reads and reuse hits only). */
 #ifndef QSB_LEA_ORD

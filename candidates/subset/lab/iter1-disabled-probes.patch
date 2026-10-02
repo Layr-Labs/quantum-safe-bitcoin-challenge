@@ -1,0 +1,53 @@
+diff --git i/candidates/subset/tests/gpu_epochs/tree.cu w/candidates/subset/tests/gpu_epochs/tree.cu
+index 7b477cf..0f3463f 100644
+--- i/candidates/subset/tests/gpu_epochs/tree.cu
++++ w/candidates/subset/tests/gpu_epochs/tree.cu
+@@ -851,8 +851,8 @@ __device__ uint64_t BINOM_C[151][10];
+  *   rescheduled (the full QSB_S3_NM_MASK does reschedule it). Pinning b9736ce1 runs
+  *   its seed gathers in the same (rec, msk) form (QSB_GLV_GLUE bit 8). Same index, same mask, same loads:
+  *   bit-identical; the start-up self-check replays the split walker against the packed codes.
+- * QSB_TREE_UNROLL 1 (tree_inverse.cuh): the tree's up and down loops with the block size as the compile-time 256
+- *   of every kernel_digest launch (QSB_SE_BLOCK), fully unrolled: the per-pass loop control that all eight warps
++ * QSB_TREE_UNROLL 1 (tree_inverse.cuh): the tree's up and down loops with a compile-time block size
++ *   for every kernel_digest launch (QSB_SE_BLOCK), fully unrolled: the per-pass loop control that all warps
+  *   run goes, and the row offsets become immediates. Pinning's QSB_POST_GLUE bits 8 and 128 write the levels out
+  *   the same way. Same products of the same operands in the same order: bit-identical. */
+ #ifndef QSB_S3_NM_SEED
+@@ -3021,7 +3021,14 @@ __global__ void kernel_verify_pair_hits(
+ #endif /* !QSB_HOST_VERIFY */
+ 
+ 
+-__global__ void __launch_bounds__(QSB_SE_BLOCK, 512 / QSB_SE_BLOCK) kernel_digest(
++/* Experimental register/occupancy tradeoff; the default preserves 512 resident threads. */
++#ifndef QSB_DIGEST_MIN_BLOCKS
++#define QSB_DIGEST_MIN_BLOCKS (512 / QSB_SE_BLOCK)
++#endif
++#if QSB_DIGEST_MIN_BLOCKS < 1 || QSB_DIGEST_MIN_BLOCKS * QSB_SE_BLOCK > 1024
++#error "QSB_DIGEST_MIN_BLOCKS must request 1..1024 resident threads"
++#endif
++__global__ void __launch_bounds__(QSB_SE_BLOCK, QSB_DIGEST_MIN_BLOCKS) kernel_digest(
+     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
+     int n_pool, int t_sel,
+     const uint32_t * __restrict__ d_midstate,
+@@ -5320,7 +5327,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
+  * from them), so the string does not depend on how a preprocessor spaces expressions;
+  * a knob that is not defined in this configuration stringifies to its own name. */
+ #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+-    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
++    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(QSB_DIGEST_MIN_BLOCKS) QSB_CARRIER_KV(MAX_T) \
+     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
+     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
+     QSB_CARRIER_KV(QSB_CHAIN_UNROLL) QSB_CARRIER_KV(QSB_DIGIT_SHIFT) QSB_CARRIER_KV(QSB_EPOCH_FAST) \
+diff --git i/candidates/subset/tests/gpu_epochs/tree_inverse.cuh w/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
+index 4ef5a3f..102ba34 100644
+--- i/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
++++ w/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
+@@ -206,7 +206,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+     __shared__ uint64_t inverses[4][QSB_SE_BLOCK];
+ #endif
+ #if QSB_TREE_UNROLL
+-    static_assert(QSB_SE_BLOCK==256,"QSB_TREE_UNROLL (tree.cu): the tree is written out for 256-thread kernel_digest blocks");
++    static_assert(QSB_SE_BLOCK==128 || QSB_SE_BLOCK==256,"QSB_TREE_UNROLL requires a supported power-of-two digest block");
+     const int tid=threadIdx.x;constexpr int n=QSB_SE_BLOCK;
+ #else
+     const int tid=threadIdx.x,n=blockDim.x;

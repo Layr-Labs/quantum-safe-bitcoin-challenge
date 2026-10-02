@@ -62,13 +62,13 @@
 #include <immintrin.h>
 #include <cpuid.h>
 #include <openssl/sha.h>
-#ifndef QSB_HP_RING_THP
-#define QSB_HP_RING_THP 0   /* see the ring notes below g_hp */
-#endif
-#if QSB_HP_RING_THP
-#include <sys/mman.h>
-#endif
 
+/* Host-only memory repair: retain the full batch-0 self-check, but alias
+ * slot0's immutable producer outputs until comparison finishes. Slot reuse
+ * waits on the same check outcome; no sampled/omitted verification. */
+#ifndef QSB_HP_CHECK_ALIAS
+#define QSB_HP_CHECK_ALIAS 0
+#endif
 namespace qhp {
 
 enum { MAXK = 8, NCLS = 16, CHUNK = 16384, NSLOT = 4 };
@@ -81,19 +81,7 @@ static int blocksync() {
 static int g_share_cpu = -1;
 
 /* ---- SHA-256 compression: 4-lane (and 1-lane) SHA-NI, else OpenSSL ---- */
-/* QSB_HP_SHA_AVX (host only, not an image knob): the producers' SHA-NI functions also target avx, as the co-grinder's QSHA
- * does, so their adds, shuffles and palignr take the VEX three-operand forms and feed sha256rnds2 without register copies.
- * The same operations on the same values: the words are identical. With it on, SHA-NI is chosen only where the CPU and
- * OS also support AVX (the co-grinder's rule); elsewhere the producers use OpenSSL, as on a CPU without SHA-NI.
- * 0 = the previous target (sha, sse4.1, ssse3). */
-#ifndef QSB_HP_SHA_AVX
-#define QSB_HP_SHA_AVX 1
-#endif
-#if QSB_HP_SHA_AVX
-#define QHP_SHA __attribute__((target("sha,sse4.1,ssse3,avx")))
-#else
 #define QHP_SHA __attribute__((target("sha,sse4.1,ssse3")))
-#endif
 alignas(16) static const uint32_t k_[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -147,7 +135,7 @@ QHP_SHA static void sha_ni(uint32_t (*st)[8], const uint8_t *const *blk) {
 static bool shani_supported() {
     unsigned a, b, c, d;
     if (!__get_cpuid_count(7, 0, &a, &b, &c, &d)) return false;
-    return ((b >> 29) & 1) && (!QSB_HP_SHA_AVX || __builtin_cpu_supports("avx"));   /* CPUID.(7,0):EBX.SHA (+ AVX) */
+    return (b >> 29) & 1;                                     /* CPUID.(7,0):EBX.SHA */
 }
 static bool g_shani = false;
 static inline void sha_sw(uint32_t st[8], const uint8_t *blk) {
@@ -558,6 +546,7 @@ struct Hp {
     int check = 0;              /* 0 pending, 1 passed, -1 failed */
     uint8_t *c_ep = nullptr; uint32_t *c_fi = nullptr;           /* host-built batch 0 (pageable) */
     int c_nchunks = 0, c_next = 0, c_done = 0;
+    size_t chk_fi_pitch = 0;
     uint8_t *d_scr_ep = nullptr; uint32_t *d_scr_fi = nullptr;   /* GPU-built batch 0 (device scratch) */
     cudaEvent_t chk_evt = nullptr; bool chk_enqueued = false, chk_running = false;
     /* rate estimates for the claim lead: GPU batch interval, host chunk time (one thread) */
@@ -570,49 +559,6 @@ struct Hp {
     int place = 0; bool behind = true; uint64_t helper_chunks = 0;
 };
 static Hp *g_hp = nullptr;
-/* QSB_HP_RING_THP (host only, not an image knob; default 0 = cudaHostAlloc per piece): the ring's pieces are carved from one
- * anonymous mapping with MADV_HUGEPAGE, each piece 2 MiB-aligned, first-touched and pinned with
- * cudaHostRegister(Portable) as worker 0 reaches it (one piece per pass, as before). The teardown unregisters each piece
- * and unmaps the whole mapping: the driver then unpins about 640 huge pages instead of about 327,680 small ones. Same bytes
- * in the same pieces, the same uploads. If the mapping cannot be made, the pieces come from cudaHostAlloc as before. */
-#if QSB_HP_RING_THP
-static char *g_ring_map = nullptr; static size_t g_ring_bytes = 0, g_ring_used = 0; static bool g_ring_tried = false;
-static const size_t RING_H = (size_t)2 << 20;
-static size_t ring_round(size_t n) { return (n + RING_H - 1) / RING_H * RING_H; }
-/* A pinned piece of n bytes: from the mapping (made on the first call, sized for the whole ring) or, without it, from
- * cudaHostAlloc. false: no pinned memory (the caller's "pinned allocation failed" path). */
-static bool ring_piece(void **out, size_t n, size_t total) {
-    if (!g_ring_tried) {
-        g_ring_tried = true;
-        void *m = mmap(nullptr, total + RING_H, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (m != MAP_FAILED) {
-            g_ring_map = (char *)m; g_ring_bytes = total + RING_H;
-            char *a = (char *)(((uintptr_t)m + RING_H - 1) & ~(uintptr_t)(RING_H - 1));
-            g_ring_used = (size_t)(a - g_ring_map);
-#ifdef MADV_HUGEPAGE
-            madvise(a, total, MADV_HUGEPAGE);
-#endif
-        }
-    }
-    if (!g_ring_map) return cudaHostAlloc(out, n, cudaHostAllocPortable) == cudaSuccess;
-    const size_t r = ring_round(n);
-    if (g_ring_used + r > g_ring_bytes) return false;
-    char *q = g_ring_map + g_ring_used; g_ring_used += r;
-    memset(q, 0, r);                                            /* first touch: the pages fault in as huge pages */
-    if (cudaHostRegister(q, r, cudaHostRegisterPortable) != cudaSuccess) return false;
-    *out = q;
-    return true;
-}
-static bool ring_thp_on() { return g_ring_map != nullptr; }
-/* Teardown (the GPU idle): unregister every piece, then unmap the mapping. */
-static void ring_release(Hp *h) {
-    for (auto &sl : h->slot) {
-        for (int p = 0; p < sl.npieces_ok; p++) { cudaHostUnregister(sl.ep[p]); cudaHostUnregister(sl.fi[p]); sl.ep[p] = nullptr; sl.fi[p] = nullptr; }
-        sl.npieces_ok = 0;
-    }
-    munmap(g_ring_map, g_ring_bytes); g_ring_map = nullptr;
-}
-#endif
 
 static double now_s() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 static uint64_t batch_len(const Hp *h, int64_t b) {
@@ -648,6 +594,21 @@ static void run_check(Hp *h) {
         for (size_t r = 0; io_ok && r < len; r += 64)      /* mid, remW, early; the GPU never writes the pad */
             if (memcmp(buf.data() + r, h->c_ep + off + r, 40 + h->P.K)) { bad_ep++; if ((off + r) / 64 < first_bad) first_bad = (off + r) / 64; }
     }
+#if QSB_HP_CHECK_ALIAS
+    /* Pack exactly the same ncls*8 words per epoch as the old D2D snapshot.
+     * The first-state allocation has padding classes, so alias pitch is not w. */
+    const size_t w=(size_t)h->P.ncls*32, rows_per_buf=BUF/w;
+    for(size_t row=0;row<(size_t)n && io_ok;row+=rows_per_buf){
+        const size_t rows=std::min(rows_per_buf,(size_t)n-row),len=rows*w,off=row*w;
+        io_ok=cudaMemcpy2D(buf.data(),w,(const uint8_t*)h->d_scr_fi+row*h->chk_fi_pitch,
+                          h->chk_fi_pitch,w,rows,cudaMemcpyDeviceToHost)==cudaSuccess;
+        if(io_ok && memcmp(buf.data(),(const uint8_t*)h->c_fi+off,len))
+            for(size_t k=0;k<len/4;k++)
+                if(((const uint32_t*)buf.data())[k]!=h->c_fi[off/4+k]){
+                    bad_fi++;const uint64_t e=(off/4+k)/(h->P.ncls*8);if(e<first_bad)first_bad=e;
+                }
+    }
+#else
     for (size_t off = 0; off < fi_n * 4 && io_ok; off += BUF) {
         const size_t len = fi_n * 4 - off < BUF ? fi_n * 4 - off : BUF;
         io_ok = cudaMemcpy(buf.data(), (const uint8_t *)h->d_scr_fi + off, len, cudaMemcpyDeviceToHost) == cudaSuccess;
@@ -657,9 +618,15 @@ static void run_check(Hp *h) {
                     bad_fi++; const uint64_t e = (off / 4 + w) / (h->P.ncls * 8); if (e < first_bad) first_bad = e;
                 }
     }
+#endif
     free(h->c_ep); free(h->c_fi); h->c_ep = nullptr; h->c_fi = nullptr;
     std::lock_guard<std::mutex> g(h->m);
     h->chk_running = false;
+#if QSB_HP_CHECK_ALIAS
+    /* A concurrent ring-allocation failure can stop producers while this
+     * checker still reads slot0. Reuse waits for that read to finish too. */
+    h->cv_ready.notify_all();
+#endif
     if (!io_ok) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check readback failed"); return; }
     if (bad_ep || bad_fi) {
         h->check = -1;
@@ -669,6 +636,7 @@ static void run_check(Hp *h) {
         return;
     }
     h->check = 1; h->active = true;
+    h->cv_ready.notify_all();
     printf("  Host producers: self-check passed (batch 0: %llu descriptors + %llu first-block states bit-identical)\n",
            (unsigned long long)n, (unsigned long long)n * h->P.ncls);
     fflush(stdout);
@@ -721,14 +689,8 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
             if (a) {
                 const int p = a->npieces_ok;
                 lk.unlock();
-#if QSB_HP_RING_THP
-                const size_t ring_total = (size_t)NSLOT * NPIECE * (ring_round((size_t)h->pe * 64) + ring_round((size_t)h->pe * h->P.ncls * 32));
-                bool ok = ring_piece((void **)&a->ep[p], (size_t)h->pe * 64, ring_total) &&
-                          ring_piece((void **)&a->fi[p], (size_t)h->pe * h->P.ncls * 32, ring_total);
-#else
                 bool ok = cudaHostAlloc((void **)&a->ep[p], (size_t)h->pe * 64, cudaHostAllocPortable) == cudaSuccess &&
                           cudaHostAlloc((void **)&a->fi[p], (size_t)h->pe * h->P.ncls * 32, cudaHostAllocPortable) == cudaSuccess;
-#endif
                 if (ok && p == 0) ok = cudaEventCreateWithFlags(&a->copied, cudaEventDisableTiming) == cudaSuccess;
                 lk.lock();
                 if (!ok) { (void)cudaGetLastError(); kill_locked(h, "pinned allocation failed"); break; }
@@ -847,8 +809,10 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
     h->c_fi = (uint32_t *)malloc((size_t)n0 * ncls * 32);
     h->c_nchunks = (int)((n0 + CHUNK - 1) / CHUNK);
     bool ok = h->c_ep && h->c_fi && n0 > 0 &&
+#if !QSB_HP_CHECK_ALIAS
               cudaMalloc((void **)&h->d_scr_ep, (size_t)n0 * 64) == cudaSuccess &&
               cudaMalloc((void **)&h->d_scr_fi, (size_t)n0 * ncls * 32) == cudaSuccess &&
+#endif
               cudaEventCreateWithFlags(&h->chk_evt, cudaEventDisableTiming) == cudaSuccess;
     if (!ok) { (void)cudaGetLastError(); printf("  Host producers: off (self-check buffers)\n"); return; }
     /* Placement. PLACE=1: main thread on its current logical CPU, producer 0 on that core's other
@@ -899,13 +863,31 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
 static void enqueue_check_copy(cudaStream_t st, const void *d_ep, const uint32_t *d_fi, size_t fi_pitch) {
     Hp *h = g_hp; if (!h) return;
     const size_t n = (size_t)batch_len(h, 0), w = (size_t)h->P.ncls * 32;
+#if QSB_HP_CHECK_ALIAS
+    h->d_scr_ep=(uint8_t*)d_ep;h->d_scr_fi=(uint32_t*)d_fi;h->chk_fi_pitch=fi_pitch;
+    cudaError_t e=cudaEventRecord(h->chk_evt,st);
+#else
     cudaError_t e = cudaMemcpyAsync(h->d_scr_ep, d_ep, n * 64, cudaMemcpyDeviceToDevice, st);
     if (e == cudaSuccess) e = cudaMemcpy2DAsync(h->d_scr_fi, w, d_fi, fi_pitch, w, n, cudaMemcpyDeviceToDevice, st);
     if (e == cudaSuccess) e = cudaEventRecord(h->chk_evt, st);
+#endif
     std::lock_guard<std::mutex> g(h->m);
     if (e != cudaSuccess) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check copy failed"); return; }
     h->chk_enqueued = true;
     h->cv_work.notify_all();
+}
+
+/* Full batch0 descriptors/classes remain read-only until the checker returns.
+ * Invoked before a producer or host upload can overwrite that epoch slot. */
+static void wait_check_reuse(const void *d_ep){
+#if QSB_HP_CHECK_ALIAS
+    Hp *h=g_hp;if(!h)return;
+    std::unique_lock<std::mutex> g(h->m);
+    if(h->chk_enqueued && d_ep==h->d_scr_ep)
+        h->cv_ready.wait(g,[&]{return (h->check!=0 || h->dead || h->stop) && !h->chk_running;});
+#else
+    (void)d_ep;
+#endif
 }
 
 /* Main thread, once per loop iteration: release slots whose upload finished. */

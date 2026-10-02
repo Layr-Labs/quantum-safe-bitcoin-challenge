@@ -1,0 +1,17 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-combined-final.wh8dSx/candidates/subset/lab/n24L_promoted.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_SE_BLOCK 256\n#define ZLAB_LAUNCH_BLOCKS 262144\n#define QSB_OUTER_LITK 0\n#define QSB_TAIL_STAGGER 0\n#define QSB_PARK128 1\n#define QSB_PRE3_ROOT 0\n#define QSB_DEN_CROSS_PRE 0\n#define QSB_K2S_CENTER_SQR 0\n#define QSB_GROUP_CAP_TIGHT 0\n#define QSB_HP_CHECK_ALIAS 0\n#include \"../subset.cu\"\n",
+    "sha256": "2a1117a74b0dc7ffe33609309e8cea38765ccea5b8dcc090e80b6c1fb4851f6c",
+    "stamp": "QSB_ZEROS_N=24 1790937658818557414"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it5-combined-final.wh8dSx/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "sha256": "549dac501bf4dd2400693c2654e3e9188dfff045a2affa4c42e539a96f3260a6",
+    "stamp": "QSB_ZEROS_N=24 1790937658817568803"
+  },
+  "tests/gpu_epochs/tree.cu": "4769f52e35b5ca98fd3d3869e820e43507928a4ab6e90b2d5cf29d5c6bb6eb43",
+  "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+  "subset.cu": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313"
+}

@@ -1,0 +1,98 @@
+{
+  "iteration": 11,
+  "control_source_head": "b5fe417",
+  "board": {
+    "currentBestScore": 736585478,
+    "leader_submission": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+    "leader_source_ref": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+    "note": "Read initial board list/all submissions and public note/tree. Our414fe58f previously terminal failed; no new bat qualifies."
+  },
+  "probe": "QSB_LAUNCH_BUDGET=1, locally forced QSB_LAUNCH_TEST_MAX_EPOCHS=1048576",
+  "benchmark": {
+    "Mps": {
+      "A": 403.627048,
+      "B": 374.997364
+    },
+    "runs": {
+      "A": [
+        403.627048
+      ],
+      "B": [
+        374.997364
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        5846
+      ],
+      "B": [
+        5400
+      ]
+    },
+    "delta_percent": -7.093103433444825,
+    "all_verified": true
+  },
+  "artifacts": "candidates/subset/lab/iter6-launchbudget-screen-20261002T095636-1283710",
+  "memory": {
+    "allocation_accounting": {
+      "2097152": {
+        "epoch_count": 2097152,
+        "group_capacity": 362053,
+        "slots_bytes": 2525381888,
+        "slots_MiB": 2408.391845703125
+      },
+      "1048576": {
+        "epoch_count": 1048576,
+        "group_capacity": 181498,
+        "slots_bytes": 1262811648,
+        "slots_MiB": 1204.31103515625
+      },
+      "saved_bytes": 1262570240,
+      "saved_MiB": 1204.080810546875,
+      "ranked_major_headroom_MiB_after": 1662.6178588867188,
+      "ranked_fit_proven": false
+    },
+    "observed_candidate_gpu_process_MiB": 11040,
+    "previous_frozen_fullcap_gpu_process_MiB": 12244,
+    "comparison": "candidate point sample versus iter10 fullcap observed allocation; not simultaneous paired memory trace",
+    "observed_delta_MiB": 1204,
+    "automatic_ranked_fit_proven": false
+  },
+  "native": {
+    "qualified": {
+      "bytes": 473504,
+      "sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad"
+    },
+    "budget_on": {
+      "bytes": 473504,
+      "sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad"
+    },
+    "byte_identical": true
+  },
+  "local_payload": {
+    "control": {
+      "bytes": 1126120,
+      "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+    },
+    "budget": {
+      "bytes": 1126120,
+      "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+    },
+    "byte_identical": true
+  },
+  "resources": {
+    "native_digest_registers": 128,
+    "native_digest_shared_bytes": 24576,
+    "native_digest_spill_bytes": 0
+  },
+  "decision": "Reject adoption: bothN24 scoredPASS but singlepair-7.093103% versus frozen production. Probe stays0; no threepair gate/no new submission. Qualified subset.cu/carrier unchanged. This is a capacity screen, not confirmed regression.",
+  "caveats": [
+    "Runtime budget is exercised with test-only cap1M on localGLV12; no claim free-memory branch on rankedGLV11 is directly proven.",
+    "Existing verifier validates every hit, not completion of full producer startup comparison; no additional checker completion claim.",
+    "Both scored runs warn self-reported candidate count differs from verified hit rate; ranked scores exclusively verified hits.",
+    "Official414fe58f raw stderr unavailable; allocation remains one hypothesis, not established failure cause.",
+    "No singlepair negative screen proves stable regression.",
+    "Process memory sample candidate11040MiB compared to prior exactfull-cap12244MiB; requested savings1204.0808MiB independently from allocation sizes."
+  ],
+  "next_lead": "Avoid current capacity/row-half memory speed tradeoffs. Obtain candidate stderr for startup failure, or compact the physically padded first-state pitch while preserving full epoch launch capacity (requires different device carrier, unlike these host-only repairs)."
+}

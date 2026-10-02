@@ -1,0 +1,24 @@
+{
+  "bench": "subset",
+  "zeros_n": 24,
+  "mode": "fixed_time",
+  "grinder": "candidates/subset/lab/n24L_producerscratch.cu",
+  "candidates": 42073224064,
+  "elapsed_s": 121.8279,
+  "throughput_Mps": 394.201799,
+  "verified_hits": 5725,
+  "problem_seed": 1789110211,
+  "self_reported": {
+    "elapsed_s": 121.775,
+    "throughput_Mps": 345.5
+  },
+  "max_relative_variance": null,
+  "hit_relative_variance": 0.013216,
+  "hit_implied_candidates": 48024780800,
+  "gpu": "RTX_4090",
+  "score": {
+    "primary_throughput_Mps": 394.201799,
+    "secondary_hits_per_s": 46.99252,
+    "valid": true
+  }
+}

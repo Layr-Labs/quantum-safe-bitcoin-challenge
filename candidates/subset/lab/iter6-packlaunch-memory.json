@@ -1,0 +1,42 @@
+{
+  "accounting_only_not_ranked_allocation_proof": true,
+  "pipeline_slots": 2,
+  "group_t_B": 128,
+  "epoch_desc_t_B": 64,
+  "rows": [
+    {
+      "launch_blocks": 1048576,
+      "epochs": 2097152,
+      "first_slots": 16,
+      "table_B": 22688113472,
+      "first_B": 2147483648,
+      "descriptors_B": 268435456,
+      "group_map_B": 16777216,
+      "groups_B": 92685568,
+      "combo_B": 75497472,
+      "total_B": 25288992832,
+      "total_MiB": 24117.462951660156,
+      "headroom_MiB": 458.53704833984375,
+      "headroom_with_trim_MiB": 530.5370483398438
+    },
+    {
+      "launch_blocks": 2097152,
+      "epochs": 4194304,
+      "first_slots": 8,
+      "table_B": 22688113472,
+      "first_B": 2147483648,
+      "descriptors_B": 536870912,
+      "group_map_B": 33554432,
+      "groups_B": 152138752,
+      "combo_B": 75497472,
+      "total_B": 25633658688,
+      "total_MiB": 24446.16192626953,
+      "headroom_MiB": 129.83807373046875,
+      "headroom_with_trim_MiB": 201.83807373046875
+    }
+  ],
+  "measured_local_probe_gpu_process_MiB": 12572,
+  "known_local_probe_requests_MiB": 12158.161926269531,
+  "measured_local_gap_MiB": 413.83807373046875,
+  "caveat": "Local NVML process footprint is not ranked sm89/context proof; snapshot was captured while pre-existing benchmark ran."
+}

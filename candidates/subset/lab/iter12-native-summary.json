@@ -1,0 +1,64 @@
+{
+  "0": {
+    "cubin_sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad",
+    "cubin_bytes": 473504,
+    "all_instructions": 14520,
+    "NOP": 20,
+    "non_NOP": 14500,
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_frame_bytes": 0,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0,
+    "local_stack_ops": {},
+    "constant_bank_carry_adds": 24
+  },
+  "1": {
+    "cubin_sha256": "f3d313bd57c6c35d563b1b43277633a82a0acafafac94dd6d849f10889bf2dc0",
+    "cubin_bytes": 474144,
+    "all_instructions": 14552,
+    "NOP": 21,
+    "non_NOP": 14531,
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_frame_bytes": 8,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0,
+    "local_stack_ops": {
+      "LDL.LU.64": 1,
+      "STL.64": 1
+    },
+    "constant_bank_carry_adds": 27
+  },
+  "3": {
+    "cubin_sha256": "ad871f600221338ef0b4e330f203a3b0d840a011ecb2da08ffcf8dee9a562a90",
+    "cubin_bytes": 474272,
+    "all_instructions": 14560,
+    "NOP": 14,
+    "non_NOP": 14546,
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_frame_bytes": 0,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0,
+    "local_stack_ops": {},
+    "constant_bank_carry_adds": 30
+  },
+  "mac": {
+    "cubin_sha256": "2c94532ad3bafcee7ae39f41799c4de656fff7b1dc418128cd887265f705b0e2",
+    "cubin_bytes": 472736,
+    "all_instructions": 14464,
+    "NOP": 18,
+    "non_NOP": 14446,
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_frame_bytes": 0,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0,
+    "local_stack_ops": {},
+    "constant_bank_carry_adds": 48
+  },
+  "final_default_sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad",
+  "final_default_matches_qualified": true,
+  "census_definition": "Every address-bearing instruction within kernel_digest, including predicated NOPs; continuation encoding lines excluded."
+}

@@ -1,0 +1,12 @@
+{
+  "native_sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad",
+  "default_image_byte_identity": true,
+  "probes": {
+    "QSB_S3_FINAL_PREFETCH": 0,
+    "QSB_SHA_LEA": 0,
+    "QSB_SHA_LEA_GATE": 0
+  },
+  "live_tree_sha256": "1fd0743c71fb9225233c6382c5774dbcba59484ff247985f8166dc776257cd14",
+  "live_GPUHash_sha256": "69b531d5a1e67d07d59ba59ddbceb4e58e5f4a25e741d46b23c65f79c7e3bc07",
+  "live_gate_sha256": "b96e7477275cedb9eeeb3b140ce15846f93a36d90c82ed72c53226415c009ee7"
+}

@@ -1,0 +1,10 @@
+{
+  "cubin_sha256": "f937a522ebed114f26856fe6db8ead83607da586b99202c5109af3f654164be4",
+  "cubin_bytes": 473376,
+  "digest_instructions": 14512,
+  "digest_ptxas": "Compiling entry function '_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i' for 'sm_89'\nptxas info    : Function properties for _Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 128 registers, used 1 barriers, 24576 bytes smem, 628 bytes cmem[0], 16 bytes cmem[2]\nptxas info    : Compile time = 4510.277 ms\nptxas info    : Function properties for _Z15qsb_root_fermat15QsbInverseWords\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Function properties for _Z20qsb_pair_tail3_valuemmmmmmmmmmmmmmmmmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Function properties for _Z23qsb_pair_front3_z_valuemmmmPKhmmmmmmmm\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Function properties for _Z25qsb_field_cold_correction13QsbFieldWordsj\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\n",
+  "baseline_digest_instructions": 14520,
+  "no_throughput_claim": true,
+  "delta_instructions_same_cuobjdump": -8,
+  "count_caveat": "Same CUDA12.8 cuobjdump regex counts. Earlier 14503 notebook was a different census, not an apples-to-apples count."
+}

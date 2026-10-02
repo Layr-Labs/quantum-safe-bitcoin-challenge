@@ -1,0 +1,19 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-center.ia2ktM/candidates/subset/lab/n24L_denbest.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "sha256": "bf53ad1ce88fd70ebe93b9d50d2f50c0cf902d96c0ee9a1061df6dc39c805878",
+    "stamp": "QSB_ZEROS_N=24 1790933877613702869"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it5-center.ia2ktM/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_K2S_CENTER_SQR 1\n#include \"../subset.cu\"\n",
+    "sha256": "90e03532e82d7580beb5abb27676048e2ddfcdc4a027333b86f8e4e764a67a78",
+    "stamp": "QSB_ZEROS_N=24 1790933877613353932"
+  },
+  "tests/gpu_epochs/tree.cu": "6c0e08b64100e2f54d7b190ab61f4b834eb874810d0756669d8c0f68e5e031c9",
+  "tests/gpu_epochs/pair_shared.cuh": "f4b654ffcc1d234f9a7e56a5d65cda70c047e5119f74263d0f258d460b5deef4",
+  "subset.cu": "a7fb3d0079942da6e68200fe97b7c02d2a3209c7908781937942cc25904ccc93",
+  "provenance_correction": "Native build had prepended center switch after sm86 binaries compiled. Local wrappers were built with original subset.cu; this corrected manifest preserves that exact input. B enables center in its wrapper; A does not. No executable or wrapper stamp changed.",
+  "subset.cu_text": "#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */\n#ifndef QSB_FKLEAN_TAG_0924\n#define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */\n#endif\n#ifndef QSB_REMEASURE_TAG_0921R3\n#define QSB_REMEASURE_TAG_0921R3 1 /* no-op: exact-source PR897 remeasurement */\n#endif\n/* Keep the paired SHA constant-block loop compact on the ranked PTX route. */\n#define QSB_PAIR_SHA_UNROLL_CONST 0\n#define QSB_SHA_FMA_ADD 0\n/* Smaller independent digest CTAs, same window patterns and field arithmetic. */\n#ifndef QSB_SE_BLOCK\n#define QSB_SE_BLOCK 128\n#endif\n/* Keep twice the restored work per host iteration behind the four resident CTAs. */\n#ifndef ZLAB_LAUNCH_BLOCKS\n#define ZLAB_LAUNCH_BLOCKS 1048576\n#endif\n/* Retire both opposite-denominator live ranges before the common inversion. */\n#ifndef QSB_DEN_CROSS_PRE\n#define QSB_DEN_CROSS_PRE 1\n#endif\n#include \"tests/gpu_epochs/tree.cu\"\n"
+}

@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_iter9leader.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_GLV11 0\n#define QSB_Q_P18 0\n#define QSB_Q_MIX 0\n#define QSB_GLV_ZDEC 0\n#define QSB_S3_NM_MASK 0\n#define QSB_S3_NM_SEED 0\n#define QSB_GATHER_ONE_FORM 0\n#define QSB_DECODE_CUT 0\n#include \"/work/tmp/qsb-it9-leader.K52ZCG/candidates/subset/subset.cu\"\n",
+    "source_sha256": "48dd25f48ad3cd1daffccc4473f499d1bc01974562f7e58c98b8e45616fba459",
+    "binary_sha256": "5950f99e88f0a36fa2bd3131dd14e4bf52b9821a3bf161853e4c91bf72743bb9",
+    "stamp": "QSB_ZEROS_N=24 1790947574846885556"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_rotateadd.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_SHA_LEA 1\n#define QSB_LEA_PARTS 0\n#define QSB_S3_FINAL_PREFETCH 0\n#include \"/work/tmp/qsb-it9-rotateadd.RTSQzH/current/subset.cu\"\n",
+    "source_sha256": "708f2ca61fc8dd50dea6d98a4fc77b62988bd29c27acb9aef70fa3d652c2444c",
+    "binary_sha256": "9df22b6a115c352e74fbb91ac9d4cacfef1ef6612d15dbcaeba51ecca2ab201e",
+    "stamp": "QSB_ZEROS_N=24 1790947272323729360"
+  }
+}

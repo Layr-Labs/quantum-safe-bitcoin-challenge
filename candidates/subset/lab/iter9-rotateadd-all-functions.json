@@ -1,0 +1,78 @@
+{
+  "0": {
+    "_Z19kernel_gt_heal_scanPKhPKmPjj": {
+      "instructions": 520,
+      "LEA.HI": 0,
+      "SHF64": 0,
+      "NOP": 15
+    },
+    "_Z19kernel_build_gtablePKmS0_S0_Ph": {
+      "instructions": 5848,
+      "LEA.HI": 0,
+      "SHF64": 7,
+      "NOP": 9
+    },
+    "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i": {
+      "instructions": 14520,
+      "LEA.HI": 7,
+      "SHF64": 3071,
+      "NOP": 20
+    },
+    "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj": {
+      "instructions": 1896,
+      "LEA.HI": 0,
+      "SHF64": 576,
+      "NOP": 13
+    },
+    "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm": {
+      "instructions": 3464,
+      "LEA.HI": 0,
+      "SHF64": 1152,
+      "NOP": 8
+    },
+    "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj": {
+      "instructions": 1464,
+      "LEA.HI": 0,
+      "SHF64": 576,
+      "NOP": 12
+    }
+  },
+  "1": {
+    "_Z19kernel_gt_heal_scanPKhPKmPjj": {
+      "instructions": 520,
+      "LEA.HI": 0,
+      "SHF64": 0,
+      "NOP": 15
+    },
+    "_Z19kernel_build_gtablePKmS0_S0_Ph": {
+      "instructions": 5848,
+      "LEA.HI": 0,
+      "SHF64": 7,
+      "NOP": 9
+    },
+    "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i": {
+      "instructions": 14256,
+      "LEA.HI": 548,
+      "SHF64": 1451,
+      "NOP": 21
+    },
+    "_Z23kernel_build_epochs_incmmiiPKhPK11qsb_group_tmP12epoch_desc_tPjPKj": {
+      "instructions": 1832,
+      "LEA.HI": 128,
+      "SHF64": 192,
+      "NOP": 12
+    },
+    "_Z19kernel_epoch_groupsmjiiPKjPKhiS2_P11qsb_group_tPjmm": {
+      "instructions": 3344,
+      "LEA.HI": 256,
+      "SHF64": 384,
+      "NOP": 14
+    },
+    "_Z23kernel_build_first_flatPK12epoch_desc_tPjjj": {
+      "instructions": 1400,
+      "LEA.HI": 128,
+      "SHF64": 192,
+      "NOP": 11
+    }
+  }
+}

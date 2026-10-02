@@ -1,0 +1,14 @@
+{
+  "iter12dc": {
+    "wrapper": "#define QSB_LOCAL_SM86 1\n#define QSB_YP_LEGACY_DC 1\n#include \"../subset.cu\"\n",
+    "stamp_matches": true
+  },
+  "iter12dc3": {
+    "wrapper": "#define QSB_LOCAL_SM86 1\n#define QSB_YP_LEGACY_DC 3\n#include \"../subset.cu\"\n",
+    "stamp_matches": true
+  },
+  "iter12mac": {
+    "wrapper": "#define QSB_LOCAL_SM86 1\n#define QSB_YP_MAC_PORT 1\n#define QSB_YP_MAC 2\n#define QSB_YP_DC 1\n#include \"../subset.cu\"\n",
+    "stamp_matches": true
+  }
+}

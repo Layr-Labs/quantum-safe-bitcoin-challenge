@@ -1,0 +1,16 @@
+score.py: subset score = 377377753.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 41,010,124,844  in 121.3s (harness clock)
+  candidates (from N verified hits): 45,776,633,856
+  grinder self-reported: 121.2s, 338.3 M/s (not scored)
+  verified hits: 5457 / 5457
+  hit rel. variance: 0.013537
+    ⚠ verified hits (5457) outside expected Poisson band [4464,5313] for 41,010,124,844 candidates at N=24 (expected≈4888.8) — candidate count may be misreported
+--------------------------------------------------------
+  SCORE (throughput) : 377.3778 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 44.986929 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================

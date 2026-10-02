@@ -1,0 +1,65 @@
+{
+  "native": {
+    "ptx_sha256": "6ef3fe971e143d701d893faa1dc02411d6612935a3ad00d76bdf1f741e19ab3a",
+    "exact_ORD16_RLA_blocks": 384,
+    "output_alias_last_use_violations": 0,
+    "sample": [
+      {
+        "h_output": "%r40",
+        "maj_input": "%r12;",
+        "d_output": "%r8",
+        "d_old": "%r8",
+        "alias_maj": false,
+        "alias_old_d": false
+      },
+      {
+        "h_output": "%r48",
+        "maj_input": "%r20;",
+        "d_output": "%r16",
+        "d_old": "%r16",
+        "alias_maj": false,
+        "alias_old_d": false
+      },
+      {
+        "h_output": "%r56",
+        "maj_input": "%r28;",
+        "d_output": "%r24",
+        "d_old": "%r24",
+        "alias_maj": false,
+        "alias_old_d": false
+      }
+    ]
+  },
+  "local": {
+    "ptx_sha256": "20eeb562e0981fd14103bf7c81a8c896656fcc1bad78f26dfb5f2f1948bf0058",
+    "exact_ORD16_RLA_blocks": 384,
+    "output_alias_last_use_violations": 0,
+    "sample": [
+      {
+        "h_output": "%r40",
+        "maj_input": "%r12;",
+        "d_output": "%r8",
+        "d_old": "%r8",
+        "alias_maj": false,
+        "alias_old_d": false
+      },
+      {
+        "h_output": "%r48",
+        "maj_input": "%r20;",
+        "d_output": "%r16",
+        "d_old": "%r16",
+        "alias_maj": false,
+        "alias_old_d": false
+      },
+      {
+        "h_output": "%r56",
+        "maj_input": "%r28;",
+        "d_output": "%r24",
+        "d_old": "%r24",
+        "alias_maj": false,
+        "alias_old_d": false
+      }
+    ]
+  },
+  "scope": "Actual CUDA12.8 enabled PTX substitutions clear the conditional h-output/Maj and h-output/old-d alias concern in ORD16 RLA. Not all-domain code proof; no fixture, expected output or verifier change."
+}

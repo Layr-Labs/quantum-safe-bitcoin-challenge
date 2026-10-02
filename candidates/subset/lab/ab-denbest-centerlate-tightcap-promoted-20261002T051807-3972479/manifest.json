@@ -1,0 +1,17 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-stack-promoted.HmBlPr/candidates/subset/lab/n24L_promoted.cu",
+    "text": "// Promoted device configuration; no branch-only experiment enabled.\n#define QSB_LOCAL_SM86 1\n#define QSB_SE_BLOCK 256\n#define ZLAB_LAUNCH_BLOCKS 262144\n#define QSB_OUTER_LITK 0\n#define QSB_TAIL_STAGGER 0\n#define QSB_PARK128 1\n#define QSB_PRE3_ROOT 0\n#define QSB_DEN_CROSS_PRE 0\n#define QSB_K2S_CENTER_SQR 0\n#define QSB_GROUP_CAP_TIGHT 0\n#include \"../subset.cu\"\n",
+    "sha256": "c4669c0ec887f4cc75e54a60b18f9938100eddaab3e20e8b4bc072fc06bc1fbb",
+    "stamp": "QSB_ZEROS_N=24 1790936181389643235"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it5-stack-promoted.HmBlPr/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_K2S_CENTER_SQR 2\n#define QSB_GROUP_CAP_TIGHT 1\n#include \"../subset.cu\"\n",
+    "sha256": "b5ba344b01abf179b2d746cb2a651ae466960f8eace81a852d35f096e2ab4062",
+    "stamp": "QSB_ZEROS_N=24 1790936181387643219"
+  },
+  "tests/gpu_epochs/tree.cu": "a6d1bfbd5d486b7a2b2929ca6c62a9157c334c51da2d335fcdf550f387a13161",
+  "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+  "subset.cu": "a7fb3d0079942da6e68200fe97b7c02d2a3209c7908781937942cc25904ccc93"
+}

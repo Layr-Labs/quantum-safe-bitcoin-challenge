@@ -1,0 +1,49 @@
+{
+  "run-subset": {
+    "bench": "subset",
+    "zeros_n": 24,
+    "mode": "fixed_time",
+    "grinder": "candidates/subset/subset.cu",
+    "candidates": 0,
+    "elapsed_s": 0.6145,
+    "throughput_Mps": 0.0,
+    "verified_hits": 0,
+    "hits": [],
+    "problem_seed": 1045024462,
+    "bridge_metrics": {
+      "schema": "yukon.gpu-bench-metrics.v1",
+      "bench": "subset",
+      "wall_s": 0.614531435,
+      "command_exit_status": 0,
+      "evidence_dir": "/var/lib/yukon/gpu-health/qsb-bench-v1-subset-90W8Kf5C",
+      "profile_sha256": "7256bf0abd252a3d6f66e71cbe61f9d363ef7e38bf28414fa22d22dc24becf54",
+      "observed_epoch": 1790892157
+    },
+    "self_reported": {
+      "elapsed_s": 0.49,
+      "throughput_Mps": 0.0
+    },
+    "max_relative_variance": 0.1,
+    "hit_relative_variance": null,
+    "hit_implied_candidates": 0,
+    "gpu": "RTX_4090",
+    "score": {
+      "primary_throughput_Mps": 0.0,
+      "secondary_hits_per_s": 0.0,
+      "valid": false
+    }
+  },
+  "bridge_metrics": {
+    "schema": "yukon.gpu-bench-metrics.v1",
+    "bench": "subset",
+    "wall_s": 0.614531435,
+    "command_exit_status": 0,
+    "evidence_dir": "/var/lib/yukon/gpu-health/qsb-bench-v1-subset-90W8Kf5C",
+    "profile_sha256": "7256bf0abd252a3d6f66e71cbe61f9d363ef7e38bf28414fa22d22dc24becf54",
+    "observed_epoch": 1790892157
+  },
+  "run_id": 37007650774,
+  "diagnostics_artifact_id": 11227473179,
+  "raw_log_sha256": "70d6418c28e9f83dbf6c76a34459a52608a78a43832917831617754a6ecb535d",
+  "raw_stderr_available": false
+}

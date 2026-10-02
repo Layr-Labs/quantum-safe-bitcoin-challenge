@@ -1,0 +1,13 @@
+{
+  "control": {
+    "bytes": 1126120,
+    "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+  },
+  "interleave": {
+    "bytes": 1126120,
+    "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+  },
+  "byte_identical": true,
+  "carrier_header_sha256": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20",
+  "notes": "objcopy dump-section extracted both payloads; idle B ELF was rewritten (whole ELF hash changed, device section unchanged), before B scored run. A rewrite attempt failed ETXTBSY, and its executable hash stayed unchanged. Both original and actual B hashes retained in corrected run manifest. These are local compiled device payloads, not another verifier run."
+}

@@ -1,0 +1,38 @@
+{
+  "default": {
+    "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i": {
+      "instructions": 14520,
+      "loads_constant": 23,
+      "CALL": 14,
+      "IMAD": 4959,
+      "IADD3": 2943,
+      "SHF": 3612,
+      "LDS": 62,
+      "STS": 42
+    }
+  },
+  "signed": {
+    "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i": {
+      "instructions": 14512,
+      "loads_constant": 23,
+      "CALL": 14,
+      "IMAD": 4959,
+      "IADD3": 2941,
+      "SHF": 3612,
+      "LDS": 62,
+      "STS": 42
+    }
+  },
+  "unsigned": {
+    "_Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i": {
+      "instructions": 14504,
+      "loads_constant": 23,
+      "CALL": 14,
+      "IMAD": 4956,
+      "IADD3": 2939,
+      "SHF": 3612,
+      "LDS": 62,
+      "STS": 42
+    }
+  }
+}

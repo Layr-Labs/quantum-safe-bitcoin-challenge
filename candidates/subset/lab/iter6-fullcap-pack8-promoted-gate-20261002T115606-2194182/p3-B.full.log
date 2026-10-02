@@ -1,0 +1,24 @@
+benchmark.sh: benches=subset N=24 mode=fixed_time grinder=cmd:python3 harness/gpu_wrap.py --src candidates/subset/lab/n24L_iter12pack8.cu seed=1789110211
+benchmark.sh: === subset ===
+  pinning: /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=1789110211 — no real coin material)
+▶ grinder: python3 harness/gpu_wrap.py --src candidates/subset/lab/n24L_iter12pack8.cu --bench subset --zeros 24 --mode fixed_time --out /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json --seconds 120.0 --hits 200
+  compile: reusing /work/comps/yukon-glm-night/qsb-subset/candidates/subset/lab/n24L_iter12pack8 (already built for N=24)
+  run: stdbuf -oL timeout 120 /work/comps/yukon-glm-night/qsb-subset/candidates/subset/lab/n24L_iter12pack8 /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/subset.bin 0 4081224 970060878 1 0 single_hash
+  → /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json: 343.2M/s, 41,606,528,276 candidates, 5339 hits
+score.py: subset score = 369260956.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 41,606,528,276  in 121.3s (harness clock)
+  candidates (from N verified hits): 44,786,778,112
+  grinder self-reported: 121.2s, 343.2 M/s (not scored)
+  verified hits: 5339 / 5339
+  hit rel. variance: 0.013686
+--------------------------------------------------------
+  SCORE (throughput) : 369.2610 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 44.019339 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================

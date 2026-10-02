@@ -1,0 +1,30 @@
+{
+  "current_best_score": 736585478,
+  "source_ref": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+  "max_submission_bytes": 8388608,
+  "recent_promoted": [
+    {
+      "id": "e6715658-2270-4be9-8caa-9a7c7e072dd3",
+      "officialScore": 720332123,
+      "promotedSourceRef": "7813ffe1b7442f4a998e4978834d9ce2bd4559c6"
+    },
+    {
+      "id": "fb6f5a8f-b29e-4506-a50c-c79a9c5a2a0e",
+      "officialScore": 728337167,
+      "promotedSourceRef": "ff27a2b66990a3eb554a1d4453e896c0397337ba"
+    },
+    {
+      "id": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+      "officialScore": 736585478,
+      "promotedSourceRef": "2f57d80b8877a9e63b6af220da913236886a7ce5"
+    }
+  ],
+  "previous_bat": [
+    {
+      "id": "f0225b8a-0fc9-4ec3-8b18-bde97dcc95d3",
+      "status": "rejected",
+      "officialScore": null,
+      "rejectionReason": "Submission rejected: submission archive expands to 77590028 bytes; at most 8388608 are allowed"
+    }
+  ]
+}

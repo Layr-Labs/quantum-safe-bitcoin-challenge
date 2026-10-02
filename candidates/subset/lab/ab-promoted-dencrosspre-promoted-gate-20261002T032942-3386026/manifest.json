@@ -1,0 +1,22 @@
+{
+  "control": "promoted",
+  "pairs": 3,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_promoted.cu",
+      "source_text": "// Promoted fb6f5a8 device configuration with the shared dev-only small table.\n#define QSB_LOCAL_SM86 1\n#define QSB_SE_BLOCK 256\n#define ZLAB_LAUNCH_BLOCKS 262144\n#define QSB_OUTER_LITK 0\n#define QSB_TAIL_STAGGER 0\n#define QSB_PARK128 1\n#define QSB_PRE3_ROOT 0\n#include \"subset.cu\"\n",
+      "source_sha256": "a1597e559b9958a33a7c1c7016c0a5b93287f5c2a1dca302a8fc10fa5487e3ea",
+      "binary_sha256": "9bb3171a0baad97e3384dec94cbd74324e94861dd95e91f64c58be98f57cdfe0",
+      "build_stamp": "QSB_ZEROS_N=24 1790916570850925802"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-it3-dencrosspre.EqV6OV/candidates/subset/lab/n24L_dencrosspre.cu",
+      "source_text": "// Relocate opposite-denominator factor before inversion without extra multiplies.\n#define QSB_LOCAL_SM86 1\n#define QSB_DEN_CROSS_PRE 1\n#include \"../subset.cu\"\n",
+      "source_sha256": "22b2876578e2aa79b10bfee08c3ae8015517ee231f732ffea745128b71c8cf2c",
+      "binary_sha256": "456f1fa45cb7fcccdb42362889b50da277c8e571347ea61067fd28fdfc39243d",
+      "build_stamp": "QSB_ZEROS_N=24 1790926921743351656"
+    }
+  }
+}

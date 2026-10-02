@@ -1,0 +1,100 @@
+scored A/B: block128 vs block128_fill2, 3 pairs, seed 1789110211; artifacts=candidates/subset/lab/ab-block128-block128_fill2-20261001T224044-1655336
+score.py: subset score = 371172705.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 39,531,962,455  in 120.6s (harness clock)
+  candidates (from N verified hits): 44,753,223,680
+  grinder self-reported: 120.5s, 328.0 M/s (not scored)
+  verified hits: 5335 / 5335
+  hit rel. variance: 0.013691
+    ⚠ verified hits (5335) outside expected Poisson band [4296,5129] for 39,531,962,455 candidates at N=24 (expected≈4712.6) — candidate count may be misreported
+--------------------------------------------------------
+  SCORE (throughput) : 371.1727 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 44.247237 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+  → /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json: 339.7M/s, 41,113,887,912 candidates, 5296 hits
+score.py: subset score = 366919389.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 41,113,887,912  in 121.1s (harness clock)
+  candidates (from N verified hits): 44,426,067,968
+  grinder self-reported: 121.0s, 339.7 M/s (not scored)
+  verified hits: 5296 / 5296
+  hit rel. variance: 0.013741
+--------------------------------------------------------
+  SCORE (throughput) : 366.9194 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 43.740182 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+score.py: subset score = 376156954.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 41,591,891,969  in 121.0s (harness clock)
+  candidates (from N verified hits): 45,499,809,792
+  grinder self-reported: 120.9s, 344.0 M/s (not scored)
+  verified hits: 5424 / 5424
+  hit rel. variance: 0.013578
+    ⚠ verified hits (5424) outside expected Poisson band [4531,5386] for 41,591,891,969 candidates at N=24 (expected≈4958.1) — candidate count may be misreported
+--------------------------------------------------------
+  SCORE (throughput) : 376.1570 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 44.841418 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+  → /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json: 341.7M/s, 41,212,040,379 candidates, 5240 hits
+score.py: subset score = 364251203.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 41,212,040,379  in 120.7s (harness clock)
+  candidates (from N verified hits): 43,956,305,920
+  grinder self-reported: 120.6s, 341.7 M/s (not scored)
+  verified hits: 5240 / 5240
+  hit rel. variance: 0.013814
+--------------------------------------------------------
+  SCORE (throughput) : 364.2512 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 43.422128 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+  → /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json: 344.1M/s, 41,462,804,635 candidates, 5256 hits
+score.py: subset score = 365742676.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 41,462,804,635  in 120.6s (harness clock)
+  candidates (from N verified hits): 44,090,523,648
+  grinder self-reported: 120.5s, 344.1 M/s (not scored)
+  verified hits: 5256 / 5256
+  hit rel. variance: 0.013793
+--------------------------------------------------------
+  SCORE (throughput) : 365.7427 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 43.599913 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+score.py: subset score = 378607465.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 42,166,448,730  in 121.0s (harness clock)
+  candidates (from N verified hits): 45,818,576,896
+  grinder self-reported: 121.0s, 348.6 M/s (not scored)
+  verified hits: 5462 / 5462
+  hit rel. variance: 0.013531
+    ⚠ verified hits (5462) outside expected Poisson band [4596,5457] for 42,166,448,730 candidates at N=24 (expected≈5026.6) — candidate count may be misreported
+--------------------------------------------------------
+  SCORE (throughput) : 378.6075 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 45.133521 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================
+block128 [371.172705, 364.251203, 365.742676] mean 367.055528
+block128_fill2 [366.919389, 376.156954, 378.607465] mean 373.8946026666667
+AB-DONE verified delta +1.863%; submit gate >= +4.000%

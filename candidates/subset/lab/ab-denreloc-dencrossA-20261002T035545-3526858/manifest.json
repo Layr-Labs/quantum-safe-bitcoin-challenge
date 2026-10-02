@@ -1,0 +1,22 @@
+{
+  "control": "denreloc",
+  "pairs": 1,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_denreloc.cu",
+      "source_text": "// Frozen qualified eager relocation control.\n#define QSB_LOCAL_SM86 1\n#define QSB_DEN_CROSS_PRE 1\n#include \"subset.cu\"\n",
+      "source_sha256": "a0b39398f342b7044428eaa85faeec68827b8132744c33a3f69ca4bdbae75fcb",
+      "binary_sha256": "d839a964647d6a27faed72732124b16ad90efdcc7b83baaaadbe762f6b55d5ee",
+      "build_stamp": "QSB_ZEROS_N=24 1790931257020096046"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-it4-dencrossA.NSNtqf/candidates/subset/lab/n24L_dencrossA.cu",
+      "source_text": "// Isolate parked A's relocation against the qualified both-factor mode.\n#define QSB_LOCAL_SM86 1\n#define QSB_DEN_CROSS_PRE 3\n#include \"../subset.cu\"\n",
+      "source_sha256": "d3960652a241a7740182a834d9ce2d20a8d2712d6cc1df90eff9c6b6c30717c7",
+      "binary_sha256": "663342a28dfca1e57d4c5a15291b66fb590f2825c818285383be9eb833898372",
+      "build_stamp": "QSB_ZEROS_N=24 1790931192054749426"
+    }
+  }
+}

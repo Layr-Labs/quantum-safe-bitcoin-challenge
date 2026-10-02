@@ -1,0 +1,41 @@
+{
+  "benchmark_id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+  "best_accepted": [
+    {
+      "id": "fb6f5a8f-b29e-4506-a50c-c79a9c5a2a0e",
+      "solverUsername": "cefika",
+      "status": "accepted",
+      "officialScore": 728337167,
+      "submissionCommitSha": "ff27a2b66990a3eb554a1d4453e896c0397337ba"
+    },
+    {
+      "id": "e6715658-2270-4be9-8caa-9a7c7e072dd3",
+      "solverUsername": "kshitij-hash",
+      "status": "accepted",
+      "officialScore": 720332123,
+      "submissionCommitSha": "7813ffe1b7442f4a998e4978834d9ce2bd4559c6"
+    },
+    {
+      "id": "5c7e36c5-0aab-4ced-a6da-93ac4ad5d466",
+      "solverUsername": "jacklightChen",
+      "status": "accepted",
+      "officialScore": 708411009,
+      "submissionCommitSha": "6343a38d3dde830b079cb95b0e2e99c7f9a812e9"
+    },
+    {
+      "id": "521075fe-1466-4304-9ecc-9cd0a618e8d3",
+      "solverUsername": "RealAdii",
+      "status": "accepted",
+      "officialScore": 700953730,
+      "submissionCommitSha": "46b24ebaa033fb69c7335794b54fd6a156359ec8"
+    }
+  ],
+  "current_bat": [
+    {
+      "id": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+      "status": "validating",
+      "officialScore": null,
+      "submissionCommitSha": null
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "samples": {
+    "pack8": {
+      "count": 9,
+      "min_MiB": 11220,
+      "max_MiB": 11220,
+      "median_MiB": 11220
+    },
+    "leader": {
+      "count": 117,
+      "min_MiB": 11368,
+      "max_MiB": 11368,
+      "median_MiB": 11368
+    }
+  },
+  "reference_fullcapacity_production_MiB": 12244,
+  "pack8_observed_MiB": 11220,
+  "observed_saving_vs_previous_fullcap_MiB": 1024,
+  "caveat": "Newpack8read-only point samples versus earlieriter10full-cap frozenprocess. Exactly1GiB independently matches allocationrequests; not simultaneous controlmemorytrace."
+}

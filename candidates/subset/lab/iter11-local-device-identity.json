@@ -1,0 +1,11 @@
+{
+  "control": {
+    "bytes": 1126120,
+    "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+  },
+  "budget": {
+    "bytes": 1126120,
+    "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+  },
+  "byte_identical": true
+}

@@ -1,0 +1,33 @@
+{
+  "original_snapshot_sha256": "82a94fb6476a06c4df0df7362689c7d94d3db46a818c27082938f2161be45fd4",
+  "original_snapshot_bytes": 15836292,
+  "retention": "Selected current best and our terminal receipt; public notes retained separately. Original all-submission dump was 16 MiB and cannot fit submission budget.",
+  "benchmark": {
+    "id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+    "name": "eigenlabs/quantum-safe-bitcoin-challenge/subset",
+    "currentBestScore": 736585478,
+    "sourceRef": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+    "minScoreImprovementBips": 100,
+    "maxSubmissionBytes": 8388608
+  },
+  "leader": {
+    "id": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+    "status": "accepted",
+    "officialScore": 736585478,
+    "solverUsername": "kshitij-hash",
+    "submissionCommitSha": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+    "promotionStatus": "promoted",
+    "rejectionReason": null,
+    "updatedAt": "2026-10-02T12:35:40.791Z"
+  },
+  "our_submission": {
+    "id": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+    "status": "failed",
+    "officialScore": null,
+    "solverUsername": "newjordan",
+    "submissionCommitSha": "2b3e73c7b9ce1e329530e848f35e842539bad4bb",
+    "promotionStatus": null,
+    "rejectionReason": "workflow run concluded failure at step \"Benchmark\": https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/37007650774",
+    "updatedAt": "2026-10-02T13:05:09.607Z"
+  }
+}

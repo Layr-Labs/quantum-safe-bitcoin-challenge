@@ -1,0 +1,59 @@
+{
+  "total_tracked_bytes": 5874811,
+  "MiB": 5.602656364440918,
+  "cap_bytes": 8388608,
+  "largest": [
+    [
+      653686,
+      "candidates/subset/qsb_carrier_sm89.h"
+    ],
+    [
+      426741,
+      "candidates/subset/lab/iter9-leader-tree.cu.txt"
+    ],
+    [
+      391384,
+      "candidates/subset/tests/gpu_epochs/tree.cu"
+    ],
+    [
+      260719,
+      "candidates/subset/lab/iter9-board-start.txt"
+    ],
+    [
+      259827,
+      "candidates/subset/tests/gpu_epochs/tree.cu.orig"
+    ],
+    [
+      258130,
+      "candidates/subset/hit_filter_field_sc.cuh"
+    ],
+    [
+      251692,
+      "candidates/subset/hit_filter_field_sc_aluz.cuh"
+    ],
+    [
+      229839,
+      "candidates/subset/CpuGrindSubset.h"
+    ],
+    [
+      117865,
+      "candidates/subset/hit_filter_field.cuh"
+    ],
+    [
+      115980,
+      "candidates/subset/chain_replay_field.cuh"
+    ],
+    [
+      79826,
+      "candidates/subset/y_pair_sc.cuh"
+    ],
+    [
+      76683,
+      "candidates/subset/lab/iter3-firstflat-local-build.log"
+    ]
+  ],
+  "note": "untracked local executables not committed; remove before packaging if CLI packages dirty files",
+  "final_tracked_bytes": 6166343,
+  "final_MiB": 5.880682945251465,
+  "budget_PASS": true
+}

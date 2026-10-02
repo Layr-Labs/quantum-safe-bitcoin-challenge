@@ -1,0 +1,27 @@
+{
+  "Mps": {
+    "A": 401.315271,
+    "B": 359.765211
+  },
+  "runs": {
+    "A": [
+      401.315271
+    ],
+    "B": [
+      359.765211
+    ]
+  },
+  "verified_hits": {
+    "A": [
+      5797
+    ],
+    "B": [
+      5206
+    ]
+  },
+  "delta_percent": -10.353470949776034,
+  "all_verified": true,
+  "probe": "QSB_SHA_LEA_GATE1 ordinary gate extension on scopedSHA1 control",
+  "artifacts": "candidates/subset/lab/iter6-rotateaddgate-screen-20261002T083034-815147",
+  "decision": "default-off; singlepair negative screen -10.353471%, all verification PASS; not repeat"
+}

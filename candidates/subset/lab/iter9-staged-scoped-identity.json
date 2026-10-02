@@ -1,0 +1,7 @@
+{
+  "native_sha256": "82b9868eb8213657b8f2ade164ccb503afc632ce7018c19cb5ab176b1d8e4c64",
+  "matches_measured_scoped_image": true,
+  "header_sha256": "462978bbf3588b14de17e6ed167c138650f4116d949c17f9848f6009b5d1409a",
+  "production_unchanged": true,
+  "staged_source_sha256": "7f5d0ab7026d4022bbe6c0f6437e6c07b1e655fd802113fd9068542469771b86"
+}

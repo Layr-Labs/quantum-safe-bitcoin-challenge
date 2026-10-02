@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_rotateadd.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_SHA_LEA 1\n#define QSB_LEA_PARTS 0\n#define QSB_S3_FINAL_PREFETCH 0\n#include \"/work/tmp/qsb-it9-rotateadd.RTSQzH/current/subset.cu\"\n",
+    "source_sha256": "708f2ca61fc8dd50dea6d98a4fc77b62988bd29c27acb9aef70fa3d652c2444c",
+    "binary_sha256": "9df22b6a115c352e74fbb91ac9d4cacfef1ef6612d15dbcaeba51ecca2ab201e",
+    "stamp": "QSB_ZEROS_N=24 1790947272323729360"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_rotateaddgate.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_SHA_LEA 1\n#define QSB_SHA_LEA_GATE 1\n#define QSB_LEA_PARTS 0\n#define QSB_S3_FINAL_PREFETCH 0\n#include \"/work/tmp/qsb-it9-rotateaddgate.ahnqly/current/subset.cu\"\n",
+    "source_sha256": "3963cea6b42041aec726a2dbb68977947f7fb92a1c68ff705e66b416329c9a4c",
+    "binary_sha256": "d88b2b5b4f7a04203d072b04e9c4eb87908b7331b77b4bb1a686f2d6dfecf8f5",
+    "stamp": "QSB_ZEROS_N=24 1790947789837556306"
+  }
+}

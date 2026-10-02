@@ -1,0 +1,12 @@
+{
+  "current": {
+    "size": 1126120,
+    "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+  },
+  "producerscratch": {
+    "size": 1126120,
+    "sha256": "b4a0440fddddf91f0c7e7417c856c3d9bc414a18516f273fe3871f1dfda7fc1b"
+  },
+  "local_device_payload_byte_identical": true,
+  "unchanged_qualified_carrier_header_sha256": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20"
+}

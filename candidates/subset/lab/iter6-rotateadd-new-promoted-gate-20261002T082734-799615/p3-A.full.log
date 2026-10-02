@@ -1,0 +1,25 @@
+benchmark.sh: benches=subset N=24 mode=fixed_time grinder=cmd:python3 harness/gpu_wrap.py --src candidates/subset/lab/n24L_iter9leader.cu seed=1789110211
+benchmark.sh: === subset ===
+  pinning: /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+  subset: /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+problems generated (synthetic, seed=1789110211 — no real coin material)
+▶ grinder: python3 harness/gpu_wrap.py --src candidates/subset/lab/n24L_iter9leader.cu --bench subset --zeros 24 --mode fixed_time --out /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json --seconds 120.0 --hits 200
+  compile: reusing /work/comps/yukon-glm-night/qsb-subset/candidates/subset/lab/n24L_iter9leader (already built for N=24)
+  run: stdbuf -oL timeout 120 /work/comps/yukon-glm-night/qsb-subset/candidates/subset/lab/n24L_iter9leader /work/comps/yukon-glm-night/qsb-subset/benchmark-results/problem/subset.bin 0 4081224 970060878 1 0 single_hash
+  → /work/comps/yukon-glm-night/qsb-subset/benchmark-results/run-subset.json: 326.1M/s, 39,363,648,645 candidates, 5395 hits
+score.py: subset score = 374776564.0 verified candidates per second  →  /work/comps/yukon-glm-night/qsb-subset/score-subset.json
+
+========================================================
+  BENCH   : subset   GPU: RTX_4090
+  N (zeros): 24   mode: fixed_time
+  candidates (self-reported): 39,363,648,645  in 120.8s (harness clock)
+  candidates (from N verified hits): 45,256,540,160
+  grinder self-reported: 120.7s, 326.1 M/s (not scored)
+  verified hits: 5395 / 5395
+  hit rel. variance: 0.013615
+    ⚠ verified hits (5395) outside expected Poisson band [4277,5109] for 39,363,648,645 candidates at N=24 (expected≈4692.5) — candidate count may be misreported
+--------------------------------------------------------
+  SCORE (throughput) : 374.7766 M/s        ← primary (from verified hits)
+  SCORE (hit-rate)   : 44.676832 hits/s
+  RESULT: PASS ✅ (scored)
+========================================================

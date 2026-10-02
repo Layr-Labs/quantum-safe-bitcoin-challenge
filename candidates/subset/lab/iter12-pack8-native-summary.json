@@ -1,0 +1,33 @@
+{
+  "sha256": "a724399a04db515f8bebd836b1af866e6e7a1b778a98ce73a384c6f7704de147",
+  "bytes": 473504,
+  "digest_instructions": 14520,
+  "instruction_changes": [
+    {
+      "index": 16,
+      "before": "IMAD.WIDE.U32 R4, R54, 0x80, RZ",
+      "after": "IMAD.WIDE.U32 R4, R54, 0x40, RZ"
+    },
+    {
+      "index": 27,
+      "before": "LOP3.LUT R9, R4, 0x80, RZ, 0xfc, !PT",
+      "after": "LOP3.LUT R9, R4, 0x40, RZ, 0xfc, !PT"
+    }
+  ],
+  "digest_resources": {
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_bytes": 0,
+    "spill_store_bytes": 0,
+    "spill_load_bytes": 0
+  },
+  "first_allocation": {
+    "epochs_per_slot": 2097152,
+    "slots": 2,
+    "before_row_bytes": 512,
+    "after_row_bytes": 256,
+    "saved_bytes": 1073741824,
+    "saved_MiB": 1024
+  },
+  "ranked_fit": "Memory savings from exact requests; fullsm89GLV11fit not locally exercised. No assertion of officialfailure cause."
+}

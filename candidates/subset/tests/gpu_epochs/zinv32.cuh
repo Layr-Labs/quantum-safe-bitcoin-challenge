@@ -199,13 +199,66 @@ static inline uint32_t zi_clz32(uint32_t x){return x?(uint32_t)__builtin_clz(x):
     0x800000020FFC1000ULL,0x8000000615FF4000ULL,0x800000041FFE2000ULL,0x800000063FFF4000ULL \
 }
 ZI_CONST uint64_t ZI_BY_LUT[832]=ZI_BY_LUT_INIT;
+#ifndef QSB_ROOT_LUT32
+#define QSB_ROOT_LUT32 0
+#endif
+#ifndef QSB_ROOT_LUT40
+#define QSB_ROOT_LUT40 0
+#endif
+#ifndef QSB_ROOT_LUT40_SHORT
+#define QSB_ROOT_LUT40_SHORT 0
+#endif
+#ifndef QSB_ROOT_LUT_GLOBAL
+#define QSB_ROOT_LUT_GLOBAL 0
+#endif
+#if QSB_ROOT_LUT_GLOBAL != 0 && QSB_ROOT_LUT_GLOBAL != 1
+#error "QSB_ROOT_LUT_GLOBAL must be 0 or 1"
+#endif
+#if QSB_ROOT_LUT_GLOBAL && (QSB_ROOT_LUT_SMEM || QSB_ROOT_LUT32 || QSB_ROOT_LUT40)
+#error "QSB_ROOT_LUT_GLOBAL uses the original 64-bit table without shared packing"
+#endif
+#if QSB_ROOT_LUT_GLOBAL
+__device__ __align__(16) const uint64_t ZI_BY_LUT_RO[832]=ZI_BY_LUT_INIT;
+#endif
+#if QSB_ROOT_LUT40_SHORT && !QSB_ROOT_LUT40
+#error "QSB_ROOT_LUT40_SHORT requires QSB_ROOT_LUT40"
+#endif
+#if QSB_ROOT_LUT40
+#if QSB_ROOT_LUT32 || !QSB_ROOT_LUT_SMEM
+#error "QSB_ROOT_LUT40 requires shared LUT and excludes LUT32"
+#endif
+#include "zinv40_split.cuh"
+#endif
+#if QSB_ROOT_LUT32
+#include "zinv32_compact.cuh"
+ZI_CONST uint32_t ZI_BY_LUT32[832]=ZI_LUT32_INIT;
+#endif
 /* QSB_ROOT_LUT_SMEM (tree.cu): the column divstep below reads the table from the tree's inverses rows
  * (file scope here so that the loader, the tree and the lookup name the same array). Declared for both
  * nvcc passes: the host pass parses the device bodies of qsb_root_lut_issue/wait and of the tree, and
  * only its own (host) copy of the divstep code keeps reading ZI_BY_LUT. */
 #if defined(QSB_ROOT_LUT_SMEM) && QSB_ROOT_LUT_SMEM
+#if QSB_ROOT_LUT40
+#if QSB_ROOT_LUT40_SHORT
+struct ZiLut40 { uint32_t word[704]; uint8_t flag[704]; };
+__device__ __align__(16) const ZiLut40 ZI_BY_LUT_G={ZI_LUT40_SHORT_WORD_INIT,ZI_LUT40_SHORT_FLAG_INIT};
+__shared__ __align__(16) uint64_t qsb_tree_inverses_smem[4][QSB_SE_BLOCK];
+#else
+struct ZiLut40 { uint32_t word[832]; uint8_t flag[832]; };
+__device__ __align__(16) const ZiLut40 ZI_BY_LUT_G={ZI_LUT40_WORD_INIT,ZI_LUT40_FLAG_INIT};
+__shared__ __align__(16) uint64_t qsb_tree_inverses_smem[4][QSB_SE_BLOCK < 130 ? 130 : QSB_SE_BLOCK];
+#endif
+static_assert(sizeof(ZiLut40)==(QSB_ROOT_LUT40_SHORT?3520:4160),"LUT word/flag layout must be packed");
+static_assert(sizeof(qsb_tree_inverses_smem)>=sizeof(ZiLut40),"shared inverse arena must hold LUT");
+#elif QSB_ROOT_LUT32
+__device__ __align__(16) const uint32_t ZI_BY_LUT_G[832]=ZI_LUT32_INIT;
+__shared__ __align__(16) uint64_t qsb_tree_inverses_smem[4][QSB_SE_BLOCK];
+static_assert(sizeof(qsb_tree_inverses_smem)>=3328,"shared inverse arena must hold compact LUT");
+#else
 __device__ __align__(16) const uint64_t ZI_BY_LUT_G[832]=ZI_BY_LUT_INIT;   /* global mirror, cp.async source */
+// LUT needs 832 words even when the inverse tree has only 128 leaves.
 __shared__ __align__(16) uint64_t qsb_tree_inverses_smem[4][256];         /* the tree's inverses rows */
+#endif
 /* Issue this thread's share of the 416 16-byte chunks (flat word 2i..2i+1 of the table to flat word
  * 2i..2i+1 of the rows) and commit them as one group. No register holds table data. cp.async needs sm_80:
  * the ranked build's own PTX (nvcc's default target, JIT fallback only; the native sm_89 image is the
@@ -214,13 +267,27 @@ __device__ __forceinline__ void qsb_root_lut_issue(int tid,int n){
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
     const uint32_t dst=(uint32_t)__cvta_generic_to_shared(&qsb_tree_inverses_smem[0][0]);
     #pragma unroll 1
-    for(int i=tid;i<416;i+=n)
-        asm volatile("cp.async.cg.shared.global [%0], [%1], 16;" :: "r"(dst+16u*(uint32_t)i),"l"(ZI_BY_LUT_G+2*i) : "memory");
+    for(int i=tid;i<(QSB_ROOT_LUT40?(QSB_ROOT_LUT40_SHORT?220:260):(QSB_ROOT_LUT32?208:416));i+=n)
+#if QSB_ROOT_LUT40
+        asm volatile("cp.async.cg.shared.global [%0], [%1], 16;" :: "r"(dst+16u*(uint32_t)i),"l"((const uint8_t*)&ZI_BY_LUT_G+16*i) : "memory");
+#else
+        asm volatile("cp.async.cg.shared.global [%0], [%1], 16;" :: "r"(dst+16u*(uint32_t)i),"l"(ZI_BY_LUT_G+(QSB_ROOT_LUT32?4:2)*i) : "memory");
+#endif
     asm volatile("cp.async.commit_group;" ::: "memory");
 #else
+#if QSB_ROOT_LUT40
+    uint32_t *flat=(uint32_t*)&qsb_tree_inverses_smem[0][0];
+    #pragma unroll 1
+    for(int i=tid;i<(QSB_ROOT_LUT40_SHORT?880:1040);i+=n)flat[i]=((const uint32_t*)&ZI_BY_LUT_G)[i];
+#else
+#if QSB_ROOT_LUT32
+    uint32_t *flat=(uint32_t*)&qsb_tree_inverses_smem[0][0];
+#else
     uint64_t *flat=&qsb_tree_inverses_smem[0][0];
+#endif
     #pragma unroll 1
     for(int i=tid;i<832;i+=n)flat[i]=ZI_BY_LUT_G[i];
+#endif
 #endif
 }
 /* This thread's copies have landed; a block barrier after it publishes the whole table. */
@@ -230,12 +297,27 @@ __device__ __forceinline__ void qsb_root_lut_wait(){
 #endif
 }
 #ifdef __CUDA_ARCH__
-#define ZI_LUT(i) (((const uint64_t*)qsb_tree_inverses_smem)[(i)])
+#if QSB_ROOT_LUT40
+#define ZI_LUT40_WORD(i) (((const uint32_t*)qsb_tree_inverses_smem)[(i)])
+#define ZI_LUT40_FLAG(i) (((const uint8_t*)qsb_tree_inverses_smem)[(QSB_ROOT_LUT40_SHORT?2816:3328)+(i)])
+#elif QSB_ROOT_LUT32
+#define ZI_LUT32(i) (((const uint32_t*)qsb_tree_inverses_smem)[(i)])
 #else
-#define ZI_LUT(i) ZI_BY_LUT[(i)]
+#define ZI_LUT(i) (((const uint64_t*)qsb_tree_inverses_smem)[(i)])
 #endif
 #else
 #define ZI_LUT(i) ZI_BY_LUT[(i)]
+#define ZI_LUT32(i) ZI_BY_LUT32[(i)]
+#define ZI_LUT40_WORD(i) ((uint32_t)ZI_BY_LUT[(i)+(QSB_ROOT_LUT40_SHORT?64:0)])
+#define ZI_LUT40_FLAG(i) (((uint32_t)(ZI_BY_LUT[(i)+(QSB_ROOT_LUT40_SHORT?64:0)]>>32)&255u)|((uint32_t)(ZI_BY_LUT[(i)+(QSB_ROOT_LUT40_SHORT?64:0)]>>63)))
+#endif
+#else
+#if QSB_ROOT_LUT_GLOBAL && defined(__CUDA_ARCH__)
+#define ZI_LUT(i) __ldg(&ZI_BY_LUT_RO[(i)])
+#else
+#define ZI_LUT(i) ZI_BY_LUT[(i)]
+#endif
+#define ZI_LUT32(i) ZI_BY_LUT32[(i)]
 #endif
 template<int BYTE> ZI_DEV int32_t zi_by_signed_byte(uint32_t value){
     static_assert(BYTE>=0&&BYTE<4,"byte selector");
@@ -286,16 +368,43 @@ ZI_DEV int32_t zi_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
     for(int k=0;k<5;k++){
         const int32_t dc=delta<-6?-6:(delta>6?6:delta);
         const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
+#if QSB_ROOT_LUT40
+#if QSB_ROOT_LUT40_SHORT
+        const int32_t ds=delta<-5?-5:(delta>5?5:delta);
+        const uint32_t index=((uint32_t)(ds+5)<<6)|ratio;
+#else
+        const uint32_t index=((uint32_t)(dc+6)<<6)|ratio;
+#endif
+        const uint32_t e=ZI_LUT40_WORD(index),flags=ZI_LUT40_FLAG(index);
+        const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
+        const int32_t c=zi_by_signed_byte<2>(e),d=zi_by_signed_byte<3>(e);
+#elif QSB_ROOT_LUT32
+        const uint32_t packed=ZI_LUT32(((uint32_t)(dc+6)<<6)|ratio);
+        const int32_t a=((int32_t)(packed<<25)>>25)*2;
+        const int32_t b=((int32_t)(packed<<18)>>25)*2;
+        const int32_t c=(int32_t)(packed<<11)>>25;
+        const int32_t d=((int32_t)(packed<<5)>>26)*2+1;
+        const int32_t adj=((int32_t)(packed<<2)>>29)*2;
+        const int32_t sm=-(int32_t)((packed>>30)&1u);
+#else
         const uint64_t packed=ZI_LUT(((uint32_t)(dc+6)<<6)|ratio);   /* QSB_ROOT_LUT_SMEM */
         const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
         const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
         const int32_t c=zi_by_signed_byte<2>(e),d=zi_by_signed_byte<3>(e);
+#endif
         const uint32_t nf=((uint32_t)a*f+(uint32_t)b*g)>>6;
         g=((uint32_t)c*f+(uint32_t)d*g)>>6;f=nf;
         const int32_t nu=a*u+b*q;
         q=c*u+d*q;u=nu;
+#if QSB_ROOT_LUT40
+        const int32_t sm=-(int32_t)(flags&1u);
+        delta=((delta^sm)-sm)+zi_by_signed_byte<0>(flags&254u);
+#elif QSB_ROOT_LUT32
+        delta=((delta^sm)-sm)+adj;
+#else
         const int32_t sm=(int32_t)flags>>31;
         delta=((delta^sm)-sm)+zi_by_signed_byte<0>(flags);
+#endif
     }
     *top=u;*bottom=q;
     return delta;

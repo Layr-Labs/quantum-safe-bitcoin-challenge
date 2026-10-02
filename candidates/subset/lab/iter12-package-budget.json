@@ -1,0 +1,9 @@
+{
+  "indexed_paths": 926,
+  "candidate_bytes": 6813842,
+  "max_submission_bytes": 8388608,
+  "remaining_bytes": 1574766,
+  "new_files_staged": 41,
+  "production_entrypoint_unstaged_changes": "",
+  "note": "Excludes local binaries and raw disassemblies, includes existing tracked evidence. Metadata overhead not measured here."
+}

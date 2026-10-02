@@ -1,0 +1,985 @@
+benchmark / benchmark	UNKNOWN STEP	﻿2026-10-02T13:02:55.4951451Z Current runner version: '2.337.0'
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4956699Z Runner name: 'starkware-rtx4090-leadergpu-2-20261002130248-1772'
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4957469Z Runner group name: 'Default'
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4958201Z Machine name: 'ubuntu22044'
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4960577Z ##[group]GITHUB_TOKEN Permissions
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4962417Z Contents: read
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4962923Z Metadata: read
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4963400Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4965091Z Secret source: Actions
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4965918Z Cache mode: write
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.4966787Z Prepare workflow directory
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.5375037Z Prepare all required actions
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.5433422Z Getting action download info
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:55.9851869Z Download action repository 'actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd' (SHA:93cb6efe18208431cddfb8368fd83d5badbf9bfd)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.3776317Z Download action repository 'actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f' (SHA:b7c566a772e6b6bfb58ed0dc250532a479d7789f)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.8927467Z Uses: Layr-Labs/quantum-safe-bitcoin-challenge/.github/workflows/benchmark.yml@refs/heads/submissions/414fe58f-5131-4596-97f8-8ccf4fbdcf7f (2b3e73c7b9ce1e329530e848f35e842539bad4bb)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.8933006Z ##[group] Inputs
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.8933798Z   bench: subset
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.8934585Z   runner-label: starkware-subset-rtx4090
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.8935529Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.8936283Z Complete job name: benchmark / benchmark
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9536867Z ##[group]Run actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9538260Z with:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9538997Z   ref: 2b3e73c7b9ce1e329530e848f35e842539bad4bb
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9539926Z   clean: true
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9540623Z   persist-credentials: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9541441Z   set-safe-directory: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9542369Z   repository: Layr-Labs/quantum-safe-bitcoin-challenge
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9549467Z   token: ***
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9550201Z   ssh-strict: true
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9550929Z   ssh-user: git
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9551677Z   sparse-checkout-cone-mode: true
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9552524Z   fetch-depth: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9553228Z   fetch-tags: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9553944Z   show-progress: true
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9554721Z   lfs: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9555396Z   submodules: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9556291Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9556951Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9557817Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:56.9558560Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0394010Z Syncing repository: Layr-Labs/quantum-safe-bitcoin-challenge
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0397021Z ##[group]Getting Git version info
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0399204Z Working directory is '/home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge'
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0402090Z [command]/usr/bin/git version
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0403193Z git version 2.34.1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0406546Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0411463Z [command]/usr/bin/git config --local --get remote.origin.url
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0428474Z https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0440784Z ##[group]Removing previously created refs, to avoid conflicts
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0443580Z [command]/usr/bin/git rev-parse --symbolic-full-name --verify --quiet HEAD
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0467732Z HEAD
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0537352Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0538376Z [command]/usr/bin/git submodule status
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0810935Z ##[group]Cleaning the repository
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0812936Z [command]/usr/bin/git clean -ffdx
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0877588Z Removing benchmark-results/
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0879904Z Removing candidates/subset/.subset.build
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0882334Z Removing candidates/subset/subset
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0884578Z Removing harness/__pycache__/
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0886828Z Removing score-subset.json
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.0891257Z [command]/usr/bin/git reset --hard HEAD
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1127046Z HEAD is now at f8cdef4b3 Validate submission 8ad63ed6-ea57-4f6a-99b0-3a2adbea83b6
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1139013Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1141950Z ##[group]Disabling automatic garbage collection
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1144564Z [command]/usr/bin/git config --local gc.auto 0
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1171506Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1174237Z ##[group]Setting up auth
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1177048Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1204325Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1431955Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1460020Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1675789Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1702512Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1908747Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1941918Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1943461Z ##[group]Fetching the repository
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.1948082Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 2b3e73c7b9ce1e329530e848f35e842539bad4bb
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8875324Z From https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8876076Z  * branch                2b3e73c7b9ce1e329530e848f35e842539bad4bb -> FETCH_HEAD
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8912887Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8913396Z ##[group]Determining the checkout info
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8914017Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8917586Z [command]/usr/bin/git sparse-checkout disable
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8965066Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8997491Z ##[group]Checking out the ref
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.8999245Z [command]/usr/bin/git checkout --progress --force 2b3e73c7b9ce1e329530e848f35e842539bad4bb
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9407439Z Warning: you are leaving 1 commit behind, not connected to
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9408009Z any of your branches:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9408226Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9408568Z   f8cdef4b3 Validate submission 8ad63ed6-ea57-4f6a-99b0-3a2adbea83b6
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9408976Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9409242Z If you want to keep it by creating a new branch, this may be a good time
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9409721Z to do so with:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9409901Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9410107Z  git branch <new-branch-name> f8cdef4b3
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9410371Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9410680Z HEAD is now at 2b3e73c7b Validate submission 414fe58f-5131-4596-97f8-8ccf4fbdcf7f
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9424062Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9533927Z [command]/usr/bin/git log -1 --format=%H
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9624624Z 2b3e73c7b9ce1e329530e848f35e842539bad4bb
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9632864Z ##[group]Removing auth
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9634964Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9666247Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9945713Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9971712Z http.https://github.com/.extraheader
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:57.9978845Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0008767Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0223201Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0249124Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0458818Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0619322Z ##[group]Run [[ "${GITHUB_REF_TYPE}" == branch ]]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0619741Z ^[[36;1m[[ "${GITHUB_REF_TYPE}" == branch ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0620100Z ^[[36;1m[[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ||^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0620427Z ^[[36;1m   "${GITHUB_REF_NAME}" == submissions/* ||^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0620749Z ^[[36;1m   "${GITHUB_REF_NAME}" == yukon/baseline/* ]] || {^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0621130Z ^[[36;1m  echo "ranked benchmark ref is not allowed: ${GITHUB_REF_NAME}" >&2^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0621514Z ^[[36;1m  exit 1^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0621719Z ^[[36;1m}^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0644897Z shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0645221Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0645434Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0645685Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0645917Z   DEFAULT_BRANCH: main
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0646128Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0805361Z ##[group]Run bridge="/opt/starkware-challenge/bench-exec.sh"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0805795Z ^[[36;1mbridge="/opt/starkware-challenge/bench-exec.sh"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0806131Z ^[[36;1mwork_root="/home/runner/actions-runner/_work"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0806508Z ^[[36;1m[[ "$(uname -s)" == Linux ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0806779Z ^[[36;1m[[ "$(uname -m)" == x86_64 ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0807078Z ^[[36;1m[[ -f "${bridge}" && ! -L "${bridge}" && -x "${bridge}" ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0807393Z ^[[36;1m[[ "$(stat -c '%u' "${bridge}")" == 0 ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0807713Z ^[[36;1mbridge_mode="$(stat -c '%a' "${bridge}")"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0808004Z ^[[36;1m[[ "${bridge_mode}" =~ ^[0-7]{3,4}$ ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0808294Z ^[[36;1m(( (8#${bridge_mode} & 8#022) == 0 ))^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0808671Z ^[[36;1msudo -n -l /opt/starkware-challenge/bench-exec.sh >/dev/null^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0809046Z ^[[36;1m[[ -d "${RUNNER_TEMP:?}" && ! -L "${RUNNER_TEMP}" ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0809379Z ^[[36;1mcase "${RUNNER_TEMP:?}" in^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0809635Z ^[[36;1m  "${work_root}"/*) ;;^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0809967Z ^[[36;1m  *) echo "runner temp is outside the bridge work root" >&2; exit 1 ;;^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0810294Z ^[[36;1mesac^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0810509Z ^[[36;1mcase "${GITHUB_WORKSPACE:?}" in^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0810773Z ^[[36;1m  "${work_root}"/*) ;;^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0811087Z ^[[36;1m  *) echo "workspace is outside the bridge work root" >&2; exit 1 ;;^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0811418Z ^[[36;1mesac^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0811632Z ^[[36;1mcommand -v nvidia-smi^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0811900Z ^[[36;1m[[ -x /usr/local/cuda-12.8/bin/nvcc ]]^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0812176Z ^[[36;1mcommand -v bwrap^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0812416Z ^[[36;1mpython3 --version^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0812666Z ^[[36;1mmkdir -p benchmark-results^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0812911Z ^[[36;1m{^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0813118Z ^[[36;1m  cat /etc/os-release^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0813395Z ^[[36;1m  uname -a^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0813604Z ^[[36;1m  nproc^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0813909Z ^[[36;1m  nvidia-smi --query-gpu=name,driver_version --format=csv,noheader^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0814278Z ^[[36;1m  /usr/local/cuda-12.8/bin/nvcc --version^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0814615Z ^[[36;1m  git rev-parse HEAD^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0814875Z ^[[36;1m} | tee benchmark-results/runner.txt^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0836433Z shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0836739Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0836952Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0837379Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0837607Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0963692Z /usr/bin/nvidia-smi
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0963981Z /usr/bin/bwrap
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0975554Z Python 3.10.12
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0998038Z PRETTY_NAME="Ubuntu 22.04.4 LTS"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0998305Z NAME="Ubuntu"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0998541Z VERSION_ID="22.04"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0998796Z VERSION="22.04.4 LTS (Jammy Jellyfish)"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0999055Z VERSION_CODENAME=jammy
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0999277Z ID=ubuntu
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0999468Z ID_LIKE=debian
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.0999715Z HOME_URL="https://www.ubuntu.com/"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1000001Z SUPPORT_URL="https://help.ubuntu.com/"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1000307Z BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1000717Z PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1001090Z UBUNTU_CODENAME=jammy
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1007293Z Linux ubuntu22044 5.15.0-191-generic #201-Ubuntu SMP Fri Aug 7 18:39:04 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1015151Z 32
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1356089Z NVIDIA GeForce RTX 4090, 580.178.04
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1393818Z nvcc: NVIDIA (R) Cuda compiler driver
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1394153Z Copyright (c) 2005-2025 NVIDIA Corporation
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1394481Z Built on Fri_Feb_21_20:23:50_PST_2025
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1395126Z Cuda compilation tools, release 12.8, V12.8.93
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1395425Z Build cuda_12.8.r12.8/compiler.35583870_0
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1407712Z 2b3e73c7b9ce1e329530e848f35e842539bad4bb
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1444715Z ##[group]Run export PATH="/usr/local/cuda-12.8/bin:${PATH}"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1445136Z ^[[36;1mexport PATH="/usr/local/cuda-12.8/bin:${PATH}"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1445443Z ^[[36;1m./setup.sh "${BENCH}"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1466989Z shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1467299Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1467518Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1467787Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1468015Z   BENCH: subset
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1468233Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.1840845Z setup.sh: python3 3.10.12
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.3978222Z   pinning: /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/problems/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.3982088Z   subset: /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/problems/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.3984293Z problems generated (synthetic, seed=0 — no real coin material)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.4063936Z setup.sh: nvcc 12.8
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.4451802Z   compile: nvcc -O3 -DQSB_ZEROS_N=24 -o candidates/subset/subset candidates/subset/subset.cu -lcrypto -lm
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.4465125Z nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.8993269Z candidates/subset/tests/gpu_epochs/zinv32.cuh(482): warning #20091-D: a __constant__ variable "QSB_ISO_INVU" cannot be directly read in a host function
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.8994441Z           const uint32_t scaled=i<8?(uint32_t)(QSB_ISO_INVU[i>>1]>>(32*(i&1))):0u;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.8994990Z                                                ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.8995285Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.8995626Z Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:58.8996077Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1992911Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(99): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1993674Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1993960Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1994137Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1994698Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(107): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1995321Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1996068Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1996240Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1996591Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(110): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1997160Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1997406Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1997539Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1997849Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(113): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1998370Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1998611Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1998769Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1999090Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(126): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1999591Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1999826Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.1999952Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2003092Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(217): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2003755Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2004045Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2005446Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2005791Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(228): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2006409Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2006636Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2006764Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2007090Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(230): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2007619Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2007864Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2008400Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2008705Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(232): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2009170Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2009431Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2009558Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2009856Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(238): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2010309Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2010556Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2010671Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2011000Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(241): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2011477Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2011705Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2011827Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2012129Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(252): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2012602Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2012822Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2012943Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2013233Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(264): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2013684Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2013892Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2014001Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2014286Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(266): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2014741Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2014965Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2015082Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2015360Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(268): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2015817Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2016030Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2016140Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2016429Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(274): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2016879Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2017090Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2017202Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2017521Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(294): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2017970Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2018188Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2018310Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2018602Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(296): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2019250Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2019468Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2019580Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2019868Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(298): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2020349Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2020570Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2020698Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2020988Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(304): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2021441Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2021657Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2021776Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2022058Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(317): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2022507Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2022717Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2022827Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2226347Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1894): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2226911Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2227141Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2227271Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2227576Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1902): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2228064Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2228291Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2228403Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2228707Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1905): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2229199Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2229713Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2229825Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2230116Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1908): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2230569Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2230776Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2230892Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2231212Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1921): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2231680Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2231888Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2232005Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2232313Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1950): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2232768Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2232966Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2233079Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2233354Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1964): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2233813Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2234018Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2234128Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2234406Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1970): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2234860Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2235073Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2235179Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2235464Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1973): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2235921Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2236124Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2236234Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2236509Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1976): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2236959Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2237156Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2237269Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2237549Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1980): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2238026Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2238239Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2238345Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2238670Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1982): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2239126Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2239324Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2239436Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2239711Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1989): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2240390Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2240597Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2240702Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2240986Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(1992): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2241436Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2241633Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2241742Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2242021Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2020): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2242470Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2242670Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2242781Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2243086Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2058): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2243540Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2243739Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2243845Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2244124Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2065): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2244575Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2244789Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2244900Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2245172Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2068): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2245621Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2245826Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2245936Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2246484Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2071): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2246938Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2247143Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2247248Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2247528Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2084): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2247968Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2248170Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2248280Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2248593Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2103): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2249067Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2249281Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2249396Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2249686Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2106): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2250138Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2250343Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2250582Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2250877Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2109): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2251371Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2251583Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2251689Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2251968Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2112): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2252417Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2252616Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2252733Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2253004Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2125): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2253452Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2253647Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2253751Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2254027Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2137): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2254474Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2254672Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2254792Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2255073Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2139): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2255517Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2255717Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2255840Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2256147Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2142): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2256597Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2256798Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2257070Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2257360Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2158): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2257805Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2258005Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2258117Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2258388Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2164): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2258837Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2259041Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2259154Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2259439Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2167): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2259886Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2260089Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2260194Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2260473Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2180): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2260915Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2261120Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2261233Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2261505Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2193): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2261949Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2262150Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2262252Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2262529Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2200): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2262975Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2263173Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2263276Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2263691Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2217): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2264151Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2264346Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2264460Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2264773Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2279): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2265222Z   #pragma GCC unroll 9
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2265429Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2265532Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2265812Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2284): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2266256Z   #pragma GCC unroll 64
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2266455Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2266570Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2266854Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2312): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2267328Z   #pragma GCC unroll 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2267535Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2267656Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2267942Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2316): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2268392Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2268591Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2268696Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2268978Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2318): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2269429Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2269630Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2269739Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2270010Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2320): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2270452Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2270657Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2270762Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2271038Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2322): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2271483Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2271688Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2271791Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2272071Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2325): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2272517Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2272715Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2272830Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2273101Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2340): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2273714Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2273916Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.2274019Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9528399Z candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(11): warning #550-D: variable "carry" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9529499Z       uint64_t r0,r1,r2,r3;uint32_t carry;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9530006Z                                     ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9530367Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9530768Z Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9531375Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9533234Z candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(42): warning #550-D: variable "carry" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9534223Z       uint64_t r0,r1,r2,r3; uint32_t carry;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9534720Z                                      ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9535019Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9541534Z candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(58): warning #550-D: variable "carry" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9542653Z       uint64_t r0,r1,r2,r3; uint32_t carry;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9543177Z                                      ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9543508Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9560992Z candidates/subset/tests/gpu_epochs/../../chain_replay_field.cuh(1694): warning #550-D: variable "high" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9562113Z       uint64_t r0,r1,r2,r3,high;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9562599Z                            ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9562877Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9571977Z candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(253): warning #550-D: variable "carry" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9573132Z       uint64_t r0,r1,r2,r3;uint32_t carry;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9573671Z                                     ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9574041Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9576157Z candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(284): warning #550-D: variable "carry" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9577207Z       uint64_t r0,r1,r2,r3; uint32_t carry;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9577727Z                                      ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9578045Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9581660Z candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(309): warning #550-D: variable "carry" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9582782Z       uint64_t r0,r1,r2,r3; uint32_t carry;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9583288Z                                      ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9583588Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9603955Z candidates/subset/tests/gpu_epochs/../../hit_filter_field_sc.cuh(3978): warning #550-D: variable "high" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9605026Z       uint64_t r0,r1,r2,r3,high;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9605505Z                            ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:02:59.9605802Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2754339Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(99): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2755364Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2755789Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2756058Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2756625Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(107): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2757497Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2757888Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2758106Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2758658Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(110): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2759518Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2759918Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2760124Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2760639Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(113): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2761470Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2761855Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2762170Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2762957Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(126): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2764101Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2764623Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2765448Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2766055Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(217): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2767676Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2768250Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2768485Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2769103Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(228): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2769996Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2770390Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2770604Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2771303Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(230): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2772286Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2772686Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2772900Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2773434Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(232): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2774435Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2774842Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2775075Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2775607Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(238): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2776457Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2776831Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2777034Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2777541Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(241): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2778363Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2778763Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2778985Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2779868Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(252): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2780742Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2781138Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2781353Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2781881Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(264): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2782717Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2783098Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2783323Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2783825Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(266): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2784670Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2785067Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2785268Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2785776Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(268): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2786603Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2786979Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2787185Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2787686Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(274): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2788504Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2788875Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2789081Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2789571Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(294): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2790402Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2790781Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2790976Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2791480Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(296): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2792317Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2792698Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2792899Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2793392Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(298): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2794214Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2794588Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2794795Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2795309Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(304): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2796140Z   #pragma GCC unroll 4
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2796511Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2796707Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2797209Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(317): warning #1675-D: unrecognized GCC pragma
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2798033Z   #pragma GCC unroll 16
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2800054Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2800266Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2889617Z candidates/subset/tests/gpu_epochs/host_producers_v3.h(865): warning #177-D: variable "w" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2890915Z       const size_t n = (size_t)batch_len(h, 0), w = (size_t)h->P.ncls * 32;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2891631Z                                                 ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.2891993Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3096677Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2556): warning #177-D: variable "b8" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3097812Z               Build8 b8; bool okb = false;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3098312Z                      ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3098567Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3100543Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h(2556): warning #177-D: variable "okb" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3101571Z               Build8 b8; bool okb = false;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3102057Z                               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3102361Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3322292Z candidates/subset/tests/gpu_epochs/tree.cu(6322): warning #550-D: variable "debug_idx" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3323368Z           int debug_idx = -1;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3323835Z               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3324058Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3329707Z candidates/subset/tests/gpu_epochs/tree.cu(6419): warning #177-D: variable "f" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3330773Z               int f = (int)tile_first[t];
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3331274Z                   ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3332057Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3372516Z candidates/subset/tests/gpu_epochs/tree.cu(6471): warning #177-D: variable "zh_cnt" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3373730Z           uint32_t *zh_cnt = (uint32_t *)d_hitbuf;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3374346Z                     ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3374622Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3375303Z candidates/subset/tests/gpu_epochs/tree.cu(6472): warning #177-D: variable "zh_idx" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3376537Z           uint32_t *zh_idx = (uint32_t *)(d_hitbuf + 4);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3377077Z                     ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3377321Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3378086Z candidates/subset/tests/gpu_epochs/tree.cu(6473): warning #177-D: variable "zh_combos" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3379072Z           uint8_t *zh_combos = d_hitbuf + 8;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3379693Z                    ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3379943Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3380598Z candidates/subset/tests/gpu_epochs/tree.cu(6480): warning #177-D: variable "zh_host" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3381799Z           uint8_t zh_host[4 + 64 * 16];
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3382276Z                   ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3382528Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3383213Z candidates/subset/tests/gpu_epochs/tree.cu(6488): warning #177-D: variable "hv_pend" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3384706Z           static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3385729Z                          ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3386016Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3386751Z candidates/subset/tests/gpu_epochs/tree.cu(6488): warning #177-D: variable "hv_pend_n" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3388212Z           static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3389188Z                                                           ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3389564Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3390232Z candidates/subset/tests/gpu_epochs/tree.cu(6488): warning #177-D: variable "hv_pend_base" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3391523Z           static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3392437Z                                                                                   ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3393379Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3394032Z candidates/subset/tests/gpu_epochs/tree.cu(6488): warning #177-D: variable "hv_pend_epochs" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3395330Z           static uint8_t hv_pend[4 + 1024 * 16]; uint32_t hv_pend_n = 0; uint64_t hv_pend_base = 0; int hv_pend_epochs = 0;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3396291Z                                                                                                         ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3396751Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3397371Z candidates/subset/tests/gpu_epochs/tree.cu(5812): warning #177-D: variable "epoch_mid" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3398317Z       uint32_t epoch_mid[8];
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3398752Z                ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3398972Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3399600Z candidates/subset/tests/gpu_epochs/tree.cu(5813): warning #177-D: variable "epoch_rem_len" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3400684Z       int epoch_rem_len = 0;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3401094Z           ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3401304Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3401895Z candidates/subset/tests/gpu_epochs/tree.cu(6273): warning #177-D: variable "BLKSZ" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3402806Z       int BLKSZ = 256;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3403204Z           ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3403410Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3403982Z candidates/subset/tests/gpu_epochs/tree.cu(6330): warning #550-D: variable "t_last_report" was set but never used
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3404924Z       struct timespec t0, t1, t_last_report;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3405438Z                               ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3406449Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3407064Z candidates/subset/tests/gpu_epochs/tree.cu(6439): warning #177-D: variable "found" was declared but never referenced
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3408668Z       int found = 0;
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3408853Z           ^
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:00.3408945Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3108366Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void gt_point_to_limbs(EC_GROUP*, EC_POINT*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*, uint64_t*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3111320Z candidates/subset/tests/gpu_epochs/tree.cu:4230:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3113037Z  4230 |     EC_POINT_get_affine_coordinates_GFp(grp, pt, x, y, ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3113746Z       |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3114407Z /usr/include/openssl/ec.h:659:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3115206Z   659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3115972Z       |                                                    ^~~~~~~~~~                         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3117747Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void gt_batch_ladder(EC_GROUP*, const EC_POINT*, int, uint64_t*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3120217Z candidates/subset/tests/gpu_epochs/tree.cu:4259:28: warning: ‘int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3121715Z  4259 |     if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3122407Z       |       ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3123046Z /usr/include/openssl/ec.h:846:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3123909Z   846 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3124734Z       |                                                    ^~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3126647Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void gt_biased_ladder(EC_GROUP*, const EC_POINT*, const EC_POINT*, int, uint64_t*, BIGNUM*, BIGNUM*, const BIGNUM*, const BIGNUM*, const BIGNUM*, BN_CTX*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3129892Z candidates/subset/tests/gpu_epochs/tree.cu:4285:28: warning: ‘int EC_POINTs_make_affine(const EC_GROUP*, size_t, EC_POINT**, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3131320Z  4285 |     if(!EC_POINTs_make_affine(grp,(size_t)count,points,ctx)) {
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3131979Z       |       ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3132595Z /usr/include/openssl/ec.h:846:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3133412Z   846 | OSSL_DEPRECATEDIN_3_0 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3134205Z       |                                                    ^~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3135636Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void gt_build_ladders(uint64_t*, uint64_t*, uint64_t*, const uint8_t*, const uint64_t*, const uint64_t*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3137911Z candidates/subset/tests/gpu_epochs/tree.cu:4308:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3139404Z  4308 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3140048Z       |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3140655Z /usr/include/openssl/ec.h:354:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3141418Z   354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3142506Z       |                                                    ^~~~~~~~~~~~~~~~~~~~  
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3609652Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void gt_build_ladders_seg(int, uint64_t*, uint64_t*, uint64_t*, const uint8_t*, const uint64_t*, const uint64_t*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3612194Z candidates/subset/tests/gpu_epochs/tree.cu:4370:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3613789Z  4370 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3614461Z       |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3615120Z /usr/include/openssl/ec.h:354:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3615958Z   354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3616751Z       |                                                    ^~~~~~~~~~~~~~~~~~~~  
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3641148Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘int gt_spot_check(const uint8_t*, int, const uint8_t*, const uint64_t*, const uint64_t*, const uint8_t*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3643650Z candidates/subset/tests/gpu_epochs/tree.cu:4472:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3645185Z  4472 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3645885Z       |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3646710Z /usr/include/openssl/ec.h:354:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3647509Z   354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3648283Z       |                                                    ^~~~~~~~~~~~~~~~~~~~  
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3649955Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void gt_spot_check_range(int, int, const int*, const int*, const uint8_t*, const uint64_t*, const uint64_t*, const uint8_t*, int*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3652396Z candidates/subset/tests/gpu_epochs/tree.cu:4511:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3653880Z  4511 |     EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3654542Z       |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3655820Z /usr/include/openssl/ec.h:354:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3656581Z   354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3657334Z       |                                                    ^~~~~~~~~~~~~~~~~~~~  
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3666587Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘int gt_heal(uint8_t*, const uint8_t*, const uint64_t*, const uint64_t*, unsigned int*, unsigned int*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3669126Z candidates/subset/tests/gpu_epochs/tree.cu:4571:23: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3670719Z  4571 |     EC_GROUP_get_curve_GFp(grp, field_p, NULL, NULL, ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3671410Z       |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3672041Z /usr/include/openssl/ec.h:354:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3672856Z   354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3673636Z       |                                                    ^~~~~~~~~~~~~~~~~~~~  
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3676128Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void compute_gtable(uint8_t*, const uint8_t*, const uint64_t*, const uint64_t*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3678814Z candidates/subset/tests/gpu_epochs/tree.cu:4637:60: warning: ‘int EC_GROUP_get_curve_GFp(const EC_GROUP*, BIGNUM*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3680562Z  4637 |     EC_GROUP_get_order(grp,order,ctx); EC_GROUP_get_curve_GFp(grp,field_p,NULL,NULL,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3681479Z       |                                      ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3682202Z /usr/include/openssl/ec.h:354:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3682981Z   354 | OSSL_DEPRECATEDIN_3_0 int EC_GROUP_get_curve_GFp(const EC_GROUP *group,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3683764Z       |                                                    ^~~~~~~~~~~~~~~~~~~~  
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3727410Z candidates/subset/tests/gpu_epochs/qsb_host_verify.h: In function ‘int qsb_hv_check(const qsb_hv_t*, const uint8_t*, int)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3729489Z candidates/subset/tests/gpu_epochs/qsb_host_verify.h:71:27: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3730761Z    71 |     SHA256_CTX sc; SHA256_Init(&sc);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3731311Z       |                ~~~~~~~~~~~^~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3731890Z /usr/include/openssl/sha.h:73:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3732609Z    73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3733244Z       |                                                    ^~         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3734923Z candidates/subset/tests/gpu_epochs/qsb_host_verify.h:73:66: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3736477Z    73 |     for (size_t off = 0; off < len; off += 64) SHA256_Transform(&sc, buf + off);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3737272Z       |                                                  ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~ 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3771826Z /usr/include/openssl/sha.h:77:53: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3772692Z    77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.3773447Z       |                                                     ^~~~~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6403029Z candidates/subset/tests/gpu_epochs/host_producers_v3.h: In function ‘void qhp::sha_sw(uint32_t*, const uint8_t*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6405457Z candidates/subset/tests/gpu_epochs/host_producers_v3.h:144:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6407203Z   144 |     SHA256_Transform(&c, blk);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6408486Z       |     ~~~~~~~~~~~~^~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6409067Z /usr/include/openssl/sha.h:77:53: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6409834Z    77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6410567Z       |                                                     ^~~~~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6916941Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function ‘bool qcpu::table_check(const qcpu::Ctx&)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6919777Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:2613:139: warning: ‘int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6922086Z  2613 |         ok = cxb && cyb && BN_lebin2bn(c.dp->u2r_x, 32, cxb) && BN_lebin2bn(c.dp->u2r_y, 32, cyb) &&
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6923206Z       |                                                                                                                                           ^                      
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6924135Z /usr/include/openssl/ec.h:646:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6924935Z   646 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6925733Z       |                                                    ^~~~~~~~~~                         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6928821Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:2623:295: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6930938Z  2623 |             ok = BN_set_word(k, (BN_ULONG)j + 1) && BN_lshift(k, k, c.g.off[i]) && BN_mod_mul(k, k, nri, ord, bx) &&
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6932442Z       |                                                                                                                                                                                                                                                                                                       ^                   
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6933694Z /usr/include/openssl/ec.h:659:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6934441Z   659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6935219Z       |                                                    ^~~~~~~~~~                         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6986067Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function ‘bool qcpu::gate_publish(qcpu::Ctx*, uint8_t*, const uint8_t*, int, const qcpu::fe&, unsigned int)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6988561Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:2878:27: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6990061Z  2878 |     SHA256_CTX s3; SHA256_Init(&s3); SHA256_Transform(&s3, pk);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6990759Z       |                ~~~~~~~~~~~^~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6991371Z /usr/include/openssl/sha.h:73:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6992113Z    73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6992828Z       |                                                    ^~         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6994671Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:2878:50: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6996302Z  2878 |     SHA256_CTX s3; SHA256_Init(&s3); SHA256_Transform(&s3, pk);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6997030Z       |                                  ~~~~~~~~~~~~~~~~^~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6997677Z /usr/include/openssl/sha.h:77:53: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6998399Z    77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.6999105Z       |                                                     ^~~~~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7054389Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function ‘void qcpu::worker(qcpu::Ctx*, int)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7056810Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3138:17: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7058509Z  3138 |                         SHA256_Transform(&pc, &pfx[b * 64]);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7059188Z       |                 ^       ~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7059838Z /usr/include/openssl/sha.h:77:53: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7060607Z    77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7061327Z       |                                                     ^~~~~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7063015Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3162:12: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7064340Z  3162 |                 SHA256_Init(&ectx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7064883Z       |            ^    ~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7065402Z /usr/include/openssl/sha.h:73:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7066093Z    73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7066766Z       |                                                    ^~         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7069063Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3166:46: warning: ‘int SHA256_Update(SHA256_CTX*, const void*, size_t)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7070968Z  3166 |                 if (dp->prefix_remainder_len) SHA256_Update(&ectx, dp->prefix_remainder, dp->prefix_remainder_len);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7072096Z       |                                 ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7072877Z /usr/include/openssl/sha.h:74:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7073591Z    74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7074286Z       |                                                    ^~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7076045Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3172:14: warning: ‘int SHA256_Update(SHA256_CTX*, const void*, size_t)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7077526Z  3172 |                 SHA256_Update(&ectx, pbuf.data(), pl);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7078138Z       |              ^  ~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7078763Z /usr/include/openssl/sha.h:74:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7079449Z    74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7080114Z       |                                                    ^~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7081856Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3263:14: warning: ‘int SHA256_Update(SHA256_CTX*, const void*, size_t)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7083323Z  3263 |             SHA256_Update(&s, wbuf, wl);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7083871Z       |             ~^~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7084430Z /usr/include/openssl/sha.h:74:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7085115Z    74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7085766Z       |                                                    ^~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7087626Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3264:14: warning: ‘int SHA256_Update(SHA256_CTX*, const void*, size_t)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7089184Z  3264 |             SHA256_Update(&s, dp->tail_section, dp->tail_section_len);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7089925Z       |             ~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7090569Z /usr/include/openssl/sha.h:74:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7091246Z    74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7092235Z       |                                                    ^~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7093922Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3265:14: warning: ‘int SHA256_Update(SHA256_CTX*, const void*, size_t)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7095423Z  3265 |             SHA256_Update(&s, dp->tx_suffix, dp->tx_suffix_len);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7096100Z       |             ~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7096732Z /usr/include/openssl/sha.h:74:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7097403Z    74 | OSSL_DEPRECATEDIN_3_0 int SHA256_Update(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7098051Z       |                                                    ^~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7099710Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3266:13: warning: ‘int SHA256_Final(unsigned char*, SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7101322Z  3266 |             SHA256_Final(blk2, &s);                     /* first digest into the second block */
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7102102Z       |             ^~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7102611Z /usr/include/openssl/sha.h:76:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7103396Z    76 | OSSL_DEPRECATEDIN_3_0 int SHA256_Final(unsigned char *md, SHA256_CTX *c);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7104187Z       |                                                    ^~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7106033Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3267:27: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7107509Z  3267 |             SHA256_CTX s2; SHA256_Init(&s2); SHA256_Transform(&s2, blk2);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7108196Z       |                ~~~~~~~~~~~^~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7108747Z /usr/include/openssl/sha.h:73:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7109418Z    73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7110089Z       |                                                    ^~         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7111879Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3267:50: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7113491Z  3267 |             SHA256_CTX s2; SHA256_Init(&s2); SHA256_Transform(&s2, blk2);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7114216Z       |                                  ~~~~~~~~~~~~~~~~^~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7114870Z /usr/include/openssl/sha.h:77:53: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7115588Z    77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7116292Z       |                                                     ^~~~~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7156490Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h: In function ‘void qcpu::start(const digest_params_t*, const uint8_t (*)[3], int, int, int)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7159395Z candidates/subset/tests/gpu_epochs/../../CpuGrindSubset.h:3566:99: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7161319Z  3566 |     if (!EC_POINT_mul(grp, A, nri, NULL, NULL, bctx) ||
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7162182Z       |                                                                                                   ^                     
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7163005Z /usr/include/openssl/ec.h:659:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7163822Z   659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7164624Z       |                                                    ^~~~~~~~~~                         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7178431Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘void build_epoch_prefix(const digest_params_t*, int, int, const uint8_t*, uint8_t*, uint32_t*, uint8_t*, int*)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7180802Z candidates/subset/tests/gpu_epochs/tree.cu:5311:12: warning: ‘int SHA256_Init(SHA256_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7182576Z  5311 |     SHA256_Init(&ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7183049Z       |     ~~~~~~~^~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7183599Z /usr/include/openssl/sha.h:73:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7184327Z    73 | OSSL_DEPRECATEDIN_3_0 int SHA256_Init(SHA256_CTX *c);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7185016Z       |                                                    ^~         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7186817Z candidates/subset/tests/gpu_epochs/tree.cu:5314:57: warning: ‘void SHA256_Transform(SHA256_CTX*, const unsigned char*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7188450Z  5314 |     for (size_t i = 0; i < blocks; ++i) SHA256_Transform(&ctx, scratch + i * 64);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7189355Z       |                                         ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~   
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7190104Z /usr/include/openssl/sha.h:77:53: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7190917Z    77 | OSSL_DEPRECATEDIN_3_0 void SHA256_Transform(SHA256_CTX *c,
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7191644Z       |                                                     ^~~~~~          
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7228125Z candidates/subset/tests/gpu_epochs/tree.cu: In function ‘int main(int, char**)’:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7231066Z candidates/subset/tests/gpu_epochs/tree.cu:6238:36: warning: ‘int EC_POINT_set_affine_coordinates_GFp(const EC_GROUP*, EC_POINT*, const BIGNUM*, const BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7232980Z  6238 |         EC_POINT_set_affine_coordinates_GFp(grp,pt,bx,by,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7233723Z       |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7234405Z /usr/include/openssl/ec.h:646:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7235205Z   646 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_set_affine_coordinates_GFp
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7235999Z       |                                                    ^~~~~~~~~~                         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7238134Z candidates/subset/tests/gpu_epochs/tree.cu:6243:36: warning: ‘int EC_POINT_get_affine_coordinates_GFp(const EC_GROUP*, const EC_POINT*, BIGNUM*, BIGNUM*, BN_CTX*)’ is deprecated: Since OpenSSL 3.0 [-Wdeprecated-declarations]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7239903Z  6243 |         EC_POINT_get_affine_coordinates_GFp(grp,dbl,dx,dy,ctx);
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7240628Z       |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7241302Z /usr/include/openssl/ec.h:659:52: note: declared here
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7242053Z   659 | OSSL_DEPRECATEDIN_3_0 int EC_POINT_get_affine_coordinates_GFp
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:05.7242842Z       |                                                    ^~~~~~~~~~                         
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:12.0652840Z setup.sh: gpu: NVIDIA GeForce RTX 4090
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5495321Z setup.sh: verifier smoke test passed
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5495961Z setup.sh: ready — run ./benchmark.sh subset
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5619962Z ##[group]Run mkdir "${QSB_BRIDGE_OUTDIR:?}"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5620648Z ^[[36;1mmkdir "${QSB_BRIDGE_OUTDIR:?}"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5621449Z ^[[36;1mprintf 'QSB_BRIDGE_OUTDIR=%s\n' "${QSB_BRIDGE_OUTDIR}" >> "${GITHUB_ENV}"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5668620Z shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5669253Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5669657Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5670144Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5670910Z   QSB_BRIDGE_OUTDIR: /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5671747Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5803112Z ##[group]Run case "${BENCH}" in
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5803418Z ^[[36;1mcase "${BENCH}" in^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5803670Z ^[[36;1m  pinning|subset) ;;^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5803968Z ^[[36;1m  *) echo "invalid bench: ${BENCH}" >&2; exit 2 ;;^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5804283Z ^[[36;1mesac^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5804773Z ^[[36;1mrm -f "score-${BENCH}.json"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5805068Z ^[[36;1m./benchmark.sh "${BENCH}"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5830416Z shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5830753Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5830970Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5831225Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5831621Z   QSB_BRIDGE_OUTDIR: /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5832053Z   BENCH: subset
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.5832262Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.6927304Z benchmark.sh: benches=subset N=24 mode=fixed_time grinder=bridge:/opt/starkware-challenge/bench-exec.sh seed=1045024462
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.6934902Z benchmark.sh: === subset ===
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.9517203Z   pinning: /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/benchmark-results/problem/pinning.json  +  pinning.bin (219 bytes)  preimage=9995B
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.9519822Z   subset: /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/benchmark-results/problem/subset.json  +  subset.bin (1956 bytes)  preimage=9906B
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.9521903Z problems generated (synthetic, seed=1045024462 — no real coin material)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:13.9589172Z ▶ grinder: sudo -n /opt/starkware-challenge/bench-exec.sh qsb-bench-v1 run subset /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1 1200 24 benchmark-results/problem
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:17.8589142Z host load 13.15 exceeds 4.0; waiting 10s (10/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:27.8666932Z host load 11.13 exceeds 4.0; waiting 10s (20/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:37.8738520Z host load 9.42 exceeds 4.0; waiting 10s (30/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:47.8817774Z host load 7.97 exceeds 4.0; waiting 10s (40/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:03:57.8899135Z host load 6.74 exceeds 4.0; waiting 10s (50/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:07.8985270Z host load 5.71 exceeds 4.0; waiting 10s (60/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:17.9067526Z host load 4.83 exceeds 4.0; waiting 10s (70/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:27.9151372Z host load 4.09 exceeds 4.0; waiting 10s (80/600)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:38.0210114Z run-preflight: PASS evidence=/var/lib/yukon/gpu-health/qsb-bench-v1-subset-90W8Kf5C/preflight
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:40.7974902Z   compile: reusing /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/candidates/subset/subset (already built for N=24)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:40.7976302Z   run: stdbuf -oL timeout 1200 /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/candidates/subset/subset /home/runner/actions-runner/_work/quantum-safe-bitcoin-challenge/quantum-safe-bitcoin-challenge/benchmark-results/problem/subset.bin 0 3931229741 3767125012 1 0 single_hash
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:41.2887777Z   → /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1/worker/run-subset.json: 0.0M/s, 0 candidates, 0 hits
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0559067Z 
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0561651Z ========================================================
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0562126Z   BENCH   : subset   GPU: RTX_4090
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0562418Z   N (zeros): 24   mode: fixed_time
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0562756Z   candidates (self-reported): 0  in 0.6s (harness clock)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0563107Z   candidates (from N verified hits): 0
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0563361Z   grinder self-reported: 0.5s, 0.0 M/s (not scored)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0563620Z   verified hits: 0 / 0
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0564156Z     ✗ too few verified hits: K=0 gives relative variance inf > max 0.1 (need K ≥ 100)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0567793Z     ✗ fixed-time run ended early: 0.6s (minimum 1199.0s)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0568564Z --------------------------------------------------------
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0569544Z   SCORE (throughput) : 0.0000 M/s        ← primary (from verified hits)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0570277Z   SCORE (hit-rate)   : 0.000000 hits/s
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0570872Z   RESULT: REJECT ❌ (not scored)
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0572135Z   bridge: exit=0 wall=0.614531435s evidence=/var/lib/yukon/gpu-health/qsb-bench-v1-subset-90W8Kf5C
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0573040Z ========================================================
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0628231Z ##[error]Process completed with exit code 1.
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0689850Z ##[group]Run actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0690157Z with:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0690340Z   name: benchmark-score-subset-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0690572Z   path: score-subset.json
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0690759Z   if-no-files-found: error
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0690955Z   compression-level: 6
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0691129Z   overwrite: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0691306Z   include-hidden-files: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0691491Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0691644Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0691844Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0692147Z   QSB_BRIDGE_OUTDIR: /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.0692495Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.1978390Z ##[error]No files were found with the provided path: score-subset.json. No artifacts will be uploaded.
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2127693Z ##[group]Run actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2128149Z with:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2128435Z   name: benchmark-diagnostics-subset-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2129064Z   path: benchmark-results/
+benchmark / benchmark	UNKNOWN STEP	/home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1/metrics.json
+benchmark / benchmark	UNKNOWN STEP	
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2129636Z   if-no-files-found: warn
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2129917Z   compression-level: 6
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2130175Z   overwrite: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2130427Z   include-hidden-files: false
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2130707Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2130936Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2131218Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2131654Z   QSB_BRIDGE_OUTDIR: /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.2132152Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.3475312Z Multiple search paths detected. Calculating the least common ancestor of all paths
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.3477431Z The least common ancestor is /home/runner/actions-runner/_work. This will be the root directory of the artifact
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.3478502Z With the provided path, there will be 7 files uploaded
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.3479763Z Artifact name is valid!
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:48.3480363Z Root directory input is valid!
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:49.4504645Z Beginning upload of artifact content to blob storage
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:49.9653859Z Uploaded bytes 27919
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.0675734Z Finished uploading artifact content to blob storage!
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.0676898Z SHA256 digest of uploaded artifact zip is b98ecbe89cbede5357722bba3910878b035cf663ddc37fd05bf751c42cf83ebf
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.0679315Z Finalizing artifact upload
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5534759Z Artifact benchmark-diagnostics-subset-37007650774-1.zip successfully finalized. Artifact ID 11227473179
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5536453Z Artifact benchmark-diagnostics-subset-37007650774-1 has been successfully uploaded! Final size is 27919 bytes. Artifact ID is 11227473179
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5541906Z Artifact download URL: https://github.com/Layr-Labs/quantum-safe-bitcoin-challenge/actions/runs/37007650774/artifacts/11227473179
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5758450Z ##[group]Run if [[ -n "${QSB_BRIDGE_OUTDIR:-}" ]]; then
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5759168Z ^[[36;1mif [[ -n "${QSB_BRIDGE_OUTDIR:-}" ]]; then^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5759774Z ^[[36;1m  rm -rf -- "${QSB_BRIDGE_OUTDIR:?}"^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5760315Z ^[[36;1mfi^[[0m
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5804142Z shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5804766Z env:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5805157Z   GIT_CONFIG_GLOBAL: /dev/null
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5805634Z   GIT_CONFIG_NOSYSTEM: 1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5806483Z   QSB_BRIDGE_OUTDIR: /home/runner/actions-runner/_work/_temp/qsb-bridge-out-37007650774-1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.5807723Z ##[endgroup]
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.6091966Z Post job cleanup.
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.6796232Z [command]/usr/bin/git version
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.6837211Z git version 2.34.1
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.6860193Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.6890142Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.7157190Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.7184938Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.7405184Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.7430800Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+benchmark / benchmark	UNKNOWN STEP	2026-10-02T13:04:50.7765110Z Cleaning up orphan processes

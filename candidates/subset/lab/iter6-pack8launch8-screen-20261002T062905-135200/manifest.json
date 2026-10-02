@@ -1,0 +1,16 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-combined-final.wh8dSx/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "e251680b8587b7303f46d9021b03fb2476e565a7cba118cb1a68356b793c3980",
+    "binary_sha256": "549dac501bf4dd2400693c2654e3e9188dfff045a2affa4c42e539a96f3260a6",
+    "stamp": "QSB_ZEROS_N=24 1790937658817568803"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it6-probes.SLn6WU/candidates/subset/lab/n24L_pack8launch8.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_FIRST_PACK8 1\n#define ZLAB_LAUNCH_BLOCKS 2097152\n#include \"../subset.cu\"\n",
+    "source_sha256": "831a8ab61f0d7dd8bd8dee7fe4d6079ffa2a3feeeaae75617f721270ce4f58b8",
+    "binary_sha256": "3064634a080ca2f74d8ab5424a8530eb5ec2d74b5ac89aaa5b8961b3865307ac",
+    "stamp": "QSB_ZEROS_N=24 1790940000188893862"
+  }
+}

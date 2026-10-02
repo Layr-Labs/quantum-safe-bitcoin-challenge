@@ -1,0 +1,23 @@
+{
+  "benchmark": {
+    "id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+    "name": "eigenlabs/quantum-safe-bitcoin-challenge/subset",
+    "currentBestScore": 736585478,
+    "currentBestSubmissionId": null
+  },
+  "leader": [
+    {
+      "id": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+      "status": "accepted",
+      "solverUsername": "kshitij-hash"
+    }
+  ],
+  "our_failed_bat": [
+    {
+      "id": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+      "status": "failed",
+      "solverUsername": "newjordan"
+    }
+  ],
+  "submission_count": 1262
+}

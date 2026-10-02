@@ -1,0 +1,18 @@
+{
+  "A": {
+    "subset.cu": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313",
+    "tests/gpu_epochs/tree.cu": "4769f52e35b5ca98fd3d3869e820e43507928a4ab6e90b2d5cf29d5c6bb6eb43",
+    "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "584d8133d592762deb330924925b066ca94537c6a0fc00f2071054f409b638d8",
+    "tests/gpu_epochs/host_producers_v3.h": "8838b4b563647004e6d5dbce5655649b8e654796a64bf35b5ac3cd0998700ce8",
+    "qsb_carrier_sm89.h": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20"
+  },
+  "B": {
+    "subset.cu": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313",
+    "tests/gpu_epochs/tree.cu": "d477af359bd654bdc5088a547c1b142bd4a10c018dfffcb2ac2b439bd0634c02",
+    "tests/gpu_epochs/pair_shared.cuh": "0ed11ca26e4c84fa94994d221458479393bff12fdf49eb454c1972924d7aafee",
+    "tests/gpu_epochs/window_schedule_shared.cuh": "8c754a155c28ded56fef5efec8869e4132d5f88608d771877fb8cfbdb67972cc",
+    "tests/gpu_epochs/host_producers_v3.h": "170bc772b47c826e3bea2b3e41b24ef35488b6c0b4465753a63b60886c1539f8",
+    "qsb_carrier_sm89.h": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20"
+  }
+}

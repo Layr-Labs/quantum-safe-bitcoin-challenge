@@ -1,0 +1,339 @@
+{
+  "board": {
+    "raw_sha256": "00faa05d89f9fc238a0ad478002eace1f9cb7665e35c0e1d8f082407c3ffada5",
+    "leader": {
+      "id": "4cc9d2d8-0b37-4ae2-b460-f70e41c9e35f",
+      "status": "accepted",
+      "officialScore": 736585478,
+      "submissionCommitSha": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+      "solverUsername": "kshitij-hash"
+    },
+    "bat": {
+      "id": "414fe58f-5131-4596-97f8-8ccf4fbdcf7f",
+      "status": "validating",
+      "officialScore": null,
+      "validationJobId": null
+    },
+    "note": "one iteration-start snapshot, no official result yet; watcher owns bat"
+  },
+  "final_prefetch": {
+    "Mps": {
+      "A": 410.106447,
+      "B": 395.756486
+    },
+    "runs": {
+      "A": [
+        410.106447
+      ],
+      "B": [
+        395.756486
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        5925
+      ],
+      "B": [
+        5726
+      ]
+    },
+    "delta_percent": -3.499082032231504,
+    "all_verified": true,
+    "artifact_directory": "candidates/subset/lab/iter6-finalprefetch-screen-20261002T081559-730717",
+    "probe": "QSB_S3_FINAL_PREFETCH=1",
+    "decision": "default-off; single-pair negative screen, not confirmed regression",
+    "native": "iter9-native-census.json"
+  },
+  "scoped_SHA_screen": {
+    "Mps": {
+      "A": 392.855587,
+      "B": 398.051871
+    },
+    "runs": {
+      "A": [
+        392.855587
+      ],
+      "B": [
+        398.051871
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        5698
+      ],
+      "B": [
+        5790
+      ]
+    },
+    "delta_percent": 1.322695711083277,
+    "all_verified": true,
+    "probe": "QSB_SHA_LEA1 scoped GPUHash only, PARTS0",
+    "artifacts": "candidates/subset/lab/iter6-rotateadd-screen-20261002T082129-766994",
+    "decision": "+1.322696% initial lead; direct current-promoted3pair gate1602 needed"
+  },
+  "qualification": {
+    "refreshed-promoted-qualified-glv12": {
+      "Mps": {
+        "A": 365.15042266666666,
+        "B": 388.756808
+      },
+      "runs": {
+        "A": [
+          351.738638,
+          376.55357,
+          367.15906
+        ],
+        "B": [
+          381.064,
+          390.466372,
+          394.740052
+        ]
+      },
+      "verified_hits": {
+        "A": [
+          5063,
+          5421,
+          5296
+        ],
+        "B": [
+          5508,
+          5656,
+          5706
+        ]
+      },
+      "delta_percent": 6.464838561855579,
+      "all_verified": true,
+      "artifacts": "candidates/subset/lab/iter6-refreshed-promoted-qualified-glv12-20261002T082630-794209"
+    },
+    "rotateadd-new-promoted-gate": {
+      "Mps": {
+        "A": 370.99839633333335,
+        "B": 373.7822043333333
+      },
+      "runs": {
+        "A": [
+          375.853448,
+          362.365177,
+          374.776564
+        ],
+        "B": [
+          396.561924,
+          363.637879,
+          361.14681
+        ]
+      },
+      "verified_hits": {
+        "A": [
+          5426,
+          5230,
+          5395
+        ],
+        "B": [
+          5760,
+          5278,
+          5239
+        ]
+      },
+      "delta_percent": 0.7503558040986125,
+      "all_verified": true,
+      "artifacts": "candidates/subset/lab/iter6-rotateadd-new-promoted-gate-20261002T082734-799615"
+    },
+    "rotateaddgate-screen": {
+      "Mps": {
+        "A": 401.315271,
+        "B": 359.765211
+      },
+      "runs": {
+        "A": [
+          401.315271
+        ],
+        "B": [
+          359.765211
+        ]
+      },
+      "verified_hits": {
+        "A": [
+          5797
+        ],
+        "B": [
+          5206
+        ]
+      },
+      "delta_percent": -10.353470949776034,
+      "all_verified": true,
+      "artifacts": "candidates/subset/lab/iter6-rotateaddgate-screen-20261002T083034-815147"
+    }
+  },
+  "production": "UNCHANGED: all new probes default0, exact9c9aab2...native identityPASS",
+  "decision": "Reject scopedSHA adoption: currentpromoted direct3pair+0.750356% <4%. Unchangedproduction refreshgate+6.464839% qualifies but is already watcherownedbat414fe58f, no redundant submit until notify. Ordinarygateextension negative -10.353471%, no repeat.",
+  "chronology": [
+    {
+      "experiment": "refreshed-promoted-qualified-glv12",
+      "arm": "p1-A",
+      "finished_at_mtime": 1790947730.0154507,
+      "mtime_utc": "2026-10-02T13:28:50.015451+00:00"
+    },
+    {
+      "experiment": "rotateadd-new-promoted-gate",
+      "arm": "p1-A",
+      "finished_at_mtime": 1790947872.9375987,
+      "mtime_utc": "2026-10-02T13:31:12.937599+00:00"
+    },
+    {
+      "experiment": "refreshed-promoted-qualified-glv12",
+      "arm": "p1-B",
+      "finished_at_mtime": 1790948015.8340032,
+      "mtime_utc": "2026-10-02T13:33:35.834003+00:00"
+    },
+    {
+      "experiment": "rotateaddgate-screen",
+      "arm": "p1-A",
+      "finished_at_mtime": 1790948160.0314655,
+      "mtime_utc": "2026-10-02T13:36:00.031466+00:00"
+    },
+    {
+      "experiment": "rotateadd-new-promoted-gate",
+      "arm": "p1-B",
+      "finished_at_mtime": 1790948305.0630138,
+      "mtime_utc": "2026-10-02T13:38:25.063014+00:00"
+    },
+    {
+      "experiment": "refreshed-promoted-qualified-glv12",
+      "arm": "p2-B",
+      "finished_at_mtime": 1790948449.3678613,
+      "mtime_utc": "2026-10-02T13:40:49.367861+00:00"
+    },
+    {
+      "experiment": "rotateaddgate-screen",
+      "arm": "p1-B",
+      "finished_at_mtime": 1790948591.9106612,
+      "mtime_utc": "2026-10-02T13:43:11.910661+00:00"
+    },
+    {
+      "experiment": "rotateadd-new-promoted-gate",
+      "arm": "p2-B",
+      "finished_at_mtime": 1790948734.8542826,
+      "mtime_utc": "2026-10-02T13:45:34.854283+00:00"
+    },
+    {
+      "experiment": "refreshed-promoted-qualified-glv12",
+      "arm": "p2-A",
+      "finished_at_mtime": 1790948877.7362554,
+      "mtime_utc": "2026-10-02T13:47:57.736255+00:00"
+    },
+    {
+      "experiment": "rotateadd-new-promoted-gate",
+      "arm": "p2-A",
+      "finished_at_mtime": 1790949057.6825323,
+      "mtime_utc": "2026-10-02T13:50:57.682532+00:00"
+    },
+    {
+      "experiment": "refreshed-promoted-qualified-glv12",
+      "arm": "p3-A",
+      "finished_at_mtime": 1790949198.973762,
+      "mtime_utc": "2026-10-02T13:53:18.973762+00:00"
+    },
+    {
+      "experiment": "rotateadd-new-promoted-gate",
+      "arm": "p3-A",
+      "finished_at_mtime": 1790949340.5509012,
+      "mtime_utc": "2026-10-02T13:55:40.550901+00:00"
+    },
+    {
+      "experiment": "refreshed-promoted-qualified-glv12",
+      "arm": "p3-B",
+      "finished_at_mtime": 1790949484.5916586,
+      "mtime_utc": "2026-10-02T13:58:04.591659+00:00"
+    },
+    {
+      "experiment": "rotateadd-new-promoted-gate",
+      "arm": "p3-B",
+      "finished_at_mtime": 1790949627.2849872,
+      "mtime_utc": "2026-10-02T14:00:27.284987+00:00"
+    }
+  ],
+  "final_default_native": {
+    "native_sha256": "9c9aab2abc1a6c7368627ae239a40a8e0f4f917df08de43930ee90ee3d48f5ad",
+    "default_image_byte_identity": true,
+    "probes": {
+      "QSB_S3_FINAL_PREFETCH": 0,
+      "QSB_SHA_LEA": 0,
+      "QSB_SHA_LEA_GATE": 0
+    },
+    "live_tree_sha256": "1fd0743c71fb9225233c6382c5774dbcba59484ff247985f8166dc776257cd14",
+    "live_GPUHash_sha256": "69b531d5a1e67d07d59ba59ddbceb4e58e5f4a25e741d46b23c65f79c7e3bc07",
+    "live_gate_sha256": "b96e7477275cedb9eeeb3b140ce15846f93a36d90c82ed72c53226415c009ee7"
+  },
+  "PTX_binding_audit": {
+    "native": {
+      "ptx_sha256": "6ef3fe971e143d701d893faa1dc02411d6612935a3ad00d76bdf1f741e19ab3a",
+      "exact_ORD16_RLA_blocks": 384,
+      "output_alias_last_use_violations": 0,
+      "sample": [
+        {
+          "h_output": "%r40",
+          "maj_input": "%r12;",
+          "d_output": "%r8",
+          "d_old": "%r8",
+          "alias_maj": false,
+          "alias_old_d": false
+        },
+        {
+          "h_output": "%r48",
+          "maj_input": "%r20;",
+          "d_output": "%r16",
+          "d_old": "%r16",
+          "alias_maj": false,
+          "alias_old_d": false
+        },
+        {
+          "h_output": "%r56",
+          "maj_input": "%r28;",
+          "d_output": "%r24",
+          "d_old": "%r24",
+          "alias_maj": false,
+          "alias_old_d": false
+        }
+      ]
+    },
+    "local": {
+      "ptx_sha256": "20eeb562e0981fd14103bf7c81a8c896656fcc1bad78f26dfb5f2f1948bf0058",
+      "exact_ORD16_RLA_blocks": 384,
+      "output_alias_last_use_violations": 0,
+      "sample": [
+        {
+          "h_output": "%r40",
+          "maj_input": "%r12;",
+          "d_output": "%r8",
+          "d_old": "%r8",
+          "alias_maj": false,
+          "alias_old_d": false
+        },
+        {
+          "h_output": "%r48",
+          "maj_input": "%r20;",
+          "d_output": "%r16",
+          "d_old": "%r16",
+          "alias_maj": false,
+          "alias_old_d": false
+        },
+        {
+          "h_output": "%r56",
+          "maj_input": "%r28;",
+          "d_output": "%r24",
+          "d_old": "%r24",
+          "alias_maj": false,
+          "alias_old_d": false
+        }
+      ]
+    },
+    "scope": "Actual CUDA12.8 enabled PTX substitutions clear the conditional h-output/Maj and h-output/old-d alias concern in ORD16 RLA. Not all-domain code proof; no fixture, expected output or verifier change."
+  },
+  "staged_scoped_integration": {
+    "verified_hits": 1451,
+    "total_hits": 1451,
+    "score_Mps": 382.182114,
+    "duration": "30s existing benchmark, not performancepair",
+    "installed": false
+  }
+}

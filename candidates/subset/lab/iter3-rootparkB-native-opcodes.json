@@ -1,0 +1,24 @@
+{
+  "control": {
+    "total": 14512,
+    "shared_ops": {
+      "STS.128": 8,
+      "LDS.128": 8,
+      "STS.64": 32,
+      "LDS.64": 52
+    },
+    "calls": 14,
+    "WARPSYNC": 0
+  },
+  "rootparkB": {
+    "total": 14560,
+    "shared_ops": {
+      "STS.128": 8,
+      "LDS.128": 8,
+      "STS.64": 44,
+      "LDS.64": 64
+    },
+    "calls": 14,
+    "WARPSYNC": 0
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "continuation": "iteration12 compactfirstpitch",
+  "screen": {
+    "Mps": {
+      "A": 373.512368,
+      "B": 374.850759
+    },
+    "runs": {
+      "A": [
+        373.512368
+      ],
+      "B": [
+        374.850759
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        5441
+      ],
+      "B": [
+        5428
+      ]
+    },
+    "delta_percent": 0.35832575161205416,
+    "all_verified": true
+  },
+  "promoted_gate": {
+    "Mps": {
+      "A": 342.5160773333333,
+      "B": 367.109754
+    },
+    "runs": {
+      "A": [
+        345.648608,
+        338.250383,
+        343.649241
+      ],
+      "B": [
+        364.097521,
+        367.970785,
+        369.260956
+      ]
+    },
+    "verified_hits": {
+      "A": [
+        4975,
+        4884,
+        4964
+      ],
+      "B": [
+        5290,
+        5349,
+        5339
+      ]
+    },
+    "delta_percent": 7.180298471867741,
+    "all_verified": true
+  },
+  "artifact_dir": "candidates/subset/lab/iter6-fullcap-pack8-promoted-gate-20261002T115606-2194182",
+  "native": {
+    "sha256": "a724399a04db515f8bebd836b1af866e6e7a1b778a98ce73a384c6f7704de147",
+    "bytes": 473504,
+    "digest_instructions": 14520,
+    "instruction_changes": [
+      {
+        "index": 16,
+        "before": "IMAD.WIDE.U32 R4, R54, 0x80, RZ",
+        "after": "IMAD.WIDE.U32 R4, R54, 0x40, RZ"
+      },
+      {
+        "index": 27,
+        "before": "LOP3.LUT R9, R4, 0x80, RZ, 0xfc, !PT",
+        "after": "LOP3.LUT R9, R4, 0x40, RZ, 0xfc, !PT"
+      }
+    ],
+    "digest_resources": {
+      "registers": 128,
+      "shared_bytes": 24576,
+      "stack_bytes": 0,
+      "spill_store_bytes": 0,
+      "spill_load_bytes": 0
+    },
+    "first_allocation": {
+      "epochs_per_slot": 2097152,
+      "slots": 2,
+      "before_row_bytes": 512,
+      "after_row_bytes": 256,
+      "saved_bytes": 1073741824,
+      "saved_MiB": 1024
+    },
+    "ranked_fit": "Memory savings from exact requests; fullsm89GLV11fit not locally exercised. No assertion of officialfailure cause."
+  },
+  "memory": {
+    "samples": {
+      "pack8": {
+        "count": 9,
+        "min_MiB": 11220,
+        "max_MiB": 11220,
+        "median_MiB": 11220
+      },
+      "leader": {
+        "count": 117,
+        "min_MiB": 11368,
+        "max_MiB": 11368,
+        "median_MiB": 11368
+      }
+    },
+    "reference_fullcapacity_production_MiB": 12244,
+    "pack8_observed_MiB": 11220,
+    "observed_saving_vs_previous_fullcap_MiB": 1024,
+    "caveat": "Newpack8read-only point samples versus earlieriter10full-cap frozenprocess. Exactly1GiB independently matches allocationrequests; not simultaneous controlmemorytrace."
+  },
+  "leader": "4cc9d2d8 /2f57d80,localGLV12explicitgeometryoverrides",
+  "final_integration": {
+    "score": 346487571.0,
+    "metrics": {
+      "bench": "subset",
+      "unit": "verified candidates per second",
+      "direction": "higher is better",
+      "throughput_Mps": 346.487571,
+      "hits_per_s": 41.304571,
+      "leading_zero_bits": 24,
+      "mode": "fixed_time",
+      "candidates": 10812915712,
+      "candidates_self_reported": 10719182081,
+      "elapsed_s": 31.2072,
+      "verified_hits": 1289,
+      "hit_relative_variance": 0.027853,
+      "problem_seed": 1789110211,
+      "gpu": "RTX_4090",
+      "verified": true
+    }
+  },
+  "decision": "Qualified +7.180298% all6PASS; finalinstalledpreflightPASS; submitted f0225b8a",
+  "startup_caveat": "Full rankedGLV11capacityfit/nativeexecution not locallyproven;1GiB request reduction does not establish priorofficialfailurecause.",
+  "submission_receipt": {
+    "submission_id": "f0225b8a-0fc9-4ec3-8b18-bde97dcc95d3",
+    "validation_job_id": "0031a649-6885-47f7-a02a-d60e66d35987",
+    "status_at_receipt": "queued",
+    "created_at": "2026-10-02T17:14:32.011Z",
+    "submitted_local_commit": "9b6d55a",
+    "benchmark_id": "eafd2f3d-e64f-49c1-b98a-6b825b0cdc82",
+    "promoted_source_ref": "2f57d80b8877a9e63b6af220da913236886a7ce5",
+    "archive_sha256": "be981400edffc183d985b104260d9ded151798ed91566cf7e9471f965bba35ca",
+    "command": "yukon submit eigenlabs/quantum-safe-bitcoin-challenge/subset --track subset --model GPT-6.1-Sol --harness angelX --note-file candidates/subset/SUBMISSION-PACK8-FULLCAP.md --json",
+    "receipt_source": "Successful shell response. This compact file transcribes returned identifiers; not a new status query.",
+    "watcher_owns_slot": true,
+    "official_result": null,
+    "prior_attempts": "Combined preparation command and redirected submission were refused by static-attribution guard before execution. Literal unredirected command succeeded."
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "A": {
+    "source": "candidates/subset/lab/n24L_iter10control.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"/work/tmp/qsb-it10-firstinterleave.buu9uW/candidates/subset/subset.cu\"\n",
+    "source_sha256": "6c7ea397cb0ded3bac23da2ff3a1fd4ce1f53ebfab41f7e4d26daf581c4533f0",
+    "binary_sha256": "ca1828bbc1926239a2e72a771740afe83d3b5835389eb73a4ff4fa6279040efe",
+    "stamp": "QSB_ZEROS_N=24 1790951350984794898"
+  },
+  "B": {
+    "source": "candidates/subset/lab/n24L_iter10interleave.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_FIRST_SLOT_INTERLEAVE 1\n#include \"../subset.cu\"\n",
+    "source_sha256": "1ec35136ac56203b46d03c72c3bf132caf6d3b0e53694ffd83e6599ec8757672",
+    "binary_sha256": "193f1961419cd5ce616b433550dfb39c34dfd33ed72e70032db59d9238e3bde7",
+    "stamp": "QSB_ZEROS_N=24 1790951350984847236",
+    "pre_section_extraction_binary_sha256": "3077fac6f299f42cf0d10c19ddfbc1768cd32e38227c0a42adb52459580a3137",
+    "section_extraction_note": "objcopy --dump-section rewrote idle B ELF after manifest capture, before B scored run. Extracted device section byte identical to control. No source/build-stamp change. Actual binary hash correction recorded near B startup; original pre-extraction hash retained."
+  }
+}
