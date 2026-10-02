@@ -207,6 +207,13 @@ static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
 static void qsb_carrier_init(const cudaDeviceProp &, const char *) {}
 #endif
 
+/* Dynamic shared bytes added to every kernel_digest launch (host-only; the record is 0). Two CTAs of
+ * 48 KiB static shared plus the 1 KiB per-CTA reserve fill an Ada SM's 100 KiB exactly, so any pad above
+ * 1 KiB makes the digest kernel run one CTA (8 warps) per SM with its code unchanged. */
+#ifndef QSB_HOST_DIG_SMEM_PAD
+#define QSB_HOST_DIG_SMEM_PAD 8192
+#endif
+
 static inline bool qsb_carrier_has(int kid) { return g_qsb_carrier.on && g_qsb_carrier.k[kid]; }
 
 /* Launch the carrier image of `kern`. The static kernel pointer only supplies the
@@ -217,7 +224,8 @@ static cudaError_t qsb_carrier_launch_impl(int kid, dim3 g, dim3 b, cudaStream_t
                                            std::index_sequence<I...>, A &&...a) {
     std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
     void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
-    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, 0, st);
+    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv,
+                            kid == QK_DIG ? (size_t)QSB_HOST_DIG_SMEM_PAD : 0, st);
 }
 template <typename... P, typename... A>
 static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,

@@ -6097,6 +6097,8 @@ int main(int argc, char **argv) {
         cudaError_t rc = cudaFuncSetAttribute(
             kernel_digest, cudaFuncAttributePreferredSharedMemoryCarveout,
             cudaSharedmemCarveoutMaxShared);
+        if (QSB_HOST_DIG_SMEM_PAD > 0 && rc == cudaSuccess) rc = cudaFuncSetAttribute(
+            kernel_digest, cudaFuncAttributeMaxDynamicSharedMemorySize, QSB_HOST_DIG_SMEM_PAD);
         if (rc != cudaSuccess) {
             fprintf(stderr, "WARN: digest shared-memory carveout hint unavailable: %s\n",
                     cudaGetErrorString(rc));
@@ -6108,6 +6110,9 @@ int main(int argc, char **argv) {
     if (qsb_carrier_has(QK_DIG)) {   /* the same hint on the native image's digest kernel */
         qsb_carveout_rc = cudaFuncSetAttribute((const void *)g_qsb_carrier.k[QK_DIG],
             cudaFuncAttributePreferredSharedMemoryCarveout, cudaSharedmemCarveoutMaxShared);
+        if (QSB_HOST_DIG_SMEM_PAD > 0 && qsb_carveout_rc == cudaSuccess)
+            qsb_carveout_rc = cudaFuncSetAttribute((const void *)g_qsb_carrier.k[QK_DIG],
+                cudaFuncAttributeMaxDynamicSharedMemorySize, QSB_HOST_DIG_SMEM_PAD);
         if (qsb_carveout_rc != cudaSuccess) {
             fprintf(stderr, "WARN: carrier digest shared-memory carveout hint unavailable: %s\n",
                     cudaGetErrorString(qsb_carveout_rc));
@@ -6448,7 +6453,7 @@ int main(int argc, char **argv) {
                 d_hit_qx, d_hit_qy,
                 batch_pos, easy, single_hash, calibrate, window_start, (uint64_t)0,
                 t_win, s_early, d_early, fast_inc, d_const_words, d_ep, d_fi, epochs_in_batch))
-            kernel_digest<<<nblk, QSB_SE_BLOCK, 0, st>>>(
+            kernel_digest<<<nblk, QSB_SE_BLOCK, QSB_HOST_DIG_SMEM_PAD, st>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
@@ -6619,7 +6624,7 @@ int main(int argc, char **argv) {
             // One producer block for each valid epoch, including an odd tail.
             { const unsigned nthr=(unsigned)epochs_in_batch*(unsigned)qsb_first_class_count;
               kernel_build_first_flat<<<(nthr+255)/256,256>>>(d_epochs,d_first,(unsigned)epochs_in_batch,(unsigned)qsb_first_class_count); }
-            kernel_digest<<<nblk, QSB_SE_BLOCK>>>(
+            kernel_digest<<<nblk, QSB_SE_BLOCK, QSB_HOST_DIG_SMEM_PAD>>>(
                 (const uint8_t*)NULL, n_pool, t_sel,
                 d_mid,
                 d_prem, 0,
