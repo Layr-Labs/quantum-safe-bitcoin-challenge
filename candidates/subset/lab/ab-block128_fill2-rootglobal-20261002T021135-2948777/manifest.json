@@ -1,0 +1,22 @@
+{
+  "control": "block128_fill2",
+  "pairs": 1,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_block128_fill2.cu",
+      "source_text": "// Double candidates per launch while preserving the verified 128-thread CTA.\n#define QSB_LOCAL_SM86 1\n#define QSB_SE_BLOCK 128\n#define ZLAB_LAUNCH_BLOCKS 524288\n#include \"subset.cu\"\n",
+      "source_sha256": "8fba3e329683c9e893b9588b00f8535dd5dec2bffaeb9f891ab077a9c3465988",
+      "binary_sha256": "80d9bf23c35407f843df03bb0e772494fc05a06ff07a0da6b585b27c5a11ca29",
+      "build_stamp": "QSB_ZEROS_N=24 1790912411727535028"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-it3-rootglobal.n3UZq7/candidates/subset/lab/n24L_rootglobal.cu",
+      "source_text": "// Original 64-bit divstep table through read-only global cache, no shared copies.\n#define QSB_LOCAL_SM86 1\n#define QSB_ROOT_LUT_GLOBAL 1\n#include \"../subset.cu\"\n",
+      "source_sha256": "5dea2f22c492f8448e23480e9920e35b9fb126822e2aba3ad7c09f69a54aa8c6",
+      "binary_sha256": "784b2cbc0475130344ede949d01b9d0acfde4631215e9bcaa0de5f644d8db199",
+      "build_stamp": "QSB_ZEROS_N=24 1790924742053052466"
+    }
+  }
+}

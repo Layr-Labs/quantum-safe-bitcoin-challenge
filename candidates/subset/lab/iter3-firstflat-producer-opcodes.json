@@ -1,0 +1,61 @@
+{
+  "control": {
+    "opcodes": {
+      "IMAD.MOV.U32": 5,
+      "I2F.U32.RP": 1,
+      "S2R": 2,
+      "ISETP.NE.U32.AND": 1,
+      "MUFU.RCP": 1,
+      "IADD3": 245,
+      "F2I.FTZ.U32.TRUNC.NTZ": 1,
+      "IMAD.MOV": 3,
+      "IMAD": 4,
+      "IMAD.HI.U32": 2,
+      "ISETP.GE.U32.AND": 3,
+      "LOP3.LUT": 353,
+      "EXIT": 2,
+      "ULDC.64": 1,
+      "IMAD.WIDE.U32": 3,
+      "LDG.E.CONSTANT": 24,
+      "SHF.R.U64": 576,
+      "IMAD.IADD": 118,
+      "SHF.R.U32.HI": 96,
+      "LEA": 1,
+      "LEA.HI.X": 1,
+      "STG.E": 8,
+      "BRA": 1,
+      "NOP;": 12
+    },
+    "total": 1464
+  },
+  "firstflat": {
+    "opcodes": {
+      "IMAD.MOV.U32": 7,
+      "S2R": 2,
+      "ISETP.NE.AND": 1,
+      "IMAD": 4,
+      "BRA": 3,
+      "I2F.U32.RP": 1,
+      "ISETP.NE.U32.AND": 1,
+      "MUFU.RCP": 1,
+      "IADD3": 245,
+      "F2I.FTZ.U32.TRUNC.NTZ": 1,
+      "IMAD.MOV": 3,
+      "IMAD.HI.U32": 2,
+      "ISETP.GE.U32.AND": 3,
+      "LOP3.LUT": 354,
+      "SHF.R.U32.HI": 97,
+      "EXIT": 2,
+      "ULDC.64": 1,
+      "IMAD.WIDE.U32": 3,
+      "LDG.E.CONSTANT": 24,
+      "SHF.R.U64": 576,
+      "IMAD.IADD": 118,
+      "LEA": 1,
+      "LEA.HI.X": 1,
+      "STG.E.128": 2,
+      "NOP;": 11
+    },
+    "total": 1464
+  }
+}

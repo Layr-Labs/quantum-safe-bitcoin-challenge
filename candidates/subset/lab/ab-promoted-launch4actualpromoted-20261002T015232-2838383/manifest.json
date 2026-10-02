@@ -1,0 +1,22 @@
+{
+  "control": "promoted",
+  "pairs": 3,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_promoted.cu",
+      "source_text": "// Promoted fb6f5a8 device configuration with the shared dev-only small table.\n#define QSB_LOCAL_SM86 1\n#define QSB_SE_BLOCK 256\n#define ZLAB_LAUNCH_BLOCKS 262144\n#define QSB_OUTER_LITK 0\n#define QSB_TAIL_STAGGER 0\n#define QSB_PARK128 1\n#define QSB_PRE3_ROOT 0\n#include \"subset.cu\"\n",
+      "source_sha256": "a1597e559b9958a33a7c1c7016c0a5b93287f5c2a1dca302a8fc10fa5487e3ea",
+      "binary_sha256": "4577057b9ef42607ee09dfa6832120ebc306fda51d41f31bb62f937357fa6222",
+      "build_stamp": "QSB_ZEROS_N=24 1790916570850925802"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-launch4.e9ifzj/candidates/subset/n24L_launch4.cu",
+      "source_text": "// Restore more host batching while retaining the verified four independent CTAs.\n#define QSB_LOCAL_SM86 1\n#define ZLAB_LAUNCH_BLOCKS 1048576\n#include \"subset.cu\"\n",
+      "source_sha256": "cf0a916ef82f03d433f4f3cd608c408c07646c44bc268733cbcee8c718b0f29e",
+      "binary_sha256": "c26465d18f71398b014b1e718d16779fe1da9c94f36a8af0193affce51c8022f",
+      "build_stamp": "QSB_ZEROS_N=24 1790916419857738567"
+    }
+  }
+}

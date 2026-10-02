@@ -63,8 +63,14 @@ static size_t qsb_group_capacity(int cut, int early, size_t epochs) {
  * 12 table gathers and 11 additions per candidate instead of 15 and 14. The four small segments (48 MiB)
  * sit first and are pinned in L2; the 4 GiB and 5.08 GiB segments are read with evict-first loads.
  * 0 = the 15-chunk 64 MiB table, byte for byte. */
+#ifndef QSB_LOCAL_SM86
+#define QSB_LOCAL_SM86 0   /* dev-only: 1 = force the small-table geometry (GLV12 six-term, 9.8 GiB) so the tree
+                            * runs on a 24 GiB RTX 3090 next to a desktop session; the ranked sm_89 carrier and the
+                            * fixed compute_52 line never define it, so their QSB_S3/QSB_GLV11/QSB_Q_P18/QSB_Q_MIX/
+                            * QSB_GLV_ZDEC stay the promoted values. Build: nvcc -arch=sm_86 -DQSB_LOCAL_SM86=1 ... */
+#endif
 #ifndef QSB_S3
-#define QSB_S3 1
+#define QSB_S3 1   /* QSB_LOCAL_SM86 keeps S3 on: the 9.8 GiB GLV12 table is the small one */
 #endif
 #if QSB_S3 != 0 && QSB_S3 != 1
 #error "QSB_S3 must be 0 or 1"
@@ -237,7 +243,11 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #error "QSB_OUTER_LITK must be 0 or 1"
 #endif
 #ifndef QSB_S3_NM_MASK
+#if QSB_LOCAL_SM86
+#define QSB_S3_NM_MASK 0   /* dev-only sm_86 rig: needs the ZDEC walker */
+#else
 #define QSB_S3_NM_MASK 1   /* see QSB_SHA_SCHED_V4 */
+#endif
 #endif
 /* QSB_S3_DOFF: the chain loop counts the descriptor's
  * byte offset instead of its index (qsb_filter_chain_trial, rolled ZDEC loop). 0 = the base byte for byte. */
@@ -269,7 +279,11 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #error "QSB_GATHER_L1_POLICY must be 0 to 3"
 #endif
 #ifndef QSB_GATHER_ONE_FORM
+#if QSB_LOCAL_SM86
+#define QSB_GATHER_ONE_FORM 0   /* dev-only sm_86 rig: needs QSB_S3_NM_MASK 0 */
+#else
 #define QSB_GATHER_ONE_FORM 1
+#endif
 #endif
 #if QSB_GATHER_ONE_FORM < 0 || QSB_GATHER_ONE_FORM > 2
 #error "QSB_GATHER_ONE_FORM must be 0, 1 or 2"
@@ -519,7 +533,11 @@ __device__ uint64_t BINOM_C[151][10];
 #define QSB_GLV11_P18 1
 #endif
 #ifndef QSB_GLV11
+#if QSB_LOCAL_SM86
+#define QSB_GLV11 0   /* dev-only sm_86 rig: the 21.1 GiB P18 table does not fit beside a desktop session */
+#else
 #define QSB_GLV11 1
+#endif
 #endif
 #if QSB_GLV11 && !QSB_GLV11_P18
 #error "this tree carries only the P18 layout of QSB_GLV11"
@@ -531,7 +549,11 @@ __device__ uint64_t BINOM_C[151][10];
  * for two more cold records (8 instead of 6). The walker's half form still applies: P18's widths
  * (18+27+28+27+28) tile exactly 128 bits, so P enters at term 5. 0 = the GLV11 chain byte for byte. */
 #ifndef QSB_Q_P18
+#if QSB_LOCAL_SM86
+#define QSB_Q_P18 0
+#else
 #define QSB_Q_P18 1
+#endif
 #endif
 #if QSB_Q_P18 && !QSB_GLV11
 #error "QSB_Q_P18 needs the GLV11 table (segments 6 and 7)"
@@ -545,7 +567,11 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
+#if QSB_LOCAL_SM86
+#define QSB_Q_MIX 0
+#else
 #define QSB_Q_MIX 4
+#endif
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -830,7 +856,11 @@ __device__ uint64_t BINOM_C[151][10];
  *   run goes, and the row offsets become immediates. Pinning's QSB_POST_GLUE bits 8 and 128 write the levels out
  *   the same way. Same products of the same operands in the same order: bit-identical. */
 #ifndef QSB_S3_NM_SEED
+#if QSB_LOCAL_SM86
+#define QSB_S3_NM_SEED 0   /* dev-only sm_86 rig: needs the ZDEC walker */
+#else
 #define QSB_S3_NM_SEED 1
+#endif
 #endif
 #ifndef QSB_TREE_UNROLL
 #define QSB_TREE_UNROLL 0
@@ -2472,8 +2502,25 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #ifndef QSB_SE_WINDOWS
 #define QSB_SE_WINDOWS 128
 #endif
-#define QSB_SE_BLOCK   256
+#ifndef QSB_SE_BLOCK
+#define QSB_SE_BLOCK 256
+#endif
+#ifndef QSB_CTA_WINDOW_SPLIT
+#define QSB_CTA_WINDOW_SPLIT 0
+#endif
+#if QSB_CTA_WINDOW_SPLIT
+#if QSB_SE_BLOCK != 64 || QSB_SE_WINDOWS != 128 || QSB_ROOT_LUT_SMEM
+#error "QSB_CTA_WINDOW_SPLIT requires 64-thread CTAs, 128 windows and no root shared LUT"
+#endif
+#define QSB_CTA_PARTS 2
+#define QSB_SE_HALVES 1
+#else
+#if (QSB_SE_BLOCK != 128 && QSB_SE_BLOCK != 256) || QSB_SE_BLOCK < QSB_SE_WINDOWS || QSB_SE_BLOCK % QSB_SE_WINDOWS
+#error "QSB_SE_BLOCK must be 128 or 256 and contain complete window sets"
+#endif
+#define QSB_CTA_PARTS 1
 #define QSB_SE_HALVES  (QSB_SE_BLOCK / QSB_SE_WINDOWS)
+#endif
 #define QSB_SE_PER_EPOCH QSB_SE_WINDOWS
 /* ZLAB_LAUNCH_BLOCKS (kill switch/knob): epochs per launch, promoted 32768. */
 #ifndef ZLAB_LAUNCH_BLOCKS
@@ -2935,7 +2982,7 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
  * kernel_digest passes to the fronts as ry. Warps 1..7 run it in the root window (both forms); in form 2
  * warp 0 runs it after its second front (in form 1 warp 0's fronts keep it). */
 struct QsbPre3Idle{
-    uint64_t *nB;uint64_t (*parkA)[256];int tid;
+    uint64_t *nB;uint64_t (*parkA)[QSB_SE_BLOCK];int tid;
     __device__ __forceinline__ void operator()()const{
         uint64_t yR[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
         uint64_t y[4],zz[4],zzz[4],w[12];
@@ -2986,7 +3033,7 @@ __global__ void kernel_verify_pair_hits(
 #endif /* !QSB_HOST_VERIFY */
 
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+__global__ void __launch_bounds__(QSB_SE_BLOCK, 512 / QSB_SE_BLOCK) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -3015,7 +3062,11 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 ) {
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
+#if QSB_CTA_WINDOW_SPLIT
+    const int lane = tid + (blockIdx.x & 1u) * QSB_SE_BLOCK;
+#else
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
+#endif
 #if QSB_TID_UNSIGNED
     const int half = (int)((unsigned)tid / (unsigned)QSB_SE_WINDOWS);   /* QSB_TID_UNSIGNED: tid >= 0, same value */
 #else
@@ -3026,21 +3077,21 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if QSB_ROOT_LUT_SMEM
     qsb_root_lut_issue(tid,blockDim.x);       /* the divstep table into the tree's inverses rows (async) */
 #endif
-    const unsigned eA = (unsigned)QSB_PAIR_MUL*blockIdx.x + 2u*(unsigned)half;
+    const unsigned eA = (unsigned)QSB_PAIR_MUL*(blockIdx.x / QSB_CTA_PARTS) + 2u*(unsigned)half;
     const bool hasA = eA < (unsigned)epochs_in_batch;
     const bool active = idx<batch_size && hasA;
 #if ZLAB_K2S3M && QSB_PARK128
 #if !ZLAB_DUAL_EPOCH_SHA || QSB_TAIL_STAGGER || QSB_TAIL_WEAVE || QSB_PRE3_ROOT
 #error "QSB_PARK128 is written for the paired-SHA front with N-b2's tails (no stagger, weave or pre3 in the root)"
 #endif
-    __shared__ __align__(16) ulonglong2 parkA2[6][256];   /* QSB_PARK128: the twelve rows as word pairs */
+    __shared__ __align__(16) ulonglong2 parkA2[6][QSB_SE_BLOCK];   /* QSB_PARK128: the twelve rows as word pairs */
 #elif ZLAB_K2S3M
-    __shared__ uint64_t parkA[12][256];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
+    __shared__ uint64_t parkA[12][QSB_SE_BLOCK];       /* (yb-Y),(yb+Y),ZZ of the first candidate */
 #if QSB_TAIL_WEAVE
     static_assert(sizeof(parkA[0])==QSB_WEAVE_PARK_STRIDE,"QSB_WEAVE_PARK_STRIDE is the parkA row stride");
 #endif
 #else
-    __shared__ uint64_t parkA[8][256];        /* m1,m2 of the first candidate */
+    __shared__ uint64_t parkA[8][QSB_SE_BLOCK];        /* m1,m2 of the first candidate */
 #endif
     const unsigned eA0 = hasA ? eA : 0u;
 #if !(QSB_HIT_NO_COMBO && ZLAB_DUAL_EPOCH_SHA)
@@ -3188,7 +3239,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     unsigned qsb_sc_bx,qsb_sc_tx;
     asm volatile("mov.u32 %0, %%ctaid.x;" : "=r"(qsb_sc_bx));
     asm volatile("mov.u32 %0, %%tid.x;" : "=r"(qsb_sc_tx));
-    const unsigned qsb_sc_eA=(unsigned)QSB_PAIR_MUL*qsb_sc_bx+2u*(qsb_sc_tx/(unsigned)QSB_SE_WINDOWS);
+    const unsigned qsb_sc_eA=(unsigned)QSB_PAIR_MUL*(qsb_sc_bx / QSB_CTA_PARTS)+2u*(qsb_sc_tx/(unsigned)QSB_SE_WINDOWS);
     const unsigned qsb_sc_eA0=qsb_sc_eA<(unsigned)epochs_in_batch?qsb_sc_eA:0u;
 #if !QSB_HIT_NO_COMBO
     const epoch_desc_t *qsb_sc_e0=d_epochs+qsb_sc_eA0;
@@ -5284,6 +5335,41 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * knobs whose value is one token are listed (derived macros such as QSB_PAIR_MUL follow
  * from them), so the string does not depend on how a preprocessor spaces expressions;
  * a knob that is not defined in this configuration stringifies to its own name. */
+#if QSB_TREE_TOP_SHFL
+#define QSB_CARRIER_TREE_TOP_SHFL QSB_CARRIER_KV(QSB_TREE_TOP_SHFL)
+#else
+#define QSB_CARRIER_TREE_TOP_SHFL ""
+#endif
+#if QSB_CTA_WINDOW_SPLIT
+#define QSB_CARRIER_CTA_WINDOW_SPLIT QSB_CARRIER_KV(QSB_CTA_WINDOW_SPLIT)
+#else
+#define QSB_CARRIER_CTA_WINDOW_SPLIT ""
+#endif
+#if QSB_ROOT_LUT32
+#define QSB_CARRIER_ROOT_LUT32 QSB_CARRIER_KV(QSB_ROOT_LUT32)
+#else
+#define QSB_CARRIER_ROOT_LUT32 ""
+#endif
+#if QSB_ROOT_LUT40
+#define QSB_CARRIER_ROOT_LUT40 QSB_CARRIER_KV(QSB_ROOT_LUT40) QSB_CARRIER_KV(QSB_ROOT_LUT40_SHORT)
+#else
+#define QSB_CARRIER_ROOT_LUT40 ""
+#endif
+#if QSB_FIRST_FLAT_FAST
+#define QSB_CARRIER_FIRST_FLAT_FAST QSB_CARRIER_KV(QSB_FIRST_FLAT_FAST)
+#else
+#define QSB_CARRIER_FIRST_FLAT_FAST ""
+#endif
+#if QSB_OUTER_PAIR
+#define QSB_CARRIER_OUTER_PAIR QSB_CARRIER_KV(QSB_OUTER_PAIR)
+#else
+#define QSB_CARRIER_OUTER_PAIR ""
+#endif
+#if QSB_ROOT_LUT_GLOBAL
+#define QSB_CARRIER_ROOT_LUT_GLOBAL QSB_CARRIER_KV(QSB_ROOT_LUT_GLOBAL)
+#else
+#define QSB_CARRIER_ROOT_LUT_GLOBAL ""
+#endif
 #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
@@ -5326,7 +5412,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
-    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128)
+    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128) QSB_CARRIER_TREE_TOP_SHFL QSB_CARRIER_CTA_WINDOW_SPLIT QSB_CARRIER_ROOT_LUT32 QSB_CARRIER_ROOT_LUT40 QSB_CARRIER_FIRST_FLAT_FAST QSB_CARRIER_OUTER_PAIR QSB_CARRIER_ROOT_LUT_GLOBAL
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
@@ -6355,7 +6441,7 @@ int main(int argc, char **argv) {
             uint32_t *cnt = (uint32_t *)d_hb;
             uint32_t *idx = (uint32_t *)(d_hb + 4);
             uint8_t *combos = d_hb + 8;
-            const int nblk = (epochs_in_batch + QSB_PAIR_MUL - 1) / QSB_PAIR_MUL;
+            const int nblk = ((epochs_in_batch + QSB_PAIR_MUL - 1) / QSB_PAIR_MUL) * QSB_CTA_PARTS;
             const int batch_pos = nblk * QSB_SE_BLOCK;
 #if QSB_TRACE_START
             if ((sp_batch_no & (sp_batch_no - 1)) == 0 && sp_batch_no <= 64)

@@ -8,4 +8,12 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Smaller independent digest CTAs, same window patterns and field arithmetic. */
+#ifndef QSB_SE_BLOCK
+#define QSB_SE_BLOCK 128
+#endif
+/* Keep twice the restored work per host iteration behind the four resident CTAs. */
+#ifndef ZLAB_LAUNCH_BLOCKS
+#define ZLAB_LAUNCH_BLOCKS 1048576
+#endif
 #include "tests/gpu_epochs/tree.cu"

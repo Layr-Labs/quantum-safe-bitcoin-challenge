@@ -1,0 +1,12 @@
+{
+  "n24L_block128_fill2": {
+    "active_blocks_per_SM": 4,
+    "static_smem": 24576,
+    "registers": 128
+  },
+  "n24L_lut40": {
+    "active_blocks_per_SM": 3,
+    "static_smem": 24640,
+    "registers": 128
+  }
+}

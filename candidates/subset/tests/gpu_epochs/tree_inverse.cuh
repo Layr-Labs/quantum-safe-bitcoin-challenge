@@ -7,6 +7,12 @@
 #ifndef QSB_ISO_FUSED_ROOT_SCALE
 #define QSB_ISO_FUSED_ROOT_SCALE 1
 #endif
+#ifndef QSB_TREE_TOP_SHFL
+#define QSB_TREE_TOP_SHFL 0
+#endif
+#if QSB_TREE_TOP_SHFL && !QSB_TREE_WAVE_TOP
+#error "QSB_TREE_TOP_SHFL requires the wave-top tree"
+#endif
 #include "hm39_pair_inverse.cuh"
 #include "hm41_quad_inverse.cuh"
 #include "hm43_warp_inverse.cuh"
@@ -179,7 +185,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #define QSB_SC_PARK 1   /* 1 = the product arena is a file-scope array that kernel_digest also uses to park prodA across B's front call; on with QSB_Y_PAIR=1, 0 = the record's arena */
 #endif
 #if QSB_SC_PARK
-__shared__ uint64_t qsb_sc_products[4][512];
+__shared__ uint64_t qsb_sc_products[4][2 * QSB_SE_BLOCK];
 #endif
 #if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
 /*. LUT_ISSUED (QSB_ROOT_LUT_SMEM): 1 = the caller already issued qsb_root_lut_issue (kernel_digest
@@ -198,12 +204,12 @@ __device__ __forceinline__ void qsb_block_inverse_tree_x(uint64_t *value,const I
 __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
 #if QSB_SC_PARK
-    uint64_t (&products)[4][512] = qsb_sc_products;
+    uint64_t (&products)[4][2 * QSB_SE_BLOCK] = qsb_sc_products;
 #else
-    __shared__ uint64_t products[4][512];
+    __shared__ uint64_t products[4][2 * QSB_SE_BLOCK];
 #endif
 #if !QSB_ROOT_LUT_SMEM
-    __shared__ uint64_t inverses[4][256];
+    __shared__ uint64_t inverses[4][QSB_SE_BLOCK];
 #endif
 #if QSB_TREE_UNROLL
     static_assert(QSB_SE_BLOCK==256,"QSB_TREE_UNROLL (tree.cu): the tree is written out for 256-thread kernel_digest blocks");
@@ -305,42 +311,74 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         #pragma unroll
         for(int k=0;k<4;k++){a[k]=products[k][offset+(lt&7)];b[k]=products[k][offset+8+(lt&7)];}
         a[4]=b[4]=0;QSB_TREE_MUL(r,a,b);
+#if !QSB_TREE_TOP_SHFL
         if(lt<8){
             #pragma unroll
             for(int k=0;k<4;k++)products[k][l8+lt]=r[k];
         }
         __syncwarp();
+#endif
         // Wave B: c[i] = x[i^8]*P8[(i&7)^4] on lanes i < 16; P4[j] = P8[j]*P8[j+4] on lanes 16+j, j < 4.
         {
+#if QSB_TREE_TOP_SHFL
+            // P8[j] is in lane j. All lanes participate in the shuffles.
+            #pragma unroll
+            for(int k=0;k<4;k++){
+                const uint64_t pa=__shfl_sync(0xffffffffu,r[k],lt&3);
+                const uint64_t pb=__shfl_sync(0xffffffffu,r[k],cof?((lt&7)^4):4+(lt&3));
+                a[k]=cof?products[k][offset+(lt^8)]:pa;b[k]=pb;
+            }
+#else
             const int ia=cof?offset+(lt^8):l8+(lt&3);
             const int ib=cof?l8+((lt&7)^4):l8+4+(lt&3);
             #pragma unroll
             for(int k=0;k<4;k++){a[k]=products[k][ia];b[k]=products[k][ib];}
+#endif
             a[4]=b[4]=0;QSB_TREE_MUL(r,a,b);
+#if !QSB_TREE_TOP_SHFL
             if((unsigned)(lt-16)<4u){
                 #pragma unroll
                 for(int k=0;k<4;k++)products[k][l4+(lt&3)]=r[k];
             }
+#endif
         }
+#if !QSB_TREE_TOP_SHFL
         __syncwarp();
+#endif
         // Wave C: d[i] = c[i]*P4[(i&3)^2] on lanes i < 16; P2[j] = P4[j]*P4[j+2] on lanes 16+j, j < 2
         // (the first operand is every lane's own wave-B product: c[i], or P4[j] on lane 16+j).
         {
+#if QSB_TREE_TOP_SHFL
+            // P4[j] is wave B's register result in lane 16+j.
+            #pragma unroll
+            for(int k=0;k<4;k++)b[k]=__shfl_sync(0xffffffffu,r[k],16+(cof?((lt&3)^2):2+(lt&1)));
+#else
             const int ib=cof?l4+((lt&3)^2):l4+2+(lt&1);
             #pragma unroll
             for(int k=0;k<4;k++)b[k]=products[k][ib];
+#endif
             b[4]=0;QSB_TREE_MUL(r,r,b);
+#if !QSB_TREE_TOP_SHFL
             if((unsigned)(lt-16)<2u){
                 #pragma unroll
                 for(int k=0;k<4;k++)products[k][l2+(lt&1)]=r[k];
             }
+#endif
         }
+#if !QSB_TREE_TOP_SHFL
         __syncwarp();
+#endif
         // Wave D: E16[i] = d[i]*P2[(i&1)^1] on lanes i < 16; the root P2[0]*P2[1] on lane 16 (own P2[0]).
         {
+#if QSB_TREE_TOP_SHFL
+            // P2[j] is wave C's register result in lane 16+j.
+            #pragma unroll
+            for(int k=0;k<4;k++)b[k]=__shfl_sync(0xffffffffu,r[k],16+(cof?((lt&1)^1):1));
+#else
             const int ib=cof?l2+((lt&1)^1):l2+1;
             #pragma unroll
             for(int k=0;k<4;k++)b[k]=products[k][ib];
+#endif
             b[4]=0;QSB_TREE_MUL(r,r,b);
         }
         uint64_t root[5];

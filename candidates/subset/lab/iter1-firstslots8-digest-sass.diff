@@ -1,0 +1,14 @@
+--- fill2
+
++++ firstslots8
+
+@@ -15,6 +15,6 @@
+
+ SEL R54, R0.reuse, RZ, !P1 ;
+ IADD3 R0, R0, 0x1, RZ ;
+-IMAD.WIDE.U32 R2, R54, 0x80, RZ ;
+-LOP3.LUT R5, R2, 0x80, RZ, 0xfc, !PT ;
++IMAD.WIDE.U32 R2, R54, 0x40, RZ ;
++LOP3.LUT R5, R2, 0x40, RZ, 0xfc, !PT ;
+ SHF.R.U32.HI R6, RZ, 0xd, R4 ;
+ LOP3.LUT R7, R6, 0x7fff8, RZ, 0xc0, !PT ;

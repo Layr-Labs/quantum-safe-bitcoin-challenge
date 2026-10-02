@@ -273,6 +273,24 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#ifndef QSB_OUTER_PAIR
+#define QSB_OUTER_PAIR 0
+#endif
+#if QSB_OUTER_PAIR != 0 && QSB_OUTER_PAIR != 1
+#error "QSB_OUTER_PAIR must be 0 or 1"
+#endif
+#ifndef QSB_GATE_PAIR
+#define QSB_GATE_PAIR 1
+#endif
+#if QSB_OUTER_PAIR && (QSB_OUTER_LITK || !QSB_GATE_PAIR)
+#error "QSB_OUTER_PAIR uses the existing paired generic transform, not literal-K"
+#endif
+#if QSB_OUTER_PAIR
+// Defined below for the pubkey gate. Its arithmetic also applies to the
+// independent 32-byte SHA256d outer blocks of the two epoch candidates.
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(
+    uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1);
+#endif
 #if QSB_OUTER_LITK
 /* QSB_OUTER_LITK needs the literal-K transform before the outer block; sha_gate_fma.cuh is include-guarded,
  * so the gate's own include below (QSB_GATE_H0_FMA) is then a no-op. */
@@ -306,8 +324,24 @@ __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if QSB_OUTER_PAIR
+    uint32_t wA[16],wB[16],sA[8],sB[8];
+    #pragma unroll
+    for(int i=0;i<8;i++){wA[i]=stateA[i];wB[i]=stateB[i];}
+    wA[8]=wB[8]=0x80000000u;
+    #pragma unroll
+    for(int i=9;i<15;i++)wA[i]=wB[i]=0u;
+    wA[15]=wB[15]=0x100u;
+    qsb_sha256_init_transform_pair(sA,wA,sB,wB);
+    #pragma unroll
+    for(int i=0;i<4;i++){
+        out.a[i]=((uint64_t)sA[6-2*i]<<32)|(uint64_t)sA[7-2*i];
+        out.b[i]=((uint64_t)sB[6-2*i]<<32)|(uint64_t)sB[7-2*i];
+    }
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
