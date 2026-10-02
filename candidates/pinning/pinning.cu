@@ -5775,6 +5775,9 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
+#ifndef QSB_HOST_GATE_JOINT
+#define QSB_HOST_GATE_JOINT 1
+#endif
 static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
                               EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                               const BIGNUM *nri, const EC_POINT *Ru2) {
@@ -5818,15 +5821,27 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
+#if QSB_HOST_GATE_JOINT
+    EC_POINT *P = NULL;
+#else
     EC_POINT *P = EC_POINT_new(grp);
+#endif
     EC_POINT *Q = EC_POINT_new(grp);
     EC_POINT *R = EC_POINT_dup(Ru2, grp);
     int ok = 0;
-    if (z && u1 && P && Q && R &&
-        BN_mod_mul(u1, z, nri, order, ctx) &&
-        EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
+    if (z && u1 && (P || QSB_HOST_GATE_JOINT) && Q && R &&
+        BN_mod_mul(u1, z, nri, order, ctx)
+#if !QSB_HOST_GATE_JOINT
+        && EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)
+#endif
+        ) {
         if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
+#if QSB_HOST_GATE_JOINT
+        const int qok = EC_POINT_mul(grp, Q, u1, R, BN_value_one(), ctx);
+#else
+        const int qok = EC_POINT_add(grp, Q, P, R, ctx);
+#endif
+        if (qok) {
             BIGNUM *qx = BN_new(), *qy = BN_new();
             if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
                 uint8_t pub[33], xb[32];
