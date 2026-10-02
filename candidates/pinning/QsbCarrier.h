@@ -65,6 +65,9 @@ static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+namespace qsb_carrier_baseline {
+#include "qsb_carrier_baseline_sm89.h"
+}
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -76,23 +79,26 @@ static int qsb_b64_val(unsigned char c) {
 }
 
 /* Decode the line-split base64 image. Returns a malloc'd buffer or nullptr. */
-static unsigned char *qsb_carrier_decode(size_t *out_len) {
-    unsigned char *buf = (unsigned char *)malloc(qsb_carrier_cubin_bytes + 4);
+static unsigned char *qsb_carrier_decode(size_t *out_len, bool baseline) {
+    const size_t image_bytes = baseline ? qsb_carrier_baseline::qsb_carrier_cubin_bytes : qsb_carrier_cubin_bytes;
+    const unsigned image_lines = baseline ? qsb_carrier_baseline::qsb_carrier_b64_lines : qsb_carrier_b64_lines;
+    const char *const *image_b64 = baseline ? qsb_carrier_baseline::qsb_carrier_b64 : qsb_carrier_b64;
+    unsigned char *buf = (unsigned char *)malloc(image_bytes + 4);
     if (!buf) return nullptr;
     size_t n = 0; unsigned acc = 0; int bits = 0;
-    for (unsigned li = 0; li < qsb_carrier_b64_lines; li++) {
-        for (const unsigned char *p = (const unsigned char *)qsb_carrier_b64[li]; *p; p++) {
+    for (unsigned li = 0; li < image_lines; li++) {
+        for (const unsigned char *p = (const unsigned char *)image_b64[li]; *p; p++) {
             int v = qsb_b64_val(*p);
             if (v < 0) continue;              /* '=' padding */
             acc = (acc << 6) | (unsigned)v; bits += 6;
             if (bits >= 8) {
                 bits -= 8;
-                if (n >= qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
+                if (n >= image_bytes) { free(buf); return nullptr; }
                 buf[n++] = (unsigned char)(acc >> bits);
             }
         }
     }
-    if (n != qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
+    if (n != image_bytes) { free(buf); return nullptr; }
     *out_len = n;
     return buf;
 }
@@ -107,8 +113,12 @@ static void qsb_carrier_off(const char *why) {
 
 static void qsb_carrier_init(const cudaDeviceProp &prop) {
     if (prop.major != 8 || prop.minor != 9) { qsb_carrier_off("device is not sm_89"); return; }
+    /* Select once before loading a library or uploading any constants. Both images
+     * implement the same math; only the schedule-sigma shift instruction differs. */
+    const char *image_env = getenv("QSB_SHA_IMAGE");
+    const bool baseline = image_env && !strcmp(image_env, "baseline");
     size_t len = 0;
-    unsigned char *img = qsb_carrier_decode(&len);
+    unsigned char *img = qsb_carrier_decode(&len, baseline);
     if (!img) { qsb_carrier_off("embedded image failed to decode"); return; }
     cudaError_t e = cudaLibraryLoadData(&g_qsb_carrier.lib, img, nullptr, nullptr, 0,
                                         nullptr, nullptr, 0);
@@ -118,7 +128,10 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
      * required kernels). The optional kernels past its end are then looked up by their
      * fixed mangled names; one that does not resolve stays on the compute_52 image and
      * turns QSB_NOJIT off, so its constants are still uploaded there. */
-    const int n_gen = (int)(sizeof(qsb_carrier_kernel_names) / sizeof(qsb_carrier_kernel_names[0]));
+    const int n_gen = baseline
+        ? (int)(sizeof(qsb_carrier_baseline::qsb_carrier_kernel_names) / sizeof(qsb_carrier_baseline::qsb_carrier_kernel_names[0]))
+        : (int)(sizeof(qsb_carrier_kernel_names) / sizeof(qsb_carrier_kernel_names[0]));
+    const char *const *image_names = baseline ? qsb_carrier_baseline::qsb_carrier_kernel_names : qsb_carrier_kernel_names;
     char rf_name[64] = "";
 #ifdef QSB_RF_K
     snprintf(rf_name, sizeof(rf_name), "_Z14qsb_root_fusedILi%dEEvPmi", (int)(QSB_RF_K));
@@ -130,7 +143,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     int all = 1;
     for (int i = 0; i < QK_N; i++) {
         g_qsb_carrier.k[i] = nullptr;
-        const char *name = i < n_gen ? qsb_carrier_kernel_names[i] : fixed[i];
+        const char *name = i < n_gen ? image_names[i] : fixed[i];
         if (i >= QK_RF) {
             if (!name || !name[0]) name = fixed[i];
             if (!name || !name[0]) { all = 0; continue; }
@@ -149,8 +162,10 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
-    printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
-           len, qsb_carrier_cubin_sha256, g_qsb_carrier.nojit ? "no compute_52 JIT" : "root kernels partly compute_52");
+    printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s, SHA image=%s)\n",
+           len, baseline ? qsb_carrier_baseline::qsb_carrier_cubin_sha256 : qsb_carrier_cubin_sha256,
+           g_qsb_carrier.nojit ? "no compute_52 JIT" : "root kernels partly compute_52",
+           baseline ? "baseline" : "candidate");
 }
 #else
 static void qsb_carrier_init(const cudaDeviceProp &) {}
