@@ -4798,7 +4798,11 @@ static int qsb_subpipe_init(cudaStream_t like) {
     {
         int dev = 0; cudaGetDevice(&dev);
         cudaStream_t sA[4], sB[2]; unsigned nA = 0, nB = 0;
-        if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
+        /* Same-binary test: finish18 lost to the promoted finish20 policy.
+         * Test two more finish SMs; explicit 20 retains the promoted split. */
+        const char *finish_env = getenv("QSB_FINISH_SMS");
+        const int finish_sms = !finish_env || !strcmp(finish_env, "22") ? 22 : QSB_GREEN;
+        if (!qsb_green_streams(dev, finish_sms, sA, sB, least, greatest, &nA, &nB)) {
             printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
             return 0;
         }
