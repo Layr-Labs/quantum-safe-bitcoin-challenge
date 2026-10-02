@@ -109,6 +109,9 @@ static const double qsb_trace_t_start = qsb_trace_now();
  * runs on, clipped to the device's persisting-L2 limit and maximum window
  * size. Any failing runtime call leaves the default cache policy in place;
  * 0 = no window. */
+#ifndef QSB_HP_SKIP
+#define QSB_HP_SKIP 0
+#endif
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
@@ -305,6 +308,19 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #endif
 #if QSB_SHA_CONST_PEEL && !QSB_SHA_CONST_IV
 #error "QSB_SHA_CONST_PEEL is written in the QSB_SHA_CONST_IV loop"
+#endif
+/* QSB_CODE_ROLL (screen arm, default 0; a bit mask, in QSB_CARRIER_KNOBS): the code footprint of kernel_digest.
+ * Bit 0 (1): the SHA256d outer block runs inside qsb_pair_front3_z_value (the __noinline__ front, called once per
+ * epoch) instead of twice inline before the A front: zpair carries the two epochs' 8 state words (two per u64, low
+ * word first) where it carried their z, B's words are parked in the same shared rows, and the front computes z from
+ * them first. Bit 1 (2): qsb_pair_tail3_value's two recovery-id hashes as one 2-trip loop (recid 0, then recid 1;
+ * recid 0 wins), with qsb_k2s_post3's last step (x2 = p2 + xR) at the start of trip 1. Same compressions on the
+ * same words, the same field operations and the same verdict: bit-identical. 0 = the unrolled copies. */
+#ifndef QSB_CODE_ROLL
+#define QSB_CODE_ROLL 0
+#endif
+#if QSB_CODE_ROLL < 0 || QSB_CODE_ROLL > 3
+#error "QSB_CODE_ROLL is a mask of bits 0 (outer block) and 1 (gate): 0 to 3"
 #endif
 
 #if QSB_SHA_SCHED_V4
@@ -895,7 +911,7 @@ __device__ uint64_t BINOM_C[151][10];
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
 #ifndef QSB_DIVSTEP_LOOKAHEAD
-#define QSB_DIVSTEP_LOOKAHEAD 0
+#define QSB_DIVSTEP_LOOKAHEAD 1   /* ks-cuts: on (measured +0.33%, 7/7 rounds, identical hit set) */
 #endif
 #if QSB_DIVSTEP_LOOKAHEAD < 0 || QSB_DIVSTEP_LOOKAHEAD > 1
 #error "QSB_DIVSTEP_LOOKAHEAD must be 0 or 1"
@@ -3059,7 +3075,21 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], nB[12];
 #if ZLAB_DUAL_EPOCH_SHA
     uint64_t zB[4];
+#if QSB_CODE_ROLL & 1
+    /* QSB_CODE_ROLL bit 0: the two epochs' states, not their z; qsb_pair_front3_z_value runs the outer block. */
+    QsbPairEpochZ zpair;
+    {
+        uint32_t stA[8],stB[8];
+        qsb_scheduled_window_hash_pair(stA,stB,lane,f0,f1);
+        #pragma unroll
+        for(int k=0;k<4;k++){
+            zpair.a[k]=((uint64_t)stA[2*k+1]<<32)|(uint64_t)stA[2*k];
+            zpair.b[k]=((uint64_t)stB[2*k+1]<<32)|(uint64_t)stB[2*k];
+        }
+    }
+#else
     QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
+#endif
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
 #if QSB_PARK128
@@ -5326,7 +5356,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
-    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128)
+    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128) \
+    QSB_CARRIER_KV(QSB_CODE_ROLL) QSB_CARRIER_KV(QSB_WSEC_L1LAST)
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
@@ -5912,8 +5943,15 @@ int main(int argc, char **argv) {
 #endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
 #ifdef QSB_HP_ON
+#if QSB_HP_SKIP
+        /* QSB_HP_SKIP (host-only, default 0; not in the image's knob list): do not start the host producers, so every batch
+         * is built by the GPU producers on its slot stream (what the multi-arm probes of 9b2fbb14 / 8df5c413 run) and the
+         * co-grinder keeps the producers' CPU time. */
+        printf("  Host producers: off (QSB_HP_SKIP; the GPU producers build every batch)\n");
+#else
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
                    (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+#endif
 #endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
