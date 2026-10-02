@@ -175,9 +175,17 @@ static QI_INL void to_w(V w[4], const vfe *a) {
 }
 static QI_INL void set_w(vfe *r, const uint64_t *w) { from_w(r, vs1(w[0]), vs1(w[1]), vs1(w[2]), vs1(w[3])); }
 /* r lane l = a lane (l ^ k), k = 1 or 2 */
+#ifndef QSB_CG_PERMX1_SHUF
+#define QSB_CG_PERMX1_SHUF 1
+#endif
 static QI_INL void fpermx(vfe *r, const vfe *a, int k) {
-    for (int j = 0; j < 5; j++)
+    for (int j = 0; j < 5; j++) {
+#if QSB_CG_PERMX1_SHUF
+        r->n[j] = (V)(k == 1 ? _mm256_shuffle_epi32((__m256i)a->n[j], 0x4E) : _mm256_permute4x64_epi64((__m256i)a->n[j], 0x4E));
+#else
         r->n[j] = (V)(k == 1 ? _mm256_permute4x64_epi64((__m256i)a->n[j], 0xB1) : _mm256_permute4x64_epi64((__m256i)a->n[j], 0x4E));
+#endif
+    }
 }
 /* gather x (half 0) or y (half 1) words of 4 table entries, transposed to one V per word */
 static QI_INL void tr4(V w[4], const tentry *e0, const tentry *e1, const tentry *e2, const tentry *e3, int half) {
