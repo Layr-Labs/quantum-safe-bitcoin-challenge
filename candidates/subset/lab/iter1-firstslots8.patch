@@ -1,0 +1,23 @@
+--- a/candidates/subset/tests/gpu_epochs/tree.cu
++++ b/candidates/subset/tests/gpu_epochs/tree.cu
+@@ -5320,7 +5320,7 @@
+  * from them), so the string does not depend on how a preprocessor spaces expressions;
+  * a knob that is not defined in this configuration stringifies to its own name. */
+ #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+-    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
++    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(QSB_FIRST_SLOTS) QSB_CARRIER_KV(MAX_T) \
+     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
+     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
+     QSB_CARRIER_KV(QSB_CHAIN_UNROLL) QSB_CARRIER_KV(QSB_DIGIT_SHIFT) QSB_CARRIER_KV(QSB_EPOCH_FAST) \
+--- a/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh
++++ b/candidates/subset/tests/gpu_epochs/window_schedule_shared.cuh
+@@ -5,7 +5,9 @@
+ #ifndef QSB_950_PACK
+ #define QSB_950_PACK 1
+ #endif
++#ifndef QSB_FIRST_SLOTS
+ #define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
++#endif
+ #ifndef QSB_SHA_UNROLL_CONST
+ #define QSB_SHA_UNROLL_CONST 1
+ #endif   /* first-block classes per epoch in d_first */

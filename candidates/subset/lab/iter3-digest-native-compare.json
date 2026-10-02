@@ -1,0 +1,18 @@
+{
+  "control": {
+    "instructions": 14512,
+    "calls": 14,
+    "branches": 41
+  },
+  "firstflat": {
+    "instructions": 14512,
+    "calls": 14,
+    "branches": 41,
+    "digest_instruction_text_equal": true
+  },
+  "outerpair": {
+    "instructions": 14528,
+    "calls": 14,
+    "branches": 41
+  }
+}

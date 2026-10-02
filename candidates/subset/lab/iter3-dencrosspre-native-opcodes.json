@@ -1,0 +1,24 @@
+{
+  "control": {
+    "total": 14512,
+    "shared_ops": {
+      "STS.128": 8,
+      "LDS.128": 8,
+      "STS.64": 32,
+      "LDS.64": 52
+    },
+    "calls": 14,
+    "branches": 41
+  },
+  "dencrosspre": {
+    "total": 14512,
+    "shared_ops": {
+      "STS.128": 10,
+      "LDS.128": 10,
+      "STS.64": 32,
+      "LDS.64": 52
+    },
+    "calls": 14,
+    "branches": 41
+  }
+}

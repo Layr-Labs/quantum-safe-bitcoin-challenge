@@ -155,6 +155,19 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 #define QSB_NEGFOLD_PARITY 1
 #endif
 #include "parity_window_subset.cuh"
+#if QSB_K2S_CENTER_SQR
+__device__ __forceinline__ void qsb_k2s_center_offset(uint64_t *sum,uint64_t *p1,uint64_t *p2,uint64_t *cc) {
+    /* p1+p2=(m1+m2-c)^2-c^2 in original recovery coordinates. */
+    uint64_t t[4];QSB_FSUB(t,sum,cc);
+#if QSB_SHORT_CARRY3
+    uint32_t bad=0;qsb_filter_sqr(sum,t,bad);
+#else
+    _ModSqr(sum,t);
+#endif
+    uint64_t cc2[4]={QSB_U2R_C[4],QSB_U2R_C[5],QSB_U2R_C[6],QSB_U2R_C[7]};
+    QSB_FSUB(sum,sum,cc2);QSB_FSUB(p2,sum,p1);
+}
+#endif
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -168,6 +181,9 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
 #if QSB_NEGFOLD_PARITY
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
+#if QSB_K2S_CENTER_SQR == 1
+    qsb_k2s_center_offset(sum,x1,x2,cc);
+#endif
 #if QSB_K2S_PARITY_WINDOW
     uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
 #else
@@ -175,9 +191,15 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FADD(t, t, yR);            /* -y1 */
     uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
 #endif
+#if QSB_K2S_CENTER_SQR == 2
+    /* Do not hold x2 across parity0: form it just before p1 becomes x1. */
+    qsb_k2s_center_offset(sum,x1,x2,cc);
+#endif
     QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
+#if !QSB_K2S_CENTER_SQR
     QSB_FSUB(t, m2, cc);
     QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
+#endif
 #if QSB_K2S_PARITY_WINDOW
     parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
 #else
@@ -273,6 +295,24 @@ __device__ __forceinline__ int qsb_k2s_front3(
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#ifndef QSB_OUTER_PAIR
+#define QSB_OUTER_PAIR 0
+#endif
+#if QSB_OUTER_PAIR != 0 && QSB_OUTER_PAIR != 1
+#error "QSB_OUTER_PAIR must be 0 or 1"
+#endif
+#ifndef QSB_GATE_PAIR
+#define QSB_GATE_PAIR 1
+#endif
+#if QSB_OUTER_PAIR && (QSB_OUTER_LITK || !QSB_GATE_PAIR)
+#error "QSB_OUTER_PAIR uses the existing paired generic transform, not literal-K"
+#endif
+#if QSB_OUTER_PAIR
+// Defined below for the pubkey gate. Its arithmetic also applies to the
+// independent 32-byte SHA256d outer blocks of the two epoch candidates.
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(
+    uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1);
+#endif
 #if QSB_OUTER_LITK
 /* QSB_OUTER_LITK needs the literal-K transform before the outer block; sha_gate_fma.cuh is include-guarded,
  * so the gate's own include below (QSB_GATE_H0_FMA) is then a no-op. */
@@ -306,8 +346,24 @@ __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     uint32_t stateA[8],stateB[8];
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if QSB_OUTER_PAIR
+    uint32_t wA[16],wB[16],sA[8],sB[8];
+    #pragma unroll
+    for(int i=0;i<8;i++){wA[i]=stateA[i];wB[i]=stateB[i];}
+    wA[8]=wB[8]=0x80000000u;
+    #pragma unroll
+    for(int i=9;i<15;i++)wA[i]=wB[i]=0u;
+    wA[15]=wB[15]=0x100u;
+    qsb_sha256_init_transform_pair(sA,wA,sB,wB);
+    #pragma unroll
+    for(int i=0;i<4;i++){
+        out.a[i]=((uint64_t)sA[6-2*i]<<32)|(uint64_t)sA[7-2*i];
+        out.b[i]=((uint64_t)sB[6-2*i]<<32)|(uint64_t)sB[7-2*i];
+    }
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(

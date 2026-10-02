@@ -1,0 +1,10 @@
+{
+  "subset.cu": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313",
+  "tests/gpu_epochs/tree.cu": "4769f52e35b5ca98fd3d3869e820e43507928a4ab6e90b2d5cf29d5c6bb6eb43",
+  "tests/gpu_epochs/host_producers_v3.h": "8838b4b563647004e6d5dbce5655649b8e654796a64bf35b5ac3cd0998700ce8",
+  "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+  "tests/gpu_epochs/filter_tail_sc.cuh": "890752b2dfb632e56232c1a148a4842354e461f04d23628b1581d1413e7471fc",
+  "qsb_carrier_sm89.h": "add141c23df5ac968812408edad4e135df2c99383fa49a0c5c7f5dc204148f20",
+  "local_fallback_only": true,
+  "claim": "N24 frozen local sm86 digest and host integration; native sm89 image has separate build equivalence evidence"
+}

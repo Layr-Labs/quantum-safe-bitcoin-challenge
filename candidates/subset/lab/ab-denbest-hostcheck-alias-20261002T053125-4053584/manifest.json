@@ -1,0 +1,17 @@
+{
+  "A": {
+    "source": "/work/tmp/qsb-it5-alias.9wkX76/candidates/subset/lab/n24L_denbest.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#include \"../subset.cu\"\n",
+    "sha256": "79d4b12b91e2824fe7124e2f438e7b55c47ef511fa052f2cb96494e7cc99c1aa",
+    "stamp": "QSB_ZEROS_N=24 1790936949056752293"
+  },
+  "B": {
+    "source": "/work/tmp/qsb-it5-alias.9wkX76/candidates/subset/lab/n24L_center.cu",
+    "text": "#define QSB_LOCAL_SM86 1\n#define QSB_HP_CHECK_ALIAS 1\n#include \"../subset.cu\"\n",
+    "sha256": "68eaba0e79265689c435798f8dd4370fbab7b1e3b9f255c5043e07c5f92dec42",
+    "stamp": "QSB_ZEROS_N=24 1790936949054944051"
+  },
+  "tests/gpu_epochs/tree.cu": "4769f52e35b5ca98fd3d3869e820e43507928a4ab6e90b2d5cf29d5c6bb6eb43",
+  "tests/gpu_epochs/pair_shared.cuh": "802f52e49ef70f8a6644b190aac7099a4338de6511d4752bab7d5a406b27ff26",
+  "subset.cu": "6cd5c26f4ea01c480974ea1e99eaaf3a3a6d2ce9d6158353512836f57352f246"
+}

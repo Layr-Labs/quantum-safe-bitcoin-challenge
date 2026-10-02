@@ -1,0 +1,109 @@
+{
+  "instructions": [
+    14520,
+    14520
+  ],
+  "differences": 1531,
+  "first": [
+    {
+      "i": 7325,
+      "early": "BSSY B1, 0x1fc40 ;",
+      "late": "BSSY B1, 0x1f450 ;"
+    },
+    {
+      "i": 7429,
+      "early": "IMAD.MOV.U32 R98, RZ, RZ, c[0x3][0x77c] ;",
+      "late": "IMAD.MOV.U32 R90, RZ, RZ, c[0x3][0x764] ;"
+    },
+    {
+      "i": 7608,
+      "early": "IADD3.X R103, P4, R28, R31, RZ, P4, !PT ;",
+      "late": "IADD3.X R116, P4, R28, R31, RZ, P4, !PT ;"
+    },
+    {
+      "i": 7615,
+      "early": "IADD3.X R76, P6, R68, R77, RZ, P6, !PT ;",
+      "late": "IADD3.X R46, P6, R68, R77, RZ, P6, !PT ;"
+    },
+    {
+      "i": 7633,
+      "early": "IMAD.MOV.U32 R99, RZ, RZ, c[0x3][0x780] ;",
+      "late": "IMAD.MOV.U32 R82, RZ, RZ, c[0x3][0x754] ;"
+    },
+    {
+      "i": 7636,
+      "early": "IMAD.MOV.U32 R100, RZ, RZ, c[0x3][0x784] ;",
+      "late": "IMAD.MOV.U32 R84, RZ, RZ, c[0x3][0x758] ;"
+    },
+    {
+      "i": 7638,
+      "early": "IMAD.WIDE.U32 R74, P0, R49, 0x3d1, R48 ;",
+      "late": "IMAD.WIDE.U32 R76, P0, R49, 0x3d1, R48 ;"
+    },
+    {
+      "i": 7640,
+      "early": "IADD3 R106, P2, R43, R75, RZ ;",
+      "late": "IADD3 R106, P2, R43, R77, RZ ;"
+    },
+    {
+      "i": 7641,
+      "early": "SEL R34, RZ, 0x1, !P0 ;",
+      "late": "SEL R35, RZ, 0x1, !P0 ;"
+    },
+    {
+      "i": 7642,
+      "early": "IMAD.MOV.U32 R101, RZ, RZ, c[0x3][0x788] ;",
+      "late": "IMAD.MOV.U32 R86, RZ, RZ, c[0x3][0x75c] ;"
+    },
+    {
+      "i": 7644,
+      "early": "IMAD.MOV.U32 R102, RZ, RZ, c[0x3][0x78c] ;",
+      "late": "IMAD.MOV.U32 R88, RZ, RZ, c[0x3][0x760] ;"
+    },
+    {
+      "i": 7645,
+      "early": "SEL R35, RZ, 0x1, !P3 ;",
+      "late": "SEL R37, RZ, 0x1, !P3 ;"
+    },
+    {
+      "i": 7646,
+      "early": "IMAD.X R103, R103, 0x1, R34, P2 ;",
+      "late": "IMAD.X R116, R116, 0x1, R35, P2 ;"
+    },
+    {
+      "i": 7647,
+      "early": "IADD3 R64, P0, R74.reuse, R40, RZ ;",
+      "late": "IADD3 R42, P0, R76.reuse, R40, RZ ;"
+    },
+    {
+      "i": 7648,
+      "early": "IADD3 RZ, P2, R74, -c[0x3][0x7f8], RZ ;",
+      "late": "IMAD.MOV.U32 R92, RZ, RZ, c[0x3][0x768] ;"
+    },
+    {
+      "i": 7649,
+      "early": "IMAD.X R34, R76, 0x1, R35, P4 ;",
+      "late": "IADD3 RZ, P2, R76, -c[0x3][0x7f8], RZ ;"
+    },
+    {
+      "i": 7650,
+      "early": "IADD3.X R65, P3, R106, R33, RZ, P0, !PT ;",
+      "late": "IMAD.X R34, R46, 0x1, R37, P4 ;"
+    },
+    {
+      "i": 7651,
+      "early": "IADD3.X RZ, P0, R106, ~c[0x3][0x7fc], RZ, P2, !PT ;",
+      "late": "IADD3.X R43, P3, R106.reuse, R33, RZ, P0, !PT ;"
+    },
+    {
+      "i": 7652,
+      "early": "IADD3.X R86, P2, R103.reuse, R34, RZ, P3, !PT ;",
+      "late": "IMAD.MOV.U32 R94, RZ, RZ, c[0x3][0x76c] ;"
+    },
+    {
+      "i": 7653,
+      "early": "IADD3.X R89, P0, R103, ~c[0x3][0x800], RZ, P0, !PT ;",
+      "late": "IADD3.X RZ, P0, R106, ~c[0x3][0x7fc], RZ, P2, !PT ;"
+    }
+  ]
+}

@@ -63,6 +63,12 @@
 #include <cpuid.h>
 #include <openssl/sha.h>
 
+/* Host-only memory repair: retain the full batch-0 self-check, but alias
+ * slot0's immutable producer outputs until comparison finishes. Slot reuse
+ * waits on the same check outcome; no sampled/omitted verification. */
+#ifndef QSB_HP_CHECK_ALIAS
+#define QSB_HP_CHECK_ALIAS 0
+#endif
 namespace qhp {
 
 enum { MAXK = 8, NCLS = 16, CHUNK = 16384, NSLOT = 4 };
@@ -540,6 +546,7 @@ struct Hp {
     int check = 0;              /* 0 pending, 1 passed, -1 failed */
     uint8_t *c_ep = nullptr; uint32_t *c_fi = nullptr;           /* host-built batch 0 (pageable) */
     int c_nchunks = 0, c_next = 0, c_done = 0;
+    size_t chk_fi_pitch = 0;
     uint8_t *d_scr_ep = nullptr; uint32_t *d_scr_fi = nullptr;   /* GPU-built batch 0 (device scratch) */
     cudaEvent_t chk_evt = nullptr; bool chk_enqueued = false, chk_running = false;
     /* rate estimates for the claim lead: GPU batch interval, host chunk time (one thread) */
@@ -587,6 +594,21 @@ static void run_check(Hp *h) {
         for (size_t r = 0; io_ok && r < len; r += 64)      /* mid, remW, early; the GPU never writes the pad */
             if (memcmp(buf.data() + r, h->c_ep + off + r, 40 + h->P.K)) { bad_ep++; if ((off + r) / 64 < first_bad) first_bad = (off + r) / 64; }
     }
+#if QSB_HP_CHECK_ALIAS
+    /* Pack exactly the same ncls*8 words per epoch as the old D2D snapshot.
+     * The first-state allocation has padding classes, so alias pitch is not w. */
+    const size_t w=(size_t)h->P.ncls*32, rows_per_buf=BUF/w;
+    for(size_t row=0;row<(size_t)n && io_ok;row+=rows_per_buf){
+        const size_t rows=std::min(rows_per_buf,(size_t)n-row),len=rows*w,off=row*w;
+        io_ok=cudaMemcpy2D(buf.data(),w,(const uint8_t*)h->d_scr_fi+row*h->chk_fi_pitch,
+                          h->chk_fi_pitch,w,rows,cudaMemcpyDeviceToHost)==cudaSuccess;
+        if(io_ok && memcmp(buf.data(),(const uint8_t*)h->c_fi+off,len))
+            for(size_t k=0;k<len/4;k++)
+                if(((const uint32_t*)buf.data())[k]!=h->c_fi[off/4+k]){
+                    bad_fi++;const uint64_t e=(off/4+k)/(h->P.ncls*8);if(e<first_bad)first_bad=e;
+                }
+    }
+#else
     for (size_t off = 0; off < fi_n * 4 && io_ok; off += BUF) {
         const size_t len = fi_n * 4 - off < BUF ? fi_n * 4 - off : BUF;
         io_ok = cudaMemcpy(buf.data(), (const uint8_t *)h->d_scr_fi + off, len, cudaMemcpyDeviceToHost) == cudaSuccess;
@@ -596,9 +618,15 @@ static void run_check(Hp *h) {
                     bad_fi++; const uint64_t e = (off / 4 + w) / (h->P.ncls * 8); if (e < first_bad) first_bad = e;
                 }
     }
+#endif
     free(h->c_ep); free(h->c_fi); h->c_ep = nullptr; h->c_fi = nullptr;
     std::lock_guard<std::mutex> g(h->m);
     h->chk_running = false;
+#if QSB_HP_CHECK_ALIAS
+    /* A concurrent ring-allocation failure can stop producers while this
+     * checker still reads slot0. Reuse waits for that read to finish too. */
+    h->cv_ready.notify_all();
+#endif
     if (!io_ok) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check readback failed"); return; }
     if (bad_ep || bad_fi) {
         h->check = -1;
@@ -608,6 +636,7 @@ static void run_check(Hp *h) {
         return;
     }
     h->check = 1; h->active = true;
+    h->cv_ready.notify_all();
     printf("  Host producers: self-check passed (batch 0: %llu descriptors + %llu first-block states bit-identical)\n",
            (unsigned long long)n, (unsigned long long)n * h->P.ncls);
     fflush(stdout);
@@ -780,8 +809,10 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
     h->c_fi = (uint32_t *)malloc((size_t)n0 * ncls * 32);
     h->c_nchunks = (int)((n0 + CHUNK - 1) / CHUNK);
     bool ok = h->c_ep && h->c_fi && n0 > 0 &&
+#if !QSB_HP_CHECK_ALIAS
               cudaMalloc((void **)&h->d_scr_ep, (size_t)n0 * 64) == cudaSuccess &&
               cudaMalloc((void **)&h->d_scr_fi, (size_t)n0 * ncls * 32) == cudaSuccess &&
+#endif
               cudaEventCreateWithFlags(&h->chk_evt, cudaEventDisableTiming) == cudaSuccess;
     if (!ok) { (void)cudaGetLastError(); printf("  Host producers: off (self-check buffers)\n"); return; }
     /* Placement. PLACE=1: main thread on its current logical CPU, producer 0 on that core's other
@@ -832,13 +863,31 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
 static void enqueue_check_copy(cudaStream_t st, const void *d_ep, const uint32_t *d_fi, size_t fi_pitch) {
     Hp *h = g_hp; if (!h) return;
     const size_t n = (size_t)batch_len(h, 0), w = (size_t)h->P.ncls * 32;
+#if QSB_HP_CHECK_ALIAS
+    h->d_scr_ep=(uint8_t*)d_ep;h->d_scr_fi=(uint32_t*)d_fi;h->chk_fi_pitch=fi_pitch;
+    cudaError_t e=cudaEventRecord(h->chk_evt,st);
+#else
     cudaError_t e = cudaMemcpyAsync(h->d_scr_ep, d_ep, n * 64, cudaMemcpyDeviceToDevice, st);
     if (e == cudaSuccess) e = cudaMemcpy2DAsync(h->d_scr_fi, w, d_fi, fi_pitch, w, n, cudaMemcpyDeviceToDevice, st);
     if (e == cudaSuccess) e = cudaEventRecord(h->chk_evt, st);
+#endif
     std::lock_guard<std::mutex> g(h->m);
     if (e != cudaSuccess) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check copy failed"); return; }
     h->chk_enqueued = true;
     h->cv_work.notify_all();
+}
+
+/* Full batch0 descriptors/classes remain read-only until the checker returns.
+ * Invoked before a producer or host upload can overwrite that epoch slot. */
+static void wait_check_reuse(const void *d_ep){
+#if QSB_HP_CHECK_ALIAS
+    Hp *h=g_hp;if(!h)return;
+    std::unique_lock<std::mutex> g(h->m);
+    if(h->chk_enqueued && d_ep==h->d_scr_ep)
+        h->cv_ready.wait(g,[&]{return (h->check!=0 || h->dead || h->stop) && !h->chk_running;});
+#else
+    (void)d_ep;
+#endif
 }
 
 /* Main thread, once per loop iteration: release slots whose upload finished. */

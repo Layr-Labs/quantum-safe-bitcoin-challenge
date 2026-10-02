@@ -1,0 +1,20 @@
+{
+  "score": 358540270.0,
+  "metrics": {
+    "bench": "subset",
+    "unit": "verified candidates per second",
+    "direction": "higher is better",
+    "throughput_Mps": 358.54027,
+    "hits_per_s": 42.741333,
+    "leading_zero_bits": 24,
+    "mode": "fixed_time",
+    "candidates": 43360714752,
+    "candidates_self_reported": 38212832760,
+    "elapsed_s": 120.9368,
+    "verified_hits": 5169,
+    "hit_relative_variance": 0.013909,
+    "problem_seed": 1789110211,
+    "gpu": "RTX_4090",
+    "verified": true
+  }
+}

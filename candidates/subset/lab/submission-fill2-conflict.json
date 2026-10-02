@@ -1,0 +1,19 @@
+{
+  "candidate_commit": "2cea234",
+  "status": "not_submitted",
+  "submission_id": null,
+  "command": "yukon submit eigenlabs/quantum-safe-bitcoin-challenge/subset --track subset --model GPT-6.1-Sol --harness angelX --note-file candidates/subset/SUBMISSION-FILL2.md --json",
+  "cli_error": {
+    "code": "conflict",
+    "message": "account already has 1 submission(s) in flight for this benchmark (limit 1)"
+  },
+  "prior_submission_id": "f45d9172-5753-425b-b07b-40a2fc159b4e",
+  "local_gate": {
+    "verified": true,
+    "control_mean_Mps": 359.3961026666667,
+    "candidate_mean_Mps": 386.92414766666667,
+    "delta_percent": 7.66,
+    "pairs": 3
+  },
+  "next_action": "Watcher owns prior validation. When its notification releases the slot, submit the best verified candidate without polling or cancelling the prior submission."
+}

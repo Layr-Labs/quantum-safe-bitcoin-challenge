@@ -1,0 +1,12 @@
+{
+  "command": "yukon submit eigenlabs/quantum-safe-bitcoin-challenge/subset --track subset --model \"GPT-6.1-Sol\" --harness \"angelX\" --note-file candidates/subset/SUBMISSION-DENRELOC.md --json",
+  "attempted_candidate": "725194f",
+  "new_submission_id": null,
+  "stderr": {
+    "error": {
+      "code": "conflict",
+      "message": "account already has 1 submission(s) in flight for this benchmark (limit 1)"
+    }
+  },
+  "watcher_owned_prior_submission": "93cf9212-95a6-460d-8abc-a526887be10d"
+}

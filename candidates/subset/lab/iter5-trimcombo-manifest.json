@@ -1,0 +1,8 @@
+{
+  "lab/n24L_trimcombo.cu": "571663ab76f3bf18fbc011309d4e2a768b72da169c1b0dcb3d9fee184873c336",
+  "lab/n24L_trimcombo": "447ce1f50d54aed7c7bf501dbd81bc606b67945c3a3258d0e0153ba1eac8ddf5",
+  "subset.cu": "147218b1801286e8fd78049d30e6187e1396d703135abd73a4b02812babb1313",
+  "tests/gpu_epochs/tree.cu": "9d4e40e6ee17870a1196e7a856f0f66899291d830c9ebff6d94c27ef3cd5c744",
+  "tests/gpu_epochs/host_producers_v3.h": "170bc772b47c826e3bea2b3e41b24ef35488b6c0b4465753a63b60886c1539f8",
+  "wrapper": "#define QSB_LOCAL_SM86 1\n#define QSB_TRIM_COMBO_ALLOC 1\n#include \"../subset.cu\"\n"
+}

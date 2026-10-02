@@ -1,0 +1,35 @@
+{
+  "qualified_commit": "285e670",
+  "production_mode": "QSB_DEN_CROSS_PRE=1,QSB_DEN_CROSS_IDLE=0",
+  "native_cubin_sha256": "152a7bc7e48d5ec071501307b89c23a907095d875b5c7108aa55520e174c91d6",
+  "native_digest": {
+    "registers": 128,
+    "smem_bytes": 24576,
+    "stack": 0,
+    "spill_stores": 0,
+    "spill_loads": 0
+  },
+  "production_preflight_verified": true,
+  "preflight_score": 388806294,
+  "direct_gate": {
+    "A_Mps": [
+      361.33566,
+      357.581896,
+      358.81707
+    ],
+    "B_Mps": [
+      390.443277,
+      388.587497,
+      392.744373
+    ],
+    "delta_percent": 8.72575852452948,
+    "all_verified": true
+  },
+  "root_overlap": {
+    "A_Mps": 390.754387,
+    "B_Mps": 384.832063,
+    "delta_percent": -1.515612926439136,
+    "all_verified": true,
+    "adopted": false
+  }
+}

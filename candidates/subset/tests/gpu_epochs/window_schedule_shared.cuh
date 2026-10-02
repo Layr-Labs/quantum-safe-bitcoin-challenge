@@ -123,10 +123,25 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
  * waited; now each lane reads its class state (32 bytes). */
 /* Flat mapping: one thread per (epoch, class) over full 256-thread blocks, instead of one
  * 54-thread block per epoch (two warps, 10 idle lanes, and a block launch per epoch). */
+/* Producer-only probe. Bit 0 specializes the common eight-class quotient;
+ * bit 1 writes each aligned 32-byte state as two 16-byte vectors. Neither
+ * changes the first-state layout or the digest's loads. Other class counts
+ * retain the exact runtime mapping, including partial final blocks. */
+#ifndef QSB_FIRST_FLAT_FAST
+#define QSB_FIRST_FLAT_FAST 0
+#endif
+#if QSB_FIRST_FLAT_FAST < 0 || QSB_FIRST_FLAT_FAST > 3
+#error "QSB_FIRST_FLAT_FAST must be a bitmask in [0,3]"
+#endif
 __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_t * __restrict__ d_epochs,
         uint32_t * __restrict__ d_first, unsigned n_epochs, unsigned classes) {
     const unsigned t = blockIdx.x * blockDim.x + threadIdx.x;
+#if QSB_FIRST_FLAT_FAST & 1
+    const unsigned e = classes == 8u ? t >> 3 : t / classes;
+    const unsigned c = classes == 8u ? t & 7u : t - e * classes;
+#else
     const unsigned e = t / classes, c = t - e * classes;
+#endif
     if (e >= n_epochs) return;
     const epoch_desc_t *ep = d_epochs + e;
     uint32_t st[8], W[16];
@@ -137,8 +152,14 @@ __global__ void __launch_bounds__(256) kernel_build_first_flat(const epoch_desc_
     for(int j=2;j<16;j++)W[j]=QSB_FIRST_UNIQUE[j-2][c];
     _SHA256Transform(st,W);
     const size_t base=((size_t)e*QSB_FIRST_SLOTS+(size_t)c)*8;
+#if QSB_FIRST_FLAT_FAST & 2
+    uint4 *out = reinterpret_cast<uint4 *>(d_first + base);
+    out[0] = make_uint4(st[0],st[1],st[2],st[3]);
+    out[1] = make_uint4(st[4],st[5],st[6],st[7]);
+#else
     #pragma unroll
     for(int j=0;j<8;j++)d_first[base+j]=st[j];
+#endif
 }
 #if 0   /* superseded by kernel_build_first_flat; kept out of the JIT-compiled module */
 __global__ void kernel_build_first(const epoch_desc_t * __restrict__ d_epochs,

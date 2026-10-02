@@ -1,0 +1,4 @@
+qsb_carrier_sm89.h: 473376 B cubin, sha256 d938cf8a0d9f28df, 5260 lines, LTC64B loads in digest: 4, Cuda compilation tools, release 12.8, V12.8.93
+ptxas info    : Function properties for _Z13kernel_digestPKhiiPKjS0_iS0_S0_iS0_iiPKmS4_S4_S4_S4_PhPjS6_S5_S5_S5_S5_S5_S5_iiiiimiiS0_iS2_PK12epoch_desc_tS2_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+build logs: /work/tmp/tmp.gNEXVbvlXJ

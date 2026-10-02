@@ -1,0 +1,29 @@
+{
+  "all_six_verified": true,
+  "rates_Mps": {
+    "A": [
+      406.619419,
+      369.0605,
+      369.995377
+    ],
+    "B": [
+      397.085372,
+      404.95509,
+      375.636318
+    ]
+  },
+  "means": {
+    "A": 381.89176533333335,
+    "B": 392.55892666666665
+  },
+  "delta_percent": 2.7932420391475254,
+  "orders": [
+    "AB",
+    "BA",
+    "AB"
+  ],
+  "sources": [
+    "candidates/subset/lab/ab-denbest-centerlate-20261002T045206-3819248",
+    "candidates/subset/lab/ab-denbest-centerlate-confirm-20261002T045944-3862177"
+  ]
+}

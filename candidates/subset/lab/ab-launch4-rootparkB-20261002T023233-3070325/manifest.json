@@ -1,0 +1,22 @@
+{
+  "control": "launch4",
+  "pairs": 1,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_launch4.cu",
+      "source_text": "// Production launch4 with the identical dev-only GLV12 geometry as controls.\n#define QSB_LOCAL_SM86 1\n#include \"subset.cu\"\n",
+      "source_sha256": "9a95500a1ef2a85b04cbd2d9ac477f1a6fdbb68ae781eaffd0d14d7bb22dc565",
+      "binary_sha256": "0a98f991bd59dfef53b84dc6bc66e22c7df83d65dffb4bab8b8d12aae672f7c9",
+      "build_stamp": "QSB_ZEROS_N=24 1790925151241605429"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-it3-rootparkB.EgPJm0/candidates/subset/lab/n24L_rootparkB.cu",
+      "source_text": "// Root warp only: B's twelve words parked across divsteps in dead inverse rows.\n#define QSB_LOCAL_SM86 1\n#define QSB_ROOT_PARK_B 1\n#include \"../subset.cu\"\n",
+      "source_sha256": "e1cca13312440719071ad6a205ef48fb6af397f66e87789d2d09a01e7389545d",
+      "binary_sha256": "55c3a9d49a3e4e048ae19743b2f6a7f66353a8bbf72ec6143dcc3c511a42ddf3",
+      "build_stamp": "QSB_ZEROS_N=24 1790926195497141033"
+    }
+  }
+}

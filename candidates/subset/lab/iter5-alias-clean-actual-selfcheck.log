@@ -1,0 +1,28 @@
+  CUDA runtime 12.8, driver 13.3, module loading LAZY
+  L2 fetch granularity: 64 -> 64 B
+QSB Digest Search [GPU 0]
+  GPU: NVIDIA GeForce RTX 3090 (82 SMs)
+  Native sm_89 carrier: off (device is not sm_89); using the compute_52 image
+  Loaded: n=150, t=9, preimage=9906, tail=218, suffix=44, prefix_rem=42
+  Isomorphic recovery coordinates: xR'=+1
+  Patched tx_suffix: seq=0x003E4648 (off=0) lt=970060878 (off=36) tx_suffix_len=44
+  Short-epoch split: cut=137, 6 early omissions x 8218472724 epochs, 3 window omissions x 128 per epoch (1.052e+12 candidates)
+  Register-resident assembly: 10 kept pushes (108 message bytes) + 69 constant words, 6 SHA-256 blocks per candidate
+  GTable heal: 0 off-curve flags, 0 records rewritten from OpenSSL
+  GTable built on GPU in 0.14s (153175181 points, 9349 MiB total, spot check passed)
+Window schedule classes: first=8 second=53 of 128
+  Host producers: 3 threads (SHA-NI, precomputed schedules, off the main core), 4 pinned slots of 640 MiB, self-check on batch 0
+  Mode: REAL, GPU 0 (global 0 of 1)
+  Batch: 8388608 combos per kernel launch
+  Search space (GLOBAL): C(150,9) = 1051964508672 combos
+  Search space (this GPU's slice): 82947113349100 combos (7884.973% of global)
+  Using short-epoch producer/consumer path (1048576 epochs per launch)
+  Table L2 window: 4.1 of 9349.1 MiB persisting on 2 stream(s) (limit 4.1 MiB, max window 128.0 MiB)
+  CPU co-grind: 32 threads (of 32 CPUs), 8-lane IFMA, 4-lane SHA-NI (16-lane key hashes), 100 window patterns per epoch disjoint from the GPU's 128, batch 1024 (SMT siblings among the workers' CPUs); table 12 signed windows of 20..22 bits, 1088 MiB, huge pages 0.0% (0.32 s)
+  Host producers: self-check passed (batch 0: 2097152 descriptors + 16777216 first-block states bit-identical)
+  [HP] final: host-built batches 0, GPU-built after start-up 0 (of 2); ready ahead at launch: avg 0.00, min 0
+  Teardown: co-grinder table left to the exit, 0.000 s after the stop signal; pinned slots freed in 0.420 s; waited 0.000 s after the drain
+  [GPU 0] epoch=4194304/8218472724 (536M/1051964M)  276.1M/s  elapsed=2s
+  CPU co-grind: 0M candidates, 0 hits (0.00M/s)
+
+  [GPU 0] Stopped by signal 15 after draining every launched batch: 536M in 2s (276.1M/s)

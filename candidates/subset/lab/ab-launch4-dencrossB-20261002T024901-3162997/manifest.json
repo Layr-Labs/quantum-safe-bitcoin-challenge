@@ -1,0 +1,22 @@
+{
+  "control": "launch4",
+  "pairs": 1,
+  "seconds": 120,
+  "seed": 1789110211,
+  "arms": {
+    "A": {
+      "source": "candidates/subset/n24L_launch4.cu",
+      "source_text": "// Production launch4 with the identical dev-only GLV12 geometry as controls.\n#define QSB_LOCAL_SM86 1\n#include \"subset.cu\"\n",
+      "source_sha256": "9a95500a1ef2a85b04cbd2d9ac477f1a6fdbb68ae781eaffd0d14d7bb22dc565",
+      "binary_sha256": "0a98f991bd59dfef53b84dc6bc66e22c7df83d65dffb4bab8b8d12aae672f7c9",
+      "build_stamp": "QSB_ZEROS_N=24 1790925151241605429"
+    },
+    "B": {
+      "source": "/work/tmp/qsb-it3-dencrossB.wxZ9Pi/candidates/subset/lab/n24L_dencrossB.cu",
+      "source_text": "// B-only relocation: avoid A's extra shared-memory round trip while retiring WA early.\n#define QSB_LOCAL_SM86 1\n#define QSB_DEN_CROSS_PRE 2\n#include \"../subset.cu\"\n",
+      "source_sha256": "b5dea8cca1ca12e3cf55b333e551ff402cb2b5ce357e16f8fe10573c2a13fc3b",
+      "binary_sha256": "7c6c6b6cd9e00290e1f7e288063658fa99684315e208f5aab5bf860a4dbad262",
+      "build_stamp": "QSB_ZEROS_N=24 1790927256652463370"
+    }
+  }
+}

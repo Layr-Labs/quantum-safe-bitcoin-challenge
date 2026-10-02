@@ -1,0 +1,9 @@
+{
+  "Mps": {
+    "A": 381.427067,
+    "B": 385.404145
+  },
+  "delta_percent": 1.0426837380159037,
+  "all_verified": true,
+  "orchestration_error": "Both runs/scoring passed. Script file was changed while background bash retained it; trailing parsing failed after completed scores. Reconstruct summary from immutable score artifacts, do NOT rerun GPU."
+}

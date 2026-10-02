@@ -1,0 +1,41 @@
+{
+  "total_epochs": 8218472724,
+  "capacities": {
+    "1048576": {
+      "aligned_launches_checked": 7838,
+      "max_groups": 181498,
+      "at_base": 8217690112,
+      "group_bytes_conservative": 536871936,
+      "group_bytes_tight": 46463488,
+      "saved_bytes": 490408448,
+      "ranked_table_plus_first_states": 23761855296,
+      "old_lower_bound_bytes": 24298727232,
+      "tight_lower_bound_bytes": 23808318784
+    },
+    "2097152": {
+      "aligned_launches_checked": 3919,
+      "max_groups": 362053,
+      "at_base": 8216641536,
+      "group_bytes_conservative": 1073742848,
+      "group_bytes_tight": 92685568,
+      "saved_bytes": 981057280,
+      "ranked_table_plus_first_states": 24835597120,
+      "old_lower_bound_bytes": 25909339968,
+      "tight_lower_bound_bytes": 24928282688
+    },
+    "4194304": {
+      "aligned_launches_checked": 1960,
+      "max_groups": 594292,
+      "at_base": 8212447232,
+      "group_bytes_conservative": 2147484672,
+      "group_bytes_tight": 152138752,
+      "saved_bytes": 1995345920,
+      "ranked_table_plus_first_states": 26983080768,
+      "old_lower_bound_bytes": 29130565440,
+      "tight_lower_bound_bytes": 27135219520
+    }
+  },
+  "ranked_VRAM_bytes": 25769803776,
+  "current_launch4_including_descriptors_and_indices_bytes": 25213495360,
+  "remaining_before_context_other_bytes": 556308416
+}

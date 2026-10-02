@@ -1,0 +1,80 @@
+diff --git i/candidates/subset/tests/gpu_epochs/tree.cu w/candidates/subset/tests/gpu_epochs/tree.cu
+index 7b477cf..c75b602 100644
+--- i/candidates/subset/tests/gpu_epochs/tree.cu
++++ w/candidates/subset/tests/gpu_epochs/tree.cu
+@@ -5361,7 +5361,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
+     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
+     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
+     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
+-    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128)
++    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_TREE_INPLACE) QSB_CARRIER_KV(QSB_PARK128)
+ #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
+ __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
+ #endif
+diff --git i/candidates/subset/tests/gpu_epochs/tree_inverse.cuh w/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
+index 4ef5a3f..4e9e5fe 100644
+--- i/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
++++ w/candidates/subset/tests/gpu_epochs/tree_inverse.cuh
+@@ -4,6 +4,15 @@
+ // One work-efficient binary product tree per block. The caller supplies
+ // a power-of-two block size at most 256 and identity factors for inactive lanes.
+ #pragma once
++#ifndef QSB_TREE_INPLACE
++#define QSB_TREE_INPLACE 0
++#endif
++#if QSB_TREE_INPLACE != 0 && QSB_TREE_INPLACE != 1
++#error "QSB_TREE_INPLACE must be 0 or 1"
++#endif
++#if QSB_TREE_INPLACE && (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_WARP)
++#error "QSB_TREE_INPLACE currently supports the untemplated warp-0 tree only"
++#endif
+ #ifndef QSB_ISO_FUSED_ROOT_SCALE
+ #define QSB_ISO_FUSED_ROOT_SCALE 1
+ #endif
+@@ -202,7 +211,11 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+ #else
+     __shared__ uint64_t products[4][2 * QSB_SE_BLOCK];
+ #endif
+-#if !QSB_ROOT_LUT_SMEM
++#if QSB_TREE_INPLACE
++    // Only internal levels are overwritten: products[0..n) remain immutable leaves.
++    uint64_t *inverses[4] = {products[0]+QSB_SE_BLOCK, products[1]+QSB_SE_BLOCK,
++                             products[2]+QSB_SE_BLOCK, products[3]+QSB_SE_BLOCK};
++#elif !QSB_ROOT_LUT_SMEM
+     __shared__ uint64_t inverses[4][QSB_SE_BLOCK];
+ #endif
+ #if QSB_TREE_UNROLL
+@@ -428,6 +441,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+ #endif
+     for(int count=QSB_TREE_WAVE_TOP?32:4;count<n;count<<=1){
+         int half=count>>1;
++        uint64_t parent_inv[5],sibling[5],child_inv[5];
+ #if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
+         const int ut=(RW && count<=32)?tid-32*RW:tid;   /*: down level 32 on warp RW (it reads RW's inverses) */
+         if(RW?(unsigned)ut<(unsigned)count:tid<count){
+@@ -435,13 +449,24 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
+         const int ut=tid;
+         if(tid<count){
+ #endif
+-            uint64_t parent_inv[5],sibling[5],child_inv[5];
+             #pragma unroll
+             for(int k=0;k<4;k++){
+                 parent_inv[k]=inverses[k][offset+count-n+(ut&(half-1))];
+                 sibling[k]=products[k][offset+(ut^half)];
+             }
+             parent_inv[4]=sibling[4]=0;
++        }
++#if QSB_TREE_INPLACE
++        // Every reader must snapshot its sibling before that sibling is overwritten.
++        // count>32 includes cross-warp sibling reads, so idle warps join the barrier.
++        asm volatile("" ::: "memory");
++        if(count>32)__syncthreads();else __syncwarp();
++#endif
++#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT
++        if(RW?(unsigned)ut<(unsigned)count:tid<count){
++#else
++        if(tid<count){
++#endif
+             QSB_TREE_MUL(child_inv,parent_inv,sibling);
+             #pragma unroll
+             for(int k=0;k<4;k++)inverses[k][offset-n+ut]=child_inv[k];

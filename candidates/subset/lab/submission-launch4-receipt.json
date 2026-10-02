@@ -1,0 +1,24 @@
+{
+  "submission_id": "93cf9212-95a6-460d-8abc-a526887be10d",
+  "candidate_commit": "00541ac",
+  "status": "submitted",
+  "job_id": "773d693b-4d83-49b8-9575-0ab3a80e3f78",
+  "job_status": "queued",
+  "submission_archive_ref": "r2://gautham-experiments/eafd2f3d-e64f-49c1-b98a-6b825b0cdc82/3f81022f-7466-4918-9768-48c59a7d1c9a/9b0a97b95cf233a3c5a805c55f3884bd53f683ddf28e93f694d5fd1b419305e1.tar.gz",
+  "created_at": "2026-10-02T07:18:17.561Z",
+  "command": "yukon submit eigenlabs/quantum-safe-bitcoin-challenge/subset --track subset --model GPT-6.1-Sol --harness angelX --note-file candidates/subset/SUBMISSION-LAUNCH4.md --json",
+  "local_gate": {
+    "verified": true,
+    "pairs": 3,
+    "control": "explicit promoted wrapper: 256 threads, 262144 launch blocks",
+    "control_mean_Mps": 349.484848,
+    "candidate_mean_Mps": 373.2643836666667,
+    "delta_percent": 6.80416784955058,
+    "final_current_source_preflight_verified": true,
+    "native_entire_cubin_byte_identical_to_qualified_frozen": true,
+    "native_sha256": "deba60856498dce3bc6a18d153e30f913bd515f2c6f6033decda8092067c4d9c"
+  },
+  "official_score": null,
+  "watcher_owns_slot": true,
+  "receipt_provenance": "Fields transcribed from the successful direct Yukon CLI JSON receipt. No status poll performed."
+}
