@@ -65,6 +65,9 @@ static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#ifndef QSB_CARRIER_PO_DC
+#define QSB_CARRIER_PO_DC 0
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -102,6 +105,10 @@ static void qsb_carrier_off(const char *why) {
     g_qsb_carrier.on = 0; g_qsb_carrier.nojit = 0; g_qsb_carrier.lib = nullptr;
     memset(g_qsb_carrier.k, 0, sizeof(g_qsb_carrier.k));
     cudaGetLastError();                        /* clear any sticky-free error from the attempt */
+#if QSB_PO_DC
+    fprintf(stderr,"QSB_PO_DC native carrier failure: %s\n",why);
+    exit(2);
+#endif
     printf("  Native sm_89 carrier: off (%s); using the compute_52 image\n", why);
 }
 
@@ -142,11 +149,12 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
         e = cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, name);
         if (e != cudaSuccess) { qsb_carrier_off("kernel missing from image"); return; }
     }
+    if (QSB_CARRIER_PO_DC != QSB_PO_DC) { qsb_carrier_off("PO_DC semantic marker mismatch"); return; }
     void *dz = nullptr; size_t zb = 0; int zeros = -1;
     e = cudaLibraryGetGlobal(&dz, &zb, g_qsb_carrier.lib, "qsb_carrier_zeros");
     if (e == cudaSuccess && zb == sizeof(int))
         e = cudaMemcpy(&zeros, dz, sizeof(int), cudaMemcpyDeviceToHost);
-    if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
+    if (e != cudaSuccess || zeros != (QSB_ZEROS_N | (QSB_PO_DC ? 0x08000000 : 0))) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",

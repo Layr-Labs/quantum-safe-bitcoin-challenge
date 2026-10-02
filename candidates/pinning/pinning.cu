@@ -1,5 +1,12 @@
 #define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
+/* Pair-ordinate two-carry fusion shape; exact carryA+carryB, default off. */
+#ifndef QSB_PO_DC
+#define QSB_PO_DC 1
+#endif
+#if QSB_PO_DC != 0 && QSB_PO_DC != 1
+#error "QSB_PO_DC must be 0 or 1"
+#endif
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
 #endif
@@ -2266,7 +2273,7 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #define QSB_ZEROS_N 24
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
-__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N | (QSB_PO_DC ? 0x08000000 : 0);
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -6349,6 +6356,14 @@ int main(int argc, char **argv) {
     printf("  GPU: %s (%d SMs)\n", prop.name, prop.multiProcessorCount);
 #endif
     qsb_carrier_init(prop);
+#if QSB_PO_DC && !defined(QSB_CARRIER_BUILD)
+    if (!g_qsb_carrier.on || !g_qsb_carrier.nojit || !qsb_carrier_has(QK_S0)) {
+        fprintf(stderr,"QSB_PO_DC requires its native carrier and no compute_52 JIT\n");
+        return 1;
+    }
+    printf("PO_DC selected=1 fp=%u native=%s carrier=1 nojit=1\n",
+           (unsigned)(QSB_ZEROS_N | 0x08000000), qsb_carrier_cubin_sha256);
+#endif
 
     /* GTable */
     size_t gt_sz = (size_t)GT_TOTAL_ENTRIES*64;

@@ -19,6 +19,24 @@
 #define QSB_PO_Z "0"
 #define QSB_PO_ZDECL ""
 #endif
+/* The first capture retains carryA with the existing qz=0 dependency.
+ * The later literal-zero merge combines carryA+carryB. Neither writes CC. */
+#ifndef QSB_PO_DC
+#define QSB_PO_DC 0
+#endif
+#if QSB_PO_DC != 0 && QSB_PO_DC != 1
+#error "QSB_PO_DC must be 0 or 1"
+#endif
+#if QSB_PO_DC && QSB_PO_ALU != 1
+#error "QSB_PO_DC requires the existing QSB_PO_ALU=1 constant zero"
+#endif
+#if QSB_PO_DC
+#define QSB_PO_CAPTURE_Z QSB_PO_Z
+#define QSB_PO_MERGE_Z "0"
+#else
+#define QSB_PO_CAPTURE_Z "0"
+#define QSB_PO_MERGE_Z QSB_PO_Z
+#endif
 /* QSB_PAIR_ORD_G8=0 (default): the g-chain carry g8 (bit 288) is dropped exactly as in every
  * _ModMultCore tail; for a SUM of two products it fires when a*b+c*d lies within ~2^-22 below
  * 2^512 (~2^-23.6 per op, the square-class exposure QSB_SAS_Z9SUB_ALL documents; host-gated).
@@ -135,7 +153,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, a1, b6;\n"
   "addc.cc.u64 o3, o3, t;\n"
-  "addc.u32 k2, 0, 0;\n"
+  "addc.u32 k2, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c1, d1;\n"
   "add.cc.u64 e1, e1, t;\n"
   "mul.wide.u32 t, c1, d3;\n"
@@ -153,7 +171,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, c1, d6;\n"
   "addc.cc.u64 o3, o3, t;\n"
-  "addc.u32 k2, k2, " QSB_PO_Z ";\n"
+  "addc.u32 k2, k2, " QSB_PO_MERGE_Z ";\n"
   "mul.wide.u32 t, a2, b1;\n"
   "add.cc.u64 o1, o1, t;\n"
   "mul.wide.u32 t, a2, b3;\n"
@@ -171,7 +189,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e3, e3, t;\n"
   "mul.wide.u32 t, a2, b6;\n"
   "addc.cc.u64 e4, e4, t;\n"
-  "addc.u32 k4, 0, 0;\n"
+  "addc.u32 k4, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c2, d0;\n"
   "add.cc.u64 e1, e1, t;\n"
   "mul.wide.u32 t, c2, d2;\n"
@@ -180,7 +198,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e3, e3, t;\n"
   "mul.wide.u32 t, c2, d6;\n"
   "addc.cc.u64 e4, e4, t;\n"
-  "addc.u32 k4, k4, " QSB_PO_Z ";\n"
+  "addc.u32 k4, k4, " QSB_PO_MERGE_Z ";\n"
   "mul.wide.u32 t, c2, d1;\n"
   "add.cc.u64 o1, o1, t;\n"
   "mul.wide.u32 t, c2, d3;\n"
@@ -207,7 +225,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, a3, b6;\n"
   "addc.cc.u64 o4, o4, t;\n"
-  "addc.u32 k6, 0, 0;\n"
+  "addc.u32 k6, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c3, d1;\n"
   "add.cc.u64 e2, e2, t;\n"
   "mul.wide.u32 t, c3, d3;\n"
@@ -225,7 +243,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, c3, d6;\n"
   "addc.cc.u64 o4, o4, t;\n"
-  "addc.u32 k6, k6, " QSB_PO_Z ";\n"
+  "addc.u32 k6, k6, " QSB_PO_MERGE_Z ";\n"
   "mul.wide.u32 t, a4, b1;\n"
   "add.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, a4, b3;\n"
@@ -243,7 +261,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e4, e4, t;\n"
   "mul.wide.u32 t, a4, b6;\n"
   "addc.cc.u64 e5, e5, t;\n"
-  "addc.u32 k8, 0, 0;\n"
+  "addc.u32 k8, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c4, d0;\n"
   "add.cc.u64 e2, e2, t;\n"
   "mul.wide.u32 t, c4, d2;\n"
@@ -252,7 +270,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e4, e4, t;\n"
   "mul.wide.u32 t, c4, d6;\n"
   "addc.cc.u64 e5, e5, t;\n"
-  "addc.u32 k8, k8, " QSB_PO_Z ";\n"
+  "addc.u32 k8, k8, " QSB_PO_MERGE_Z ";\n"
   "mul.wide.u32 t, c4, d1;\n"
   "add.cc.u64 o2, o2, t;\n"
   "mul.wide.u32 t, c4, d3;\n"
@@ -279,7 +297,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o4, o4, t;\n"
   "mul.wide.u32 t, a5, b6;\n"
   "addc.cc.u64 o5, o5, t;\n"
-  "addc.u32 k10, 0, 0;\n"
+  "addc.u32 k10, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c5, d1;\n"
   "add.cc.u64 e3, e3, t;\n"
   "mul.wide.u32 t, c5, d3;\n"
@@ -297,7 +315,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o4, o4, t;\n"
   "mul.wide.u32 t, c5, d6;\n"
   "addc.cc.u64 o5, o5, t;\n"
-  "addc.u32 k10, k10, " QSB_PO_Z ";\n"
+  "addc.u32 k10, k10, " QSB_PO_MERGE_Z ";\n"
   "mul.wide.u32 t, a6, b1;\n"
   "add.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, a6, b3;\n"
@@ -315,7 +333,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e5, e5, t;\n"
   "mul.wide.u32 t, a6, b6;\n"
   "addc.cc.u64 e6, e6, t;\n"
-  "addc.u32 k12, 0, 0;\n"
+  "addc.u32 k12, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c6, d0;\n"
   "add.cc.u64 e3, e3, t;\n"
   "mul.wide.u32 t, c6, d2;\n"
@@ -324,7 +342,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e5, e5, t;\n"
   "mul.wide.u32 t, c6, d6;\n"
   "addc.cc.u64 e6, e6, t;\n"
-  "addc.u32 k12, k12, " QSB_PO_Z ";\n"
+  "addc.u32 k12, k12, " QSB_PO_MERGE_Z ";\n"
   "mul.wide.u32 t, c6, d1;\n"
   "add.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, c6, d3;\n"
@@ -351,7 +369,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o5, o5, t;\n"
   "mul.wide.u32 t, a7, b6;\n"
   "addc.cc.u64 o6, o6, t;\n"
-  "addc.u32 k14, 0, 0;\n"
+  "addc.u32 k14, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c7, d1;\n"
   "add.cc.u64 e4, e4, t;\n"
   "mul.wide.u32 t, c7, d3;\n"
@@ -360,7 +378,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 e6, e6, t;\n"
   "mul.wide.u32 t, c7, d7;\n"
   "addc.cc.u64 e7, e7, t;\n"
-  "addc.u32 k15, 0, 0;\n"
+  "addc.u32 k15, " QSB_PO_CAPTURE_Z ", 0;\n"
   "mul.wide.u32 t, c7, d0;\n"
   "add.cc.u64 o3, o3, t;\n"
   "mul.wide.u32 t, c7, d2;\n"
@@ -369,7 +387,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u64 o5, o5, t;\n"
   "mul.wide.u32 t, c7, d6;\n"
   "addc.cc.u64 o6, o6, t;\n"
-  "addc.u32 k14, k14, " QSB_PO_Z ";\n"
+  "addc.u32 k14, k14, " QSB_PO_MERGE_Z ";\n"
 #if QSB_PAIR_ORD_G8
   "mov.b64 {x0,x1}, e0; mov.b64 {x2,x3}, e1; mov.b64 {x4,x5}, e2; mov.b64 {x6,x7}, e3;\n"
   "mov.b64 {x8,x9}, e4; mov.b64 {x10,x11}, e5; mov.b64 {x12,x13}, e6; mov.b64 {x14,x15}, e7;\n"
@@ -390,7 +408,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u32 x13, x13, y13;\n"
   "addc.cc.u32 x14, x14, y14;\n"
   "addc.cc.u32 x15, x15, k14;\n"
-  "addc.u32 x16, k15, " QSB_PO_Z ";\n"
+  "addc.u32 x16, k15, " QSB_PO_MERGE_Z ";\n"
   "mov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
   "mov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n"
   "mul.wide.u32 t, x8, 977;  add.cc.u64  f0, r0, t;\n"
@@ -442,7 +460,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u32 x13, x13, y13;\n"
   "addc.cc.u32 x14, x14, y14;\n"
   "addc.cc.u32 x15, x15, k14;\n"
-  "addc.u32 x16, k15, " QSB_PO_Z ";\n"
+  "addc.u32 x16, k15, " QSB_PO_MERGE_Z ";\n"
   "mov.b64 r0, {x0,x1}; mov.b64 r1, {x2,x3}; mov.b64 r2, {x4,x5}; mov.b64 r3, {x6,x7};\n"
   "mov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n"
   QSB_FAW("x8",  "add.cc.u64", "f0", "r0")
