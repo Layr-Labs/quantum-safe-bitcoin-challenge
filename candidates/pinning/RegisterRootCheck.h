@@ -9,7 +9,11 @@ __global__ void qsb_prefix_field_check_kernel(uint32_t *data){
     data[(512u+field)*8+d]=qsb_prefix_cyclic_research::multiply8(a,b,lane);
 }
 static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
+#if QSB_HALF_SUBPIPE
+    constexpr size_t words=1024u*4u;
+#else
     constexpr size_t words=2048u*4u;
+#endif
     uint64_t *raw=(uint64_t*)calloc(words,sizeof(uint64_t));
     uint64_t *got=(uint64_t*)malloc(words*sizeof(uint64_t));
     BN_CTX *ctx=BN_CTX_new();
@@ -31,7 +35,7 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
            BN_lebin2bn((const unsigned char*)weight_words,32,weight)!=nullptr;
     }
     /* First 64 products are the complete 8x8 edge Cartesian product; remaining */
-    // 192 use deterministic full-width values. Compare every result to OpenSSL.
+    /* 192 use deterministic full-width values. Compare every result to OpenSSL. */
     if(ok&&error==cudaSuccess){
         const uint64_t edges[8][4]={
             {0,0,0,0},{1,0,0,0},
@@ -67,10 +71,18 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
                BN_nnmod(observed,observed,p,ctx) && BN_cmp(observed,weighted)==0;
         }
     }
+#if QSB_HALF_SUBPIPE
+    const int counts[]={1,31,32,33,63,64,65,95,96,97,127,128,129,255,256,257,383,384,385,511,512};
+#else
     const int counts[]={1,31,32,33,63,64,65,95,96,97,127,128,129,255,256,257,511,512,513,557,767,768,769,1023,1024};
+#endif
     for(int case_id=0;case_id<(int)(sizeof(counts)/sizeof(counts[0]))+4;++case_id){
         const int mixed=(int)(sizeof(counts)/sizeof(counts[0]));
+#if QSB_HALF_SUBPIPE
+        const int count=case_id<mixed?counts[case_id]:(case_id&1?512:1);
+#else
         const int count=case_id<mixed?counts[case_id]:(case_id&1?1024:1);
+#endif
         if(!ok||error!=cudaSuccess)break;
         memset(raw,0,words*sizeof(uint64_t));
         for(int i=0;i<count;++i){
@@ -96,10 +108,10 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
         }
         error=cudaMemcpyAsync(device,raw,words*sizeof(uint64_t),cudaMemcpyHostToDevice,stream);
         if(error==cudaSuccess){
-            if(qsb_carrier_has(QK_RR))
-                qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(QSB_RROOT_LANES),stream,device,count);
+            if(qsb_carrier_has(QSB_SELECTED_REGISTER_KID))
+                qsb_carrier_launch(QSB_SELECTED_REGISTER_KERNEL,QSB_SELECTED_REGISTER_KID,dim3(1),dim3(128),stream,device,count);
             else
-                qsb_root_register<<<1,QSB_RROOT_LANES,0,stream>>>(device,count);
+                QSB_SELECTED_REGISTER_KERNEL<<<1,128,0,stream>>>(device,count);
             error=cudaGetLastError();
         }
         if(error==cudaSuccess)error=cudaMemcpyAsync(got,device,words*sizeof(uint64_t),cudaMemcpyDeviceToHost,stream);
@@ -120,7 +132,7 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
     }
     BN_free(p);BN_free(a);BN_free(inv);BN_free(weighted);BN_free(scale);BN_free(weight);BN_free(observed);BN_CTX_free(ctx);
     free(raw);free(got);
-    // An asynchronous CUDA fault can poison the context. Never silently retry
+    /* An asynchronous CUDA fault can poison the context. Never silently retry */
     /* work under the baseline after such a fault. Arithmetic/host-allocation */
     /* mismatch before search can safely retain the promoted root implementation. */
     if(error!=cudaSuccess)qsb_subpipe_die("register root startup check",error);
