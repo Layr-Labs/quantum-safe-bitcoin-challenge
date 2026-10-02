@@ -19,6 +19,15 @@
 #ifndef QSB_HV_JOINT
 #define QSB_HV_JOINT 1
 #endif
+#ifndef QSB_HV_SKIP_UNUSED_POINT
+#define QSB_HV_SKIP_UNUSED_POINT 1
+#endif
+#ifndef QSB_HV_BN_CTX_SCRATCH
+#define QSB_HV_BN_CTX_SCRATCH 1
+#endif
+#ifndef QSB_HV_RECID_DIGEST_REUSE
+#define QSB_HV_RECID_DIGEST_REUSE 1
+#endif
 typedef struct {
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order; BIGNUM *nri; EC_POINT *Ru2;
     const digest_params_t *dp;
@@ -51,7 +60,7 @@ static int qsb_hv_zeros(const uint8_t *hh) {
 
 /* verify.py predicate: z = SHA256d(fixed_prefix || kept dummy sigs in storage order || tail || suffix),
  * Q = u1*G + (recid ? -R : R) with u1 = z*neg_r_inv mod n; hit iff lz(SHA256(compress(Q))) >= N. */
-static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
+static int qsb_hv_digest(const qsb_hv_t *h, const uint8_t skip[9], uint8_t d2[32]) {
     const digest_params_t *dp = h->dp;
     uint8_t buf[4096]; size_t len = 0;
     if (dp->prefix_remainder_len) { memcpy(buf + len, dp->prefix_remainder, dp->prefix_remainder_len); len += dp->prefix_remainder_len; }
@@ -71,13 +80,29 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
     SHA256_CTX sc; SHA256_Init(&sc);
     for (int i = 0; i < 8; i++) sc.h[i] = dp->midstate[i];
     for (size_t off = 0; off < len; off += 64) SHA256_Transform(&sc, buf + off);
-    uint8_t d1[32], d2[32];
+    uint8_t d1[32];
     for (int i = 0; i < 8; i++) { d1[4*i] = (uint8_t)(sc.h[i] >> 24); d1[4*i+1] = (uint8_t)(sc.h[i] >> 16); d1[4*i+2] = (uint8_t)(sc.h[i] >> 8); d1[4*i+3] = (uint8_t)sc.h[i]; }
     SHA256(d1, 32, d2);
+    return 1;
+}
+
+static int qsb_hv_check_digest(const qsb_hv_t *h, const uint8_t d2[32], int recid) {
+#if QSB_HV_BN_CTX_SCRATCH
+    BN_CTX_start(h->ctx);
+    BIGNUM *z = BN_CTX_get(h->ctx), *u1 = BN_CTX_get(h->ctx);
+    BIGNUM *qx = BN_CTX_get(h->ctx), *qy = BN_CTX_get(h->ctx);
+    if (z && u1 && qx && qy) z = BN_bin2bn(d2, 32, z);
+#else
     BIGNUM *z = BN_bin2bn(d2, 32, NULL), *u1 = BN_new(), *qx = BN_new(), *qy = BN_new();
-    EC_POINT *P = EC_POINT_new(h->grp), *Q = EC_POINT_new(h->grp), *R = EC_POINT_dup(h->Ru2, h->grp);
+#endif
+#if QSB_HV_SKIP_UNUSED_POINT && QSB_HV_JOINT
+    EC_POINT *P = NULL;
+#else
+    EC_POINT *P = EC_POINT_new(h->grp);
+#endif
+    EC_POINT *Q = EC_POINT_new(h->grp), *R = EC_POINT_dup(h->Ru2, h->grp);
     int ok = 0;
-    if (z && u1 && qx && qy && P && Q && R && BN_mod_mul(u1, z, h->nri, h->order, h->ctx)) {
+    if (z && u1 && qx && qy && (P || (QSB_HV_SKIP_UNUSED_POINT && QSB_HV_JOINT)) && Q && R && BN_mod_mul(u1, z, h->nri, h->order, h->ctx)) {
         if (recid) EC_POINT_invert(h->grp, R, h->ctx);
 #if QSB_HV_JOINT
         /* Q = u1*G + 1*(+-R) in one interleaved wNAF pass instead of a constant-time ladder for u1*G
@@ -96,9 +121,19 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
             ok = qsb_hv_zeros(hh) >= QSB_ZEROS_N;
         }
     }
+#if QSB_HV_BN_CTX_SCRATCH
+    BN_CTX_end(h->ctx);
+#else
     BN_free(z); BN_free(u1); BN_free(qx); BN_free(qy);
+#endif
     EC_POINT_free(P); EC_POINT_free(Q); EC_POINT_free(R);
     return ok;
+}
+
+static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
+    uint8_t d2[32];
+    if (!qsb_hv_digest(h, skip, d2)) return 0;
+    return qsb_hv_check_digest(h, d2, recid);
 }
 
 /* Rebuild the candidate from (epoch rank, lane) — never from the tentative combo bytes — check the
@@ -108,7 +143,13 @@ static int qsb_hv_publish(const qsb_hv_t *h, uint64_t epoch_rank, unsigned lane,
     qsb_host_unrank(epoch_rank, h->window_start, h->s_early, skip);
     for (int j = 0; j < 3; j++) skip[6 + j] = h->win3[lane & (QSB_SE_PER_EPOCH - 1)][j];
     int recid = recid_gpu & 1;
+#if QSB_HV_RECID_DIGEST_REUSE
+    uint8_t d2[32];
+    if (!qsb_hv_digest(h, skip, d2)) return 0;
+    if (!qsb_hv_check_digest(h, d2, recid)) { recid ^= 1; if (!qsb_hv_check_digest(h, d2, recid)) return 0; }
+#else
     if (!qsb_hv_check(h, skip, recid)) { recid ^= 1; if (!qsb_hv_check(h, skip, recid)) return 0; }
+#endif
     char line[96];
     int wl = snprintf(line, sizeof line, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
                       skip[0], skip[1], skip[2], skip[3], skip[4], skip[5], skip[6], skip[7], skip[8], recid);
