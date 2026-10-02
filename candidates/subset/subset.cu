@@ -1,4 +1,5 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_ERC_1002KJCQ3 1   /* inert tag; unreferenced */
+#define QSB_R_CBANK 1   /* the recovery point R from the constant bank in the paired front and tail (bit-identical) */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
