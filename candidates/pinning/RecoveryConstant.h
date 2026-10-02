@@ -27,8 +27,8 @@ static int qsb_make_recovery_constant(uint64_t out[4],const uint8_t ax[32],
     return ok;
 }
 
-// E = a - c^2 mod p (c as four little-endian 64-bit words, canonical), for the chord identity
-// x2 - a = (sum - c)^2 - x1 + E of the finish recovery.
+/* E = a - c^2 mod p (c as four little-endian 64-bit words, canonical), for the chord identity */
+/* x2 - a = (sum - c)^2 - x1 + E of the finish recovery. */
 static int qsb_make_chord_constant(uint64_t out[4],const uint8_t ax[32],
                                    const uint64_t cw[4]) {
     BN_CTX *ctx=BN_CTX_new();
