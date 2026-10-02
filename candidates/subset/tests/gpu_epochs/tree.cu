@@ -109,6 +109,9 @@ static const double qsb_trace_t_start = qsb_trace_now();
  * runs on, clipped to the device's persisting-L2 limit and maximum window
  * size. Any failing runtime call leaves the default cache policy in place;
  * 0 = no window. */
+#ifndef QSB_HP_SKIP
+#define QSB_HP_SKIP 0
+#endif
 #ifndef QSB_TABLE_L2_WINDOW
 #define QSB_TABLE_L2_WINDOW 1
 #endif
@@ -305,6 +308,19 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #endif
 #if QSB_SHA_CONST_PEEL && !QSB_SHA_CONST_IV
 #error "QSB_SHA_CONST_PEEL is written in the QSB_SHA_CONST_IV loop"
+#endif
+/* QSB_CODE_ROLL (screen arm, default 0; a bit mask, in QSB_CARRIER_KNOBS): the code footprint of kernel_digest.
+ * Bit 0 (1): the SHA256d outer block runs inside qsb_pair_front3_z_value (the __noinline__ front, called once per
+ * epoch) instead of twice inline before the A front: zpair carries the two epochs' 8 state words (two per u64, low
+ * word first) where it carried their z, B's words are parked in the same shared rows, and the front computes z from
+ * them first. Bit 1 (2): qsb_pair_tail3_value's two recovery-id hashes as one 2-trip loop (recid 0, then recid 1;
+ * recid 0 wins), with qsb_k2s_post3's last step (x2 = p2 + xR) at the start of trip 1. Same compressions on the
+ * same words, the same field operations and the same verdict: bit-identical. 0 = the unrolled copies. */
+#ifndef QSB_CODE_ROLL
+#define QSB_CODE_ROLL 0
+#endif
+#if QSB_CODE_ROLL < 0 || QSB_CODE_ROLL > 3
+#error "QSB_CODE_ROLL is a mask of bits 0 (outer block) and 1 (gate): 0 to 3"
 #endif
 
 #if QSB_SHA_SCHED_V4
@@ -702,6 +718,35 @@ __device__ uint64_t BINOM_C[151][10];
 #if QSB_ROOT_WARP && QSB_PRE3_ROOT == 2
 #error "QSB_ROOT_WARP is written for QSB_PRE3_ROOT 0 or 1"
 #endif
+/* QSB_TREE_LANEMASK (ported from kshitij-hash's public 21af7f34; tree_inverse.cuh, the wave-top branch): each of the
+ * four waves and the inv16 product runs its operand loads and its QSB_TREE_MUL only on the lanes whose result is stored
+ * or read afterwards (wave A lanes < 8, B < 20, C < 18, D < 17, inv16 < 16); the base runs all 32 lanes and leaves the
+ * rest unstored. The same products of the same operands on the lanes that matter, so every stored node, the root and
+ * every inverse are bit-identical; the masked lanes only stop drawing datapath energy. 0 = the base byte for byte. */
+#ifndef QSB_TREE_LANEMASK
+#define QSB_TREE_LANEMASK 1
+#endif
+#if QSB_TREE_LANEMASK != 0 && QSB_TREE_LANEMASK != 1
+#error "QSB_TREE_LANEMASK must be 0 or 1"
+#endif
+#if QSB_TREE_LANEMASK && !QSB_TREE_WAVE_TOP
+#error "QSB_TREE_LANEMASK masks the wave-top branch (QSB_TREE_WAVE_TOP 1)"
+#endif
+/* QSB_TREE_ROW128 (ported from 21af7f34; tree_inverse.cuh, kernel_digest's prodA park): the block inverse's product
+ * rows (qsb_sc_products, 4 x 512 words) and inverse rows (4 x 256 words) as 2 rows of 16-byte limb pairs, so every node
+ * load and store is two 128-bit shared accesses instead of four 64-bit ones. Same words, same nodes, same products in
+ * the same order: bit-identical. Same 24 KiB of shared memory. 0 = the base byte for byte. Default 0 in this package:
+ * with it on, ptxas re-allocates the chain loop (the same 1,105 instructions and opcode mix, 1,082 lines with other
+ * registers), which fails the chain-loop identity gate; QSB_TREE_LANEMASK and QSB_POOL_RCONST leave it identical. */
+#ifndef QSB_TREE_ROW128
+#define QSB_TREE_ROW128 0
+#endif
+#if QSB_TREE_ROW128 != 0 && QSB_TREE_ROW128 != 1
+#error "QSB_TREE_ROW128 must be 0 or 1"
+#endif
+#if QSB_TREE_ROW128 && !(QSB_TREE_WAVE_TOP && !QSB_ROOT_LUT_SMEM && !QSB_PRE3_ROOT)
+#error "QSB_TREE_ROW128 is written for the wave top without the shared-memory divstep table or pre3"
+#endif
 /* QSB_TAIL_STAGGER: the two paired tails after the block
  * inverse run in a warp-group-dependent order, so the two warps a block has on one sub-partition put
  * different pipes under load at the same time. the base runs qsb_pair_tail3_value (finish qsb_k2s_post3, then
@@ -895,7 +940,7 @@ __device__ uint64_t BINOM_C[151][10];
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
 #ifndef QSB_DIVSTEP_LOOKAHEAD
-#define QSB_DIVSTEP_LOOKAHEAD 0
+#define QSB_DIVSTEP_LOOKAHEAD 1   /* ks-cuts: on (measured +0.33%, 7/7 rounds, identical hit set) */
 #endif
 #if QSB_DIVSTEP_LOOKAHEAD < 0 || QSB_DIVSTEP_LOOKAHEAD > 1
 #error "QSB_DIVSTEP_LOOKAHEAD must be 0 or 1"
@@ -3059,7 +3104,21 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     uint64_t prodA[5], prodB[5], nB[12];
 #if ZLAB_DUAL_EPOCH_SHA
     uint64_t zB[4];
+#if QSB_CODE_ROLL & 1
+    /* QSB_CODE_ROLL bit 0: the two epochs' states, not their z; qsb_pair_front3_z_value runs the outer block. */
+    QsbPairEpochZ zpair;
+    {
+        uint32_t stA[8],stB[8];
+        qsb_scheduled_window_hash_pair(stA,stB,lane,f0,f1);
+        #pragma unroll
+        for(int k=0;k<4;k++){
+            zpair.a[k]=((uint64_t)stA[2*k+1]<<32)|(uint64_t)stA[2*k];
+            zpair.b[k]=((uint64_t)stB[2*k+1]<<32)|(uint64_t)stB[2*k];
+        }
+    }
+#else
     QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
+#endif
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
 #if QSB_PARK128
@@ -3093,8 +3152,12 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #if QSB_SC_PARK
         /*: park prodA in the product arena (idle until the tree) across B's front call instead
          * of holding its 8 registers over the CALL; reloaded before the leaf product below. */
+#if QSB_TREE_ROW128
+        QTR_ST4(qsb_sc_products2,tid,prodA);
+#else
         #pragma unroll
         for(int k=0;k<4;k++)qsb_sc_products[k][tid]=prodA[k];
+#endif
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && QSB_PARK128
         #pragma unroll
@@ -3152,8 +3215,12 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
 #if QSB_SC_PARK
     asm volatile("" ::: "memory");            /* the reload must not be forwarded from the store */
+#if QSB_TREE_ROW128
+    QTR_LD4(qsb_sc_products2,tid,prodA);
+#else
     #pragma unroll
     for(int k=0;k<4;k++)prodA[k]=qsb_sc_products[k][tid];
+#endif
 #endif
     uint64_t leaf[5];
     QSB_TREE_MUL(leaf,prodA,prodB);
@@ -3166,6 +3233,9 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
 #ifndef QSB_ISO_RELOAD_R
 #define QSB_ISO_RELOAD_R 1
+#endif
+#if QSB_POOL_RCONST && !QSB_ISO_RELOAD_R
+#error "QSB_POOL_RCONST reads the finish's xR from QSB_U2R; it needs QSB_ISO_RELOAD_R"
 #endif
 #if QSB_R_CBANK && !QSB_ISO_RELOAD_R
 #error "QSB_R_CBANK tail reads QSB_U2R; it needs QSB_ISO_RELOAD_R"
@@ -5326,7 +5396,29 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
-    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128)
+    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128) \
+    QSB_CARRIER_KV(QSB_CODE_ROLL) QSB_CARRIER_KV(QSB_WSEC_L1LAST) QSB_LEA_KNOBS \
+    QSB_K16_TREE_LANEMASK QSB_K16_TREE_ROW128 QSB_K16_POOL_RCONST
+/* QSB_LEA_KNOBS (GPUHash.h): QSB_SHA_LEA, QSB_LEA_PARTS, QSB_LEA_ORD, only when QSB_SHA_LEA is 1 (empty at 0, so the
+ * tree at QSB_SHA_LEA 0 builds the base's image byte for byte, knob string included). */
+/* The 21af7f34 ports (QSB_TREE_LANEMASK, QSB_TREE_ROW128, QSB_POOL_RCONST) enter the knob string only when non-zero, so
+ * the tree with all three at 0 builds the base's image byte for byte (knob string included), and any non-zero value is
+ * fingerprinted. */
+#if QSB_TREE_LANEMASK
+#define QSB_K16_TREE_LANEMASK QSB_CARRIER_KV(QSB_TREE_LANEMASK)
+#else
+#define QSB_K16_TREE_LANEMASK
+#endif
+#if QSB_TREE_ROW128
+#define QSB_K16_TREE_ROW128 QSB_CARRIER_KV(QSB_TREE_ROW128)
+#else
+#define QSB_K16_TREE_ROW128
+#endif
+#if QSB_POOL_RCONST
+#define QSB_K16_POOL_RCONST QSB_CARRIER_KV(QSB_POOL_RCONST)
+#else
+#define QSB_K16_POOL_RCONST
+#endif
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
@@ -5912,8 +6004,15 @@ int main(int argc, char **argv) {
 #endif
         if (qsb_prepare_window_schedule(dp.dummy_sigs, h_win3, h_const_words)) return 1;
 #ifdef QSB_HP_ON
+#if QSB_HP_SKIP
+        /* QSB_HP_SKIP (host-only, default 0; not in the image's knob list): do not start the host producers, so every batch
+         * is built by the GPU producers on its slot stream (what the multi-arm probes of 9b2fbb14 / 8df5c413 run) and the
+         * co-grinder keeps the producers' CPU time. */
+        printf("  Host producers: off (QSB_HP_SKIP; the GPU producers build every batch)\n");
+#else
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
                    (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+#endif
 #endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
