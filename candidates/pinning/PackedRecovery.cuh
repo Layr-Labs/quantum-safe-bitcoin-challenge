@@ -192,7 +192,9 @@ __device__ __forceinline__ void qsb_packed_prepare(
 #ifndef QSB_XOUT_LAZY
 #define QSB_XOUT_LAZY 1
 #endif
-/* QSB_FIN_MLATE (kill switch, default 1): m is not held across the x1 half of the recovery. After
+/* QSB_FIN_MLATE, QSB_FIN_SUMU and QSB_FIN_CHORD (pinning.cu): ports of the rival items in terrapinelf's
+ * PR #2713 (commit 91a4936; device image of fkiene's 285108a0), each on in this tree (0 gives back the record's statements, byte for byte).
+ * QSB_FIN_MLATE (rival default 1): m is not held across the x1 half of the recovery. After
  * sum = l + m (lazy, congruent), m == sum - l (mod p), so it is re-derived as QSB_FIN_SUB(m,sum,l)
  * once the x1 parity window has read l for the last time. Every consumer of m (the m - c
  * subtraction and the parity window) takes any representative in [0,2^256): the subtraction is
@@ -203,7 +205,7 @@ __device__ __forceinline__ void qsb_packed_prepare(
 #ifndef QSB_FIN_MLATE
 #define QSB_FIN_MLATE 1
 #endif
-/* QSB_FIN_SUMU (kill switch, default 1; needs QSB_FIN_MLATE): sum = l + m == (u + v) + (u - v)
+/* QSB_FIN_SUMU (rival default 1; needs QSB_FIN_MLATE): sum = l + m == (u + v) + (u - v)
  * == 2u (mod p) for either QSB_NEG_Y_MAC sign, so sum is formed as the lazy doubling u + u right
  * after the first slope product. The early m = u -/+ v subtraction is gone (MLATE re-derives m as
  * sum - l after the x1 window, as before), and sum no longer waits for the v product, so the
