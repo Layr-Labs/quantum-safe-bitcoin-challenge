@@ -1,4 +1,5 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_Q_MIX 2   /* the record's Q-layout switch (tree.cu): one warp in two decodes Q with the six GLV12 terms (the record: one in four) */
+#define QSB_RT_THERMAL 2   /* host only (ercumentyildirim): the gate-form switch also fires once NVML reports thermal slowdown in 2 consecutive 1 s samples */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
