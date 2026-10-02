@@ -2383,11 +2383,24 @@ __device__ __forceinline__ void _SHA256TransformFastTail11(
  *   v[2] = g+K1, v[3] = f+K2+W2, v[4] = e+K3 (the "h" inputs of rounds 1..3)
  *   v[5] = s1(L)+s0(W2) (the constant part of schedule word 17).
  * Passed by value as a kernel parameter together with the midstate (constant bank). */
+/* Use five aligned vector loads for the per-warp tail precompute. */
+#ifndef QSB_TAIL_PRE_VEC
+#define QSB_TAIL_PRE_VEC 1
+#endif
+/* Keep each per-warp precompute on a 16-byte boundary for vector loads. */
+#if QSB_TAIL_PRE_VEC
+struct alignas(16) qsb_tail_pre { uint32_t mid[8]; uint32_t v[6];
+#else
 struct qsb_tail_pre { uint32_t mid[8]; uint32_t v[6];
+#endif
     /* QSB_SHA_OPT extras: round 1 with Maj(A1,a,b) = (A1&(a^b)) + (a&b) and Ch(E1,e,f) =
      * (E1&e) + (~E1&f): v2y = v2 + (a&b), c2y = c - (a&b), mx = a^b; round 63 with the
      * feed-forward of words 0/4 folded: km63 = K63 + mid0, d4 = mid4 - mid0. */
     uint32_t v2y, c2y, mx, km63, d4; };
+#if QSB_TAIL_PRE_VEC
+static_assert(sizeof(qsb_tail_pre) == 80, "vector tail precompute stride");
+static_assert(alignof(qsb_tail_pre) == 16, "vector tail precompute alignment");
+#endif
 __device__ __forceinline__ void _SHA256TransformFastTail11P(
     uint32_t state[8], uint32_t w0, uint32_t w1, uint32_t w2, const qsb_tail_pre &tp)
 {
@@ -4132,10 +4145,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         /* The launch's four sequences' precomputes, one qsb_tail_pre per warp (host: d_mid_slot). */
         qsb_tail_pre ab_tp;
         {
+#if QSB_TAIL_PRE_VEC
+            const qsb_tail_pre *src_tp = reinterpret_cast<const qsb_tail_pre *>(d_midstate) + ab_warp;
+            const uint4 *src = reinterpret_cast<const uint4 *>(src_tp);
+            uint4 *dst = reinterpret_cast<uint4 *>(&ab_tp);
+            #pragma unroll
+            for (int i = 0; i < 5; i++) dst[i] = __ldg(src + i);
+#else
             const uint32_t *src = d_midstate + ab_warp * (uint32_t)(sizeof(qsb_tail_pre) / 4);
             uint32_t *dst = (uint32_t *)&ab_tp;
             #pragma unroll
             for (int i = 0; i < (int)(sizeof(qsb_tail_pre) / 4); i++) dst[i] = __ldg(src + i);
+#endif
         }
         (void)lt;
 #elif QSB_UNIF_DP & 1
