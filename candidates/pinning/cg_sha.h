@@ -22,9 +22,25 @@
 #include <string.h>
 #include <immintrin.h>
 
+/* QSB_CG_V29 (host only; default 0 = this file as in the record, byte for byte in the preprocessed source): 1 = the
+ * radix-2^29 AVX2 co-grinder of ercumentyildirim's b62c41b8 (also in cefika's c5a62fc4) in V3: cpu_cogrind3_vec29.h in
+ * place of cpu_cogrind3_vec.h, and here the structured 8-lane compressions (s8_compress_plan) that skip constant message
+ * words. V3 uses them on AVX2 hosts such as intel-r5 and intel-r3.
+ * Set the same value in cg_sha.h, cg_ec_scalar.h and cpu_cogrind3.h (bake.py bakes every file's first site). */
+#ifndef QSB_CG_V29
+#define QSB_CG_V29 1
+#endif
+#if QSB_CG_V29 != 0 && QSB_CG_V29 != 1
+#error "QSB_CG_V29 must be 0 or 1"
+#endif
+
 namespace qcg_sha {
 
+#if QSB_CG_V29
 static constexpr uint32_t K256[64] = {
+#else
+static const uint32_t K256[64] = {
+#endif
     0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,
     0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,
     0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,
@@ -33,7 +49,11 @@ static constexpr uint32_t K256[64] = {
     0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,
     0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,
     0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};
+#if QSB_CG_V29
 static constexpr uint32_t IV256[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
+#else
+static const uint32_t IV256[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
+#endif
 
 /* ---------------- portable scalar reference (also the no-AVX2 fallback) ---------------- */
 static inline uint32_t ror32(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
@@ -131,6 +151,7 @@ static QSB_SHA_AVX2 void s8_compress_full(v8u st[8], const v8u w_in[16]) {
     st[4] = s8_add(st[4], e); st[5] = s8_add(st[5], f); st[6] = s8_add(st[6], g); st[7] = s8_add(st[7], h);
 }
 
+#if QSB_CG_V29
 /* ---------------- structured 8-lane compressions ----------------
  * The co-grinder's three block shapes have message words that are the same in all 8 lanes of a call
  * (problem constants, SHA padding) and a scalar initial state (per-sequence midstate, or the IV).
@@ -239,6 +260,7 @@ static QSB_SHA_AVX2F void s8_compress_mid(v8u out[8], const v8u W[16], const uin
     for (int k = 0; k < 8; k++) out[k] = _mm256_set1_epi32((int)st0[k]);
     s8_compress_full(out, W);
 }
+#endif
 
 /* byte-swap of each 32-bit lane */
 static QSB_SHA_AVX2 v8u s8_bswap(v8u x) {
