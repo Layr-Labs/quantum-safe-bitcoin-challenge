@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* Pinning extension; mathematical model checked, native execution is remote only. */
 /* Derived from the PROMOTED Subset source a137e289b236c3622eba80f1ad5e9a0c8a91eb67. */
 // Preserves i34-9/VanitySearch (Jean Luc Pons), AbdelStark cooperative inverse,

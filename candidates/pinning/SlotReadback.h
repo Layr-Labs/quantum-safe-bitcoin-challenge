@@ -6,7 +6,7 @@
 namespace qsb {
 
 // One counter plus the unchanged 1024 device hit slots. Only the counter and
-// first 64 hits cross to the host, in one transfer on the completion stream.
+/* first 64 hits cross to the host, in one transfer on the completion stream. */
 class SlotReadback {
  public:
   SlotReadback() : device_(nullptr), host_(nullptr) {}

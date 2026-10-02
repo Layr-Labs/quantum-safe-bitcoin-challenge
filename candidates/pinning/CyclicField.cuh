@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 // Python-validated integration; no local native compilation or GPU execution.
 // Four independent secp256k1 products per full warp, eight lanes/product.
 // A and B each supply one 32-bit limb per lane. Return one noncanonical limb.
