@@ -60,7 +60,7 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
  * One IMAD.WIDE.U32 (c-bank multiplier, so ptxas cannot fold it back into shifts) plus one IMAD
  * add replaces one ALU-pipe SHF. Exact for every x and every 1 <= k <= 31. */
 #ifndef QSB_SHA_FMA_ROT
-#define QSB_SHA_FMA_ROT 0     /* bit 8 only: schedule-sigma logical shifts as IMAD.HI (no extra
+#define QSB_SHA_FMA_ROT 1     /* bit 8 only: schedule-sigma logical shifts as IMAD.HI (no extra
                                * instruction); rotations stay on the ALU pipe: IMAD.WIDE rotations
                                * (bits 1/2/4) measured -0.8..-2.3% */
 #endif
@@ -118,68 +118,11 @@ __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by t
 #endif
 
 /* One round; kw = K_i + W_i (a literal when W_i is constant). */
-#define QSB_RL_BASE(a, b, c, d, e, f, g, h, kw) \
+#define QSB_RL(a, b, c, d, e, f, g, h, kw) \
     t1 = h + S1(e) + Ch(e,f,g) + (kw); \
     t2 = S0(a) + Maj(a,b,c); \
     d += t1 + QSB_Z; \
     h = t1 + t2;
-
-/* QSB_SHA_LEA (default 0 = the rounds above, unchanged): rotate-add fusion for the two
- * prepare-kernel compressions (tail block and SHA256d outer digest; the finish's pubkey hash
- * uses QSB_RL_F and is not touched). Both Sigmas factor through one outer rotation:
- *   S1(e) = ROR6(e ^ ROR5(e) ^ ROR19(e)),  S0(a) = ROR2(a ^ ROR11(a) ^ ROR20(a))
- * (ROR distributes over XOR and ROR_i(ROR_j(x)) = ROR_{i+j}(x): exact for every x). sm_89 has a
- * rotate-add, LEA.HI Rd, y, x, y, n = x + ROL(y, n) (same pipe, issue cost and latency as SHF),
- * which ptxas forms from shf.wrap + add, so the outer rotation of each Sigma rides in an add the
- * round needs anyway. With Maj folded into T1:
- *   TM = h + K + W + Ch + Maj + S1(e)   (IADD3, IADD3, LEA.HI)
- *   a' = TM + S0(a)                     (LEA.HI)            = T1 + S0 + Maj
- *   e' = TM - Maj + d                   (IADD3 with -Maj)   = d + T1
- * 4 SHF + 4 LOP3 + 3 IADD3 + 2 LEA.HI = 13 instructions per round against 6 + 4 + 4 = 14; the
- * same 32-bit sums in another association, so every state word is unchanged.
- * The front end cancels the +Maj/-Maj pair of plain C, so the part that must keep its shape is PTX:
- *  QSB_RLA: per-lane W, whole add chain in PTX (the digest);
- *  QSB_RLM: per-lane W, only e' = TM - Maj + d in PTX (the tail block: with the whole chain in PTX,
- *           ptxas moves the block-uniform W1 schedule terms off the uniform datapath);
- *  QSB_RLK: literal K+W, plain C (the front end folds the literal). */
-#ifndef QSB_SHA_LEA
-#define QSB_SHA_LEA 0
-#endif
-#define QSB_S1P(x) ((x) ^ ROR(x,5) ^ ROR(x,19))    /* S1(x) = ROR(QSB_S1P(x), 6) */
-#define QSB_S0P(x) ((x) ^ ROR(x,11) ^ ROR(x,20))   /* S0(x) = ROR(QSB_S0P(x), 2) */
-#if QSB_SHA_LEA
-#define QSB_RLA(a, b, c, d, e, f, g, h, kw) { \
-    const uint32_t qy_ = QSB_S1P(e), qz_ = QSB_S0P(a); \
-    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
-    const uint32_t qx_ = (h) + (kw); \
-    asm("{\n\t.reg .u32 x2, t, r, s;\n\t" \
-        "add.u32 x2, %2, %3;\n\t" \
-        "add.u32 x2, x2, %4;\n\t" \
-        "shf.r.wrap.b32 r, %5, %5, 6;\n\t" \
-        "add.u32 t, x2, r;\n\t" \
-        "shf.r.wrap.b32 s, %6, %6, 2;\n\t" \
-        "sub.u32 r, t, %4;\n\t" \
-        "add.u32 %1, t, s;\n\t" \
-        "add.u32 %0, r, %0;\n\t}" \
-        : "+r"(d), "=r"(h) : "r"(qx_), "r"(qch_), "r"(qmj_), "r"(qy_), "r"(qz_)); }
-#define QSB_RLM(a, b, c, d, e, f, g, h, kw) { \
-    const uint32_t qy_ = QSB_S1P(e), qz_ = QSB_S0P(a); \
-    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
-    const uint32_t qt_ = (h) + (kw) + qch_ + qmj_ + ROR(qy_, 6); \
-    h = qt_ + ROR(qz_, 2); \
-    asm("{\n\t.reg .u32 r;\n\tsub.u32 r, %1, %2;\n\tadd.u32 %0, r, %0;\n\t}" \
-        : "+r"(d) : "r"(qt_), "r"(qmj_)); }
-#define QSB_RLK(a, b, c, d, e, f, g, h, kw) { \
-    const uint32_t qy_ = QSB_S1P(e), qz_ = QSB_S0P(a); \
-    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
-    const uint32_t qt_ = (h) + (kw) + qch_ + qmj_ + ROR(qy_, 6); \
-    d = qt_ - qmj_ + d; \
-    h = qt_ + ROR(qz_, 2); }
-#define QSB_RL(a, b, c, d, e, f, g, h, kw) QSB_RLA(a, b, c, d, e, f, g, h, kw)
-#else
-#define QSB_RL(a, b, c, d, e, f, g, h, kw) QSB_RL_BASE(a, b, c, d, e, f, g, h, kw)
-#define QSB_RLK(a, b, c, d, e, f, g, h, kw) QSB_RL_BASE(a, b, c, d, e, f, g, h, kw)
-#endif
 
 #define QSB_RND15L(k) {\
 QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(k) + w[0]);\
@@ -262,17 +205,8 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;\
  * transforms). Round 1's Maj has two constant inputs: Maj(A1,IV0,IV1) =
  * (A1 & (IV0^IV1)) + (IV0&IV1); the constant rides in t1 and leaves again
  * through c (= IV2 - (IV0&IV1) + t1). */
-#if QSB_SHA_LEA
-/* round 0 from the literal IV: d = W0 + (IV3 + T1'), h = W0 + (T1' + T2), T1' = the literal part */
-#define QSB_IV_ROUND0(W0) \
-    d = (W0) + (QSB_IV3 + QSB_IV7 + S1(QSB_IV4) + Ch(QSB_IV4, QSB_IV5, QSB_IV6) + qsb_klit(0)); \
-    h = (W0) + (QSB_IV7 + S1(QSB_IV4) + Ch(QSB_IV4, QSB_IV5, QSB_IV6) + qsb_klit(0) + \
-                S0(QSB_IV0) + Maj(QSB_IV0, QSB_IV1, QSB_IV2));
-#else
-#define QSB_IV_ROUND0(W0) QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(0) + (W0));
-#endif
 #define QSB_IV_ROUNDS01(W0, W1) \
-    QSB_IV_ROUND0(W0) \
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(0) + (W0)); \
     t1 = g + S1(d) + Ch(d,e,f) + (qsb_klit(1) + (QSB_IV0 & QSB_IV1)) + (W1); \
     t2 = S0(h) + (h & (QSB_IV0 ^ QSB_IV1)); \
     c = (QSB_IV2 - (QSB_IV0 & QSB_IV1)) + t1; \
@@ -301,20 +235,20 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     for (int i = 0; i < 8; i++) w[i] = m[i];
 
     QSB_IV_ROUNDS01(w[0], w[1]);
-    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);   /* h, d literal (IV5, IV1) */
-    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);   /* h, d literal (IV4, IV0) */
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);
     QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
     QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5) + w[5]);
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6) + w[6]);
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7) + w[7]);
-    QSB_RLK(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
-    QSB_RLK(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RLK(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RLK(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RLK(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
+    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8) + 0x80000000u);
+    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
 
     {
         w[0] += s0(w[1]);
@@ -383,41 +317,16 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     d = qsb_fadd((W0), one, QSB_IV3 + r0t1); \
     h = qsb_fadd((W0), one, r0t1 + r0t2); \
     t1 = qsb_fadd((W1), one, QSB_IV6 + qsb_klit(1) + (QSB_IV0 & QSB_IV1)); \
-    t1 = QSB_FADD_S1IV(t1, d); \
+    t1 = qsb_fadd(t1, one, S1(d)); \
     t1 = qsb_fadd(t1, one, Ch(d, QSB_IV4, QSB_IV5)); \
     c = qsb_fadd(t1, one, QSB_IV2 - (QSB_IV0 & QSB_IV1)); \
-    t2 = QSB_FADD_S0IV(t1, h); \
+    t2 = qsb_fadd(t1, one, S0(h)); \
     g = qsb_fadd(t2, one, h & (QSB_IV0 ^ QSB_IV1)); }
 #else
 #define QSB_KWF(K, X) K + X
 #define QSB_IV_ROUNDS01_F(W0, W1) QSB_IV_ROUNDS01(W0, W1)
 #endif
 
-/* QSB_FIN_LEA (default 0 = unchanged): the QSB_SHA_LEA rotate-add in the finish's pubkey hash.
- * There every add is a multiply-pipe IMAD (qsb_fadd); x + S1(e) and x + S0(a) become one ALU-pipe
- * LEA.HI each (x + ROR6(QSB_S1P(e)), x + ROR2(QSB_S0P(a))) in place of the Sigma's outer SHF plus
- * an IMAD: ALU-pipe count per round unchanged (4 SHF + 4 LOP3 + 2 LEA.HI), two IMADs fewer. The
- * shf.wrap + add pair is kept in one asm block so that ptxas fuses it. Exact: the same sum. */
-#ifndef QSB_FIN_LEA
-#define QSB_FIN_LEA 0
-#endif
-__device__ __forceinline__ uint32_t qsb_add_ror6(uint32_t x, uint32_t y) {
-    uint32_t r; asm("{\n\t.reg .u32 t;\n\tshf.r.wrap.b32 t, %2, %2, 6;\n\tadd.u32 %0, %1, t;\n\t}" : "=r"(r) : "r"(x), "r"(y)); return r;
-}
-__device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
-    uint32_t r; asm("{\n\t.reg .u32 t;\n\tshf.r.wrap.b32 t, %2, %2, 2;\n\tadd.u32 %0, %1, t;\n\t}" : "=r"(r) : "r"(x), "r"(y)); return r;
-}
-#if QSB_FIN_LEA
-#define QSB_FADD_S1(x, e) qsb_add_ror6((x), QSB_S1P(e))    /* x + S1(e) */
-#define QSB_FADD_S0(x, a) qsb_add_ror2((x), QSB_S0P(a))    /* x + S0(a) */
-#define QSB_FADD_S1IV(x, e) QSB_FADD_S1(x, e)
-#define QSB_FADD_S0IV(x, a) QSB_FADD_S0(x, a)
-#else
-#define QSB_FADD_S1(x, e) qsb_fadd((x), one, QSB_S1M(e))
-#define QSB_FADD_S0(x, a) qsb_fadd((x), one, QSB_S0M(a))
-#define QSB_FADD_S1IV(x, e) qsb_fadd((x), one, S1(e))      /* the IV rounds use the plain Sigmas */
-#define QSB_FADD_S0IV(x, a) qsb_fadd((x), one, S0(a))
-#endif
 #if QSB_SHA_FMA_ADD
 #if QSB_SHA_FMA_ROT & 1
 #define QSB_S1M(x) S1F(x)
@@ -441,11 +350,6 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
     t1 = qsb_fadd(h, one, (kw)); \
     t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
     t1 = qsb_fadd(t1, one, QSB_S1M(e));
-#elif QSB_FIN_LEA
-#define QSB_RL_T1(h, e, f, g, kw) \
-    t1 = qsb_fadd(h, one, (kw)); \
-    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
-    t1 = QSB_FADD_S1(t1, e);
 #else
 #define QSB_RL_T1(h, e, f, g, kw) \
     t1 = qsb_fadd(h, one, (kw)); \
@@ -462,7 +366,7 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
 #define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
     QSB_RL_T1(h, e, f, g, kw) \
     d  = qsb_fadd(d, one, t1); \
-    t2 = QSB_FADD_S0(t1, a); \
+    t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
 #endif
 #define QSB_RND15L_F(k) {\
@@ -519,13 +423,7 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
  * h role (IV5, then IV4). t1 = h + (K + W) was two multiply-pipe adds with h a literal; the
  * literal now rides in the immediate of the K + W add: t1 = W*one + (K + IV). Same sum mod 2^32. */
 #ifndef QSB_FIN_IVFOLD
-#define QSB_FIN_IVFOLD 1
-#endif
-/* QSB_FIN_R63_SUM (kill switch): the a-output of round 63 as two three-input sums on the ALU
- * pipe (a + W63 + (K63 + IV0) + S1(f) + Ch, then + S0(b) + Maj) instead of six serial IMAD
- * adds; the same seven addends mod 2^32, so H0 is bit-identical. */
-#ifndef QSB_FIN_R63_SUM
-#define QSB_FIN_R63_SUM 1
+#define QSB_FIN_IVFOLD 0
 #endif
 /* QSB_FIN_W8S0 (kill switch): s0 of the padded last message word W8 = (b << 24) | 0x800000
  * (b = the low byte of x) from its 8 live bits; see the W23 step of _SHA256Pubkey33H0. */
@@ -670,19 +568,13 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[15] = qsb_fadd(w[15], one, s1(w[13]));
         w[15] = qsb_fadd(w[15], one, w[8]);
         w[15] = qsb_fadd(w[15], one, s0(w[0]));
-#if QSB_FIN_R63_SUM
-        const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
-        const uint32_t r1 = r0 + S1(f) + Ch(f,g,h);
-        return r1 + S0(b) + Maj(b,c,d);
-#else
         uint32_t r = qsb_fadd(a, one, w[15]);
         r = qsb_fadd(r, one, qsb_klit(63) + QSB_IV0);
-        r = QSB_FADD_S1(r, f);
+        r = qsb_fadd(r, one, QSB_S1M(f));
         r = qsb_fadd(r, one, Ch(f,g,h));
-        r = QSB_FADD_S0(r, b);
+        r = qsb_fadd(r, one, QSB_S0M(b));
         r = qsb_fadd(r, one, Maj(b,c,d));
         return r;
-#endif
     }
 #else
     QSB_RND16L(16);
