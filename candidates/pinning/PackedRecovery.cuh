@@ -217,12 +217,20 @@ __device__ __forceinline__ void qsb_packed_prepare(
 #if QSB_FIN_SUMU && !(QSB_FIN_MLATE && QSB_PARITY_SUM && QSB_FIN_RAWS)
 #error "QSB_FIN_SUMU re-derives m through QSB_FIN_MLATE"
 #endif
+#if QSB_FIN_LINEAR_PRE && !(QSB_NEG_Y_MAC && QSB_ISO_XR && QSB_YOFF && QSB_LAZY_REC && QSB_FIN_SUMU)
+#error "QSB_FIN_LINEAR_PRE needs negative-Y isomorphic offset ordinates and lazy FIN_SUMU recovery"
+#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
     uint64_t *a,uint64_t *b,uint64_t *c,uint64_t *x1,uint64_t *x2) {
     uint64_t u[4],v[4],l[4],m[4],sum[4],t[4],s[4];
-#if QSB_LAZY_REC
+#if QSB_FIN_LINEAR_PRE
+    /* Prepare stores (Y + bV)*hc and the root plane stores 2*b*r. Their products
+     * directly supply l and sum; FIN_MLATE derives m from sum-l below. */
+    QSB_FIN_RAW_MUL(sum,tbar,weighted_inv);
+    QSB_FIN_RAW_MUL(l,vbar,root_inv);
+#elif QSB_LAZY_REC
     /* u, v, l, m and sum only feed multiplies and borrow-corrected subtractions, which
      * accept any representative in [0,2^256); only x1/x2 (hashed) and the parity inputs
      * need [0,p). So u and v stay raw and m, sum use the carry-folding lazy add
