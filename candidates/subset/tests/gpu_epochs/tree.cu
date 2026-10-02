@@ -215,6 +215,9 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
  * _ModSub256 go with it. Default 0: gate PKG2 read the seed 15 slots per candidate leaner but the chain loop
  * 3 IMAD.MOV phi copies per trip longer (ptxas re-allocates at the 128-register wall), net +5.5 slots per
  * candidate; 1 = the K32 form (hit_filter_field_sc.cuh, qsb_filter_sub_k32).
+ * QSB_S3_HINT_MODE (default 0; carrier image only): 2 adds the 64 B L2 hint to each of the other three 16 B
+ * cold-record loads, alongside the first load's existing hint; 3 switches those loads to the same .cs.nc path
+ * without adding hints. Mode 0 keeps the original instructions. The loads address the same bytes in every mode.
  * QSB_GATHER_L1_POLICY (screen arm, default 0; carrier image only, sm_80+): 1 = .L1::no_allocate on the cold
  * record loads (segments 4-5, 480 B per candidate; the hot loads keep __ldg); 2 = .L1::evict_first on the cold
  * loads; 3 = .L1::no_allocate on the cold and the hot loads. PTX allows either a cache operator or an eviction
@@ -231,7 +234,7 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #error "QSB_SHA_SCHED_V4 must be 0 or 1"
 #endif
 #ifndef QSB_OUTER_LITK
-#define QSB_OUTER_LITK 0
+#define QSB_OUTER_LITK 1
 #endif
 #if QSB_OUTER_LITK != 0 && QSB_OUTER_LITK != 1
 #error "QSB_OUTER_LITK must be 0 or 1"
@@ -274,8 +277,17 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #if QSB_GATHER_ONE_FORM < 0 || QSB_GATHER_ONE_FORM > 2
 #error "QSB_GATHER_ONE_FORM must be 0, 1 or 2"
 #endif
-#if (QSB_GATHER_L1_POLICY || QSB_GATHER_ONE_FORM) && !QSB_S3_NM_MASK
-#error "QSB_GATHER_L1_POLICY and QSB_GATHER_ONE_FORM are written in qsb_s3_load_n (QSB_S3_NM_MASK 1)"
+#ifndef QSB_S3_HINT_MODE
+#define QSB_S3_HINT_MODE 0
+#endif
+#if QSB_S3_HINT_MODE != 0 && QSB_S3_HINT_MODE != 2 && QSB_S3_HINT_MODE != 3
+#error "QSB_S3_HINT_MODE must be 0, 2 or 3"
+#endif
+#if (QSB_GATHER_L1_POLICY || QSB_GATHER_ONE_FORM || QSB_S3_HINT_MODE) && !QSB_S3_NM_MASK
+#error "QSB_GATHER_L1_POLICY, QSB_GATHER_ONE_FORM and QSB_S3_HINT_MODE require QSB_S3_NM_MASK 1"
+#endif
+#if QSB_S3_HINT_MODE && QSB_GATHER_L1_POLICY
+#error "QSB_S3_HINT_MODE and QSB_GATHER_L1_POLICY are separate cold-load variants"
 #endif
 
 /* ---- switches. File-scope defaults, all 0 in this tree
@@ -923,6 +935,14 @@ __device__ uint64_t BINOM_C[151][10];
 #if QSB_GT_HEAL != 0 && QSB_GT_HEAL != 1
 #error "QSB_GT_HEAL must be 0 or 1"
 #endif
+/* Encode only the low limb of Y so signed gathers can absorb its correction. */
+#ifndef QSB_SMEM02
+#define QSB_SMEM02 1
+#endif
+#if QSB_SMEM02 != 0 && QSB_SMEM02 != 1
+#error "QSB_SMEM02 must be 0 or 1"
+#endif
+#define QSB_SMEM02_Q 0x800001E8ULL
 __host__ __device__ __forceinline__ unsigned gt_entries(int c) {
 #if QSB_GLV11
     if(c>=6) return c==6 ? 67108864u : 134217728u;
@@ -1085,6 +1105,9 @@ __device__ __forceinline__ void gt_load_signed_flat(const uint8_t *__restrict__ 
     const ulonglong2 *ty=(const ulonglong2 *)(gTable+off+32);
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
+#if QSB_SMEM02
+    y0.x -= QSB_SMEM02_Q;
+#endif
     uint64_t m=0ULL-neg;
     uint64_t r0=y0.x^m, r1=y0.y^m, r2=y1.x^m, r3=y1.y^m;
     uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
@@ -1116,7 +1139,12 @@ __device__ __forceinline__ void gt_load_signed_flat_f(const uint8_t *__restrict_
     ulonglong2 x0=__ldg(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
     gx[0]=x0.x;gx[1]=x0.y;gx[2]=x1.x;gx[3]=x1.y;
     uint64_t m=0ULL-neg;
-    gy[0]=(y0.x^m)+(0xFFFFFFFEFFFFFC30ULL&m); gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
+#if QSB_SMEM02
+    gy[0]=(y0.x^m)-QSB_SMEM02_Q;
+#else
+    gy[0]=(y0.x^m)+(0xFFFFFFFEFFFFFC30ULL&m);
+#endif
+    gy[1]=y0.y^m; gy[2]=y1.x^m; gy[3]=y1.y^m;
 #else
     gt_load_signed_flat(gTable, base, idx, neg, gx, gy);
 #endif
@@ -1797,9 +1825,19 @@ __device__ __forceinline__ void qsb_s3_load(const uint8_t *__restrict__ gTable, 
     gx[0] = x0.x; gx[1] = x0.y; gx[2] = x1.x; gx[3] = x1.y;
     const uint64_t m = 0ULL - (uint64_t)(code >> 31);
 #if QSB_NEG_SHORT
-    gy[0] = (y0.x ^ m) + (0xFFFFFFFEFFFFFC30ULL & m); gy[1] = y0.y ^ m; gy[2] = y1.x ^ m; gy[3] = y1.y ^ m;
+#if QSB_SMEM02
+    gy[0] = (y0.x ^ m) - QSB_SMEM02_Q;
 #else
-    uint64_t r0 = y0.x ^ m, r1 = y0.y ^ m, r2 = y1.x ^ m, r3 = y1.y ^ m;
+    gy[0] = (y0.x ^ m) + (0xFFFFFFFEFFFFFC30ULL & m);
+#endif
+    gy[1] = y0.y ^ m; gy[2] = y1.x ^ m; gy[3] = y1.y ^ m;
+#else
+#if QSB_SMEM02
+    uint64_t r0 = (y0.x - QSB_SMEM02_Q) ^ m;
+#else
+    uint64_t r0 = y0.x ^ m;
+#endif
+    uint64_t r1 = y0.y ^ m, r2 = y1.x ^ m, r3 = y1.y ^ m;
     uint64_t c0 = 0xFFFFFFFEFFFFFC30ULL & m;
     UADDO1(r0, c0); UADDC1(r1, m); UADDC1(r2, m); UADD1(r3, m);
     gy[0] = r0; gy[1] = r1; gy[2] = r2; gy[3] = r3;
@@ -1856,7 +1894,21 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
     if (cold) {
         asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
             : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
+#if QSB_S3_HINT_MODE == 2 || QSB_S3_HINT_MODE == 3
+#if QSB_S3_HINT_MODE == 2
+#define QSB_S3_HINT_SUFFIX ".L2::64B"
+#else
+#define QSB_S3_HINT_SUFFIX ""
+#endif
+#define QSB_S3_HINT_LOAD(v, p) asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc" QSB_S3_HINT_SUFFIX \
+                                    ".v2.u64 {%0,%1}, [g]; }" \
+                                    : "=l"((v).x), "=l"((v).y) : "l"(p))
+        QSB_S3_HINT_LOAD(x1, tx + 1); QSB_S3_HINT_LOAD(y0, ty); QSB_S3_HINT_LOAD(y1, ty + 1);
+#undef QSB_S3_HINT_LOAD
+#undef QSB_S3_HINT_SUFFIX
+#else
         x1 = __ldcs(tx + 1); y0 = __ldcs(ty); y1 = __ldcs(ty + 1);
+#endif
     }
     else    { x0 = __ldg(tx);  x1 = __ldg(tx + 1);  y0 = __ldg(ty);  y1 = __ldg(ty + 1);  }
 #endif
@@ -1867,7 +1919,12 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
     gx[0] = x0.x; gx[1] = x0.y; gx[2] = x1.x; gx[3] = x1.y;
     uint64_t m;   /* {nm, nm}: the 64-bit mask is the walker's register twice, no instruction */
     asm("mov.b64 %0, {%1,%1};" : "=l"(m) : "r"(nm));
-    gy[0] = (y0.x ^ m) + (0xFFFFFFFEFFFFFC30ULL & m); gy[1] = y0.y ^ m; gy[2] = y1.x ^ m; gy[3] = y1.y ^ m;
+#if QSB_SMEM02
+    gy[0] = (y0.x ^ m) - QSB_SMEM02_Q;
+#else
+    gy[0] = (y0.x ^ m) + (0xFFFFFFFEFFFFFC30ULL & m);
+#endif
+    gy[1] = y0.y ^ m; gy[2] = y1.x ^ m; gy[3] = y1.y ^ m;
 }
 #endif
 /* z*A = r1*A + psi(r2*A): seed with Q's segments 0,1 (3M+2S), deferred madds for Q2..Q5, psi, P0..P4,
@@ -3828,7 +3885,11 @@ __device__ __forceinline__ void gt_batch_store(uint8_t *gTable, size_t off,
     ulonglong2 *r = (ulonglong2 *)(gTable + off);
     __stcs(r,     make_ulonglong2(x[0], x[1]));
     __stcs(r + 1, make_ulonglong2(x[2], x[3]));
+#if QSB_SMEM02
+    __stcs(r + 2, make_ulonglong2(y[0] + QSB_SMEM02_Q, y[1]));
+#else
     __stcs(r + 2, make_ulonglong2(y[0], y[1]));
+#endif
     __stcs(r + 3, make_ulonglong2(y[2], y[3]));
 }
 __global__ void __launch_bounds__(256, 2) kernel_build_gtable(
@@ -3954,6 +4015,9 @@ __global__ void kernel_build_gtable(
         for (int k = 0; k < 4; k++) { rx[k] = px[k]; ry[k] = py[k]; }
     }
     size_t off = ((size_t)gt_offset(ch) + d) * 64;
+#if QSB_SMEM02
+    ry[0] += QSB_SMEM02_Q;
+#endif
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
 }
@@ -3979,6 +4043,9 @@ __global__ void kernel_gt_heal_scan(const uint8_t * __restrict__ gTable,
     if (t >= GT_TOTAL_ENTRIES) return;
     const uint64_t *r = (const uint64_t *)(gTable + t * 64);
     uint64_t x[4] = {r[0], r[1], r[2], r[3]}, y[4] = {r[4], r[5], r[6], r[7]};
+#if QSB_SMEM02
+    y[0] -= QSB_SMEM02_Q;
+#endif
     uint64_t b[4] = {bprime[0], bprime[1], bprime[2], bprime[3]};
     uint64_t lhs[4], x2[4], rhs[4];
     _ModSqr(lhs, y); _ModSqr(x2, x); _ModMult(rhs, x2, x); _ModAdd256(rhs, rhs, b);
@@ -4026,6 +4093,9 @@ __global__ void kernel_build_gtable(
     /* Limbs are little-endian in memory, which is exactly the table's byte
      * order, so the store is a straight copy. */
     size_t off = ((size_t)gt_offset(ch) + d) * 64;
+#if QSB_SMEM02
+    ry[0] += QSB_SMEM02_Q;
+#endif
     memcpy(gTable + off,      rx, 32);
     memcpy(gTable + off + 32, ry, 32);
 }
@@ -4301,6 +4371,9 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         BN_mod_mul(k, k, nri, order, ctx);
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, alpha,beta,field_p,ctx,want);
+#if QSB_SMEM02
+        want[4] += QSB_SMEM02_Q;
+#endif
         const uint8_t *rec = gathered ? gathered + (size_t)t * 64
                                       : gTable + ((size_t)gt_offset(ch) + i) * 64;
         if (memcmp(rec,      want,     32) != 0 ||
@@ -4339,6 +4412,9 @@ static void gt_spot_check_range(int t0, int t1, const int *chs, const int *is, c
         BN_mod_mul(k, k, nri, order, ctx);
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, alpha,beta,field_p,ctx,want);
+#if QSB_SMEM02
+        want[4] += QSB_SMEM02_Q;
+#endif
         const uint8_t *rec = gathered + (size_t)t * 64;
         if (memcmp(rec, want, 32) != 0 || memcmp(rec + 32, want + 4, 32) != 0) { *first_bad = t; break; }
     }
@@ -4430,6 +4506,9 @@ static int gt_heal(uint8_t *d_gTable, const uint8_t neg_r_inv[32],
             BN_mod_mul(k, k, nri, order, ctx);
             EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
             gt_point_to_limbs(grp, pt, x, y, alpha, beta, field_p, ctx, want);
+#if QSB_SMEM02
+            want[4] += QSB_SMEM02_Q;
+#endif
             if (cudaMemcpy(got, d_gTable + (size_t)t * 64, 64, cudaMemcpyDeviceToHost) != cudaSuccess) { rc = -1; break; }
             if (memcmp(got, want, 64) != 0) {
                 if (cudaMemcpy(d_gTable + (size_t)t * 64, want, 64, cudaMemcpyHostToDevice) != cudaSuccess) { rc = -1; break; }
@@ -4468,6 +4547,9 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
         EC_POINT_mul(grp,step,stepk,NULL,NULL,ctx);
         for(unsigned d=0;d<gt_entries(ch);d++) {
             uint64_t limbs[8]; gt_point_to_limbs(grp,pt,x,y,alpha,beta,field_p,ctx,limbs);
+#if QSB_SMEM02
+            limbs[4] += QSB_SMEM02_Q;
+#endif
             memcpy(gTable+((size_t)gt_offset(ch)+d)*64,limbs,64);
             if(d+1<gt_entries(ch)) EC_POINT_add(grp,pt,pt,step,ctx);
         }
@@ -4811,6 +4893,9 @@ static int gt_spot_check(const uint8_t *gTable, int samples,
         BN_mod_mul(k, k, half_nri, order, ctx);
         EC_POINT_mul(grp, pt, k, NULL, NULL, ctx);
         gt_point_to_limbs(grp, pt, x, y, alpha,beta,field_p,ctx,want);
+#if QSB_SMEM02
+        want[4] += QSB_SMEM02_Q;
+#endif
         const uint8_t *rec = gathered ? gathered + (size_t)t * 64
                                       : gTable + ((size_t)gt_offset(ch) + i) * 64;
         if (memcmp(rec,      want,     32) != 0 ||
@@ -4889,6 +4974,9 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
                 uint64_t limbs[8];
                 gt_point_to_limbs(grp, batch[j], x, y, alpha, beta, field_p, ctx, limbs);
                 size_t off = ((size_t)gt_offset(ch) + start + j) * 64;
+#if QSB_SMEM02
+                limbs[4] += QSB_SMEM02_Q;
+#endif
                 memcpy(gTable + off, limbs, sizeof(limbs));
             }
         }
@@ -4903,6 +4991,12 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
             for(int j=0;j<16;j++){uint8_t t=xb[j];xb[j]=xb[31-j];xb[31-j]=t;}
             for(int j=0;j<16;j++){uint8_t t=yb[j];yb[j]=yb[31-j];yb[31-j]=t;}
             size_t off = ((size_t)gt_offset(ch) + d) * 64;
+#if QSB_SMEM02
+            uint64_t y0;
+            memcpy(&y0, yb, sizeof(y0));
+            y0 += QSB_SMEM02_Q;
+            memcpy(yb, &y0, sizeof(y0));
+#endif
             memcpy(gTable + off,      xb, 32);
             memcpy(gTable + off + 32, yb, 32);
             if (d < gt_entries(ch) - 1) EC_POINT_add(grp, pt, pt, two_base, ctx);
@@ -5284,6 +5378,16 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * knobs whose value is one token are listed (derived macros such as QSB_PAIR_MUL follow
  * from them), so the string does not depend on how a preprocessor spaces expressions;
  * a knob that is not defined in this configuration stringifies to its own name. */
+#if QSB_SMEM02
+#define QSB_CARRIER_SMEM02 QSB_CARRIER_KV(QSB_SMEM02)
+#else
+#define QSB_CARRIER_SMEM02
+#endif
+#if QSB_S3_HINT_MODE
+#define QSB_CARRIER_S3_HINT_MODE QSB_CARRIER_KV(QSB_S3_HINT_MODE)
+#else
+#define QSB_CARRIER_S3_HINT_MODE
+#endif
 #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
@@ -5326,7 +5430,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_DECODE_CUT) QSB_CARRIER_KV(QSB_K32_SUBCUT) QSB_CARRIER_KV(QSB_K32_ADDCUT) \
     QSB_CARRIER_KV(QSB_FX3_PRESUB) QSB_CARRIER_KV(QSB_FX3_PRESUB_EARLY) QSB_CARRIER_KV(QSB_S3_DOFF) QSB_CARRIER_KV(QSB_S3_UNIFORM_G) \
     QSB_CARRIER_KV(QSB_OK_FOLD) QSB_CARRIER_KV(QSB_XNEG_BRANCH) QSB_CARRIER_KV(QSB_PW_QN) QSB_CARRIER_KV(QSB_TID_UNSIGNED) \
-    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128)
+    QSB_CARRIER_KV(QSB_S3_NM_SEED) QSB_CARRIER_KV(QSB_TREE_UNROLL) QSB_CARRIER_KV(QSB_PARK128) \
+    QSB_CARRIER_SMEM02 QSB_CARRIER_S3_HINT_MODE
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif

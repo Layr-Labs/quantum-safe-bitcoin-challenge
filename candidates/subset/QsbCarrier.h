@@ -14,10 +14,10 @@
  *
  * What. build_carrier.sh compiles the SAME source offline with
  * `-arch=sm_89 -cubin -DQSB_CARRIER_BUILD=1` and embeds the cubin as base64 in
- * qsb_carrier_sm89.h. QSB_CARRIER_BUILD changes one device line (qsb_s3_load in
- * tree.cu): the first 16 B load of each cold (DRAM-segment) 64 B table record
- * becomes `ld.global.cs.nc.L2::64B`, so a miss fetches both 32 B sectors of the
- * record as one DRAM access. At startup this file loads that image with
+ * qsb_carrier_sm89.h. QSB_CARRIER_BUILD changes the cold gather in qsb_s3_load_n
+ * (tree.cu): by default, the first 16 B load of each DRAM-segment record becomes
+ * `ld.global.cs.nc.L2::64B`, so a miss can fetch both 32 B sectors together.
+ * QSB_S3_HINT_MODE optionally adds the hint to the other three slices. At startup this file loads that image with
  * cudaLibraryLoadData and resolves the four search-loop kernels (epoch groups,
  * incremental epochs, first-block states, digest); sp_launch in tree.cu launches
  * them with cudaLaunchKernel.
