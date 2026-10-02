@@ -551,7 +551,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 4
+#define QSB_Q_MIX 2
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -1002,7 +1002,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  *   (sm_70+): the JIT/ranked sm_52 path runs the solo inversion. PROTOTYPE, default off: it has no in-run
  *   counters yet and its slot census wants QSB_SC_OPS 52, not 48. */
 #ifndef QSB_QMIX_RT
-#define QSB_QMIX_RT 0
+#define QSB_QMIX_RT 1
 #endif
 #ifndef QSB_CONST_CALLEE
 #define QSB_CONST_CALLEE 1
@@ -1098,13 +1098,13 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * (mask TARGET - 1). FORCE_S (test builds only, -D on the host line): > 0 writes the mask at the first boundary at
  * or after that many seconds whatever the rate (the identity gate forces 60 s); < 0 never writes. */
 #ifndef QSB_QMIX_RT_AFTER_S
-#define QSB_QMIX_RT_AFTER_S 240
+#define QSB_QMIX_RT_AFTER_S 150
 #endif
 #ifndef QSB_QMIX_RT_RATIO_PCT
-#define QSB_QMIX_RT_RATIO_PCT 80
+#define QSB_QMIX_RT_RATIO_PCT 95
 #endif
 #ifndef QSB_QMIX_RT_TARGET
-#define QSB_QMIX_RT_TARGET 16
+#define QSB_QMIX_RT_TARGET 8
 #endif
 #ifndef QSB_QMIX_RT_FORCE_S
 #define QSB_QMIX_RT_FORCE_S 0
