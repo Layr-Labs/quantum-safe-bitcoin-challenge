@@ -1,188 +1,165 @@
-# Subset: rotate-add SHA-256 rounds, pinning's chain items, a two-form gate, fused carry captures and jacklightChen's co-grinder cuts on fb6f5a8f
+# Subset: kshitij-hash's promoted `4cc9d2d8` with four exact device switches (`QSB_Q_MIX` 2, ercumentyildirim's `QSB_CODE_ROLL` 2, `QSB_SHA_WROLL_PIPE` 1, `QSB_R_CBANK_TAILS` 1), runtime telemetry and the co-grinder's diagnostic walk start turned off
 
-This package builds on our subset submission `e6715658` and carries the contiguous co-grinder walk that the current record
-`fb6f5a8f` (cefika) added to it, so it holds everything in the record. Each item is a compile-time switch at file scope.
-Setting a switch to 0 gives back the previous code for that part.
+## Starting point
 
-`kernel_digest` runs at 128 registers with no stack frame and no spills, 2 blocks per SM, as in `e6715658`. No kernel in
-the image spills. The committed native image is cubin sha256 `cef81a9f525fae26...` (516,960 B), built from this tree's own
-source with CUDA 12.8.93. `build_carrier.sh` reproduces it byte for byte. The ranked build line exits 0, and the binary
-carries the image's sha and knob string.
+This package starts from kshitij-hash's promoted record `4cc9d2d8` (736.59 M/s, landed as benchmark commit `2f57d80`).
+Its tree is used as promoted: every file except `subset.cu`, `tests/gpu_epochs/pair_shared.cuh` and `tests/gpu_epochs/tree.cu`
+is byte for byte the record's, and every switch of the record other than the six in the table below keeps the record's value. That includes the record's own rare-carry switches (`QSB_FMUL_LEAN` 3,
+`QSB_LOSS_FINK32` 1, `QSB_LOSS_SQRLEAN` 1, `QSB_LOSS_ROOTLAZY` 1, `QSB_HIGH15_NOFB` 1), which the record's note describes:
+on those paths a rare candidate can lose its hit, and the exact host gate still re-derives every published hit. The current
+promoted record and its bar are the leaderboard's at submission time.
 
-Written with Claude Fable 5.1 and Claude Opus 5.5 in Claude Code.
+This ticket sets four compile-time switches in `subset.cu`, changes the defaults of two of the record's own switches in
+`tests/gpu_epochs/tree.cu`, and ports ercumentyildirim's `QSB_CODE_ROLL` code, which the record does not have, into `tests/gpu_epochs/pair_shared.cuh` (the rolled gate, about 57 lines) and `tests/gpu_epochs/tree.cu` (its call
+site and knob-string entry). Nothing else differs from `4cc9d2d8`.
 
-## Device switches (on)
+| switch | record | this package | where it acts |
+|---|---|---|---|
+| `QSB_CODE_ROLL` | absent (off) | **2** | device: the pair gate's two recovery-id hashes as one 2-trip loop (ercumentyildirim, PR 2441) |
+| `QSB_Q_MIX` | 4 | **2** | device: the per-warp mix of the two Q layouts (half of the warps instead of a quarter decode Q with the six GLV12 terms) |
+| `QSB_SHA_WROLL_PIPE` | 0 | **1** | device: the paired hash's window block as one 8-round loop with its W+K loads issued half a trip ahead (the record's own switch) |
+| `QSB_R_CBANK_TAILS` | 0 | **1** | device: the tail callees read the recovery point R from the constant bank instead of eight 64-bit ABI arguments (the record's own switch) |
+| `QSB_HIT_TELEMETRY` | 1 | **0** | host: no runtime telemetry encoded in the hit order |
+| `QSB_CPU_DIAG_EPOCH` | 1 | **0** | host: the co-grinder walks from epoch 0, without a diagnostic code in its start |
 
-Files without a directory sit in `tests/gpu_epochs/`. Every device switch is in the image's knob list, so flipping one needs
-`build_carrier.sh`.
+## New in this package: `QSB_CODE_ROLL` 2 (device, bit-identical)
 
-| switch, default | file | change |
-|---|---|---|
-| `QSB_SHA_LEA` 1, `QSB_LEA_PARTS` 11, `QSB_LEA_ORD` 536 | GPUHash.h, sha_gate_fma.cuh | SHA-256 rounds in 13 issue slots instead of 14. Each Sigma is a rotation of a three-way XOR, and a sum plus a rotation is one `LEA.HI`. It covers the window and constant blocks, the outer SHA256d, both gate hashes with their first and last rounds, and the gate's FMA form. `QSB_LEA_ORD` picks the operand order |
-| `QSB_YP_MAC` 2 | y_pair_sc.cuh | the chain's fused pair sums use pinning's multiply-accumulate schedule; carries add a guarded 8-byte zero from the constant bank |
-| `QSB_FMUL_LEAN` 3 | hit_filter_field.cuh | the standalone multiply keeps its top fold in the chain and drops one normalisation |
-| `QSB_YOFF_S` 1 | tree.cu, hit_filter_field_sc.cuh | table ordinates stored with a constant offset, added once at start-up, so the point add's fold loses a subtraction. A readback check after the pass stops the run on a mismatch |
-| `QSB_ZZ3_LATE` 1 | point_add_f8_zz3.cuh | ZZ3 = ZZ1 x PP formed later in the add |
-| `QSB_HIGH15_NOFB` 1 | GLVScalar.cuh | the GLV split drops its rare exact-rounding fallback |
-| `QSB_FOLD_REG` 2 | hit_filter_field_sc.cuh, y_pair_sc.cuh, point_add_f8_zz3.cuh, tree.cu | the chain point add's fold multiplies read 977 from the constant bank instead of an immediate: 144 `IMAD.WIDE.U32` take `c[0x3][0x840]` as their second operand, 594 per candidate. No other instruction changes |
-| `QSB_YP_DC` 1 | y_pair_sc.cuh, tree.cu | the pair sums' 8 carry captures per chain trip fuse into their adds (below): `kernel_digest` 17,320 to 17,296 instructions, chain trip 970 to 962 |
-| `QSB_GATE_FMA_RT` 1 | sha_gate_fma.cuh, pair_shared.cuh, tree.cu | the gate's pubkey hash has both add forms. The FMA-pipe form runs from the start, and the host switches to the plain form once, after 120 s, when the 60 s rate has fallen to 90% of the first minute's |
-| `QSB_GATE_FMA_RT_HEAD` 1 | tree.cu, sha_gate_fma.cuh | in the FMA form, the schedule head W16 to W31 also runs on the FMA pipe |
-| `QSB_CONST_CALLEE` 1 | window_schedule_shared.cuh | the four constant SHA blocks run in a callee, so their K+W words come over the uniform datapath |
-| `QSB_DIVSTEP_4LANE` 1 | inverse_limbs.cuh | the root's divstep decision runs on the four lanes that read it |
-| `QSB_OUTER_LITK` 1 | tree.cu | the outer SHA256d takes its round constants as literals |
-| `QSB_TREE_ROW128` 1 | tree_inverse.cuh, tree.cu | the block inverse's product and inverse rows are stored as 16-byte limb pairs, so each node load or store is two 128-bit shared accesses instead of four 64-bit ones |
-| `QSB_TREE_LANEMASK` 1 | tree_inverse.cuh | the top of the inversion tree loads and multiplies only on the lanes whose result is stored or read later |
-| `QSB_POOL_RCONST` 1 | pair_shared.cuh | the finish's x1 = p1 + xR and x2 = p2 + xR read xR's words from the constant bank as adder operands instead of moving them into registers |
-| `QSB_EC_PSI_ZZ` 1 | tree.cu | the psi step scales ZZ by beta squared instead of X by beta |
-| `QSB_LOSS_FINK32` 1, `QSB_LOSS_SQRLEAN` 1, `QSB_LOSS_ROOTLAZY` 1 | filter_tail_sc.cuh, hit_filter_field_sc.cuh, tree_inverse.cuh | the finish's adds and subtractions in the half-word correction form, the seed addition's squares without their second fold's carry-out, and no normalisation of the root before its divsteps |
+`QSB_CODE_ROLL` is ercumentyildirim's switch (PR 2441, `dea321f0`), the same one several tickets carried on `e6715658` and on
+`fb6f5a8f`. Bit 1 turns the pair gate, which hashes recovery id 0 and then recovery id 1 with two copies of the same
+compression, into one loop of two trips. Trip 0 hashes recovery id 0. Trip 1 forms recovery id 1's x and hashes it. Both trips
+always run, so the loop stays warp-uniform, and the first passing recovery id is kept as in the unrolled gate. The words, the
+rounds and the order of every hash are unchanged, so the candidates, the hits and their recovery ids are bit-identical.
 
-## Host switches (on)
+The switch is in the image's knob list, so the native image is rebuilt with the package's own `build_carrier.sh`.
 
-None is in the knob list, so they leave the image unchanged.
+Our checks on our RTX 4090 through the unmodified harness:
 
-| switch, default | file | change |
-|---|---|---|
-| `QSB_CPU_EPOCH_CONTIG` 1 | CpuGrindSubset.h | each co-grinder worker walks one contiguous range of epochs and takes the next epoch by the next-combination step, so consecutive epochs share a longer prefix |
-| `QSB_CPU_GWK_CACHE` 1 | CpuGrindSubset.h | the last prefix block's group schedules are kept for up to 8 buffered-byte states instead of recomputed |
-| `QSB_CPU_ILP2` 3 | CpuGrindSubset.h | adds bit 1: `ec8_window`'s forward pass steps groups h and h+1, two inversion chains, op by op. The same operations, reordered to hide latency under SMT |
-| `QSB_CPU_JL` 1 | CpuGrindSubset.h | jacklightChen's seven cuts, each also its own `QSB_CPU_JL_*` switch. The inversion chains start at one and skip their last, dead update; only lane 0 feeds the scalar inverse; parity tests v >= p by compares; the key-hash words come straight from the radix-52 limbs; the padding rounds' W+K are written once per worker; and the key prefilter mask is formed in registers |
-| `QSB_CPU_I34_CANON_TOP` 2 | CpuGrindSubset.h | i34-9's canonical-top test. If limb 4 of an 8-lane element is below 2^48 - 1 in every lane, the element is already below p, so one compare replaces the v >= p carry chain and its blends; if any lane fails, all eight take the unchanged full path. At 1, his code as written, it reaches only the parity test here; 2 also applies it inside jacklightChen's key-word builder (our extension) |
-| `QSB_CPU_DIAG_EPOCH` 1 | CpuGrindSubset.h | the walk starts at a code x 2^29 that records the table geometry, huge-page backing, worker count and memory, so the public hit list shows them |
-| `QSB_HP_SHA_AVX` 1 | host_producers_v3.h | the host producers' SHA-NI code also targets AVX, so its adds and shuffles take three-operand forms. SHA-NI is used only where AVX is present |
-| `QSB_GT_SPOT_ASYNC` 1 | tree.cu | the start-up spot check of the GPU table runs on a thread while the first batch launches, and is joined before the second |
-| `QSB_HIT_TELEMETRY` 1 | hit_telemetry.h, tree.cu, qsb_host_verify.h | once a second a host thread reads the card's clock, power, temperature and clock-event reasons through NVML, and the GPU host thread writes them, with the walked progress, into the order of each batch's GPU hit lines. The same lines and the same count are written (below) |
+| check | result |
+|---|---|
+| native image of the `QSB_CODE_ROLL` 2 tree (before `QSB_Q_MIX` 2) | cubin sha256 `0fc64cf271d75ff2...`; knob string matches the host binary (the carrier loads; no JIT); 128 registers, no stack, no local memory |
+| static `kernel_digest` | 17,296 -> 14,632 instructions (the second copy of the gate's compression is gone); the chain loop's length unchanged |
+| fixed-seed identity against the record's tree with the same two host switches off (seed 24681357) | 6,244 = 6,244 hits on the common epoch prefix, identical |
+| GPU-only rate, 60 s arms in ABBA order, 4 rounds against the record's tree with the same two host switches off | -0.553% +/- 0.031 (-0.61, -0.51, -0.61, -0.49), all 4 rounds slower on our card |
+| 90 s official-path run of the `QSB_CODE_ROLL` 2 tree | PASS, 9,491 / 9,491 hits verified |
 
-Three more co-grinder switches we tested cost 0.64% of the co-grinder's rate on a Zen 4 host and are left out.
+Our card is not the ranked host, and this switch's effect on our card and on the ranked host need not agree. We submit this
+package to measure it on the ranked host; the number above is reported as measured. The 60 s arms also end before the record's `QSB_GATE_FMA_RT`
+selector may switch the gate's form (it waits at least 120 s), so they measure only the first phase of a run.
 
-## Other switches in the tree (0)
+## New in this package: `QSB_Q_MIX` 2 (device, bit-identical)
 
-`QSB_QMIX_RT`, `QSB_SHA_WROLL_PIPE`, `QSB_ROOT_COMBINE` (a prototype), `QSB_OUTER_FMA_RT`, `QSB_ROOT_FILL`, `QSB_CPU_FENCE`,
-`QSB_CPU_DIAG_V4`, `QSB_HP_RING_THP`, `QSB_CPU_TOUCH_FUSE` and `QSB_CPU_BUILD_NT` stay at 0 with their code in the tree.
-Every earlier switch of `e6715658` keeps its value, except `QSB_OUTER_LITK`, which was 0 there.
+`QSB_Q_MIX` is the record's own switch (its value there is 4). The warp whose global index is 0 mod `QSB_Q_MIX` decodes Q with
+the six GLV12 terms (segments 0-3 hot, 4 and 5 cold: one more addition, two fewer cold table records); every other warp uses the
+five P18 terms. Both layouts sum Q to the same point (same segment-0 bias, same top digit), so every candidate's point and the hit
+set are unchanged; only the balance of cold table records against field additions moves, on half of the warps instead of a
+quarter. The choice is warp-uniform, so no lane diverges.
 
-## Hit-order telemetry (`QSB_HIT_TELEMETRY` 1)
+| check | result |
+|---|---|
+| native image | cubin sha256 `5f1f811166d423a696a48077d8dfab3c98316e7cf325e6c704e65cfddb3e59b2`; knob string matches the host binary; 128 registers, no stack, no local memory |
+| static `kernel_digest` | 14,632 = 14,632 instructions (the same code; only the per-warp layout choice changes); the chain loop's text unchanged (1,078 instructions) |
+| fixed-seed identity against the `QSB_CODE_ROLL` 2 tree (seed 24681357) | 6,257 = 6,257 hits on the common epoch prefix, identical |
+| GPU-only rate, 60 s arms in ABBA order, 4 rounds against the `QSB_CODE_ROLL` 2 tree | +1.903% +/- 0.034 (+1.88, +1.89, +1.84, +2.00; all 4 rounds ahead) on our card |
+| 90 s official-path run of this exact tree | PASS, 9,816 / 9,816 hits verified |
 
-This switch records how the card runs during the draw and publishes it in the hit list. Once a second a detached host
-thread reads through NVML the SM clock, board power, GPU temperature, memory temperature where the driver reports it, and
-the clock-event (throttle) reasons: power cap, thermal slowdown, hardware slowdown, power brake. It also records the
-enforced power limit once, and the GPU's and the co-grinder's walked progress every second. These values travel in the
-order of each batch's GPU hit lines: the batch's verified lines are sorted, and the first 20 at most are written in a
-permutation that carries about 40 bits. No line is added, dropped or changed, so the hit set and the count are the run's
-own, and the harness checks each hit on its own without reading their order. It is host only. It is not in the knob list,
-the native image is unchanged (cubin sha256 `cef81a9f525fae26...`), and neither walk changes. NVML is loaded at run time
-(`libnvidia-ml.so.1`, read-only queries that need no root). If the library is missing, refuses access or fails, the frames
-carry progress only; if the thread cannot start, the lines keep their sorted order. Nothing in it can stop the run. The
-frame layout is in the header of `hit_telemetry.h`, so anyone can read it back from the public hit list. At 0 the host
-code is the previous code byte for byte.
+The same limits apply as above: our card is not the ranked host, and the 60 s arms cover only the first phase of a run,
+before any `QSB_GATE_FMA_RT` switch of the gate's form.
+
+## New in this package: `QSB_SHA_WROLL_PIPE` 1 and `QSB_R_CBANK_TAILS` 1 (device, bit-identical)
+
+Both are the record's own switches, off in `4cc9d2d8`; this package turns them on by changing their defaults in
+`tests/gpu_epochs/tree.cu`. As the record's source describes them:
+
+- `QSB_SHA_WROLL_PIPE` 1: the window block of the paired hash becomes one 8-round loop that walks a pointer and issues each
+  16 B W+K load half a trip ahead (the unrolled form's load lead), reading one zero padding row on the last trip. The words,
+  rounds and order of every hash are unchanged.
+- `QSB_R_CBANK_TAILS` 1: the tail callees (`qsb_pair_tail3_value`, `qsb_pair_finish3_value`, `qsb_pair_weave3_value`) read the recovery point R from
+  the constant bank instead of receiving it as eight 64-bit register arguments; the front keeps its arguments. Same
+  `__constant__` words, same field operations.
+
+We screened 27 switch settings of this tree one at a time (10 built; 17 not built, because the tree's own #error constraints
+rule them out with its other switches or because their source makes no exactness claim) on the `QSB_Q_MIX` 2 + `QSB_CODE_ROLL` 2 tree (60 s GPU-only arms
+on our RTX 4090, fixed-seed identity for every finalist). These two were exact and faster in every round, with the chain
+loop's text unchanged; we stack them here.
+
+| check | result |
+|---|---|
+| one at a time on the `QSB_Q_MIX` 2 + `QSB_CODE_ROLL` 2 tree, 4 rounds ABBA | `QSB_SHA_WROLL_PIPE` +0.136% +/- 0.013 (+0.16, +0.13, +0.10, +0.16); `QSB_R_CBANK_TAILS` +0.136% +/- 0.018 (+0.18, +0.14, +0.09, +0.13) |
+| one at a time, fixed-seed identity (seed 24681357) | identical hits on the common epoch prefix for each (6,339 and 6,354 common hits) |
+| native image of this exact tree | cubin sha256 `5554da9f3ba62973ebebf73f5a92cdf4737aa181d29e0364a8361957564b8346`; knob string matches the host binary; 128 registers, no stack, no local memory |
+| static `kernel_digest` | 14,632 -> 13,184 instructions (the window block's unrolled rounds become one loop); the chain loop's text unchanged (1,078 instructions) |
+| fixed-seed identity of this exact tree against the `QSB_Q_MIX` 2 + `QSB_CODE_ROLL` 2 tree (seed 24681357) | 6,354 = 6,354 hits on the common epoch prefix, identical |
+| GPU-only rate, 60 s arms in ABBA order, 4 rounds against the `QSB_Q_MIX` 2 + `QSB_CODE_ROLL` 2 tree | +0.352% +/- 0.014 (+0.32, +0.36, +0.39, +0.34; all 4 rounds ahead) on our card |
+| 90 s official-path run of this exact tree | PASS, 9,804 / 9,804 hits verified |
+
+The same limits apply: our card is not the ranked host, and the 60 s arms cover only the first phase of a run, before any
+`QSB_GATE_FMA_RT` switch of the gate's form.
+
+## The two host switches
+
+`QSB_HIT_TELEMETRY` 1 in the record encodes runtime GPU telemetry into the order in which hits are written. We set it to 0:
+hits are written in the order they are found, and the set of hits is unchanged. `QSB_CPU_DIAG_EPOCH` 1 in the record starts
+the co-grinder's walk at a diagnostic code times 2^29. We set it to 0: the walk starts at epoch 0, as in `296e5e53`. The
+co-grinder's candidates stay disjoint from the GPU's either way, and every co-grinder hit is re-derived by the exact host gate.
+Both switches are host-only: the native image does not change with them.
+
+## Why this ticket
+
+The record's stack with four exact device switches: `QSB_Q_MIX` 2 (the record's own switch at a different value),
+`QSB_CODE_ROLL` 2 (removes the gate's duplicated compression), and the record's own `QSB_SHA_WROLL_PIPE` and
+`QSB_R_CBANK_TAILS` turned on, with the record's runtime telemetry off. Everything else is the record.
 
 ## Exactness
 
-Most device items compute the same words by another route: the rotate-add rounds, the pair-sum schedule, the fold operand,
-the runtime gate forms (their FMA adds are a x 1 + b), the constant callee, the literal constants, the row layout, the lane
-masks, the constant-bank operands and the root without its normalisation. The SHA-256 round forms were checked against
-CommonCrypto and a FIPS 180-4 loop in a PTX interpreter, 100,000 cases per form and 20,000 per form at each of 16 operand
-orders including the shipped one, with 0 mismatches. Each of 12 deliberately broken variants failed every case of the
-forms that use the broken code. The fold switch changes only the second operand of 144 multiplies and moves the constant
-tables after it by 8 bytes. The products and sums are the same.
+- Fixed-seed identity, step by step: the `QSB_CODE_ROLL` 2 tree against the record's tree with the same two host switches off
+  (6,244 = 6,244 hits on the common epoch prefix), this package's `QSB_Q_MIX` 2 step against the `QSB_CODE_ROLL` 2 tree (6,257 = 6,257), and this exact tree against the
+  `QSB_Q_MIX` 2 + `QSB_CODE_ROLL` 2 tree (6,354 = 6,354); identical every time.
+- The 90 s official-path run passed with every hit verified.
+- The record's rare-carry switches are kept as promoted; this ticket adds no new rare-carry path.
+- The exact host gate re-derives every GPU nomination and every co-grinder hit before publishing it.
 
-A few items can lose a candidate but never publish a wrong hit. The offset ordinates and the GLV fallback drop move a
-candidate between rare-carry classes, and the lean multiply leaves a carry band of about 2^-43.6 per product.
-`QSB_LOSS_FINK32` and `QSB_LOSS_SQRLEAN` together drop about 1.15 x 10^-6 of candidates, measured site by site on 5 x 10^8
-to 10^9 inputs against an exact reference. The host gate recomputes every GPU nomination and every co-grinder hit with
-OpenSSL before publishing it. On the host side, `QSB_CPU_ILP2` 3 reorders the same operations and the `QSB_CPU_JL` items
-keep the same residues: in a scalar audit, the parity compare and the radix-52 key words matched the previous code on
-240,019 representatives, 25,131 of them >= p, with 0 mismatches. A scalar audit of `QSB_CPU_I34_CANON_TOP`'s ported text
-found 0 mismatches on 280,016 values and 60,000 eight-lane groups, about half of them forced onto the full path.
+## Full run of this exact package
 
-## The carry-capture change (`QSB_YP_DC` 1)
-
-It changes 32 lines of inline PTX in y_pair_sc.cuh. Eight column carries of the pair sum were each captured as
-`addc.u32 k, 0, 0` and later added as `addc.u32 k, k, Z`, with `Z` the constant-bank zero. ptxas 12.8 lowers that capture
-to a separate `SEL`. Written as `addc.u32 k, Z, 0` and then `addc.u32 k, k, 0`, the pair fuses into one two-carry-in
-`IADD3.X Rk, RZ, c[0x3][0x848], RZ, Pa, Pb`, a form ptxas already uses 10 times per chain trip. ptxas merges them
-when both carry-outs are dead and only one step reads the constant bank.
-
-The trip loses 8 `SEL` and nothing else. The last add loses 16, so a candidate executes about 74 fewer `SEL`.
-`ptxas -v` is unchanged for every function, and every other kernel's SASS is identical. The fused X3's two-carry-out adds
-stay: ptxas 12.8 emits that form only at a chain's top limb, and each rewrite we built for one cost 6 to 14 extra moves.
-
-It is exact by construction, since `Z` is a `__constant__` 0 that no host upload writes and the old text relied on it
-too. A PTX interpreter ran the old and new text of the three changed blocks on 20,000 random, near-all-ones and edge
-states each, with 0 mismatches. Turning one `addc` into `add` in each block made 798 to 842 of 2,000 states mismatch.
-
-## Validation
-
-These checks ran on the base image `fca7e8b6937439c6...`, which this tree builds byte for byte at `QSB_YP_DC` 0.
-The switch touches no host code.
-
-GPU hit sets. At a fixed seed (4242, 300 s, GPU only) the base image and the same stack without the fold switch matched with 0
-differences on 30,861 common hits. Against the record `fb6f5a8f`, the GPU hit sets on the same fixed work were identical in
-4 of 4 runs, with 0 differences.
-
-Co-grinder. Before `QSB_CPU_ILP2` 3 and `QSB_CPU_JL` 1 it gave the record's hits on fixed work. On the SHA-NI path (one
-worker, 1,638,400 candidates, `QSB_ZEROS_N` 14) that is 210 hits, the same as `e6715658` and `fb6f5a8f`. On the 8-lane
-AVX-512 path of a Zen 4 host (16,179,200 candidates) it is 1,972 hits with 0 duplicates, the same set as the record's. With
-the two switches on, the same 8-lane fixed work gives the same 1,972 hits, 0 duplicates. On a Zen 4 host the two switches raise
-the co-grinder's rate by 0.97% (se 0.52%, A/A +0.15%), about +0.09% of score. Public ranked runs of Oct 1 read
-jacklightChen's co-grinder at +1.31% (6 draws) and the same with `QSB_CPU_ILP2` 3 at +1.44% (3 draws) of the CPU rate over
-the record's. With `QSB_CPU_I34_CANON_TOP` 2 as well, identity on fixed work: the same 1,972 hits, 0 duplicates, the same set as the record's, on a Zen 4 host. Public ranked runs read
-i34-9's item at +0.56 to +0.70% of the CPU rate on his base, from one draw. Every co-grinder hit re-derives with the
-harness's own `problem.candidate_hash`.
-
-Energy. The rig is a test RTX 4090 with its SM clock locked. There, ABBA blocks of GPU-only runs against the record's code,
-with the gate held in its plain form, read the base image's GPU energy per candidate at -1.21% (se 0.05%, 40 blocks).
-
-`QSB_YP_DC` 1 against 0, GPU hit sets and rate, measured on the rig: GPU hit sets identical to the base
-on the common walked range (30,590 hits each, 0 differences, verifier PASS); rate +0.12% (se 0.06, two ABBA blocks at the
-450 W cap) with 0.28% fewer cycles per candidate on one RTX 4090, and +0.36% (se 0.01, six blocks) with 0.48% fewer
-cycles per candidate on a second one. Expected gain in score over the record: about +1.4 to +1.6% (the GPU part from the energy reading and the DC1 rate readings, the CPU part from the Zen 4 reading; one ranked draw moves by more than that).
-
-Full run. One run of the base image through the official path on an RTX 4090 host lasted 1,200 s and gave 125,602 hits, all
-verified. We quote no score from it: one run off the ranked runners does not predict the ranked one.
+The 90 s official-path run of this exact tree is in the table above (PASS, every hit verified). It ran on a rented Zen 4
+desktop host (Ryzen 9 7900X, 12 cores / 24 threads) with an RTX 4090 (CUDA 12.8.93): the harness copied,
+`candidates/subset` replaced, any binary deleted, then `./setup.sh subset` and `./benchmark.sh subset`. This host is not the ranked host, so the score does not predict the ranked one.
 
 ## Reproducing
 
-```
-./setup.sh subset
-./benchmark.sh subset
+```bash
+# from a clone at the record's commit 2f57d80
+cd candidates/subset
+# take this package's tests/gpu_epochs/pair_shared.cuh and tests/gpu_epochs/tree.cu (the QSB_CODE_ROLL port), then
+# add the four switches to subset.cu, before its #include of tests/gpu_epochs/tree.cu:
+#   #define QSB_HIT_TELEMETRY 0
+#   #define QSB_CPU_DIAG_EPOCH 0
+#   #define QSB_CODE_ROLL 2
+#   #define QSB_Q_MIX 2
+# and in tests/gpu_epochs/tree.cu change the defaults QSB_SHA_WROLL_PIPE and QSB_R_CBANK_TAILS from 0 to 1
+./build_carrier.sh 24          # rebuilds qsb_carrier_sm89.h; prints the cubin sha256 (5554da9f3ba62973...)
+cd ../.. && ./setup.sh subset && ./benchmark.sh subset
 ```
 
-Off the official runners, the harness's command grinder runs the same build:
-
-```
-QSB_GRINDER='cmd:python3 harness/gpu_wrap.py --src candidates/{bench}/{bench}.cu --no-build' ./benchmark.sh subset
-```
-
-To isolate a change, set its switch at its `#define` and rebuild. After any device switch flips, regenerate the image with
-`NVCC=/path/to/cuda-12.8/bin/nvcc ./build_carrier.sh 24`. `QSB_GATE_FMA_RT_FORCE_S` (host only, seconds) fires the gate's
-switch to the plain form at a fixed time; at 1 the plain form runs from the first batch.
+The fixed-seed identity check runs both trees through `./benchmark.sh subset` with `QSB_PROBLEM_SEED=24681357`, 60 s each,
+and compares the hit sets on the common epoch prefix.
 
 ## Base and credits
 
-- Base: our `e6715658`, with everything it credits.
-- The contiguous co-grinder walk (`QSB_CPU_EPOCH_CONTIG`): cefika, first in `30c24617`, and the record `fb6f5a8f`.
-- The rotate-add SHA-256 round (`QSB_SHA_LEA`): ercumentyildirim's `b62c41b8`.
-- The FMA schedule head (`QSB_GATE_FMA_RT_HEAD`): fkiene's `QSB_PK_HEAD_FMA` (public source `8c07297b`), as i34-9's
-  `78691035` carries it. `78691035` was also the first ranked run to choose the gate's form at run time, with two bound
-  images and a selector; this package keeps both forms in one image.
-- From the pinning record `b9736ce1` (kaankolcu): the offset ordinates (`QSB_YOFF`), the GLV fallback drop
-  (`QSB_HIGH15_NOFB`) and the 16-byte product-tree rows (its `QSB_POST_GLUE` bit 1). The multiply-accumulate pair schedule
-  is Ryun1's `5089a297` as `b9736ce1` carries it, with the constant-bank zero addend of `b9736ce1`'s `QSB_PO_ALU` (origin
-  cefika's `8eb88d94`).
-- The seven co-grinder cuts (`QSB_CPU_JL`): jacklightChen's public subset submission `b1c5e58e`, prepared with GPT 6.1 Sol
-  in Codex. Ported here as written, his switch names behind a `JL_` prefix.
-- `QSB_CPU_ILP2` 3: the paired forward pass was already in `e6715658`'s co-grinder at 1; terrapinelf's `fb96dba5` first
-  ranked it at 3.
-- The canonical-top test (`QSB_CPU_I34_CANON_TOP`): i34-9's `QSB_CPU_CANON_TOP` from his public subset submission
-  `b4c5a3c8`, also in `791650a2`; his note's model line reads "GPT-6.1-sol (max); GPT-6 Astra (advisor, high)", harness
-  Codex. Ported as written under a new name. Value 2's reach into jacklightChen's key-word builder is ours.
-- The walk-start diagnostic: `2d1631b0`, already in the co-grinder engine `e6715658` credits.
-- Ours: the lean multiply, the late ZZ3, the schedule cache, the two-form gate, the constant callee, the four-lane divstep,
-  the literal outer constants, the lane masks, the constant-bank finish operands, psi on ZZ, the three loss items, the fold
-  operand, the carry-capture rewrite, the start-up items, the hit-order telemetry, and the operand-order searches.
+- **kshitij-hash**: the promoted record `4cc9d2d8` this ticket starts from, its whole device and host stack, and the
+  record `e6715658` before it. Everyone credited in kshitij-hash's note for `4cc9d2d8` is credited here as well.
+- **ercumentyildirim** (co-author): `QSB_CODE_ROLL` (PR 2441, `dea321f0`), taken unchanged.
+- **cefika**: the record `fb6f5a8f` (the co-grinder's contiguous epoch walk), carried by `4cc9d2d8`.
+- **jacklightChen**: the co-grinder cuts from `b1c5e58e`, carried by `4cc9d2d8`.
+- **DPZZxlz** (`7843167a`) and **anamdongparkjinhyeong** (`2e06efbc`): tickets that carried `QSB_CODE_ROLL` 2 on the
+  earlier record.
+- **terrapinelf** (us): the measurements above and this ticket.
 
-Coauthors in the submission metadata, up to Yukon's limit of ten: cefika, ercumentyildirim, fkiene, i34-9, kaankolcu,
-Ryun1, then the authors `e6715658` credits, in its order: terrapinelf, HyeokxC, newjordan and jacklightChen. Past the
-tenth, Meganpark980320 and anamdongparkjinhyeong are credited here by name, through `e6715658`. All inherited source,
-GPLv3 notices and attributions are kept.
+## Attribution
+
+- **ercumentyildirim** (co-author): `QSB_CODE_ROLL` 2, the only code ported into this ticket (the other device changes are the record's own switches).
+- **kshitij-hash**: the promoted record `4cc9d2d8`, used as promoted.
+- **terrapinelf**: the port, the checks and the ticket.
+
+## Ranked result of our previous ticket `31edf1f2`
+
+`31edf1f2` scored **738.10** (self 863.0); public hit list split: GPU 668.18 + co-grinder 69.92 M/s. Line 1 of `subset.cu` carries a fresh inert tag (`QSB_REDRAW_10021739`) so the archive is new.
