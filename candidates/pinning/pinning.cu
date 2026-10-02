@@ -6006,7 +6006,102 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
+/* Private CPU-only fixed-message NI screen; zero retains literal b59 record service. */
+#ifndef QSB_PK_SHANI_DIRECT
+#define QSB_PK_SHANI_DIRECT 1
+#endif
+#if QSB_PK_SHANI_DIRECT != 0 && QSB_PK_SHANI_DIRECT != 1
+#error "QSB_PK_SHANI_DIRECT must be zero or one"
+#endif
+#if QSB_PK_SHANI_DIRECT
+#include "pksha_shani_direct.h"
+static bool shani_direct_isa = false;
+__attribute__((target("sha,ssse3,sse4.1"), noinline))
+static void hash_record_shani_direct(Job &J, uint32_t j) {
+    const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
+    const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
+    const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
+    for (int l0 = 0; l0 < QSB_PK_LANES; l0 += 8) {
+        uint32_t h0[8], h1[8], live = 0;
+        for (int t = 0; t < 8; t++) {
+            const int l = l0 + t;
+            const uint32_t y = yp[l];
+            h0[t] = h1[t] = ~0u;
+            if (y != 0u && base + (uint32_t)l < J.batch_sz) {
+                const uint8_t *lane = rec + 16u * (uint32_t)l;
+                const auto a = qsb_pksha_direct::pack(lane, lane + 16u * QSB_PK_LANES, prefix_of(y, 0));
+                const auto b = qsb_pksha_direct::pack(lane + 32u * QSB_PK_LANES, lane + 48u * QSB_PK_LANES, prefix_of(y, 1));
+                live |= 1u << t;
+                qsb_pksha_direct::pubkey_h0_pair(a.m0, a.m1, a.m2, b.m0, b.m1, b.m2, &h0[t], &h1[t]);
+            }
+        }
+        if (!live) continue;
+        for (int t = 0; t < 8; t++) {
+            if (!((live >> t) & 1u)) continue;
+            const uint32_t idx = base + (uint32_t)(l0 + t);
+            /* the GPU tests recid 0 first and stops at its hit */
+            if (h0_hit(h0[t])) record_hit(J, idx);
+            else if (h0_hit(h1[t])) record_hit(J, idx | (1u << 30));
+        }
+    }
+}
+#endif
+#ifndef QSB_PK_AVX2_PACK
+#define QSB_PK_AVX2_PACK 1
+#endif
+#if QSB_PK_AVX2_PACK != 0 && QSB_PK_AVX2_PACK != 1
+#error "QSB_PK_AVX2_PACK must be 0 or 1"
+#endif
+#if QSB_PK_AVX2_PACK
+static inline void message_soa9(uint32_t w[9][8], int t, const uint64_t x[4], uint32_t prefix) {
+    w[0][t] = (prefix << 24) | (uint32_t)(x[3] >> 40);
+    w[1][t] = (uint32_t)(x[3] >> 8);
+    w[2][t] = (uint32_t)(x[3] << 24) | (uint32_t)(x[2] >> 40);
+    w[3][t] = (uint32_t)(x[2] >> 8);
+    w[4][t] = (uint32_t)(x[2] << 24) | (uint32_t)(x[1] >> 40);
+    w[5][t] = (uint32_t)(x[1] >> 8);
+    w[6][t] = (uint32_t)(x[1] << 24) | (uint32_t)(x[0] >> 40);
+    w[7][t] = (uint32_t)(x[0] >> 8);
+    w[8][t] = (uint32_t)(x[0] << 24) | 0x800000u;
+}
+__attribute__((target("avx2"), noinline))
+static void hash_record_avx2(Job &J, uint32_t j) {
+    const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
+    const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
+    const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
+    for (int l0 = 0; l0 < QSB_PK_LANES; l0 += 8) {
+        uint32_t w0[9][8], w1[9][8], h0[8], h1[8], live = 0;
+        for (int t = 0; t < 8; t++) {
+            const int l = l0 + t;
+            const uint32_t y = yp[l];
+            if (y != 0u && base + (uint32_t)l < J.batch_sz) {
+                uint64_t x0[4], x1[4];
+                lane_keys(rec, l, x0, x1);
+                message_soa9(w0, t, x0, prefix_of(y, 0));
+                message_soa9(w1, t, x1, prefix_of(y, 1));
+                live |= 1u << t;
+            } else {
+                for (int k = 0; k < 9; k++) { w0[k][t] = 0; w1[k][t] = 0; }
+            }
+        }
+        if (!live) continue;
+        hash8_avx2(w0, w1, h0, h1);
+        for (int t = 0; t < 8; t++) {
+            if (!((live >> t) & 1u)) continue;
+            const uint32_t idx = base + (uint32_t)(l0 + t);
+            if (h0_hit(h0[t])) record_hit(J, idx);
+            else if (h0_hit(h1[t])) record_hit(J, idx | (1u << 30));
+        }
+    }
+}
+#endif
 static void hash_record(Job &J, uint32_t j) {
+#if QSB_PK_SHANI_DIRECT
+    if (mode == 2 && shani_direct_isa) { hash_record_shani_direct(J, j); return; }
+#endif
+#if QSB_PK_AVX2_PACK
+    if (mode == 1) { hash_record_avx2(J, j); return; }
+#endif
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
     const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
@@ -6130,6 +6225,9 @@ static int start(size_t batch) {
 #endif
     mode = (__builtin_cpu_supports("sha") && __builtin_cpu_supports("sse4.1")) ? 2
          : __builtin_cpu_supports("avx2") ? 1 : 0;
+#if QSB_PK_SHANI_DIRECT
+    shani_direct_isa = __builtin_cpu_supports("sha") && __builtin_cpu_supports("ssse3") && __builtin_cpu_supports("sse4.1");
+#endif
     int ncpu = 0;
     { cpu_set_t cs; CPU_ZERO(&cs); if (sched_getaffinity(0, sizeof cs, &cs) == 0) ncpu = CPU_COUNT(&cs); }
     int nw = ncpu / QSB_PK_WDIV;
