@@ -131,6 +131,13 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
 #endif
+/* Roll the two recovery-id SHA gates through one warp-uniform loop. */
+#ifndef QSB_CODE_ROLL
+#define QSB_CODE_ROLL 0   /* probe: the record's path in every arm */
+#endif
+#if QSB_CODE_ROLL != 0 && QSB_CODE_ROLL != 2
+#error "QSB_CODE_ROLL supports only the original path (0) or the two-trip recovery gate (2)"
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #ifndef QSB_STARTUP_TRIM
@@ -267,6 +274,14 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #endif
 #if QSB_SEED_K32_SUB != 0 && QSB_SEED_K32_SUB != 1
 #error "QSB_SEED_K32_SUB must be 0 or 1"
+#endif
+/* QSB_S3_HINT_MODE (default 0; carrier image only): 2 puts the .L2::64B fetch hint on all four 16-byte loads of a
+ * cold table record in qsb_s3_load_n, not only on X's first; the loads read the same bytes with the same .cs.nc operator. */
+#ifndef QSB_S3_HINT_MODE
+#define QSB_S3_HINT_MODE 0
+#endif
+#if QSB_S3_HINT_MODE != 0 && QSB_S3_HINT_MODE != 2
+#error "QSB_S3_HINT_MODE must be 0 or 2"
 #endif
 #ifndef QSB_GATHER_L1_POLICY
 #define QSB_GATHER_L1_POLICY 0
@@ -2163,7 +2178,14 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
     if (cold) {
         asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
             : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
+#if QSB_S3_HINT_MODE == 2
+#define QSB_S3_HINT_LOAD(v, p) asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }" \
+                                    : "=l"((v).x), "=l"((v).y) : "l"(p))
+        QSB_S3_HINT_LOAD(x1, tx + 1); QSB_S3_HINT_LOAD(y0, ty); QSB_S3_HINT_LOAD(y1, ty + 1);
+#undef QSB_S3_HINT_LOAD
+#else
         x1 = __ldcs(tx + 1); y0 = __ldcs(ty); y1 = __ldcs(ty + 1);
+#endif
     }
     else    { x0 = __ldg(tx);  x1 = __ldg(tx + 1);  y0 = __ldg(ty);  y1 = __ldg(ty + 1);  }
 #endif
@@ -3441,7 +3463,19 @@ __global__ void kernel_verify_pair_hits(
 #endif /* !QSB_HOST_VERIFY */
 
 
-__global__ void __launch_bounds__(256, 2) kernel_digest(
+/* QSB_DIGEST_MINB (device knob, default 2): the minBlocksPerMultiprocessor bound of kernel_digest.
+ * 2 is the promoted value (<= 128 registers, two 48 KiB blocks per SM); 1 lets ptxas use more
+ * registers, which drops residency to one barrier-locked block per SM (probe arm). */
+#ifndef QSB_SM_SKEW_NS
+#define QSB_SM_SKEW_NS 0
+#endif
+#if QSB_SM_SKEW_NS
+__device__ unsigned qsb_sm_skew_ctr[256];   /* per-SM block arrival count (probe knob only) */
+#endif
+#ifndef QSB_DIGEST_MINB
+#define QSB_DIGEST_MINB 2
+#endif
+__global__ void __launch_bounds__(256, QSB_DIGEST_MINB) kernel_digest(
     const uint8_t * __restrict__ d_combos,       /* batch × T bytes: indices per combo, or NULL for enum mode */
     int n_pool, int t_sel,
     const uint32_t * __restrict__ d_midstate,
@@ -3468,6 +3502,17 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     const epoch_desc_t * __restrict__ d_epochs   /* short-epoch mode: one per block, else NULL */
 , const uint32_t *d_first, int epochs_in_batch
 ) {
+#if QSB_SM_SKEW_NS && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    /* Probe knob (default 0 = compiled out): phase-offset the two co-resident blocks of an SM.
+     * Every 128th block to arrive on an SM (one per SM per two 32,768-epoch probe batches;
+     * a block runs ~200 us) waits ~QSB_SM_SKEW_NS (100 us = half a block) before starting, so from then on its SHA
+     * (ALU-bound) phase overlaps the other block's EC (IMAD.WIDE-bound) phase instead of
+     * coinciding with it; identical blocks otherwise stay phase-locked from the launch's first
+     * wave. Costs one idle half-block per SM per 2 batches (~0.4% if phases do not matter). */
+    if(threadIdx.x==0){unsigned sm;asm volatile("mov.u32 %0, %%smid;":"=r"(sm));
+        if((atomicAdd(&qsb_sm_skew_ctr[sm&255u],1u)&127u)==1u)__nanosleep(QSB_SM_SKEW_NS);}
+    __syncthreads();
+#endif
 #if QSB_PAIR_SHARED
     const int tid = threadIdx.x;
     const int lane = tid & (QSB_SE_WINDOWS-1);        /* which window omission set */
@@ -5867,7 +5912,14 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_XSHA_KNOBS
 #endif
-#define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+/* probe: always in the knob string, so every arm has the same keys (the loader compares them in order) */
+#define QSB_HINT_KNOBS QSB_CARRIER_KV(QSB_S3_HINT_MODE)
+#if QSB_CODE_ROLL
+#define QSB_CODE_ROLL_KNOBS QSB_CARRIER_KV(QSB_CODE_ROLL)
+#else
+#define QSB_CODE_ROLL_KNOBS
+#endif
+#define QSB_CARRIER_KNOBS QSB_CODE_ROLL_KNOBS QSB_HINT_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
@@ -5894,6 +5946,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_TABLE_L2_WINDOW) QSB_CARRIER_KV(QSB_TRIM_DIRECT_PRODUCER) \
     QSB_CARRIER_KV(QSB_Z2_SPEC_CUT) QSB_CARRIER_KV(ZLAB_DIRDIG) QSB_CARRIER_KV(ZLAB_DUAL_EPOCH_SHA) \
     QSB_CARRIER_KV(ZLAB_HITPATH) QSB_CARRIER_KV(ZLAB_K2S3M) QSB_CARRIER_KV(ZLAB_LAUNCH_BLOCKS) \
+    QSB_CARRIER_KV(QSB_DIGEST_MINB) QSB_CARRIER_KV(QSB_SM_SKEW_NS) \
     QSB_CARRIER_KV(ZLAB_MODSQR) QSB_CARRIER_KV(ZLAB_PAIRSHA) QSB_CARRIER_KV(ZLAB_T14) \
     QSB_CARRIER_KV(ZLAB_TREE) QSB_CARRIER_KV(ZLAB_TRIM) QSB_CARRIER_KV(QSB_FORCE_EXACT_HIT_CHECK) \
     QSB_CARRIER_KV(QSB_SC_OPS) QSB_CARRIER_KV(QSB_SC_PP) QSB_CARRIER_KV(QSB_SC_ALUZ) QSB_CARRIER_KV(QSB_SC_PARK) QSB_CARRIER_KV(QSB_SC_LATE) \
@@ -6621,6 +6674,11 @@ int main(int argc, char **argv) {
                    (unsigned long long)n_epochs, (unsigned long long)qsb_fence_n);
 #endif
 #ifdef QSB_HP_ON
+#if QSB_PROBE
+        /* Probe run: the host producers build ahead by batch index; the probe's schedule is
+         * time-driven, so every batch is built by the GPU producers on its slot stream. */
+        if (g_qsb_arms_on > 1) printf("  Host producers: off (multi-arm probe)\n"); else
+#endif
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
                    (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
 #endif
@@ -7203,6 +7261,11 @@ int main(int argc, char **argv) {
             sp_epochs[s] = epochs_in_batch;
             return 0;
         };
+#if QSB_PROBE
+        /* Multi-arm probe (QsbCarrier.h): false keeps every line of the base loop below. In
+         * probe mode epoch_base counts the epochs launched; the ranks come from the schedule. */
+        const bool probe = qsb_probe_begin(effective_total, se_mode, n_epochs, (uint64_t)QSB_SE_PER_EPOCH);
+#endif
         g_stop_polled = 1;
         g_qsb_carrier.running = 1;   /* from here a carrier failure keeps the image loaded */
 #if QSB_HIT_TELEMETRY
@@ -7302,6 +7365,25 @@ int main(int argc, char **argv) {
 #endif
             const uint64_t epochs_left = n_epochs - epoch_base;
             const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
+#if QSB_PROBE
+            uint64_t launch_base = epoch_base;
+            int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
+            if (probe) {
+                const int pr = qsb_probe_next(&launch_base, &epochs_in_batch);
+                if (pr) {
+                    /* Slice over: slot s is already collected; publish it, drain the other
+                     * slot, and only then may the next slice switch the digest kernel. */
+                    if (sp_publish(completed)) return 1;
+                    if (sp_drain(s ^ 1)) return 1;
+                    qsb_probe_slice_end();
+                    if (pr == 2) break;                      /* schedule used up */
+                    continue;
+                }
+            }
+            const int launch_error = sp_launch(s, launch_base, epochs_in_batch);
+            if (sp_publish(completed)) return 1;
+            if (launch_error) return 1;
+#else
             const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
 #if QSB_SP_REFILL_FIRST
             const int launch_error = sp_launch(s, epoch_base, epochs_in_batch);
@@ -7310,6 +7392,7 @@ int main(int argc, char **argv) {
             if (launch_error) return 1;
 #else
             if (sp_launch(s, epoch_base, epochs_in_batch)) return 1;
+#endif
 #endif
             epoch_base += epochs_in_batch;
             sp_batch_no++;
@@ -7402,6 +7485,9 @@ int main(int argc, char **argv) {
                 t_last_se = t_now;
             }
         }
+#if QSB_PROBE
+        if (probe) qsb_probe_print(" final");
+#endif
 #ifdef QSB_HP_ON
         qhp::shutdown();
 #if QSB_FAST_TEARDOWN && QSB_FAST_TEARDOWN_PIN
