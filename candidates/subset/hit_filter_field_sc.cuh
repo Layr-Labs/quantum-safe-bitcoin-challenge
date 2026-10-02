@@ -95,6 +95,12 @@
  * sums the same 64 partial products with the same per-row carry captures whichever vector feeds the
  * a limbs, so every result is bit-identical (tests/test_sc_ops.py runs the PTX text of both orders);
  * only the registers ptxas allocates and reads together change. 0 keeps the record's PTX byte for byte. */
+#ifndef QSB_ZZ3_LATE
+#define QSB_ZZ3_LATE 0
+#endif
+#if QSB_ZZ3_LATE != 0 && QSB_ZZ3_LATE != 1
+#error "QSB_ZZ3_LATE must be 0 or 1"
+#endif
 #ifndef QSB_SC_OPS
 #define QSB_SC_OPS 48
 #endif
@@ -2475,6 +2481,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\tmov.b64 Q0, {f7_z0,f7_z1}; mov.b64 Q1, {f7_z2,f7_z3}; mov.b64 Q2, {f7_z4,f7_z5}; mov.b64 Q3, {f7_z6,f7_z7};\n"
 #endif
         "\t\n"
+#if !QSB_ZZ3_LATE
         ".reg .u32 f8_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
@@ -2774,6 +2781,7 @@ __device__ __forceinline__ void qsb_filter_point_add(
 #endif
         "\n"
         "\tmov.b64 ZZ0, {f8_z0,f8_z1}; mov.b64 ZZ1, {f8_z2,f8_z3}; mov.b64 ZZ2, {f8_z4,f8_z5}; mov.b64 ZZ3, {f8_z6,f8_z7};\n"
+#endif
 #endif
         "\t\n"
         ".reg .u32 f9_outcarry;\n"
@@ -3180,6 +3188,9 @@ __device__ __forceinline__ void qsb_filter_point_add(
         "\n"
 #endif
         "\t\n"
+#if QSB_ZZ3_LATE
+#include "point_add_f8_zz3_min.cuh"
+#endif
         ".reg .u32 f13_outcarry;\n"
         "\n"
 #if QSB_CHAIN_MUL_LEAN
