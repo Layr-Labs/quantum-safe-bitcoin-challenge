@@ -4719,7 +4719,11 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
     }
     if (sr != CUDA_SUCCESS || ng != (unsigned)nB / 2u) return 0;
     int na = 0; partA[na++] = rem;
-    for (int i = 0; i < QSB_GREEN_SHARED / 2 && i < (int)ng; i++) partA[na++] = grp[i];
+    /* Reduce prepare/finish overlap without changing either kernel. Explicit
+     * 8 (and invalid overrides) retain the promoted shared-SM policy. */
+    const char *shared_env = getenv("QSB_SHARED_SMS");
+    const int shared_sms = !shared_env || !strcmp(shared_env, "4") ? 4 : QSB_GREEN_SHARED;
+    for (int i = 0; i < shared_sms / 2 && i < (int)ng; i++) partA[na++] = grp[i];
     CUdevResourceDesc dA, dB; CUgreenCtx gA, gB;
     if (qsb_cuDevResourceGenerateDesc(&dB, grp, ng) != CUDA_SUCCESS) return 0;
     if (qsb_cuDevResourceGenerateDesc(&dA, partA, na) != CUDA_SUCCESS) return 0;
