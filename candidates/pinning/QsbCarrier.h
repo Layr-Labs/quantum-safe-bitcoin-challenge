@@ -7,10 +7,10 @@
  *
  * This file loads a second image of the SAME source, compiled offline by
  * build_carrier.sh with `-arch=sm_89 -DQSB_CARRIER_BUILD=1`, from a base64 copy in
- * qsb_carrier_sm89.h, through the CUDA runtime library API. QSB_CARRIER_BUILD changes
- * one device line: the first 16 B load of each 64 B table record becomes
- * `ld.global.nc.L2::64B`, so the whole record (both 32 B sectors) is fetched as one
- * DRAM access instead of two independent sector misses.
+ * qsb_carrier_sm89.h, through the CUDA runtime library API. With
+ * QSB_ALL_RECORD_LOADS_L2_64B enabled, each of the four 16 B loads of a 64 B table
+ * record carries the advisory `L2::64B` fetch-size hint. The ordinary PTX path uses
+ * the same record values without this native size hint.
  *
  * If the GPU is not sm_89, the image is missing, a required kernel or the zeros
  * fingerprint fails to resolve, or the image was built for another QSB_ZEROS_N,
@@ -52,8 +52,19 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
+#if QSB_FIN_FULL_TILE
+    QK_S2_FULL,       /* complete-tile finish specialization */
+#else
+    QK_S2_FULL_SLOT,  /* reserve this slot to keep the T1 scheduler index stable */
+#endif
+    QK_T1SCHED,       /* qsb_tail_sched_batch           (optional) */
     QK_N
 };
+#if QSB_FIN_FULL_TILE
+#define QK_S2_FULL_RESERVED_INDEX (-1)
+#else
+#define QK_S2_FULL_RESERVED_INDEX QK_S2_FULL_SLOT
+#endif
 
 struct QsbCarrierState {
     int on;
@@ -65,6 +76,12 @@ static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#ifndef QSB_CARRIER_FIN_T2EARLY
+#define QSB_CARRIER_FIN_T2EARLY 0
+#endif
+#if QSB_CARRIER_FIN_T2EARLY != QSB_FIN_T2EARLY
+#error "QSB_FIN_T2EARLY requires a matching regenerated native carrier"
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -133,9 +150,14 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
         const char *name = i < n_gen ? qsb_carrier_kernel_names[i] : fixed[i];
         if (i >= QK_RF) {
             if (!name || !name[0]) name = fixed[i];
-            if (!name || !name[0]) { all = 0; continue; }
+            if (!name || !name[0]) {
+                if (i != QK_T1SCHED && i != QK_S2_FULL_RESERVED_INDEX) all = 0;
+                continue;
+            }
             if (cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, name) != cudaSuccess) {
-                g_qsb_carrier.k[i] = nullptr; all = 0; cudaGetLastError();
+                g_qsb_carrier.k[i] = nullptr;
+                if (i != QK_T1SCHED && i != QK_S2_FULL_RESERVED_INDEX) all = 0;
+                cudaGetLastError();
             }
             continue;
         }
@@ -146,7 +168,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     e = cudaLibraryGetGlobal(&dz, &zb, g_qsb_carrier.lib, "qsb_carrier_zeros");
     if (e == cudaSuccess && zb == sizeof(int))
         e = cudaMemcpy(&zeros, dz, sizeof(int), cudaMemcpyDeviceToHost);
-    if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
+    if (e != cudaSuccess || zeros != QSB_CARRIER_FINGERPRINT) { qsb_carrier_off("image built for another device-code variant"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
