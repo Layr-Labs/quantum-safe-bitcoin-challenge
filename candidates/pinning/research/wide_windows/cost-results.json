@@ -1,0 +1,228 @@
+{
+  "kind": "unmeasured arithmetic and byte budget",
+  "frontier_score": 644546620,
+  "existing_search_checkpoint_bytes": {
+    "state": 2147483648,
+    "tree": 536870912,
+    "roots": 2097152,
+    "root_checkpoint": 2097152,
+    "super_roots": 8192
+  },
+  "logical_checkpoint_traffic_per_full_batch": {
+    "state_read_write": 4294967296,
+    "tree_read_write": 1065353216,
+    "roots_five_transfers": 10485760,
+    "root_tree_read_write": 4161536,
+    "super_roots_four_transfers": 32768
+  },
+  "fused_tradeoff": {
+    "logical_checkpoint_bytes_per_candidate": 0,
+    "ten_window_table_bytes_per_candidate": 640,
+    "scalar_inverses_per_full_batch": 65536,
+    "split_scalar_inverses_per_full_batch": 1,
+    "limits": "Fused search still uses shared-memory trees and has local stack accesses in the root-inverse lane. Eliminating global checkpoints is not eliminating all memory traffic."
+  },
+  "target_factor": 1.25,
+  "rows": [
+    {
+      "windows": 15,
+      "widths": [
+        18,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17
+      ],
+      "table_bytes": 67108864,
+      "table_gib": 0.0625,
+      "multiplications": 95,
+      "squares": 28,
+      "wide_products_proxy": 8195,
+      "field_product_reduction_from_15": 0.0,
+      "lookup_bytes_per_candidate": 960,
+      "logical_lookup_gb_per_s_at_target": 773.455944,
+      "checkpoint_bytes_per_candidate": 320.375,
+      "total_logical_bytes_per_candidate_split": 1280.375,
+      "total_logical_gb_per_s_at_target_split": 1031.576723228125,
+      "search_allocations_gib_before_misc": 2.5664138793945312
+    },
+    {
+      "windows": 14,
+      "widths": [
+        19,
+        19,
+        19,
+        19,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18
+      ],
+      "table_bytes": 150994944,
+      "table_gib": 0.140625,
+      "multiplications": 88,
+      "squares": 26,
+      "wide_products_proxy": 7594,
+      "field_product_reduction_from_15": 0.07333740085417939,
+      "lookup_bytes_per_candidate": 896,
+      "logical_lookup_gb_per_s_at_target": 721.8922144,
+      "checkpoint_bytes_per_candidate": 320.375,
+      "total_logical_bytes_per_candidate_split": 1216.375,
+      "total_logical_gb_per_s_at_target_split": 980.012993628125,
+      "search_allocations_gib_before_misc": 2.6445388793945312
+    },
+    {
+      "windows": 13,
+      "widths": [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        19,
+        19,
+        19,
+        19
+      ],
+      "table_bytes": 369098752,
+      "table_gib": 0.34375,
+      "multiplications": 81,
+      "squares": 24,
+      "wide_products_proxy": 6993,
+      "field_product_reduction_from_15": 0.14667480170835878,
+      "lookup_bytes_per_candidate": 832,
+      "logical_lookup_gb_per_s_at_target": 670.3284848,
+      "checkpoint_bytes_per_candidate": 320.375,
+      "total_logical_bytes_per_candidate_split": 1152.375,
+      "total_logical_gb_per_s_at_target_split": 928.449264028125,
+      "search_allocations_gib_before_misc": 2.8476638793945312
+    },
+    {
+      "windows": 12,
+      "widths": [
+        22,
+        22,
+        22,
+        22,
+        21,
+        21,
+        21,
+        21,
+        21,
+        21,
+        21,
+        21
+      ],
+      "table_bytes": 1073741824,
+      "table_gib": 1.0,
+      "multiplications": 74,
+      "squares": 22,
+      "wide_products_proxy": 6392,
+      "field_product_reduction_from_15": 0.22001220256253817,
+      "lookup_bytes_per_candidate": 768,
+      "logical_lookup_gb_per_s_at_target": 618.7647552,
+      "checkpoint_bytes_per_candidate": 320.375,
+      "total_logical_bytes_per_candidate_split": 1088.375,
+      "total_logical_gb_per_s_at_target_split": 876.885534428125,
+      "search_allocations_gib_before_misc": 3.5039138793945312
+    },
+    {
+      "windows": 11,
+      "widths": [
+        24,
+        24,
+        24,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23
+      ],
+      "table_bytes": 3758096384,
+      "table_gib": 3.5,
+      "multiplications": 67,
+      "squares": 20,
+      "wide_products_proxy": 5791,
+      "field_product_reduction_from_15": 0.29334960341671756,
+      "lookup_bytes_per_candidate": 704,
+      "logical_lookup_gb_per_s_at_target": 567.2010256,
+      "checkpoint_bytes_per_candidate": 320.375,
+      "total_logical_bytes_per_candidate_split": 1024.375,
+      "total_logical_gb_per_s_at_target_split": 825.321804828125,
+      "search_allocations_gib_before_misc": 6.003913879394531
+    },
+    {
+      "windows": 10,
+      "widths": [
+        26,
+        26,
+        26,
+        26,
+        26,
+        26,
+        25,
+        25,
+        25,
+        25
+      ],
+      "table_bytes": 17179869184,
+      "table_gib": 16.0,
+      "multiplications": 60,
+      "squares": 18,
+      "wide_products_proxy": 5190,
+      "field_product_reduction_from_15": 0.36668700427089684,
+      "lookup_bytes_per_candidate": 640,
+      "logical_lookup_gb_per_s_at_target": 515.637296,
+      "checkpoint_bytes_per_candidate": 320.375,
+      "total_logical_bytes_per_candidate_split": 960.375,
+      "total_logical_gb_per_s_at_target_split": 773.758075228125,
+      "search_allocations_gib_before_misc": 18.50391387939453
+    }
+  ],
+  "ten_window_scenarios": [
+    {
+      "assumed_point_chain_time_fraction": 0.5,
+      "ideal_speedup_if_time_scaled_with_products": 1.2245050429585356,
+      "extra_time_budget_fraction_for_25pct_gain": -0.01665649786455159
+    },
+    {
+      "assumed_point_chain_time_fraction": 0.65,
+      "ideal_speedup_if_time_scaled_with_products": 1.312933071654584,
+      "extra_time_budget_fraction_for_25pct_gain": 0.03834655277608301
+    },
+    {
+      "assumed_point_chain_time_fraction": 0.8,
+      "ideal_speedup_if_time_scaled_with_products": 1.4151269210844415,
+      "extra_time_budget_fraction_for_25pct_gain": 0.09334960341671761
+    },
+    {
+      "assumed_point_chain_time_fraction": 0.9,
+      "ideal_speedup_if_time_scaled_with_products": 1.4925780894271923,
+      "extra_time_budget_fraction_for_25pct_gain": 0.1300183038438072
+    }
+  ],
+  "limits": "Wide-products proxy excludes additions, recoding, scheduling, memory hierarchy, table construction, hashing, recovery and inverse costs. Time scenarios assume product-count scaling and are not measured. Logical bytes include search checkpoints but are not physical DRAM traffic or a bandwidth guarantee; do not equate the cache-resident15-window traffic with16GiB-table misses. Allocation is live search table plus existing16M checkpoint buffers before runtime/driver overhead."
+}
