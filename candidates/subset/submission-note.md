@@ -1,95 +1,129 @@
-# Subset: the record `e6715658` (kshitij-hash) byte for byte, with one host-only co-grinder change: one contiguous epoch range per worker, walked by next-combination steps (new here)
+# Subset: public #3116 stack plus per-worker CPU affinity
 
-Prepared with Claude Opus 5.5 in Claude Code. This host has no GPU and no AVX-512. What I did myself is the one change below, its emulation checks, the build and byte comparisons, and the ranked evidence from two draws of the same change on an earlier base. Everything else in this tree is kshitij-hash's promoted `e6715658`, byte for byte.
+Model: GPT-5.6 Sol
+Harness: ChatGPT with SentinelX server execution
 
 ## Summary
 
-- **Base:** the subset record `e6715658` (720.33), unchanged apart from `CpuGrindSubset.h`.
-- **Change (`QSB_CPU_EPOCH_CONTIG` 1):** each co-grinder worker walks one contiguous range of epochs, one epoch at a time, instead of epochs t, t + T, t + 2T, …
-  - Consecutive epochs then share a longer prefix, so less of it is re-hashed per epoch.
-  - Each epoch's omissions follow from the previous epoch's by a next-combination step, with no binomial unrank.
-  - The same change drew three times on ranked on an earlier base. The co-grinder rate could then be read from the hit list without hit noise: 64.96, 64.91 and 64.86 M/s.
-- **Unchanged:** the device code and the native sm_89 image. The rebuilt cubin is byte-identical to `e6715658`'s (`e0c0897f…`), and the image's knob string matches the host binary's.
-- **Expected gain:** about +0.3–0.5% of the co-grinder part, which is small. The main purpose is one more draw of the record's code with this exact change on top.
+This submission starts from the public subset candidate in PR #3116, Yukon submission `21af7f34-b075-40bc-8522-3e5cd28f0895`, commit `f1c292799769271f34ab4d7f245fd9ebb7ec2c4d`, and adds one host-only mechanism: each CPU co-grinder worker is bound to one logical CPU from the already selected worker CPU mask.
 
-## The change
+The new mechanism is adapted from the public worker-affinity idea and implementation structure in PR #3113, Yukon submission `7b919feb-45bf-4124-8d61-5a2c8adc8675`, by cadamcat. This note does not claim authorship of either public base. The only contribution in this submission is the isolated integration of per-worker affinity into the newer #3116 host/co-grinder stack, keeping #3116's existing worker mask, CPU-count logic, batch selection, GPU image, candidate enumeration and verifier unchanged.
 
-In `e6715658`, worker t walks epochs base + t, base + t + T, … (T = the worker count). An epoch's early omissions come from a binomial unrank, and `hash_plan` re-hashes the epoch prefix from the first block that differs from the worker's previous epoch.
+The motivation is compositional. PR #3116 already contains a large current public device/host optimization package and reports an expected score gain over the promoted record. PR #3113 separately reports that binding each SCHED_IDLE co-grinder worker to its own logical CPU reduced migrations and improved co-grinder throughput on its test host. The #3116 host code already selects the CPUs on which co-grinder work may run, but its workers inherit the same multi-CPU mask and remain free to migrate within that mask. This submission keeps that mask and assigns each worker to a single member of it.
 
-- **Ranges:** with `QSB_CPU_EPOCH_CONTIG` 1, worker t walks [base + t·span, base + (t+1)·span). Here span is the epoch space above the diagnostic base divided among the workers: about 2.6e8 epochs each at 32 workers (this package has no diagnostic base), against about 2.6e7 walked in 1,200 s.
-- **Prefix re-hash:** in lexicographic order, consecutive epochs differ in the last omission. I replayed both walks on this problem's prefix. The re-hash drops from about 6.1 SHA-256 blocks per epoch at stride 32 to about 3.4.
-- **No unrank:** the next epoch's omissions come from the previous epoch's by the usual next-combination step. The unrank runs only at the start of each range.
-- **Disjointness:** the ranges are disjoint, and the co-grinder's patterns (`QSB_CPU_PREFIX100`) stay the complement subset they are in `e6715658`. So no candidate is walked twice, and every hit still passes the exact OpenSSL gate.
-- **Diagnostic:** worker 0 still starts at the base, so the smallest co-grinder hit still carries the diagnostic code.
-- **Luck-free rate:** each worker's range starts at a known epoch and its last hit shows how far it got. A ranked hit list therefore gives the co-grinder's rate without hit-count noise.
+## Exact source change
 
-## Ranked draws of this exact package
+Only `candidates/subset/CpuGrindSubset.h` is changed relative to PR #3116.
 
-This is a redraw. The first draw of this package was `538d7362`: 718.82 (GPU 652.36 + co-grinder 66.47).
+1. Add `QSB_CPU_PIN_WORKERS`, default 1.
+2. Add `Ctx::pin_cpus`, a vector of logical CPU ids.
+3. Immediately after a co-grinder worker starts, if `pin_cpus` is non-empty, bind that worker to exactly one CPU with `sched_setaffinity`.
+4. Before spawning the workers, inspect the builder thread's current affinity mask. That is the same mask the #3116 workers would otherwise inherit.
+5. Group CPUs by `thread_siblings_list` and construct the list one CPU per physical core first, followed by SMT siblings. This means that when the worker count is below the number of logical CPUs in the mask, workers occupy different physical cores before sharing SMT cores.
+6. `QSB_CPU_PIN_WORKERS_ENV=0` disables the added placement behavior at runtime and restores #3116's inherited-mask behavior.
 
-- **Co-grinder, luck-free:** 66.45 M/s from the 32 worker ranges (hits: 66.47). That is `e6715658`'s co-grinder rate on the ranked host, read without hit noise: about 2.4% above the `a33e04c3` co-grinder with the same walk (64.9).
-- **GPU work, luck-free:** 651.35 M/s from the largest GPU-hit epoch (hits: 652.36).
-- **Walk:** `e6715658` has no diagnostic base (the smallest co-grinder hit is at epoch 53,476), so the 32 ranges start at t·C(137,6)/32.
+No GPU source is changed. No carrier knob is changed. `qsb_carrier_sm89.h` is exactly the #3116 image. No candidate arithmetic, hit encoding, search bounds, gate rule or publication rule is changed.
 
-## Ranked evidence (same change on terrapinelf's `a33e04c3` co-grinder with 100 patterns)
+## Why this is distinct from the public bases
 
-| draw | total | GPU (hits) | co-grinder (hits) | co-grinder work, luck-free |
-|---|---:|---:|---:|---:|
-| `56b4b1f9` | 704.73 | 640.61 | 64.12 | 64.96 |
-| `30c24617` | 714.02 | 649.29 | 64.73 | 64.91 |
-| `7e55c5c2` | 709.13 | 644.00 | 65.14 | 64.86 |
+PR #3116 does substantial CPU placement work already. In particular it records the process CPU set early, derives a `work_cpus` mask, reserves or shares cores according to its host-producer rules, and makes the co-grinder table-build thread and its workers inherit that mask. That determines the *set* of CPUs available to co-grinder work.
 
-- **Walk:** on all three draws the hits show 32 workers, each about 2.4e7 epochs into its range (±2%, no range exhausted), on the 9-window table (diagnostic code 6).
-- **Luck-free rate:** 32 × about 2.43e7 epochs × 100 patterns / 1,201.9 s. It reproduces to about 0.1% between the draws, while the hit counts scatter by Poisson around it.
+It does not, however, assign worker t to CPU t. A worker remains schedulable on any CPU in the inherited mask, so Linux may migrate two SCHED_IDLE workers onto sibling or already-occupied logical CPUs while another logical CPU in the same mask is idle. The new code only removes that degree of freedom.
 
-## Checks done here
+PR #3113 does have per-worker affinity. The integration here is not a replay of the whole #3113 candidate: none of its Q-layout choice, scheduling-switch selection or other candidate-specific device configuration is taken. The worker-affinity mechanism is ported into #3116's newer and substantially different co-grinder/host stack and uses #3116's existing selected worker mask as the source set.
 
-All builds ran in an amd64 container with CUDA 12.8.93, the ranked runner's toolkit.
+## Correctness
 
-- **Emulation harness:** the co-grinder ran under `qemu-x86_64 -cpu max` (SHA-NI + scalar EC) in a CPU-only harness with tree.cu's loader and 128-pattern rule.
-- **Settings:** `QSB_ZEROS_N=12`, 40 s per run.
-- **Reference:** each run was compared against a brute-force `qsb_hv_check` oracle on the kept 100 patterns.
+The change is scheduling-only.
 
-| check | result |
-|---|---|
-| `build_carrier.sh 24` | cubin sha256 `e0c0897f799baf81df92f777f89adb4b351cf224df4a6a6c6d8a8cabf1631fea`, 473,376 bytes, byte-identical to `e6715658`'s; 0 spills. Only the informational source hash in the header changes |
-| the harness's build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`) | builds with no errors |
-| image `qsb_carrier_knobs` against the host binary's `QSB_CARRIER_KNOBS` | byte-identical (2,534 bytes), so the native image loads |
-| next-combination step against the binomial unrank, 20,000,000 consecutive epochs from 400 starts | 0 mismatches; carries at every index 0..5 exercised |
-| 1 thread | all hits over epochs < 4,096 match the oracle (199 = 199), 0 missing, 0 extra, 0 duplicates |
-| 4 threads, ranges capped to 4 × 1,024 epochs (`-DQSB_CPU_EPOCH_CAP=4096`) | every worker stops at its range end: exactly 409,600 candidates, 199 = 199 hits |
-| 4 threads, full ranges | epochs < 4,096 (worker 0): exact. Worker 2's first 2,048 epochs (from 4,109,236,362): 87 = 87 against a separate oracle run. 0 duplicates |
-| `e6715658` unchanged, same harness | exact (the reference walk) |
+- Each worker retains its original `tid`.
+- Each worker retains the same epoch range and candidate sequence assigned by #3116.
+- The number of workers is unchanged.
+- The selected CPU mask is unchanged.
+- The CPU table, scalar/IFMA paths, SHA paths, GPU work, host verification and hit publication are unchanged.
+- Failure of `sched_setaffinity` leaves the worker running with its inherited mask, so failure falls back to the #3116 behavior.
+- If the topology files cannot enumerate siblings, each readable CPU encountered remains a valid singleton core entry; the mechanism never changes candidate data.
 
-Emulated timings say nothing about Zen 4, so I did not measure speed here.
+Therefore the set of candidates searched by a fully completed amount of work is unchanged. Only where the worker executes is changed.
 
-## Kill switch
+## Local validation
 
-- `-DQSB_CPU_EPOCH_CONTIG=0`: `e6715658`'s stride walk, byte-for-byte the record's code path.
-- `QSB_CPU_EPOCH_CAP` (default: no cap) exists only for tests.
-- Every other switch is as in `e6715658`; its note documents them.
+This host has CUDA 12.8 available for compilation but no NVIDIA GPU. I therefore do not make a local GPU performance claim.
 
-## Reproducing
+The following was run from this exact tree after the change:
+
+```
+./setup.sh subset
+```
+
+It completed successfully. The official setup path:
+
+- regenerated the synthetic problem files,
+- compiled the subset candidate with CUDA 12.8,
+- completed the verifier smoke test,
+- reported `setup.sh: verifier smoke test passed`,
+- and finished with `setup.sh: ready  run ./benchmark.sh subset`.
+
+The compiler emitted inherited CUDA/OpenSSL warnings, but no build error. Because this is a host-only change, the native carrier from #3116 does not need regeneration.
+
+`git diff --check` also passes.
+
+## Performance hypothesis
+
+This submission deliberately makes no claimed local score.
+
+The performance hypothesis comes from the separation between mask selection and per-worker placement:
+
+- #3116 chooses which CPUs co-grinder work may use.
+- The added mechanism prevents Linux from moving a worker among those CPUs after it has warmed local execution state and prevents two workers from being simultaneously placed on one logical CPU while another allowed CPU is idle.
+- These workers run at SCHED_IDLE and share the host with GPU-launch/control work and host producers. The exact effect therefore depends on the ranked host scheduler and topology.
+- PR #3113 reports reduced migrations and a material co-grinder-side improvement from this placement idea on its measured host. Those measurements belong to #3113; they are not reproduced or claimed as measurements of this tree.
+
+Because the co-grinder is only one component of total subset score, any benefit is expected to be smaller in total-score percentage than in CPU-worker percentage. The official Yukon runner is the only result used here.
+
+## Base and attribution
+
+Public base used directly:
+
+- **kshitij-hash / PR #3116**, Yukon submission `21af7f34-b075-40bc-8522-3e5cd28f0895`, head `f1c292799769271f34ab4d7f245fd9ebb7ec2c4d`.
+  This submission keeps its complete candidate tree and all attribution inherited in its note. In particular, #3116 describes its lineage through the current promoted subset record and credits the public contributors from whom its device and host switches derive.
+
+Specific additional public idea used:
+
+- **cadamcat / PR #3113**, Yukon submission `7b919feb-45bf-4124-8d61-5a2c8adc8675`, head `e04d5cc6fa86a3446ef0a476a1375055a8b891c4`.
+  The per-worker CPU-affinity mechanism and one-core-first sibling ordering are adapted from that public candidate. PR #3113 in turn credits HyeokxC for earlier per-worker CPU binding work. Those credits are preserved here.
+
+I do not claim the #3116 optimization package or #3113's worker-affinity concept as original work. The incremental work here is selecting the compatibility point in #3116, integrating the affinity mechanism without replacing #3116's own CPU-mask construction, providing the runtime off switch, compiling the combined tree, and submitting the combination for official measurement.
+
+If #3116, #3113, or another intervening submission promotes first, that promoted result should advance the global record normally. This submission should only be evaluated for whatever additional record improvement it actually produces under Yukon's rules.
+
+## Reproduction
+
+From the repository root:
 
 ```
 ./setup.sh subset
 ./benchmark.sh subset
 ```
 
-To read the co-grinder's rate without hit noise from a ranked run:
+To disable only the added mechanism while leaving the #3116 base intact:
 
-1. Take the co-grinder hits: the patterns outside the 128 most frequent `skip[6:9]`.
-2. Take each hit's lexicographic epoch rank of the first six skip indices.
-3. Group the hits into the 32 ranges; range t starts at base + t·(C(137,6) − base)/32, with base = the smallest rank with its low 19 bits cleared (0 for this package).
-4. Sum each range's last rank minus its start, × 100 patterns / `elapsed_s`.
+```
+QSB_CPU_PIN_WORKERS_ENV=0 ./benchmark.sh subset
+```
 
-## Base and attribution
+The default is enabled.
 
-- **kshitij-hash** (co-author): the record `e6715658` in full: every device switch, the operand-order search, the co-grinder switches, the start-up and exit hardening, and the composition. Its note credits the lineage in detail.
-- **Credited through `e6715658`** (co-authors, up to Yukon's limit): terrapinelf, i34-9, ercumentyildirim, HyeokxC, jacklightChen, fkiene, kaankolcu, newjordan, Meganpark980320.
-- **Also credited through `e6715658`:** Ryun1, RealAdii and every contributor that note names. The GPU arithmetic headers derive from VanitySearch (GPLv3, `COPYING`); the co-grinder's field and scalar code follow libsecp256k1 (MIT, `COPYING-secp256k1`).
-- **Mine:**
-  - Co-grinder: the contiguous epoch walk with its next-combination step (first in my `56b4b1f9`), its emulation checks, and the luck-free reading of the co-grinder rate from ranked hit lists.
-  - Earlier: the block-0 pattern selection that `QSB_CPU_PREFIX100` follows (`4a197f06`).
+## Files
 
-All inherited source, GPLv3 notices and attributions are kept. Only `candidates/subset/` changes.
+Relative to the #3116 head, only:
+
+```
+candidates/subset/CpuGrindSubset.h
+```
+
+is modified by this integration. The public submission note is added for Yukon packaging.
+
+## Measurement policy
+
+No redraw, unchanged rerun, or claimed-score prefilter is used. This candidate contains a source change with a specific scheduling mechanism. No local score is supplied because the local host lacks the target GPU. The official Yukon RTX 4090 result is authoritative.
