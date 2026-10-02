@@ -131,6 +131,13 @@ static const double qsb_trace_t_start = qsb_trace_now();
 #ifndef ZLAB_DUAL_EPOCH_SHA
 #define ZLAB_DUAL_EPOCH_SHA 1
 #endif
+/* Roll the two recovery-id SHA gates through one warp-uniform loop. */
+#ifndef QSB_CODE_ROLL
+#define QSB_CODE_ROLL 2
+#endif
+#if QSB_CODE_ROLL != 0 && QSB_CODE_ROLL != 2
+#error "QSB_CODE_ROLL supports only the original path (0) or the two-trip recovery gate (2)"
+#endif
 #define ZLAB_HIT_REC 16        /* bytes per record: u32 tag + MAX_T combo bytes... first 12 used */
 #define ZLAB_HIT_FIRST 8       /* records copied with the count in the first D2H */
 #ifndef QSB_STARTUP_TRIM
@@ -267,6 +274,14 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
 #endif
 #if QSB_SEED_K32_SUB != 0 && QSB_SEED_K32_SUB != 1
 #error "QSB_SEED_K32_SUB must be 0 or 1"
+#endif
+/* QSB_S3_HINT_MODE (default 0; carrier image only): 2 puts the .L2::64B fetch hint on all four 16-byte loads of a
+ * cold table record in qsb_s3_load_n, not only on X's first; the loads read the same bytes with the same .cs.nc operator. */
+#ifndef QSB_S3_HINT_MODE
+#define QSB_S3_HINT_MODE 0
+#endif
+#if QSB_S3_HINT_MODE != 0 && QSB_S3_HINT_MODE != 2
+#error "QSB_S3_HINT_MODE must be 0 or 2"
 #endif
 #ifndef QSB_GATHER_L1_POLICY
 #define QSB_GATHER_L1_POLICY 0
@@ -2163,7 +2178,14 @@ __device__ __forceinline__ void qsb_s3_load_n(const uint8_t *__restrict__ gTable
     if (cold) {
         asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }"
             : "=l"(x0.x), "=l"(x0.y) : "l"(tx));
+#if QSB_S3_HINT_MODE == 2
+#define QSB_S3_HINT_LOAD(v, p) asm("{ .reg .u64 g; cvta.to.global.u64 g, %2; ld.global.cs.nc.L2::64B.v2.u64 {%0,%1}, [g]; }" \
+                                    : "=l"((v).x), "=l"((v).y) : "l"(p))
+        QSB_S3_HINT_LOAD(x1, tx + 1); QSB_S3_HINT_LOAD(y0, ty); QSB_S3_HINT_LOAD(y1, ty + 1);
+#undef QSB_S3_HINT_LOAD
+#else
         x1 = __ldcs(tx + 1); y0 = __ldcs(ty); y1 = __ldcs(ty + 1);
+#endif
     }
     else    { x0 = __ldg(tx);  x1 = __ldg(tx + 1);  y0 = __ldg(ty);  y1 = __ldg(ty + 1);  }
 #endif
@@ -5867,7 +5889,17 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_XSHA_KNOBS
 #endif
-#define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
+#if QSB_S3_HINT_MODE
+#define QSB_HINT_KNOBS QSB_CARRIER_KV(QSB_S3_HINT_MODE)
+#else
+#define QSB_HINT_KNOBS
+#endif
+#if QSB_CODE_ROLL
+#define QSB_CODE_ROLL_KNOBS QSB_CARRIER_KV(QSB_CODE_ROLL)
+#else
+#define QSB_CODE_ROLL_KNOBS
+#endif
+#define QSB_CARRIER_KNOBS QSB_CODE_ROLL_KNOBS QSB_HINT_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
