@@ -137,11 +137,25 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
     return c<3 ? 262144u : (c<5 ? 8388608u : 5329993u);
 #endif
 }
+/* QSB_HOT_ORDER (default 0): 1 = the four hot banks in access-density order 0, 2, 3, 1
+ * (segment 0: two reads per candidate in 16 MiB; segments 2 and 3: 7/8 read each in 8 MiB; segment 1:
+ * 7/8 read in 16 MiB), so a persisting window over the first W MiB holds the densest records. The
+ * banks keep their sizes and contents; only their base record moves (segment 0 stays at 0, the four
+ * still end at 786432 = QSB_HOT_RECS, the cold banks do not move). */
+#ifndef QSB_HOT_ORDER
+#define QSB_HOT_ORDER 0
+#endif
+#if QSB_HOT_ORDER && !(QSB_FOUR_HOT && QSB_BIGTBL)
+#error "QSB_HOT_ORDER reorders the four-hot bank layout"
+#endif
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #if QSB_GLV11
     if(c>=6) return c==6?153175181u:220284045u;
 #endif
-#if QSB_FOUR_HOT
+#if QSB_FOUR_HOT && QSB_HOT_ORDER
+    return c==0?0u:c==1?524288u:c==2?262144u:
+           c==3?393216u:c==4?786432u:67895296u;
+#elif QSB_FOUR_HOT
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
 #else
@@ -666,6 +680,20 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
 #if QSB_HIGH15_NOFB != 0 && QSB_HIGH15_NOFB != 1
 #error "QSB_HIGH15_NOFB must be 0 or 1"
 #endif
+/* QSB_W5_GLV_RND2 (W5 P-pkg1, subset QSB_GLV_RND 2): with QSB_HIGH15_NOFB and the QSB_GLV_GLUE bit 4
+ * rounding, the 2^31 rides in the diagonal-10 carry, so diagonal 11 accumulates w11 + 2^31 and its carry
+ * into diagonal 12 already holds the rounding bit: w12..w15 ARE floor((P' + 2^383)/2^384) mod 2^128 and
+ * the 128-bit rounding add goes. Bit 4's form is (w12..w15) + (w11 >> 31) mod 2^128 on the same P', the
+ * same value for every k. Diagonal 11 cannot overflow (its carry-in grows by 2^31 < 2^32). 0 = bit 4's form. */
+#ifndef QSB_W5_GLV_RND2
+#define QSB_W5_GLV_RND2 0   /* W5's P-pkg1 shipped 1; P-lg1 sets its default with work/bake.py; 0 = the record */
+#endif
+#if QSB_W5_GLV_RND2 != 0 && QSB_W5_GLV_RND2 != 1
+#error "QSB_W5_GLV_RND2 must be 0 or 1"
+#endif
+#if QSB_W5_GLV_RND2 && !(QSB_HIGH15_NOFB && QSB_GLV_RND)
+#error "QSB_W5_GLV_RND2 is written for QSB_HIGH15_NOFB 1 with QSB_GLV_GLUE bit 4"
+#endif
 #if QSB_GLV_NZ_CUT != 0 && QSB_GLV_NZ_CUT != 1
 #error "QSB_GLV_NZ_CUT must be 0 or 1"
 #endif
@@ -774,12 +802,18 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
     const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
     carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
     w10=0;
+#if QSB_W5_GLV_RND2
+    carry+=0x80000000ULL;   /* + 2^383: diagonal 11 now accumulates w11 + 2^31 */
+#endif
 #else
     q9_high15_begin(&acc,&overflow,carry,q9_mulw(a3,b7),q9_mulw(a4,b6));
     q9_high15_add(&acc,&overflow,q9_mulw(a5,b5));
     q9_high15_add(&acc,&overflow,q9_mulw(a6,b4));
     q9_high15_add(&acc,&overflow,q9_mulw(a7,b3));
     w10=(uint32_t)acc;carry=(acc>>32)|((uint64_t)overflow<<32);
+#if QSB_W5_GLV_RND2
+    carry+=0x80000000ULL;
+#endif
 #endif
 
     q9_high15_begin(&acc,&overflow,carry,q9_mulw(a4,b7),q9_mulw(a5,b6));
@@ -828,7 +862,10 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
 #endif
         uint64_t lo=(uint64_t)w12|((uint64_t)w13<<32);
         uint64_t hi=(uint64_t)w14|((uint64_t)w15<<32);
-#if QSB_GLV_RND
+#if QSB_W5_GLV_RND2
+        (void)w11;
+        out[0]=lo;out[1]=hi;   /* the rounding bit is already in w12..w15 */
+#elif QSB_GLV_RND
         /* (hi:lo) + (w11 >> 31) mod 2^128: the carry out of w11 + 2^31 is bit 31 of w11 */
         asm("{\n\t.reg .u32 t;\n\t"
             "add.cc.u32 t,%4,0x80000000;\n\t"
