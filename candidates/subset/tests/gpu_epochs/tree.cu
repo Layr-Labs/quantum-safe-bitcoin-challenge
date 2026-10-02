@@ -923,7 +923,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * across both tails. The front keeps its ABI (its chain loop is not re-allocated by this). Same __constant__
  * words, same field operations, in the same order: bit-identical. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1
 #endif
 #if QSB_R_CBANK_TAILS < 0 || QSB_R_CBANK_TAILS > 1
 #error "QSB_R_CBANK_TAILS must be 0 or 1"
@@ -1008,7 +1008,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_CONST_CALLEE 1
 #endif
 #ifndef QSB_SHA_WROLL_PIPE
-#define QSB_SHA_WROLL_PIPE 0
+#define QSB_SHA_WROLL_PIPE 1
 #endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
@@ -5944,7 +5944,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_YP_DC
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC
+#if defined(QSB_CODE_ROLL) && QSB_CODE_ROLL   /* ours (PR 2441 bit 1 port): only when non-zero, so 0 builds 21af7f34's image byte for byte */
+#define QSB_K16_CODE_ROLL QSB_CARRIER_KV(QSB_CODE_ROLL)
+#else
+#define QSB_K16_CODE_ROLL
+#endif
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
