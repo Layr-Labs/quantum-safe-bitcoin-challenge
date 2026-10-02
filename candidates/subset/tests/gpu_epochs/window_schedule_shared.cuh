@@ -13,7 +13,11 @@ __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
 #if QSB_SHA_SCHED_V4
 /* QSB_SHA_SCHED_V4: W+K word r of second-block slot s at [r/4][s].{x,y,z,w}, so a block's 8 rounds
  * read two 16 B words per lane instead of eight 4 B words; same 32 KiB, same values. */
+#if QSB_SHA_WROLL_PIPE
+__device__ uint4 QSB_WINDOW_SECOND[17][QSB_SE_PER_EPOCH];   /* QSB_SHA_WROLL_PIPE: row 16 is zero padding the pipelined roll reads once and discards (the host uploads rows 0..15) */
+#else
 __device__ uint4 QSB_WINDOW_SECOND[16][QSB_SE_PER_EPOCH];
+#endif
 #define QSB_WSEC_V4(r, slot) (QSB_WINDOW_SECOND[(r) >> 2][slot])
 #else
 __device__ uint32_t QSB_WINDOW_SECOND[64][QSB_SE_PER_EPOCH];
@@ -206,7 +210,11 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 
 #if ZLAB_DUAL_EPOCH_SHA
 #ifndef QSB_PAIR_SHA_UNROLL_WINDOW
+#if defined(QSB_SHA_WROLL_PIPE) && QSB_SHA_WROLL_PIPE
+#define QSB_PAIR_SHA_UNROLL_WINDOW 0   /* the pipelined roll replaces the unrolled window loop */
+#else
 #define QSB_PAIR_SHA_UNROLL_WINDOW 1
+#endif
 #endif
 #ifndef QSB_PAIR_SHA_UNROLL_CONST
 #define QSB_PAIR_SHA_UNROLL_CONST 1
@@ -215,12 +223,113 @@ __device__ __forceinline__ void qsb_scheduled_window_hash(uint32_t *state,
 #ifndef QSB_PAIR_SHA_UNROLL_CONST_INNER
 #define QSB_PAIR_SHA_UNROLL_CONST_INNER 0
 #endif
+#if QSB_SHA_WROLL_PIPE && QSB_PAIR_SHA_UNROLL_WINDOW
+#error "QSB_SHA_WROLL_PIPE replaces the window loop: set QSB_PAIR_SHA_UNROLL_WINDOW 0 with it"
+#endif
+#ifndef QSB_SHA_UEXIT
+#define QSB_SHA_UEXIT 0   /* lane SHA probe (X-SHA): 0 = the base loop header, byte for byte */
+#endif
+#if QSB_CONST_CALLEE
+/* QSB_CONST_CALLEE (tree.cu): the four constant blocks in their own __noinline__ callee
+ * (16 state words in and out as ABI registers), block loop unrolled, 8-round loop rolled and C-indexed, so ptxas
+ * keeps the K+W walk on the uniform datapath (ULDC) instead of per-thread LDC. Same words, rounds and order. */
+struct QsbPairS16 { uint32_t w[16]; };
+#if QSB_SHA_W0FOLD
+/* QSB_SHA_W0FOLD (tree.cu): w[0] and w[8] come back without block 154's word-0 feed-forward; w[16] and w[17] carry
+ * the final a of A and B, which the literal-K outer block adds inside round 0 and W16. */
+struct QsbPairS18 { uint32_t w[18]; };
+#define QSB_CC_RET QsbPairS18
+#else
+#define QSB_CC_RET QsbPairS16
+#endif
+__device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
+    uint32_t a0,b0,c0,d0,e0,f0,g0,h0,a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
+#if QSB_SHA_W0FOLD
+    uint32_t fa0=0,fa1=0;
+#endif
+    const uint4 *K=reinterpret_cast<const uint4*>(&QSB_CONST_SCHEDULE[0][0]);
+    #pragma unroll
+    for(int block=0;block<4;block++){
+        a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
+        a1=s.w[8];b1=s.w[9];c1=s.w[10];d1=s.w[11];e1=s.w[12];f1=s.w[13];g1=s.w[14];h1=s.w[15];
+#if QSB_SHA_UEXIT == 1
+        /* QSB_SHA_UEXIT 1 (lane SHA probe): the byte offset is the only induction variable, so the exit test can
+         * sit on the uniform datapath with the ULDC address. Same words, rounds and order. */
+        #pragma unroll 1
+        for(uint32_t off=0;off!=256u;off+=32u){
+            const uint4 *kr=reinterpret_cast<const uint4*>(reinterpret_cast<const char*>(K)+block*256+off);
+            const uint4 ka=kr[0], kb=kr[1];
+#elif QSB_SHA_UEXIT == 2
+        /* QSB_SHA_UEXIT 2 (lane SHA probe): do-while on the row index with an equality exit. */
+        int q=0;
+        #pragma unroll 1
+        do{
+            const uint4 ka=K[block*16+q], kb=K[block*16+q+1];
+#elif QSB_SHA_UEXIT == 3
+        /* QSB_SHA_UEXIT 3 (lane SHA probe): pointer walk with an equality exit on the end pointer. */
+        #pragma unroll 1
+        for(const uint4 *kr=K+block*16;kr!=K+block*16+16;kr+=2){
+            const uint4 ka=kr[0], kb=kr[1];
+#elif QSB_SHA_UEXIT == 4
+        /* QSB_SHA_UEXIT 4 (lane SHA probe): the 8-round loop fully unrolled inside the callee, so K+W are
+         * immediate constant-bank operands (no ULDC, no loop control, no per-block copies). Code-size arm. */
+        #pragma unroll
+        for(int q=0;q<16;q+=2){
+            const uint4 ka=K[block*16+q], kb=K[block*16+q+1];
+#else
+        #pragma unroll 1
+        for(int q=0;q<16;q+=2){
+            const uint4 ka=K[block*16+q], kb=K[block*16+q+1];
+#endif
+            {const uint32_t w=ka.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+            {const uint32_t w=ka.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+            {const uint32_t w=ka.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+            {const uint32_t w=ka.w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+            {const uint32_t w=kb.x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+            {const uint32_t w=kb.y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+            {const uint32_t w=kb.z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+            {const uint32_t w=kb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+#if QSB_SHA_UEXIT == 2
+            q+=2;
+        }while(q!=16);
+#else
+        }
+#endif
+#if QSB_SHA_W0FOLD
+        if(block<3){ s.w[0]+=a0; s.w[8]+=a1; } else { fa0=a0; fa1=a1; }
+        s.w[1]+=b0;s.w[2]+=c0;s.w[3]+=d0;s.w[4]+=e0;s.w[5]+=f0;s.w[6]+=g0;s.w[7]+=h0;
+        s.w[9]+=b1;s.w[10]+=c1;s.w[11]+=d1;s.w[12]+=e1;s.w[13]+=f1;s.w[14]+=g1;s.w[15]+=h1;
+#else
+        s.w[0]+=a0;s.w[1]+=b0;s.w[2]+=c0;s.w[3]+=d0;s.w[4]+=e0;s.w[5]+=f0;s.w[6]+=g0;s.w[7]+=h0;
+        s.w[8]+=a1;s.w[9]+=b1;s.w[10]+=c1;s.w[11]+=d1;s.w[12]+=e1;s.w[13]+=f1;s.w[14]+=g1;s.w[15]+=h1;
+#endif
+    }
+#if QSB_SHA_W0FOLD
+    QsbPairS18 o;
+    #pragma unroll
+    for(int j=0;j<16;j++) o.w[j]=s.w[j];
+    o.w[16]=fa0; o.w[17]=fa1;
+    return o;
+#else
+    return s;
+#endif
+}
+#endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
  * second block and constant suffix) in both epochs.  Load each schedule word
  * once and advance two independent SHA-256 states with it. */
+#if QSB_ROOT_FILL
+/* QSB_ROOT_FILL (tree.cu): PART 0 = the whole paired hash below; 1 = the first-state load and the window block only
+ * (stateA/stateB leave with the window block's chaining values); 2 = the four constant blocks only, from stateA/stateB. */
+template<int PART=0>
+#endif
 __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     uint32_t *stateA, uint32_t *stateB, int lane,
-    const uint32_t *firstA, const uint32_t *firstB) {
+    const uint32_t *firstA, const uint32_t *firstB
+#if QSB_SHA_W0FOLD
+    , uint32_t *w0x   /* QSB_SHA_W0FOLD: block 154's final a for A and B; stateA[0], stateB[0] exclude it */
+#endif
+    ) {
 #if QSB_950_PACK
     const uint32_t lane_rec=QSB_LANE_CLASS[lane];
     const int first_slot=(int)(lane_rec>>16);
@@ -228,6 +337,9 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
 #else
     const int first_slot=QSB_FIRST_CLASS[lane];
     const int slot=QSB_WINDOW_CLASS[lane];
+#endif
+#if QSB_ROOT_FILL
+    if(PART!=2){
 #endif
 #if QSB_950_PACK
     {   const uint4 *pA=reinterpret_cast<const uint4*>(firstA+first_slot*8);
@@ -245,6 +357,9 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         stateB[j]=firstB[first_slot*8+j];
     }
 #endif
+#if QSB_ROOT_FILL
+    }
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0;
     uint32_t a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #define QSB_PAIR_STATE_LOAD() do { \
@@ -259,7 +374,36 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     stateB[0]+=a1;stateB[1]+=b1;stateB[2]+=c1;stateB[3]+=d1; \
     stateB[4]+=e1;stateB[5]+=f1;stateB[6]+=g1;stateB[7]+=h1; \
 } while(0)
+#if QSB_ROOT_FILL
+    if(PART!=2){
+#endif
     QSB_PAIR_STATE_LOAD();
+#if QSB_SHA_WROLL_PIPE
+    /* QSB_SHA_WROLL_PIPE (tree.cu): the rolled window block with its loads one
+     * half-trip ahead. wb (rounds r+4..r+7) is issued at the top of the trip, the next trip's wa (rounds r+8..r+11)
+     * after rounds r..r+3 have consumed wa, so each load leads its first use by four rounds, as in the unrolled
+     * form. The pointer walks the rows; the last trip's extra wa load reads padding row 16 (discarded). Same
+     * words, same rounds, same order. */
+    {
+        const uint4 *wp=&QSB_WINDOW_SECOND[0][slot];
+        uint4 wa=wp[0];
+        #pragma unroll 1
+        for(int r=0;r<64;r+=8){
+            const uint4 wb=wp[QSB_SE_PER_EPOCH];
+            {const uint32_t w=wa.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+            {const uint32_t w=wa.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+            {const uint32_t w=wa.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+            {const uint32_t w=wa.w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+            wa=(wp+=2*QSB_SE_PER_EPOCH, *wp);
+            {const uint32_t w=wb.x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+            {const uint32_t w=wb.y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+            {const uint32_t w=wb.z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+            {const uint32_t w=wb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+        }
+    }
+    if(0)   /* the rolled loop replaces the loop below, which stays in the source as dead code (this form is the
+             * measured one; an #else form reorders two moves) */
+#endif
 #if QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
     #pragma unroll
 #else
@@ -289,7 +433,27 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
 #endif
     }
     QSB_PAIR_STATE_ADD();
-#if QSB_SHA_CONST_IV
+#if QSB_ROOT_FILL
+    }
+    if(PART!=1){
+#endif
+#if QSB_CONST_CALLEE
+    {   /* QSB_CONST_CALLEE (tree.cu): the four constant blocks in the __noinline__ callee above */
+        QsbPairS16 s16;
+        #pragma unroll
+        for(int j=0;j<8;j++){ s16.w[j]=stateA[j]; s16.w[8+j]=stateB[j]; }
+#if QSB_SHA_W0FOLD
+        const QsbPairS18 r18=qsb_pair_const4(s16);
+        #pragma unroll
+        for(int j=0;j<8;j++){ stateA[j]=r18.w[j]; stateB[j]=r18.w[8+j]; }
+        w0x[0]=r18.w[16]; w0x[1]=r18.w[17];
+#else
+        s16=qsb_pair_const4(s16);
+        #pragma unroll
+        for(int j=0;j<8;j++){ stateA[j]=s16.w[j]; stateB[j]=s16.w[8+j]; }
+#endif
+    }
+#elif QSB_SHA_CONST_IV
     /* QSB_SHA_CONST_IV: the four constant blocks on one induction variable. q indexes the 16 B rows
      * of QSB_CONST_SCHEDULE viewed as uint4[64] (block b, rounds r..r+3 at q = 16 b + r/4) and runs on across
      * the block boundaries, so the inner loop needs no block term in its address (the base LEA and IMAD per
@@ -390,6 +554,9 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         QSB_PAIR_STATE_ADD();
     }
 #endif /* QSB_SHA_CONST_IV */
+#if QSB_ROOT_FILL
+    }
+#endif
 #undef QSB_PAIR_STATE_LOAD
 #undef QSB_PAIR_STATE_ADD
 }

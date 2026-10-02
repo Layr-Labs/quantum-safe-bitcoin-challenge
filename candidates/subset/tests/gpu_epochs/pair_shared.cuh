@@ -155,6 +155,65 @@ __device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
 #define QSB_NEGFOLD_PARITY 1
 #endif
 #include "parity_window_subset.cuh"
+/* QSB_POOL_RCONST (0/1): x1 = p1 + xR and x2 = p2 + xR read xR's four words straight from QSB_U2R inside the add's
+ * asm (one ld.const per use), so ptxas takes each word as a c[0x3] operand of the IADD3 instead of moving it into a
+ * register on every candidate. The finish's xR is QSB_U2R[0..3] (tree.cu's u2rx under QSB_ISO_RELOAD_R, checked
+ * there), so the words are the same and the add is qsb_fadd's instruction for instruction: bit-identical. */
+#ifndef QSB_POOL_RCONST
+#define QSB_POOL_RCONST 1
+#endif
+#if QSB_POOL_RCONST != 0 && QSB_POOL_RCONST != 1
+#error "QSB_POOL_RCONST must be 0 or 1"
+#endif
+#if QSB_POOL_RCONST
+__device__ __forceinline__ void qsb_fadd_u2rx(uint64_t *r, const uint64_t *a) {
+    uint64_t r0,r1,r2,r3;
+#if QSB_LOSS_FINK32
+    /* with QSB_LOSS_FINK32: qsb_fadd's K32 text (filter_tail_sc.cuh), the same instructions and the same drop class */
+    asm("{\n\t.reg .u32 m,l,h;\n\t.reg .u64 c0,c1,c2,c3;\n\t"
+        "ld.const.u64 c0,[QSB_U2R];\n\t"
+        "ld.const.u64 c1,[QSB_U2R+8];\n\t"
+        "ld.const.u64 c2,[QSB_U2R+16];\n\t"
+        "ld.const.u64 c3,[QSB_U2R+24];\n\t"
+        "add.cc.u64 %0,%4,c0;\n\t"
+        "addc.cc.u64 %1,%5,c1;\n\t"
+        "addc.cc.u64 %2,%6,c2;\n\t"
+        "addc.cc.u64 %3,%7,c3;\n\t"
+        "addc.u32 m,0,0;\n\t"
+        "mov.b64 {l,h},%0;\n\t"
+        "mad.lo.u32 l,m,977,l;\n\t"
+        "add.u32 h,h,m;\n\t"
+        "mov.b64 %0,{l,h};\n\t}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+    return;
+#endif
+    asm("{\n\t.reg .u64 h,t,c0,c1,c2,c3;\n\t"
+        "ld.const.u64 c0,[QSB_U2R];\n\t"
+        "ld.const.u64 c1,[QSB_U2R+8];\n\t"
+        "ld.const.u64 c2,[QSB_U2R+16];\n\t"
+        "ld.const.u64 c3,[QSB_U2R+24];\n\t"
+        "add.cc.u64 %0,%4,c0;\n\t"
+        "addc.cc.u64 %1,%5,c1;\n\t"
+        "addc.cc.u64 %2,%6,c2;\n\t"
+        "addc.cc.u64 %3,%7,c3;\n\t"
+        "addc.u64 h,0,0;\n\t"
+        "mul.lo.u64 t,h,0x1000003d1;\n\t"
+#if QSB_SHORT_CARRY4
+        "add.u64 %0,%0,t;\n\t}"
+#else
+        "add.cc.u64 %0,%0,t;\n\t"
+        "addc.u64 %1,%1,0;\n\t}"
+#endif
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+}
+#define QSB_FADD_XR(r,a,xr) qsb_fadd_u2rx(r,a)
+#else
+#define QSB_FADD_XR(r,a,xr) QSB_FADD(r,a,xr)
+#endif
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
     uint64_t *x1, uint64_t *x2
@@ -175,7 +234,7 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FADD(t, t, yR);            /* -y1 */
     uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
 #endif
-    QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
+    QSB_FADD_XR(x1, x1, xR);          /* x1 = p1 + xR */
     QSB_FSUB(t, m2, cc);
     QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
 #if QSB_K2S_PARITY_WINDOW
@@ -185,18 +244,18 @@ __device__ __forceinline__ uint32_t qsb_k2s_post3(
     QSB_FADD(t, t, yR);            /* y2 */
     parities |= (uint32_t)((t[0] & 1ULL) << 1);
 #endif
-    QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
+    QSB_FADD_XR(x2, x2, xR);          /* x2 = p2 + xR */
 #else
     QSB_FSUB(t, m1, cc);
     QSB_FMUL(x1, sum, t);
-    QSB_FADD(x1, x1, xR);
+    QSB_FADD_XR(x1, x1, xR);
     QSB_FSUB(t, xR, x1);
     QSB_FMUL(t, t, m1);
     QSB_FSUB(t, t, yR);
     uint32_t parities = (uint32_t)(t[0] & 1ULL);
     QSB_FSUB(t, m2, cc);
     QSB_FMUL(x2, sum, t);
-    QSB_FADD(x2, x2, xR);
+    QSB_FADD_XR(x2, x2, xR);
     QSB_FSUB(t, xR, x2);
     QSB_FMUL(t, t, m2);
     QSB_FSUB(t, t, yR);
@@ -301,13 +360,56 @@ __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *
     z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
     z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
 }
+#if QSB_SHA_W0FOLD
+/* QSB_SHA_W0FOLD (tree.cu): the outer block of qsb_pair_second_sha_z's QSB_OUTER_LITK form with W0 = state[0] + w0x,
+ * never formed: _SHA256TransformDigest32Q_W0F adds w0x inside round 0's T1 and W16. */
+__device__ __forceinline__ void qsb_pair_second_sha_z_w0f(uint32_t *state,uint32_t w0x,uint64_t *z){
+    uint32_t s2[8];
+    _SHA256TransformDigest32Q_W0F(s2,state,w0x);
+    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+}
+#endif
+#if defined(QSB_OUTER_FMA_RT) && QSB_OUTER_FMA_RT
+/* QSB_OUTER_FMA_RT (tree.cu): the outer compression's cap-phase form (sha_gate_fma.cuh, include-guarded, so the gate's
+ * own include below is then a no-op). */
+#include "../../sha_gate_fma.cuh"
+__device__ __forceinline__ void qsb_pair_second_sha_z_fma(uint32_t *state,uint64_t *z){
+    uint32_t s2[8];
+    _SHA256TransformDigest32Q_fma(s2,state);
+    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+}
+#endif
 __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
     const uint32_t*firstA,const uint32_t*firstB,int lane){
     uint32_t stateA[8],stateB[8];
+#if QSB_SHA_W0FOLD
+    uint32_t w0x[2];
+    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB,w0x);
+    QsbPairEpochZ out;
+    qsb_pair_second_sha_z_w0f(stateA,w0x[0],out.a);
+    qsb_pair_second_sha_z_w0f(stateB,w0x[1],out.b);
+#else
     qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
     QsbPairEpochZ out;
+#if defined(QSB_OUTER_FMA_RT) && QSB_OUTER_FMA_RT
+    if(QSB_GATE_FMA_C!=0u){   /* QSB_OUTER_FMA_RT (tree.cu): the cap-phase form until main() clears the flag */
+        qsb_pair_second_sha_z_fma(stateA,out.a);
+        qsb_pair_second_sha_z_fma(stateB,out.b);
+    }else{
+        qsb_pair_second_sha_z(stateA,out.a);
+        qsb_pair_second_sha_z(stateB,out.b);
+    }
+#else
     qsb_pair_second_sha_z(stateA,out.a);
     qsb_pair_second_sha_z(stateB,out.b);
+#endif
+#endif
     return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
@@ -466,12 +568,26 @@ __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *
 #include "../../sha_gate_fma.cuh"
 #endif
 
+#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT && !QSB_GATE_H0_FMA
+#error "QSB_GATE_FMA_RT switches the QSB_GATE_H0_FMA hash: set QSB_GATE_H0_FMA 1"
+#endif
+#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT && defined(QSB_TAIL_WEAVE) && QSB_TAIL_WEAVE
+#error "QSB_GATE_FMA_RT is written for qsb_k2s_gate_h0; the weave's hashes (QSB_TAIL_WEAVE) have no second form"
+#endif
 __device__ __forceinline__ int qsb_k2s_gate_h0(
     uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
     uint32_t pb0[16],pb1[16],h0,h1;
     qsb_gate_block(pb0,q1x,y_parities);
     qsb_gate_block(pb1,q2x,y_parities>>1);
-#if QSB_GATE_H0_FMA
+#if QSB_GATE_H0_FMA && defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT
+    if(QSB_GATE_FMA_C){       /* QSB_GATE_FMA_RT (tree.cu): the cap-phase form until main() clears the flag */
+        h0=_SHA256Pubkey33H0_fma(pb0);
+        h1=_SHA256Pubkey33H0_fma(pb1);
+    }else{
+        h0=_SHA256Pubkey33H0(pb0);
+        h1=_SHA256Pubkey33H0(pb1);
+    }
+#elif QSB_GATE_H0_FMA
     h0=_SHA256Pubkey33H0(pb0);
     h1=_SHA256Pubkey33H0(pb1);
 #else
