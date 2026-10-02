@@ -26,6 +26,7 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_RF",    r"_Z14qsb_root_fusedILi\d+EE\w+"),        # optional: absent when QSB_ROOT_FUSED=0
     ("QK_RR",    r"_Z17qsb_root_register\w+"),             # optional
     ("QK_PFC",   r"_Z29qsb_prefix_field_check_kernel\w+"),  # optional
+    ("QK_ABS", r"_Z22qsb_ab_global_schedule\w+"),
 ]
 optional = {"QK_RF", "QK_RR", "QK_PFC"}
 names = []

@@ -52,6 +52,7 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
+    QK_ABS,      /* qsb_ab_global_schedule (global SHA schedule producer) */
     QK_N
 };
 
@@ -127,6 +128,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     fixed[QK_RF] = rf_name;
     fixed[QK_RR] = "_Z17qsb_root_registerPmi";
     fixed[QK_PFC] = "_Z29qsb_prefix_field_check_kernelPj";
+    fixed[QK_ABS]="_Z22qsb_ab_global_scheduleP5uint4ji";
     int all = 1;
     for (int i = 0; i < QK_N; i++) {
         g_qsb_carrier.k[i] = nullptr;

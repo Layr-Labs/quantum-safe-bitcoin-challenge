@@ -1,4 +1,4 @@
-#define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
+#define QSB_DRAW_TAG 0x77a950d3u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
@@ -11,7 +11,7 @@
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (42u<<20) /* HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #ifndef QSB_GREEN
@@ -154,7 +154,7 @@
 #if QSB_ASICBOOST && (!(QSB_UNIF_DP & 1) || QSB_TAIL_TAB || QSB_SHA_SMEM_W1)
 #error "QSB_ASICBOOST replaces the QSB_UNIF_DP tail transform; it does not combine with QSB_TAIL_TAB or QSB_SHA_SMEM_W1"
 #endif
-#define QSB_AB_K 4       /* sequences per launch under QSB_ASICBOOST: one per warp of a 128-thread block */
+#define QSB_AB_K 32       /* sequences per launch under QSB_ASICBOOST: one per warp of a 128-thread block */
 #ifndef QSB_SHA_OPT
 #define QSB_SHA_OPT 1    /* constant-folded SHA transforms (sha_pinsha.cuh): literal K, IV round-1 Maj,
                           * feed-forward folded into round 63, word-0-only pubkey hash */
@@ -250,13 +250,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_PDEC_Z && !(QSB_GLV11 && !QSB_QGLV5)
 #error "QSB_PDEC_Z decodes GLV11 P (QSB_GLV11=1, QSB_QGLV5=0)"
 #endif
-#if QSB_PMIX12_WARP
-#define QSB_PMIX12_SEL() \
-    ((((blockIdx.x*(unsigned)(QSB_TREE_N/32)+(threadIdx.x>>5))*(unsigned)QSB_PMIX12_N) \
-      &(QSB_PMIX12-1u))<(unsigned)QSB_PMIX12_N)
-#else
-#define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
-#endif
+
 /* QSB_QMIX5 (0 or a power of two K >= 2; default 0 = compiled out): the reverse of QSB_PMIX12.
  * Every K-th prepare block ((blockIdx.x & (K-1)) == 0, block-uniform) decodes Q with P's
  * five-term GLV11 decoder (segments 0, 6, 7, 4, 5; q11_bigtbl_code_z) instead of GLV12's six
@@ -271,7 +265,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * like segment 1: only the shift and offset constants of seed 1 and slot 3 depend on the block.
  * Slot 2 (segment 2) is still written and never read by such a block. */
 #ifndef QSB_QMIX5
-#define QSB_QMIX5 8
+#define QSB_QMIX5 16
 #endif
 #if QSB_QMIX5 != 0 && (QSB_QMIX5 < 2 || (QSB_QMIX5 & (QSB_QMIX5-1)) != 0)
 #error "QSB_QMIX5 must be 0 or a power of two >= 2"
@@ -280,6 +274,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
 #endif
 #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
+
+#if QSB_PMIX12_WARP
+#define QSB_PMIX12_SEL() \
+    ((((blockIdx.x*(unsigned)(QSB_TREE_N/32)+(threadIdx.x>>5))*(unsigned)QSB_PMIX12_N) \
+      &(QSB_PMIX12-1u))<(unsigned)QSB_PMIX12_N)
+#else
+#define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
+#endif
 #ifndef QSB_BATCH
 #define QSB_BATCH 4194304    /* candidates per pipeline launch */
 #endif
@@ -1920,11 +1922,9 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #endif
     uint64_t x0[4],y0[4],x1[4],y1[4];
 #if QSB_QMIX5
-#if !QSB_CHAIN_PIPE || QSB_CHAIN_ROLES || QSB_CHAIN_PP || !QSB_GLV_SEED_REG
-#error "QSB_QMIX5 runs the one-addition piped chain with register seeds (QSB_CHAIN_PIPE=1, QSB_CHAIN_ROLES=0)"
+#if !(QSB_CHAIN_PIPE && !QSB_CHAIN_ROLES)
+#error "QMIX5 requires the piped chain with fixed roles"
 #endif
-    /* A QMIX5 block's five Q terms are in slots 1..5 (seeds in registers): its chain starts at
-     * term 1, so it runs one trip fewer and phi still runs before term GT_Q_TERMS. */
     int first=(nonzero&1u)?(QSB_QMIX5_SEL()?1:0):GT_Q_TERMS;
 #else
     int first=(nonzero&1u)?0:GT_Q_TERMS;
@@ -2922,7 +2922,7 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
  * of the locktime alone and equal for every sequence at that locktime (AsicBoost's observation).
  * Under the switch the four warps of a prepare block hash the same 32 locktimes for four
  * sequences. Warp 0 expands the schedule once per locktime and stores the 48 words lane-major as
- * twelve 16-byte quads (quad q of lane l at sw[q*32 + l]: conflict-free STS.128/LDS.128); after one
+ * twelve 16-byte quads (quad q of lane l at sw[q*16 + l]: conflict-free STS.128/LDS.128); after one
  * block barrier every warp, warp 0 included, loads them. Every warp runs the same rounds on the same
  * words; only where W16..W63 come from differs. The words are the U transform's own sums (mod 2^32,
  * so the association does not change a bit). */
@@ -2933,7 +2933,7 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
 /* The arena holds only the GLV codes (u32 slots below GT_Q_TERMS+GT_CHUNKS) until the post-chain
  * __syncthreads that precedes the tree; the schedule's 6 KiB sit above them and below 14 KiB. */
 static_assert((GT_Q_TERMS + GT_CHUNKS) * QSB_TREE_N * 4 <= QSB_AB_SW_OFF &&
-              QSB_AB_SW_OFF + 12 * 32 * 16 <= 14 * QSB_TREE_N * 8, "QSB_ASICBOOST arena layout");
+              QSB_AB_SW_OFF <= 14 * QSB_TREE_N * 8, "QSB_ASICBOOST arena layout");
 __device__ __forceinline__ void qsb_ab_schedule_store(
     uint32_t lane, uint32_t u0, uint32_t w1, uint32_t w2, uint32_t v5, uint4 *sw)
 {
@@ -3821,6 +3821,18 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
  * an 11-byte locktime-dependent tail. Host code hashes the first block once
  * per sequence. These words contain only the fixed bytes of the second block. */
 __device__ __constant__ uint32_t pin_tail_words[3];
+/* Source-bound global schedule producer: thirty-two full warps across eight ordinary
+ * 128-leaf EC CTAs consume each32-locktime schedule. Ring-private storage and
+ * same-stream launch order; no cross-CTA barrier or duplicate expansion. */
+__global__ void qsb_ab_global_schedule(uint4 *out,uint32_t start_lt,int n) {
+    const unsigned bid=blockIdx.x,lane=threadIdx.x;
+    if(bid*1024u>=(unsigned)n)return;
+    const uint32_t u0=pin_tail_words[0]|((bid&7u)<<5);
+    const uint32_t w1=__byte_perm((start_lt>>8)+(bid>>3),pin_tail_words[1],0x0124);
+    const uint32_t w2=pin_tail_words[2];
+    qsb_ab_schedule_store(lane,u0,w1,w2,s1(9995u*8u)+s0(w2),out+bid*(12*32));
+}
+
 
 /* QSB_SHA_SMEM_W1: the eight tail-schedule quantities that depend on W1 alone. With the
  * QSB_SHA_UNIF locktime split, W1 is block-uniform, so one warp computes them per block:
@@ -4014,7 +4026,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
  * the same 33-byte message and H0 gate, mirroring the GPU's recid-0-first early exit, and publish
  * through the same exact OpenSSL gate. A null plane (runtime fallback) hashes on the GPU as before. */
 #ifndef QSB_HOST_PKSHA
-#define QSB_HOST_PKSHA 4
+#define QSB_HOST_PKSHA 0
 #endif
 /* QSB_PK_YIELD (kill switch, default 1): when a batch's plane still holds an unfinished host job
  * (the host workers are behind), the feeder no longer waits for, or helps with, that job: the
@@ -4118,17 +4130,14 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         /* tid through volatile asm: this warp/lane must not be CSE'd with the tree's lane/warp
          * arithmetic after the chain, which would keep them live across the chain loop. */
         uint32_t ab_tid; asm volatile("mov.u32 %0, %%tid.x;" : "=r"(ab_tid));
-        const uint32_t ab_warp = ab_tid >> 5, ab_lane = ab_tid & 31u;
+        const uint32_t ab_warp = ((blockIdx.x&7u)<<2)+(ab_tid>>5), ab_lane = ab_tid & 31u;
         uint32_t u0, w1;
         {
-            const uint32_t bid = blockIdx.x;
+            const uint32_t bid = blockIdx.x>>3;
             u0 = pin_tail_words[0] | ((bid & 7u) << 5);
             w1 = __byte_perm((start_lt >> 8) + (bid >> 3), pin_tail_words[1], 0x0124);
         }
-        uint4 *ab_sw = (uint4 *)((char *)qsb_digit_arena() + QSB_AB_SW_OFF);
-        if (ab_warp == 0)
-            qsb_ab_schedule_store(ab_lane, u0, w1, pin_tail_words[2], tp.v[5], ab_sw);
-        __syncthreads();   /* warps 1-3 read what warp 0 stored */
+        const uint4 *ab_sw=(const uint4 *)tree+(blockIdx.x>>3)*(12*32);
         /* The launch's four sequences' precomputes, one qsb_tail_pre per warp (host: d_mid_slot). */
         qsb_tail_pre ab_tp;
         {
@@ -4532,6 +4541,9 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #if QSB_SUBPIPE && QSB_ROOT_FUSED
 #define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
 #endif
+#if !QSB_ASICBOOST || !QSB_SUBPIPE || !QSB_SLOTPIPE || QSB_SUBGRAPH || QSB_HOST_PKSHA
+#error "globalAB needs ASICBOOST slotted subpipeline, graph/host-offload disabled"
+#endif
 #include "QsbCarrier.h"
 #if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
 #error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
@@ -4765,6 +4777,7 @@ struct QsbSubPipe {
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
     ulonglong2 *state[QSB_SUBRING];
+    uint4 *schedule[QSB_SUBRING];
     uint64_t *roots[QSB_SUBRING], *super_roots[QSB_SUBRING], *ckpt[QSB_SUBRING];
     unsigned long long g;
 };
@@ -4831,7 +4844,8 @@ static int qsb_subpipe_init(cudaStream_t like) {
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
     const int groups = (blocks + 255) / 256;
     for (int r = 0; r < QSB_SUBRING && e == cudaSuccess; r++) {
-        e = cudaMalloc(&P.state[r], (size_t)QSB_SUBPIPE * QSB_STATE_PLANES * sizeof(ulonglong2));
+        e = cudaMalloc(&P.schedule[r], (size_t)((QSB_SUBPIPE+1023)/1024)*(12*32)*sizeof(uint4));
+        if(e == cudaSuccess) e = cudaMalloc(&P.state[r], (size_t)QSB_SUBPIPE * QSB_STATE_PLANES * sizeof(ulonglong2));
         if (e == cudaSuccess) e = cudaMalloc(&P.roots[r], (size_t)blocks * 8u * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaMalloc(&P.super_roots[r], (size_t)groups * 4u * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaMalloc(&P.ckpt[r], (size_t)groups * 4u * QSB_CHECKPOINT_STRIDE * sizeof(uint64_t));
@@ -4929,7 +4943,7 @@ static void qsb_subpipe_launch(
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
                 seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
                 d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
-                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+                P.state[r],P.roots[r],(uint64_t*)P.schedule[r],tp);
             if (graph.root_count != blocks) {
                 if (g_qsb_register_roots)
                     qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(1),
@@ -4956,18 +4970,23 @@ static void qsb_subpipe_launch(
             if (e != cudaSuccess) qsb_subpipe_die("ring wait", e);
         }
         const int groups = (blocks + 255) / 256;
+        if(qsb_carrier_has(QK_ABS))
+            qsb_carrier_launch(qsb_ab_global_schedule,QK_ABS,dim3((n+1023)/1024),dim3(32),s0,P.schedule[r],lt0,n);
+        else qsb_ab_global_schedule<<<(n+1023)/1024,32,0,s0>>>(P.schedule[r],lt0,n);
+        e=cudaGetLastError();
+        if(e!=cudaSuccess) qsb_subpipe_die("AB schedule producer",e);
         if (qsb_carrier_has(QK_S0))
             qsb_carrier_launch(kernel_pinning_pipeline<true,0>,QK_S0,dim3(blocks),dim3(QSB_S0_THREADS),s0,
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
                 seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
                 d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
-                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+                P.state[r],P.roots[r],(uint64_t*)P.schedule[r],tp);
         else
             kernel_pinning_pipeline<true,0><<<blocks,QSB_S0_THREADS,0,s0>>>(
                 d_midstate,d_suffix,suffix_len,seq_offset,lt_offset,total_preimage_len,
                 seq_value,lt0,d_neg_r_inv,d_u2rx,d_u2ry,d_neg2u2rx,d_neg2u2ry,
                 d_gt,d_hit_cnt,d_hit_idx,n,easy_mode,single_hash,
-                P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
+                P.state[r],P.roots[r],(uint64_t*)P.schedule[r],tp);
         e = cudaGetLastError();
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_s0[r], s0);
         if (e == cudaSuccess) e = cudaStreamWaitEvent(root_st, P.ev_s0[r], 0);
@@ -6836,6 +6855,7 @@ int main(int argc, char **argv) {
     /* Green partitions (or plain streams) for the sub-batch pipeline; if the driver cannot
      * create them, the run keeps the monolithic slotted pipeline below. */
     g_qsb_sub_ok = qsb_subpipe_init(slot_stream[0]);
+    if(!g_qsb_sub_ok){fprintf(stderr,"GlobalAB requires initialized subpipeline; no null-schedule fallback\n");return 1;}
 #endif
 #else
     uint32_t *d_hit_cnt, *d_hit_idx;
@@ -7109,7 +7129,7 @@ int main(int argc, char **argv) {
 #if QSB_ASICBOOST
                     /* candidate hi: block hi>>7 (32 locktimes), warp (hi>>5)&3 = sequence
                      * base_seq + warp*effective_total, lane hi&31 */
-                    const uint32_t lt = base_lt + ((hi >> 7) << 5) + (hi & 31u);
+                    const uint32_t lt = base_lt + ((hi >> 10) << 5) + (hi & 31u);
                     const uint32_t hs = base_seq + ((hi >> 5) & (uint32_t)(QSB_AB_K - 1)) * (uint32_t)effective_total;
 #else
                     const uint32_t lt = base_lt + hi;
