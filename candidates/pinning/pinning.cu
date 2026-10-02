@@ -1,5 +1,12 @@
 #define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
+/* Host-only PK offload policy; the native GPU recipe is unchanged. */
+#ifndef QSB_HOST_PK_DISABLE
+#define QSB_HOST_PK_DISABLE 1
+#endif
+#if QSB_HOST_PK_DISABLE != 0 && QSB_HOST_PK_DISABLE != 1
+#error "QSB_HOST_PK_DISABLE must be 0 or 1"
+#endif
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
 #endif
@@ -6104,6 +6111,9 @@ static int startup_fallback(const char *why) {
     return 0;
 }
 static int start(size_t batch) {
+#if QSB_HOST_PK_DISABLE
+    return 0;  /* before allocation, ISA/autotune setup, workers or CPU-budget adjustment */
+#endif
     const char *off = getenv("QSB_HOST_PKSHA_OFF");
     if (off && atoi(off)) return 0;
     const size_t recs = batch / QSB_PK_LANES / QSB_HOST_PKSHA + 1;
@@ -6922,6 +6932,15 @@ int main(int argc, char **argv) {
         }
     }
 #if QSB_PK_ON
+#if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
+    printf("HOST_PK_DISABLE selected=%d native=%s carrier=%d nojit=%d env_pkoff=%s compiled_pk=%d\n",
+           QSB_HOST_PK_DISABLE,g_qsb_carrier.on?qsb_carrier_cubin_sha256:"none",
+           g_qsb_carrier.on,g_qsb_carrier.nojit,
+           getenv("QSB_HOST_PKSHA_OFF")?getenv("QSB_HOST_PKSHA_OFF"):"absent",QSB_PK_ON);
+#else
+    printf("HOST_PK_DISABLE selected=%d native=none carrier=0 nojit=0 env_pkoff=%s compiled_pk=%d\n",
+           QSB_HOST_PK_DISABLE,getenv("QSB_HOST_PKSHA_OFF")?getenv("QSB_HOST_PKSHA_OFF"):"absent",QSB_PK_ON);
+#endif
     if (g_qsb_sub_ok) qsb_pk::start((size_t)BATCH);
 #endif
 #else
