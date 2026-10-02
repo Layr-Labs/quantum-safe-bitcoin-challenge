@@ -307,6 +307,26 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  * 0, qsha_keyhash4_h0: QSB_CPU_SHA4's four SHA-NI lanes with sha256msg1/2 schedules). QSB_CPU_MRG: fe8_mul_cols accumulates each
  * column's low and high partial products in one register (needs QSB_CPU_FOLD3; else the split accumulators as before). QSB_CPU_AINL:
  * the small 8-lane field operations always_inline (the hot loops' codegen independent of unit growth). */
+/* QSB_CPU_EPOCH_CONTIG (default 0 = the stride walk, the previous text): the contiguous epoch walk of submission 30c24617.
+ * Worker t walks [base + t*span, base + (t+1)*span), span = floor((n_epochs - base) / nthreads), and takes each next epoch by
+ * the next-combination step of the previous one instead of the binomial unrank; the prefix re-hash restarts at the first
+ * changed omission as before. The ranges are disjoint and every epoch keeps its patterns, so the walk is exact; only the
+ * order changes (re-hashed prefix blocks per epoch about 6.75 -> 3.53 over a run). Host-only: the device image is unchanged.
+ * QSB_CPU_GWK_CACHE (default 0 = recompute): the block-149 group schedules (gwk) depend only on the epoch's buffered bytes
+ * after the prefix's full blocks (erem, at most 7 values in a run); keep up to 8 computed sets keyed by erem instead of
+ * recomputing them whenever erem changes. Same W+K words, so exact. */
+#ifndef QSB_CPU_EPOCH_CONTIG
+#define QSB_CPU_EPOCH_CONTIG 1
+#endif
+#if QSB_CPU_EPOCH_CONTIG != 0 && QSB_CPU_EPOCH_CONTIG != 1
+#error "QSB_CPU_EPOCH_CONTIG must be 0 or 1"
+#endif
+#ifndef QSB_CPU_GWK_CACHE
+#define QSB_CPU_GWK_CACHE 1
+#endif
+#if QSB_CPU_GWK_CACHE != 0 && QSB_CPU_GWK_CACHE != 1
+#error "QSB_CPU_GWK_CACHE must be 0 or 1"
+#endif
 #ifndef QSB_CPU_KH16
 #define QSB_CPU_KH16 1             /* key hashes: message schedule for 16 keys with AVX-512, rounds 4 keys at a time with SHA-NI from it */
 #endif
@@ -342,7 +362,86 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  *   retirement until a walker returns (C1: +6.9 ns per candidate in a hashing phase that reads no row); at most a few in flight
  *   instead of 16 lets each walk finish under the SHA rounds. Prefetches only. */
 #ifndef QSB_CPU_ILP2
-#define QSB_CPU_ILP2 1
+#define QSB_CPU_ILP2 3
+#endif
+/* Lane H1 (2026-10-01; host only, none an image knob; every switch 0 = N-pkg17r's co-grinder, which is N-pkg16c's, byte for byte
+ * in behaviour). jacklightChen's seven co-grinder cuts from his public subset submission b1c5e58e (PR #2842 "Validate submission
+ * b1c5e58e-210d-4353-addf-edc4474b8f33", head 843c8281, on the promoted fb6f5a8f; its public note: "first-group identity elision
+ * and single-lane scalar-inverse bridge", prepared with GPT 6.1 Sol in Codex; five of the seven first prepared in his PR2678 /
+ * 4bed8f2f). Ported here as written, renamed QSB_CPU_JL_<his name> (his QSB_CPU_INV_FIRST is QSB_CPU_JL_INV_FIRST, and so on).
+ * The same file rides in later public trees: i34-9's cdca0fa5 (the three INV items only), DPZZxlz's 772875d7 / bc297d9d (as is),
+ * and terrapinelf's fb96dba5 / ee8c77d6, DPZZxlz's e69d3dce, jungjipdo's 7282224e (as is plus QSB_CPU_ILP2 3). Same residues,
+ * same canonical outputs, same hits; none changes an operand that reaches a canonicalization in another representative range.
+ * QSB_CPU_JL (umbrella, default 0): 1 sets every QSB_CPU_JL_* below to 1 unless it is given itself.
+ * QSB_CPU_JL_INV_FIRST: the batch inversion's chain products start at one, so in the forward pass's first group of each chain
+ *   (g == 0) the weighted prefix PRE = run * t is t and the chain product run * D is D: fe8_cp instead of fe8_mul_lz (2 x NCH = 4
+ *   multiplications per window step at NCH 2). 1 = as jacklightChen wrote it: ec8_window's paired forward pass (QSB_CPU_ILP2 bit 1
+ *   only; at ILP2 1 that pass is not compiled and ec8_window is untouched) and ec8_final_cf_kh's forward pass. 2 = 1 plus the same
+ *   copy in ec8_window's one-group QSB_CPU_WPRE forward pass (lane H1's extension, so the item reaches ec8_window at QSB_CPU_ILP2 1;
+ *   the same operands, fe8_sub_d's D and fe8_sub_sgn_nf's t, the same mul-only consumers). Copied operands are only ever IFMA
+ *   inputs (limbs < 2^52) before the inversion's canonicalization, as before.
+ * QSB_CPU_JL_INV_LAST: the paired backward passes (QSB_CPU_ILP2 bit 0: ec8_window, ec8_final_cf_kh) skip the chain update
+ *   run = run * D of the last pair (g == 0): no later reader (2 multiplications per window step at NCH 2).
+ * QSB_CPU_JL_INV_LANE0: fe8_inv_lanes canonicalizes only lane 0 of the 8-lane product (5 scalar extractions and fe8_lane_canon)
+ *   instead of fe8_canon64 over all 8 lanes and a 4 x 8 store; every lane holds the same residue and only lane 0 is read.
+ * QSB_CPU_JL_PARITY_CMP: fe8_parity tests v >= p of a normalized v (limbs 0..3 < 2^52) by compares (limb 4 >= 2^48, or limb 4 =
+ *   2^48 - 1 and limbs 1..3 all ones and limb 0 >= p's) instead of fe8_ge_p's carry chain.
+ * QSB_CPU_JL_KH16_WORDS52: kh16_store builds the nine key-hash message words straight from the canonical radix-52 limbs (shifts of
+ *   r0..r4) instead of packing 4 x 64-bit words first (kh16_canon) and cutting those (kh16_words8); the same low 32 bits per word.
+ * QSB_CPU_JL_KH16_PAD_ONCE: the W + K pairs of rounds 10..15 (zero words W10..W14, W15 = 264: the same for every key) are written
+ *   once per worker into its kh16 scratch (vecbuf_alloc) and kh16_pass<true> skips them.
+ * QSB_CPU_JL_KH16_REGMASK: kh16_pass forms the 16 keys' prefilter mask from the four-key h0 results in registers (unpack, shift,
+ *   compare, movemask) instead of storing h0[16] and reloading it (dev builds, QSB_CPU_DEVBENCH, still store h0 for the unit test). */
+#ifndef QSB_CPU_JL
+#define QSB_CPU_JL 1
+#endif
+#ifndef QSB_CPU_JL_INV_FIRST
+#define QSB_CPU_JL_INV_FIRST QSB_CPU_JL
+#endif
+#ifndef QSB_CPU_JL_INV_LAST
+#define QSB_CPU_JL_INV_LAST QSB_CPU_JL
+#endif
+#ifndef QSB_CPU_JL_INV_LANE0
+#define QSB_CPU_JL_INV_LANE0 QSB_CPU_JL
+#endif
+#ifndef QSB_CPU_JL_PARITY_CMP
+#define QSB_CPU_JL_PARITY_CMP QSB_CPU_JL
+#endif
+#ifndef QSB_CPU_JL_KH16_WORDS52
+#define QSB_CPU_JL_KH16_WORDS52 QSB_CPU_JL
+#endif
+#ifndef QSB_CPU_JL_KH16_PAD_ONCE
+#define QSB_CPU_JL_KH16_PAD_ONCE QSB_CPU_JL
+#endif
+#ifndef QSB_CPU_JL_KH16_REGMASK
+#define QSB_CPU_JL_KH16_REGMASK QSB_CPU_JL
+#endif
+#if QSB_CPU_JL < 0 || QSB_CPU_JL > 1 || QSB_CPU_JL_INV_FIRST < 0 || QSB_CPU_JL_INV_FIRST > 2
+#error "QSB_CPU_JL: 0 or 1; QSB_CPU_JL_INV_FIRST: 0, 1 (as written) or 2 (also ec8_window's one-group forward pass)"
+#endif
+#if QSB_CPU_JL_INV_FIRST && !QSB_CPU_WPRE
+#error "QSB_CPU_JL_INV_FIRST is ported for the QSB_CPU_WPRE window step"
+#endif
+/* Lane H2 (2026-10-02; host only, not an image knob; 0 = N-dc1h's co-grinder byte for byte in behaviour). i34-9's
+ * QSB_CPU_CANON_TOP, the "additional key-message preparation update" of the public subset submission b4c5a3c8 (PR #2987
+ * "Validate submission b4c5a3c8-6f27-4165-b432-21474d1fa53e", head e7e52427, on the promoted fb6f5a8f; header blob 061e8355 =
+ * jacklightChen's three INV cuts + this item; public note's model line "GPT-6.1-sol (max); GPT-6 Astra (advisor, high)", harness
+ * Codex). The same item rides in i34-9's a0cf96d5 (PR #3042) and 791650a2 (PR #3075) with QSB_CPU_SHA_RING and the producers'
+ * QSB_HP_DEAD_DESCRIPTORS (not ported: lane H2 priced them below +0.01% of score). Ported as written under the name
+ * QSB_CPU_I34_CANON_TOP.
+ * QSB_CPU_I34_CANON_TOP: a normalized 8-lane element (limbs 0..3 < 2^52) whose limb 4 is below 2^48 - 1 in every lane is below
+ *   (2^48 - 1) 2^208 <= p = (2^48 - 1) 2^208 + 2^208 - 2^32 - 977, so it is already canonical: one unsigned compare of limb 4
+ *   (and a branch on the 8-bit mask) replaces the v >= p test and the blend with v - p. If any lane's limb 4 is at or above
+ *   2^48 - 1 (at most about 2^-41 per lane over this co-grinder's v < 2^256 + 2^215), all eight take the unchanged full path.
+ *   1 = as i34-9 wrote it: fe8_parity and kh16_canon. With QSB_CPU_JL_KH16_WORDS52 1 (N-dc1h's default) kh16_store does not
+ *   call kh16_canon, so value 1 reaches fe8_parity only (ahead of QSB_CPU_JL_PARITY_CMP's compares). 2 = 1 plus the same test
+ *   in kh16_words52 (lane H2's extension: the canonicalization jacklightChen's WORDS52 kept, fe8_ge_p's carry chain and five
+ *   blends per call, two calls per kh16_store). Same canonical values, same words, same parities, same hits. */
+#ifndef QSB_CPU_I34_CANON_TOP
+#define QSB_CPU_I34_CANON_TOP 2
+#endif
+#if QSB_CPU_I34_CANON_TOP < 0 || QSB_CPU_I34_CANON_TOP > 2
+#error "QSB_CPU_I34_CANON_TOP: 0, 1 (as i34-9 wrote it: fe8_parity, kh16_canon) or 2 (also kh16_words52)"
 #endif
 #ifndef QSB_CPU_NCH
 #define QSB_CPU_NCH 2
@@ -406,9 +505,61 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #if QSB_CPU_ALLCPU && QSB_CPU_HP_SHARE
 #error "QSB_CPU_ALLCPU 1 needs QSB_CPU_HP_SHARE 0 (the host thread's CPU is already a worker CPU)"
 #endif
+/* Host-only co-grinder switches of this package (none an image knob; 0 on each = the previous file).
+ * QSB_CPU_FENCE (defined in tests/gpu_epochs/qsb_host_verify.h, next to the shared set of published hits): with the co-grinder
+ *   on, the GPU walks epochs [0, F) and the co-grinder the GPU's own 128 window patterns on [F, C(137,6)),
+ *   F = C(137,6) - QSB_CPU_FENCE_R rounded down to the GPU's batch (QSB_SE_LAUNCH_BLOCKS x QSB_PAIR_MUL epochs), in
+ *   QSB_CPU_EPOCH_CONTIG's contiguous per-worker ranges. At F the GPU drains, publishes and idles until the stop signal
+ *   (tree.cu). fence_plan() fixes F before the host producers start; any later "CPU co-grind: off" releases [F, N) back to the
+ *   GPU (fence_released()). Dev only: QSB_CPU_FENCE_AT=<epoch> in the environment forces F (rounded down to the batch).
+ * QSB_CPU_DIAG_V4: the walk-start diagnostic on the contiguous walk. Worker t starts at t x span + c_t x 2^20 inside its own
+ *   range, c_t < 100 a code (diag4_fill()), so the public hit list carries the huge-page fraction (0.1% steps), the table-ready
+ *   time, MemAvailable and HugePages_Free. Enumeration only.
+ * QSB_CPU_DIAG_EPOCH (below) is the v3 walk-start code and defaults to 1 unless one of the two above is on (each moves the
+ *   walk's base itself: the fence to F, DIAG_V4 to per-worker offsets; they exclude each other). */
+#ifndef QSB_CPU_FENCE   /* normally defined by tests/gpu_epochs/qsb_host_verify.h (included first); this fallback keeps older host
+                          * harnesses compiling at the default. With -DQSB_CPU_FENCE=1 and an old qsb_host_verify.h the build still
+                          * fails loudly (no qsb_pub_once). */
+#define QSB_CPU_FENCE 0
+#endif
+#ifndef QSB_CPU_FENCE_R
+#define QSB_CPU_FENCE_R 800000000ull   /* QSB_CPU_FENCE: epochs reserved above the fence (1.3 x the runner co-grinder's 1,200 s need) */
+#endif
+#ifndef QSB_CPU_DIAG_V4
+#define QSB_CPU_DIAG_V4 0
+#endif
 #ifndef QSB_CPU_DIAG_EPOCH
-#define QSB_CPU_DIAG_EPOCH 0       /* 1 (2d1631b0): the walk starts at a diagnostic code x 2^29 (geometry, huge pages, workers, memory);
-                                    * 0: at epoch 0, as 296e5e53. Enumeration only: disjoint from the GPU's candidates either way */
+#if QSB_CPU_FENCE || QSB_CPU_DIAG_V4
+#define QSB_CPU_DIAG_EPOCH 0
+#else
+#define QSB_CPU_DIAG_EPOCH 1       /* 1 (2d1631b0, v3 code): the walk starts at a diagnostic code x 2^29 (geometry, huge pages, workers,
+                                    * memory); 0: at epoch 0, as 296e5e53. Enumeration only: disjoint from the GPU's candidates either way */
+#endif
+#endif
+#if QSB_CPU_FENCE && !QSB_CPU_EPOCH_CONTIG
+#error "QSB_CPU_FENCE walks [F, N) in QSB_CPU_EPOCH_CONTIG's contiguous ranges: set QSB_CPU_EPOCH_CONTIG 1"
+#endif
+#if QSB_CPU_FENCE && QSB_CPU_DIAG_EPOCH
+#error "QSB_CPU_FENCE fixes the walk's base at F; QSB_CPU_DIAG_EPOCH would move it into the GPU's range"
+#endif
+#if QSB_CPU_FENCE && QSB_CPU_DIAG_V4
+#error "QSB_CPU_DIAG_V4's codes need 2^25 epochs of room per worker range; the fence's ranges (about 2.5e7 epochs) leave none"
+#endif
+#if QSB_CPU_DIAG_V4 && !QSB_CPU_EPOCH_CONTIG
+#error "QSB_CPU_DIAG_V4 codes the contiguous walk's per-worker range starts: set QSB_CPU_EPOCH_CONTIG 1"
+#endif
+#if QSB_CPU_DIAG_V4 && QSB_CPU_DIAG_EPOCH
+#error "QSB_CPU_DIAG_V4 needs the walk's base at 0 (QSB_CPU_DIAG_EPOCH 0)"
+#endif
+/* COHASH hook (the GPU hashes the co-grinder's SHA-256d, QSB_GPU_COHASH): not in this tree. The feature is built on QSB_CPU_FENCE's walk: the
+ * GPU hashes z for chunks of the co-grinder's region [Fc, N), and the workers take batches of ready z in place of their own
+ * hashing phase. Its consumer goes where the worker's batch loop marks "COHASH hook", its producer where tree.cu's slot loop
+ * marks "COHASH hook", and its kernel entry beside QsbCarrier.h's kernel list. */
+#ifndef QSB_GPU_COHASH
+#define QSB_GPU_COHASH 0
+#endif
+#if QSB_GPU_COHASH
+#error "QSB_GPU_COHASH is not wired into this tree: apply its patch at the \"COHASH hook\" sites first"
 #endif
 /* : start-up and teardown of the co-grinder, host-only, no image knob; 0 on each switch =
  * the base code. QSB_CPU_TOUCH_GUARD: the 9-window table's first touch (the sampled and the full pass) stops once it has run
@@ -426,6 +577,19 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 #ifndef QSB_CPU_FOLD_PAR
 #define QSB_CPU_FOLD_PAR 1
+#endif
+/* QSB_CPU_TOUCH_FUSE (default 0 = the full first touch): a 9- or 10-window table keeps the sampled first touch (1 region in
+ * 32) as its huge-page gate and skips the full pass, so the build's own writes fault the rest of the table in while other
+ * threads run additions; the huge-page fraction is measured again over the whole table after the build and printed (and used
+ * by the walk-start code). The 10-window fallback still rests on the sample; QSB_CPU_TOUCH_GUARD bounds only the sample.
+ * QSB_CPU_BUILD_NT (default 0): the 8-lane build and the C fold write their table rows with non-temporal stores (no read for
+ * ownership of freshly faulted lines), each build thread ending with a store fence. Same table entries; table_check and the
+ * fixed-work hit set are the gates. Both are host-only start-up items, priced by the start-up timeline job. */
+#ifndef QSB_CPU_TOUCH_FUSE
+#define QSB_CPU_TOUCH_FUSE 0
+#endif
+#ifndef QSB_CPU_BUILD_NT
+#define QSB_CPU_BUILD_NT 0
 #endif
 
 namespace qcpu {
@@ -1249,7 +1413,24 @@ Q8T static inline QCPU_AIF void fe8_canon64(uint64_t w[4][8], const fe8 &a) {
 }
 /* parity of the canonical y of 8 lanes (p is odd: v - p flips v's parity) */
 Q8T static inline QCPU_AIF __mmask8 fe8_parity(const fe8 &a) {
+#if QSB_CPU_I34_CANON_TOP
+    /* QSB_CPU_I34_CANON_TOP (i34-9 b4c5a3c8): limb 4 < 2^48 - 1 in every lane: v < p, so the parity is limb 0's */
+    if (_mm512_cmp_epu64_mask(a.l[4], _mm512_set1_epi64(0x0FFFFFFFFFFFFULL), _MM_CMPINT_NLT) == 0)
+        return _mm512_test_epi64_mask(a.l[0], _mm512_set1_epi64(1));
+#endif
+#if QSB_CPU_JL_PARITY_CMP
+    /* QSB_CPU_JL_PARITY_CMP (jacklightChen b1c5e58e): normalized input only (limbs 0..3 < 2^52). In radix 2^52 p's middle limbs
+     * are all ones, so v >= p is limb 4 >= 2^48, or limb 4 = 2^48 - 1 with limbs 1..3 all ones and limb 0 >= p's limb 0 */
+    const __m512i M48 = _mm512_set1_epi64(0x0FFFFFFFFFFFFULL);
+    const __m512i mid = _mm512_and_si512(_mm512_and_si512(a.l[1], a.l[2]), a.l[3]);
+    const __mmask8 top = _mm512_test_epi64_mask(a.l[4], _mm512_set1_epi64((long long)~0x0FFFFFFFFFFFFULL));
+    const __mmask8 edge = (__mmask8)(_mm512_cmpeq_epi64_mask(a.l[4], M48)
+        & _mm512_cmpeq_epi64_mask(mid, F8_M52)
+        & _mm512_cmp_epu64_mask(a.l[0], _mm512_set1_epi64(0xFFFFEFFFFFC2FULL), _MM_CMPINT_NLT));
+    return (__mmask8)(_mm512_test_epi64_mask(a.l[0], _mm512_set1_epi64(1)) ^ (top | edge));
+#else
     return (__mmask8)(_mm512_test_epi64_mask(a.l[0], _mm512_set1_epi64(1)) ^ fe8_ge_p(a, nullptr));
+#endif
 }
 /* x^(p-2) for one 8-lane element: libsecp256k1's secp256k1_fe_inv addition chain
  * (255 squarings, 15 multiplications). Kept for QSB_CPU_SCALAR_INV=0 and as the reference. */
@@ -1422,8 +1603,18 @@ Q8T static void fe8_inv_lanes(fe8 &x) {
     fe8_swap1(a1, x); fe8_mul(p1, x, a1);                 /* lanes 2k, 2k+1: a_2k * a_2k+1 */
     fe8_swap2(t, p1); fe8_mul(p2, p1, t);                 /* lanes 4k..4k+3: the product of the four */
     fe8_swap4(t, p2); fe8_mul(t, p2, t);                  /* every lane: the product of all eight */
+    fe pr, pi;
+#if QSB_CPU_JL_INV_LANE0
+    /* QSB_CPU_JL_INV_LANE0 (jacklightChen b1c5e58e): only lane 0 feeds the scalar inverse; its five radix-52 limbs through the
+     * scalar canonicalizer instead of fe8_canon64 over all 8 lanes */
+    uint64_t l0[5];
+    for (int i = 0; i < 5; i++) l0[i] = (uint64_t)_mm_cvtsi128_si64(_mm512_castsi512_si128(t.l[i]));
+    fe8_lane_canon(pr, l0);
+#else
     alignas(64) uint64_t w[4][8]; fe8_canon64(w, t);
-    fe pr = {{w[0][0], w[1][0], w[2][0], w[3][0]}}, pi; fe_inv_var(pi, pr);
+    pr = fe{{w[0][0], w[1][0], w[2][0], w[3][0]}};
+#endif
+    fe_inv_var(pi, pr);
     fe8 I; fe8_bcast(I, pi);
     fe8_swap4(t, p2); fe8_mul(i2, I, t);                  /* lanes 0..3: 1/(a0 a1 a2 a3), lanes 4..7: 1/(a4..a7) */
     fe8_swap2(t, p1); fe8_mul(i2, i2, t);                 /* 1/(a_2k a_2k+1) */
@@ -1490,8 +1681,13 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             pt8_load(txA, tyA, rp + (size_t)hA * 8); pt8_load(txB, tyB, rp + (size_t)hB * 8);
             fe8_sub_d(D[hA], txA, X[hA]); fe8_sub_d(D[hB], txB, X[hB]);
             fe8_sub_sgn_nf(tA, tyA, Y[hA], ng[hA]); fe8_sub_sgn_nf(tB, tyB, Y[hB], ng[hB]);
-            fe8_mul_lz(PRE[hA], run[c], tA); fe8_mul_lz(PRE[hB], run[c + 1], tB);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c + 1], run[c + 1], D[hB]);
+            if (QSB_CPU_JL_INV_FIRST && g == 0) {    /* QSB_CPU_JL_INV_FIRST (jacklightChen b1c5e58e): each chain starts at one; the copies stay mul-only IFMA inputs */
+                fe8_cp(PRE[hA], tA); fe8_cp(PRE[hB], tB);
+                fe8_cp(run[c], D[hA]); fe8_cp(run[c + 1], D[hB]);
+            } else {
+                fe8_mul_lz(PRE[hA], run[c], tA); fe8_mul_lz(PRE[hB], run[c + 1], tB);
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c + 1], run[c + 1], D[hB]);
+            }
         }
     }
     (void)TX; (void)TY;
@@ -1504,7 +1700,9 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             /* weighted prefix: PRE[h] = (product of the earlier D of chain c) * (sign * ty - Y), so the backward pass's slope is
              * one product, lam = (1 / product through h) * PRE[h]; the table y is not kept */
             { fe8 tx, ty, t; pt8_load(tx, ty, rp + (size_t)h * 8); fe8_sub_d(D[h], tx, X[h]);   /* D normalized (limb 4 < 2^51 under DNF): a subtrahend of x3 */
-              fe8_sub_sgn_nf(t, ty, Y[h], ng[h]); fe8_mul_lz(PRE[h], run[c], t); }
+              fe8_sub_sgn_nf(t, ty, Y[h], ng[h]);
+              if (QSB_CPU_JL_INV_FIRST >= 2 && g == 0) fe8_cp(PRE[h], t);   /* QSB_CPU_JL_INV_FIRST 2 (lane H1): the chain starts at one */
+              else fe8_mul_lz(PRE[h], run[c], t); }
 #elif QSB_CPU_NOTX
             { fe8 tx; pt8_load(tx, TY[h], rp + (size_t)h * 8); fe8_sub_d(D[h], tx, X[h]); }   /* D normalized: a subtrahend of x3 */
             fe8_cp(PRE[h], run[c]);
@@ -1513,7 +1711,8 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8_sub_lz(D[h], TX[h], X[h]);
             fe8_cp(PRE[h], run[c]);
 #endif
-            fe8_mul_lz(run[c], run[c], D[h]);
+            if (QSB_CPU_JL_INV_FIRST >= 2 && QSB_CPU_WPRE && g == 0) fe8_cp(run[c], D[h]);
+            else fe8_mul_lz(run[c], run[c], D[h]);
         }
     }
 #endif
@@ -1531,7 +1730,9 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8 lamA, lamB, x3A, x3B, tA, tB;
             fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
             qcpu_pf_rows(pA, 4, 8);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            if (!QSB_CPU_JL_INV_LAST || g > 0) {     /* QSB_CPU_JL_INV_LAST (jacklightChen b1c5e58e): after g == 0 both chains are dead */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
             qcpu_pf_rows(pB, 0, 4);
             fe8_sqr_subdx(x3A, lamA, D[hA], X[hA]); fe8_sqr_subdx(x3B, lamB, D[hB], X[hB]);
             qcpu_pf_rows(pB, 4, 8);
@@ -1683,6 +1884,16 @@ Q8T static void ec8_final_cf(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G
  * interleaved (unpack of rounds 2p, 2p + 1) and runs the rounds with SHA-NI four keys at a time from those pairs (no sha256msg1/2,
  * four independent sha256rnds2 chains). Same messages, same rounds, same h0 as qsha_keyhash4_h0. */
 Q8T static inline QCPU_AIF void kh16_canon(__m512i w[4], const fe8 &a) {   /* canonical 4 x 64-bit limbs of 8 lanes */
+#if QSB_CPU_I34_CANON_TOP
+    /* QSB_CPU_I34_CANON_TOP (i34-9 b4c5a3c8): limb 4 < 2^48 - 1 in every lane: v < p, pack v itself */
+    if (_mm512_cmp_epu64_mask(a.l[4], _mm512_set1_epi64(0x0FFFFFFFFFFFFULL), _MM_CMPINT_NLT) == 0) {
+        w[0] = _mm512_or_si512(a.l[0], _mm512_slli_epi64(a.l[1], 52));
+        w[1] = _mm512_or_si512(_mm512_srli_epi64(a.l[1], 12), _mm512_slli_epi64(a.l[2], 40));
+        w[2] = _mm512_or_si512(_mm512_srli_epi64(a.l[2], 24), _mm512_slli_epi64(a.l[3], 28));
+        w[3] = _mm512_or_si512(_mm512_srli_epi64(a.l[3], 36), _mm512_slli_epi64(a.l[4], 16));
+        return;
+    }
+#endif
     fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
     __m512i r[5];
     for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
@@ -1705,11 +1916,47 @@ Q8T static inline QCPU_AIF void kh16_words8(__m512i W[9], const __m512i w[4], __
     W[7] = _mm512_srli_epi64(w[0], 8);
     W[8] = _mm512_or_si512(_mm512_slli_epi64(w[0], 24), _mm512_set1_epi64(0x00800000));
 }
+#if QSB_CPU_JL_KH16_WORDS52
+/* QSB_CPU_JL_KH16_WORDS52 (jacklightChen b1c5e58e): the same message words straight from the canonical radix-52 limbs r0..r4;
+ * kh16_store keeps only each word's low 32 bits, so the bits above them are don't-care */
+Q8T static inline QCPU_AIF void kh16_words52(__m512i W[9], const fe8 &a, __mmask8 par) {
+#if QSB_CPU_I34_CANON_TOP >= 2
+    /* QSB_CPU_I34_CANON_TOP 2 (lane H2, i34-9's test on jacklightChen's WORDS52 path): limb 4 < 2^48 - 1 in every lane: v < p,
+     * r = v; else the full v >= p test and blend below */
+    __m512i r[5];
+    if (_mm512_cmp_epu64_mask(a.l[4], _mm512_set1_epi64(0x0FFFFFFFFFFFFULL), _MM_CMPINT_NLT) == 0) {
+        for (int i = 0; i < 5; i++) r[i] = a.l[i];
+    } else {
+        fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
+        for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
+    }
+#else
+    fe8 u; const __mmask8 ge = fe8_ge_p(a, &u);
+    __m512i r[5];
+    for (int i = 0; i < 5; i++) r[i] = _mm512_mask_blend_epi64(ge, a.l[i], u.l[i]);
+#endif
+    const __m512i head = _mm512_or_si512(_mm512_srli_epi64(r[4], 24), _mm512_set1_epi64(0x02000000));
+    W[0] = _mm512_mask_or_epi64(head, par, head, _mm512_set1_epi64(0x01000000));
+    W[1] = _mm512_or_si512(_mm512_slli_epi64(r[4], 8), _mm512_srli_epi64(r[3], 44));
+    W[2] = _mm512_srli_epi64(r[3], 12);
+    W[3] = _mm512_or_si512(_mm512_slli_epi64(r[3], 20), _mm512_srli_epi64(r[2], 32));
+    W[4] = r[2];
+    W[5] = _mm512_srli_epi64(r[1], 20);
+    W[6] = _mm512_or_si512(_mm512_slli_epi64(r[1], 12), _mm512_srli_epi64(r[0], 40));
+    W[7] = _mm512_srli_epi64(r[0], 8);
+    W[8] = _mm512_or_si512(_mm512_slli_epi64(r[0], 24), _mm512_set1_epi64(0x00800000));
+}
+#endif
 /* m[0..8] (16 dwords each): recid 0's keys in lanes 0..7, recid 1's in lanes 8..15 */
 Q8T static inline QCPU_AIF void kh16_store(uint32_t *m, const fe8 &x0, __mmask8 p0, const fe8 &x1, __mmask8 p1) {
-    __m512i w[4], W0[9], W1[9];
+    __m512i W0[9], W1[9];
+#if QSB_CPU_JL_KH16_WORDS52
+    kh16_words52(W0, x0, p0); kh16_words52(W1, x1, p1);
+#else
+    __m512i w[4];
     kh16_canon(w, x0); kh16_words8(W0, w, p0);
     kh16_canon(w, x1); kh16_words8(W1, w, p1);
+#endif
     for (int i = 0; i < 9; i++)
         _mm512_store_si512((void *)(m + 16 * i), _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi64_epi32(W0[i])), _mm512_cvtepi64_epi32(W1[i]), 1));
 }
@@ -1723,11 +1970,14 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
         for (int c = 0; c < NC; c++) {
             const int h = g + c; fe8_sub_lz(D[h], MX, X[h]);
 #if QSB_CPU_WPRE
-            { fe8 t; fe8_sub_lz(t, MY, Y[h]); fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
+            { fe8 t; fe8_sub_lz(t, MY, Y[h]);
+              if (QSB_CPU_JL_INV_FIRST && g == 0) fe8_cp(PRE[h], t);   /* QSB_CPU_JL_INV_FIRST (jacklightChen b1c5e58e) */
+              else fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
 #else
             fe8_cp(PRE[h], run[c]);
 #endif
-            fe8_mul_lz(run[c], run[c], D[h]);
+            if (QSB_CPU_JL_INV_FIRST && g == 0) fe8_cp(run[c], D[h]);
+            else fe8_mul_lz(run[c], run[c], D[h]);
         }
     QCPU_INVC(run);
 #if QSB_CPU_ILP2 & 1
@@ -1737,7 +1987,9 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
             const int hA = g + c, hB = hA - 1;
             fe8 tA, tB, lamA, lamB, x3A, x3B, y3A, y3B;
             fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
-            fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            if (!QSB_CPU_JL_INV_LAST || g > 0) {     /* QSB_CPU_JL_INV_LAST (jacklightChen b1c5e58e): after g == 0 both chains are dead */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
             fe8_sqr_sub2(x3A, lamA, X[hA], MX); fe8_sqr_sub2(x3B, lamB, X[hB], MX);
             fe8_sub_lz(tA, X[hA], x3A); fe8_sub_lz(tB, X[hB], x3B);
             fe8_mul_sub(y3A, lamA, tA, Y[hA]); fe8_mul_sub(y3B, lamB, tB, Y[hB]);
@@ -1865,10 +2117,22 @@ Q8TX static bool build8_block(pt *dst, const pt *src, const pt &Q, Build8 &b) {
     ec8_window<RowNone>(b.X, b.Y, b.D, b.P, b.TX, b.TY, G, b.rp, b.ng, nullptr, nullptr, nullptr);
     for (int h = 0; h < G; h++) {
         fe xs[8], ys[8]; fe8_store_canon(xs, b.X[h]); fe8_store_canon(ys, b.Y[h]);
+#if QSB_CPU_BUILD_NT
+        for (int j = 0; j < 8; j++) {                    /* one 64-byte row per non-temporal store (rows are 64-byte aligned) */
+            alignas(64) pt v; v.x = xs[j]; v.y = ys[j];
+            _mm512_stream_si512((__m512i *)&dst[8 * h + j], _mm512_load_si512((const void *)&v));
+        }
+#else
         for (int j = 0; j < 8; j++) { dst[8 * h + j].x = xs[j]; dst[8 * h + j].y = ys[j]; }
+#endif
     }
     return true;
 }
+#if QSB_CPU_BUILD_NT
+Q8TX static void nt_copy_rows(pt *dst, const pt *src, size_t n) {   /* QSB_CPU_BUILD_NT: the fold's copy back */
+    for (size_t i = 0; i < n; i++) _mm512_stream_si512((__m512i *)&dst[i], _mm512_load_si512((const void *)&src[i]));
+}
+#endif
 #endif  /* QCPU_VEC */
 #if !QCPU_VEC
 struct Build8 {};
@@ -2267,6 +2531,7 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 /* QSB_CPU_KH16 (a33e04c3): h0 of SHA-256 of the 16 keys whose message words W0..W8 are m[0..8] (lane = key); wk: 32 x 32 dwords of
  * scratch. Returns the prefilter mask of the 16 keys (bit k = key k's h0 has QSB_ZEROS_N leading zero bits). h0_out (dev builds
  * only, never in a ranked build): the 16 h0 values for the unit test. */
+template <bool PAD_READY = false>   /* QSB_CPU_JL_KH16_PAD_ONCE: true when wk's pairs 5..7 (rounds 10..15) were written once */
 QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #ifdef QSB_CPU_DEVBENCH
                                  , uint32_t *h0_out = nullptr
@@ -2283,6 +2548,7 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
     __m512i prev = _mm512_setzero_si512();
 #pragma GCC unroll 64
     for (int t = 0; t < 64; t++) {
+        if (PAD_READY && t >= 10 && t <= 15) continue;   /* QSB_CPU_JL_KH16_PAD_ONCE (jacklightChen b1c5e58e): fixed pairs; W9..W15 stay set for the expansion */
         __m512i wt;
         if (t < 16) wt = W[t];
         else {
@@ -2308,7 +2574,12 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
     /* key 4L + e: pair p at wk + 32 p + (e >= 2 ? 16 : 0) + 4 L + 2 (e & 1) */
     const __m128i IV0 = _mm_set_epi32((int)0x6a09e667, (int)0xbb67ae85, (int)0x510e527f, (int)0x9b05688c);
     const __m128i IV1 = _mm_set_epi32((int)0x3c6ef372, (int)0xa54ff53a, (int)0x1f83d9ab, (int)0x5be0cd19);
+#if !QSB_CPU_JL_KH16_REGMASK || defined(QSB_CPU_DEVBENCH)
     alignas(64) uint32_t h0[16];
+#endif
+#if QSB_CPU_JL_KH16_REGMASK
+    unsigned pass = 0;
+#endif
 #pragma GCC unroll 1
     for (int L = 0; L < 4; L++) {
         __m128i S0[4], S1[4];
@@ -2322,14 +2593,31 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #pragma GCC unroll 4
             for (int e = 0; e < 4; e++) S0[e] = _mm_sha256rnds2_epu32(S0[e], S1[e], _mm_loadl_epi64((const __m128i *)(base[e] + 64 * r + 32)));
         }
+#if QSB_CPU_JL_KH16_REGMASK
+        /* QSB_CPU_JL_KH16_REGMASK (jacklightChen b1c5e58e): the IV feed-forward per state as before; unpackhi32 gives [a2, b2, a3, b3],
+         * unpackhi64 keeps h0 = a3, b3, c3, d3; the four keys' prefilter bits from registers */
+        const __m128i h01 = _mm_unpackhi_epi32(_mm_add_epi32(S0[0], IV0), _mm_add_epi32(S0[1], IV0));
+        const __m128i h23 = _mm_unpackhi_epi32(_mm_add_epi32(S0[2], IV0), _mm_add_epi32(S0[3], IV0));
+        const __m128i hv4 = _mm_unpackhi_epi64(h01, h23);
+        const __m128i hit4 = _mm_cmpeq_epi32(_mm_srli_epi32(hv4, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm_setzero_si128());
+        pass |= (unsigned)_mm_movemask_ps(_mm_castsi128_ps(hit4)) << (4 * L);
+#ifdef QSB_CPU_DEVBENCH
+        _mm_storeu_si128((__m128i *)(h0 + 4 * L), hv4);
+#endif
+#else
 #pragma GCC unroll 4
         for (int e = 0; e < 4; e++) h0[4 * L + e] = (uint32_t)_mm_extract_epi32(_mm_add_epi32(S0[e], IV0), 3);
+#endif
     }
 #ifdef QSB_CPU_DEVBENCH
     if (h0_out) memcpy(h0_out, h0, sizeof h0);
 #endif
+#if QSB_CPU_JL_KH16_REGMASK
+    return pass;
+#else
     const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
     return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
+#endif
 }
 #endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */
@@ -2348,6 +2636,27 @@ QSHA static void qsha_schedule(uint32_t wk[64], const uint8_t *blk) {
     }
 }
 #endif
+#if QSB_CPU_FENCE
+/* QSB_CPU_FENCE: F and N once fence_plan() committed a fence (0: none, the co-grinder takes the complement patterns as in the
+ * base); g_fence_off: the co-grinder said "off" after the fence was committed, so nobody grinds [F, N) and the GPU may. */
+static uint64_t g_fence = 0, g_fence_n = 0;
+static std::atomic<int> g_fence_off{0};
+/* Called by tree.cu before the host producers start (and by the bench before start()): the GPU's epoch count, F with the
+ * co-grinder on, n_epochs with it off at run time (QSB_CPU_THREADS_ENV < 1) or when no fence fits. */
+static uint64_t fence_plan(uint64_t n_epochs, uint64_t cap) {
+    if (const char *e = getenv("QSB_CPU_THREADS_ENV")) if (atoi(e) < 1) return n_epochs;
+    uint64_t f = n_epochs > (uint64_t)QSB_CPU_FENCE_R ? n_epochs - (uint64_t)QSB_CPU_FENCE_R : 0;
+    if (const char *e = getenv("QSB_CPU_FENCE_AT")) f = strtoull(e, nullptr, 10);   /* dev: the forced-low fence test */
+    if (cap) f = f / cap * cap;                           /* batch-aligned: the GPU never launches a partial batch at F */
+    if (f == 0 || f >= n_epochs) return n_epochs;
+    g_fence = f; g_fence_n = n_epochs;
+    return f;
+}
+static bool fence_released() { return g_fence_off.load() != 0; }
+#define QCPU_FENCE_OFF() (g_fence_off = 1)
+#else
+#define QCPU_FENCE_OFF() ((void)0)
+#endif
 struct Ctx {
     const digest_params_t *dp;
     Geo g;                          /* table geometry */
@@ -2362,7 +2671,7 @@ struct Ctx {
     int cut = 137, early = 6;
     uint64_t mid_bytes = 0;         /* preimage bytes covered by dp->midstate */
     uint64_t n_epochs = 0;
-    uint64_t epoch_base = 0;        /* first epoch of the workers' walk (worker t: base + t * span, + 1, ...; QSB_CPU_EPOCH_CONTIG 0: base + t, + T, ...) */
+    uint64_t epoch_base = 0;        /* first epoch of the workers' walk (worker t: base + t, base + t + T, ...) */
     std::atomic<uint64_t> cand{0};
     std::atomic<uint32_t> hits{0};
     std::mutex io;
@@ -2390,6 +2699,9 @@ struct Ctx {
     uint64_t h_binom[256][8];       /* binom_u64(n, k) for the epoch unrank */
     std::vector<uint8_t> h_gblk;    /* ng x 64: block 0 of each group, epoch bytes left zero */
     std::vector<uint32_t, qalloc64<uint32_t> > h_wk;   /* distinct fixed blocks x 64 words W[i]+K[i] */
+#endif
+#if QSB_CPU_DIAG_V4
+    uint8_t diag4[256] = {0};       /* QSB_CPU_DIAG_V4: worker t starts diag4[t] x 2^20 epochs into its range (set before spawn) */
 #endif
 };
 
@@ -2527,6 +2839,9 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
 #if QCPU_VEC
             if (okb) build8_free(b8);
 #endif
+#if QSB_CPU_BUILD_NT
+            _mm_sfence();                                /* this thread's non-temporal rows are visible before the join */
+#endif
         };
         std::vector<std::thread> ts;
         const int m = (size_t)nth < nt ? nth : (int)nt;
@@ -2574,6 +2889,9 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
 #if QCPU_VEC
             if (okb) build8_free(b8);
 #endif
+#if QSB_CPU_BUILD_NT
+            _mm_sfence();
+#endif
         };
         std::vector<std::thread> ts;
         for (int t = 0; t < nth; t++) ts.emplace_back(work);
@@ -2582,7 +2900,18 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
 #if QSB_CPU_FOLD_PAR
             {   /* H9: the copy back in 65,536-entry chunks on the build threads */
                 std::atomic<uint32_t> nc{0};
+#if QSB_CPU_BUILD_NT && QCPU_VEC
+                const bool ntc = c.vec;
+                auto cp = [&]() {
+                    for (uint32_t o; (o = nc.fetch_add(CH)) < n;) {
+                        const size_t k = (size_t)(n - o < CH ? n - o : CH);
+                        if (ntc) nt_copy_rows(T + o, tmp + o, k); else memcpy(T + o, tmp + o, k * sizeof(pt));
+                    }
+                    if (ntc) _mm_sfence();
+                };
+#else
                 auto cp = [&]() { for (uint32_t o; (o = nc.fetch_add(CH)) < n;) memcpy(T + o, tmp + o, (size_t)(n - o < CH ? n - o : CH) * sizeof(pt)); };
+#endif
                 std::vector<std::thread> tc;
                 for (int t = 1; t < nth; t++) tc.emplace_back(cp);
                 cp();
@@ -2741,7 +3070,9 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
                 touch_dl = t.tv_sec + 1e-9 * t.tv_nsec + (e ? atof(e) : (double)QSB_CPU_TOUCH9_MAX_S); }
 #endif
             double f = measure(32);                      /* 1,792 of 57,344 regions */
+#if !QSB_CPU_TOUCH_FUSE
             if (f >= QSB_CPU_HP_MIN) f = measure(1);
+#endif
             if (f >= QSB_CPU_HP_MIN) { hp = f; return true; }
             add(9, f);
             table_free(c);
@@ -2751,7 +3082,9 @@ static bool table_setup(Ctx &c, int nth, double &hp, char *note, size_t nn, int 
     if (c.g.nw == 10 && c.g.sgn && !forced) {
         if (table_alloc(c)) {
             double f = measure(32);                      /* 272 of 8,704 regions */
+#if !QSB_CPU_TOUCH_FUSE
             if (f >= QSB_CPU_HP_MIN) f = measure(1);
+#endif
             if (f >= QSB_CPU_HP_MIN) { hp = f; return true; }
             add(10, f);
             table_free(c);
@@ -2883,6 +3216,9 @@ static bool gate_publish(Ctx *c, uint8_t *pk, const uint8_t *sk, int ri, const f
 static bool gate_publish_exact(Ctx *c, const uint8_t *sk, int ri) {
     std::lock_guard<std::mutex> g(c->io);
     if (!qsb_hv_check(&c->hv, sk, ri)) return false;
+#if QSB_CPU_FENCE
+    if (!qsb_pub_once(sk, ri)) return false;         /* published before in this process (qsb_host_verify.h): dropped, counted */
+#endif
     if (!c->out) { mkdir("results", 0755); c->out = fopen("results/digest_hit_cpu.txt", "a"); }
     if (c->out) {
         fprintf(c->out, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
@@ -2949,6 +3285,14 @@ static bool vecbuf_alloc(VecBuf &v, int B) {
     void *m = nullptr, *w = nullptr;   /* QSB_CPU_KH16: the groups' key-hash message words (9 x 16 dwords each) and the W + K scratch */
     if (posix_memalign(&m, 64, (size_t)G * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
     v.m16 = (uint32_t *)m; v.wk16 = (uint32_t *)w;
+#if QSB_CPU_JL_KH16_PAD_ONCE
+    /* QSB_CPU_JL_KH16_PAD_ONCE (jacklightChen b1c5e58e): pairs 5..7 hold rounds 10..15's W + K, the same for all 16 keys (W10..W14 = 0,
+     * W15 = 264); kh16_pass's unpacklo/hi of two broadcast words alternate them, round 2p in even dwords and 2p + 1 in odd ones */
+    for (int p = 5; p < 8; p++) for (int j = 0; j < 32; j++) {
+        const int t = 2 * p + (j & 1);
+        v.wk16[32 * p + j] = qsha_k[t] + (t == 15 ? uint32_t(264) : uint32_t(0));
+    }
+#endif
 #endif
     return true;
 }
@@ -2989,12 +3333,6 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 }
 #endif
 
-#ifndef QSB_CPU_EPOCH_CONTIG
-#define QSB_CPU_EPOCH_CONTIG 1      /* worker t walks a contiguous epoch range (fewer prefix blocks re-hashed per epoch, no unrank); 0 = epochs t, t+T, ... */
-#endif
-#ifndef QSB_CPU_EPOCH_CAP
-#define QSB_CPU_EPOCH_CAP (~0ull)   /* at most this many epochs above the base are shared out by the contiguous ranges (tests set it small) */
-#endif
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
 #ifdef SCHED_IDLE
@@ -3011,20 +3349,16 @@ static void worker(Ctx *c, int tid) {
     uint8_t pk[64]; memset(pk, 0, 64); pk[33] = 0x80; pk[62] = 0x01; pk[63] = 0x08;   /* 264 bits */
     uint8_t blk2[64]; memset(blk2, 0, 64); blk2[32] = 0x80; blk2[62] = 0x01;          /* 256 bits */
 #if QSB_CPU_EPOCH_CONTIG
-    /* Contiguous epoch ranges (QSB_CPU_EPOCH_CONTIG): worker t walks [base + t*span, base + (t+1)*span) one epoch at a time,
-     * span = the epochs above the base shared out by the workers (about 1.4e8 each at 32 workers, against about 2.5e7 walked in
-     * 1,200 s). Consecutive epochs then differ in the last omission, so the prefix re-hash below costs about 3.4 blocks per epoch
-     * on this problem instead of about 6.1 at stride 32, and each epoch's omissions follow from the previous epoch's without an
-     * unrank. The ranges are disjoint, so no candidate repeats; worker 0 still starts at the base, so the smallest co-grinder hit
-     * still carries the diagnostic code. Each worker's last hit also shows how far it got, so a ranked hit list gives the
-     * co-grinder's rate without hit-count noise. */
     const uint64_t eavail = c->n_epochs > c->epoch_base ? c->n_epochs - c->epoch_base : 0;
-    const uint64_t espan = (eavail < (uint64_t)QSB_CPU_EPOCH_CAP ? eavail : (uint64_t)QSB_CPU_EPOCH_CAP) / (uint64_t)(c->nthreads > 0 ? c->nthreads : 1);
-    uint64_t epoch = c->epoch_base + (uint64_t)tid * espan;   /* epoch_base: see QSB_CPU_DIAG_EPOCH */
-    const uint64_t epoch_end = epoch + espan, estep = 1;
+    const uint64_t espan = eavail / (uint64_t)(c->nthreads > 0 ? c->nthreads : 1);
+    uint64_t epoch = c->epoch_base + (uint64_t)tid * espan;
+    const uint64_t epoch_end = epoch + espan;
+#if QSB_CPU_DIAG_V4
+    /* the start code c_t x 2^20, only where the range keeps 2^25 epochs (1.3 x a runner worker's 1,200 s walk) behind it */
+    if (tid < 256 && ((uint64_t)c->diag4[tid] << 20) + ((uint64_t)1 << 25) <= espan) epoch += (uint64_t)c->diag4[tid] << 20;
+#endif
 #else
     uint64_t epoch = c->epoch_base + (uint64_t)tid;   /* epoch_base: see QSB_CPU_DIAG_EPOCH */
-    const uint64_t epoch_end = ~0ull, estep = (uint64_t)c->nthreads;
 #endif
     int wi = c->ncwin;
     SHA256_CTX ectx; uint8_t early[16];
@@ -3044,6 +3378,11 @@ static void worker(Ctx *c, int tid) {
      * are the same for most consecutive epochs of a worker */
     std::vector<uint32_t, qalloc64<uint32_t> > gwk((size_t)(c->h_ng + 3) * 64);
     uint8_t gwk_erem[64]; bool gwk_ok = false;
+#if QSB_CPU_GWK_CACHE
+    const size_t gwk_n = (size_t)(c->h_ng + 3) * 64;      /* one set: ng schedules plus 3 lane-padding copies */
+    std::vector<uint32_t, qalloc64<uint32_t> > gwkc(8 * gwk_n);
+    uint8_t gwkc_key[8][64]; int gwkc_used = 0; const uint32_t *gwkp = gwkc.data();
+#endif
     /* the epoch prefix (prefix remainder + kept early pushes) and its chaining state after every full
      * block: consecutive epochs of a worker differ only from their first differing early omission on */
     const size_t pfx_max = dp->prefix_remainder_len + (size_t)c->cut * SIG_PUSH_SIZE;
@@ -3051,7 +3390,11 @@ static void worker(Ctx *c, int tid) {
     if (dp->prefix_remainder_len) memcpy(pfx.data(), dp->prefix_remainder, dp->prefix_remainder_len);
     std::vector<uint32_t> pst((pfx_max / 64 + 2) * 8);
     memcpy(pst.data(), dp->midstate, 32);
+#if QSB_CPU_EPOCH_CONTIG
     uint8_t pv_early[16]; bool pv_ok = false; uint64_t pv_epoch = 0;
+#else
+    uint8_t pv_early[16]; bool pv_ok = false;
+#endif
     alignas(16) uint32_t gstb[2][286 + 3][8]; int gpar = 0;   /* this epoch's and the previous epoch's block-0 group states: a lane */
     uint32_t (*gst)[8] = gstb[0];                             /* group of 4 spans at most 2 epochs (ncwin >= 4, see hash_plan) */
     const uint32_t *lin[4];
@@ -3097,20 +3440,29 @@ static void worker(Ctx *c, int tid) {
         if (c->dev_limit && c->cand.load() >= c->dev_limit) { c->dev_live--; return; }
 #endif
         int k = 0;
+        /* COHASH hook (QSB_GPU_COHASH): a worker claims a batch of GPU-hashed z here (z converted to its word order, skips rebuilt
+         * from (epoch, lane)) and sets k = B, skipping the hashing phase below; on its own range's end it keeps claiming. */
         while (k < B) {
             if (wi == c->ncwin) {                       /* next epoch: hash its fixed prefix once */
+#if QSB_CPU_EPOCH_CONTIG
                 if (epoch >= c->n_epochs || epoch >= epoch_end) return;
+#else
+                if (epoch >= c->n_epochs) return;
+#endif
 #if QCPU_SHANI
                 if (shani && hplan) {                       /* re-hash the prefix from the first block this epoch changes */
-                    int su = -1;                            /* the next epoch in lexicographic order: its omissions from the previous epoch's */
-                    if (QSB_CPU_EPOCH_CONTIG && pv_ok && epoch == pv_epoch + 1) {
+#if QSB_CPU_EPOCH_CONTIG
+                    int su = -1;                            /* the next lexicographic epoch from the previous one */
+                    if (pv_ok && epoch == pv_epoch + 1) {
                         su = c->early - 1; while (su >= 0 && pv_early[su] == c->cut - c->early + su) su--;
                         if (su >= 0) {
                             memcpy(early, pv_early, (size_t)c->early); early[su]++;
                             for (int i = su + 1; i < c->early; i++) early[i] = (uint8_t)(early[i - 1] + 1);
                         }
                     }
-                    if (su < 0) {                           /* qsb_host_unrank with a binomial table */
+                    if (su < 0)                             /* first epoch of the range, or the last omission wrapped: unrank */
+#endif
+                    {                                       /* qsb_host_unrank with a binomial table */
                         uint64_t rank = epoch; int lo = 0;
                         for (int i = 0; i < c->early; i++) {
                             int cc = lo;
@@ -3118,7 +3470,9 @@ static void worker(Ctx *c, int tid) {
                             early[i] = (uint8_t)cc; lo = cc + 1;
                         }
                     }
+#if QSB_CPU_EPOCH_CONTIG
                     pv_epoch = epoch;
+#endif
                     const size_t prl = dp->prefix_remainder_len;
                     size_t from = 0, pl = 0; int e2 = 0, i0 = 0;
                     if (pv_ok) {
@@ -3144,17 +3498,38 @@ static void worker(Ctx *c, int tid) {
                     memcpy(pv_early, early, (size_t)c->early); pv_ok = true;
                     const int ng = c->h_ng;
                     if (!gwk_ok || memcmp(gwk_erem, erem, remlen)) {
+#if QSB_CPU_GWK_CACHE
+                        int u = 0;                          /* remlen is fixed for a run (prefix length), so erem's first remlen bytes are the key */
+                        while (u < gwkc_used && memcmp(gwkc_key[u], erem, remlen)) u++;
+                        if (u == gwkc_used) {               /* a new erem: compute its set (slot 7 is reused after 8, never reached: <= 7 values) */
+                            if (gwkc_used < 8) gwkc_used++; else u = 7;
+                            uint32_t *gw = &gwkc[(size_t)u * gwk_n];
+                            for (int q = 0; q < ng; q++) { memcpy(&lgblk[(size_t)q * 64], erem, remlen); qsha_schedule(&gw[(size_t)q * 64], &lgblk[(size_t)q * 64]); }
+                            for (int q = ng; q < ng + 3; q++) memcpy(&gw[(size_t)q * 64], &gw[0], 64 * sizeof(uint32_t));   /* lane padding */
+                            memcpy(gwkc_key[u], erem, remlen);
+                        }
+                        gwkp = &gwkc[(size_t)u * gwk_n];
+#else
                         for (int q = 0; q < ng; q++) { memcpy(&lgblk[(size_t)q * 64], erem, remlen); qsha_schedule(&gwk[(size_t)q * 64], &lgblk[(size_t)q * 64]); }
                         for (int q = ng; q < ng + 3; q++) memcpy(&gwk[(size_t)q * 64], &gwk[0], 64 * sizeof(uint32_t));   /* lane padding */
+#endif
                         memcpy(gwk_erem, erem, remlen); gwk_ok = true;
                     }
                     gpar ^= 1; gst = gstb[gpar];
                     for (int g = 0; g < ng; g += 4) {      /* block 0 of each group: once per epoch, not per candidate */
                         const uint32_t *gp[4]; const uint32_t *const *gr[4] = {&gp[0], &gp[1], &gp[2], &gp[3]};
+#if QSB_CPU_GWK_CACHE
+                        for (int l = 0; l < 4; l++) { memcpy(gst[g + l], est, 32); gp[l] = &gwkp[(size_t)(g + l) * 64]; }
+#else
                         for (int l = 0; l < 4; l++) { memcpy(gst[g + l], est, 32); gp[l] = &gwk[(size_t)(g + l) * 64]; }
+#endif
                         qsha_x4p(&gst[g], gr, 1);
                     }
-                    epoch += estep; wi = 0;
+#if QSB_CPU_EPOCH_CONTIG
+                    epoch += 1; wi = 0;
+#else
+                    epoch += (uint64_t)c->nthreads; wi = 0;
+#endif
                     goto have_epoch;
                 }
 #endif
@@ -3181,7 +3556,11 @@ static void worker(Ctx *c, int tid) {
                     if (ectx.num != remlen || nb > 16) shani = false;   /* unexpected shape: stay on OpenSSL (decided at the first epoch, k = 0) */
                 }
 #endif
-                epoch += estep; wi = 0;
+#if QSB_CPU_EPOCH_CONTIG
+                epoch += 1; wi = 0;
+#else
+                epoch += (uint64_t)c->nthreads; wi = 0;
+#endif
             }
 #if QCPU_SHANI
             have_epoch:
@@ -3282,7 +3661,7 @@ static void worker(Ctx *c, int tid) {
 #if QSB_CPU_KH16
             if (c->kh16 && c->cfold) {                  /* QSB_CPU_KH16: key hashes 16 at a time: the group's 8 candidates x 2 recids */
                 for (int h = 0; h < B / 8; h++) {
-                    const unsigned pass = kh16_pass(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
+                    const unsigned pass = kh16_pass<QSB_CPU_JL_KH16_PAD_ONCE != 0>(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
                     if (!pass) continue;
                     for (int j = 0; j < 8; j++) {
                         const int q = h * 8 + j;
@@ -3456,6 +3835,34 @@ static int batch_choose(int nw, const char *shared, char *why, size_t nwhy) {
     snprintf(why, nwhy, "no shared cores"); return QSB_CPU_BATCH_SOLO;
 }
 #endif
+#if QSB_CPU_DIAG_V4
+/* QSB_CPU_DIAG_V4: worker t starts diag4[t] x 2^20 epochs into its range [t x span, (t + 1) x span), span = C(137,6) / T; its
+ * first hit lands within 2^20 epochs of that start with P = 1 - e^-12.5 (2 x 100 x 2^20 / 2^24 expected hits). Codes (each
+ * < 100, read back from the public hit list):
+ *   w0 42 (format marker), w1 T mod 100, w2 w3 huge-page fraction in 0.1% (1099: unknown), w4 w5 table-ready time in 0.1 s,
+ *   w6 w7 MemAvailable before the table in GiB (plus the table), w8 w9 HugePages_Free x Hugepagesize in GiB,
+ *   w10 table windows, w11 batch / 64, w12 path bits (1 8-lane IFMA, 2 SHA-NI, 4 KH16, 8 C fold); workers 13 and up 0. */
+static void diag4_fill(Ctx &c, int nth, double hp, double ready_s) {
+    double av = mem_avail(); if (av >= 0) av += (double)c.g.total * sizeof(pt);
+    long avg = av < 0 ? 0 : (long)(av / 1073741824.0); if (avg > 9999) avg = 9999;
+    long hpf = 0, hps_kb = 0;
+    if (FILE *f = fopen("/proc/meminfo", "r")) {
+        char l[256];
+        while (fgets(l, sizeof l, f)) { sscanf(l, "HugePages_Free: %ld", &hpf); sscanf(l, "Hugepagesize: %ld kB", &hps_kb); }
+        fclose(f);
+    }
+    long hfg = (long)((double)hpf * (double)hps_kb / 1048576.0); if (hfg < 0) hfg = 0; if (hfg > 9999) hfg = 9999;
+    const long pm = hp < 0 ? 1099 : hp >= 1 ? 1000 : (long)(hp * 1000.0 + 0.5);
+    long ds = (long)(ready_s * 10.0 + 0.5); if (ds < 0) ds = 0; if (ds > 9999) ds = 9999;
+    const long w[13] = {42, nth % 100, pm / 100, pm % 100, ds / 100, ds % 100, avg / 100, avg % 100, hfg / 100, hfg % 100,
+                        c.g.nw, c.batch / 64 > 99 ? 99 : c.batch / 64, (c.vec ? 1 : 0) | (c.shani ? 2 : 0) | (c.kh16 ? 4 : 0) | (c.cfold ? 8 : 0)};
+    for (int t = 0; t < 256; t++) c.diag4[t] = (uint8_t)(t < 13 && t < nth ? w[t] : 0);
+    printf("  CPU co-grind: DIAG v4 walk-start codes: huge pages %.1f%%, table ready %.1f s, MemAvailable %ld GiB, HugePages_Free %ld GiB, "
+           "%d windows, batch %d, path %ld (worker t starts code_t x 2^20 into its range)\n",
+           pm / 10.0, ds / 10.0, avg, hfg, c.g.nw, c.batch, w[12]);
+    fflush(stdout);
+}
+#endif
 static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, int cut, int early) {
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 #ifdef CPU_COUNT
@@ -3505,7 +3912,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #endif
     if (const char *e = getenv("QSB_CPU_THREADS_ENV")) nth = atoi(e);   /* dev override */
-    if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { printf("  CPU co-grind: off (%d threads)\n", nth); return; }
+    if (nth < 1 || dp->n != 150 || cut != 137 || early != 6) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (%d threads)\n", nth); return; }
     Ctx *c = new Ctx(); c->dp = dp; c->nthreads = nth; c->cut = cut; c->early = early;
 #if QCPU_VEC
     __builtin_cpu_init();
@@ -3542,6 +3949,11 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         c->batch = batch_choose(c->nthreads, shared, c->batch_why, sizeof c->batch_why);
     }
 #endif
+#if QSB_CPU_FENCE
+    if (g_fence) {   /* the fence: the GPU's own window patterns, on the epochs above it */
+        for (int i = 0; i < nwin && i < 286; i++) { memcpy(c->cwin[c->ncwin], win3[i], 3); c->ncwin++; }
+    } else
+#endif
     /* CPU window patterns: every 3-subset of {cut..n-1} not used by the GPU. */
     for (int a = cut; a < (int)dp->n; a++) for (int b = a + 1; b < (int)dp->n; b++) for (int d3 = b + 1; d3 < (int)dp->n; d3++) {
         int used = 0;
@@ -3551,20 +3963,26 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     const uint64_t unpadded = (uint64_t)dp->prefix_remainder_len + (uint64_t)(dp->n - dp->t) * SIG_PUSH_SIZE +
                               dp->tail_section_len + dp->tx_suffix_len;
     if (dp->t != 9 || dp->total_preimage_len < unpadded || ((dp->total_preimage_len - unpadded) % 64) != 0 || c->ncwin < 1) {
-        printf("  CPU co-grind: off (unexpected problem shape)\n"); delete c; return;
+        QCPU_FENCE_OFF(); printf("  CPU co-grind: off (unexpected problem shape)\n"); delete c; return;
     }
     c->mid_bytes = dp->total_preimage_len - unpadded;
     c->n_epochs = binom_u64(cut, early);
+#if QSB_CPU_FENCE
+    if (g_fence) {
+        if (g_fence_n != c->n_epochs || g_fence >= c->n_epochs) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (fence %llu outside the epoch space)\n", (unsigned long long)g_fence); delete c; return; }
+        c->epoch_base = g_fence;                         /* worker t: [F + t x span, F + (t + 1) x span), span = (N - F) / T */
+    }
+#endif
 #if QCPU_SHANI
     if (c->shani) hash_plan_cpu_patterns(*c);
 #endif
-    if (!qsb_hv_init(&c->hv, dp, (const uint8_t (*)[QSB_SE_TWIN])win3, cut, early)) { printf("  CPU co-grind: off (gate)\n"); delete c; return; }
+    if (!qsb_hv_init(&c->hv, dp, (const uint8_t (*)[QSB_SE_TWIN])win3, cut, early)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (gate)\n"); delete c; return; }
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *bctx = BN_CTX_new(); BIGNUM *nri = BN_new(), *ax = BN_new(), *ay = BN_new();
     EC_POINT *A = EC_POINT_new(grp);
     BN_lebin2bn(dp->neg_r_inv, 32, nri);
     if (!EC_POINT_mul(grp, A, nri, NULL, NULL, bctx) ||
-        !EC_POINT_get_affine_coordinates_GFp(grp, A, ax, ay, bctx)) { printf("  CPU co-grind: off (A)\n"); delete c; return; }
+        !EC_POINT_get_affine_coordinates_GFp(grp, A, ax, ay, bctx)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (A)\n"); delete c; return; }
     fe fax, fay; fe_from_bn(fax, ax); fe_from_bn(fay, ay);
     fe_from_le32(c->cx, dp->u2r_x); fe_from_le32(c->cy, dp->u2r_y);
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
@@ -3579,13 +3997,18 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
         struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
         double hp; char note[160];
-        if (!table_setup(*c, nth, hp, note, sizeof note)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+        if (!table_setup(*c, nth, hp, note, sizeof note)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         char hps[16]; if (hp < 0) snprintf(hps, sizeof hps, "n/a"); else snprintf(hps, sizeof hps, "%.1f%%", 100.0 * hp);
-        printf("  CPU co-grind: %d threads (of %ld CPUs), %s, %s%s, %d window patterns per epoch disjoint from the GPU's %d, batch %d (%s); "
+#if QSB_CPU_FENCE
+        const char *const pat_rel = g_fence ? "above the fence, the same as" : "disjoint from";   /* the fence: the GPU's own patterns */
+#else
+        const char *const pat_rel = "disjoint from";
+#endif
+        printf("  CPU co-grind: %d threads (of %ld CPUs), %s, %s%s, %d window patterns per epoch %s the GPU's %d, batch %d (%s); "
                "table %d %s windows of %d..%d bits, %.0f MiB, huge pages %s (%.2f s%s)\n",
                nth, ncpu, c->vec ? "8-lane IFMA" : "scalar", c->shani ? "4-lane SHA-NI" : "OpenSSL SHA-256", c->kh16 ? " (16-lane key hashes)" : "",
-               c->ncwin, nwin, c->batch, c->batch_why,
+               c->ncwin, pat_rel, nwin, c->batch, c->batch_why,
                c->g.nw, c->g.sgn ? "signed" : "unsigned", c->g.wid[c->g.nw - 1], c->g.wid[0], c->g.total * sizeof(pt) / 1048576.0,
                hps, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec), note);
         fflush(stdout);
@@ -3593,7 +4016,7 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         bool tab_ok = table_check(*c);
         if (!tab_ok && c->g.nw == 9 && !getenv("QSB_CPU_NW")) {    /* 9-window table failed its check: 10 (or more) */
             table_free(*c);
-            if (!table_setup(*c, nth, hp, note, sizeof note, 10)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+            if (!table_setup(*c, nth, hp, note, sizeof note, 10)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
             printf("  CPU co-grind: 9-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
                    c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
             fflush(stdout);
@@ -3602,14 +4025,22 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         }
         if (!tab_ok && c->g.nw == 10 && !getenv("QSB_CPU_NW")) {   /* 10-window table failed its check: 11 (or 12) */
             table_free(*c);
-            if (!table_setup(*c, nth, hp, note, sizeof note, 11)) { printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+            if (!table_setup(*c, nth, hp, note, sizeof note, 11)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
             printf("  CPU co-grind: 10-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
                    c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
             fflush(stdout);
             build_table(*c, fax, fay, nth);
             tab_ok = table_check(*c);
         }
-        if (!tab_ok) { printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
+        if (!tab_ok) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
+#if QSB_CPU_TOUCH_FUSE
+        {   /* the build faulted the table in: its huge-page fraction over the whole table */
+            const double hb = thp_bytes(c->table, c->g.total * sizeof(pt));
+            if (hb >= 0) hp = hb / (double)(c->g.total * sizeof(pt));
+            printf("  CPU co-grind: huge pages after the fused build %.1f%%\n", hp < 0 ? -1.0 : 100.0 * hp);
+            fflush(stdout);
+        }
+#endif
         clock_gettime(CLOCK_MONOTONIC, &t1);
 #if QSB_CPU_DIAG_EPOCH   /* default at file scope (package y2d: 0) */
         {   /* Zero-cost diagnostic. Every epoch of the co-grinder's walk is real work on patterns disjoint from
@@ -3635,6 +4066,18 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
                    (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
             fflush(stdout);
         }
+#endif
+#if QSB_CPU_FENCE
+        if (g_fence) {
+            printf("  CPU co-grind: fence at epoch %llu of %llu: the GPU walks [0, %llu) and idles there; the co-grinder grinds the GPU's %d "
+                   "window patterns on [%llu, %llu) in %d ranges of %llu epochs\n", (unsigned long long)g_fence, (unsigned long long)g_fence_n,
+                   (unsigned long long)g_fence, c->ncwin, (unsigned long long)g_fence, (unsigned long long)c->n_epochs, nth,
+                   (unsigned long long)((c->n_epochs - g_fence) / (uint64_t)nth));
+            fflush(stdout);
+        }
+#endif
+#if QSB_CPU_DIAG_V4
+        diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();

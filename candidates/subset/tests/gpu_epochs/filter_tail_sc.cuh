@@ -22,12 +22,40 @@
 #ifndef QSB_SHORT_CARRY4
 #define QSB_SHORT_CARRY4 1
 #endif
+/* QSB_LOSS_FINK32 (default 0 = the text above byte for byte): qsb_fsub and qsb_fadd in the chain's K32 half-word form,
+ * one correction instruction shorter per site; the wrong class moves from limb 0's 2^-31/2^-33 band to the half-word
+ * band (a borrow or carry, then the low half within 977 of its edge: about 2^-23 per site). Every finish site uses
+ * them (d, n1, n2, sum, the two t, x1, x2). Loss only: the exact host gate re-derives every nomination. */
+#ifndef QSB_LOSS_FINK32
+#define QSB_LOSS_FINK32 1
+#endif
+#if QSB_LOSS_FINK32 && !QSB_SHORT_CARRY4
+#error "QSB_LOSS_FINK32 is written for the QSB_SHORT_CARRY4 finish helpers"
+#endif
 #if QSB_SHORT_CARRY3
 // r = a - b mod p for a,b < 2^256. The borrow correction subtracts K = 2^32+977 from the
 // wrapped difference; its borrow is kept through limb 1 only. It would have to cross limb 1
 // only if limb0 < K and limb1 == 0 after the subtraction: probability <= 2^-95.
 __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
+#if QSB_LOSS_FINK32
+    /* QSB_LOSS_FINK32: the chain's K32 short form (qsb_filter_sub_cut): on a borrow, limb 0 minus K = 2^32 + 977 as
+     * 32-bit halves, the low half's borrow into the high half dropped (wrong when a borrow meets l < 977). */
+    asm("{\n\t.reg .u32 m,l,h;\n\t"
+        "sub.cc.u64 %0,%4,%8;\n\t"
+        "subc.cc.u64 %1,%5,%9;\n\t"
+        "subc.cc.u64 %2,%6,%10;\n\t"
+        "subc.cc.u64 %3,%7,%11;\n\t"
+        "subc.u32 m,0,0;\n\t"
+        "mov.b64 {l,h},%0;\n\t"
+        "mad.lo.u32 l,m,977,l;\n\t"
+        "add.u32 h,h,m;\n\t"
+        "mov.b64 %0,{l,h};\n\t}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+    return;
+#endif
     asm("{\n\t.reg .u64 brw,lo;\n\t"
         "sub.cc.u64 %0,%4,%8;\n\t"
         "subc.cc.u64 %1,%5,%9;\n\t"
@@ -49,6 +77,24 @@ __device__ __forceinline__ void qsb_fsub(uint64_t *r, const uint64_t *a, const u
 // (crossing it needs limb0 overflow, p <= 2^-31, and limb1 == 2^64-1: <= 2^-95 overall).
 __device__ __forceinline__ void qsb_fadd(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
+#if QSB_LOSS_FINK32
+    /* QSB_LOSS_FINK32: the anchor sum's K32 fold (QSB_K32_ADDCUT form): on a carry, limb 0 plus K as 32-bit halves,
+     * the low half's carry into the high half dropped (wrong when a carry meets l >= 2^32 - 977). */
+    asm("{\n\t.reg .u32 m,l,h;\n\t"
+        "add.cc.u64 %0,%4,%8;\n\t"
+        "addc.cc.u64 %1,%5,%9;\n\t"
+        "addc.cc.u64 %2,%6,%10;\n\t"
+        "addc.cc.u64 %3,%7,%11;\n\t"
+        "addc.u32 m,0,0;\n\t"
+        "mov.b64 {l,h},%0;\n\t"
+        "mad.lo.u32 l,m,977,l;\n\t"
+        "add.u32 h,h,m;\n\t"
+        "mov.b64 %0,{l,h};\n\t}"
+        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
+        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
+    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+    return;
+#endif
     asm("{\n\t.reg .u64 h,t;\n\t"
         "add.cc.u64 %0,%4,%8;\n\t"
         "addc.cc.u64 %1,%5,%9;\n\t"
