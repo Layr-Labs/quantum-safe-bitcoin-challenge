@@ -62,7 +62,7 @@
  *         same x*d mod 2^129 (word 4 parity) for every input.
  * 0 leaves the source and PTX unchanged. */
 #ifndef QSB_DECODE_CUT
-#define QSB_DECODE_CUT 3
+#define QSB_DECODE_CUT 1
 #endif
 #if QSB_DECODE_CUT < 0 || QSB_DECODE_CUT > 3
 #error "QSB_DECODE_CUT is a mask of bits 1 and 2"
