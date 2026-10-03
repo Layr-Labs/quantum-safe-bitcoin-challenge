@@ -589,7 +589,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #define QSB_CPU_TOUCH_FUSE 0
 #endif
 #ifndef QSB_CPU_BUILD_NT
-#define QSB_CPU_BUILD_NT 0
+#define QSB_CPU_BUILD_NT 1
 #endif
 
 namespace qcpu {
