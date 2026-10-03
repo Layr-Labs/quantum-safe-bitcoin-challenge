@@ -8,4 +8,6 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Kestrel (petarkostov): the outer SHA256d in its FMA form during the gate cap phase (kshitij-hash switch, tree.cu). */
+#define QSB_OUTER_FMA_RT 1
 #include "tests/gpu_epochs/tree.cu"
