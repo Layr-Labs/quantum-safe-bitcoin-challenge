@@ -81,6 +81,27 @@ static int qsb_hv_init(qsb_hv_t *h, const digest_params_t *dp, const uint8_t win
     return ok;
 }
 
+/* Compare only the requested hash prefix, retaining the full-count control. */
+#ifndef QSB_HV_PREFIX_TEST
+#define QSB_HV_PREFIX_TEST 1
+#endif
+#if QSB_HV_PREFIX_TEST
+static int qsb_hv_meets_prefix(const uint8_t *hh) {
+#if QSB_ZEROS_N <= 0
+    return 1;
+#elif QSB_ZEROS_N > 256
+    return 0;
+#else
+#pragma GCC unroll 32
+    for (int i = 0; i < QSB_ZEROS_N / 8; i++) if (hh[i]) return 0;
+#if (QSB_ZEROS_N & 7)
+    return (hh[QSB_ZEROS_N / 8] & (0xffu << (8 - (QSB_ZEROS_N & 7)))) == 0;
+#else
+    return 1;
+#endif
+#endif
+}
+#endif
 static int qsb_hv_zeros(const uint8_t *hh) {
     int n = 0;
     for (int i = 0; i < 32; i++) { if (hh[i] == 0) { n += 8; continue; } uint8_t b = hh[i]; while (!(b & 0x80)) { n++; b <<= 1; } break; }
@@ -89,7 +110,22 @@ static int qsb_hv_zeros(const uint8_t *hh) {
 
 /* verify.py predicate: z = SHA256d(fixed_prefix || kept dummy sigs in storage order || tail || suffix),
  * Q = u1*G + (recid ? -R : R) with u1 = z*neg_r_inv mod n; hit iff lz(SHA256(compress(Q))) >= N. */
-static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
+/* A recid retry changes EC recovery, not the exact preimage digest. Cache only
+ * inside one publication call; invalid preimages never mark the cache ready. */
+#ifndef QSB_HV_RECID_DIGEST
+#define QSB_HV_RECID_DIGEST 1
+#endif
+static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid
+#if QSB_HV_RECID_DIGEST
+                        , uint8_t *digest_cache = nullptr, bool *cache_ready = nullptr
+#endif
+                        ) {
+    uint8_t d2[32];
+#if QSB_HV_RECID_DIGEST
+    if (digest_cache && cache_ready && *cache_ready) memcpy(d2, digest_cache, 32);
+    else
+#endif
+    {
     const digest_params_t *dp = h->dp;
     uint8_t buf[4096]; size_t len = 0;
     if (dp->prefix_remainder_len) { memcpy(buf + len, dp->prefix_remainder, dp->prefix_remainder_len); len += dp->prefix_remainder_len; }
@@ -109,9 +145,13 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
     SHA256_CTX sc; SHA256_Init(&sc);
     for (int i = 0; i < 8; i++) sc.h[i] = dp->midstate[i];
     for (size_t off = 0; off < len; off += 64) SHA256_Transform(&sc, buf + off);
-    uint8_t d1[32], d2[32];
+    uint8_t d1[32];
     for (int i = 0; i < 8; i++) { d1[4*i] = (uint8_t)(sc.h[i] >> 24); d1[4*i+1] = (uint8_t)(sc.h[i] >> 16); d1[4*i+2] = (uint8_t)(sc.h[i] >> 8); d1[4*i+3] = (uint8_t)sc.h[i]; }
     SHA256(d1, 32, d2);
+#if QSB_HV_RECID_DIGEST
+    if (digest_cache && cache_ready) { memcpy(digest_cache, d2, 32); *cache_ready = true; }
+#endif
+    }
     BIGNUM *z = BN_bin2bn(d2, 32, NULL), *u1 = BN_new(), *qx = BN_new(), *qy = BN_new();
     EC_POINT *P = EC_POINT_new(h->grp), *Q = EC_POINT_new(h->grp), *R = EC_POINT_dup(h->Ru2, h->grp);
     int ok = 0;
@@ -131,7 +171,11 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
             if (nb > 0 && nb <= 32) BN_bn2bin(qx, pub + 1 + (32 - nb));
             pub[0] = (uint8_t)(0x02 + (BN_is_odd(qy) ? 1 : 0));
             uint8_t hh[32]; SHA256(pub, 33, hh);
+#if QSB_HV_PREFIX_TEST
+            ok = qsb_hv_meets_prefix(hh);
+#else
             ok = qsb_hv_zeros(hh) >= QSB_ZEROS_N;
+#endif
         }
     }
     BN_free(z); BN_free(u1); BN_free(qx); BN_free(qy);
@@ -146,7 +190,15 @@ static int qsb_hv_publish(const qsb_hv_t *h, uint64_t epoch_rank, unsigned lane,
     qsb_host_unrank(epoch_rank, h->window_start, h->s_early, skip);
     for (int j = 0; j < 3; j++) skip[6 + j] = h->win3[lane & (QSB_SE_PER_EPOCH - 1)][j];
     int recid = recid_gpu & 1;
+#if QSB_HV_RECID_DIGEST
+    uint8_t digest_cache[32]; bool cache_ready = false;
+    if (!qsb_hv_check(h, skip, recid, digest_cache, &cache_ready)) {
+        recid ^= 1;
+        if (!qsb_hv_check(h, skip, recid, digest_cache, &cache_ready)) return 0;
+    }
+#else
     if (!qsb_hv_check(h, skip, recid)) { recid ^= 1; if (!qsb_hv_check(h, skip, recid)) return 0; }
+#endif
 #if QSB_CPU_FENCE
     if (!qsb_pub_once(skip, recid)) return 0;              /* published before in this process: dropped, counted */
 #endif
@@ -167,7 +219,15 @@ static int qsb_hv_publish_line(const qsb_hv_t *h, uint64_t epoch_rank, unsigned 
     qsb_host_unrank(epoch_rank, h->window_start, h->s_early, skip);
     for (int j = 0; j < 3; j++) skip[6 + j] = h->win3[lane & (QSB_SE_PER_EPOCH - 1)][j];
     int recid = recid_gpu & 1;
+#if QSB_HV_RECID_DIGEST
+    uint8_t digest_cache[32]; bool cache_ready = false;
+    if (!qsb_hv_check(h, skip, recid, digest_cache, &cache_ready)) {
+        recid ^= 1;
+        if (!qsb_hv_check(h, skip, recid, digest_cache, &cache_ready)) return 0;
+    }
+#else
     if (!qsb_hv_check(h, skip, recid)) { recid ^= 1; if (!qsb_hv_check(h, skip, recid)) return 0; }
+#endif
 #if QSB_CPU_FENCE
     if (!qsb_pub_once(skip, recid)) return 0;
 #endif
