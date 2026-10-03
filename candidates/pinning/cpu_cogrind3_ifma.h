@@ -56,17 +56,17 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     c7 = QI_LO(QI_LO(c7, a3, b4), a4, b3);
     V c8 = QI_LO(QI_HI(QI_HI(z, a3, b4), a4, b3), a4, b4);
     V c9 = QI_HI(z, a4, b4);                                   /* < 2^46 (a4, b4 < 2^49) */
-    /* high columns to 52-bit limbs (c9 stays < 2^52) */
-    c6 += c5 >> 52; c5 &= M;
-    c7 += c6 >> 52; c6 &= M;
-    c8 += c7 >> 52; c7 &= M;
-    c9 += c8 >> 52; c8 &= M;
-    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
-    V d0 = QI_LO(c0, c5, R);
-    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
-    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
-    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
-    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    /* Split high columns independently, following the promoted Subset IFMA fold.
+     * This removes the c5->c9 carry chain; each h*R fits one 52-bit IFMA input. */
+    const V l5 = c5 & M, h5 = c5 >> 52;
+    const V l6 = c6 & M, h6 = c6 >> 52;
+    const V l7 = c7 & M, h7 = c7 >> 52;
+    const V l8 = c8 & M, h8 = c8 >> 52;
+    V d0 = QI_LO(c0, l5, R);
+    V d1 = QI_LO(QI_HI(QI_LO(c1, h5, R), l5, R), l6, R);
+    V d2 = QI_LO(QI_HI(QI_LO(c2, h6, R), l6, R), l7, R);
+    V d3 = QI_LO(QI_HI(QI_LO(c3, h7, R), l7, R), l8, R);
+    V d4 = QI_LO(QI_HI(QI_LO(c4, h8, R), l8, R), c9, R);
     const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
     d4 += d3 >> 52; d3 &= M;
     const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
@@ -114,27 +114,6 @@ static QI_INL void fnorm(vfe *r) {
     t4 &= vs1(QI_M48);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
 }
-/* QCG_Y_PARITY_PASS (kill switch, default 1): hash_block reads only bit 0 of a y's limb 0 (the
- * 02/03 prefix byte). fparity returns that bit of fnorm's canonical result without the second
- * carry pass: fnorm's final t0 is (t0 + x*C) mod 2^52 with x in {0, 1} its >= p flag and
- * C = 2^256 - p odd, so bit 0 is (t0 ^ x) & 1, and the later carries and masks never touch
- * bit 0 of limb 0. Same inputs (limbs < 2^62), same parity for every value. */
-#ifndef QCG_Y_PARITY_PASS
-#define QCG_Y_PARITY_PASS 1
-#endif
-static QI_INL V fparity(const vfe *r) {
-    const V M = vs1(QI_M52);
-    V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4], m;
-    V x = t4 >> 48; t4 &= vs1(QI_M48);
-    t0 = QI_LO(t0, x, vs1(QI_C));
-    t1 += t0 >> 52; t0 &= M;
-    t2 += t1 >> 52; t1 &= M; m = t1;
-    t3 += t2 >> 52; t2 &= M; m &= t2;
-    t4 += t3 >> 52; t3 &= M; m &= t3;
-    const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
-    x = (t4 >> 48) | ((V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48)) & (V)_mm256_cmpeq_epi64((__m256i)m, (__m256i)M) & ge & vs1(1));
-    return (t0 ^ x) & vs1(1);
-}
 /* r = a + 2p - b (b in W form); limbs of r < a's + 2^54 */
 static QI_INL void fsub(vfe *r, const vfe *a, const vfe *b) {
     r->n[0] = a->n[0] + (vs1(QI_2P0) - b->n[0]);
@@ -175,11 +154,22 @@ static QI_INL void to_w(V w[4], const vfe *a) {
 }
 static QI_INL void set_w(vfe *r, const uint64_t *w) { from_w(r, vs1(w[0]), vs1(w[1]), vs1(w[2]), vs1(w[3])); }
 /* r lane l = a lane (l ^ k), k = 1 or 2 */
+#ifndef QSB_CG_PERMX1_SHUF
+#define QSB_CG_PERMX1_SHUF 1
+#endif
 static QI_INL void fpermx(vfe *r, const vfe *a, int k) {
-    for (int j = 0; j < 5; j++)
+    for (int j = 0; j < 5; j++) {
+#if QSB_CG_PERMX1_SHUF
+        r->n[j] = (V)(k == 1 ? _mm256_shuffle_epi32((__m256i)a->n[j], 0x4E) : _mm256_permute4x64_epi64((__m256i)a->n[j], 0x4E));
+#else
         r->n[j] = (V)(k == 1 ? _mm256_permute4x64_epi64((__m256i)a->n[j], 0xB1) : _mm256_permute4x64_epi64((__m256i)a->n[j], 0x4E));
+#endif
+    }
 }
 /* gather x (half 0) or y (half 1) words of 4 table entries, transposed to one V per word */
+#ifndef QSB_CG_TR4_SHUF128
+#define QSB_CG_TR4_SHUF128 1
+#endif
 static QI_INL void tr4(V w[4], const tentry *e0, const tentry *e1, const tentry *e2, const tentry *e3, int half) {
     __m256i r0 = _mm256_load_si256((const __m256i *)((const uint8_t *)e0 + 32 * half));
     __m256i r1 = _mm256_load_si256((const __m256i *)((const uint8_t *)e1 + 32 * half));
@@ -187,8 +177,13 @@ static QI_INL void tr4(V w[4], const tentry *e0, const tentry *e1, const tentry 
     __m256i r3 = _mm256_load_si256((const __m256i *)((const uint8_t *)e3 + 32 * half));
     __m256i t0 = _mm256_unpacklo_epi64(r0, r1), t1 = _mm256_unpackhi_epi64(r0, r1);
     __m256i t2 = _mm256_unpacklo_epi64(r2, r3), t3 = _mm256_unpackhi_epi64(r2, r3);
+#if QSB_CG_TR4_SHUF128
+    w[0] = (V)_mm256_shuffle_i64x2(t0, t2, 0); w[2] = (V)_mm256_shuffle_i64x2(t0, t2, 3);
+    w[1] = (V)_mm256_shuffle_i64x2(t1, t3, 0); w[3] = (V)_mm256_shuffle_i64x2(t1, t3, 3);
+#else
     w[0] = (V)_mm256_permute2x128_si256(t0, t2, 0x20); w[2] = (V)_mm256_permute2x128_si256(t0, t2, 0x31);
     w[1] = (V)_mm256_permute2x128_si256(t1, t3, 0x20); w[3] = (V)_mm256_permute2x128_si256(t1, t3, 0x31);
+#endif
 }
 static QI_INL void gather_x(vfe *x, const tentry *const *e) { V w[4]; tr4(w, e[0], e[1], e[2], e[3], 0); from_w(x, w[0], w[1], w[2], w[3]); }
 static QI_INL void gather_y(vfe *y, const tentry *const *e) { V w[4]; tr4(w, e[0], e[1], e[2], e[3], 1); from_w(y, w[0], w[1], w[2], w[3]); }
@@ -399,12 +394,7 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             fmul(&ym, &lam, &t);
             fsub(&ym, &ym, &py[b]);
             vfe xp = px[b], yp = py[b];
-#if QCG_Y_PARITY_PASS && !defined(QCG_EC_HOOK)
-            fnorm(&xp); fnorm(&xm);
-            yp.n[0] = fparity(&py[b]); ym.n[0] = fparity(&ym);
-#else
             fnorm(&xp); fnorm(&yp); fnorm(&xm); fnorm(&ym);
-#endif
 #ifdef QCG_EC_HOOK
             { V a4[4], b4[4], c4[4], d4[4]; to_w(a4, &xp); to_w(b4, &yp); to_w(c4, &xm); to_w(d4, &ym);
               for (int l = 0; l < 4; l++) { uint64_t X0[4], Y0[4], X1[4], Y1[4];
