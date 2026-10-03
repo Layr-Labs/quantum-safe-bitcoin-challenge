@@ -548,8 +548,9 @@ __device__ uint64_t BINOM_C[151][10];
  * other warp with the five P18 terms; P is always P18. Both layouts sum Q to the same point (same
  * segment-0 bias, same top digit), so every candidate's z*A and hit set are unchanged: only the balance
  * of DRAM records against field additions moves, 8 cold / 9 adds -> 6 cold / 10 adds on 1/QSB_Q_MIX of
- * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
- * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
+ * the warps (QSB_Q_MIX_INV, below: on all but 1/QSB_Q_MIX of them). The choice is warp-uniform (1D blocks
+ * of a multiple of 32 threads), so no lane diverges; qsb_s3_selfcheck runs the half walker over both
+ * descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
 #define QSB_Q_MIX 2
 #endif
@@ -572,6 +573,22 @@ __device__ uint64_t BINOM_C[151][10];
 #endif
 #if QSB_Q_SPREAD && QSB_Q_MIX != 4
 #error "QSB_Q_SPREAD is written for QSB_Q_MIX 4"
+#endif
+/* QSB_Q_MIX_INV (default 0; needs QSB_Q_MIX >= 2, QSB_Q_SPREAD 0 and QSB_QMIX_RT 0): inverts the QSB_Q_MIX warp
+ * test, so the warps whose global index is not 0 mod QSB_Q_MIX decode Q with the six GLV12 terms and the rest
+ * with the five P18 terms: (QSB_Q_MIX - 1)/QSB_Q_MIX of the warps on GLV12 (3/4 at QSB_Q_MIX 4, 7/8 at 8)
+ * instead of 1/QSB_Q_MIX. The test still reads the warp index only, so g stays warp-uniform (and passes
+ * QSB_S3_UNIFORM_G's vote unchanged); the walk, the tables and qsb_s3_selfcheck's replay of both rows are the
+ * same, and every candidate's z*A and hit set are unchanged. In the knob string only when non-zero.
+ * 0 = the QSB_Q_MIX choice byte for byte. */
+#ifndef QSB_Q_MIX_INV
+#define QSB_Q_MIX_INV 0
+#endif
+#if QSB_Q_MIX_INV != 0 && QSB_Q_MIX_INV != 1
+#error "QSB_Q_MIX_INV must be 0 or 1"
+#endif
+#if QSB_Q_MIX_INV && (QSB_Q_MIX < 2 || QSB_Q_SPREAD)
+#error "QSB_Q_MIX_INV inverts the QSB_Q_MIX warp test: needs QSB_Q_MIX >= 2 and QSB_Q_SPREAD 0"
 #endif
 /* QSB_PSI_HOIST (default 0: every form failed the register gate on this tree, see below).
  * Bit 0 is the nested-loop form of the public QSB_BETA_OUT (fdd6302e) and QSB_PHI_HOIST (aabc3509) for
@@ -923,7 +940,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * across both tails. The front keeps its ABI (its chain loop is not re-allocated by this). Same __constant__
  * words, same field operations, in the same order: bit-identical. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1
 #endif
 #if QSB_R_CBANK_TAILS < 0 || QSB_R_CBANK_TAILS > 1
 #error "QSB_R_CBANK_TAILS must be 0 or 1"
@@ -1008,7 +1025,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_CONST_CALLEE 1
 #endif
 #ifndef QSB_SHA_WROLL_PIPE
-#define QSB_SHA_WROLL_PIPE 0
+#define QSB_SHA_WROLL_PIPE 1
 #endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
@@ -1050,6 +1067,9 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #endif
 #if QSB_QMIX_RT && (QSB_Q_MIX < 2 || QSB_Q_SPREAD)
 #error "QSB_QMIX_RT rewrites the QSB_Q_MIX warp mask: needs QSB_Q_MIX >= 2 and QSB_Q_SPREAD 0"
+#endif
+#if QSB_QMIX_RT && QSB_Q_MIX_INV
+#error "QSB_Q_MIX_INV inverts the immediate QSB_Q_MIX warp test, which QSB_QMIX_RT replaces: needs QSB_QMIX_RT 0"
 #endif
 #if QSB_CONST_CALLEE && !QSB_SHA_SCHED_V4
 #error "QSB_CONST_CALLEE reads QSB_CONST_SCHEDULE as uint4 rows, which are 16 B-aligned only under QSB_SHA_SCHED_V4 1"
@@ -2247,12 +2267,14 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
     const unsigned g = (wib == 0u) | (wib == 7u);
 #elif QSB_QMIX_RT
     const unsigned g = (((blockIdx.x * blockDim.x + threadIdx.x) >> 5) & QSB_QMIX_MASK_C) == 0u;   /* QSB_QMIX_RT */
+#elif QSB_Q_MIX_INV
+    const unsigned g = (((blockIdx.x * blockDim.x + threadIdx.x) >> 5) & (QSB_Q_MIX - 1u)) != 0u;   /* QSB_Q_MIX_INV */
 #else
     const unsigned g = (((blockIdx.x * blockDim.x + threadIdx.x) >> 5) & (QSB_Q_MIX - 1u)) == 0u;
 #endif
 #if QSB_S3_UNIFORM_G
     /* QSB_S3_UNIFORM_G: g is one
-     * value per warp (both formulas read the warp index only); a full-warp vote returns g itself and lets ptxas treat
+     * value per warp (every formula reads the warp index only); a full-warp vote returns g itself and lets ptxas treat
      * the loop index and the psi test as warp-uniform, so the psi branch needs no BSSY/BSYNC bracket. Every lane
      * reaches the vote (the front runs unconditionally). Bit-identical. */
     const unsigned gu = __all_sync(0xffffffffu, g);
@@ -5987,7 +6009,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#if QSB_Q_MIX_INV   /* only when non-zero, so QSB_Q_MIX_INV 0 builds the QSB_Q_MIX image byte for byte */
+#define QSB_K16_Q_MIX_INV QSB_CARRIER_KV(QSB_Q_MIX_INV)
+#else
+#define QSB_K16_Q_MIX_INV
+#endif
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL QSB_K16_Q_MIX_INV
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
