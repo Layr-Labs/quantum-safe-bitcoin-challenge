@@ -1,0 +1,3214 @@
+{
+  "created_at": "2026-09-16T22:07:51.477608+00:00",
+  "source_sha256": {
+    "GPUMath.h": "7f7a518c2021c2f104e2ce9b014d03108e6c858576341779c240595260405187",
+    "pinning.cu": "a30d5228ed06d01807d3197275b3998f0b4cd3f91ad103c82fbf1df2d39faf03",
+    "wide_geometry.cuh": "985e935e371842eceabe05245b8d28237bfd19e2987c75894c59e389766eabbb"
+  },
+  "function_sha256": {
+    "seed": "a1313f9d02ef3c50549263cb51c6807d45550f2d38b110caeb09ce55340622c0",
+    "mixed": "d5066cfaa5737175455081d2ada76f6b742b2e36517f439d266efa3ef8460f8b"
+  },
+  "literal_conversion": {
+    "counts": {
+      "_ModSub256": 47,
+      "_ModSqr": 18,
+      "_ModMult": 60,
+      "Load256": 16,
+      "_ModAdd256": 16
+    },
+    "violations": [
+      {
+        "stage": "seed",
+        "index": 10,
+        "op": "_ModMult",
+        "operands": [
+          "Q",
+          "R"
+        ],
+        "magnitudes": [
+          9,
+          3
+        ]
+      },
+      {
+        "stage": "add_2",
+        "index": 5,
+        "op": "_ModSqr",
+        "operands": [
+          "P"
+        ],
+        "magnitudes": [
+          9
+        ]
+      },
+      {
+        "stage": "add_2",
+        "index": 6,
+        "op": "_ModMult",
+        "operands": [
+          "PP",
+          "P"
+        ],
+        "magnitudes": [
+          1,
+          9
+        ]
+      }
+    ],
+    "final_magnitudes": {
+      "X1": 6,
+      "Y1": 3,
+      "ZZ1": 1,
+      "ZZZ1": 1
+    },
+    "operations": [
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSqr",
+        "dest": "ZZ3",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModMult",
+        "dest": "ZZZ3",
+        "input_magnitudes": [
+          1,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          3,
+          1
+        ],
+        "output_magnitude": 5
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          5,
+          1
+        ],
+        "output_magnitude": 7
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          7
+        ],
+        "output_magnitude": 9
+      },
+      {
+        "stage": "seed",
+        "op": "_ModMult",
+        "dest": "Y3",
+        "input_magnitudes": [
+          9,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "Load256",
+        "dest": "X3",
+        "input_magnitudes": [
+          7
+        ],
+        "output_magnitude": 7
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          7
+        ],
+        "output_magnitude": 9
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          9
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          9
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_9",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      }
+    ]
+  },
+  "one_weak_seed_normalization": {
+    "counts": {
+      "_ModSub256": 47,
+      "_ModSqr": 18,
+      "_ModMult": 60,
+      "normalize_weak": 1,
+      "Load256": 16,
+      "_ModAdd256": 16
+    },
+    "violations": [],
+    "final_magnitudes": {
+      "X1": 6,
+      "Y1": 3,
+      "ZZ1": 1,
+      "ZZZ1": 1
+    },
+    "operations": [
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSqr",
+        "dest": "ZZ3",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModMult",
+        "dest": "ZZZ3",
+        "input_magnitudes": [
+          1,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          3,
+          1
+        ],
+        "output_magnitude": 5
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          5,
+          1
+        ],
+        "output_magnitude": 7
+      },
+      {
+        "stage": "seed",
+        "op": "normalize_weak",
+        "dest": "T",
+        "input_magnitudes": [
+          7
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "seed",
+        "op": "_ModMult",
+        "dest": "Y3",
+        "input_magnitudes": [
+          3,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "seed",
+        "op": "Load256",
+        "dest": "X3",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_2",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_2",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_3",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_3",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_4",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_4",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_5",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_5",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_6",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_6",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_7",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_7",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_8",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "Load256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_8",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "U2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModAdd256",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "P",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "R",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSqr",
+        "dest": "PP",
+        "input_magnitudes": [
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "PPP",
+        "input_magnitudes": [
+          1,
+          8
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "ZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSqr",
+        "dest": "T",
+        "input_magnitudes": [
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModAdd256",
+        "dest": "T",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 2
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          2,
+          1
+        ],
+        "output_magnitude": 4
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "T",
+        "input_magnitudes": [
+          4,
+          1
+        ],
+        "output_magnitude": 6
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "ZZZ1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "Q",
+        "input_magnitudes": [
+          1,
+          6
+        ],
+        "output_magnitude": 8
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "Q",
+        "input_magnitudes": [
+          8,
+          3
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModMult",
+        "dest": "S2",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 1
+      },
+      {
+        "stage": "add_9",
+        "op": "_ModSub256",
+        "dest": "Y1",
+        "input_magnitudes": [
+          1,
+          1
+        ],
+        "output_magnitude": 3
+      },
+      {
+        "stage": "add_9",
+        "op": "Load256",
+        "dest": "X1",
+        "input_magnitudes": [
+          6
+        ],
+        "output_magnitude": 6
+      }
+    ]
+  },
+  "layouts": [
+    {
+      "name": "5x52",
+      "physical_storage_words32": 10,
+      "max_input_limb_bits": 56,
+      "max_raw_column_bits": 114,
+      "limb_storage_fits_conservative_contract": true,
+      "schoolbook_raw_narrow_products_mul": 100,
+      "limb_triangular_raw_narrow_products_square": 60,
+      "chain_raw_narrow_products": 7080
+    },
+    {
+      "name": "9x29",
+      "physical_storage_words32": 9,
+      "max_input_limb_bits": 33,
+      "max_raw_column_bits": 69,
+      "limb_storage_fits_conservative_contract": false,
+      "schoolbook_raw_narrow_products_mul": 81,
+      "limb_triangular_raw_narrow_products_square": 45,
+      "chain_raw_narrow_products": 5670
+    },
+    {
+      "name": "10x26",
+      "physical_storage_words32": 10,
+      "max_input_limb_bits": 30,
+      "max_raw_column_bits": 64,
+      "limb_storage_fits_conservative_contract": true,
+      "schoolbook_raw_narrow_products_mul": 100,
+      "limb_triangular_raw_narrow_products_square": 55,
+      "chain_raw_narrow_products": 6990
+    }
+  ],
+  "current_raw_products": {
+    "mul": 64,
+    "square": 36,
+    "chain": 4488
+  },
+  "assumptions": [
+    "Canonical affine inputs and anchors are assigned magnitude1 conservatively.",
+    "The input/output bounds of hypothetical primitives are contracts, not implemented GPU code.",
+    "One weak normalization is inserted on the seed T before Q-T; source production is unchanged.",
+    "Radix column bounds exclude reductions, fold terms, intermediate carry and conversions.",
+    "Raw product decompositions assume schoolbook limb multiplication; optimized diagonal squaring or other schedules can differ."
+  ],
+  "decision": "Defer a GPU rewrite. A bounded formula schedule exists for5x52 and10x26, but substantial net savings are not established.9x29 violates32-bit limb bounds under this contract and needs a different normalization schedule or tighter primitive bounds.",
+  "limits": "Source-extracted conditional magnitude/cost screen only; no CUDA implementation, field arithmetic correctness test, GPU execution, timing or measured regression. Recovery/inverse/checkpoint boundaries are not yet analyzed."
+}

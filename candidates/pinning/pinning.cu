@@ -13,7 +13,7 @@
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
-#define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
+#define QSB_L2STATE 512 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
@@ -502,7 +502,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #define QSB_SUB_S2PRIO 1
 #endif
 #ifndef QSB_L2STATE
-#define QSB_L2STATE 0
+#define QSB_L2STATE 512
 #endif
 /* QSB_PROBE_NOSTATE (speed probe only, wrong math): prepare/finish address the state of block
  * blockIdx.x & 63 only, so the state traffic never leaves L2. */
