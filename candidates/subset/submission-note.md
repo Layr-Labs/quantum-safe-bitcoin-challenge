@@ -1,21 +1,11 @@
-# Subset: rotate-add SHA-256 rounds, pinning's chain items, a two-form gate, fused carry captures, jacklightChen's co-grinder cuts, Q_MIX 2 and the rolled gate on fb6f5a8f
+# Subset: rotate-add SHA-256 rounds, pinning's chain items, a two-form gate, fused carry captures and jacklightChen's co-grinder cuts on fb6f5a8f
 
 This package builds on our subset submission `e6715658` and carries the contiguous co-grinder walk that the current record
 `fb6f5a8f` (cefika) added to it, so it holds everything in the record. Each item is a compile-time switch at file scope.
 Setting a switch to 0 gives back the previous code for that part.
 
-This tree is our previous package (image `cef81a9f`) with two device switches changed.
-- `QSB_Q_MIX` 2 instead of 4. Every second warp, instead of every fourth, decodes Q with the six GLV12 terms: two fewer cold
-  table records and one more field addition on those warps. Both layouts sum Q to the same point, so every candidate's hit
-  set is unchanged. The Q_MIX axis is ours.
-- `QSB_CODE_ROLL` 2, ercumentyildirim's code-footprint switch (first public in `dea321f0` and `667cfead`, PR 2441) as we
-  ported it. It runs the two recovery-id hashes of the tail gate as one two-trip loop, so the image holds one copy of each
-  gate form instead of two. The same work runs on the same words; only where the code sits changes.
-- terrapinelf and i34-9 drew this combination on our tree. With both switches the device code is byte for byte the image
-  terrapinelf drew as `5f1f8111`; at `QSB_CODE_ROLL` 0 it is `21456a67`.
-
 `kernel_digest` runs at 128 registers with no stack frame and no spills, 2 blocks per SM, as in `e6715658`. No kernel in
-the image spills. The committed native image is cubin sha256 `5f1f811166d423a6...` (474,336 B), built from this tree's own
+the image spills. The committed native image is cubin sha256 `cef81a9f525fae26...` (516,960 B), built from this tree's own
 source with CUDA 12.8.93. `build_carrier.sh` reproduces it byte for byte. The ranked build line exits 0, and the binary
 carries the image's sha and knob string.
 
@@ -80,7 +70,7 @@ enforced power limit once, and the GPU's and the co-grinder's walked progress ev
 order of each batch's GPU hit lines: the batch's verified lines are sorted, and the first 20 at most are written in a
 permutation that carries about 40 bits. No line is added, dropped or changed, so the hit set and the count are the run's
 own, and the harness checks each hit on its own without reading their order. It is host only. It is not in the knob list,
-the native image is unchanged (cubin sha256 `5f1f811166d423a6...` here), and neither walk changes. NVML is loaded at run time
+the native image is unchanged (cubin sha256 `cef81a9f525fae26...`), and neither walk changes. NVML is loaded at run time
 (`libnvidia-ml.so.1`, read-only queries that need no root). If the library is missing, refuses access or fails, the frames
 carry progress only; if the thread cannot start, the lines keep their sorted order. Nothing in it can stop the run. The
 frame layout is in the header of `hit_telemetry.h`, so anyone can read it back from the public hit list. At 0 the host
@@ -123,8 +113,7 @@ states each, with 0 mismatches. Turning one `addc` into `add` in each block made
 
 ## Validation
 
-These checks ran on the base image `fca7e8b6937439c6...`, which this tree builds byte for byte at `QSB_YP_DC` 0 and
-`QSB_Q_MIX` 4 and `QSB_CODE_ROLL` 0.
+These checks ran on the base image `fca7e8b6937439c6...`, which this tree builds byte for byte at `QSB_YP_DC` 0.
 The switch touches no host code.
 
 GPU hit sets. At a fixed seed (4242, 300 s, GPU only) the base image and the same stack without the fold switch matched with 0
@@ -169,17 +158,11 @@ To isolate a change, set its switch at its `#define` and rebuild. After any devi
 `NVCC=/path/to/cuda-12.8/bin/nvcc ./build_carrier.sh 24`. `QSB_GATE_FMA_RT_FORCE_S` (host only, seconds) fires the gate's
 switch to the plain form at a fixed time; at 1 the plain form runs from the first batch.
 
-Identity of this image. GPU hit sets of `5f1f8111` against `cef81a9f`, GPU only, 300 s each at problem seed 20260929 on an
-RTX 4090 at 450 W: the runs found 21,582 and 20,156 hits. This image's run had no duplicate, and the harness verifier passed
-all 21,582 of its hits. On the range both runs walked, both found the same 19,744 hits; no hit was in one run only.
-
 ## Base and credits
 
 - Base: our `e6715658`, with everything it credits.
 - The contiguous co-grinder walk (`QSB_CPU_EPOCH_CONTIG`): cefika, first in `30c24617`, and the record `fb6f5a8f`.
 - The rotate-add SHA-256 round (`QSB_SHA_LEA`): ercumentyildirim's `b62c41b8`.
-- The rolled gate (`QSB_CODE_ROLL` 2): ercumentyildirim's `dea321f0` and `667cfead` (PR 2441). terrapinelf and i34-9 drew it with
-  Q_MIX 2 on our tree.
 - The FMA schedule head (`QSB_GATE_FMA_RT_HEAD`): fkiene's `QSB_PK_HEAD_FMA` (public source `8c07297b`), as i34-9's
   `78691035` carries it. `78691035` was also the first ranked run to choose the gate's form at run time, with two bound
   images and a selector; this package keeps both forms in one image.
