@@ -5775,9 +5775,10 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+#ifndef QSB_HOST_RECID_DIGEST_REUSE
+#define QSB_HOST_RECID_DIGEST_REUSE 1
+#endif
+static int qsb_host_digest(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, uint8_t d2[32]) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5813,20 +5814,22 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
 
+    return 1;
+}
+static int qsb_host_exact_hit_digest(const uint8_t d2[32], int recid,
+                                    EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                    const BIGNUM *nri, const EC_POINT *Ru2) {
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
-    EC_POINT *P = EC_POINT_new(grp);
     EC_POINT *Q = EC_POINT_new(grp);
     EC_POINT *R = EC_POINT_dup(Ru2, grp);
     int ok = 0;
-    if (z && u1 && P && Q && R &&
-        BN_mod_mul(u1, z, nri, order, ctx) &&
-        EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
-        if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
+    if (z && u1 && Q && R &&
+        BN_mod_mul(u1, z, nri, order, ctx)) {
+        if ((!recid || EC_POINT_invert(grp, R, ctx)) &&
+            EC_POINT_mul(grp, Q, u1, R, BN_value_one(), ctx)) {
             BIGNUM *qx = BN_new(), *qy = BN_new();
             if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
                 uint8_t pub[33], xb[32];
@@ -5845,10 +5848,16 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     }
     BN_free(z);
     BN_free(u1);
-    EC_POINT_free(P);
     EC_POINT_free(Q);
     EC_POINT_free(R);
     return ok;
+ }
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return 0;
+    return qsb_host_exact_hit_digest(d2, recid, grp, ctx, order, nri, Ru2);
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
@@ -5857,8 +5866,15 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_RECID_DIGEST_REUSE
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return -1;
+    if (qsb_host_exact_hit_digest(d2, ri, grp, ctx, order, nri, Ru2)) return ri;
+    if (qsb_host_exact_hit_digest(d2, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#else
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#endif
     return -1;
 }
 #endif
@@ -7031,6 +7047,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
         return 1;
     }
+    /* Optional immutable generator cache on this owned exact-gate group.
+     * A refused/failed precompute leaves the ordinary exact joint gate in use. */
+    const int gate_precompute_ok=EC_GROUP_precompute_mult(gate_grp,gate_ctx);
+    printf("Host exact-gate group precompute: attempted=1 result=%d active=%d\n",
+           gate_precompute_ok,EC_GROUP_have_precompute_mult(gate_grp));
 #endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
     const bool can_cogrind=!easy && effective_total==1 && !seq_start_override && single_hash;
