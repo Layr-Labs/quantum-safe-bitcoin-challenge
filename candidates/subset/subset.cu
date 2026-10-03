@@ -1,4 +1,11 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_ERC_1003034135 1   /* inert tag; unreferenced */
+#define QSB_R_CBANK 1   /* the record's switch (pair_shared.cuh): R from the constant bank in the paired front/tail, bit-identical */
+#define QSB_Q_MIX 2   /* the record's Q-layout switch (tree.cu): one warp in two decodes Q with the six GLV12 terms (the record: one in four) */
+#define QSB_QMIX_RT 1   /* the record's run-time Q-layout switch, on: Q_MIX 2 at the start */
+#define QSB_QMIX_RT_TARGET 1   /* the one write selects the GLV12 terms for every warp (mask 0) */
+#define QSB_RT_THERMAL 2   /* host only: the record's gate-form switch also fires once NVML reports thermal slowdown in 2 consecutive 1 s samples */
+#define QSB_SHA_WROLL_PIPE 1   /* the record's switch (tree.cu): the window block as one 8-round loop with its W+K loads half a trip ahead */
+#define QSB_PAIR_SHA_UNROLL_WINDOW 0   /* required by QSB_SHA_WROLL_PIPE (window_schedule_shared.cuh) */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
