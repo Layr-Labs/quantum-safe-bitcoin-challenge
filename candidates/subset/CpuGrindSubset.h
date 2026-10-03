@@ -96,7 +96,7 @@
  * the previous file's behaviour. (1) QSB_CPU_BATCH_AUTO (the rule of 86c643ae's QSB_CPU_BATCH_SOLO, core_sharing and batch_choose,
  * taken as written): the candidates per batch are chosen in start() from the thread_siblings_list of the workers' CPUs, 4,096
  * (QSB_CPU_BATCH_SOLO) when no two workers can share a physical core (at most one worker per CPU and no two of their CPUs SMT
- * siblings; also with one worker), QSB_CPU_BATCH (1,024) whenever siblings are among the workers' CPUs, the topology is unreadable or
+ * siblings; also with one worker), QSB_CPU_BATCH (2,048, jungjipdo PR3313) whenever siblings are among the workers' CPUs, the topology is unreadable or
  * there are more workers than CPUs; QSB_CPU_BATCH_RT=<n> (dev) overrides. A larger batch spreads each window step's shared inversion
  * over more candidates; 1,024 was sized for two SMT threads' batch state in one 1 MB L2. The batch only regroups the same candidates
  * (the walk order and the hit set are unchanged). (2) QSB_CPU_KH16, QSB_CPU_MRG and QSB_CPU_AINL (a33e04c3's three items, taken as
@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* jungjipdo PR3313: amortize batch setup on shared cores; larger L2 footprint remains an official experiment */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -1876,7 +1876,19 @@ Q8T static void ec8_final_cf(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G
         }
     }
 }
+/* Independent EC/key-SHA fusion: keep two groups' messages plus one mask
+ * per group, instead of all groups' messages. The exact publication order is
+ * unchanged. Calling SHA inside the EC reverse sweep may spill live EC state;
+ * this is an unmeasured experiment, with macro0 retaining the original split. */
+#ifndef QSB_CPU_EC_KH_FUSE
+#define QSB_CPU_EC_KH_FUSE 1
+#endif
+#define QCPU_EC_KH_FUSE (QSB_CPU_EC_KH_FUSE && QCPU_SHANI)
 #if QSB_CPU_KH16 && QCPU_SHANI
+#if QCPU_EC_KH_FUSE
+__attribute__((target("sha,sse4.1,ssse3,avx,avx2,avx512f,avx512vl")))
+static unsigned kh16_fused_prefilter(const uint32_t *m, uint32_t *wk);
+#endif
 /* ---- QSB_CPU_KH16 (a33e04c3): key hashes from a 16-lane message schedule ----
  * The 16 keys of a group (8 candidates x 2 recids; lane j = candidate j recid 0, lane 8 + j = recid 1) are hashed together:
  * ec8_final_cf_kh writes their message words W0..W8 (the 33-byte compressed key 02|03 || x, then 0x80) straight from the canonical
@@ -1962,7 +1974,7 @@ Q8T static inline QCPU_AIF void kh16_store(uint32_t *m, const fe8 &x0, __mmask8 
 }
 /* ec8_final_cf with the key-hash message words as output (m16: 9 x 16 dwords per group) instead of qx/qp. The EC steps are
  * ec8_final_cf's line for line (a33e04c3 wrote the QSB_CPU_WPRE form; the other branch mirrors ec8_final_cf's). */
-Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, const fe &mx, const fe &my, uint32_t *m16) {
+Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, const fe &mx, const fe &my, uint32_t *m16, uint32_t *wk = nullptr, uint32_t *masks = nullptr) {
     fe8 MX, MY; fe8_bcast(MX, mx); fe8_bcast(MY, my);
     const int NC = QSB_CPU_NCH;                      /* R2-D: chains of the batch inversion (4: the code before) */
     fe8 run[4]; for (int c = 0; c < NC; c++) fe8_set1(run[c]);
@@ -1993,8 +2005,20 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
             fe8_sqr_sub2(x3A, lamA, X[hA], MX); fe8_sqr_sub2(x3B, lamB, X[hB], MX);
             fe8_sub_lz(tA, X[hA], x3A); fe8_sub_lz(tB, X[hB], x3B);
             fe8_mul_sub(y3A, lamA, tA, Y[hA]); fe8_mul_sub(y3B, lamB, tB, Y[hB]);
+#if QCPU_EC_KH_FUSE
+        if (wk && masks) {
+            kh16_store(m16, X[hA], fe8_parity(Y[hA]), x3A, fe8_parity(y3A));
+            kh16_store(m16+144, X[hB], fe8_parity(Y[hB]), x3B, fe8_parity(y3B));
+            masks[hA] = kh16_fused_prefilter(m16,wk);
+            masks[hB] = kh16_fused_prefilter(m16+144,wk);
+        } else {
             kh16_store(m16 + (size_t)hA * 144, X[hA], fe8_parity(Y[hA]), x3A, fe8_parity(y3A));
             kh16_store(m16 + (size_t)hB * 144, X[hB], fe8_parity(Y[hB]), x3B, fe8_parity(y3B));
+        }
+#else
+            kh16_store(m16 + (size_t)hA * 144, X[hA], fe8_parity(Y[hA]), x3A, fe8_parity(y3A));
+            kh16_store(m16 + (size_t)hB * 144, X[hB], fe8_parity(Y[hB]), x3B, fe8_parity(y3B));
+#endif
         }
     }
 #else
@@ -2011,7 +2035,16 @@ Q8T static void ec8_final_cf_kh(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, in
 #endif
             fe8_sqr_sub2(x3, lam, X[h], MX);
             fe8_sub_lz(t, X[h], x3); fe8_mul_sub(y3, lam, t, Y[h]);
+#if QCPU_EC_KH_FUSE
+        if (wk && masks) {
+            kh16_store(m16, X[h], fe8_parity(Y[h]), x3, fe8_parity(y3));
+            masks[h] = kh16_fused_prefilter(m16,wk);
+        } else {
             kh16_store(m16 + (size_t)h * 144, X[h], fe8_parity(Y[h]), x3, fe8_parity(y3));
+        }
+#else
+            kh16_store(m16 + (size_t)h * 144, X[h], fe8_parity(Y[h]), x3, fe8_parity(y3));
+#endif
         }
     }
 #endif
@@ -2619,6 +2652,11 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
     return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
 #endif
 }
+#if QCPU_EC_KH_FUSE
+QSHA16 static unsigned kh16_fused_prefilter(const uint32_t *m, uint32_t *wk) {
+    return kh16_pass<QSB_CPU_JL_KH16_PAD_ONCE != 0>(m,wk);
+}
+#endif
 #endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */
 QSHA static void qsha_schedule(uint32_t wk[64], const uint8_t *blk) {
@@ -3273,7 +3311,7 @@ Q8T static void hpf_rows8q(const uint32_t *zb, int k0, const pt *t0, const pt *t
     for (int j = 0; j < (QSB_CPU_HPF > 1 ? 16 : 8); j++) { if (q.tail - q.head >= 64) qpf_drain(q, 1); q.a[q.tail & 63] = (const char *)a[j]; q.tail++; }
 }
 #endif
-struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; uint32_t *m16 = nullptr, *wk16 = nullptr; };
+struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; uint32_t *m16 = nullptr, *wk16 = nullptr, *khpass = nullptr; };
 static bool vecbuf_alloc(VecBuf &v, int B) {
     const int G = B / 8; void *q[9] = {nullptr};
     const size_t sz[9] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G,
@@ -3283,8 +3321,10 @@ static bool vecbuf_alloc(VecBuf &v, int B) {
     v.qx = (fe *)q[6]; v.qp = (uint8_t *)q[7]; v.bad = (uint8_t *)q[8];
 #if QSB_CPU_KH16 && QCPU_SHANI
     void *m = nullptr, *w = nullptr;   /* QSB_CPU_KH16: the groups' key-hash message words (9 x 16 dwords each) and the W + K scratch */
-    if (posix_memalign(&m, 64, (size_t)G * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
+    const size_t message_words = QCPU_EC_KH_FUSE ? (size_t)288 + G : (size_t)G * 144;
+    if (posix_memalign(&m, 64, message_words * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
     v.m16 = (uint32_t *)m; v.wk16 = (uint32_t *)w;
+    v.khpass = QCPU_EC_KH_FUSE ? v.m16 + 288 : nullptr;   /* masks never alias the two 576-byte messages */
 #if QSB_CPU_JL_KH16_PAD_ONCE
     /* QSB_CPU_JL_KH16_PAD_ONCE (jacklightChen b1c5e58e): pairs 5..7 hold rounds 10..15's W + K, the same for all 16 keys (W10..W14 = 0,
      * W15 = 264); kh16_pass's unpacklo/hi of two broadcast words alternate them, round 2p in even dwords and 2p + 1 in odd ones */
@@ -3326,7 +3366,7 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
         std::swap(rp, rpn); std::swap(ng, ngn);
     }
 #if QSB_CPU_KH16 && QCPU_SHANI
-    if (c->cfold && c->kh16) ec8_final_cf_kh(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.m16); else
+    if (c->cfold && c->kh16) ec8_final_cf_kh(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.m16, v.wk16, v.khpass); else
 #endif
     if (c->cfold) ec8_final_cf(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.qx, v.qp);
     else ec8_final(v.X, v.Y, v.D, v.P, G, c->cx, c->cy, v.qx, v.qp);
@@ -3661,7 +3701,11 @@ static void worker(Ctx *c, int tid) {
 #if QSB_CPU_KH16
             if (c->kh16 && c->cfold) {                  /* QSB_CPU_KH16: key hashes 16 at a time: the group's 8 candidates x 2 recids */
                 for (int h = 0; h < B / 8; h++) {
+#if QCPU_EC_KH_FUSE
+                    const unsigned pass = vb.khpass[h];   /* already computed, publication order still ascending h */
+#else
                     const unsigned pass = kh16_pass<QSB_CPU_JL_KH16_PAD_ONCE != 0>(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
+#endif
                     if (!pass) continue;
                     for (int j = 0; j < 8; j++) {
                         const int q = h * 8 + j;
