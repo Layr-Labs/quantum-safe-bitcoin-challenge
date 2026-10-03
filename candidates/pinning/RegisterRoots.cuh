@@ -62,7 +62,7 @@ __device__ __forceinline__ void qbw_scratch_get(
  * (a field inverse is unique) and qbw_root_store normalises it before the weighted product,
  * so every stored word is the one the 128-lane shape stores. 0 restores the 128-lane shape. */
 #ifndef QSB_RROOT_WIDE
-#define QSB_RROOT_WIDE 0
+#define QSB_RROOT_WIDE 1
 #endif
 #define QSB_RROOT_LANES (QSB_RROOT_WIDE ? 256 : 128)
 template<int N>
