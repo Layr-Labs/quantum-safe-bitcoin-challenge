@@ -313,6 +313,32 @@ __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
 /* The bounded path leaves R untouched on failure. Exponent p-2 is independent */
 /* of the divstep table and all products use the carry-complete field helper. */
 // Canonicalize every product here; this exceptional path is not throughput work.
+#if QSB_HALF_SUBPIPE
+__device__ __noinline__ ulonglong4 qwr_fermat_scaled_words(
+    uint64_t r0,uint64_t r1,uint64_t r2,uint64_t r3) {
+    const uint64_t exponent[4]={0xFFFFFFFEFFFFFC2DULL,
+        0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL};
+    uint64_t x[5]={r0,r1,r2,r3,0};
+    uint64_t y[5]={1,0,0,0,0},tmp[5];
+    for(int bit=255;bit>=0;--bit){
+        qsb_field_mul(tmp,y,y); qsb_field_normalize(tmp);
+        for(int k=0;k<5;++k)y[k]=tmp[k];
+        if((exponent[bit>>6]>>(bit&63))&1ULL){
+            qsb_field_mul(tmp,y,x); qsb_field_normalize(tmp);
+            for(int k=0;k<5;++k)y[k]=tmp[k];
+        }
+    }
+#if QSB_ISO_XR
+    uint64_t scale[5]={pin_iso_invu_words[0],pin_iso_invu_words[1],
+        pin_iso_invu_words[2],pin_iso_invu_words[3],0};
+    qsb_field_mul(tmp,y,scale); qsb_field_normalize(tmp);
+    for(int k=0;k<5;++k)y[k]=tmp[k];
+#endif
+    ulonglong4 result;
+    result.x=y[0];result.y=y[1];result.z=y[2];result.w=y[3];
+    return result;
+}
+#else
 __device__ __noinline__ void qwr_fermat_scaled(uint64_t *R) {
     const uint64_t exponent[4]={0xFFFFFFFEFFFFFC2DULL,
         0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL};
@@ -334,10 +360,18 @@ __device__ __noinline__ void qwr_fermat_scaled(uint64_t *R) {
 #endif
     for(int k=0;k<5;++k)R[k]=y[k];
 }
+#endif
 /* All 32 lanes of warp zero pass the SAME canonical input; same scaled output. */
 QWR_DEV void qwr_inverse_scaled(uint64_t *R,int lane){
     if(qwr_inverse_limbs_bounded(R,lane))return;
+#if QSB_HALF_SUBPIPE
+    if(lane==0){
+        const ulonglong4 result=qwr_fermat_scaled_words(R[0],R[1],R[2],R[3]);
+        R[0]=result.x;R[1]=result.y;R[2]=result.z;R[3]=result.w;
+    }
+#else
     if(lane==0)qwr_fermat_scaled(R);
+#endif
     for(int k=0;k<4;++k)R[k]=__shfl_sync(0xffffffffu,R[k],0);
     R[4]=0;
 }
