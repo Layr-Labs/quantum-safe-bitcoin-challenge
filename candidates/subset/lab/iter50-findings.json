@@ -1,0 +1,139 @@
+{
+  "local": {
+    "production_Mps": 388.67515,
+    "candidate_Mps": 365.742002,
+    "change_percent": -5.900338110115866,
+    "hits": 10935,
+    "compiler_route": "compute52 PTX/JIT benchmarkfixedbuild",
+    "gate": false
+  },
+  "device": {
+    "production_Mps": 387.229028,
+    "candidate_Mps": 384.217482,
+    "change_percent": -0.7777170052447602,
+    "hits": 11211,
+    "compiler_route": "compute52 PTX/JIT benchmarkfixedbuild",
+    "gate": false
+  },
+  "hostless": {
+    "production_Mps": 371.196026,
+    "candidate_Mps": 372.622976,
+    "change_percent": 0.38441952500860577,
+    "hits": 10779,
+    "compiler_route": "compute52 PTX/JIT benchmarkfixedbuild",
+    "gate": false
+  },
+  "mixed_route": {
+    "hits": 48336,
+    "pairs": [
+      {
+        "leader_Mps": 364.194384,
+        "hostless_Mps": 389.913754,
+        "control_Mps": 379.124966,
+        "vsleader_percent": 7.0619897312859115,
+        "incrementality_percent": 2.8457076076598975
+      },
+      {
+        "leader_Mps": 361.029613,
+        "hostless_Mps": 375.919708,
+        "control_Mps": 374.379436,
+        "vsleader_percent": 4.124341733707038,
+        "incrementality_percent": 0.41142003323066945
+      },
+      {
+        "leader_Mps": 356.191122,
+        "hostless_Mps": 372.245168,
+        "control_Mps": 370.941787,
+        "vsleader_percent": 4.507143779962042,
+        "incrementality_percent": 0.35137076643241283
+      }
+    ],
+    "means_Mps": {
+      "leader": 360.4717063333333,
+      "firsthostless": 379.3595433333333,
+      "control": 374.8153963333333
+    },
+    "vsleader_percent": 5.239755761173148,
+    "incrementality_percent": 1.2123693542083869,
+    "gate": false,
+    "submission": null,
+    "mixed_compiler_route": true,
+    "numerical_gate_only": true,
+    "qualified": false,
+    "exclusion": "Leadernative86 versus candidatenoarchPTXJIT; matched-route repeat correction preregistered"
+  },
+  "matched_route": {
+    "hits": 47123,
+    "pairs": [
+      {
+        "leader_Mps": 354.425057,
+        "hostless_Mps": 375.709537,
+        "control_Mps": 367.687354,
+        "vsleader_percent": 6.005354186907841,
+        "incrementality_percent": 2.181794645023327
+      },
+      {
+        "leader_Mps": 358.484151,
+        "hostless_Mps": 375.32803,
+        "control_Mps": 364.904262,
+        "vsleader_percent": 4.698639801233506,
+        "incrementality_percent": 2.8565761174913273
+      },
+      {
+        "leader_Mps": 351.659176,
+        "hostless_Mps": 375.001824,
+        "control_Mps": 336.055682,
+        "vsleader_percent": 6.637861200016015,
+        "incrementality_percent": 11.589193126631914
+      }
+    ],
+    "compiler_route": "matched native sm86",
+    "means_Mps": {
+      "leader": 354.856128,
+      "firsthostless": 375.3464636666667,
+      "control": 356.215766
+    },
+    "vsleader_percent": 5.774265695269798,
+    "incrementality_percent": 5.370536481719523,
+    "gate": true,
+    "submission": null
+  },
+  "structural": {
+    "ring_slot_MiB_before": 640,
+    "ring_slot_MiB_hostless": 128,
+    "H2D_first_bytes_removed_per_full_hostbatch": 536870912,
+    "complete_checker_descriptors": 2097152,
+    "complete_checker_first_states": 16777216,
+    "denseprepass_digest_instruction_identical_sm86_sm89": true,
+    "carrier_restored_bytes": 473504,
+    "carrier_original_sha256": "a724399a04db515f8bebd836b1af866e6e7a1b778a98ce73a384c6f7704de147"
+  },
+  "qualified": true,
+  "native4090_projection": null,
+  "third_control_drop_caveat": true,
+  "enabled_fixed_route_verification": {
+    "score": 368253156.0,
+    "metrics": {
+      "bench": "subset",
+      "unit": "verified candidates per second",
+      "direction": "higher is better",
+      "throughput_Mps": 368.253156,
+      "hits_per_s": 43.899214,
+      "leading_zero_bits": 24,
+      "mode": "fixed_time",
+      "candidates": 44619005952,
+      "candidates_self_reported": 39996000000,
+      "elapsed_s": 121.1639,
+      "verified_hits": 5319,
+      "hit_relative_variance": 0.013712,
+      "problem_seed": 1789110211,
+      "gpu": "RTX_4090",
+      "verified": true
+    }
+  },
+  "enabled_images_byteexact": {
+    "86": "62f1c03f4d200025c85c995d22b0566f056573b08c7148ecec6f839375b4ff6d",
+    "89": "8105a04f70973f70c62334b83ff5977039c3c4e72022467090e13ef110d04a0e"
+  },
+  "next_step": "lossless final evidence compaction, package cap audit, immediate board submission"
+}

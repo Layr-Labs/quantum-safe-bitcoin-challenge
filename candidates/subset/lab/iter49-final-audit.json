@@ -1,0 +1,10 @@
+{
+  "existing_verifier_PASS_hits": 4210,
+  "complete_timestamp_rows_PASS": 56832,
+  "all_prior_member_hashes_PASS": true,
+  "off_native_local_byte_identity_PASS": true,
+  "diagnostic_not_qualified": true,
+  "submission": null,
+  "package_bytes": 8388267,
+  "limit_bytes": 8388608
+}

@@ -16,6 +16,9 @@
 #ifndef QSB_HP_V3
 #define QSB_HP_V3 1
 #endif
+#if QSB_FIRST_PLANES && !QSB_HP_V3
+#error "QSB_FIRST_PLANES requires the updated v3 host producer"
+#endif
 #if QSB_HP_V3
 #include "host_producers_v3.h"
 #else

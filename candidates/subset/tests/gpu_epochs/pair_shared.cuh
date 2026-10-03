@@ -5,13 +5,13 @@
 #ifndef QSB_PAIR_SHARED
 #define QSB_PAIR_SHARED 1
 #endif
-/* epochs consumed per digest block = (epochs per thread) x (epoch pairs per block) */
+
 #define QSB_PAIR_MUL ((QSB_PAIR_SHARED ? 2 : 1) * QSB_SE_HALVES)
-/* QSB_R_CBANK (kill switch): 1 = the paired front and tail read the recovery point R
- * (QSB_U2R_ISO in the front, QSB_U2R in the tail) from the constant bank inside the
- * __noinline__ callee instead of receiving it as eight 64-bit ABI register arguments that
- * the digest kernel holds live across both fronts, the tree inverse and both tails.
- * Same __constant__ words, same field operations: bit-identical results. 0 = arguments. */
+
+
+
+
+
 #ifndef QSB_R_CBANK
 #define QSB_R_CBANK 0
 #endif
@@ -20,9 +20,9 @@
 #else
 #define QSB_R_PASS(rx,ry) ,rx[0],rx[1],rx[2],rx[3],ry[0],ry[1],ry[2],ry[3]
 #endif
-/* QSB_R_CBANK_TAILS (tree.cu): QSB_R_CBANK for the tail callees only (qsb_pair_tail3_value,
- * qsb_pair_finish3_value, qsb_pair_weave3_value read QSB_U2R from the constant bank; the front keeps its
- * ABI). QSB_R_TAIL_CBANK is the callee-side test, QSB_R_PASS_TAIL the caller-side argument list. */
+
+
+
 #ifndef QSB_R_CBANK_TAILS
 #define QSB_R_CBANK_TAILS 0
 #endif
@@ -34,56 +34,59 @@
 #endif
 #if QSB_PAIR_SHARED
 __device__ __forceinline__ void qsb_k2s_pre(
-    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
+uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *m1, uint64_t *m2
 ) {
-    uint64_t yb[4];
-    _ModMult(yb, yR, ZZZ);
-    _ModSub256(m1, yb, Y);
-    _ModMult(m1, ZZ);
-    _ModAdd256(m2, yb, Y);
-    _ModMult(m2, ZZ);
+uint64_t yb[4];
+_ModMult(yb, yR, ZZZ);
+_ModSub256(m1, yb, Y);
+_ModMult(m1, ZZ);
+_ModAdd256(m2, yb, Y);
+_ModMult(m2, ZZ);
 }
 
 __device__ __forceinline__ uint32_t qsb_k2s_post(
-    uint64_t *m1, uint64_t *m2, uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2
+uint64_t *m1, uint64_t *m2, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t t[4], sum[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    _ModMult(m1, inv);
-    _ModMult(m2, inv);
-    _ModAdd256(sum, m1, m2);
-    _ModSub256(t, m1, cc);
-    _ModMult(x1, sum, t);
-    _ModAdd256(x1, x1, xR);
-    _ModSub256(t, xR, x1);
-    _ModMult(t, m1);
-    _ModSub256(t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
-    _ModSub256(t, m2, cc);
-    _ModMult(x2, sum, t);
-    _ModAdd256(x2, x2, xR);
-    _ModSub256(t, xR, x2);
-    _ModMult(t, m2);
-    _ModSub256(t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
-    return parities;
+uint64_t t[4], sum[4];
+uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+_ModMult(m1, inv);
+_ModMult(m2, inv);
+_ModAdd256(sum, m1, m2);
+_ModSub256(t, m1, cc);
+_ModMult(x1, sum, t);
+_ModAdd256(x1, x1, xR);
+_ModSub256(t, xR, x1);
+_ModMult(t, m1);
+_ModSub256(t, yR);
+uint32_t parities = (uint32_t)(t[0] & 1ULL);
+_ModSub256(t, m2, cc);
+_ModMult(x2, sum, t);
+_ModAdd256(x2, x2, xR);
+_ModSub256(t, xR, x2);
+_ModMult(t, m2);
+_ModSub256(t, yR);
+parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+return parities;
 }
 
-/* ---- ZLAB_K2S3M: the same paired finish in 3M instead of 4M --------------
- * qsb_k2s_pre multiplies BOTH slope numerators by ZZ and qsb_k2s_post
- * multiplies BOTH by inv: four multiplies to apply the single scale
- * h = ZZ/W.  Park (yR*ZZZ - Y), (yR*ZZZ + Y) and ZZ instead -- 12 words rather
- * than 8 -- and post forms h = ZZ*inv once (1M) and applies it twice (2M).
- * Net -1M per candidate.
- *   0 = the 4M pair above (kill switch; byte-identical to the frontier).
- *   1 = 3M for the PARKED candidate A only (ship default).  Candidate B keeps
- *       the 4M pair, so it still carries 8 words in registers across the block
- *       inverse and the kernel's register/spill profile is untouched there. */
+
+
+
+
+
+
+
+
+
+
 #ifndef ZLAB_K2S3M
 #define ZLAB_K2S3M 1
 #endif
 #if ZLAB_K2S3M
+#if QSB_K2S_SUM_BASIS && ((defined(QSB_NEGFOLD_PARITY) && !QSB_NEGFOLD_PARITY) || QSB_K2S_CENTER_SQR != 2 || QSB_TAIL_STAGGER || QSB_TAIL_WEAVE || QSB_PRE3_ROOT)
+#error "sum-basis probe requires centered mode2 and the original negfold tail"
+#endif
 #ifndef QSB_SPEC_PREPARE_PAIR
 #define QSB_SPEC_PREPARE_PAIR 1
 #endif
@@ -97,379 +100,377 @@ __device__ __forceinline__ uint32_t qsb_k2s_post(
 #define QSB_PRE_FADD(r,a,b) X_FADD(r,a,b)
 #endif
 __device__ __forceinline__ void qsb_k2s_pre3(
-    uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
+uint64_t *Y, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *yR, uint64_t *n
 ) {
-    uint64_t yb[4];
-    QSB_PRE_FMUL(yb, yR, ZZZ);
+uint64_t yb[4];
+QSB_PRE_FMUL(yb, yR, ZZZ);
 #if QSB_YNEG_FOLD
-    /* QSB_YNEG_FOLD (tree.cu): the filter chain hands back s = -Y, so n1 = yb - Y = yb + s, n2 = yb + Y = yb - s. */
-    QSB_PRE_FADD(n, yb, Y);
-    QSB_PRE_FSUB(n + 4, yb, Y);
+
+QSB_PRE_FADD(n, yb, Y);
+#if QSB_K2S_SUM_BASIS
+
+QSB_PRE_FADD(n + 4, yb, yb);
 #else
-    QSB_PRE_FSUB(n, yb, Y);
-    QSB_PRE_FADD(n + 4, yb, Y);
+QSB_PRE_FSUB(n + 4, yb, Y);
 #endif
-    Load256(n + 8, ZZ);
-}
-/* Filter-only copy of qsb_xyzz_finish_prepare (the exact front keeps the original). */
-__device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
-    uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
-) {
-    uint64_t t[4];
-#if QSB_ISO_FAST_X && QSB_XNEG_BRANCH
-    (void)xR;
-    /* QSB_XNEG_BRANCH (tree.cu): grid-uniform branch. t = p - ZZ mod 2^256 is the mask form's
-     * ~ZZ + (p+1) mod 2^256 word for word; t = ZZ is its m = 0 case. */
-    if (QSB_ISO_XNEG) {
-        asm("sub.cc.u64 %0, 0xFFFFFFFEFFFFFC2F, %4;\n\t"
-            "subc.cc.u64 %1, 0xFFFFFFFFFFFFFFFF, %5;\n\t"
-            "subc.cc.u64 %2, 0xFFFFFFFFFFFFFFFF, %6;\n\t"
-            "subc.u64 %3, 0xFFFFFFFFFFFFFFFF, %7;"
-            : "=l"(t[0]),"=l"(t[1]),"=l"(t[2]),"=l"(t[3])
-            : "l"(ZZ[0]),"l"(ZZ[1]),"l"(ZZ[2]),"l"(ZZ[3]));
-        QSB_PRE_FSUB(t, t, X_D);
-    } else {
-        QSB_PRE_FSUB(t, ZZ, X_D);
-    }
-#elif QSB_ISO_FAST_X
-    (void)xR;
-    /* Branchless selection of ZZ or p-ZZ.  This is the same complement/add-p
-     * construction used by signed G-table loads, with a problem-uniform mask. */
-    uint64_t m=0ULL-(uint64_t)QSB_ISO_XNEG;
-    t[0]=ZZ[0]^m;t[1]=ZZ[1]^m;t[2]=ZZ[2]^m;t[3]=ZZ[3]^m;
-    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
-    UADDO1(t[0],c0);UADDC1(t[1],m);UADDC1(t[2],m);UADD1(t[3],m);
 #else
-    QSB_PRE_FMUL(t,xR,ZZ);
+QSB_PRE_FSUB(n, yb, Y);
+#if QSB_K2S_SUM_BASIS
+QSB_PRE_FADD(n + 4, yb, yb);
+#else
+QSB_PRE_FADD(n + 4, yb, Y);
+#endif
+#endif
+Load256(n + 8, ZZ);
+}
+
+__device__ __forceinline__ void qsb_xyzz_finish_prepare_f(
+uint64_t *X_D, uint64_t *ZZ, uint64_t *ZZZ, uint64_t *xR, uint64_t *W
+) {
+uint64_t t[4];
+#if QSB_ISO_FAST_X && QSB_XNEG_BRANCH
+(void)xR;
+
+
+if (QSB_ISO_XNEG) {
+asm("sub.cc.u64 %0, 0xFFFFFFFEFFFFFC2F, %4;\n\t"
+"subc.cc.u64 %1, 0xFFFFFFFFFFFFFFFF, %5;\n\t"
+"subc.cc.u64 %2, 0xFFFFFFFFFFFFFFFF, %6;\n\t"
+"subc.u64 %3, 0xFFFFFFFFFFFFFFFF, %7;"
+: "=l"(t[0]),"=l"(t[1]),"=l"(t[2]),"=l"(t[3])
+: "l"(ZZ[0]),"l"(ZZ[1]),"l"(ZZ[2]),"l"(ZZ[3]));
+QSB_PRE_FSUB(t, t, X_D);
+} else {
+QSB_PRE_FSUB(t, ZZ, X_D);
+}
+#elif QSB_ISO_FAST_X
+(void)xR;
+
+
+uint64_t m=0ULL-(uint64_t)QSB_ISO_XNEG;
+t[0]=ZZ[0]^m;t[1]=ZZ[1]^m;t[2]=ZZ[2]^m;t[3]=ZZ[3]^m;
+uint64_t c0=0xFFFFFFFEFFFFFC30ULL&m;
+UADDO1(t[0],c0);UADDC1(t[1],m);UADDC1(t[2],m);UADD1(t[3],m);
+#else
+QSB_PRE_FMUL(t,xR,ZZ);
 #endif
 #if !(QSB_ISO_FAST_X && QSB_XNEG_BRANCH)
-    QSB_PRE_FSUB(t, t, X_D);
+QSB_PRE_FSUB(t, t, X_D);
 #endif
-    Load256(X_D, t);             /* X_D becomes d */
-    QSB_PRE_FMUL(W, ZZZ, X_D);       /* W = ZZZ*d */
-    W[4] = 0;
+Load256(X_D, t);
+QSB_PRE_FMUL(W, ZZZ, X_D);
+W[4] = 0;
 }
-/* h = ZZ*inv is the common slope scale: m1 = n[0..3]*h, m2 = n[4..7]*h.  The
- * tail from _ModAdd256(sum,...) on is the tail of qsb_k2s_post unchanged. */
+
+
 #ifndef QSB_NEGFOLD_PARITY
 #define QSB_NEGFOLD_PARITY 1
 #endif
 #include "parity_window_subset.cuh"
-/* QSB_POOL_RCONST (0/1): x1 = p1 + xR and x2 = p2 + xR read xR's four words straight from QSB_U2R inside the add's
- * asm (one ld.const per use), so ptxas takes each word as a c[0x3] operand of the IADD3 instead of moving it into a
- * register on every candidate. The finish's xR is QSB_U2R[0..3] (tree.cu's u2rx under QSB_ISO_RELOAD_R, checked
- * there), so the words are the same and the add is qsb_fadd's instruction for instruction: bit-identical. */
-#ifndef QSB_POOL_RCONST
-#define QSB_POOL_RCONST 1
+#if QSB_K2S_CENTER_FUSED == 1
+#include "../../center_square_sc.cuh"
+#elif QSB_K2S_CENTER_FUSED == 2
+#include "../../center_square_unsigned_sc.cuh"
+#if !QSB_SHORT_CARRY3
+#error "unsigned prebias is only supported in the speculative short filter"
 #endif
-#if QSB_POOL_RCONST != 0 && QSB_POOL_RCONST != 1
-#error "QSB_POOL_RCONST must be 0 or 1"
 #endif
-#if QSB_POOL_RCONST
-__device__ __forceinline__ void qsb_fadd_u2rx(uint64_t *r, const uint64_t *a) {
-    uint64_t r0,r1,r2,r3;
-#if QSB_LOSS_FINK32
-    /* with QSB_LOSS_FINK32: qsb_fadd's K32 text (filter_tail_sc.cuh), the same instructions and the same drop class */
-    asm("{\n\t.reg .u32 m,l,h;\n\t.reg .u64 c0,c1,c2,c3;\n\t"
-        "ld.const.u64 c0,[QSB_U2R];\n\t"
-        "ld.const.u64 c1,[QSB_U2R+8];\n\t"
-        "ld.const.u64 c2,[QSB_U2R+16];\n\t"
-        "ld.const.u64 c3,[QSB_U2R+24];\n\t"
-        "add.cc.u64 %0,%4,c0;\n\t"
-        "addc.cc.u64 %1,%5,c1;\n\t"
-        "addc.cc.u64 %2,%6,c2;\n\t"
-        "addc.cc.u64 %3,%7,c3;\n\t"
-        "addc.u32 m,0,0;\n\t"
-        "mov.b64 {l,h},%0;\n\t"
-        "mad.lo.u32 l,m,977,l;\n\t"
-        "add.u32 h,h,m;\n\t"
-        "mov.b64 %0,{l,h};\n\t}"
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
-        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]));
-    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
-    return;
-#endif
-    asm("{\n\t.reg .u64 h,t,c0,c1,c2,c3;\n\t"
-        "ld.const.u64 c0,[QSB_U2R];\n\t"
-        "ld.const.u64 c1,[QSB_U2R+8];\n\t"
-        "ld.const.u64 c2,[QSB_U2R+16];\n\t"
-        "ld.const.u64 c3,[QSB_U2R+24];\n\t"
-        "add.cc.u64 %0,%4,c0;\n\t"
-        "addc.cc.u64 %1,%5,c1;\n\t"
-        "addc.cc.u64 %2,%6,c2;\n\t"
-        "addc.cc.u64 %3,%7,c3;\n\t"
-        "addc.u64 h,0,0;\n\t"
-        "mul.lo.u64 t,h,0x1000003d1;\n\t"
-#if QSB_SHORT_CARRY4
-        "add.u64 %0,%0,t;\n\t}"
+#if QSB_K2S_CENTER_SQR
+__device__ __forceinline__ void qsb_k2s_center_offset(uint64_t *sum,uint64_t *p1,uint64_t *p2,uint64_t *cc) {
+
+uint64_t t[4];QSB_FSUB(t,sum,cc);
+uint64_t cc2[4]={QSB_U2R_C[4],QSB_U2R_C[5],QSB_U2R_C[6],QSB_U2R_C[7]};
+#if QSB_K2S_CENTER_FUSED == 2
+uint32_t bad=0;qsb_filter_sqr_offset(p2,t,cc2,p1,(uint32_t)QSB_U2R_C[8],bad);
+#elif QSB_K2S_CENTER_FUSED == 1 && QSB_SHORT_CARRY3
+uint32_t bad=0;qsb_filter_sqr_sub2(p2,t,cc2,p1,bad);
 #else
-        "add.cc.u64 %0,%0,t;\n\t"
-        "addc.u64 %1,%1,0;\n\t}"
+#if QSB_SHORT_CARRY3
+uint32_t bad=0;qsb_filter_sqr(sum,t,bad);
+#else
+_ModSqr(sum,t);
 #endif
-        : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
-        : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]));
-    r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
+QSB_FSUB(sum,sum,cc2);QSB_FSUB(p2,sum,p1);
+#endif
 }
-#define QSB_FADD_XR(r,a,xr) qsb_fadd_u2rx(r,a)
-#else
-#define QSB_FADD_XR(r,a,xr) QSB_FADD(r,a,xr)
 #endif
+#include "pool_rconst.cuh"
 __device__ __forceinline__ uint32_t qsb_k2s_post3(
-    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2
+uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+uint64_t *x1, uint64_t *x2
 ) {
-    uint64_t t[4], sum[4], m1[4], m2[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
-    QSB_FMUL(m1, n, n + 8);
-    QSB_FMUL(m2, n + 4, n + 8);
-    QSB_FADD(sum, m1, m2);
+uint64_t t[4], sum[4], m1[4];
+#if QSB_K2S_SUM_BASIS
+uint64_t *m2=m1;
+#else
+uint64_t m2[4];
+#endif
+uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+QSB_FMUL(n + 8, n + 8, inv);
+QSB_FMUL(m1, n, n + 8);
+#if QSB_K2S_SUM_BASIS
+QSB_FMUL(sum, n + 4, n + 8);
+#else
+QSB_FMUL(m2, n + 4, n + 8);
+QSB_FADD(sum, m1, m2);
+#endif
 #if QSB_NEGFOLD_PARITY
-    QSB_FSUB(t, m1, cc);
-    QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
+QSB_FSUB(t, m1, cc);
+QSB_FMUL(x1, sum, t);
+#if QSB_K2S_CENTER_SQR == 1
+qsb_k2s_center_offset(sum,x1,x2,cc);
+#endif
+#if QSB_PW_PAIR
+/* Both raw products and slopes survive until both independent fallbacks
+     * finish. Only then convert the products to affine x coordinates. */
+qsb_k2s_center_offset(sum,x1,x2,cc);
+uint32_t parities=qsb_parity_product_window_pair(x1,m1,x2,m2,yR);
+QSB_FADD_XR(x1,x1,xR);
+#else
 #if QSB_K2S_PARITY_WINDOW
-    uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
+uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
 #else
-    QSB_FMUL(t, x1, m1);           /* p1*lambda1 */
-    QSB_FADD(t, t, yR);            /* -y1 */
-    uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
+QSB_FMUL(t, x1, m1);
+QSB_FADD(t, t, yR);
+uint32_t parities = (uint32_t)((t[0] & 1ULL) ^ 1ULL);
 #endif
-    QSB_FADD_XR(x1, x1, xR);          /* x1 = p1 + xR */
-    QSB_FSUB(t, m2, cc);
-    QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
+#if QSB_K2S_CENTER_SQR == 2
+
+#if QSB_K2S_SUM_BASIS
+QSB_FSUB(m2, sum, m1);
+#endif
+qsb_k2s_center_offset(sum,x1,x2,cc);
+#endif
+QSB_FADD_XR(x1, x1, xR);
+#if !QSB_K2S_CENTER_SQR
+QSB_FSUB(t, m2, cc);
+QSB_FMUL(x2, sum, t);
+#endif
 #if QSB_K2S_PARITY_WINDOW
-    parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
+parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
 #else
-    QSB_FMUL(t, x2, m2);           /* p2*m2 */
-    QSB_FADD(t, t, yR);            /* y2 */
-    parities |= (uint32_t)((t[0] & 1ULL) << 1);
+QSB_FMUL(t, x2, m2);
+QSB_FADD(t, t, yR);
+parities |= (uint32_t)((t[0] & 1ULL) << 1);
 #endif
-    QSB_FADD_XR(x2, x2, xR);          /* x2 = p2 + xR */
+#endif
+QSB_FADD_XR(x2, x2, xR);
 #else
-    QSB_FSUB(t, m1, cc);
-    QSB_FMUL(x1, sum, t);
-    QSB_FADD_XR(x1, x1, xR);
-    QSB_FSUB(t, xR, x1);
-    QSB_FMUL(t, t, m1);
-    QSB_FSUB(t, t, yR);
-    uint32_t parities = (uint32_t)(t[0] & 1ULL);
-    QSB_FSUB(t, m2, cc);
-    QSB_FMUL(x2, sum, t);
-    QSB_FADD_XR(x2, x2, xR);
-    QSB_FSUB(t, xR, x2);
-    QSB_FMUL(t, t, m2);
-    QSB_FSUB(t, t, yR);
-    parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
+QSB_FSUB(t, m1, cc);
+QSB_FMUL(x1, sum, t);
+QSB_FADD_XR(x1, x1, xR);
+QSB_FSUB(t, xR, x1);
+QSB_FMUL(t, t, m1);
+QSB_FSUB(t, t, yR);
+uint32_t parities = (uint32_t)(t[0] & 1ULL);
+QSB_FSUB(t, m2, cc);
+QSB_FMUL(x2, sum, t);
+QSB_FADD_XR(x2, x2, xR);
+QSB_FSUB(t, xR, x2);
+QSB_FMUL(t, t, m2);
+QSB_FSUB(t, t, yR);
+parities |= (uint32_t)(((t[0] & 1ULL) ^ 1ULL) << 1);
 #endif
-    return parities;
+return parities;
 }
 #endif
 __device__ __forceinline__ int qsb_k2s_front(
-    const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
-    uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
+const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
+uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
 ) {
-    uint32_t state[8];
-    #pragma unroll
-    for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
-    qsb_scheduled_window_hash(state, ep, lane, first);
-    uint32_t b2[16];
-    #pragma unroll
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
-    uint64_t z[4];
-    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
-    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
-    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
-    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
-    uint32_t unused_flag=0;
-    qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+uint32_t state[8];
+#pragma unroll
+for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
+qsb_scheduled_window_hash(state, ep, lane, first);
+uint32_t b2[16];
+#pragma unroll
+for (int i=0;i<8;i++) b2[i]=state[i];
+b2[8]=0x80000000;
+#pragma unroll
+for (int i=9;i<15;i++) b2[i]=0;
+b2[15]=0x00000100;
+uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+_SHA256Transform(s2, b2);
+uint64_t z[4];
+z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+uint32_t unused_flag=0;
+qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
 #if QSB_YNEG_FOLD
-    /* QSB_YNEG_FOLD (tree.cu): the chain handed back -Y; the 4M pre keeps the base resolve (Y = 0 - s). */
-    { const uint64_t zero[4]={0ULL,0ULL,0ULL,0ULL}; QSB_FSUB(qy,zero,qy); }
+
+{ const uint64_t zero[4]={0ULL,0ULL,0ULL,0ULL}; QSB_FSUB(qy,zero,qy); }
 #endif
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
-    qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
-    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
+return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #if ZLAB_K2S3M
 __device__ __forceinline__ int qsb_k2s_front3(
-    const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
-    uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *n
+const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
+uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *n
 ) {
-    uint32_t state[8];
-    #pragma unroll
-    for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
-    qsb_scheduled_window_hash(state, ep, lane, first);
-    uint32_t b2[16];
-    #pragma unroll
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
-    uint64_t z[4];
-    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
-    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
-    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
-    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
-    uint32_t unused_flag=0;
-    qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
-    qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);
-    qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
-    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+uint32_t state[8];
+#pragma unroll
+for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
+qsb_scheduled_window_hash(state, ep, lane, first);
+uint32_t b2[16];
+#pragma unroll
+for (int i=0;i<8;i++) b2[i]=state[i];
+b2[8]=0x80000000;
+#pragma unroll
+for (int i=9;i<15;i++) b2[i]=0;
+b2[15]=0x00000100;
+uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+_SHA256Transform(s2, b2);
+uint64_t z[4];
+z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+uint32_t unused_flag=0;
+qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);
+qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && ZLAB_K2S3M
 struct QsbPairEpochZ {uint64_t a[4],b[4];};
+#ifndef QSB_OUTER_PAIR
+#define QSB_OUTER_PAIR 0
+#endif
+#if QSB_OUTER_PAIR != 0 && QSB_OUTER_PAIR != 1
+#error "QSB_OUTER_PAIR must be 0 or 1"
+#endif
+#ifndef QSB_GATE_PAIR
+#define QSB_GATE_PAIR 1
+#endif
+#if QSB_OUTER_PAIR && (QSB_OUTER_LITK || !QSB_GATE_PAIR)
+#error "QSB_OUTER_PAIR uses the existing paired generic transform, not literal-K"
+#endif
+#if QSB_OUTER_PAIR
+
+// independent 32-byte SHA256d outer blocks of the two epoch candidates.
+__device__ __forceinline__ void qsb_sha256_init_transform_pair(
+uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1);
+#endif
 #if QSB_OUTER_LITK
-/* QSB_OUTER_LITK needs the literal-K transform before the outer block; sha_gate_fma.cuh is include-guarded,
- * so the gate's own include below (QSB_GATE_H0_FMA) is then a no-op. */
+
+
 #include "../../sha_gate_fma.cuh"
 #endif
 __device__ __forceinline__ void qsb_pair_second_sha_z(uint32_t *state,uint64_t *z){
 #if QSB_OUTER_LITK
-    /* QSB_OUTER_LITK: the literal-K transform of sha_gate_fma.cuh on the same padded block (W8 =
-     * 0x80000000, W9..14 = 0, W15 = 256) from the IV; K+W8, K+W15 and the IV round-0/1 terms fold. */
-    uint32_t s2[8];
-    _SHA256TransformDigest32Q(s2,state);
+
+
+uint32_t s2[8];
+_SHA256TransformDigest32Q(s2,state);
 #else
-    uint32_t b2[16];
-    #pragma unroll
-    for(int i=0;i<8;i++)b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for(int i=9;i<15;i++)b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2,b2);
+uint32_t b2[16];
+#pragma unroll
+for(int i=0;i<8;i++)b2[i]=state[i];
+b2[8]=0x80000000;
+#pragma unroll
+for(int i=9;i<15;i++)b2[i]=0;
+b2[15]=0x00000100;
+uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+_SHA256Transform(s2,b2);
 #endif
-    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
-    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
-    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
-    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
+z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
+z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
+z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
+z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
 }
-#if QSB_SHA_W0FOLD
-/* QSB_SHA_W0FOLD (tree.cu): the outer block of qsb_pair_second_sha_z's QSB_OUTER_LITK form with W0 = state[0] + w0x,
- * never formed: _SHA256TransformDigest32Q_W0F adds w0x inside round 0's T1 and W16. */
-__device__ __forceinline__ void qsb_pair_second_sha_z_w0f(uint32_t *state,uint32_t w0x,uint64_t *z){
-    uint32_t s2[8];
-    _SHA256TransformDigest32Q_W0F(s2,state,w0x);
-    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
-    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
-    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
-    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
-}
-#endif
-#if defined(QSB_OUTER_FMA_RT) && QSB_OUTER_FMA_RT
-/* QSB_OUTER_FMA_RT (tree.cu): the outer compression's cap-phase form (sha_gate_fma.cuh, include-guarded, so the gate's
- * own include below is then a no-op). */
-#include "../../sha_gate_fma.cuh"
-__device__ __forceinline__ void qsb_pair_second_sha_z_fma(uint32_t *state,uint64_t *z){
-    uint32_t s2[8];
-    _SHA256TransformDigest32Q_fma(s2,state);
-    z[0]=((uint64_t)s2[6]<<32)|(uint64_t)s2[7];
-    z[1]=((uint64_t)s2[4]<<32)|(uint64_t)s2[5];
-    z[2]=((uint64_t)s2[2]<<32)|(uint64_t)s2[3];
-    z[3]=((uint64_t)s2[0]<<32)|(uint64_t)s2[1];
-}
-#endif
 __device__ __forceinline__ QsbPairEpochZ qsb_pair_epoch_z_value(
-    const uint32_t*firstA,const uint32_t*firstB,int lane){
-    uint32_t stateA[8],stateB[8];
-#if QSB_SHA_W0FOLD
-    uint32_t w0x[2];
-    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB,w0x);
-    QsbPairEpochZ out;
-    qsb_pair_second_sha_z_w0f(stateA,w0x[0],out.a);
-    qsb_pair_second_sha_z_w0f(stateB,w0x[1],out.b);
+const uint32_t*firstA,const uint32_t*firstB,int lane){
+uint32_t stateA[8],stateB[8];
+qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
+QsbPairEpochZ out;
+#if QSB_OUTER_PAIR
+uint32_t wA[16],wB[16],sA[8],sB[8];
+#pragma unroll
+for(int i=0;i<8;i++){wA[i]=stateA[i];wB[i]=stateB[i];}
+wA[8]=wB[8]=0x80000000u;
+#pragma unroll
+for(int i=9;i<15;i++)wA[i]=wB[i]=0u;
+wA[15]=wB[15]=0x100u;
+qsb_sha256_init_transform_pair(sA,wA,sB,wB);
+#pragma unroll
+for(int i=0;i<4;i++){
+out.a[i]=((uint64_t)sA[6-2*i]<<32)|(uint64_t)sA[7-2*i];
+out.b[i]=((uint64_t)sB[6-2*i]<<32)|(uint64_t)sB[7-2*i];
+}
 #else
-    qsb_scheduled_window_hash_pair(stateA,stateB,lane,firstA,firstB);
-    QsbPairEpochZ out;
-#if defined(QSB_OUTER_FMA_RT) && QSB_OUTER_FMA_RT
-    if(QSB_GATE_FMA_C!=0u){   /* QSB_OUTER_FMA_RT (tree.cu): the cap-phase form until main() clears the flag */
-        qsb_pair_second_sha_z_fma(stateA,out.a);
-        qsb_pair_second_sha_z_fma(stateB,out.b);
-    }else{
-        qsb_pair_second_sha_z(stateA,out.a);
-        qsb_pair_second_sha_z(stateB,out.b);
-    }
-#else
-    qsb_pair_second_sha_z(stateA,out.a);
-    qsb_pair_second_sha_z(stateB,out.b);
+qsb_pair_second_sha_z(stateA,out.a);
+qsb_pair_second_sha_z(stateB,out.b);
 #endif
-#endif
-    return out;
+return out;
 }
 __device__ __forceinline__ int qsb_k2s_front3_z(
-    const uint64_t*z,const uint8_t*d_gt,uint64_t*u2rx,uint64_t*u2ry,
-    uint64_t*prod,uint64_t*n){
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
-    uint32_t unused_flag=0;
-    qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
-    qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);   /* same finish as qsb_k2s_front3 */
+const uint64_t*z,const uint8_t*d_gt,uint64_t*u2rx,uint64_t*u2ry,
+uint64_t*prod,uint64_t*n){
+uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+uint32_t unused_flag=0;
+qsb_filter_chain_trial(qx,qy,qzz,qzzz,z,d_gt,unused_flag);
+qsb_xyzz_finish_prepare_f(qx,qzz,qzzz,u2rx,prod);
 #if QSB_PRE3_ROOT == 1
-    /* QSB_PRE3_ROOT (tree.cu), form 1: warp 0 keeps pre3 here; warps 1..7 return (Y, ZZZ, ZZ) for the
-     * root-window hook in kernel_digest (QsbPre3Idle). Full-warp vote: warp-uniform. */
+
+
 #if QSB_ROOT_WARP
-    /* QSB_ROOT_WARP: the root warp keeps pre3 here; the tree's vote uses the same test. */
-    if(!__all_sync(0xffffffffu,threadIdx.x-32u*(unsigned)QSB_ROOT_WARP<32u)){
+
+if(!__all_sync(0xffffffffu,threadIdx.x-32u*(unsigned)QSB_ROOT_WARP<32u)){
 #else
-    if(!__all_sync(0xffffffffu,threadIdx.x<32u)){
+if(!__all_sync(0xffffffffu,threadIdx.x<32u)){
 #endif
-        Load256(n,qy);Load256(n+4,qzzz);Load256(n+8,qzz);
-    }else qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+Load256(n,qy);Load256(n+4,qzzz);Load256(n+8,qzz);
+}else qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
 #elif QSB_PRE3_ROOT == 2
-    /* Form 2 (reference): return (Y, ZZZ, ZZ) on every warp; kernel_digest applies qsb_k2s_pre3, warp 0
-     * right after its second front and warps 1..7 in the tree's root window. */
-    (void)u2ry;
-    Load256(n,qy);Load256(n+4,qzzz);Load256(n+8,qzz);
+
+
+(void)u2ry;
+Load256(n,qy);Load256(n+4,qzzz);Load256(n+8,qzz);
 #else
-    qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
+qsb_k2s_pre3(qy,qzz,qzzz,u2ry,n);
 #endif
-    return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
+return (prod[0]|prod[1]|prod[2]|prod[3])!=0;
 }
 #endif
-#if !QSB_S3  /* exact 15-chunk chain: GPU verify path only (QSB_HOST_VERIFY=0) */
+#if !QSB_S3
 __device__ __forceinline__ int qsb_k2s_front_exact(
-    const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
-    uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
+const epoch_desc_t *ep, const uint32_t *first, int lane, const uint8_t *d_gt,
+uint64_t *u2rx, uint64_t *u2ry, uint64_t *prod, uint64_t *m1, uint64_t *m2
 ) {
-    uint32_t state[8];
-    #pragma unroll
-    for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
-    qsb_scheduled_window_hash(state, ep, lane, first);
-    uint32_t b2[16];
-    #pragma unroll
-    for (int i=0;i<8;i++) b2[i]=state[i];
-    b2[8]=0x80000000;
-    #pragma unroll
-    for (int i=9;i<15;i++) b2[i]=0;
-    b2[15]=0x00000100;
-    uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    _SHA256Transform(s2, b2);
-    uint64_t z[4];
-    z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
-    z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
-    z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
-    z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
-    uint64_t qx[4],qy[4],qzz[4],qzzz[4];
-    _FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
-    qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
-    qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
-    return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
+uint32_t state[8];
+#pragma unroll
+for (int i = 0; i < 8; i++) state[i] = ep->mid[i];
+qsb_scheduled_window_hash(state, ep, lane, first);
+uint32_t b2[16];
+#pragma unroll
+for (int i=0;i<8;i++) b2[i]=state[i];
+b2[8]=0x80000000;
+#pragma unroll
+for (int i=9;i<15;i++) b2[i]=0;
+b2[15]=0x00000100;
+uint32_t s2[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+_SHA256Transform(s2, b2);
+uint64_t z[4];
+z[0] = ((uint64_t)s2[6] << 32) | (uint64_t)s2[7];
+z[1] = ((uint64_t)s2[4] << 32) | (uint64_t)s2[5];
+z[2] = ((uint64_t)s2[2] << 32) | (uint64_t)s2[3];
+z[3] = ((uint64_t)s2[0] << 32) | (uint64_t)s2[1];
+uint64_t qx[4],qy[4],qzz[4],qzzz[4];
+_FixedBaseSignedXYZZStream(qx,qy,qzz,qzzz,z,d_gt);
+qsb_xyzz_finish_prepare(qx,qzz,qzzz,u2rx,prod);
+qsb_k2s_pre(qy,qzz,qzzz,u2ry,m1,m2);
+return (prod[0]|prod[1]|prod[2]|prod[3]) != 0;
 }
 #endif
 
@@ -481,86 +482,86 @@ __device__ __forceinline__ int qsb_k2s_front_exact(
 #endif
 #if QSB_GATE_PAIR
 __device__ __forceinline__ void qsb_gate_block(uint32_t *pb, const uint64_t *qx, uint32_t parity) {
-    uint64_t sx0=qx[0], sx1=qx[1], sx2=qx[2], sx3=qx[3];
-    uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
-                     (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-    uint8_t prefix_byte = 0x2+(uint8_t)(parity&1u);
-    pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-    pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-    pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-    pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+uint64_t sx0=qx[0], sx1=qx[1], sx2=qx[2], sx3=qx[3];
+uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+(uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+uint8_t prefix_byte = 0x2+(uint8_t)(parity&1u);
+pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
 #if QSB_GATE_W8_LEA
-    /* QSB_GATE_W8_LEA: the same word 8 (last x byte, then the 0x80 pad byte) as one LEA */
-    pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=(x32[0]<<24)+0x00800000u;
+
+pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=(x32[0]<<24)+0x00800000u;
 #else
-    pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
 #endif
-    pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
 }
 #define QSB_GP_WMIX(w) { \
-w[0] += s1(w[14]) + w[9] + s0(w[1]);   w[1] += s1(w[15]) + w[10] + s0(w[2]); \
-w[2] += s1(w[0]) + w[11] + s0(w[3]);   w[3] += s1(w[1]) + w[12] + s0(w[4]); \
-w[4] += s1(w[2]) + w[13] + s0(w[5]);   w[5] += s1(w[3]) + w[14] + s0(w[6]); \
-w[6] += s1(w[4]) + w[15] + s0(w[7]);   w[7] += s1(w[5]) + w[0] + s0(w[8]); \
-w[8] += s1(w[6]) + w[1] + s0(w[9]);    w[9] += s1(w[7]) + w[2] + s0(w[10]); \
-w[10] += s1(w[8]) + w[3] + s0(w[11]);  w[11] += s1(w[9]) + w[4] + s0(w[12]); \
+w[0] += s1(w[14]) + w[9] + s0(w[1]); w[1] += s1(w[15]) + w[10] + s0(w[2]); \
+w[2] += s1(w[0]) + w[11] + s0(w[3]); w[3] += s1(w[1]) + w[12] + s0(w[4]); \
+w[4] += s1(w[2]) + w[13] + s0(w[5]); w[5] += s1(w[3]) + w[14] + s0(w[6]); \
+w[6] += s1(w[4]) + w[15] + s0(w[7]); w[7] += s1(w[5]) + w[0] + s0(w[8]); \
+w[8] += s1(w[6]) + w[1] + s0(w[9]); w[9] += s1(w[7]) + w[2] + s0(w[10]); \
+w[10] += s1(w[8]) + w[3] + s0(w[11]); w[11] += s1(w[9]) + w[4] + s0(w[12]); \
 w[12] += s1(w[10]) + w[5] + s0(w[13]); w[13] += s1(w[11]) + w[6] + s0(w[14]); \
 w[14] += s1(w[12]) + w[7] + s0(w[15]); w[15] += s1(w[13]) + w[8] + s0(w[0]); }
 #define QSB_GP_R2(A,B,C,D,E,F,G,H,k,i) \
-    S2Round(A##0,B##0,C##0,D##0,E##0,F##0,G##0,H##0,K[(k)+(i)],w0[i]); \
-    S2Round(A##1,B##1,C##1,D##1,E##1,F##1,G##1,H##1,K[(k)+(i)],w1[i]);
+S2Round(A##0,B##0,C##0,D##0,E##0,F##0,G##0,H##0,K[(k)+(i)],w0[i]); \
+S2Round(A##1,B##1,C##1,D##1,E##1,F##1,G##1,H##1,K[(k)+(i)],w1[i]);
 #define QSB_GP_RND(k) { \
-    QSB_GP_R2(a,b,c,d,e,f,g,h,k,0)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,1) \
-    QSB_GP_R2(g,h,a,b,c,d,e,f,k,2)  QSB_GP_R2(f,g,h,a,b,c,d,e,k,3) \
-    QSB_GP_R2(e,f,g,h,a,b,c,d,k,4)  QSB_GP_R2(d,e,f,g,h,a,b,c,k,5) \
-    QSB_GP_R2(c,d,e,f,g,h,a,b,k,6)  QSB_GP_R2(b,c,d,e,f,g,h,a,k,7) \
-    QSB_GP_R2(a,b,c,d,e,f,g,h,k,8)  QSB_GP_R2(h,a,b,c,d,e,f,g,k,9) \
-    QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
-    QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
-    QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) QSB_GP_R2(b,c,d,e,f,g,h,a,k,15) }
+QSB_GP_R2(a,b,c,d,e,f,g,h,k,0) QSB_GP_R2(h,a,b,c,d,e,f,g,k,1) \
+QSB_GP_R2(g,h,a,b,c,d,e,f,k,2) QSB_GP_R2(f,g,h,a,b,c,d,e,k,3) \
+QSB_GP_R2(e,f,g,h,a,b,c,d,k,4) QSB_GP_R2(d,e,f,g,h,a,b,c,k,5) \
+QSB_GP_R2(c,d,e,f,g,h,a,b,k,6) QSB_GP_R2(b,c,d,e,f,g,h,a,k,7) \
+QSB_GP_R2(a,b,c,d,e,f,g,h,k,8) QSB_GP_R2(h,a,b,c,d,e,f,g,k,9) \
+QSB_GP_R2(g,h,a,b,c,d,e,f,k,10) QSB_GP_R2(f,g,h,a,b,c,d,e,k,11) \
+QSB_GP_R2(e,f,g,h,a,b,c,d,k,12) QSB_GP_R2(d,e,f,g,h,a,b,c,k,13) \
+QSB_GP_R2(c,d,e,f,g,h,a,b,k,14) QSB_GP_R2(b,c,d,e,f,g,h,a,k,15) }
 /* Two independent single-block SHA-256 compressions from the initial state, interleaved round by round. */
 __device__ __forceinline__ void qsb_sha256_init_transform_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
-    uint32_t t1, t2;
-    uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
-    uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
-    QSB_GP_RND(0);  QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_RND(48);
-    o0[0]=I[0]+a0;o0[1]=I[1]+b0;o0[2]=I[2]+c0;o0[3]=I[3]+d0;o0[4]=I[4]+e0;o0[5]=I[5]+f0;o0[6]=I[6]+g0;o0[7]=I[7]+h0;
-    o1[0]=I[0]+a1;o1[1]=I[1]+b1;o1[2]=I[2]+c1;o1[3]=I[3]+d1;o1[4]=I[4]+e1;o1[5]=I[5]+f1;o1[6]=I[6]+g1;o1[7]=I[7]+h1;
+uint32_t t1, t2;
+uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
+uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
+QSB_GP_RND(0); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+QSB_GP_RND(48);
+o0[0]=I[0]+a0;o0[1]=I[1]+b0;o0[2]=I[2]+c0;o0[3]=I[3]+d0;o0[4]=I[4]+e0;o0[5]=I[5]+f0;o0[6]=I[6]+g0;o0[7]=I[7]+h0;
+o1[0]=I[0]+a1;o1[1]=I[1]+b1;o1[2]=I[2]+c1;o1[3]=I[3]+d1;o1[4]=I[4]+e1;o1[5]=I[5]+f1;o1[6]=I[6]+g1;o1[7]=I[7]+h1;
 }
 #ifndef QSB_GATE_H0
 #define QSB_GATE_H0 1
 #endif
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
 __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *w0, uint32_t *o1, uint32_t *w1) {
-    uint32_t t1, t2;
-    uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
-    uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
-    QSB_GP_RND(0);  QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
-    QSB_GP_R2(a,b,c,d,e,f,g,h,48,0)
-    QSB_GP_R2(h,a,b,c,d,e,f,g,48,1)
-    QSB_GP_R2(g,h,a,b,c,d,e,f,48,2)
-    QSB_GP_R2(f,g,h,a,b,c,d,e,48,3)
-    QSB_GP_R2(e,f,g,h,a,b,c,d,48,4)
-    QSB_GP_R2(d,e,f,g,h,a,b,c,48,5)
-    QSB_GP_R2(c,d,e,f,g,h,a,b,48,6)
-    QSB_GP_R2(b,c,d,e,f,g,h,a,48,7)
-    QSB_GP_R2(a,b,c,d,e,f,g,h,48,8)
-    QSB_GP_R2(h,a,b,c,d,e,f,g,48,9)
-    QSB_GP_R2(g,h,a,b,c,d,e,f,48,10)
-    QSB_GP_R2(f,g,h,a,b,c,d,e,48,11)
-    QSB_GP_R2(e,f,g,h,a,b,c,d,48,12)
-    QSB_GP_R2(d,e,f,g,h,a,b,c,48,13)
-    QSB_GP_R2(c,d,e,f,g,h,a,b,48,14)
-    *o0=I[0]+a0+S1(f0)+Ch(f0,g0,h0)+K[63]+w0[15]+S0(b0)+Maj(b0,c0,d0);
-    *o1=I[0]+a1+S1(f1)+Ch(f1,g1,h1)+K[63]+w1[15]+S0(b1)+Maj(b1,c1,d1);
+uint32_t t1, t2;
+uint32_t a0=I[0],b0=I[1],c0=I[2],d0=I[3],e0=I[4],f0=I[5],g0=I[6],h0=I[7];
+uint32_t a1=I[0],b1=I[1],c1=I[2],d1=I[3],e1=I[4],f1=I[5],g1=I[6],h1=I[7];
+QSB_GP_RND(0); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+QSB_GP_RND(16); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+QSB_GP_RND(32); QSB_GP_WMIX(w0); QSB_GP_WMIX(w1);
+QSB_GP_R2(a,b,c,d,e,f,g,h,48,0)
+QSB_GP_R2(h,a,b,c,d,e,f,g,48,1)
+QSB_GP_R2(g,h,a,b,c,d,e,f,48,2)
+QSB_GP_R2(f,g,h,a,b,c,d,e,48,3)
+QSB_GP_R2(e,f,g,h,a,b,c,d,48,4)
+QSB_GP_R2(d,e,f,g,h,a,b,c,48,5)
+QSB_GP_R2(c,d,e,f,g,h,a,b,48,6)
+QSB_GP_R2(b,c,d,e,f,g,h,a,48,7)
+QSB_GP_R2(a,b,c,d,e,f,g,h,48,8)
+QSB_GP_R2(h,a,b,c,d,e,f,g,48,9)
+QSB_GP_R2(g,h,a,b,c,d,e,f,48,10)
+QSB_GP_R2(f,g,h,a,b,c,d,e,48,11)
+QSB_GP_R2(e,f,g,h,a,b,c,d,48,12)
+QSB_GP_R2(d,e,f,g,h,a,b,c,48,13)
+QSB_GP_R2(c,d,e,f,g,h,a,b,48,14)
+*o0=I[0]+a0+S1(f0)+Ch(f0,g0,h0)+K[63]+w0[15]+S0(b0)+Maj(b0,c0,d0);
+*o1=I[0]+a1+S1(f1)+Ch(f1,g1,h1)+K[63]+w1[15]+S0(b1)+Maj(b1,c1,d1);
 }
 
-// PR925 port: preserve the donor's standalone SHA helper and switchable gate.
+
 #ifndef QSB_GATE_H0_FMA
 #define QSB_GATE_H0_FMA 1
 #endif
@@ -568,34 +569,64 @@ __device__ __forceinline__ void qsb_sha256_gate_h0_pair(uint32_t *o0, uint32_t *
 #include "../../sha_gate_fma.cuh"
 #endif
 
-#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT && !QSB_GATE_H0_FMA
-#error "QSB_GATE_FMA_RT switches the QSB_GATE_H0_FMA hash: set QSB_GATE_H0_FMA 1"
+#if QSB_GATE_REC_CALL
+#if !QSB_GATE_H0_FMA
+#error "QSB_GATE_REC_CALL requires the FMA H0 gate"
 #endif
-#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT && defined(QSB_TAIL_WEAVE) && QSB_TAIL_WEAVE
-#error "QSB_GATE_FMA_RT is written for qsb_k2s_gate_h0; the weave's hashes (QSB_TAIL_WEAVE) have no second form"
+
+
+__device__ __noinline__ uint32_t qsb_gate_h0_value(
+uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,uint32_t parity){
+uint64_t x[4]={x0,x1,x2,x3};uint32_t pb[16];
+qsb_gate_block(pb,x,parity);
+return _SHA256Pubkey33H0(pb);
+}
 #endif
+
 __device__ __forceinline__ int qsb_k2s_gate_h0(
-    uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
-    uint32_t pb0[16],pb1[16],h0,h1;
-    qsb_gate_block(pb0,q1x,y_parities);
-    qsb_gate_block(pb1,q2x,y_parities>>1);
-#if QSB_GATE_H0_FMA && defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT
-    if(QSB_GATE_FMA_C){       /* QSB_GATE_FMA_RT (tree.cu): the cap-phase form until main() clears the flag */
-        h0=_SHA256Pubkey33H0_fma(pb0);
-        h1=_SHA256Pubkey33H0_fma(pb1);
-    }else{
-        h0=_SHA256Pubkey33H0(pb0);
-        h1=_SHA256Pubkey33H0(pb1);
-    }
-#elif QSB_GATE_H0_FMA
-    h0=_SHA256Pubkey33H0(pb0);
-    h1=_SHA256Pubkey33H0(pb1);
-#else
-    qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
+uint64_t *q1x,uint64_t *q2x,uint32_t y_parities,int *recid_out) {
+#if QSB_GATE_REC_ROLL
+#if !QSB_GATE_H0_FMA
+#error "QSB_GATE_REC_ROLL requires the FMA H0 gate"
 #endif
-    if((h0>>(32-QSB_ZEROS_N))==0){*recid_out=0;return 1;}
-    if((h1>>(32-QSB_ZEROS_N))==0){*recid_out=1;return 1;}
-    return 0;
+
+
+
+int encoded=0,ri=0;
+#pragma unroll 1
+for(;;){
+uint64_t x[4];
+#pragma unroll
+for(int k=0;k<4;k++)x[k]=ri ? q2x[k] : q1x[k];
+uint32_t pb[16];
+qsb_gate_block(pb,x,y_parities >> ri);
+uint32_t h=_SHA256Pubkey33H0(pb);
+if(encoded==0 && (h>>(32-QSB_ZEROS_N))==0)encoded=ri+1;
+if(ri)break;
+ri=1;
+}
+if(encoded){*recid_out=encoded-1;return 1;}
+return 0;
+#elif QSB_GATE_REC_CALL
+uint32_t h0=qsb_gate_h0_value(q1x[0],q1x[1],q1x[2],q1x[3],y_parities);
+uint32_t h1=qsb_gate_h0_value(q2x[0],q2x[1],q2x[2],q2x[3],y_parities>>1);
+if((h0>>(32-QSB_ZEROS_N))==0){*recid_out=0;return 1;}
+if((h1>>(32-QSB_ZEROS_N))==0){*recid_out=1;return 1;}
+return 0;
+#else
+uint32_t pb0[16],pb1[16],h0,h1;
+qsb_gate_block(pb0,q1x,y_parities);
+qsb_gate_block(pb1,q2x,y_parities>>1);
+#if QSB_GATE_H0_FMA
+h0=_SHA256Pubkey33H0(pb0);
+h1=_SHA256Pubkey33H0(pb1);
+#else
+qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
+#endif
+if((h0>>(32-QSB_ZEROS_N))==0){*recid_out=0;return 1;}
+if((h1>>(32-QSB_ZEROS_N))==0){*recid_out=1;return 1;}
+return 0;
+#endif
 }
 #endif
 #undef QSB_GP_RND
@@ -604,270 +635,319 @@ __device__ __forceinline__ int qsb_k2s_gate_h0(
 #endif
 __device__ __forceinline__ int qsb_k2s_gate(uint64_t *q1x, uint64_t *q2x, uint32_t y_parities, int *recid_out) {
 #if QSB_GATE_PAIR
-    uint32_t pb0[16], pb1[16], hs0[8], hs1[8];
-    qsb_gate_block(pb0, q1x, y_parities);
-    qsb_gate_block(pb1, q2x, y_parities>>1);
-    qsb_sha256_init_transform_pair(hs0, pb0, hs1, pb1);
-    if(gpu_bench_valid_words(hs0)){*recid_out=0;return 1;}
-    if(gpu_bench_valid_words(hs1)){*recid_out=1;return 1;}
-    return 0;
+uint32_t pb0[16], pb1[16], hs0[8], hs1[8];
+qsb_gate_block(pb0, q1x, y_parities);
+qsb_gate_block(pb1, q2x, y_parities>>1);
+qsb_sha256_init_transform_pair(hs0, pb0, hs1, pb1);
+if(gpu_bench_valid_words(hs0)){*recid_out=0;return 1;}
+if(gpu_bench_valid_words(hs1)){*recid_out=1;return 1;}
+return 0;
 #else
-    for(int ri=0;ri<2;ri++){
-        uint64_t sx0=ri ? q2x[0] : q1x[0];
-        uint64_t sx1=ri ? q2x[1] : q1x[1];
-        uint64_t sx2=ri ? q2x[2] : q1x[2];
-        uint64_t sx3=ri ? q2x[3] : q1x[3];
-        uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
-                         (uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
-        uint32_t pb[16];
-        uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
-        pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
-        pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
-        pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
-        pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
-        pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
-        pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
-        uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
-        if(gpu_bench_valid_words(hs)){*recid_out=ri;return 1;}
-    }
-    return 0;
+for(int ri=0;ri<2;ri++){
+uint64_t sx0=ri ? q2x[0] : q1x[0];
+uint64_t sx1=ri ? q2x[1] : q1x[1];
+uint64_t sx2=ri ? q2x[2] : q1x[2];
+uint64_t sx3=ri ? q2x[3] : q1x[3];
+uint32_t x32[8]={(uint32_t)sx0,(uint32_t)(sx0>>32),(uint32_t)sx1,(uint32_t)(sx1>>32),
+(uint32_t)sx2,(uint32_t)(sx2>>32),(uint32_t)sx3,(uint32_t)(sx3>>32)};
+uint32_t pb[16];
+uint8_t prefix_byte = 0x2+(uint8_t)((y_parities>>ri)&1u);
+pb[0]=__byte_perm(x32[7],prefix_byte,0x4321);
+pb[1]=__byte_perm(x32[7],x32[6],0x0765);pb[2]=__byte_perm(x32[6],x32[5],0x0765);
+pb[3]=__byte_perm(x32[5],x32[4],0x0765);pb[4]=__byte_perm(x32[4],x32[3],0x0765);
+pb[5]=__byte_perm(x32[3],x32[2],0x0765);pb[6]=__byte_perm(x32[2],x32[1],0x0765);
+pb[7]=__byte_perm(x32[1],x32[0],0x0765);pb[8]=__byte_perm(x32[0],0x80,0x0456);
+pb[9]=0;pb[10]=0;pb[11]=0;pb[12]=0;pb[13]=0;pb[14]=0;pb[15]=0x108;
+uint32_t hs[8];_SHA256Initialize(hs);_SHA256Transform(hs,pb);
+if(gpu_bench_valid_words(hs)){*recid_out=ri;return 1;}
+}
+return 0;
 #endif
 }
 
 struct QsbPairFront {uint64_t words[12];int ok;};
 __device__ __noinline__ QsbPairFront qsb_pair_front_value(
-    const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
-    uint64_t prod[5],m1[4],m2[4];QsbPairFront out;
-    out.ok=qsb_k2s_front(ep,first,lane,d_gt,rx,ry,prod,m1,m2);
-    Load256(out.words,prod);Load256(out.words+4,m1);Load256(out.words+8,m2);
-    return out;
+const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
+uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t prod[5],m1[4],m2[4];QsbPairFront out;
+out.ok=qsb_k2s_front(ep,first,lane,d_gt,rx,ry,prod,m1,m2);
+Load256(out.words,prod);Load256(out.words+4,m1);Load256(out.words+8,m2);
+return out;
 }
 
 __device__ __noinline__ int qsb_pair_tail_value(
-    uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
-    uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
-    uint64_t m1[4]={a0,a1,a2,a3},m2[4]={b0,b1,b2,b3};
-    uint64_t inv[4]={v0,v1,v2,v3};
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
-    uint64_t q1x[4],q2x[4];int recid=0;
-    uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,q1x,q2x);
-    return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
+uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
+uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
+uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,
+uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+uint64_t m1[4]={a0,a1,a2,a3},m2[4]={b0,b1,b2,b3};
+uint64_t inv[4]={v0,v1,v2,v3};
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t q1x[4],q2x[4];int recid=0;
+uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,q1x,q2x);
+return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 }
 
-#if !QSB_S3  /* GPU verify path (QSB_HOST_VERIFY=0); QSB_S3 requires the host gate */
-// Only this exact check authorizes a hit record. The speculative calculation
-// cannot bypass it, and neither the external verifier nor its inputs changes.
+#if !QSB_S3
+
+
 __device__ __noinline__ int qsb_pair_verify_candidate(
-    const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt){
-    uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
-    uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
-    uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
-    if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
-    _ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
-    uint64_t invu[4]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3]};
-    _ModMult(inv,invu);             // transformed inverse -> original slope scale
-    rx[0]=QSB_U2R[0];rx[1]=QSB_U2R[1];rx[2]=QSB_U2R[2];rx[3]=QSB_U2R[3];
-    ry[0]=QSB_U2R[4];ry[1]=QSB_U2R[5];ry[2]=QSB_U2R[6];ry[3]=QSB_U2R[7];
-    uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
-    int recid=0;
-    return qsb_k2s_gate(x1,x2,par,&recid)?recid+1:0;
+const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt){
+uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
+uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
+uint64_t inv[5],m1[4],m2[4],x1[4],x2[4];
+if(!qsb_k2s_front_exact(ep,first,lane,d_gt,rx,ry,inv,m1,m2))return 0;
+_ModInv(inv); // Nonzero canonical denominator; independent scalar inverse.
+uint64_t invu[4]={QSB_ISO_INVU[0],QSB_ISO_INVU[1],QSB_ISO_INVU[2],QSB_ISO_INVU[3]};
+_ModMult(inv,invu);
+rx[0]=QSB_U2R[0];rx[1]=QSB_U2R[1];rx[2]=QSB_U2R[2];rx[3]=QSB_U2R[3];
+ry[0]=QSB_U2R[4];ry[1]=QSB_U2R[5];ry[2]=QSB_U2R[6];ry[3]=QSB_U2R[7];
+uint32_t par=qsb_k2s_post(m1,m2,inv,rx,ry,x1,x2);
+int recid=0;
+return qsb_k2s_gate(x1,x2,par,&recid)?recid+1:0;
 }
 #endif
 #if ZLAB_K2S3M
 
-struct QsbPairFront3 {uint64_t words[16];int ok;};
-#if ZLAB_DUAL_EPOCH_SHA
-__device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
-    uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt
-#if !QSB_R_CBANK
-    ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+struct QsbPairFront3 {uint64_t words[16];
+#if !QSB_FRONT3_WORDS_ONLY
+int ok;
 #endif
-    ){
-#if QSB_CODE_ROLL & 1
-    /* QSB_CODE_ROLL bit 0 (tree.cu; ercumentyildirim's form from dea321f0/667cfead): the arguments are the epoch's 8
-     * state words (state[2k] in the low half of argument k), and the SHA256d outer block that kernel_digest ran
-     * inline, twice, runs here, once per call. The same qsb_pair_second_sha_z (this tree's QSB_OUTER_LITK form) on
-     * the same words: the same z. */
-    uint32_t st[8]={(uint32_t)z0,(uint32_t)(z0>>32),(uint32_t)z1,(uint32_t)(z1>>32),
-                    (uint32_t)z2,(uint32_t)(z2>>32),(uint32_t)z3,(uint32_t)(z3>>32)};
-    uint64_t z[4];
-    qsb_pair_second_sha_z(st,z);
+};
+#if QSB_FRONT3_WORDS_ONLY
+static_assert(sizeof(QsbPairFront3)==128,"Words-only front3 ABI");
+#endif
+#if ZLAB_DUAL_EPOCH_SHA
+#if QSB_FRONT3_PUBLISH_AB
+
+
+
+struct QsbPairFront3PublishedAB { uint64_t words[8]; int ok; };
+static_assert(sizeof(QsbPairFront3PublishedAB)==72,"Published-AB front return ABI");
+__device__ __noinline__ QsbPairFront3PublishedAB qsb_pair_front3_publish_ab(
+uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,
+#if QSB_FRONT3_PUBLISH_AB == 2
+uint32_t park
 #else
-    uint64_t z[4]={z0,z1,z2,z3};
+uint32_t p0,uint32_t p1,uint32_t p2,uint32_t p3,uint32_t gap01,uint32_t gap23
+#endif
+#if !QSB_R_CBANK
+,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+){
+uint64_t z[4]={z0,z1,z2,z3};
+#if QSB_R_CBANK
+uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
+uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
+#else
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+#endif
+uint64_t prod[5],n[12];QsbPairFront3PublishedAB out;
+out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+Load256(out.words,prod);
+#if QSB_FRONT3_PUBLISH_AB == 2
+
+
+
+if(park==1u){
+const unsigned tid=threadIdx.x;
+#pragma unroll
+for(int k=0;k<4;k++){
+qsb_sc_products[k][QSB_SE_BLOCK+tid]=n[k];
+qsb_front_inverse[k][tid]=n[4+k];
+}
+}else{
+#pragma unroll
+for(int j=0;j<4;j++){
+const uint32_t address=park+(uint32_t)(j*QSB_SE_BLOCK*sizeof(ulonglong2));
+asm volatile("st.shared.v2.u64 [%0], {%1, %2};" :: "r"(address),"l"(n[2*j]),"l"(n[2*j+1]) : "memory");
+}
+}
+#else
+
+
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p0),"l"(n[0]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p0+gap01),"l"(n[1]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p1),"l"(n[2]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p1+gap01),"l"(n[3]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p2),"l"(n[4]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p2+gap23),"l"(n[5]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p3),"l"(n[6]) : "memory");
+asm volatile("st.shared.u64 [%0], %1;" :: "r"(p3+gap23),"l"(n[7]) : "memory");
+#endif
+#pragma unroll
+for(int k=0;k<4;k++)out.words[4+k]=n[8+k];
+return out;
+}
+#endif
+#if QSB_FRONT3_PUBLISH_A
+
+
+
+
+
+struct QsbPairFront3PublishedA { uint64_t words[8]; int ok; };
+static_assert(sizeof(QsbPairFront3PublishedA)==72,"Published-A front return ABI");
+__device__ __noinline__ QsbPairFront3PublishedA qsb_pair_front3_publish_a(
+uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt,uint32_t park
+#if !QSB_R_CBANK
+,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+){
+uint64_t z[4]={z0,z1,z2,z3};
+#if QSB_R_CBANK
+uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
+uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
+#else
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+#endif
+uint64_t prod[5],n[12];QsbPairFront3PublishedA out;
+out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+Load256(out.words,prod);
+#pragma unroll
+for(int j=0;j<4;j++){
+const uint32_t address=park+(uint32_t)(j*QSB_SE_BLOCK*sizeof(ulonglong2));
+asm volatile("st.shared.v2.u64 [%0], {%1, %2};" :: "r"(address),"l"(n[2*j]),"l"(n[2*j+1]) : "memory");
+}
+#pragma unroll
+for(int k=0;k<4;k++)out.words[4+k]=n[8+k];
+return out;
+}
+#endif
+__device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
+uint64_t z0,uint64_t z1,uint64_t z2,uint64_t z3,const uint8_t*d_gt
+#if !QSB_R_CBANK
+,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+#endif
+){
+#if QSB_OUTER_FRONT_CALL
+
+uint32_t st[8]={(uint32_t)z0,(uint32_t)(z0>>32),
+(uint32_t)z1,(uint32_t)(z1>>32),
+(uint32_t)z2,(uint32_t)(z2>>32),
+(uint32_t)z3,(uint32_t)(z3>>32)};
+uint64_t z[4];
+qsb_pair_second_sha_z(st,z);
+#else
+uint64_t z[4]={z0,z1,z2,z3};
 #endif
 #if QSB_R_CBANK
-    uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
-    uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
+uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
+uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
 #else
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
 #endif
-    uint64_t prod[5],n[12];QsbPairFront3 out;
-    out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
-    Load256(out.words,prod);
-    #pragma unroll
-    for(int k=0;k<12;k++)out.words[4+k]=n[k];
-    return out;
+uint64_t prod[5],n[12];QsbPairFront3 out;
+#if QSB_FRONT3_WORDS_ONLY
+qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+#else
+out.ok=qsb_k2s_front3_z(z,d_gt,rx,ry,prod,n);
+#endif
+Load256(out.words,prod);
+#pragma unroll
+for(int k=0;k<12;k++)out.words[4+k]=n[k];
+return out;
 }
 #endif
 __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
-    const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
-    uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
-    uint64_t prod[5],n[12];QsbPairFront3 out;
-    out.ok=qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
-    Load256(out.words,prod);
-    #pragma unroll
-    for(int k=0;k<12;k++)out.words[4+k]=n[k];
-    return out;
+const epoch_desc_t*ep,const uint32_t*first,int lane,const uint8_t*d_gt,
+uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3){
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t prod[5],n[12];QsbPairFront3 out;
+#if QSB_FRONT3_WORDS_ONLY
+qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
+#else
+out.ok=qsb_k2s_front3(ep,first,lane,d_gt,rx,ry,prod,n);
+#endif
+Load256(out.words,prod);
+#pragma unroll
+for(int k=0;k<12;k++)out.words[4+k]=n[k];
+return out;
 }
 
-#if QSB_CODE_ROLL & 2
-#if !(QSB_NEGFOLD_PARITY && QSB_K2S_PARITY_WINDOW && QSB_GATE_H0_FMA && QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32)
-#error "QSB_CODE_ROLL bit 1 copies qsb_k2s_post3's QSB_NEGFOLD_PARITY + QSB_K2S_PARITY_WINDOW form and the H0 gate (qsb_k2s_gate_h0)"
-#endif
-/* QSB_CODE_ROLL bit 1 (tree.cu): ercumentyildirim's rolled gate (dea321f0/667cfead, qsb_k2s_post3_gate_roll), ported to
- * this tree: qsb_k2s_post3 followed by qsb_k2s_gate_h0, with the gate's two H0 hashes as one 2-trip loop. Trip 0
- * hashes recovery id 0 (x1, parity bit 0), trip 1 recovery id 1 (x2, parity bit 1). The port differs from the
- * rival's text in two places, both this tree's own forms: x = p + xR is QSB_FADD_XR (QSB_POOL_RCONST), and under
- * QSB_GATE_FMA_RT each trip picks the hash form on QSB_GATE_FMA_C as qsb_k2s_gate_h0 does (one loop body holds
- * both forms, so the image keeps one copy of each instead of two). Returns tail3's value: 1 = hit on recid 0,
- * 2 = hit on recid 1 (recid 0 missed), 0 = none. Same field operations on the same words, the same blocks and
- * hashes, the same verdict: bit-identical. */
-__device__ __forceinline__ int qsb_k2s_post3_gate_roll(
-    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR
-) {
-    uint64_t t[4], sum[4], m1[4], m2[4], x[4], p2[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
-    QSB_FMUL(m1, n, n + 8);
-    QSB_FMUL(m2, n + 4, n + 8);
-    QSB_FADD(sum, m1, m2);
-    QSB_FSUB(t, m1, cc);
-    QSB_FMUL(x, sum, t);           /* p1 = (lambda1+m2)*(lambda1-c) */
-    uint32_t par = qsb_parity_product_window(x,m1,yR,1u);
-    QSB_FADD_XR(x, x, xR);         /* x1 = p1 + xR */
-    QSB_FSUB(t, m2, cc);
-    QSB_FMUL(p2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
-    par |= qsb_parity_product_window(p2,m2,yR,0u) << 1;
-    /* Trip ri hashes recovery id ri. Trip 1 first does post3's last step for recovery id 1 (x2 = p2 + xR, the same
-     * add on the same words) and takes parity bit 1; the empty asm ties p2 to the trip so the add is not hoisted in
-     * front of the loop. Both trips always run (no early exit: the loop stays warp-uniform) and the first passing
-     * recovery id is kept, as in the unrolled gate. */
-    int res=0,ri=0;
-    #pragma unroll 1
-    for(;;){
-        if(ri){
-            #pragma unroll
-            for(int k=0;k<4;k++)asm("" : "+l"(p2[k]) : "r"(ri));
-            QSB_FADD_XR(x, p2, xR); /* x2 = p2 + xR */
-            par>>=1;
-        }
-        uint32_t pb[16],h;
-        qsb_gate_block(pb,x,par);
-#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT
-        if(QSB_GATE_FMA_C){        /* QSB_GATE_FMA_RT (tree.cu): the cap-phase form until main() clears the flag */
-            h=_SHA256Pubkey33H0_fma(pb);
-        }else{
-            h=_SHA256Pubkey33H0(pb);
-        }
-#else
-        h=_SHA256Pubkey33H0(pb);
-#endif
-        if(res==0 && (h>>(32-QSB_ZEROS_N))==0)res=ri+1;
-        if(ri)break;
-        ri=1;
-    }
-    return res;
-}
-#endif
 __device__ __noinline__ int qsb_pair_tail3_value(
-    uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
-    uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
-    uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
+uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
+uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
+uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
+uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
 #if !QSB_R_TAIL_CBANK
-    ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
 #endif
-    ){
-    uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
-    uint64_t inv[4]={v0,v1,v2,v3};
+){
+uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
+uint64_t inv[4]={v0,v1,v2,v3};
 #if QSB_R_TAIL_CBANK
-    /* The digest kernel's tree already applied 1/u (QSB_ISO_RELOAD_R): original R. */
-    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+
+uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
 #else
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
 #endif
-#if QSB_CODE_ROLL & 2
-    return qsb_k2s_post3_gate_roll(n,inv,rx,ry);
-#else
-    uint64_t q1x[4],q2x[4];int recid=0;
-    uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
+uint64_t q1x[4],q2x[4];int recid=0;
+uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
-    return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
+return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
 #else
-    return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
-#endif
+return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 #endif
 }
 #if defined(QSB_TAIL_STAGGER) && QSB_TAIL_STAGGER
-/* QSB_TAIL_STAGGER (tree.cu): qsb_pair_tail3_value split into its two halves. finish3 is tail3 up to
- * and including qsb_k2s_post3 (x-words of both recovery ids and their parities); gate3 is tail3's gate on
- * those values. gate3(finish3(args)) == tail3(args) for every argument. */
+
+
+
 struct QsbPairFin3 {uint64_t x[8];uint32_t par;};
 __device__ __noinline__ QsbPairFin3 qsb_pair_finish3_value(
-    uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
-    uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
-    uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
+uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
+uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
+uint64_t c0,uint64_t c1,uint64_t c2,uint64_t c3,
+uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3
 #if !QSB_R_TAIL_CBANK
-    ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
 #endif
-    ){
-    uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
-    uint64_t inv[4]={v0,v1,v2,v3};
+){
+uint64_t n[12]={a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3};
+uint64_t inv[4]={v0,v1,v2,v3};
 #if QSB_R_TAIL_CBANK
-    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
 #else
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
 #endif
-    QsbPairFin3 out;
-    out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
-    return out;
+QsbPairFin3 out;
+out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
+return out;
 }
 __device__ __noinline__ int qsb_pair_gate3_value(
-    uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,
-    uint64_t y0,uint64_t y1,uint64_t y2,uint64_t y3,uint32_t par){
-    uint64_t q1x[4]={x0,x1,x2,x3},q2x[4]={y0,y1,y2,y3};int recid=0;
+uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,
+uint64_t y0,uint64_t y1,uint64_t y2,uint64_t y3,uint32_t par){
+uint64_t q1x[4]={x0,x1,x2,x3},q2x[4]={y0,y1,y2,y3};int recid=0;
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
-    return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
+return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
 #else
-    return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
+return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
 #endif
 }
 #endif
 #if defined(QSB_TAIL_WEAVE) && QSB_TAIL_WEAVE
-/* QSB_TAIL_WEAVE (tree.cu): gate A and finish B in one __noinline__ callee. The gate is
- * qsb_k2s_gate_h0's two H0 hashes with the test written as selects (no branch between the hashes and the
- * finish), encoded as gate3 encodes it: 1 = hit on recid 0, 2 = hit on recid 1 (only if recid 0 missed),
- * 0 = none. The finish is finish3's body on B's words. Both are pure functions of their arguments, so
- * weave(finA, nB, invB) = (gate3(finA), finish3(nB, invB)) word for word. */
+
+
+
+
+
 struct QsbPairWeave3 {uint64_t x[8];uint32_t par;int enc;};
-/* gate_h0's verdict from the two digest words, as gate3 encodes it (recid 0 first). */
+
 __device__ __forceinline__ int qsb_k2s_gate_h0_verdict(uint32_t h0,uint32_t h1){
-    const int z0=(h0>>(32-QSB_ZEROS_N))==0u,z1=(h1>>(32-QSB_ZEROS_N))==0u;
-    return z0?1:(z1?2:0);
+const int z0=(h0>>(32-QSB_ZEROS_N))==0u,z1=(h1>>(32-QSB_ZEROS_N))==0u;
+return z0?1:(z1?2:0);
 }
 #if QSB_TAIL_WEAVE == 1
 #if !(QSB_NEGFOLD_PARITY && QSB_K2S_PARITY_WINDOW && QSB_GATE_H0_FMA)
@@ -880,76 +960,76 @@ __device__ __forceinline__ int qsb_k2s_gate_h0_verdict(uint32_t h0,uint32_t h1){
  * beside the whole finish, form 2, spilled at 128). Same operations in the same order as
  * post3 for the finish, the same hash for the gate; the two are independent. */
 __device__ __forceinline__ uint32_t qsb_k2s_post3_weave(
-    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
-    uint64_t *x1, uint64_t *x2, const uint32_t *pb0, const uint32_t *pb1, uint32_t *h0, uint32_t *h1
+uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR,
+uint64_t *x1, uint64_t *x2, const uint32_t *pb0, const uint32_t *pb1, uint32_t *h0, uint32_t *h1
 ) {
-    uint64_t t[4], sum[4], m1[4], m2[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    *h0=_SHA256Pubkey33H0(pb0);
-    QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
-    QSB_FMUL(m1, n, n + 8);
-    QSB_FMUL(m2, n + 4, n + 8);
-    QSB_FADD(sum, m1, m2);
-    QSB_FSUB(t, m1, cc);
-    QSB_FMUL(x1, sum, t);          /* p1 = (lambda1+m2)*(lambda1-c) */
-    uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
-    QSB_FADD(x1, x1, xR);          /* x1 = p1 + xR */
-    *h1=_SHA256Pubkey33H0(pb1);
-    QSB_FSUB(t, m2, cc);
-    QSB_FMUL(x2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
-    parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
-    QSB_FADD(x2, x2, xR);          /* x2 = p2 + xR */
-    return parities;
+uint64_t t[4], sum[4], m1[4], m2[4];
+uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
+*h0=_SHA256Pubkey33H0(pb0);
+QSB_FMUL(n + 8, n + 8, inv);
+QSB_FMUL(m1, n, n + 8);
+QSB_FMUL(m2, n + 4, n + 8);
+QSB_FADD(sum, m1, m2);
+QSB_FSUB(t, m1, cc);
+QSB_FMUL(x1, sum, t);
+uint32_t parities = qsb_parity_product_window(x1,m1,yR,1u);
+QSB_FADD(x1, x1, xR);
+*h1=_SHA256Pubkey33H0(pb1);
+QSB_FSUB(t, m2, cc);
+QSB_FMUL(x2, sum, t);
+parities |= qsb_parity_product_window(x2,m2,yR,0u) << 1;
+QSB_FADD(x2, x2, xR);
+return parities;
 }
 #endif
-/* B's twelve finish words come from shared memory (the caller parks them in the thread's own parkA rows
- * 0..11, free once A's inputs are read; nb_smem is the shared address of row 0, rows QSB_WEAVE_PARK_STRIDE
- * bytes apart) instead of 24 argument registers: with them as arguments the body and the chain subfunction
- * spilled around the call sites. */
+
+
+
+
 __device__ __noinline__ QsbPairWeave3 qsb_pair_weave3_value(
-    uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,
-    uint64_t y0,uint64_t y1,uint64_t y2,uint64_t y3,uint32_t par,
-    uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,uint32_t nb_smem
+uint64_t x0,uint64_t x1,uint64_t x2,uint64_t x3,
+uint64_t y0,uint64_t y1,uint64_t y2,uint64_t y3,uint32_t par,
+uint64_t v0,uint64_t v1,uint64_t v2,uint64_t v3,uint32_t nb_smem
 #if !QSB_R_TAIL_CBANK
-    ,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
-    uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
+,uint64_t rx0,uint64_t rx1,uint64_t rx2,uint64_t rx3,
+uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
 #endif
-    ){
-    uint64_t q1x[4]={x0,x1,x2,x3},q2x[4]={y0,y1,y2,y3};
-    uint64_t n[12];
-    #pragma unroll
-    for(int k=0;k<12;k++)
-        asm volatile("ld.shared.b64 %0, [%1];" : "=l"(n[k]) : "r"(nb_smem+(uint32_t)k*(uint32_t)QSB_WEAVE_PARK_STRIDE) : "memory");
-    uint64_t inv[4]={v0,v1,v2,v3};
+){
+uint64_t q1x[4]={x0,x1,x2,x3},q2x[4]={y0,y1,y2,y3};
+uint64_t n[12];
+#pragma unroll
+for(int k=0;k<12;k++)
+asm volatile("ld.shared.b64 %0, [%1];" : "=l"(n[k]) : "r"(nb_smem+(uint32_t)k*(uint32_t)QSB_WEAVE_PARK_STRIDE) : "memory");
+uint64_t inv[4]={v0,v1,v2,v3};
 #if QSB_R_TAIL_CBANK
-    uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
-    uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
+uint64_t rx[4]={QSB_U2R[0],QSB_U2R[1],QSB_U2R[2],QSB_U2R[3]};
+uint64_t ry[4]={QSB_U2R[4],QSB_U2R[5],QSB_U2R[6],QSB_U2R[7]};
 #else
-    uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
+uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
 #endif
-    uint32_t pb0[16],pb1[16],h0,h1;
-    qsb_gate_block(pb0,q1x,par);
-    qsb_gate_block(pb1,q2x,par>>1);
-    QsbPairWeave3 out;
+uint32_t pb0[16],pb1[16],h0,h1;
+qsb_gate_block(pb0,q1x,par);
+qsb_gate_block(pb1,q2x,par>>1);
+QsbPairWeave3 out;
 #if QSB_TAIL_WEAVE == 1
-    out.par=qsb_k2s_post3_weave(n,inv,rx,ry,out.x,out.x+4,pb0,pb1,&h0,&h1);   /* finish B around gate A */
+out.par=qsb_k2s_post3_weave(n,inv,rx,ry,out.x,out.x+4,pb0,pb1,&h0,&h1);
 #elif QSB_TAIL_WEAVE == 2
-    /* Both hashes ahead of the finish in one basic block (spills at 128; kept as the reference form). */
+
 #if QSB_GATE_H0_FMA
-    h0=_SHA256Pubkey33H0(pb0);
-    h1=_SHA256Pubkey33H0(pb1);
+h0=_SHA256Pubkey33H0(pb0);
+h1=_SHA256Pubkey33H0(pb1);
 #else
-    qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
+qsb_sha256_gate_h0_pair(&h0,pb0,&h1,pb1);
 #endif
-    out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
+out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
 #else
-    /* 3: the recid-0 hash ahead of the finish, the recid-1 hash behind it (no copy of post3). */
-    h0=_SHA256Pubkey33H0(pb0);
-    out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
-    h1=_SHA256Pubkey33H0(pb1);
+
+h0=_SHA256Pubkey33H0(pb0);
+out.par=qsb_k2s_post3(n,inv,rx,ry,out.x,out.x+4);
+h1=_SHA256Pubkey33H0(pb1);
 #endif
-    out.enc=qsb_k2s_gate_h0_verdict(h0,h1);
-    return out;
+out.enc=qsb_k2s_gate_h0_verdict(h0,h1);
+return out;
 }
 #if !(QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32)
 #error "QSB_TAIL_WEAVE is written for the H0 gate (QSB_GATE_H0 with 1 <= QSB_ZEROS_N <= 32)"

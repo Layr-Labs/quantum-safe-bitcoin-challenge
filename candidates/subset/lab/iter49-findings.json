@@ -1,0 +1,99 @@
+{
+  "diagnostic_only": true,
+  "qualified": false,
+  "submission": null,
+  "benchmark_score": {
+    "score": 385342070.0,
+    "metrics": {
+      "bench": "subset",
+      "unit": "verified candidates per second",
+      "direction": "higher is better",
+      "throughput_Mps": 385.34207,
+      "hits_per_s": 45.936376,
+      "leading_zero_bits": 24,
+      "mode": "fixed_time",
+      "candidates": 35316039680,
+      "candidates_self_reported": 29796000000,
+      "elapsed_s": 91.6485,
+      "verified_hits": 4210,
+      "hit_relative_variance": 0.015412,
+      "problem_seed": 1789110211,
+      "gpu": "RTX_4090",
+      "verified": true
+    }
+  },
+  "actual_device": "RTX3090 sm86; harness RTX4090 label not hardware proof",
+  "exact_verified_hits": 4210,
+  "gpu_hits": 3577,
+  "cpu_hits": 633,
+  "rows": 56832,
+  "batches": 111,
+  "sample_rows_per_batch": 512,
+  "epochs_per_batch": 2097152,
+  "warm_batches_min": 20,
+  "warm_rows": 46592,
+  "clock_issue_boundary_NOT_removable_cost": true,
+  "warm_intervals": {
+    "sha": {
+      "mean_cycles": 107933.32943423763,
+      "median_cycles": 94355.0,
+      "fraction_percent": 24.584540665720013
+    },
+    "front_a": {
+      "mean_cycles": 111400.15356713599,
+      "median_cycles": 94713.5,
+      "fraction_percent": 25.37419738550154
+    },
+    "front_b": {
+      "mean_cycles": 97586.90071256868,
+      "median_cycles": 84496.0,
+      "fraction_percent": 22.227880318205916
+    },
+    "cross": {
+      "mean_cycles": 4053.0081988324177,
+      "median_cycles": 3405.0,
+      "fraction_percent": 0.923174939613091
+    },
+    "inverse": {
+      "mean_cycles": 58940.65167839973,
+      "median_cycles": 49930.0,
+      "fraction_percent": 13.42522143666967
+    },
+    "tail": {
+      "mean_cycles": 59115.22647664835,
+      "median_cycles": 50698.5,
+      "fraction_percent": 13.46498525428977
+    }
+  },
+  "audit_resources": {
+    "registers": 128,
+    "shared_bytes": 24576,
+    "stack_bytes": 0,
+    "spill_stores": 0,
+    "spill_loads": 0,
+    "digest_instructions": 14800
+  },
+  "clock_sites": [
+    "00e0",
+    "12d20",
+    "13210",
+    "13550",
+    "14b80",
+    "1a500",
+    "1ac30"
+  ],
+  "binary_sha256": "2171cfea1de919b4ad24d08eb414e65b72b8def6463af84a2afb637c3c8bc273",
+  "off_identity": {
+    "sm86": {
+      "sha256": "95598e445005e424dbee6feb03f87adeb4c498afe1b07250fa0e169e9edbbfa5",
+      "bytes": 473632,
+      "byte_equal_iter48": true
+    },
+    "sm89": {
+      "sha256": "a724399a04db515f8bebd836b1af866e6e7a1b778a98ce73a384c6f7704de147",
+      "bytes": 473504,
+      "byte_equal_iter48": true
+    }
+  },
+  "next": "Distinct front gather/field work or paired SHA work elimination; not tree carry/address redraw. No native timing proof."
+}

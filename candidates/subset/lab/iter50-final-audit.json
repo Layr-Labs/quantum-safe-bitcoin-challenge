@@ -1,0 +1,25 @@
+{
+  "matched_gate_PASS": true,
+  "matched_exact_verifier_hits": 47123,
+  "fixed_enabled_exact_verifier_hits": 5319,
+  "prior49_member_hashes_PASS": true,
+  "screen_qualification_cold_hashes_PASS": true,
+  "counts": {
+    "screens": {
+      "runs": 6,
+      "verified_hits": 32925
+    },
+    "qualification": {
+      "runs": 19,
+      "verified_hits": 100778
+    }
+  },
+  "carrier_byteexact_sm86_sm89": {
+    "86": "62f1c03f4d200025c85c995d22b0566f056573b08c7148ecec6f839375b4ff6d",
+    "89": "8105a04f70973f70c62334b83ff5977039c3c4e72022467090e13ef110d04a0e"
+  },
+  "package_bytes": 8178168,
+  "limit_bytes": 8388608,
+  "ranked_score": null,
+  "submission": null
+}

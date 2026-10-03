@@ -4,8 +4,8 @@
  * Design and most of this file are Ryun1's native sm_89 carrier from the pinning
  * track (public submission 25bd990a, candidates/pinning/QsbCarrier.h,
  * build_carrier.sh, CARRIER.md; GPL-3). Credit for the idea and the loader goes to
- * Ryun1. This port adapts it to the subset tree: other kernels, every host upload
- * mirrored into both images, a build-knob fingerprint, and a per-launch fallback.
+ * Ryun1. This port adapts it to the subset tree: six kernels, carrier-only startup
+ * uploads with replay on fallback, a build-knob fingerprint, and per-launch fallback.
  *
  * Why. The fixed build line (`nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu ...`, no
  * -arch) embeds compute_52 PTX, which the driver JIT-compiles for the RTX 4090. PTX
@@ -18,17 +18,17 @@
  * tree.cu): the first 16 B load of each cold (DRAM-segment) 64 B table record
  * becomes `ld.global.cs.nc.L2::64B`, so a miss fetches both 32 B sectors of the
  * record as one DRAM access. At startup this file loads that image with
- * cudaLibraryLoadData and resolves the four search-loop kernels (epoch groups,
- * incremental epochs, first-block states, digest); sp_launch in tree.cu launches
- * them with cudaLaunchKernel.
+ * cudaLibraryLoadData and resolves six kernels (epoch groups, incremental epochs,
+ * first-block states, digest, table build, table heal scan); sp_launch in tree.cu
+ * launches them with cudaLaunchKernel.
  *
  * Module state. The image is a separate CUDA module with its own copy of every
- * __device__ / __constant__ global. Every host upload goes through QSB_TO_SYMBOL,
- * which writes the normal (JIT) symbol first and then the carrier's global of the
- * same name, so kernels of either image read identical data. No kernel writes a
- * module global; the search kernels hand data to each other only through buffers
- * passed by pointer, which both images share. The table build (kernel_build_gtable,
- * kernel_gt_heal_scan) stays on the JIT image: it writes only the table buffer.
+ * __device__ / __constant__ global. With QSB_TO_SYMBOL, an active carrier receives
+ * the startup upload and a host replay copy is logged; the JIT symbol is populated
+ * only after fallback. Replay and the JIT setup hook must finish before using the
+ * JIT image. No kernel writes a module global; kernels hand data to each other
+ * only through shared pointer arguments. Table build and heal use the carrier
+ * when available, avoiding the cold JIT path.
  *
  * Fallback. Everything is optional. If the GPU is not sm_89, QSB_CARRIER_DISABLE is
  * set in the environment, the image fails to decode or load, a kernel is missing,
@@ -36,8 +36,9 @@
  * upload into the image fails, the program prints
  * `Native sm_89 carrier: off (...)` and runs the unchanged compute_52 kernels. A
  * failed carrier launch mid-run switches to the <<<>>> launch of the same kernel
- * (both images hold the same uploads, so mixing them is safe). The exact OpenSSL
- * host gate (QSB_HOST_VERIFY) re-derives every hit in both modes.
+ * after restoring the JIT uploads. This is the intended fallback contract, not
+ * proof that every asynchronous error/replay failure path has been exercised.
+ * The exact OpenSSL host gate (QSB_HOST_VERIFY) re-derives every hit in both modes.
  *
  * Rebuild rule. Rerun build_carrier.sh after ANY edit to device code in this tree.
  * A kernel whose parameter list changed no longer resolves (mangled name) and a
@@ -52,162 +53,183 @@
 #include <utility>
 #include <type_traits>
 
-/* QSB_CARRIER (kill switch): 1 = use the embedded native sm_89 image when it loads;
- * 0 = no carrier code at all (every launch is the compute_52 <<<>>> launch). */
+ 
+
 #ifndef QSB_CARRIER
 #define QSB_CARRIER 1
 #endif
 
-/* Build-knob fingerprint: "NAME=value;" per knob, compared byte for byte between
- * this binary (host pass) and the image (device global qsb_carrier_knobs). */
+ 
+
 #define QSB_CARRIER_STR2(x) #x
 #define QSB_CARRIER_STR(x) QSB_CARRIER_STR2(x)
 #define QSB_CARRIER_KV(name) #name "=" QSB_CARRIER_STR(name) ";"
 
 enum QsbCarrierKernel {
-    QK_EG = 0,   /* kernel_epoch_groups     */
-    QK_BEI,      /* kernel_build_epochs_inc */
-    QK_BFF,      /* kernel_build_first_flat */
-    QK_DIG,      /* kernel_digest           */
-    QK_GT,       /* kernel_build_gtable     */
-    QK_HEAL,     /* kernel_gt_heal_scan     */
-    /* COHASH hook (QSB_GPU_COHASH): the co-hash kernel's entry goes here, present only in an image built with it */
+QK_EG = 0,  
+QK_BEI,  
+QK_BFF,  
+QK_DIG,  
+QK_GT,  
+QK_HEAL,  
 #if QSB_YOFF_S
-    QK_YOFF,     /* kernel_gt_offset_y      */
+QK_YOFF,  
 #endif
-    QK_N
+QK_N
 };
 
-/* No-JIT startup. With the carrier on, nothing touches the compute_52 image: every
- * kernel the ranked path launches (table build and heal scan included) comes from the
- * native image, uploads go only to the image's globals, and host reads of device
- * constants read the image. Under the CUDA 12 default of lazy module loading, the
- * compute_52 PTX is then never JIT-compiled, which removes the cold JIT (a few seconds
- * of CPU on every ranked run: each run is a fresh uid, and new source means new PTX)
- * from the timed window. Each upload is logged; if the carrier is ever switched off,
- * qsb_carrier_off replays the log into the compute_52 image (JIT-compiling it then)
- * before any <<<>>> launch, so the fallback sees exactly the same data. */
+ 
+
+
+
+
+
+
+
+
 struct QsbUpload { const void *sym; void *data; size_t n; };
-static QsbUpload *g_qsb_uploads = nullptr;       /* grows as needed; uploads are startup-only */
+static QsbUpload *g_qsb_uploads = nullptr;  
 static int g_qsb_n_uploads = 0, g_qsb_cap_uploads = 0;
-static void (*g_qsb_jit_hook)(void) = nullptr;   /* JIT-image-only setup, run on fallback */
+static void (*g_qsb_jit_hook)(void) = nullptr;  
 static bool qsb_upload_log(const void *sym, const void *src, size_t n) {
-    if (g_qsb_n_uploads == g_qsb_cap_uploads) {
-        const int cap = g_qsb_cap_uploads ? 2 * g_qsb_cap_uploads : 32;
-        QsbUpload *grown = (QsbUpload *)realloc(g_qsb_uploads, (size_t)cap * sizeof(QsbUpload));
-        if (!grown) return false;
-        g_qsb_uploads = grown; g_qsb_cap_uploads = cap;
-    }
-    void *copy = malloc(n ? n : 1);
-    if (!copy) return false;
-    memcpy(copy, src, n);
-    g_qsb_uploads[g_qsb_n_uploads++] = {sym, copy, n};
-    return true;
+if (g_qsb_n_uploads == g_qsb_cap_uploads) {
+const int cap = g_qsb_cap_uploads ? 2 * g_qsb_cap_uploads : 32;
+QsbUpload *grown = (QsbUpload *)realloc(g_qsb_uploads, (size_t)cap * sizeof(QsbUpload));
+if (!grown) return false;
+g_qsb_uploads = grown; g_qsb_cap_uploads = cap;
+}
+void *copy = malloc(n ? n : 1);
+if (!copy) return false;
+memcpy(copy, src, n);
+g_qsb_uploads[g_qsb_n_uploads++] = {sym, copy, n};
+return true;
 }
 
 struct QsbCarrierState {
-    int on;
-    int running;             /* set once the search loop may have work queued on the image */
-    cudaLibrary_t lib;
-    cudaKernel_t k[QK_N];
+int on;
+int running;  
+cudaLibrary_t lib;
+cudaKernel_t k[QK_N];
 };
 static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 static void qsb_carrier_off(const char *why) {
-    /* Never unload an image whose kernels may still be in flight; just stop using it. */
-    if (g_qsb_carrier.lib && !g_qsb_carrier.running) {
-        cudaLibraryUnload(g_qsb_carrier.lib);
-        g_qsb_carrier.lib = nullptr;
-    }
-    const int was_on = g_qsb_carrier.on;
-    g_qsb_carrier.on = 0;
-    memset(g_qsb_carrier.k, 0, sizeof(g_qsb_carrier.k));
-    cudaGetLastError();      /* clear the non-sticky error of the failed attempt */
-    printf("  Native sm_89 carrier: off (%s); using the compute_52 image%s\n", why,
-           was_on ? " from here on" : "");
-    /* Replay every upload that went only to the image into the compute_52 image. */
-    int bad = 0;
-    for (int i = 0; i < g_qsb_n_uploads; i++) {
-        if (cudaMemcpyToSymbol(g_qsb_uploads[i].sym, g_qsb_uploads[i].data,
-                               g_qsb_uploads[i].n) != cudaSuccess) bad++;
-        free(g_qsb_uploads[i].data);
-    }
-    const int replayed = g_qsb_n_uploads;
-    g_qsb_n_uploads = 0;
-    if (replayed && cudaDeviceSynchronize() != cudaSuccess) bad++;
-    if (was_on && g_qsb_jit_hook) g_qsb_jit_hook();
-    if (replayed)
-        printf("  compute_52 image: %d upload(s) replayed%s\n", replayed, bad ? ", SOME FAILED" : "");
-    fflush(stdout);
+ 
+if (g_qsb_carrier.lib && !g_qsb_carrier.running) {
+cudaLibraryUnload(g_qsb_carrier.lib);
+g_qsb_carrier.lib = nullptr;
+}
+const int was_on = g_qsb_carrier.on;
+g_qsb_carrier.on = 0;
+memset(g_qsb_carrier.k, 0, sizeof(g_qsb_carrier.k));
+cudaGetLastError();  
+printf("  Native sm_89 carrier: off (%s); using the compute_52 image%s\n", why,
+was_on ? " from here on" : "");
+ 
+int bad = 0;
+for (int i = 0; i < g_qsb_n_uploads; i++) {
+if (cudaMemcpyToSymbol(g_qsb_uploads[i].sym, g_qsb_uploads[i].data,
+g_qsb_uploads[i].n) != cudaSuccess) bad++;
+free(g_qsb_uploads[i].data);
+}
+const int replayed = g_qsb_n_uploads;
+g_qsb_n_uploads = 0;
+if (replayed && cudaDeviceSynchronize() != cudaSuccess) bad++;
+if (was_on && g_qsb_jit_hook) g_qsb_jit_hook();
+if (replayed)
+printf("  compute_52 image: %d upload(s) replayed%s\n", replayed, bad ? ", SOME FAILED" : "");
+fflush(stdout);
 }
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
-static_assert(sizeof(qsb_carrier_kernel_names) / sizeof(qsb_carrier_kernel_names[0]) == QK_N,
-              "qsb_carrier_sm89.h is stale: its kernel list does not match enum QsbCarrierKernel (rerun build_carrier.sh)");
 
 static int qsb_b64_val(unsigned char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
+if (c >= 'A' && c <= 'Z') return c - 'A';
+if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+if (c >= '0' && c <= '9') return c - '0' + 52;
+if (c == '+') return 62;
+if (c == '/') return 63;
+return -1;
 }
 
-/* Decode the line-split base64 image. Returns a malloc'd buffer or nullptr. */
+ 
+#ifndef QSB_CARRIER_LZ4
+#define QSB_CARRIER_LZ4 0
+#endif
+#if QSB_CARRIER_LZ4
+#include "qsb_lz4_block.h"
+#endif
 static unsigned char *qsb_carrier_decode(size_t *out_len) {
-    unsigned char *buf = (unsigned char *)malloc(qsb_carrier_cubin_bytes + 4);
-    if (!buf) return nullptr;
-    size_t n = 0; unsigned acc = 0; int bits = 0;
-    for (unsigned li = 0; li < qsb_carrier_b64_lines; li++) {
-        for (const unsigned char *p = (const unsigned char *)qsb_carrier_b64[li]; *p; p++) {
-            int v = qsb_b64_val(*p);
-            if (v < 0) continue;              /* '=' padding */
-            acc = (acc << 6) | (unsigned)v; bits += 6;
-            if (bits >= 8) {
-                bits -= 8;
-                if (n >= qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
-                buf[n++] = (unsigned char)(acc >> bits);
-            }
-        }
-    }
-    if (n != qsb_carrier_cubin_bytes) { free(buf); return nullptr; }
-    *out_len = n;
-    return buf;
+#if QSB_CARRIER_LZ4
+const size_t payload=qsb_carrier_payload_bytes;
+#else
+const size_t payload=qsb_carrier_cubin_bytes;
+#endif
+unsigned char *buf = (unsigned char *)malloc(payload + 4);
+if (!buf) return nullptr;
+size_t n = 0; unsigned acc = 0; int bits = 0;
+for (unsigned li = 0; li < qsb_carrier_b64_lines; li++) {
+for (const unsigned char *p = (const unsigned char *)qsb_carrier_b64[li]; *p; p++) {
+int v = qsb_b64_val(*p);
+if (v < 0) continue;  
+acc = (acc << 6) | (unsigned)v; bits += 6;
+if (bits >= 8) {
+bits -= 8;
+if (n >= payload) { free(buf); return nullptr; }
+buf[n++] = (unsigned char)(acc >> bits);
+}
+}
+}
+if (n != payload) { free(buf); return nullptr; }
+#if QSB_CARRIER_LZ4
+unsigned char *image=(unsigned char *)malloc(qsb_carrier_cubin_bytes);
+if(!image){free(buf);return nullptr;}
+bool ok=qsb_lz4_block(buf,n,image,qsb_carrier_cubin_bytes);free(buf);
+if(!ok){free(image);return nullptr;}
+*out_len=qsb_carrier_cubin_bytes;return image;
+#else
+*out_len = n;
+return buf;
+#endif
 }
 
-/* `knobs` is this binary's QSB_CARRIER_KNOBS string (host pass, same macros). */
+ 
 static void qsb_carrier_init(const cudaDeviceProp &prop, const char *knobs) {
-    const char *dis = getenv("QSB_CARRIER_DISABLE");
-    if (dis && *dis && strcmp(dis, "0") != 0) { qsb_carrier_off("disabled by QSB_CARRIER_DISABLE"); return; }
-    if (prop.major != 8 || prop.minor != 9) { qsb_carrier_off("device is not sm_89"); return; }
-    size_t len = 0;
-    unsigned char *img = qsb_carrier_decode(&len);
-    if (!img) { qsb_carrier_off("embedded image failed to decode"); return; }
-    cudaError_t e = cudaLibraryLoadData(&g_qsb_carrier.lib, img, nullptr, nullptr, 0,
-                                        nullptr, nullptr, 0);
-    free(img);
-    if (e != cudaSuccess) { g_qsb_carrier.lib = nullptr; qsb_carrier_off(cudaGetErrorString(e)); return; }
-    for (int i = 0; i < QK_N; i++) {
-        e = cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, qsb_carrier_kernel_names[i]);
-        if (e != cudaSuccess) { qsb_carrier_off("kernel missing from image"); return; }
-    }
-    /* Build fingerprint: the image must have been compiled with this binary's knobs. */
-    void *dk = nullptr; size_t kb = 0;
-    const size_t want = strlen(knobs) + 1;
-    e = cudaLibraryGetGlobal(&dk, &kb, g_qsb_carrier.lib, "qsb_carrier_knobs");
-    if (e != cudaSuccess || kb != want) { qsb_carrier_off("image built with other knobs"); return; }
-    char *img_knobs = (char *)malloc(want);
-    if (!img_knobs) { qsb_carrier_off("out of host memory"); return; }
-    e = cudaMemcpy(img_knobs, dk, want, cudaMemcpyDeviceToHost);
-    const int same = (e == cudaSuccess) && memcmp(img_knobs, knobs, want) == 0;
-    free(img_knobs);
-    if (!same) { qsb_carrier_off("image built with other knobs"); return; }
-    g_qsb_carrier.on = 1;
-    printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B cold-record loads)\n",
-           len, qsb_carrier_cubin_sha256);
-    fflush(stdout);
+const char *dis = getenv("QSB_CARRIER_DISABLE");
+if (dis && *dis && strcmp(dis, "0") != 0) { qsb_carrier_off("disabled by QSB_CARRIER_DISABLE"); return; }
+if (prop.major != 8 || prop.minor != 9) { qsb_carrier_off("device is not sm_89"); return; }
+ 
+
+if (sizeof(qsb_carrier_kernel_names)/sizeof(qsb_carrier_kernel_names[0]) != QK_N) {
+qsb_carrier_off("image kernel count differs from this build"); return;
+}
+size_t len = 0;
+unsigned char *img = qsb_carrier_decode(&len);
+if (!img) { qsb_carrier_off("embedded image failed to decode"); return; }
+cudaError_t e = cudaLibraryLoadData(&g_qsb_carrier.lib, img, nullptr, nullptr, 0,
+nullptr, nullptr, 0);
+free(img);
+if (e != cudaSuccess) { g_qsb_carrier.lib = nullptr; qsb_carrier_off(cudaGetErrorString(e)); return; }
+for (int i = 0; i < QK_N; i++) {
+e = cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, qsb_carrier_kernel_names[i]);
+if (e != cudaSuccess) { qsb_carrier_off("kernel missing from image"); return; }
+}
+ 
+void *dk = nullptr; size_t kb = 0;
+const size_t want = strlen(knobs) + 1;
+e = cudaLibraryGetGlobal(&dk, &kb, g_qsb_carrier.lib, "qsb_carrier_knobs");
+if (e != cudaSuccess || kb != want) { qsb_carrier_off("image built with other knobs"); return; }
+char *img_knobs = (char *)malloc(want);
+if (!img_knobs) { qsb_carrier_off("out of host memory"); return; }
+e = cudaMemcpy(img_knobs, dk, want, cudaMemcpyDeviceToHost);
+const int same = (e == cudaSuccess) && memcmp(img_knobs, knobs, want) == 0;
+free(img_knobs);
+if (!same) { qsb_carrier_off("image built with other knobs"); return; }
+g_qsb_carrier.on = 1;
+printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B cold-record loads)\n",
+len, qsb_carrier_cubin_sha256);
+fflush(stdout);
 }
 #else
 static void qsb_carrier_init(const cudaDeviceProp &, const char *) {}
@@ -215,75 +237,75 @@ static void qsb_carrier_init(const cudaDeviceProp &, const char *) {}
 
 static inline bool qsb_carrier_has(int kid) { return g_qsb_carrier.on && g_qsb_carrier.k[kid]; }
 
-/* Launch the carrier image of `kern`. The static kernel pointer only supplies the
- * parameter types: every argument is converted to its declared parameter type before
- * its address goes to cudaLaunchKernel, exactly as a <<<>>> launch would. */
+ 
+
+
 template <typename... P, typename... A, size_t... I>
 static cudaError_t qsb_carrier_launch_impl(int kid, dim3 g, dim3 b, cudaStream_t st,
-                                           std::index_sequence<I...>, A &&...a) {
-    std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
-    void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
-    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, 0, st);
+std::index_sequence<I...>, A &&...a) {
+std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
+void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
+return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, 0, st);
 }
 template <typename... P, typename... A>
 static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
-                                      A &&...a) {
-    static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
-    return qsb_carrier_launch_impl<P...>(kid, g, b, st, std::index_sequence_for<P...>{},
-                                         std::forward<A>(a)...);
+A &&...a) {
+static_assert(sizeof...(P) == sizeof...(A), "carrier launch: argument count mismatch");
+return qsb_carrier_launch_impl<P...>(kid, g, b, st, std::index_sequence_for<P...>{},
+std::forward<A>(a)...);
 }
-/* Try the carrier launch; on failure switch the carrier off (the caller then issues
- * the <<<>>> launch of the same kernel). Returns true when the carrier launched it. */
+ 
+
 template <typename... P, typename... A>
 static bool qsb_carrier_try(void (*kern)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
-                            A &&...a) {
-    if (!qsb_carrier_has(kid)) return false;
-    cudaError_t e = qsb_carrier_launch(kern, kid, g, b, st, std::forward<A>(a)...);
-    if (e == cudaSuccess) return true;
-    char why[160];
-    snprintf(why, sizeof(why), "launch failed: %s", cudaGetErrorString(e));
-    qsb_carrier_off(why);
-    return false;
+A &&...a) {
+if (!qsb_carrier_has(kid)) return false;
+cudaError_t e = qsb_carrier_launch(kern, kid, g, b, st, std::forward<A>(a)...);
+if (e == cudaSuccess) return true;
+char why[160];
+snprintf(why, sizeof(why), "launch failed: %s", cudaGetErrorString(e));
+qsb_carrier_off(why);
+return false;
 }
 
-/* cudaMemcpyToSymbol into the normal (JIT) image, mirrored into the carrier image's
- * global of the same name when the carrier is on. A global the image does not
- * contain is referenced by none of its kernels and is skipped; any other failure
- * switches the carrier off (the JIT image already holds the upload). */
+ 
+
+
+
 template <class T>
 static cudaError_t qsb_to_symbol(const T &sym, const char *name, const void *src, size_t n) {
-    if (!g_qsb_carrier.on) return cudaMemcpyToSymbol(sym, src, n);
-    /* Carrier on: write the image only and log the upload for a possible fallback. */
-    if (!qsb_upload_log((const void *)&sym, src, n)) {
-        qsb_carrier_off("out of host memory for the upload log");   /* replays the earlier uploads */
-        return cudaMemcpyToSymbol(sym, src, n);
-    }
-    void *d = nullptr; size_t sz = 0;
-    cudaError_t ce = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);
-    if (ce == cudaErrorSymbolNotFound || ce == cudaErrorInvalidSymbol) { cudaGetLastError(); return cudaSuccess; }
-    if (ce == cudaSuccess && n > sz) ce = cudaErrorInvalidValue;
-    if (ce == cudaSuccess) ce = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
-    if (ce != cudaSuccess) {
-        char why[160];
-        snprintf(why, sizeof(why), "upload of %s failed: %s", name, cudaGetErrorString(ce));
-        qsb_carrier_off(why);                         /* replays this upload too */
-    }
-    return cudaSuccess;
+if (!g_qsb_carrier.on) return cudaMemcpyToSymbol(sym, src, n);
+ 
+if (!qsb_upload_log((const void *)&sym, src, n)) {
+qsb_carrier_off("out of host memory for the upload log");  
+return cudaMemcpyToSymbol(sym, src, n);
+}
+void *d = nullptr; size_t sz = 0;
+cudaError_t ce = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);
+if (ce == cudaErrorSymbolNotFound || ce == cudaErrorInvalidSymbol) { cudaGetLastError(); return cudaSuccess; }
+if (ce == cudaSuccess && n > sz) ce = cudaErrorInvalidValue;
+if (ce == cudaSuccess) ce = cudaMemcpy(d, src, n, cudaMemcpyHostToDevice);
+if (ce != cudaSuccess) {
+char why[160];
+snprintf(why, sizeof(why), "upload of %s failed: %s", name, cudaGetErrorString(ce));
+qsb_carrier_off(why);  
+}
+return cudaSuccess;
 }
 #define QSB_TO_SYMBOL(sym, src, n) qsb_to_symbol(sym, #sym, src, n)
 
-/* cudaMemcpyFromSymbol that reads the image's copy while the carrier is on (the host
- * only reads constants both images define identically, e.g. the SHA-256 K table). */
+ 
+
 template <class T>
 static cudaError_t qsb_from_symbol(void *dst, const T &sym, const char *name, size_t n) {
-    if (g_qsb_carrier.on) {
-        void *d = nullptr; size_t sz = 0;
-        cudaError_t ce = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);
-        if (ce == cudaSuccess && n <= sz) ce = cudaMemcpy(dst, d, n, cudaMemcpyDeviceToHost);
-        else if (ce == cudaSuccess) ce = cudaErrorInvalidValue;
-        if (ce == cudaSuccess) return cudaSuccess;
-        cudaGetLastError();
-    }
-    return cudaMemcpyFromSymbol(dst, sym, n);
+if (g_qsb_carrier.on) {
+void *d = nullptr; size_t sz = 0;
+cudaError_t ce = cudaLibraryGetGlobal(&d, &sz, g_qsb_carrier.lib, name);
+if (ce == cudaSuccess && n <= sz) ce = cudaMemcpy(dst, d, n, cudaMemcpyDeviceToHost);
+else if (ce == cudaSuccess) ce = cudaErrorInvalidValue;
+if (ce == cudaSuccess) return cudaSuccess;
+cudaGetLastError();
+}
+return cudaMemcpyFromSymbol(dst, sym, n);
 }
 #define QSB_FROM_SYMBOL(dst, sym, n) qsb_from_symbol(dst, sym, #sym, n)

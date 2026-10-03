@@ -1,0 +1,23 @@
+{
+  "bytes": 6356948,
+  "sha256": "dc7794a713a15a7996112b43a9ebcf04088d7eb9f43a93af41da30aefad5cbfa",
+  "rawbytes": 442787840,
+  "rawsha256": "04a7c5ba6239049b0f522dc2ba1282d1cf9b570683424384dbd4a1c99e84e67d",
+  "records": {
+    "prior49.rawtar": {
+      "bytes": 415242240,
+      "sha256": "d9b2581020a33b4e1e46c9493d23b06a3c8f8608f6629d7a17cbf91e1a316913"
+    },
+    "screens50.rawtar.normalized": {
+      "bytes": 7802880,
+      "sha256": "aba6402e3afb0a1f2efdfe0a29a6735c088916a5c2746792944fb6b422b49d2f"
+    },
+    "qualification50.rawtar": {
+      "bytes": 19732480,
+      "sha256": "381a78e9078eb6240b64b3d3dd716f6eab7b8dcb218c053d52e5448dc4860597"
+    }
+  },
+  "source_screens_sha256": "cd36225fc2563809df10098570aa16487f66dfae7e6649afe8b1223d9b4864e8",
+  "screens_normalized_carriers": 1,
+  "inverse": "xz -> TAR; prior49.rawtar is exact previous49 normalized TAR; screens50.rawtar.normalized -> iter47_normalize_carriers.reconstruct; qualification50.rawtar ordinary TAR"
+}

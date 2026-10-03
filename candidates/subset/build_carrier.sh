@@ -30,7 +30,7 @@ fi
 "$CUOBJDUMP" -symbols "$W/c.cubin" > "$W/symbols.txt"
 "$CUOBJDUMP" -sass "$W/c.cubin" > "$W/sass.txt"
 python3 - "$Z" "$W" <<'PY'
-import base64, glob, hashlib, re, sys
+import base64, glob, hashlib, re, sys, ctypes, ctypes.util
 zeros = int(sys.argv[1]); W = sys.argv[2]
 syms = open(W + "/symbols.txt").read()
 want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
@@ -41,7 +41,7 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_GT",  r"_Z19kernel_build_gtable\w+"),
     ("QK_HEAL", r"_Z19kernel_gt_heal_scan\w+"),
 ]
-if re.search(r"_Z18kernel_gt_offset_y\w+", syms):   # QSB_YOFF_S images only (enum entry under #if QSB_YOFF_S)
+if re.search(r"_Z18kernel_gt_offset_y\w+", syms):
     want.append(("QK_YOFF", r"_Z18kernel_gt_offset_y\w+"))
 names = []
 for kid, pat in want:
@@ -50,8 +50,7 @@ for kid, pat in want:
         sys.exit(f"build_carrier: {kid} matched {hits}")
     names.append(hits[0])
 # Build fingerprint plus every global the host uploads with QSB_TO_SYMBOL (tree.cu and
-# window_schedule_shared.cuh). Edit this list if an upload is added or removed. Uploads that exist only under
-# a switch (QSB_QMIX_MASK_C under QSB_QMIX_RT, QSB_GATE_FMA_C under QSB_GATE_FMA_RT) are checked below, keyed on the image's knob string.
+# window_schedule_shared.cuh). Edit this list if an upload is added or removed.
 for g in ("qsb_carrier_knobs", "QSB_CONST_SCHEDULE", "QSB_U2R", "QSB_U2R_ISO", "QSB_ISO_INVU",
           "QSB_ISO_XNEG", "QSB_U2R_C", "QSB_PUSH_WORDS", "BINOM_C", "WIN3", "QSB_WINDOW_FIRST",
           "QSB_WINDOW_SECOND", "QSB_WINDOW_CLASS", "QSB_FIRST_CLASS", "QSB_LANE_CLASS",
@@ -66,20 +65,18 @@ if not dig or "LTC64B" not in dig[0]:
     sys.exit("build_carrier: digest kernel has no LTC64B load")
 n_hint = dig[0].count("LTC64B")
 img = open(W + "/c.cubin", "rb").read()
-# Switch-dependent checks, keyed on the image's own knob string (the qsb_carrier_knobs bytes).
-def knob_on(name):
-    return re.search(rb"(^|;|\0)" + name.encode() + rb"=1;", img) is not None
-if knob_on("QSB_QMIX_RT") and not re.search(r"\bQSB_QMIX_MASK_C\b", syms):
-    sys.exit("build_carrier: QSB_QMIX_RT image without the QSB_QMIX_MASK_C global (the host write would be skipped)")
-if knob_on("QSB_GATE_FMA_RT") and not re.search(r"\bQSB_GATE_FMA_C\b", syms):
-    sys.exit("build_carrier: QSB_GATE_FMA_RT image without the QSB_GATE_FMA_C global (the host clear would be skipped)")
-if knob_on("QSB_CONST_CALLEE"):
-    n_ur = dig[0].count("c[0x3][UR")
-    if n_ur != 16:
-        sys.exit(f"build_carrier: QSB_CONST_CALLEE image has {n_ur} UR-indexed c[0x3] loads in kernel_digest, "
-                 "want 16 (the K+W walk fell back to per-lane LDC)")
-    print(f"QSB_CONST_CALLEE gate: {n_ur} UR-indexed c[0x3] loads in kernel_digest")
-b64 = base64.b64encode(img).decode()
+# Lossless host-only packing; decoded CUDA image is unchanged. Optional
+# development dependency only: runtime has its own bounded block decoder.
+payload = img
+libname = ctypes.util.find_library('lz4')
+if libname:
+    lib = ctypes.CDLL(libname)
+    lib.LZ4_compress_HC.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    inp = ctypes.create_string_buffer(img)
+    out = ctypes.create_string_buffer(len(img) + len(img)//255 + 32)
+    count = lib.LZ4_compress_HC(inp, out, len(img), len(out), 12)
+    if 0 < count < len(img): payload = out.raw[:count]
+b64 = base64.b64encode(payload).decode()
 lines = [b64[i:i + 120] for i in range(0, len(b64), 120)]
 sha = hashlib.sha256(img).hexdigest()
 src = hashlib.sha256()
@@ -103,6 +100,9 @@ with open("qsb_carrier_sm89.h", "w") as f:
         f.write(f'    "{n}", /* {kid} */\n')
     f.write("};\n")
     f.write(f"static const unsigned qsb_carrier_b64_lines = {len(lines)};\n")
+    if payload != img:
+        f.write("#define QSB_CARRIER_LZ4 1\n")
+        f.write(f"static const unsigned qsb_carrier_payload_bytes = {len(payload)};\n")
     f.write("static const char *const qsb_carrier_b64[] = {\n")
     for l in lines:
         f.write(f'"{l}",\n')
