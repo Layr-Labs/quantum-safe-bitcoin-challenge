@@ -690,18 +690,7 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_z_value(
     uint64_t ry0,uint64_t ry1,uint64_t ry2,uint64_t ry3
 #endif
     ){
-#if QSB_CODE_ROLL & 1
-    /* QSB_CODE_ROLL bit 0 (tree.cu; ercumentyildirim's form from dea321f0/667cfead): the arguments are the epoch's 8
-     * state words (state[2k] in the low half of argument k), and the SHA256d outer block that kernel_digest ran
-     * inline, twice, runs here, once per call. The same qsb_pair_second_sha_z (this tree's QSB_OUTER_LITK form) on
-     * the same words: the same z. */
-    uint32_t st[8]={(uint32_t)z0,(uint32_t)(z0>>32),(uint32_t)z1,(uint32_t)(z1>>32),
-                    (uint32_t)z2,(uint32_t)(z2>>32),(uint32_t)z3,(uint32_t)(z3>>32)};
-    uint64_t z[4];
-    qsb_pair_second_sha_z(st,z);
-#else
     uint64_t z[4]={z0,z1,z2,z3};
-#endif
 #if QSB_R_CBANK
     uint64_t rx[4]={QSB_U2R_ISO[0],QSB_U2R_ISO[1],QSB_U2R_ISO[2],QSB_U2R_ISO[3]};
     uint64_t ry[4]={QSB_U2R_ISO[4],QSB_U2R_ISO[5],QSB_U2R_ISO[6],QSB_U2R_ISO[7]};
@@ -729,65 +718,6 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
     return out;
 }
 
-#if QSB_CODE_ROLL & 2
-#if !(QSB_NEGFOLD_PARITY && QSB_K2S_PARITY_WINDOW && QSB_GATE_H0_FMA && QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32)
-#error "QSB_CODE_ROLL bit 1 copies qsb_k2s_post3's QSB_NEGFOLD_PARITY + QSB_K2S_PARITY_WINDOW form and the H0 gate (qsb_k2s_gate_h0)"
-#endif
-/* QSB_CODE_ROLL bit 1 (tree.cu): ercumentyildirim's rolled gate (dea321f0/667cfead, qsb_k2s_post3_gate_roll), ported to
- * this tree: qsb_k2s_post3 followed by qsb_k2s_gate_h0, with the gate's two H0 hashes as one 2-trip loop. Trip 0
- * hashes recovery id 0 (x1, parity bit 0), trip 1 recovery id 1 (x2, parity bit 1). The port differs from the
- * rival's text in two places, both this tree's own forms: x = p + xR is QSB_FADD_XR (QSB_POOL_RCONST), and under
- * QSB_GATE_FMA_RT each trip picks the hash form on QSB_GATE_FMA_C as qsb_k2s_gate_h0 does (one loop body holds
- * both forms, so the image keeps one copy of each instead of two). Returns tail3's value: 1 = hit on recid 0,
- * 2 = hit on recid 1 (recid 0 missed), 0 = none. Same field operations on the same words, the same blocks and
- * hashes, the same verdict: bit-identical. */
-__device__ __forceinline__ int qsb_k2s_post3_gate_roll(
-    uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR
-) {
-    uint64_t t[4], sum[4], m1[4], m2[4], x[4], p2[4];
-    uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
-    QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
-    QSB_FMUL(m1, n, n + 8);
-    QSB_FMUL(m2, n + 4, n + 8);
-    QSB_FADD(sum, m1, m2);
-    QSB_FSUB(t, m1, cc);
-    QSB_FMUL(x, sum, t);           /* p1 = (lambda1+m2)*(lambda1-c) */
-    uint32_t par = qsb_parity_product_window(x,m1,yR,1u);
-    QSB_FADD_XR(x, x, xR);         /* x1 = p1 + xR */
-    QSB_FSUB(t, m2, cc);
-    QSB_FMUL(p2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
-    par |= qsb_parity_product_window(p2,m2,yR,0u) << 1;
-    /* Trip ri hashes recovery id ri. Trip 1 first does post3's last step for recovery id 1 (x2 = p2 + xR, the same
-     * add on the same words) and takes parity bit 1; the empty asm ties p2 to the trip so the add is not hoisted in
-     * front of the loop. Both trips always run (no early exit: the loop stays warp-uniform) and the first passing
-     * recovery id is kept, as in the unrolled gate. */
-    int res=0,ri=0;
-    #pragma unroll 1
-    for(;;){
-        if(ri){
-            #pragma unroll
-            for(int k=0;k<4;k++)asm("" : "+l"(p2[k]) : "r"(ri));
-            QSB_FADD_XR(x, p2, xR); /* x2 = p2 + xR */
-            par>>=1;
-        }
-        uint32_t pb[16],h;
-        qsb_gate_block(pb,x,par);
-#if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT
-        if(QSB_GATE_FMA_C){        /* QSB_GATE_FMA_RT (tree.cu): the cap-phase form until main() clears the flag */
-            h=_SHA256Pubkey33H0_fma(pb);
-        }else{
-            h=_SHA256Pubkey33H0(pb);
-        }
-#else
-        h=_SHA256Pubkey33H0(pb);
-#endif
-        if(res==0 && (h>>(32-QSB_ZEROS_N))==0)res=ri+1;
-        if(ri)break;
-        ri=1;
-    }
-    return res;
-}
-#endif
 __device__ __noinline__ int qsb_pair_tail3_value(
     uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t b0,uint64_t b1,uint64_t b2,uint64_t b3,
@@ -807,16 +737,12 @@ __device__ __noinline__ int qsb_pair_tail3_value(
 #else
     uint64_t rx[4]={rx0,rx1,rx2,rx3},ry[4]={ry0,ry1,ry2,ry3};
 #endif
-#if QSB_CODE_ROLL & 2
-    return qsb_k2s_post3_gate_roll(n,inv,rx,ry);
-#else
     uint64_t q1x[4],q2x[4];int recid=0;
     uint32_t par=qsb_k2s_post3(n,inv,rx,ry,q1x,q2x);
 #if QSB_GATE_H0 && defined(QSB_ZEROS_N) && QSB_ZEROS_N >= 1 && QSB_ZEROS_N <= 32
     return qsb_k2s_gate_h0(q1x,q2x,par,&recid) ? recid+1 : 0;
 #else
     return qsb_k2s_gate(q1x,q2x,par,&recid) ? recid+1 : 0;
-#endif
 #endif
 }
 #if defined(QSB_TAIL_STAGGER) && QSB_TAIL_STAGGER

@@ -551,7 +551,7 @@ __device__ uint64_t BINOM_C[151][10];
  * the warps. The choice is warp-uniform (1D blocks of a multiple of 32 threads), so no lane diverges;
  * qsb_s3_selfcheck runs the half walker over both descriptor lists. 0 = the P18 chain byte for byte. */
 #ifndef QSB_Q_MIX
-#define QSB_Q_MIX 2
+#define QSB_Q_MIX 4
 #endif
 #if QSB_Q_MIX < 0 || (QSB_Q_MIX & (QSB_Q_MIX - 1)) != 0
 #error "QSB_Q_MIX must be 0 or a power of two"
@@ -983,7 +983,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  *   the immediate. main()'s slot loop writes mask QSB_QMIX_RT_TARGET - 1 once: at the first batch boundary after
  *   QSB_QMIX_RT_AFTER_S where the GPU's last-60-s rate is at most QSB_QMIX_RT_RATIO_PCT % of its first full
  *   minute's. Every mask sums Q to the same point (same z*A, same hits); only the cold-record / addition balance
- *   moves. Never mask 0 (Q_MIX 1). 1 = on.
+ *   moves. Target 1 writes mask 0 (every warp on the GLV12 terms, the static QSB_Q_MIX 1 path). 1 = on.
  * QSB_CONST_CALLEE: the paired hash's four constant blocks run in a __noinline__ callee that takes the 16 state
  *   words by value, so ptxas walks K+W with ULDC.64 c[0x3][UR..] on the uniform datapath instead of per-lane
  *   LDC. Same words, rounds and order: bit-identical. build_carrier.sh gates the image on 16 UR-indexed c[0x3]
@@ -1097,6 +1097,17 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * full minute's (0.80 falls at about 290 s on two decoded ranked runs). TARGET: the Q_MIX the one write selects
  * (mask TARGET - 1). FORCE_S (test builds only, -D on the host line): > 0 writes the mask at the first boundary at
  * or after that many seconds whatever the rate (the identity gate forces 60 s); < 0 never writes. */
+/* QSB_RT_THERMAL (host only, not an image knob; 0 = the base host code): with QSB_HIT_TELEMETRY's NVML sampler, QSB_GATE_FMA_RT's
+ * and QSB_QMIX_RT's one write each also fire at the first batch boundary after QSB_RT_THERMAL_MIN_S at which the sampler has seen
+ * thermal slowdown (hit_telemetry.h QSB_RT_THERMAL_MASK) in at least QSB_RT_THERMAL consecutive samples. The decoded ranked runs
+ * reach 90 C and set SW thermal slowdown at 146-153 s, while the rate rules fire at 213-226 s and 266-297 s. The rate rules stay
+ * as the fallback (no NVML: the streak stays 0). Every form and layout computes the same verdicts, so the hits are unchanged. */
+#ifndef QSB_RT_THERMAL
+#define QSB_RT_THERMAL 0
+#endif
+#ifndef QSB_RT_THERMAL_MIN_S
+#define QSB_RT_THERMAL_MIN_S 60
+#endif
 #ifndef QSB_QMIX_RT_AFTER_S
 #define QSB_QMIX_RT_AFTER_S 240
 #endif
@@ -1109,8 +1120,8 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_QMIX_RT_FORCE_S
 #define QSB_QMIX_RT_FORCE_S 0
 #endif
-#if QSB_QMIX_RT && (QSB_QMIX_RT_TARGET < 2 || (QSB_QMIX_RT_TARGET & (QSB_QMIX_RT_TARGET - 1)) != 0)
-#error "QSB_QMIX_RT_TARGET must be a power of two >= 2 (mask 0, Q_MIX 1, is never written)"
+#if QSB_QMIX_RT && (QSB_QMIX_RT_TARGET < 1 || (QSB_QMIX_RT_TARGET & (QSB_QMIX_RT_TARGET - 1)) != 0)
+#error "QSB_QMIX_RT_TARGET must be a power of two >= 1 (1 = mask 0: every warp on the GLV12 terms, as a static QSB_Q_MIX 1)"
 #endif
 /* QSB_GATE_FMA_RT: a cap-phase form of QSB_SHA_FMA_ADD. kernel_digest carries both forms of the gate's pubkey-hash
  * compression (sha_gate_fma.cuh: every two-input add of rounds 16..63 as mad.lo.u32 a, one, b on the FMA-heavy pipe, or
@@ -1519,31 +1530,6 @@ __device__ __forceinline__ void qsb_complete_last_add(
  * source). 0 = N-pkg16f2's image byte for byte (the shared code's default). In the knob string only when non-zero. */
 #ifndef QSB_YP_DC
 #define QSB_YP_DC 1   /* N-dc1 */
-#endif
-/* QSB_CODE_ROLL (pair_shared.cuh, kernel_digest; N-cr2/N-cr3, notes/cr1-code-roll-2026-10-01.md): ercumentyildirim's
- * code-footprint switch, first public in dea321f0 and 667cfead (PR 2441), ported to this tree. A bit mask; every bit
- * keeps the same work on the same words, only where the code sits changes:
- *   bit 1 (2): qsb_pair_tail3_value's two recovery-id H0 hashes as one 2-trip loop (qsb_k2s_post3_gate_roll), with
- *     post3's last step (x2 = p2 + xR) at the start of trip 1. Under QSB_GATE_FMA_RT the loop body holds both hash
- *     forms, so the tail keeps one copy of each instead of two. About +20 loop-control slots per candidate (the
- *     rival's count), -1/2 of the gate's static code.
- *   bit 0 (1): the SHA256d outer block runs inside qsb_pair_front3_z_value (the __noinline__ front, called once per
- *     epoch) instead of twice inline before the A front: zpair carries the two epochs' 8 state words (two per u64,
- *     low word first) where it carried their z, B's words are parked in the same shared rows, and the front computes
- *     z from them first. One copy of the outer block instead of two; the same compression runs twice per thread.
- * Ranked: value 2 is ercumentyildirim's (dea321f0), drawn by DPZZxlz, terrapinelf and jungjipdo; value 3 was drawn
- * once (DPZZxlz e69d3dce). 0 = N-dc1's image byte for byte. In the knob string only when non-zero. */
-#ifndef QSB_CODE_ROLL
-#define QSB_CODE_ROLL 2   /* N-dc1uq2r */
-#endif
-#if QSB_CODE_ROLL < 0 || QSB_CODE_ROLL > 3
-#error "QSB_CODE_ROLL is a mask of bits 0 (outer block in the front) and 1 (rolled gate): 0 to 3"
-#endif
-#if (QSB_CODE_ROLL & 1) && (QSB_ROOT_FILL || QSB_SHA_W0FOLD || QSB_OUTER_FMA_RT || !ZLAB_DUAL_EPOCH_SHA)
-#error "QSB_CODE_ROLL bit 0 is written for the paired front path (ZLAB_DUAL_EPOCH_SHA) with one outer form (QSB_ROOT_FILL, QSB_SHA_W0FOLD and QSB_OUTER_FMA_RT 0)"
-#endif
-#if (QSB_CODE_ROLL & 2) && (QSB_TAIL_STAGGER || QSB_TAIL_WEAVE)
-#error "QSB_CODE_ROLL bit 1 rolls qsb_pair_tail3_value's gate; QSB_TAIL_STAGGER / QSB_TAIL_WEAVE replace that function"
 #endif
 #include "../../chain_replay_field.cuh"
 #include "../../hit_filter_field.cuh"
@@ -3563,19 +3549,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         qsb_scheduled_window_hash_pair<2>(sA,sB,lane,f0,f1);
         qsb_pair_second_sha_z(sA,zpair.a);
         qsb_pair_second_sha_z(sB,zpair.b);
-    }
-#elif QSB_CODE_ROLL & 1
-    /* QSB_CODE_ROLL bit 0 (ercumentyildirim's form): the two epochs' states, not their z; qsb_pair_front3_z_value
-     * runs the outer block. */
-    QsbPairEpochZ zpair;
-    {
-        uint32_t stA[8],stB[8];
-        qsb_scheduled_window_hash_pair(stA,stB,lane,f0,f1);
-        #pragma unroll
-        for(int k=0;k<4;k++){
-            zpair.a[k]=((uint64_t)stA[2*k+1]<<32)|(uint64_t)stA[2*k];
-            zpair.b[k]=((uint64_t)stB[2*k+1]<<32)|(uint64_t)stB[2*k];
-        }
     }
 #else
     QsbPairEpochZ zpair=qsb_pair_epoch_z_value(f0,f1,lane);
@@ -5659,6 +5632,9 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 #if QSB_HIT_TELEMETRY
 #include "hit_telemetry.h"
 #endif
+#if QSB_RT_THERMAL && !QSB_HIT_TELEMETRY
+#error "QSB_RT_THERMAL reads QSB_HIT_TELEMETRY's NVML sampler: set QSB_HIT_TELEMETRY 1"
+#endif
 #include "qsb_host_verify.h"
 #if QSB_HOST_PRODUCERS && QSB_SLOT_PIPELINE && ZLAB_HITPATH
 #include "host_producers.h"
@@ -5982,12 +5958,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_YP_DC
 #endif
-#if QSB_CODE_ROLL   /* N-cr2/N-cr3: only when non-zero, so QSB_CODE_ROLL 0 builds N-dc1's image byte for byte */
-#define QSB_K16_CODE_ROLL QSB_CARRIER_KV(QSB_CODE_ROLL)
-#else
-#define QSB_K16_CODE_ROLL
-#endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
@@ -7280,6 +7251,11 @@ int main(int argc, char **argv) {
                "is <= %d%% of the first minute's (force %d s)\n", QSB_GATE_FMA_RT_AFTER_S, QSB_GATE_FMA_RT_RATIO_PCT,
                QSB_GATE_FMA_RT_FORCE_S);
 #endif
+#if QSB_RT_THERMAL
+        printf("  RT_THERMAL: on: the switches above also fire at the first batch boundary after %d s once NVML has reported "
+               "thermal slowdown (reasons 0x%llx) in %d consecutive 1 s samples\n", QSB_RT_THERMAL_MIN_S,
+               (unsigned long long)(QSB_RT_THERMAL_MASK), QSB_RT_THERMAL);
+#endif
 #endif
         while (1) {
             const int s = (int)(sp_batch_no & 1);
@@ -7372,6 +7348,13 @@ int main(int argc, char **argv) {
                 const bool have60 = tn - tw >= 60.0;
                 const double r60 = have60 ? (double)(sn - qrt_s[qrt_tail % QRT_N]) / (tn - tw) : 0.0;
                 (void)r60; (void)have60;
+#if QSB_RT_THERMAL
+                const bool therm = tn >= (double)QSB_RT_THERMAL_MIN_S &&
+                                   qtel::g_therm_streak.load(std::memory_order_relaxed) >= QSB_RT_THERMAL;
+#else
+                const bool therm = false;
+#endif
+                (void)therm;
 #if QSB_GATE_FMA_RT
                 if (!qfa_done) {
 #if QSB_GATE_FMA_RT_FORCE_S > 0
@@ -7379,15 +7362,16 @@ int main(int argc, char **argv) {
 #elif QSB_GATE_FMA_RT_FORCE_S < 0
                     const bool fire = false;
 #else
-                    const bool fire = tn >= (double)QSB_GATE_FMA_RT_AFTER_S && qrt_r1 > 0.0 && have60 &&
-                                      r60 <= qrt_r1 * (QSB_GATE_FMA_RT_RATIO_PCT / 100.0);
+                    const bool fire = therm || (tn >= (double)QSB_GATE_FMA_RT_AFTER_S && qrt_r1 > 0.0 && have60 &&
+                                      r60 <= qrt_r1 * (QSB_GATE_FMA_RT_RATIO_PCT / 100.0));
 #endif
                     if (fire) {
                         const unsigned fz = 0u;
                         const cudaError_t fe = QSB_TO_SYMBOL(QSB_GATE_FMA_C, &fz, sizeof(fz));
                         printf("  GATE_FMA_RT: plain gate hash from %.1f s after batch %llu: 60 s GPU rate %.1f M/s, "
-                               "first minute %.1f M/s (ratio %.3f)%s\n", tn, (unsigned long long)sp_batch_no, r60 / 1e6,
-                               qrt_r1 / 1e6, qrt_r1 > 0.0 ? r60 / qrt_r1 : 0.0, fe == cudaSuccess ? "" : " UPLOAD FAILED");
+                               "first minute %.1f M/s (ratio %.3f)%s%s\n", tn, (unsigned long long)sp_batch_no, r60 / 1e6,
+                               qrt_r1 / 1e6, qrt_r1 > 0.0 ? r60 / qrt_r1 : 0.0, therm ? " (thermal slowdown seen)" : "",
+                               fe == cudaSuccess ? "" : " UPLOAD FAILED");
                         fflush(stdout);
                         qfa_done = true;
                     }
@@ -7400,16 +7384,17 @@ int main(int argc, char **argv) {
 #elif QSB_QMIX_RT_FORCE_S < 0
                     const bool fire = false;
 #else
-                    const bool fire = tn >= (double)QSB_QMIX_RT_AFTER_S && qrt_r1 > 0.0 && have60 &&
-                                      r60 <= qrt_r1 * (QSB_QMIX_RT_RATIO_PCT / 100.0);
+                    const bool fire = therm || (tn >= (double)QSB_QMIX_RT_AFTER_S && qrt_r1 > 0.0 && have60 &&
+                                      r60 <= qrt_r1 * (QSB_QMIX_RT_RATIO_PCT / 100.0));
 #endif
                     if (fire) {
                         const unsigned qm = (unsigned)QSB_QMIX_RT_TARGET - 1u;
                         const cudaError_t qe = QSB_TO_SYMBOL(QSB_QMIX_MASK_C, &qm, sizeof(qm));
                         printf("  QMIX_RT: mask %u (Q_MIX %d) written at %.1f s after batch %llu: 60 s GPU rate %.1f M/s, "
-                               "first minute %.1f M/s (ratio %.3f)%s\n", qm, QSB_QMIX_RT_TARGET, tn,
+                               "first minute %.1f M/s (ratio %.3f)%s%s\n", qm, QSB_QMIX_RT_TARGET, tn,
                                (unsigned long long)sp_batch_no, r60 / 1e6, qrt_r1 / 1e6,
-                               qrt_r1 > 0.0 ? r60 / qrt_r1 : 0.0, qe == cudaSuccess ? "" : " UPLOAD FAILED");
+                               qrt_r1 > 0.0 ? r60 / qrt_r1 : 0.0, therm ? " (thermal slowdown seen)" : "",
+                               qe == cudaSuccess ? "" : " UPLOAD FAILED");
                         fflush(stdout);
                         qrt_done = true;
                     }
