@@ -1068,7 +1068,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_SHA_W0FOLD 0
 #endif
 #ifndef QSB_SHA_UEXIT
-#define QSB_SHA_UEXIT 0
+#define QSB_SHA_UEXIT 4
 #endif
 #if (QSB_SHA_W0FOLD != 0 && QSB_SHA_W0FOLD != 1) || QSB_SHA_UEXIT < 0 || QSB_SHA_UEXIT > 4
 #error "QSB_SHA_W0FOLD is 0 or 1; QSB_SHA_UEXIT is 0 to 4"
