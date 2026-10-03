@@ -1664,6 +1664,13 @@ static inline QCPU_AIF void qcpu_pf_rows(const pt *const *pr, int j0, int j1) {
  * and prefetches them (next group 0 first), so the table misses spread over the long backward pass instead
  * of bunching in the short forward pass; the forward pass only pulls its rows QSB_CPU_PFD groups ahead. */
 template <class RowFn>
+/* Independent forward-row prefetch spacing experiment: first four rows before
+ * current-row loads, remaining four after denominator construction. Addresses,
+ * hints and count are unchanged; timing, register lifetime and DTLB pressure are
+ * unmeasured. Macro0 retains the original eight-row burst. */
+#ifndef QSB_CPU_PF_FORWARD_SPLIT
+#define QSB_CPU_PF_FORWARD_SPLIT 1
+#endif
 Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, int G, const pt *const *rp, const __mmask8 *ng,
                            const pt **rpn, __mmask8 *ngn, const RowFn *nxt) {
     const int PF = QSB_CPU_PFD;
@@ -1675,11 +1682,13 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
     for (int g = 0; g < G; g += NC) {
         for (int c = 0; c < NC; c += 2) {
             const int hA = g + c, hB = hA + 1;
-            if (hA + PF < G) { const pt *const *pr = rp + (size_t)(hA + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
-            if (hB + PF < G) { const pt *const *pr = rp + (size_t)(hB + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            if (hA + PF < G) { const pt *const *pr = rp + (size_t)(hA + PF) * 8; for (int j = 0; j < (QSB_CPU_PF_FORWARD_SPLIT ? 4 : 8); j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            if (hB + PF < G) { const pt *const *pr = rp + (size_t)(hB + PF) * 8; for (int j = 0; j < (QSB_CPU_PF_FORWARD_SPLIT ? 4 : 8); j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
             fe8 txA, tyA, tA, txB, tyB, tB;
             pt8_load(txA, tyA, rp + (size_t)hA * 8); pt8_load(txB, tyB, rp + (size_t)hB * 8);
             fe8_sub_d(D[hA], txA, X[hA]); fe8_sub_d(D[hB], txB, X[hB]);
+            if (QSB_CPU_PF_FORWARD_SPLIT && hA + PF < G) { const pt *const *pr = rp + (size_t)(hA + PF) * 8; for (int j = 4; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            if (QSB_CPU_PF_FORWARD_SPLIT && hB + PF < G) { const pt *const *pr = rp + (size_t)(hB + PF) * 8; for (int j = 4; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
             fe8_sub_sgn_nf(tA, tyA, Y[hA], ng[hA]); fe8_sub_sgn_nf(tB, tyB, Y[hB], ng[hB]);
             if (QSB_CPU_JL_INV_FIRST && g == 0) {    /* QSB_CPU_JL_INV_FIRST (jacklightChen b1c5e58e): each chain starts at one; the copies stay mul-only IFMA inputs */
                 fe8_cp(PRE[hA], tA); fe8_cp(PRE[hB], tB);
@@ -1695,7 +1704,7 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
     for (int g = 0; g < G; g += NC) {
         for (int c = 0; c < NC; c++) {
             const int h = g + c;
-            if (h + PF < G) { const pt *const *pr = rp + (size_t)(h + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+            if (h + PF < G) { const pt *const *pr = rp + (size_t)(h + PF) * 8; for (int j = 0; j < (QSB_CPU_PF_FORWARD_SPLIT ? 4 : 8); j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
 #if QSB_CPU_WPRE
             /* weighted prefix: PRE[h] = (product of the earlier D of chain c) * (sign * ty - Y), so the backward pass's slope is
              * one product, lam = (1 / product through h) * PRE[h]; the table y is not kept */
@@ -1711,6 +1720,7 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             fe8_sub_lz(D[h], TX[h], X[h]);
             fe8_cp(PRE[h], run[c]);
 #endif
+            if (QSB_CPU_PF_FORWARD_SPLIT && h + PF < G) { const pt *const *pr = rp + (size_t)(h + PF) * 8; for (int j = 4; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
             if (QSB_CPU_JL_INV_FIRST >= 2 && QSB_CPU_WPRE && g == 0) fe8_cp(run[c], D[h]);
             else fe8_mul_lz(run[c], run[c], D[h]);
         }
