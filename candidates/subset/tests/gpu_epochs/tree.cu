@@ -6287,6 +6287,19 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Independent host-only runtime batch experiment. Keep the compiled maximum,
+     * allocations and carrier fingerprint unchanged. Producer/fence planning and
+     * both launch loops must use the same capacity, including short final batches.
+     * Macro0 and odd/tiny compiled block counts keep the original capacity. */
+#ifndef QSB_RUNTIME_BATCH_HALF
+#define QSB_RUNTIME_BATCH_HALF 1
+#endif
+#if QSB_RUNTIME_BATCH_HALF && ZLAB_LAUNCH_BLOCKS >= 2 && (ZLAB_LAUNCH_BLOCKS % 2) == 0
+    const uint64_t qsb_runtime_epochs_capacity = ((uint64_t)QSB_SE_LAUNCH_BLOCKS / 2) * QSB_PAIR_MUL;
+#else
+    const uint64_t qsb_runtime_epochs_capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
+#endif
+
     const size_t group_capacity = qsb_group_capacity(window_start, s_early,
         (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
 
@@ -6658,14 +6671,14 @@ int main(int argc, char **argv) {
         /* QSB_CPU_FENCE (CpuGrindSubset.h): with the co-grinder on, the GPU (and its host producers) walk [0, F) only;
          * qcpu::g_fence_n keeps C(137,6) for the release path (a co-grinder that goes off gives [F, N) back to the GPU). */
         const uint64_t qsb_fence_n = n_epochs;
-        n_epochs = qcpu::fence_plan(n_epochs, (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+        n_epochs = qcpu::fence_plan(n_epochs, qsb_runtime_epochs_capacity);
         if (n_epochs < qsb_fence_n)
             printf("  Fence: the GPU walks epochs [0, %llu) of %llu; the co-grinder takes the GPU's patterns above it\n",
                    (unsigned long long)n_epochs, (unsigned long long)qsb_fence_n);
 #endif
 #ifdef QSB_HP_ON
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
-                   (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+                   qsb_runtime_epochs_capacity);
 #endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
@@ -7344,7 +7357,7 @@ int main(int argc, char **argv) {
             }
 #endif
             const uint64_t epochs_left = n_epochs - epoch_base;
-            const uint64_t capacity = (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL;
+            const uint64_t capacity = qsb_runtime_epochs_capacity;
             const int epochs_in_batch = (int)(epochs_left < capacity ? epochs_left : capacity);
 #if QSB_SP_REFILL_FIRST
             const int launch_error = sp_launch(s, epoch_base, epochs_in_batch);
@@ -7473,7 +7486,7 @@ int main(int argc, char **argv) {
 #endif
         while (1) {
             uint64_t epochs_left = n_epochs - epoch_base;
-            const uint64_t capacity=(uint64_t)QSB_SE_LAUNCH_BLOCKS*QSB_PAIR_MUL;
+            const uint64_t capacity=qsb_runtime_epochs_capacity;
             const int epochs_in_batch=(int)(epochs_left<capacity?epochs_left:capacity);
             int nblk=(epochs_in_batch+QSB_PAIR_MUL-1)/QSB_PAIR_MUL;
             int batch_pos = nblk * QSB_SE_BLOCK;
