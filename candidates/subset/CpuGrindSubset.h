@@ -96,7 +96,7 @@
  * the previous file's behaviour. (1) QSB_CPU_BATCH_AUTO (the rule of 86c643ae's QSB_CPU_BATCH_SOLO, core_sharing and batch_choose,
  * taken as written): the candidates per batch are chosen in start() from the thread_siblings_list of the workers' CPUs, 4,096
  * (QSB_CPU_BATCH_SOLO) when no two workers can share a physical core (at most one worker per CPU and no two of their CPUs SMT
- * siblings; also with one worker), QSB_CPU_BATCH (1,024) whenever siblings are among the workers' CPUs, the topology is unreadable or
+ * siblings; also with one worker), QSB_CPU_BATCH (2,048, jungjipdo PR3313) whenever siblings are among the workers' CPUs, the topology is unreadable or
  * there are more workers than CPUs; QSB_CPU_BATCH_RT=<n> (dev) overrides. A larger batch spreads each window step's shared inversion
  * over more candidates; 1,024 was sized for two SMT threads' batch state in one 1 MB L2. The batch only regroups the same candidates
  * (the walk order and the hit set are unchanged). (2) QSB_CPU_KH16, QSB_CPU_MRG and QSB_CPU_AINL (a33e04c3's three items, taken as
@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* jungjipdo PR3313: amortize batch setup on shared cores; larger L2 footprint is a measured experiment */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -2531,12 +2531,63 @@ QSHA static __m128i qsha_keyhash4_h0(const fe *qx, const uint8_t *qp) {
 /* QSB_CPU_KH16 (a33e04c3): h0 of SHA-256 of the 16 keys whose message words W0..W8 are m[0..8] (lane = key); wk: 32 x 32 dwords of
  * scratch. Returns the prefilter mask of the 16 keys (bit k = key k's h0 has QSB_ZEROS_N leading zero bits). h0_out (dev builds
  * only, never in a ranked build): the 16 h0 values for the unit test. */
+/* Independent stream experiment: existing four-chain SHA kernel consumes a
+ * 256-byte rolling schedule instead of a full sixteen-key W+K scratch. */
+#ifndef QSB_CPU_KH16_STREAM4
+#define QSB_CPU_KH16_STREAM4 1
+#endif
+#if QSB_CPU_KH16_STREAM4 && QSB_CPU_SHA4
+QSHA static unsigned kh16_stream4(const uint32_t *m
+#ifdef QSB_CPU_DEVBENCH
+                                  , uint32_t *h0_out = nullptr
+#endif
+                                  ) {
+    unsigned pass = 0;
+    for (int L = 0; L < 4; L++) {
+        alignas(16) __m128i mr[16], a[4], b[4];
+#pragma GCC unroll 2
+        for (int q = 0; q < 2; q++) {
+            const uint32_t *p = m + 64 * q + 4 * L;
+            const __m128i w0 = _mm_load_si128((const __m128i *)(p + 0));
+            const __m128i w1 = _mm_load_si128((const __m128i *)(p + 16));
+            const __m128i w2 = _mm_load_si128((const __m128i *)(p + 32));
+            const __m128i w3 = _mm_load_si128((const __m128i *)(p + 48));
+            const __m128i t0 = _mm_unpacklo_epi32(w0, w1), t1 = _mm_unpackhi_epi32(w0, w1);
+            const __m128i t2 = _mm_unpacklo_epi32(w2, w3), t3 = _mm_unpackhi_epi32(w2, w3);
+            _mm_store_si128(mr + 0 + q, _mm_unpacklo_epi64(t0, t2));
+            _mm_store_si128(mr + 4 + q, _mm_unpackhi_epi64(t0, t2));
+            _mm_store_si128(mr + 8 + q, _mm_unpacklo_epi64(t1, t3));
+            _mm_store_si128(mr + 12 + q, _mm_unpackhi_epi64(t1, t3));
+        }
+#pragma GCC unroll 4
+        for (int e = 0; e < 4; e++) {
+            _mm_store_si128(mr + 4 * e + 2, _mm_cvtsi32_si128((int)m[128 + 4 * L + e]));
+            _mm_store_si128(mr + 4 * e + 3, _mm_set_epi32(264, 0, 0, 0));
+        }
+        qsha_rounds4m<(QSB_CPU_SHC != 0)>(mr, a, b);
+        const __m128i hv = _mm_unpackhi_epi64(_mm_unpackhi_epi32(a[0], a[1]), _mm_unpackhi_epi32(a[2], a[3]));
+        const __m128i hit = _mm_cmpeq_epi32(_mm_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm_setzero_si128());
+        pass |= (unsigned)_mm_movemask_ps(_mm_castsi128_ps(hit)) << (4 * L);
+#ifdef QSB_CPU_DEVBENCH
+        if (h0_out) _mm_storeu_si128((__m128i *)(h0_out + 4 * L), hv);
+#endif
+    }
+    return pass;
+}
+#endif
 template <bool PAD_READY = false>   /* QSB_CPU_JL_KH16_PAD_ONCE: true when wk's pairs 5..7 (rounds 10..15) were written once */
 QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #ifdef QSB_CPU_DEVBENCH
                                  , uint32_t *h0_out = nullptr
 #endif
                                  ) {
+#if QSB_CPU_KH16_STREAM4 && QSB_CPU_SHA4
+    return kh16_stream4(m
+#ifdef QSB_CPU_DEVBENCH
+                       , h0_out
+#endif
+                       );
+#else
 #define R16(x, n) _mm512_ror_epi32((x), (n))
 #define S0_16(x) _mm512_ternarylogic_epi32(R16(x, 7), R16(x, 18), _mm512_srli_epi32(x, 3), 0x96)
 #define S1_16(x) _mm512_ternarylogic_epi32(R16(x, 17), R16(x, 19), _mm512_srli_epi32(x, 10), 0x96)
@@ -2618,6 +2669,7 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
     const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
     return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
 #endif
+#endif  /* QSB_CPU_KH16_STREAM4: original full schedule retained with macro0 */
 }
 #endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */

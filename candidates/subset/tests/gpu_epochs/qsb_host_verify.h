@@ -81,6 +81,10 @@ static int qsb_hv_init(qsb_hv_t *h, const digest_params_t *dp, const uint8_t win
     return ok;
 }
 
+/* Fixed-width coordinate encoding; macro0/older libraries retain the original. */
+#ifndef QSB_HV_PUBKEY_PAD
+#define QSB_HV_PUBKEY_PAD 1
+#endif
 static int qsb_hv_zeros(const uint8_t *hh) {
     int n = 0;
     for (int i = 0; i < 32; i++) { if (hh[i] == 0) { n += 8; continue; } uint8_t b = hh[i]; while (!(b & 0x80)) { n++; b <<= 1; } break; }
@@ -126,9 +130,16 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
 #endif
         if (qok && !EC_POINT_is_at_infinity(h->grp, Q) &&
             EC_POINT_get_affine_coordinates(h->grp, Q, qx, qy, h->ctx)) {
-            uint8_t pub[33]; memset(pub, 0, sizeof pub);
+            uint8_t pub[33];
+#if QSB_HV_PUBKEY_PAD && OPENSSL_VERSION_NUMBER >= 0x10101000L && !defined(LIBRESSL_VERSION_NUMBER)
+            if (BN_bn2binpad(qx, pub + 1, 32) != 32) {
+#endif
+            memset(pub, 0, sizeof pub);
             int nb = BN_num_bytes(qx);
             if (nb > 0 && nb <= 32) BN_bn2bin(qx, pub + 1 + (32 - nb));
+#if QSB_HV_PUBKEY_PAD && OPENSSL_VERSION_NUMBER >= 0x10101000L && !defined(LIBRESSL_VERSION_NUMBER)
+            }
+#endif
             pub[0] = (uint8_t)(0x02 + (BN_is_odd(qy) ? 1 : 0));
             uint8_t hh[32]; SHA256(pub, 33, hh);
             ok = qsb_hv_zeros(hh) >= QSB_ZEROS_N;
