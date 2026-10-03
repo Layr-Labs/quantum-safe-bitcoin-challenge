@@ -586,7 +586,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  * ownership of freshly faulted lines), each build thread ending with a store fence. Same table entries; table_check and the
  * fixed-work hit set are the gates. Both are host-only start-up items, priced by the start-up timeline job. */
 #ifndef QSB_CPU_TOUCH_FUSE
-#define QSB_CPU_TOUCH_FUSE 0
+#define QSB_CPU_TOUCH_FUSE 1
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
