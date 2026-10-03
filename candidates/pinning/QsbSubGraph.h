@@ -67,7 +67,7 @@ static bool entry(const char *name, void **ptr, unsigned version) {
 static bool init(const cudaStream_t prepare[2], const cudaStream_t root[2], const cudaStream_t finish[2],
                  bool register_roots) {
     if (!QSB_SUBGRAPH || getenv("QSB_SUBGRAPH_OFF") || !qsb_carrier_has(QK_S0) || !qsb_carrier_has(QK_S2) ||
-        !qsb_carrier_has(register_roots ? QK_RR : QK_RF))
+        !qsb_carrier_has(register_roots ? QSB_REGISTER_ROOT_KID : QK_RF))
         return false;
     if (!entry("cuGraphKernelNodeGetParams", (void**)&get_params, 12000) ||
         !entry("cuGraphExecNodeSetParams", (void**)&set_params, 12020) ||

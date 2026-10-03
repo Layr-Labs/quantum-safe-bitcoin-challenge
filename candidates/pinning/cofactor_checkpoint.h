@@ -665,7 +665,7 @@ typedef const uint32_t *qsb_t5v_tp;
 
 /* Wave W on warp WARP; tp points at this thread's entry of wave 0 (index tid). */
 template<int W,int N,int WARP=0> __device__ __forceinline__ void qsb_t5v_wave(uint64_t *roots, char *T, qsb_t5v_tp tp) {
-    const int tid=threadIdx.x;
+    const int tid=QSB_P_TID;
     if(WARP==0 ? tid<32 : (unsigned)(tid-32*WARP)<32u) {
 #if QSB_POST_GLUE & 2
         const uint4 op=__ldg(tp+(W*32-32*WARP));
@@ -681,7 +681,7 @@ template<int W,int N,int WARP=0> __device__ __forceinline__ void qsb_t5v_wave(ui
             QSB_T5V_MUL(o,a,b);
             if(W==4 && kind==3u) {
                 #pragma unroll
-                for(int k=0;k<4;k++)roots[(size_t)blockIdx.x*4+k]=o[k];
+                for(int k=0;k<4;k++)roots[(size_t)QSB_P_BLOCK*4+k]=o[k];
             } else {
                 qsb_tv_st(T,io,o);
             }
@@ -693,7 +693,7 @@ template<int W,int N,int WARP=0> __device__ __forceinline__ void qsb_t5v_wave(ui
 /* One up-sweep level (count nodes to count/2) and one down-sweep level, as in the loops of
  * qsb_cofactor_top5 at the iteration with this count and offset. */
 template<int N,int COUNT,int OFFSET> __device__ __forceinline__ void qsb_t5v_up(char *T) {
-    const int tid=threadIdx.x;
+    const int tid=QSB_P_TID;
     constexpr int half=COUNT>>1;
 #if QSB_TREE_TOP5 == 2
     const int j=tid-half;
@@ -710,7 +710,7 @@ template<int N,int COUNT,int OFFSET> __device__ __forceinline__ void qsb_t5v_up(
     if(half>32)__syncthreads();else __syncwarp();
 }
 template<int N,int COUNT,int OFFSET> __device__ __forceinline__ void qsb_t5v_down(char *T) {
-    const int tid=threadIdx.x;
+    const int tid=QSB_P_TID;
     constexpr int half=COUNT>>1;
 #if QSB_TREE_TOP5 == 2
     const int j=tid^(COUNT&64);
@@ -731,7 +731,7 @@ template<int N,int COUNT,int OFFSET> __device__ __forceinline__ void qsb_t5v_dow
 template<int N> __device__ __forceinline__ void qsb_cofactor_top5v(
     uint64_t *value, const uint64_t *U, uint64_t *roots, char *T) {
     static_assert(N==128,"QSB_TREE_TOP5 slot plan is for 128-leaf trees");
-    const int tid=threadIdx.x;
+    const int tid=QSB_P_TID;
     const int ucol=QSB_T5_U(tid);
     qsb_tv_st(T,16u*QSB_GF_P(tid),value);
     qsb_tv_st(T,16u*ucol,U);

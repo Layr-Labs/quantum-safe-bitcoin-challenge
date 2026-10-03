@@ -52,6 +52,9 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
+#if QSB_HALF_SUBPIPE
+    QK_RR512,    /* qsb_root_register512 (optional carrier image) */
+#endif
     QK_N
 };
 
@@ -65,6 +68,18 @@ static QsbCarrierState g_qsb_carrier = {0, 0, nullptr, {}};
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
+#ifndef QSB_CARRIER_ASICBOOST8
+#define QSB_CARRIER_ASICBOOST8 0
+#endif
+#if QSB_CARRIER_ASICBOOST8 != QSB_ASICBOOST8
+#error "Carrier ASICBOOST8 geometry mismatch; regenerate with build_carrier.sh zeros ASICBOOST8 HALF"
+#endif
+#ifndef QSB_CARRIER_HALF_SUBPIPE
+#define QSB_CARRIER_HALF_SUBPIPE 0
+#endif
+#if QSB_CARRIER_HALF_SUBPIPE != QSB_HALF_SUBPIPE
+#error "Carrier halfpipe marker mismatch; regenerate with build_carrier.sh zeros ASICBOOST8 HALF"
+#endif
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -127,6 +142,9 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     fixed[QK_RF] = rf_name;
     fixed[QK_RR] = "_Z17qsb_root_registerPmi";
     fixed[QK_PFC] = "_Z29qsb_prefix_field_check_kernelPj";
+#if QSB_HALF_SUBPIPE
+    fixed[QK_RR512] = "_Z20qsb_root_register512Pmi";
+#endif
     int all = 1;
     for (int i = 0; i < QK_N; i++) {
         g_qsb_carrier.k[i] = nullptr;
@@ -146,7 +164,11 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     e = cudaLibraryGetGlobal(&dz, &zb, g_qsb_carrier.lib, "qsb_carrier_zeros");
     if (e == cudaSuccess && zb == sizeof(int))
         e = cudaMemcpy(&zeros, dz, sizeof(int), cudaMemcpyDeviceToHost);
+#if QSB_ASICBOOST8 || QSB_HALF_SUBPIPE
+    if (e != cudaSuccess || zeros != (QSB_ZEROS_N | (QSB_ASICBOOST8 ? 0x20000 : 0) | (QSB_HALF_SUBPIPE ? 0x40000 : 0))) { qsb_carrier_off("image built for another ASICBOOST8/halfpipe fingerprint"); return; }
+#else
     if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
+#endif
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",

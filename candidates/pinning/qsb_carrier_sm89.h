@@ -3,6 +3,8 @@
  * cubin sha256 2ae6c12c4693eec356a8d09e35aa3f9459e3dbfcf51d52720ba359b94d3d54d6; 473248 bytes; prepare kernel LTC64B loads: 5. */
 #pragma once
 #include <stddef.h>
+#define QSB_CARRIER_ASICBOOST8 0
+#define QSB_CARRIER_HALF_SUBPIPE 0
 static const size_t qsb_carrier_cubin_bytes = 473248;
 static const char qsb_carrier_cubin_sha256[] = "2ae6c12c4693eec356a8d09e35aa3f9459e3dbfcf51d52720ba359b94d3d54d6";
 static const char *const qsb_carrier_kernel_names[] = {

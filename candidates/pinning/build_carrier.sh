@@ -2,18 +2,22 @@
 # Regenerate qsb_carrier_sm89.h, the native sm_89 image that QsbCarrier.h loads.
 # Development tool, never run by the ranked harness. Rerun after ANY edit to
 # pinning.cu or a header it includes, with the same CUDA toolkit as the runner (12.8).
-#   ./build_carrier.sh [QSB_ZEROS_N]
+#   ./build_carrier.sh [QSB_ZEROS_N] [QSB_ASICBOOST8: 0 or 1] [QSB_HALF_SUBPIPE: 0 or 1]
 set -euo pipefail
 cd "$(dirname "$0")"
 Z=${1:-24}
+A8=${2:-1}
+HALF=${3:-0}
+case "$A8" in 0|1) ;; *) echo "ASICBOOST8 must be 0 or 1" >&2; exit 2;; esac
+case "$HALF" in 0|1) ;; *) echo "HALF_SUBPIPE must be 0 or 1" >&2; exit 2;; esac
 W=$(mktemp -d)   # logs and the raw cubin stay out of the submission directory
-nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
+nvcc -O3 -DQSB_ZEROS_N="$Z" -DQSB_ASICBOOST8="$A8" -DQSB_HALF_SUBPIPE="$HALF" -DQSB_CARRIER_BUILD=1 -arch=sm_89 -cubin \
      -Xptxas -v -o "$W/c.cubin" pinning.cu 2> "$W/ptxas.log"
 cuobjdump -symbols "$W/c.cubin" > "$W/symbols.txt"
 cuobjdump -sass "$W/c.cubin" > "$W/sass.txt"
-python3 - "$Z" "$W" <<'PY'
+python3 - "$Z" "$W" "$A8" "$HALF" <<'PY'
 import base64, hashlib, re, sys
-zeros = int(sys.argv[1]); W = sys.argv[2]
+zeros = int(sys.argv[1]); W = sys.argv[2]; asic8 = int(sys.argv[3]); half = int(sys.argv[4])
 syms = open(W + "/symbols.txt").read()
 want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_S0",    r"_Z23kernel_pinning_pipelineILb1ELi0EE\w+"),
@@ -27,6 +31,8 @@ want = [  # order must match enum QsbCarrierKernel in QsbCarrier.h
     ("QK_RR",    r"_Z17qsb_root_register\w+"),             # optional
     ("QK_PFC",   r"_Z29qsb_prefix_field_check_kernel\w+"),  # optional
 ]
+if half:
+    want.append(("QK_RR512", r"_Z20qsb_root_register512\w+"))
 optional = {"QK_RF", "QK_RR", "QK_PFC"}
 names = []
 for kid, pat in want:
@@ -58,6 +64,8 @@ with open("qsb_carrier_sm89.h", "w") as f:
     f.write(f" * built with -DQSB_CARRIER_BUILD=1 -DQSB_ZEROS_N={zeros} -arch=sm_89.\n")
     f.write(f" * cubin sha256 {sha}; {len(img)} bytes; prepare kernel LTC64B loads: {n_hint}. */\n")
     f.write("#pragma once\n#include <stddef.h>\n")
+    f.write(f"#define QSB_CARRIER_ASICBOOST8 {asic8}\n")
+    f.write(f"#define QSB_CARRIER_HALF_SUBPIPE {half}\n")
     f.write(f"static const size_t qsb_carrier_cubin_bytes = {len(img)};\n")
     f.write(f'static const char qsb_carrier_cubin_sha256[] = "{sha}";\n')
     f.write("static const char *const qsb_carrier_kernel_names[] = {\n")
