@@ -929,8 +929,25 @@ static Slot *acquire(int64_t k) {
     for (int i = 0; i < NSLOT; i++)
         if (h->slot[i].batch == k && (h->slot[i].state == S_PROD || h->slot[i].state == S_READY)) s = &h->slot[i];
     if (!h->active) { if (s) abandon_locked(h, s); return nullptr; }
-    if (s && s->state == S_PROD && h->wait_ms > 0)
-        h->cv_ready.wait_for(lk, std::chrono::milliseconds(h->wait_ms), [&] { return s->state == S_READY || h->dead; });
+    if (s && s->state == S_PROD && h->wait_ms > 0) {
+        /* Independent host-only wait policy: an unfinished batch far outside the
+         * wait budget goes directly to the existing GPU fallback. Readiness and
+         * every slot ownership transition remain protected by this same lock.
+         * Unknown startup timing and macro0 retain the original bounded wait. */
+#ifndef QSB_HP_WAIT_NEAR_END
+#define QSB_HP_WAIT_NEAR_END 1
+#endif
+        bool wait_near_end = true;
+#if QSB_HP_WAIT_NEAR_END
+        if (h->tchunk > 0.0 && h->nthreads > 0) {
+            const int remaining = s->nchunks - s->done_chunks;
+            const int waves = remaining > 0 ? (remaining + h->nthreads - 1) / h->nthreads : 0;
+            wait_near_end = (double)waves * h->tchunk <= h->wait_ms * 1e-3;
+        }
+#endif
+        if (wait_near_end)
+            h->cv_ready.wait_for(lk, std::chrono::milliseconds(h->wait_ms), [&] { return s->state == S_READY || h->dead; });
+    }
     if (s && s->state == S_READY && !h->dead) {
         s->state = S_UPLOAD; h->n_host++; h->consec_fb = 0;
         int ahead = 0;
