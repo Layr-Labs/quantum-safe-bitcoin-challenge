@@ -179,6 +179,9 @@ static QI_INL void fpermx(vfe *r, const vfe *a, int k) {
     for (int j = 0; j < 5; j++)
         r->n[j] = (V)(k == 1 ? _mm256_permute4x64_epi64((__m256i)a->n[j], 0xB1) : _mm256_permute4x64_epi64((__m256i)a->n[j], 0x4E));
 }
+#ifndef QSB_CG_TR4_SHUF128
+#define QSB_CG_TR4_SHUF128 1
+#endif
 /* gather x (half 0) or y (half 1) words of 4 table entries, transposed to one V per word */
 static QI_INL void tr4(V w[4], const tentry *e0, const tentry *e1, const tentry *e2, const tentry *e3, int half) {
     __m256i r0 = _mm256_load_si256((const __m256i *)((const uint8_t *)e0 + 32 * half));
@@ -187,8 +190,13 @@ static QI_INL void tr4(V w[4], const tentry *e0, const tentry *e1, const tentry 
     __m256i r3 = _mm256_load_si256((const __m256i *)((const uint8_t *)e3 + 32 * half));
     __m256i t0 = _mm256_unpacklo_epi64(r0, r1), t1 = _mm256_unpackhi_epi64(r0, r1);
     __m256i t2 = _mm256_unpacklo_epi64(r2, r3), t3 = _mm256_unpackhi_epi64(r2, r3);
+#if QSB_CG_TR4_SHUF128
+    w[0] = (V)_mm256_shuffle_i64x2(t0, t2, 0); w[2] = (V)_mm256_shuffle_i64x2(t0, t2, 3);
+    w[1] = (V)_mm256_shuffle_i64x2(t1, t3, 0); w[3] = (V)_mm256_shuffle_i64x2(t1, t3, 3);
+#else
     w[0] = (V)_mm256_permute2x128_si256(t0, t2, 0x20); w[2] = (V)_mm256_permute2x128_si256(t0, t2, 0x31);
     w[1] = (V)_mm256_permute2x128_si256(t1, t3, 0x20); w[3] = (V)_mm256_permute2x128_si256(t1, t3, 0x31);
+#endif
 }
 static QI_INL void gather_x(vfe *x, const tentry *const *e) { V w[4]; tr4(w, e[0], e[1], e[2], e[3], 0); from_w(x, w[0], w[1], w[2], w[3]); }
 static QI_INL void gather_y(vfe *y, const tentry *const *e) { V w[4]; tr4(w, e[0], e[1], e[2], e[3], 1); from_w(y, w[0], w[1], w[2], w[3]); }

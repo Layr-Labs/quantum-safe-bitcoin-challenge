@@ -50,6 +50,15 @@
 #ifndef QSB_HOST_GATE
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
 #endif
+#ifndef QSB_HOST_RECID_DIGEST_REUSE
+#define QSB_HOST_RECID_DIGEST_REUSE 1
+#endif
+#ifndef QSB_HOST_GATE_JOINT
+#define QSB_HOST_GATE_JOINT 1
+#endif
+#ifndef QSB_BATCH_OUTPUT
+#define QSB_BATCH_OUTPUT 1
+#endif
 #ifndef QSB_FEED_BLOCK
 #define QSB_FEED_BLOCK 2 /* HY24 (host only): 0 = CUDA's default spin wait (the feeder thread burns a core).
                           * 1 = blocking sync (context flag + blocking slot events), and the co-grinder may use
@@ -5769,15 +5778,7 @@ static int qsb_host_zeros(const uint8_t *h) {
     return z;
 }
 
-/* Exact CPU re-derivation of one (sequence, locktime, recid) against the
- * problem constants. Matches harness/crypto.py and harness/problem.py:
- * z = SHA256d(prefix||suffix), Q = u1·G ± u2R with + for recid 0,
- * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
- * 155-block midstate with SHA-256 padding, the same two-block path the
- * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+static int qsb_host_digest(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, uint8_t d2[32]) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5813,9 +5814,45 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
+    return 1;
+}
 
+static int qsb_host_exact_hit_digest(const uint8_t d2[32], int recid,
+                                     EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                     const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_GATE_JOINT
+    BIGNUM *z = BN_bin2bn(d2, 32, NULL);
+    BIGNUM *u1 = BN_new();
+    EC_POINT *Q = EC_POINT_new(grp);
+    EC_POINT *R = EC_POINT_dup(Ru2, grp);
+    int ok = 0;
+    if (z && u1 && Q && R &&
+        BN_mod_mul(u1, z, nri, order, ctx)) {
+        if (recid) EC_POINT_invert(grp, R, ctx);
+        if (EC_POINT_mul(grp, Q, u1, R, BN_value_one(), ctx)) {
+            BIGNUM *qx = BN_new(), *qy = BN_new();
+            if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
+                uint8_t pub[33], xb[32];
+                memset(xb, 0, 32);
+                int nbytes = BN_num_bytes(qx);
+                if (nbytes > 0 && nbytes <= 32) BN_bn2bin(qx, xb + (32 - nbytes));
+                pub[0] = (uint8_t)(0x02 + (BN_is_odd(qy) ? 1 : 0));
+                memcpy(pub + 1, xb, 32);
+                uint8_t hh[32];
+                SHA256(pub, 33, hh);
+                ok = qsb_host_zeros(hh) >= QSB_ZEROS_N;
+            }
+            BN_free(qx);
+            BN_free(qy);
+        }
+    }
+    BN_free(z);
+    BN_free(u1);
+    EC_POINT_free(Q);
+    EC_POINT_free(R);
+    return ok;
+#else
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
     EC_POINT *P = EC_POINT_new(grp);
@@ -5849,6 +5886,21 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT_free(Q);
     EC_POINT_free(R);
     return ok;
+#endif
+}
+
+/* Exact CPU re-derivation of one (sequence, locktime, recid) against the
+ * problem constants. Matches harness/crypto.py and harness/problem.py:
+ * z = SHA256d(prefix||suffix), Q = u1·G ± u2R with + for recid 0,
+ * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
+ * 155-block midstate with SHA-256 padding, the same two-block path the
+ * GPU uses for suffix_len=75. */
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return 0;
+    return qsb_host_exact_hit_digest(d2, recid, grp, ctx, order, nri, Ru2);
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
@@ -5857,9 +5909,17 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_RECID_DIGEST_REUSE
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return -1;
+    if (qsb_host_exact_hit_digest(d2, ri, grp, ctx, order, nri, Ru2)) return ri;
+    if (qsb_host_exact_hit_digest(d2, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+    return -1;
+#else
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
     return -1;
+#endif
 }
 #endif
 
@@ -7098,6 +7158,61 @@ int main(int argc, char **argv) {
             FILE *f = fopen(fname, "a");
             int wrote = 0;
             if (f) {
+#if QSB_BATCH_OUTPUT
+                char out_buf[64 * 96];
+                size_t out_len = 0;
+                int buf_err = 0;
+                for (int h = 0; h < nh; h++) {
+                    uint32_t raw = hits[h];
+#if QSB_REFILL_BEFORE_GATE
+                    const uint32_t base_seq = hit_seq, base_lt = hit_lt;
+#else
+                    const uint32_t base_seq = slot_seq[s], base_lt = slot_lt[s];
+#endif
+                    const uint32_t hi = raw & 0x3FFFFFFF;
+#if QSB_ASICBOOST
+                    /* candidate hi: block hi>>7 (32 locktimes), warp (hi>>5)&3 = sequence
+                     * base_seq + warp*effective_total, lane hi&31 */
+                    const uint32_t lt = base_lt + ((hi >> 7) << 5) + (hi & 31u);
+                    const uint32_t hs = base_seq + ((hi >> 5) & (uint32_t)(QSB_AB_K - 1)) * (uint32_t)effective_total;
+#else
+                    const uint32_t lt = base_lt + hi;
+                    const uint32_t hs = base_seq;
+#endif
+                    int ri = (raw >> 30) & 1;
+                    int hc = (raw >> 31) & 1;
+                    /* One line per hit: harness/gpu_wrap.py searches every line for
+                     * sequence=/locktime=/recid= and starts a new record at each
+                     * sequence=, so the record parses identically; hash_choice is not
+                     * read by the harness (single_hash mode, always 0). Fewer lines
+                     * shorten the in-window hit parse. */
+                    (void)hc;
+#if QSB_HOST_GATE
+                    ri = qsb_gate_accept(&pp, hs, lt, ri,
+                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+                    if (ri < 0) continue;
+#endif
+                    int n = snprintf(out_buf + out_len, sizeof(out_buf) - out_len,
+                                     "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
+                    if (n < 0 || (size_t)n >= sizeof(out_buf) - out_len) {
+                        buf_err = 1;
+                        break;
+                    }
+                    out_len += (size_t)n;
+                    wrote = 1;
+                }
+                if (buf_err) {
+                    fclose(f);
+                    return 1;
+                }
+                if (out_len > 0) {
+                    if (fwrite(out_buf, 1, out_len, f) != out_len) {
+                        fclose(f);
+                        return 1;
+                    }
+                }
+                fclose(f);
+#else
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
 #if QSB_REFILL_BEFORE_GATE
@@ -7132,6 +7247,7 @@ int main(int argc, char **argv) {
                     wrote = 1;
                 }
                 fclose(f);
+#endif
             }
             if (wrote) found = 1;
         }
