@@ -559,19 +559,21 @@ __device__ uint64_t BINOM_C[151][10];
 #if QSB_Q_MIX && !QSB_Q_P18
 #error "QSB_Q_MIX mixes the GLV12 Q layout into the QSB_Q_P18 chain"
 #endif
-/* QSB_Q_SPREAD (exploratory; needs QSB_Q_MIX 4 and QSB_SE_BLOCK 256): the same one warp in four decodes
- * Q with the six GLV12 terms, but a block's two such warps are warps 0 and 7 instead of 0 and 4. A block's
- * warp w issues on sub-partition w % 4 (lane T's model), so the QSB_Q_MIX choice puts both of the slower
- * warps on sub-partition 0; this puts them on 0 and 3. Both layouts sum Q to the same point, so every
- * candidate's z*A and hit set are unchanged. 0 = the QSB_Q_MIX choice byte for byte. */
+/* QSB_Q_SPREAD (exploratory warp scheduling): preserve the Q-layout ratio while moving the GLV12 warps
+ * across the modeled memory sub-partitions. 0 = the QSB_Q_MIX choice byte for byte; 1 is for Q_MIX 4,
+ * and 2 is for the current Q_MIX 2. Both layouts sum Q to the same point, so candidates and hits are unchanged.
+ * The w % 4 assignment is a hardware hypothesis; only a ranked run can show whether spreading helps. */
 #ifndef QSB_Q_SPREAD
-#define QSB_Q_SPREAD 0
+#define QSB_Q_SPREAD 2
 #endif
-#if QSB_Q_SPREAD != 0 && QSB_Q_SPREAD != 1
-#error "QSB_Q_SPREAD must be 0 or 1"
+#if QSB_Q_SPREAD < 0 || QSB_Q_SPREAD > 2
+#error "QSB_Q_SPREAD must be 0, 1 or 2"
 #endif
-#if QSB_Q_SPREAD && QSB_Q_MIX != 4
-#error "QSB_Q_SPREAD is written for QSB_Q_MIX 4"
+#if QSB_Q_SPREAD == 1 && QSB_Q_MIX != 4
+#error "QSB_Q_SPREAD 1 is written for QSB_Q_MIX 4"
+#endif
+#if QSB_Q_SPREAD == 2 && QSB_Q_MIX != 2
+#error "QSB_Q_SPREAD 2 is written for QSB_Q_MIX 2"
 #endif
 /* QSB_PSI_HOIST (default 0: every form failed the register gate on this tree, see below).
  * Bit 0 is the nested-loop form of the public QSB_BETA_OUT (fdd6302e) and QSB_PHI_HOIST (aabc3509) for
@@ -2244,7 +2246,11 @@ __device__ void qsb_filter_chain_trial(uint64_t *X, uint64_t *Y, uint64_t *ZZ, u
      * loop index, as in the fixed chain; qsb_s3_selfcheck replays this schedule for both rows. */
 #if QSB_Q_SPREAD
     const unsigned wib = (threadIdx.x >> 5) & 7u;   /* warp in the block (QSB_SE_BLOCK 256: 8 warps) */
+#if QSB_Q_SPREAD == 1
     const unsigned g = (wib == 0u) | (wib == 7u);
+#else /* QSB_Q_SPREAD == 2: one GLV12 warp on each modeled sub-partition */
+    const unsigned g = (wib == 0u) | (wib == 3u) | (wib == 5u) | (wib == 6u);
+#endif
 #elif QSB_QMIX_RT
     const unsigned g = (((blockIdx.x * blockDim.x + threadIdx.x) >> 5) & QSB_QMIX_MASK_C) == 0u;   /* QSB_QMIX_RT */
 #else
