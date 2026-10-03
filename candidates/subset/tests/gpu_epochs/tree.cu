@@ -5865,7 +5865,17 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
             memset(&av, 0, sizeof(av));
             av.accessPolicyWindow.base_ptr  = (void *)d_gt;
             av.accessPolicyWindow.num_bytes = want;
+            /* Independent host-only retention experiment: same table/window,
+             * retain 7/8 of eligible accesses; macro0 keeps the full policy.
+             * A hint fraction, not a measured hit ratio or a stream count. */
+#ifndef QSB_TABLE_L2_RETAIN_7_8
+#define QSB_TABLE_L2_RETAIN_7_8 1
+#endif
+#if QSB_TABLE_L2_RETAIN_7_8
+            av.accessPolicyWindow.hitRatio  = 0.875f;
+#else
             av.accessPolicyWindow.hitRatio  = 1.0f;
+#endif
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
             for (int s = 0; s < n_streams && we == cudaSuccess; s++)
