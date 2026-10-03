@@ -683,6 +683,15 @@ __device__ __constant__ uint8_t COMBO_SYMBOLS[100] = {
     0x00,0x7F,0xFF,0x09,0x0D
 };
 
+/* Earlier lifetime end for already-loaded finish state, after pochita0's
+ * unpromoted early-discard design (publicly described by i34-9).
+ * 0 retains the promoted b59 timing and its native carrier. */
+#ifndef QSB_STATE_DROP_EARLY
+#define QSB_STATE_DROP_EARLY 1
+#endif
+#if QSB_STATE_DROP_EARLY != 0 && QSB_STATE_DROP_EARLY != 1
+#error "QSB_STATE_DROP_EARLY must be 0 or 1"
+#endif
 #include "GPUHash.h"
 #include "GLVScalar.cuh"
 
@@ -2266,7 +2275,18 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #define QSB_ZEROS_N 24
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
-__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+#if QSB_STATE_DROP_EARLY && (QSB_L2STATE != 1033 || QSB_PREP_STATE != 2 || \
+    QSB_TREE_N != 128 || QSB_S2_THREADS != 128 || QSB_STATE_PLANES != 4u || \
+    QSB_PROBE_NOSTATE || QSB_PROBE_NOS2 || QSB_ZEROS_N < 0 || QSB_ZEROS_N > 256)
+#error "QSB_STATE_DROP_EARLY requires the b59 four-plane N128 finish and valid SHA-256 zeros"
+#endif
+/* Feature bit 9 is disjoint from every valid SHA-256 zeros count (0..256). */
+#if QSB_STATE_DROP_EARLY
+#define QSB_CARRIER_FINGERPRINT (QSB_ZEROS_N | 0x00000200)
+#else
+#define QSB_CARRIER_FINGERPRINT QSB_ZEROS_N
+#endif
+__device__ __constant__ int qsb_carrier_zeros = QSB_CARRIER_FINGERPRINT;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -4310,6 +4330,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
+#if QSB_STATE_DROP_EARLY
+#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+    /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
+     * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
+     * warp's loads were one instruction per plane, so the whole 8-lane group has its data. */
+    asm volatile("membar.cta; bar.warp.sync 0xffffffff;" ::: "memory");
+    if((threadIdx.x&7u)==0u){
+        const ulonglong2 *dst=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+        qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
+        qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
+    }
+#endif
+#endif
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
 #if QSB_PK_ON
         if(pk_rec)((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=0u;
@@ -4351,6 +4384,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
+#if !QSB_STATE_DROP_EARLY
 #if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
      * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
@@ -4361,6 +4395,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
         qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
     }
+#endif
 #endif
 
 #if QSB_PK_ON
@@ -5775,9 +5810,10 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+#ifndef QSB_HOST_RECID_DIGEST_REUSE
+#define QSB_HOST_RECID_DIGEST_REUSE 1
+#endif
+static int qsb_host_digest(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, uint8_t d2[32]) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5813,9 +5849,13 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
 
+    return 1;
+}
+static int qsb_host_exact_hit_digest(const uint8_t d2[32], int recid,
+                                    EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                    const BIGNUM *nri, const EC_POINT *Ru2) {
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
     EC_POINT *P = EC_POINT_new(grp);
@@ -5849,6 +5889,13 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT_free(Q);
     EC_POINT_free(R);
     return ok;
+ }
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return 0;
+    return qsb_host_exact_hit_digest(d2, recid, grp, ctx, order, nri, Ru2);
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
@@ -5857,8 +5904,15 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_RECID_DIGEST_REUSE
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return -1;
+    if (qsb_host_exact_hit_digest(d2, ri, grp, ctx, order, nri, Ru2)) return ri;
+    if (qsb_host_exact_hit_digest(d2, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#else
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#endif
     return -1;
 }
 #endif
