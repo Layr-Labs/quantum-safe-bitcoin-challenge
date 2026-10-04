@@ -369,7 +369,19 @@ static bool build_tables(Params &P, const uint8_t *prem, int prl) {
     return true;
 }
 /* Per-thread cache of the first-block class schedules by remainder value (w0, w1). */
+#ifndef QSB_HP_CACHE_CLOCK64
+#define QSB_HP_CACHE_CLOCK64 1
+#endif
+#if QSB_HP_CACHE_CLOCK64
+/* One lookup per produced epoch, including abandoned work. This thread-local
+ * cache survives chunk boundaries: a signed 32-bit tick can overflow during a
+ * long walk. Keep the same zero-age validity, minimum-age replacement and exact
+ * 8-byte key with unsigned 64-bit ages; all supported combination spaces fit.
+ * The larger metadata can cost another cache line; no speedup is assumed. */
+struct ClsCache { enum { N = 4 }; uint64_t key[N], age[N], tick; alignas(64) uint32_t rows[N][NCLS][64]; };
+#else
 struct ClsCache { enum { N = 4 }; uint64_t key[N]; int age[N]; int tick; alignas(64) uint32_t rows[N][NCLS][64]; };
+#endif
 static const uint32_t *cls_rows(const Params &P, ClsCache &cc, uint32_t w0, uint32_t w1) {
     const uint64_t key = (uint64_t)w0 << 32 | w1;
     cc.tick++;
