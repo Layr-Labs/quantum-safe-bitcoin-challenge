@@ -589,7 +589,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #define QSB_CPU_TOUCH_FUSE 0
 #endif
 #ifndef QSB_CPU_BUILD_NT
-#define QSB_CPU_BUILD_NT 0
+#define QSB_CPU_BUILD_NT 1
 #endif
 
 namespace qcpu {
@@ -2130,7 +2130,7 @@ Q8TX static bool build8_block(pt *dst, const pt *src, const pt &Q, Build8 &b) {
 }
 #if QSB_CPU_BUILD_NT
 Q8TX static void nt_copy_rows(pt *dst, const pt *src, size_t n) {   /* QSB_CPU_BUILD_NT: the fold's copy back */
-    for (size_t i = 0; i < n; i++) _mm512_stream_si512((__m512i *)&dst[i], _mm512_load_si512((const void *)&src[i]));
+    for (size_t i = 0; i < n; i++) _mm512_stream_si512((__m512i *)&dst[i], _mm512_loadu_si512((const void *)&src[i]));
 }
 #endif
 #endif  /* QCPU_VEC */
