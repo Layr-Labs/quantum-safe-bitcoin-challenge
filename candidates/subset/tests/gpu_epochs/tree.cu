@@ -1534,7 +1534,7 @@ __device__ __forceinline__ void qsb_complete_last_add(
  * Ranked: value 2 is ercumentyildirim's (dea321f0), drawn by DPZZxlz, terrapinelf and jungjipdo; value 3 was drawn
  * once (DPZZxlz e69d3dce). 0 = N-dc1's image byte for byte. In the knob string only when non-zero. */
 #ifndef QSB_CODE_ROLL
-#define QSB_CODE_ROLL 2   /* N-dc1uq2r */
+#define QSB_CODE_ROLL 3   /* Probe 8: add rolled outer block to the already-ranked rolled gate */
 #endif
 #if QSB_CODE_ROLL < 0 || QSB_CODE_ROLL > 3
 #error "QSB_CODE_ROLL is a mask of bits 0 (outer block in the front) and 1 (rolled gate): 0 to 3"
