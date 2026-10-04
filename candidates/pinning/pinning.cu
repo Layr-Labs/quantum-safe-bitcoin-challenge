@@ -281,7 +281,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
 #ifndef QSB_BATCH
-#define QSB_BATCH 4194304    /* candidates per pipeline launch */
+#define QSB_BATCH 6291456    /* 6M candidates per pipeline launch; one host batch-size sweep point between 4M and 8M */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
