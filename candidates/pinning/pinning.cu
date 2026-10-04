@@ -4731,7 +4731,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
         sA[i] = (cudaStream_t)t;
     }
 #ifndef QSB_GREEN_RT_B
-#define QSB_GREEN_RT_B 0   /* 1: the root kernel runs on the finish partition */
+#define QSB_GREEN_RT_B 1   /* 1: the root kernel runs on the finish partition */
 #endif
     for (int i = 0; i < 2; i++) {
         if (qsb_cuGreenCtxStreamCreate(&t, QSB_GREEN_RT_B ? gB : gA, CU_STREAM_NON_BLOCKING, greatest) != CUDA_SUCCESS) return 0;
