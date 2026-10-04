@@ -357,7 +357,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  *   0: untouched (base). 1: print the driver default only.
  *   32, 64, 128: print the default, request this value, print what the driver kept. */
 #ifndef QSB_L2_FETCH
-#define QSB_L2_FETCH 64
+#define QSB_L2_FETCH 128
 #endif
 #if QSB_L2_FETCH != 0 && QSB_L2_FETCH != 1 && QSB_L2_FETCH != 32 && QSB_L2_FETCH != 64 && QSB_L2_FETCH != 128
 #error "QSB_L2_FETCH must be 0, 1, 32, 64 or 128"
