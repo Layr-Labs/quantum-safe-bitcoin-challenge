@@ -294,19 +294,35 @@ QHP_SHA static void sha_pre4_var(const uint32_t (*st)[8], const uint32_t *const 
         }
     }
 }
+/* Independent sharing of the common first two SHA rounds across eight classes.
+ * This helper's sole caller passes cls_rows: all eight rows share W+K words 0 and 1. */
+#ifndef QSB_HP_CLASS_COMMON2
+#define QSB_HP_CLASS_COMMON2 1
+#endif
 /* One state, 8 rows: out[c] <- compress(st, rows[c]) for c < 8 (the first-block class states of one epoch). */
 QHP_SHA static void sha_pre8_same(const uint32_t st[8], const uint32_t *const *rows, uint32_t *out) {
     __m128i t = _mm_loadu_si128((const __m128i *)&st[0]);
     __m128i u = _mm_loadu_si128((const __m128i *)&st[4]);
     t = _mm_shuffle_epi32(t, 0xB1); u = _mm_shuffle_epi32(u, 0x1B);
     const __m128i A0 = _mm_alignr_epi8(t, u, 8), A1 = _mm_blend_epi16(u, t, 0xF0);
+#if QSB_HP_CLASS_COMMON2
+    const __m128i B1 = _mm_sha256rnds2_epu32(A1, A0, _mm_loadl_epi64((const __m128i *)rows[0]));
+#endif
     for (int c0 = 0; c0 < 8; c0 += 4) {
         __m128i S0[4], S1[4];
         const uint32_t *const w[4] = {rows[c0], rows[c0 + 1], rows[c0 + 2], rows[c0 + 3]};
 #pragma GCC unroll 4
-        for (int l = 0; l < 4; l++) { S0[l] = A0; S1[l] = A1; }
+        for (int l = 0; l < 4; l++) {
+            S0[l] = A0;
+#if QSB_HP_CLASS_COMMON2
+            S1[l] = B1;
+            S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 2)));
+#else
+            S1[l] = A1;
+#endif
+        }
 #pragma GCC unroll 16
-        for (int r = 0; r < 16; r++) {
+        for (int r = QSB_HP_CLASS_COMMON2 ? 1 : 0; r < 16; r++) {
 #pragma GCC unroll 4
             for (int l = 0; l < 4; l++) {
                 S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
