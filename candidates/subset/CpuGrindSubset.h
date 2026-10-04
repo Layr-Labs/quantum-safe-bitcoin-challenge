@@ -246,7 +246,7 @@
 #define QSB_CPU_CFOLD 1            /* 8-lane path: C folded into the top window's table; the final step is one addition (-2C) */
 #endif
 #ifndef QSB_CPU_PFD1
-#define QSB_CPU_PFD1 8             /* prefetch distance of the first window's loop (window 0 loads), in groups */
+#define QSB_CPU_PFD1 3             /* prefetch distance of the first window's loop (window 0 loads), in groups */
 #endif
 #ifndef QSB_CPU_PFD
 #define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
