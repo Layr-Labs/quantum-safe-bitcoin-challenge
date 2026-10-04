@@ -51,7 +51,7 @@
 #define QSB_HOST_GATE 1  /* exact OpenSSL recover+hash before publishing a hit */
 #endif
 #ifndef QSB_FEED_BLOCK
-#define QSB_FEED_BLOCK 2 /* HY24 (host only): 0 = CUDA's default spin wait (the feeder thread burns a core).
+#define QSB_FEED_BLOCK 1 /* HY24 (host only): 0 = CUDA's default spin wait (the feeder thread burns a core).
                           * 1 = blocking sync (context flag + blocking slot events), and the co-grinder may use
                           *     the feeder CPU's hyperthread sibling; 2 = as 1, plus a SCHED_IDLE worker on the
                           *     feeder CPU itself (the woken feeder preempts it). Device code is unchanged. */
