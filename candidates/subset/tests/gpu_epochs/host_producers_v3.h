@@ -387,6 +387,11 @@ static const uint32_t *cls_rows(const Params &P, ClsCache &cc, uint32_t w0, uint
     return &cc.rows[v][0][0];
 }
 
+/* Independent suffix-length bucketing: complete four lanes together, leaving
+ * descriptor positions unchanged. Macro0 retains the original lex quartet. */
+#ifndef QSB_HP_SUFFIX_BUCKETS
+#define QSB_HP_SUFFIX_BUCKETS 1
+#endif
 /* One pending epoch for the 4-lane tail. */
 struct Lane { SCtx c; int o6, o5; uint32_t idx; uint8_t early[MAXK]; };
 
@@ -423,6 +428,12 @@ QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, u
     }
     for (int b = 0; b < maxnb; b++)
         for (int l = 0; l < 4; l++) if (b >= nb[l]) rows[4 * b + l] = P.tail_rows;   /* idle lane: any row */
+#if QSB_HP_SUFFIX_BUCKETS
+    if (nl == 4 && nb[0] == nb[1] && nb[0] == nb[2] && nb[0] == nb[3]) {
+        sha_pre4(S, rows, maxnb);
+        memcpy(F, S, sizeof F);
+    } else
+#endif
     sha_pre4_var(S, rows, nb, maxnb, F);
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
@@ -513,11 +524,33 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
     }
     static thread_local ClsCache cc = {};
     Lane L[4]; int nl = 0;
+#if QSB_HP_SUFFIX_BUCKETS
+    /* The conservative shape bound includes every possible buffered byte.
+     * Software SHA and larger shapes continue through the original path. */
+    const bool bucketed = g_shani && e1 > e0 && e1 - e0 > 64 &&
+        ((P.cut * SIG_PUSH_SIZE + 63) >> 6) <= Params::TAILMAX;
+    Lane buckets[Params::TAILMAX + 1][4];
+    int pending[Params::TAILMAX + 1] = {};
+#endif
     for (uint64_t e = e0; e < e1; e++) {
+#if QSB_HP_SUFFIX_BUCKETS
+        const int bin = bucketed ?
+            (ctx[K].len + (N - 1 - o[K - 1]) * SIG_PUSH_SIZE) >> 6 : 0;
+        Lane &x = bucketed ? buckets[bin][pending[bin]++] : L[nl++];
+#else
         Lane &x = L[nl++];
+#endif
         memcpy(x.c.st, ctx[K].st, 32); x.c.len = ctx[K].len; memcpy(x.c.buf, ctx[K].buf, 64);
         x.o6 = o[K - 1]; x.o5 = o[K - 2]; x.idx = (uint32_t)(e - base);
         memcpy(x.early, o, MAXK);
+#if QSB_HP_SUFFIX_BUCKETS
+        if (bucketed) {
+            if (pending[bin] == 4) {
+                flush(P, cc, buckets[bin], 4, ep_out, fi_out);
+                pending[bin] = 0;
+            }
+        } else
+#endif
         if (nl == 4) { flush(P, cc, L, 4, ep_out, fi_out); nl = 0; }
         if (e + 1 == e1) break;
         int i = K - 1;
@@ -527,6 +560,24 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
         o[i]++;
         for (int j = i + 1; j < K; j++) { o[j] = o[j - 1] + 1; ctx[j + 1] = ctx[j]; }
     }
+#if QSB_HP_SUFFIX_BUCKETS
+    if (bucketed) {
+        /* Pack pending tails by descending length into mixed quartets.
+         * The original per-lane snapshot path handles different lengths;
+         * every descriptor still goes to its original indexed location. */
+        int tail_n = 0;
+        for (int b = Params::TAILMAX; b >= 0; b--) {
+            for (int j = 0; j < pending[b]; j++) {
+                L[tail_n++] = buckets[b][j];
+                if (tail_n == 4) {
+                    flush(P, cc, L, 4, ep_out, fi_out);
+                    tail_n = 0;
+                }
+            }
+        }
+        if (tail_n) flush(P, cc, L, tail_n, ep_out, fi_out);
+    } else
+#endif
     if (nl) flush(P, cc, L, nl, ep_out, fi_out);
     _mm_sfence();                                            /* order the streamed stores before "chunk done" */
 }
