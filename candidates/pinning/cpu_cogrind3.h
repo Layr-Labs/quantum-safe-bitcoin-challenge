@@ -462,6 +462,17 @@ static int fill_batch(worker_t *w) {
 
 /* ---------------- AVX2 EC back end ---------------- */
 #if defined(__x86_64__) && !defined(QSB_CG_NO_SIMD)
+/* QSB_CG_PF_L2 (host only): 1 = V3 table-row software prefetches use _MM_HINT_T1
+ * (bring into L2, not L1). QSB_CG_PF stays 4. At QSB_CG_B 2048 the per-worker
+ * batch state (px, py, chain) is about 242 KiB on the 5-limb IFMA layout and
+ * about 435 KiB on the 9-limb AVX2 layout, so a T0 prefetch of a random 64 B
+ * table line four blocks early only evicts L1 lines the current addition still
+ * uses. 0 restores _MM_HINT_T0. */
+#ifndef QSB_CG_PF_L2
+#define QSB_CG_PF_L2 1
+#endif
+#define QCG_PF_HINT (QSB_CG_PF_L2 ? _MM_HINT_T1 : _MM_HINT_T0)
+
 #include "cpu_cogrind3_vec.h"
 #include "cpu_cogrind3_ifma.h"
 #define QSB_CG_HAVE_SIMD 1

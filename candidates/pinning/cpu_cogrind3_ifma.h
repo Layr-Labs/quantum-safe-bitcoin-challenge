@@ -261,7 +261,7 @@ static QI_INL void entries4(const tentry **e, const tentry *Tj, const uint32_t *
     e[0] = Tj + (d4[0] & QCG_IDXM); e[1] = Tj + (d4[1] & QCG_IDXM); e[2] = Tj + (d4[2] & QCG_IDXM); e[3] = Tj + (d4[3] & QCG_IDXM);
 }
 static QI_INL void prefetch4(const tentry *Tj, const uint32_t *d4) {
-    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), _MM_HINT_T0);
+    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), QCG_PF_HINT);
 }
 
 struct bst { vfe xT, dx, dy, ik, lam, l2, t, y3, dxn; };
@@ -323,7 +323,7 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
         const tentry *T0 = T + L.off[0];
         for (int b = 0; b < nb; b++) {
             const tentry *e[4] = {T0 + dg[4 * b], T0 + dg[4 * b + 1], T0 + dg[4 * b + 2], T0 + dg[4 * b + 3]};
-            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), _MM_HINT_T0);
+            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), QCG_PF_HINT);
             gather_x(&px[b], e); gather_y(&py[b], e);
         }
     }
