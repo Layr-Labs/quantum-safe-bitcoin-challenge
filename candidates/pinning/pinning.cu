@@ -5890,7 +5890,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * keep the split only if it is >= 3% faster per worker. Measured +3.6% on a Xeon E5-2630 v4 (the r5
  * grader class, 18 workers). Same candidates, same exact gate. 0 = the base co-grinder's behaviour. */
 #ifndef QSB_CG_HETERO
-#define QSB_CG_HETERO 1
+#define QSB_CG_HETERO 0   /* was 1: SMT sibling AVX2/MULX split calibration (CG5) */
 #endif
 #if QSB_CG_HIGHFOLD && !QSB_CPU_GRIND_V3
 #error "QSB_CG_HIGHFOLD is ported into the V3 co-grinder (QSB_CPU_GRIND_V3=1)"
