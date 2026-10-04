@@ -237,6 +237,28 @@ __device__ __forceinline__ void qsb_root_lut_wait(){
 #else
 #define ZI_LUT(i) ZI_BY_LUT[(i)]
 #endif
+/* The extreme normalized-six-step rows have closed forms. For delta <= -5
+ * no exchange occurs: (a,b,c,d)=(64,0,-ratio mod 64,1), delta += 6.
+ * For delta >= 5 and ratio != 0, let k=ctz(ratio), h=ratio>>k. The first
+ * exchange follows k halvings: (0,64>>k,-2^k,h^-1 mod (64>>k)),
+ * delta = -delta + 6 - 2*k. h*(2-h*h) is that odd inverse modulo 64.
+ * These are exactly the shipped -6,-5,5,6 LUT rows, including ratio 0.
+ * Keep the central rows and all downstream matrix/flag arithmetic unchanged.
+ */
+ZI_DEV uint64_t zi_divstep6_extreme_lookup(int32_t delta,uint32_t ratio){
+    /* One unsigned range test keeps the common central path short. Casting
+     * before the add also preserves clamp equivalence at either int32 end. */
+    if((uint32_t)delta+4u <= 8u){
+        return ZI_LUT(((uint32_t)(delta+6)<<6)|ratio);   /* central -4..4 rows */
+    }
+    if(delta < 0 || ratio == 0u){
+        return 0x0000000601000040ULL | ((uint64_t)((0u-ratio)&63u)<<16);
+    }
+    const uint32_t k=zi_ctz32(ratio),h=ratio>>k,b=64u>>k;
+    const uint32_t c=(0u-(1u<<k))&255u,d=(h*(2u-h*h))&(b-1u);
+    const uint32_t flags=0x80000000u|((6u-2u*k)&255u);
+    return ((uint64_t)flags<<32)|((uint64_t)d<<24)|(c<<16)|(b<<8);
+}
 template<int BYTE> ZI_DEV int32_t zi_by_signed_byte(uint32_t value){
     static_assert(BYTE>=0&&BYTE<4,"byte selector");
 #ifdef __CUDA_ARCH__
@@ -284,9 +306,8 @@ ZI_DEV int32_t zi_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
     int32_t u=1-(int32_t)column,q=(int32_t)column;
     #pragma unroll
     for(int k=0;k<5;k++){
-        const int32_t dc=delta<-6?-6:(delta>6?6:delta);
         const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
-        const uint64_t packed=ZI_LUT(((uint32_t)(dc+6)<<6)|ratio);   /* QSB_ROOT_LUT_SMEM */
+        const uint64_t packed=zi_divstep6_extreme_lookup(delta,ratio);
         const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
         const int32_t a=zi_by_signed_byte<0>(e),b=zi_by_signed_byte<1>(e);
         const int32_t c=zi_by_signed_byte<2>(e),d=zi_by_signed_byte<3>(e);
