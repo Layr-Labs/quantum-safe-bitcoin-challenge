@@ -438,7 +438,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  *   in kh16_words52 (lane H2's extension: the canonicalization jacklightChen's WORDS52 kept, fe8_ge_p's carry chain and five
  *   blends per call, two calls per kh16_store). Same canonical values, same words, same parities, same hits. */
 #ifndef QSB_CPU_I34_CANON_TOP
-#define QSB_CPU_I34_CANON_TOP 2
+#define QSB_CPU_I34_CANON_TOP 1 /* canonical-top shortcut only in parity; keep kh16_words52 on its full path */
 #endif
 #if QSB_CPU_I34_CANON_TOP < 0 || QSB_CPU_I34_CANON_TOP > 2
 #error "QSB_CPU_I34_CANON_TOP: 0, 1 (as i34-9 wrote it: fe8_parity, kh16_canon) or 2 (also kh16_words52)"
