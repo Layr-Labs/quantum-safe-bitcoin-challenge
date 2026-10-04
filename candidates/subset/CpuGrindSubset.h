@@ -273,7 +273,7 @@
 #error "QSB_CPU_WPRE is written for the QSB_CPU_NOTX window step"
 #endif
 #ifndef QSB_CPU_PFNX
-#define QSB_CPU_PFNX 1             /* next window's rows (backward-pass prefetch) into L2 (prefetcht1) instead of L1 (prefetcht0) */
+#define QSB_CPU_PFNX 0             /* next window's rows (backward-pass prefetch) into L1 (prefetcht0); tip default was L2 (prefetcht1) */
 #endif
 #define QCPU_NXT_HINT (QSB_CPU_PFNX ? _MM_HINT_T1 : _MM_HINT_T0)
 #ifndef QSB_CPU_X4PS
