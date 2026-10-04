@@ -478,7 +478,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  * The workers are SCHED_IDLE: a wake-up of the host thread or a producer preempts them at once. 0 = the the base footprint:
  * ncpu - QSB_CPU_RESERVE workers, none on the host thread's core (QSB_CPU_RSV_CORE 1). Not an image knob. */
 #ifndef QSB_CPU_ALLCPU
-#define QSB_CPU_ALLCPU 1
+#define QSB_CPU_ALLCPU 0
 #endif
 #ifndef QSB_CPU_HP_SHARE
 #define QSB_CPU_HP_SHARE 0         /* 1 (2d1631b0): the GPU host thread's own CPU also hosts a worker when the host producers publish
