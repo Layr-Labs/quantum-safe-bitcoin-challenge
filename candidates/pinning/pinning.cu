@@ -4376,6 +4376,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
 
     /* Check both pubkeys × 2 hashes */
+#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+    /* The ranked path computes both independent H0 chains before the rare hit
+     * branch, preserving recid-0 precedence while exposing one straight-line
+     * scheduling region to ptxas. Non-ranked/double-hash modes are unchanged. */
+    uint32_t ranked_hit_ri = 2u;
+#endif
 #if QSB_PK_UNROLL
     #pragma unroll
 #else
@@ -4412,11 +4418,8 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
         if (FAST_TAIL) {
             /* ranked gate: only digest word 0 is read */
-            if (gpu_bench_valid_h0(_SHA256Pubkey33H0(pb))) {
-                uint32_t pos=atomicAdd(d_hit_cnt,1);
-                if(pos<1024)d_hit_idx[pos]=((uint32_t)idx+QSB_HIT_BASE)|(ri<<30);
-                return;
-            }
+            const bool valid = gpu_bench_valid_h0(_SHA256Pubkey33H0(pb));
+            if (valid && ranked_hit_ri == 2u) ranked_hit_ri = (uint32_t)ri;
             continue;
         }
 #endif
@@ -4463,6 +4466,13 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
             return;
         }
     }
+#if QSB_SHA_OPT && QSB_SPARSE_D && QSB_ZEROS_N <= 32
+    if (FAST_TAIL && ranked_hit_ri != 2u) {
+        uint32_t pos=atomicAdd(d_hit_cnt,1);
+        if(pos<1024)d_hit_idx[pos]=((uint32_t)idx+QSB_HIT_BASE)|(ranked_hit_ri<<30);
+        return;
+    }
+#endif
 #if (QSB_L2STATE & 2) && QSB_SM80_PTX && QSB_PREP_STATE
     /* QSB_L2STATE bit 2: this block's state lines are dead once every lane has consumed its
      * four entries (long before this point: the values fed the whole recovery). Lanes 0, 8,
@@ -5967,6 +5977,18 @@ static inline void message(uint32_t w[16], const uint64_t *x, uint32_t prefix) {
     for (int i = 9; i < 15; i++) w[i] = 0;
     w[15] = 0x108u;
 }
+/* The AVX2 H0 compressor consumes only rows 0..8; it folds the seven
+ * fixed padding/length words itself. Build its column directly, avoiding
+ * two temporary padded messages and seven unused matrix rows per key.
+ * SHA-NI and scalar compressors continue to receive complete messages. */
+static inline void message_live_column(uint32_t w[16][8], int t,
+                                       const uint64_t *x, uint32_t prefix) {
+    uint32_t s[8];
+    for (int i = 0; i < 4; i++) { s[2 * i] = (uint32_t)x[i]; s[2 * i + 1] = (uint32_t)(x[i] >> 32); }
+    w[0][t] = (prefix << 24) | (s[7] >> 8);
+    for (int i = 1; i < 8; i++) w[i][t] = (s[8 - i] << 24) | (s[7 - i] >> 8);
+    w[8][t] = (s[0] << 24) | 0x800000u;
+}
 static inline uint32_t prefix_of(uint32_t yp, int ri) {
 #if QSB_FIN_BAL2 & 2
     return (yp >> (8 * ri)) & 0xFFu;
@@ -6020,9 +6042,14 @@ static void hash_record(Job &J, uint32_t j) {
             if (y != 0u && base + (uint32_t)l < J.batch_sz) {
                 uint64_t x0[4], x1[4];
                 lane_keys(rec, l, x0, x1);
-                message(m0, x0, prefix_of(y, 0));
-                message(m1, x1, prefix_of(y, 1));
                 live |= 1u << t;
+                if (mode == 1) {
+                    message_live_column(w0, t, x0, prefix_of(y, 0));
+                    message_live_column(w1, t, x1, prefix_of(y, 1));
+                } else {
+                    message(m0, x0, prefix_of(y, 0));
+                    message(m1, x1, prefix_of(y, 1));
+                }
                 if (mode == 2) {
                     hash2_ni(m0, m1, &h0[t], &h1[t]);
                 } else if (mode == 0) {
@@ -6032,10 +6059,9 @@ static void hash_record(Job &J, uint32_t j) {
                     h0[t] = s0[0]; h1[t] = s1[0];
                 }
             } else {
-                memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+                if (mode == 1)
+                    for (int k = 0; k < 9; k++) { w0[k][t] = 0; w1[k][t] = 0; }
             }
-            if (mode == 1)
-                for (int k = 0; k < 16; k++) { w0[k][t] = m0[k]; w1[k][t] = m1[k]; }
         }
         if (!live) continue;
         if (mode == 1) hash8_avx2(w0, w1, h0, h1);
