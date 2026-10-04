@@ -191,7 +191,7 @@ static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_pl
     static_assert(VM & 1, "round 0 folding needs a varying word 0");
     constexpr uint64_t V = s8_varmask(VM);
     static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
+    v8u W[64];
     for (int j = 0; j < 16; j++) if ((V >> j) & 1) W[j] = Wv[j];
     /* W16..W31 with the constant terms folded (compile-time structure) */
 #define S8P_W(t) do {                                                                                     \
@@ -206,25 +206,25 @@ static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_pl
     S8P_W(24); S8P_W(25); S8P_W(26); S8P_W(27); S8P_W(28); S8P_W(29); S8P_W(30); S8P_W(31);
 #undef S8P_W
     for (int t = 32; t < 64; t++) W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
-    /* K + W per round; message-independent words come precomputed */
-#define S8P_KW(t) KW[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]);
+    /* Schedule is complete: reuse W[1..63] for K+W; keep raw W[0] for folded round0. */
+#define S8P_KW(t) W[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]);
     S8P_KW(1) S8P_KW(2) S8P_KW(3) S8P_KW(4) S8P_KW(5) S8P_KW(6) S8P_KW(7) S8P_KW(8)
     S8P_KW(9) S8P_KW(10) S8P_KW(11) S8P_KW(12) S8P_KW(13) S8P_KW(14) S8P_KW(15)
 #undef S8P_KW
-    for (int t = 16; t < 64; t++) KW[t] = s8_add(s8_set1(K256[t]), W[t]);
+    for (int t = 16; t < 64; t++) W[t] = s8_add(s8_set1(K256[t]), W[t]);
     /* round 0 from the scalar state: the new a is kept in h, the new e in d (S8_ROUND's naming) */
     v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]), d = s8_add(W[0], s8_set1(P.e1c));
     v8u e = s8_set1(P.st0[4]), f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
     v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
-    S8_ROUND(h, a, b, c, d, e, f, g, KW[1], bc); S8_ROUND(g, h, a, b, c, d, e, f, KW[2], bc);
-    S8_ROUND(f, g, h, a, b, c, d, e, KW[3], bc); S8_ROUND(e, f, g, h, a, b, c, d, KW[4], bc);
-    S8_ROUND(d, e, f, g, h, a, b, c, KW[5], bc); S8_ROUND(c, d, e, f, g, h, a, b, KW[6], bc);
-    S8_ROUND(b, c, d, e, f, g, h, a, KW[7], bc);
+    S8_ROUND(h, a, b, c, d, e, f, g, W[1], bc); S8_ROUND(g, h, a, b, c, d, e, f, W[2], bc);
+    S8_ROUND(f, g, h, a, b, c, d, e, W[3], bc); S8_ROUND(e, f, g, h, a, b, c, d, W[4], bc);
+    S8_ROUND(d, e, f, g, h, a, b, c, W[5], bc); S8_ROUND(c, d, e, f, g, h, a, b, W[6], bc);
+    S8_ROUND(b, c, d, e, f, g, h, a, W[7], bc);
     for (int t = 8; t < 64; t += 8) {
-        S8_ROUND(a, b, c, d, e, f, g, h, KW[t + 0], bc); S8_ROUND(h, a, b, c, d, e, f, g, KW[t + 1], bc);
-        S8_ROUND(g, h, a, b, c, d, e, f, KW[t + 2], bc); S8_ROUND(f, g, h, a, b, c, d, e, KW[t + 3], bc);
-        S8_ROUND(e, f, g, h, a, b, c, d, KW[t + 4], bc); S8_ROUND(d, e, f, g, h, a, b, c, KW[t + 5], bc);
-        S8_ROUND(c, d, e, f, g, h, a, b, KW[t + 6], bc); S8_ROUND(b, c, d, e, f, g, h, a, KW[t + 7], bc);
+        S8_ROUND(a, b, c, d, e, f, g, h, W[t + 0], bc); S8_ROUND(h, a, b, c, d, e, f, g, W[t + 1], bc);
+        S8_ROUND(g, h, a, b, c, d, e, f, W[t + 2], bc); S8_ROUND(f, g, h, a, b, c, d, e, W[t + 3], bc);
+        S8_ROUND(e, f, g, h, a, b, c, d, W[t + 4], bc); S8_ROUND(d, e, f, g, h, a, b, c, W[t + 5], bc);
+        S8_ROUND(c, d, e, f, g, h, a, b, W[t + 6], bc); S8_ROUND(b, c, d, e, f, g, h, a, W[t + 7], bc);
     }
     out[0] = s8_add(s8_set1(P.st0[0]), a);
     if (!H0ONLY) {
