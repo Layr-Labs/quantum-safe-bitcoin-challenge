@@ -7,8 +7,23 @@
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
 /* l2state variant fkF20c8 + split retry */
+/* H1: integrate the unpromoted i34-9/ercumentyildirim half-packet path
+ * into DPZZxlz's promoted host-offload tree. Rebuild the carrier from THIS source. */
+#ifndef QSB_HALF_SUBPIPE
+#define QSB_HALF_SUBPIPE 1
+#endif
+#if QSB_HALF_SUBPIPE != 0 && QSB_HALF_SUBPIPE != 1
+#error "QSB_HALF_SUBPIPE must be 0 or 1"
+#endif
+#if QSB_HALF_SUBPIPE
+#define QSB_SUBPIPE 65536
+#define QSB_SUBRING 8
+#else
 #define QSB_SUBPIPE 131072
-#define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
+#define QSB_SUBRING 4
+#endif
+/* No early finish-round scheduling change is part of H1. */
+#define QSB_FIN_T2EARLY 0
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -2266,7 +2281,8 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #define QSB_ZEROS_N 24
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
-__device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+#define QSB_CARRIER_FINGERPRINT (QSB_ZEROS_N | (QSB_HALF_SUBPIPE ? 0x20000000 : 0))
+__device__ __constant__ int qsb_carrier_zeros = QSB_CARRIER_FINGERPRINT;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -4532,7 +4548,20 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 #if QSB_SUBPIPE && QSB_ROOT_FUSED
 #define QSB_RF_K ((QSB_SUBPIPE/QSB_TREE_N+QSB_RF_LANES-1)/QSB_RF_LANES)
 #endif
+#if QSB_HALF_SUBPIPE && (QSB_SUBPIPE != 65536 || QSB_SUBRING != 8 || \
+    QSB_TREE_N != 128 || QSB_RF_LANES != 128 || !QSB_ROOT_FUSED || QSB_RROOT_WIDE)
+#error "half packets require ring8 and the 128-lane register-root path"
+#endif
 #include "QsbCarrier.h"
+#if QSB_HALF_SUBPIPE
+#define QSB_SELECTED_REGISTER_KERNEL qsb_root_register512
+#define QSB_SELECTED_REGISTER_KID QK_RR512
+#define QSB_SELECTED_REGISTER_LANES 128
+#else
+#define QSB_SELECTED_REGISTER_KERNEL qsb_root_register
+#define QSB_SELECTED_REGISTER_KID QK_RR
+#define QSB_SELECTED_REGISTER_LANES QSB_RROOT_LANES
+#endif
 #if QSB_NOJIT && (QSB_TREE_OFFLOAD || QSB_TREE_OFFLOAD2)
 #error "QSB_NOJIT needs every launched kernel in the carrier; the leaf-tree offload kernels are compute_52 only"
 #endif
@@ -4541,9 +4570,9 @@ __global__ void __launch_bounds__(256,QSB_TREE_BLOCKS) qsb_leaf_tree_finish(
 static void qsb_launch_selected_roots(uint64_t *roots,int count,cudaStream_t stream){
     constexpr int K=QSB_RF_K;
     if(g_qsb_register_roots){
-        if(qsb_carrier_has(QK_RR))
-            qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(QSB_RROOT_LANES),stream,roots,count);
-        else qsb_root_register<<<1,QSB_RROOT_LANES,0,stream>>>(roots,count);
+        if(qsb_carrier_has(QSB_SELECTED_REGISTER_KID))
+            qsb_carrier_launch(QSB_SELECTED_REGISTER_KERNEL,QSB_SELECTED_REGISTER_KID,dim3(1),dim3(QSB_SELECTED_REGISTER_LANES),stream,roots,count);
+        else QSB_SELECTED_REGISTER_KERNEL<<<1,QSB_SELECTED_REGISTER_LANES,0,stream>>>(roots,count);
     } else if(qsb_carrier_has(QK_RF))
         qsb_carrier_launch(qsb_root_fused<K>,QK_RF,dim3(1),dim3(QSB_RF_LANES),stream,roots,count);
     else qsb_root_fused<K><<<1,QSB_RF_LANES,0,stream>>>(roots,count);
@@ -4932,7 +4961,7 @@ static void qsb_subpipe_launch(
                 P.state[r],P.roots[r],(uint64_t*)nullptr,tp);
             if (graph.root_count != blocks) {
                 if (g_qsb_register_roots)
-                    qsb_sg::update(qsb_root_register, graph.exec, graph.root, graph.rp, dim3(1),
+                    qsb_sg::update(QSB_SELECTED_REGISTER_KERNEL, graph.exec, graph.root, graph.rp, dim3(1),
                                    P.roots[r], blocks);
                 else
                     qsb_sg::update(qsb_root_fused<QSB_RF_K>, graph.exec, graph.root, graph.rp, dim3(1),
@@ -5775,9 +5804,10 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+#ifndef QSB_HOST_RECID_DIGEST_REUSE
+#define QSB_HOST_RECID_DIGEST_REUSE 1
+#endif
+static int qsb_host_digest(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, uint8_t d2[32]) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5813,9 +5843,13 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
 
+    return 1;
+}
+static int qsb_host_exact_hit_digest(const uint8_t d2[32], int recid,
+                                    EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                    const BIGNUM *nri, const EC_POINT *Ru2) {
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
     EC_POINT *P = EC_POINT_new(grp);
@@ -5849,6 +5883,13 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT_free(Q);
     EC_POINT_free(R);
     return ok;
+ }
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return 0;
+    return qsb_host_exact_hit_digest(d2, recid, grp, ctx, order, nri, Ru2);
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
@@ -5857,8 +5898,15 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_RECID_DIGEST_REUSE
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return -1;
+    if (qsb_host_exact_hit_digest(d2, ri, grp, ctx, order, nri, Ru2)) return ri;
+    if (qsb_host_exact_hit_digest(d2, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#else
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#endif
     return -1;
 }
 #endif

@@ -4,8 +4,13 @@
 #include "WarpInverse.cuh"
 #include "CyclicField.cuh"
 #include "PrefixCyclicField.cuh"
+#if QSB_HALF_SUBPIPE
+static_assert(QSB_RF_LANES==128 && QSB_TREE_N==128 && QSB_SUBPIPE==65536,
+              "half subpipe requires 128 lanes and 512 roots");
+#else
 static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE==131072,
               "register roots require promoted 128-lane / 1024-root shape");
+#endif
 __device__ __forceinline__ bool qbw_root_load(
     uint64_t x[5],const uint64_t *roots,unsigned i,unsigned count) {
     x[0]=1;x[1]=x[2]=x[3]=x[4]=0;
@@ -277,6 +282,51 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
             qbw_root_store(roots,n,j,ia,na);
             qbw_root_store(roots,n,j+128u,ib,nb);
         }
+    }
+}
+#endif
+
+#if QSB_HALF_SUBPIPE
+/* One quartet per lane. Allocate 1024 four-word rows, even for a partial
+ * packet. Scratch rows 256..511 follow the actual input count n. */
+__global__ void __launch_bounds__(128,1) qsb_root_register512(uint64_t *roots,int count) {
+    if(count<=0 || count>512)return; // uniform, before the warp collective
+    const unsigned n=(unsigned)count,lane=threadIdx.x;
+    uint64_t total[5];
+    {
+        uint64_t a[5],b[5],p01[5],p23[5];
+        qbw_root_load(a,roots,lane,n);
+        qbw_root_load(b,roots,lane+128u,n);
+        qsb_field_mul(p01,a,b);p01[4]=0;
+        qbw_root_load(a,roots,lane+256u,n);
+        qbw_root_load(b,roots,lane+384u,n);
+        qsb_field_mul(p23,a,b);p23[4]=0;
+        qbw_scratch_put(roots,n,lane+256u,p01);
+        qbw_scratch_put(roots,n,lane+384u,p23);
+        qsb_field_mul(total,p01,p23);total[4]=0;
+    }
+    qsb_block_inverse_register_n<128>(total);
+    uint64_t ip01[5],ip23[5];
+    {
+        /* Fetch BOTH pair products before any weighted output can overwrite
+         * their scratch rows. Each lane owns the same rows modulo128. */
+        uint64_t p01[5],p23[5];
+        qbw_scratch_get(p01,roots,n,lane+256u);
+        qbw_scratch_get(p23,roots,n,lane+384u);
+        qsb_field_mul(ip01,total,p23);ip01[4]=0;
+        qsb_field_mul(ip23,total,p01);ip23[4]=0;
+    }
+    #pragma unroll
+    for(unsigned pair=0;pair<2;++pair){
+        const unsigned j=lane+pair*256u;
+        uint64_t a[5],b[5],ia[5],ib[5];
+        const bool na=qbw_root_load(a,roots,j,n);
+        const bool nb=qbw_root_load(b,roots,j+128u,n);
+        uint64_t *pinv=pair?ip23:ip01;
+        qsb_field_mul(ia,pinv,b);ia[4]=0;
+        qsb_field_mul(ib,pinv,a);ib[4]=0;
+        qbw_root_store(roots,n,j,ia,na);
+        qbw_root_store(roots,n,j+128u,ib,nb);
     }
 }
 #endif
