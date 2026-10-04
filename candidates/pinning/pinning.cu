@@ -7,7 +7,7 @@
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
 /* l2state variant fkF20c8 + split retry */
-#define QSB_SUBPIPE 131072
+#define QSB_SUBPIPE 65536 /* was 131072: half-size sub-batches so the 4-entry state ring is 16 MiB beside the persisting L2 window */
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
