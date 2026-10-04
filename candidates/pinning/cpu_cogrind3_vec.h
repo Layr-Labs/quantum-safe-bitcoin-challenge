@@ -253,7 +253,7 @@ static QV_INL void entries4(const tentry **e, const tentry *Tj, const uint32_t *
     e[0] = Tj + (d4[0] & QCG_IDXM); e[1] = Tj + (d4[1] & QCG_IDXM); e[2] = Tj + (d4[2] & QCG_IDXM); e[3] = Tj + (d4[3] & QCG_IDXM);
 }
 static QV_INL void prefetch4(const tentry *Tj, const uint32_t *d4) {
-    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), _MM_HINT_T0);
+    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), QCG_PF_HINT);
 }
 
 /* per-block temporaries of one addition step (memory operands of the out-of-line multiplies) */
@@ -325,9 +325,13 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
     {
         const uint32_t *dg = w->dig[0];
         const tentry *T0 = T + L.off[0];
+#if QSB_CG_PF_PROLOGUE
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++)
+            for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * p + l]), QCG_PF_HINT);
+#endif
         for (int b = 0; b < nb; b++) {
             const tentry *e[4] = {T0 + dg[4 * b], T0 + dg[4 * b + 1], T0 + dg[4 * b + 2], T0 + dg[4 * b + 3]};
-            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), _MM_HINT_T0);
+            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), QCG_PF_HINT);
             gather_x(&px[b], e); gather_y(&py[b], e);
         }
     }
@@ -336,6 +340,9 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
         const uint32_t *dg = w->dig[1];
         const uint8_t *zf = w->zf[1];
         const tentry *Tj = T + L.off[1];
+#if QSB_CG_PF_PROLOGUE
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++) prefetch4(Tj, dg + 4 * p);
+#endif
         for (int b = 0; b < nb; b++) {
             if (b + QSB_CG_PF < nb) prefetch4(Tj, dg + 4 * (b + QSB_CG_PF));
             const tentry *e[4]; entries4(e, Tj, dg + 4 * b);
@@ -349,6 +356,14 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
     vfe xD, yD; v29_set_w(&xD, S->dx_w); v29_set_w(&yD, S->dy_w);
     int asc = 1;
     for (int s = 1; s < nw; s++) {
+#if QSB_CG_PF_PROLOGUE
+        /* Issue the first current/next-window lines before the scalar batch inverse. */
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++) {
+            const int pb = asc ? nb - 1 - p : p;
+            prefetch4(T + L.off[s], w->dig[s] + 4 * pb);
+            if (s + 1 < nw) prefetch4(T + L.off[s + 1], w->dig[s + 1] + 4 * pb);
+        }
+#endif
         vinv(&inv, &acc);
         vfe ubuf[2]; ubuf[0] = inv; int ui = 0;
         const vfe *accp = &one;

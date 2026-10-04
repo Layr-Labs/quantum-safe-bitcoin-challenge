@@ -79,7 +79,117 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     d4 += d3 >> 52; d3 &= M;
     r->n[0] = d0; r->n[1] = d1; r->n[2] = d2; r->n[3] = d3; r->n[4] = d4;
 }
-static QI_INL void fsqr(vfe *r, const vfe *a) { fmul(r, a, a); }
+/* Independently implemented from public symmetric-square arithmetic idea.
+ * Extract 52-bit product halves before doubling cross terms; retain exact original folds. */
+#ifndef QCG_IFMA_SYMMETRIC_SQR
+#define QCG_IFMA_SYMMETRIC_SQR 1
+#endif
+static QI_INL void fsqr(vfe *r, const vfe *A) {
+#if QCG_IFMA_SYMMETRIC_SQR
+    const V a0=A->n[0], a1=A->n[1], a2=A->n[2], a3=A->n[3], a4=A->n[4];
+    const V z=vs1(0), M=vs1(QI_M52), R=vs1(QI_R), C=vs1(QI_C);
+    V c0=z, c1=z, c2=z, c3=z, c4=z, c5=z, c6=z, c7=z, c8=z, c9=z;
+    {
+        const V lo00=QI_LO(z,a0,a0), hi00=QI_HI(z,a0,a0);
+        c0 += lo00;
+        c1 += hi00;
+    }
+    {
+        const V lo01=QI_LO(z,a0,a1), hi01=QI_HI(z,a0,a1);
+        c1 += lo01+lo01;
+        c2 += hi01+hi01;
+    }
+    {
+        const V lo02=QI_LO(z,a0,a2), hi02=QI_HI(z,a0,a2);
+        c2 += lo02+lo02;
+        c3 += hi02+hi02;
+    }
+    {
+        const V lo03=QI_LO(z,a0,a3), hi03=QI_HI(z,a0,a3);
+        c3 += lo03+lo03;
+        c4 += hi03+hi03;
+    }
+    {
+        const V lo04=QI_LO(z,a0,a4), hi04=QI_HI(z,a0,a4);
+        c4 += lo04+lo04;
+        c5 += hi04+hi04;
+    }
+    {
+        const V lo11=QI_LO(z,a1,a1), hi11=QI_HI(z,a1,a1);
+        c2 += lo11;
+        c3 += hi11;
+    }
+    {
+        const V lo12=QI_LO(z,a1,a2), hi12=QI_HI(z,a1,a2);
+        c3 += lo12+lo12;
+        c4 += hi12+hi12;
+    }
+    {
+        const V lo13=QI_LO(z,a1,a3), hi13=QI_HI(z,a1,a3);
+        c4 += lo13+lo13;
+        c5 += hi13+hi13;
+    }
+    {
+        const V lo14=QI_LO(z,a1,a4), hi14=QI_HI(z,a1,a4);
+        c5 += lo14+lo14;
+        c6 += hi14+hi14;
+    }
+    {
+        const V lo22=QI_LO(z,a2,a2), hi22=QI_HI(z,a2,a2);
+        c4 += lo22;
+        c5 += hi22;
+    }
+    {
+        const V lo23=QI_LO(z,a2,a3), hi23=QI_HI(z,a2,a3);
+        c5 += lo23+lo23;
+        c6 += hi23+hi23;
+    }
+    {
+        const V lo24=QI_LO(z,a2,a4), hi24=QI_HI(z,a2,a4);
+        c6 += lo24+lo24;
+        c7 += hi24+hi24;
+    }
+    {
+        const V lo33=QI_LO(z,a3,a3), hi33=QI_HI(z,a3,a3);
+        c6 += lo33;
+        c7 += hi33;
+    }
+    {
+        const V lo34=QI_LO(z,a3,a4), hi34=QI_HI(z,a3,a4);
+        c7 += lo34+lo34;
+        c8 += hi34+hi34;
+    }
+    {
+        const V lo44=QI_LO(z,a4,a4), hi44=QI_HI(z,a4,a4);
+        c8 += lo44;
+        c9 += hi44;
+    }
+    /* high columns to 52-bit limbs (c9 stays < 2^52) */
+    c6 += c5 >> 52; c5 &= M;
+    c7 += c6 >> 52; c6 &= M;
+    c8 += c7 >> 52; c7 &= M;
+    c9 += c8 >> 52; c8 &= M;
+    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
+    V d0 = QI_LO(c0, c5, R);
+    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
+    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
+    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
+    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
+    d4 += d3 >> 52; d3 &= M;
+    const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
+    d4 &= vs1(QI_M48);
+    d0 = QI_LO(d0, top, C);
+    d1 = QI_HI(d1, top, C);
+    d1 += d0 >> 52; d0 &= M;
+    d2 += d1 >> 52; d1 &= M;
+    d3 += d2 >> 52; d2 &= M;
+    d4 += d3 >> 52; d3 &= M;
+    r->n[0] = d0; r->n[1] = d1; r->n[2] = d2; r->n[3] = d3; r->n[4] = d4;
+#else
+    fmul(r,A,A);
+#endif
+}
 
 /* any limbs < 2^62 -> W form (libsecp256k1 fe_normalize_weak, radix 2^52) */
 static QI_INL void fwk(vfe *r) {
@@ -261,7 +371,7 @@ static QI_INL void entries4(const tentry **e, const tentry *Tj, const uint32_t *
     e[0] = Tj + (d4[0] & QCG_IDXM); e[1] = Tj + (d4[1] & QCG_IDXM); e[2] = Tj + (d4[2] & QCG_IDXM); e[3] = Tj + (d4[3] & QCG_IDXM);
 }
 static QI_INL void prefetch4(const tentry *Tj, const uint32_t *d4) {
-    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), _MM_HINT_T0);
+    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), QCG_PF_HINT);
 }
 
 struct bst { vfe xT, dx, dy, ik, lam, l2, t, y3, dxn; };
@@ -321,9 +431,13 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
     {
         const uint32_t *dg = w->dig[0];
         const tentry *T0 = T + L.off[0];
+#if QSB_CG_PF_PROLOGUE
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++)
+            for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * p + l]), QCG_PF_HINT);
+#endif
         for (int b = 0; b < nb; b++) {
             const tentry *e[4] = {T0 + dg[4 * b], T0 + dg[4 * b + 1], T0 + dg[4 * b + 2], T0 + dg[4 * b + 3]};
-            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), _MM_HINT_T0);
+            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), QCG_PF_HINT);
             gather_x(&px[b], e); gather_y(&py[b], e);
         }
     }
@@ -332,6 +446,9 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
         const uint32_t *dg = w->dig[1];
         const uint8_t *zf = w->zf[1];
         const tentry *Tj = T + L.off[1];
+#if QSB_CG_PF_PROLOGUE
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++) prefetch4(Tj, dg + 4 * p);
+#endif
         for (int b = 0; b < nb; b++) {
             if (b + QSB_CG_PF < nb) prefetch4(Tj, dg + 4 * (b + QSB_CG_PF));
             const tentry *e[4]; entries4(e, Tj, dg + 4 * b);
@@ -345,6 +462,14 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
     vfe xD, yD; set_w(&xD, S->dx_w); set_w(&yD, S->dy_w);
     int asc = 1;
     for (int s = 1; s < nw; s++) {
+#if QSB_CG_PF_PROLOGUE
+        /* Issue the first current/next-window lines before the scalar batch inverse. */
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++) {
+            const int pb = asc ? nb - 1 - p : p;
+            prefetch4(T + L.off[s], w->dig[s] + 4 * pb);
+            if (s + 1 < nw) prefetch4(T + L.off[s + 1], w->dig[s + 1] + 4 * pb);
+        }
+#endif
         vinv(&inv, &acc);
         vfe ubuf[2]; ubuf[0] = inv; int ui = 0;
         const vfe *accp = &one;

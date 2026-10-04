@@ -47,7 +47,7 @@ namespace qcg {
 #define QSB_FEED_BLOCK 0
 #endif
 #ifndef QSB_CG_QUOTA_CAP
-#define QSB_CG_QUOTA_CAP 1   /* HY28: 1 = under a cgroup quota, never ramp workers past the quota guess */
+#define QSB_CG_QUOTA_CAP 0   /* Explore measured RECOVER ramp beyond the initial quota guess. */
 #endif
 static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 
@@ -58,6 +58,13 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
 #define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#endif
+#ifndef QSB_CG_PF_L2
+#define QSB_CG_PF_L2 1
+#endif
+#define QCG_PF_HINT (QSB_CG_PF_L2 ? _MM_HINT_T1 : _MM_HINT_T0)
+#ifndef QSB_CG_PF_PROLOGUE
+#define QSB_CG_PF_PROLOGUE 1              /* warm pass edges before their first demand load */
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
