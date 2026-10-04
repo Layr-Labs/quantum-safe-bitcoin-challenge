@@ -136,6 +136,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <new>
+#include "PrefixRuns.h"
 #ifndef QSB_CPU_VEC
 #define QSB_CPU_VEC 1              /* 8-lane AVX-512 IFMA field arithmetic when the host CPU has it */
 #endif
@@ -3481,10 +3482,9 @@ static void worker(Ctx *c, int tid) {
                         from = prl + (size_t)(lo - e) * SIG_PUSH_SIZE;   /* the kept pushes below push lo are unchanged */
                         i0 = lo; e2 = e; pl = (size_t)(lo - e) * SIG_PUSH_SIZE;   /* early[0..e-1] < lo: rebuild from push lo on */
                     }
-                    for (int i = i0; i < c->cut; i++) {
-                        if (e2 < c->early && early[e2] == i) { e2++; continue; }
-                        memcpy(&pfx[prl + pl], dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pl += SIG_PUSH_SIZE;
-                    }
+                    pl += qsb_prefix::copy_kept_runs<SIG_PUSH_SIZE>(
+                        &pfx[prl + pl], dp->dummy_sigs, c->cut, i0,
+                        early, c->early, e2);
                     const size_t lp = prl + pl, nfull = lp / 64;
                     SHA256_CTX pc;
                     for (size_t b = from / 64; b < nfull; b++) {
