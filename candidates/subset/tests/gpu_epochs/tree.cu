@@ -1138,8 +1138,17 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_GATE_FMA_RT_RATIO_PCT
 #define QSB_GATE_FMA_RT_RATIO_PCT 90
 #endif
+/* Independent early plain-form experiment using the existing two-form image.
+ * 0 keeps the promoted rate policy. Explicit FORCE_S overrides this default. */
+#ifndef QSB_GATE_EARLY_PLAIN
+#define QSB_GATE_EARLY_PLAIN 1
+#endif
 #ifndef QSB_GATE_FMA_RT_FORCE_S
+#if QSB_GATE_EARLY_PLAIN
+#define QSB_GATE_FMA_RT_FORCE_S 1
+#else
 #define QSB_GATE_FMA_RT_FORCE_S 0
+#endif
 #endif
 #if QSB_GATE_FMA_RT
 /* QSB_GATE_FMA_RT: 1 = the FMA-pipe gate compression, 0 = the plain one. Cleared once by main(); build_carrier.sh
