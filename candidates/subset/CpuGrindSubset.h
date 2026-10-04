@@ -136,6 +136,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <new>
+#include "PrefixRuns.h"
+#include "ChunkMultiples.h"
 #ifndef QSB_CPU_VEC
 #define QSB_CPU_VEC 1              /* 8-lane AVX-512 IFMA field arithmetic when the host CPU has it */
 #endif
@@ -2783,6 +2785,10 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
     const Geo &g = c.g;
     const uint32_t S = 1u << 16;
     std::vector<pt> base(g.nw);
+    // Host-only offset cache. Filled after chunk 0 exists; each window's
+    // cache is immutable before phase 1 starts. Allocation/check failures
+    // retain the previous scalar offset calculation for that window.
+    std::vector<std::vector<pt> > chunk_offsets(g.nw);
     { pt q = {ax, ay}; int at = 0; for (int i = 0; i < g.nw; i++) { while (at < g.off[i]) { q = pt_double(q); at++; } base[i] = q; } }
     auto chunk0 = [&](int i) {
         pt *T = c.table + g.base[i];
@@ -2811,7 +2817,8 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
     auto chunkc = [&](int i, uint32_t cc, Build8 *b8) {
         pt *T = c.table + g.base[i];
         const uint32_t o = cc * S, n = g.ent[i] - o < S ? g.ent[i] - o : S;
-        const pt Q = pt_mul_small(T[S - 1], cc);         /* T[S-1] = S * B_i */
+        const pt Q = chunk_offsets[i].empty() ? pt_mul_small(T[S - 1], cc)
+                                               : chunk_offsets[i][cc - 1];
 #if QCPU_VEC
         if (b8) {                                        /* 8-lane blocks; the block with T[k] = Q (cc = 1) and a tail: scalar */
             uint32_t k = 0;
@@ -2847,6 +2854,37 @@ static void build_table(Ctx &c, const fe &ax, const fe &ay, int nth) {
         const int m = (size_t)nth < nt ? nth : (int)nt;
         for (int t = 0; t < m; t++) ts.emplace_back(work);
         for (auto &t : ts) t.join();
+        if (phase == 0) {
+            std::atomic<int> next_window{0};
+            auto cache_work = [&]() {
+                for (int i; (i = next_window.fetch_add(1)) < g.nw;) {
+                    const size_t nc = ((size_t)g.ent[i] + S - 1) / S;
+                    if (nc < 2) continue;
+                    try {
+                        std::vector<fe> d(nc), pre(nc);
+                        std::vector<uint8_t> inf(nc), bad(nc);
+                        std::vector<const pt *> tp(nc);
+                        auto add_batch = [&](pt *dst, const pt *src, size_t n, const pt &q) {
+                            for (size_t k = 0; k < n; k++) {
+                                dst[k] = src[k]; tp[k] = &q; inf[k] = bad[k] = 0;
+                            }
+                            batch_add(dst, tp.data(), inf.data(), bad.data(), (int)n, d.data(), pre.data());
+                            for (size_t k = 0; k < n; k++) if (bad[k]) {
+                                if (!fe_eq(src[k].x, q.x) || !fe_eq(src[k].y, q.y)) return false;
+                                dst[k] = pt_double(q);
+                            }
+                            return true;
+                        };
+                        qsb_chunk::multiples(chunk_offsets[i], c.table[g.base[i] + S - 1],
+                                             nc - 1, pt_double, add_batch);
+                    } catch (const std::bad_alloc &) { chunk_offsets[i].clear(); }
+                }
+            };
+            std::vector<std::thread> ct;
+            for (int t = 1; t < std::min(nth, g.nw); t++) ct.emplace_back(cache_work);
+            cache_work();
+            for (auto &t : ct) t.join();
+        }
     }
     c.cfold = false;
     if (QSB_CPU_CFOLD && c.vec) {                       /* top window T[j] += C, in chunks; any equal-x entry (T[j] = +-C, a known
@@ -3481,10 +3519,9 @@ static void worker(Ctx *c, int tid) {
                         from = prl + (size_t)(lo - e) * SIG_PUSH_SIZE;   /* the kept pushes below push lo are unchanged */
                         i0 = lo; e2 = e; pl = (size_t)(lo - e) * SIG_PUSH_SIZE;   /* early[0..e-1] < lo: rebuild from push lo on */
                     }
-                    for (int i = i0; i < c->cut; i++) {
-                        if (e2 < c->early && early[e2] == i) { e2++; continue; }
-                        memcpy(&pfx[prl + pl], dp->dummy_sigs + (size_t)i * SIG_PUSH_SIZE, SIG_PUSH_SIZE); pl += SIG_PUSH_SIZE;
-                    }
+                    pl += qsb_prefix::copy_kept_runs<SIG_PUSH_SIZE>(
+                        &pfx[prl + pl], dp->dummy_sigs, c->cut, i0,
+                        early, c->early, e2);
                     const size_t lp = prl + pl, nfull = lp / 64;
                     SHA256_CTX pc;
                     for (size_t b = from / 64; b < nfull; b++) {

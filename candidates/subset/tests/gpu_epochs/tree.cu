@@ -5740,6 +5740,14 @@ static void build_epoch_prefix(const digest_params_t *dp, int window_start, int 
 #ifndef QSB_FAST_TEARDOWN_PIN
 #define QSB_FAST_TEARDOWN_PIN 1    /* with QSB_FAST_TEARDOWN: also free the pinned producer ring after the drain (0: the exit frees it) */
 #endif
+// Host-only selection between the two exact hash forms already in the image.
+// No device instruction, build fingerprint or carrier bytes change.
+#ifndef QSB_GATE_AUTOTUNE
+#define QSB_GATE_AUTOTUNE 1
+#endif
+#if QSB_GATE_AUTOTUNE && QSB_GATE_FMA_RT
+#include "../../GateTune.h"
+#endif
 #if QSB_FAST_TEARDOWN
 #include <atomic>
 #include <thread>
@@ -7269,13 +7277,17 @@ int main(int argc, char **argv) {
         static double qrt_t[QRT_N]; static uint64_t qrt_s[QRT_N];
         unsigned qrt_head = 0, qrt_tail = 0;
         double qrt_t1 = -1.0, qrt_r1 = 0.0; uint64_t qrt_s1 = 0;
-        bool qrt_done = !QSB_QMIX_RT, qfa_done = !QSB_GATE_FMA_RT;
+        bool qrt_done = !QSB_QMIX_RT, qfa_done = !QSB_GATE_FMA_RT || QSB_GATE_AUTOTUNE;
+#if QSB_GATE_AUTOTUNE && QSB_GATE_FMA_RT
+        qsb_gate::Tune gate_tune;
+        printf("  GATE_AUTOTUNE: ABBA timing of the existing exact FMA/plain forms after 120 s; four 30 s windows\n");
+#endif
 #if QSB_QMIX_RT
         printf("  QMIX_RT: on: Q_MIX %d from the start, one write of mask %d (Q_MIX %d) after %d s when the 60 s GPU "
                "rate is <= %d%% of the first minute's (force %d s)\n", QSB_Q_MIX, QSB_QMIX_RT_TARGET - 1,
                QSB_QMIX_RT_TARGET, QSB_QMIX_RT_AFTER_S, QSB_QMIX_RT_RATIO_PCT, QSB_QMIX_RT_FORCE_S);
 #endif
-#if QSB_GATE_FMA_RT
+#if QSB_GATE_FMA_RT && !QSB_GATE_AUTOTUNE
         printf("  GATE_FMA_RT: on: the FMA-pipe gate hash from the start, cleared once after %d s when the 60 s GPU rate "
                "is <= %d%% of the first minute's (force %d s)\n", QSB_GATE_FMA_RT_AFTER_S, QSB_GATE_FMA_RT_RATIO_PCT,
                QSB_GATE_FMA_RT_FORCE_S);
@@ -7358,6 +7370,27 @@ int main(int argc, char **argv) {
             sp_batch_no++;
             struct timespec t_now;
             clock_gettime(CLOCK_MONOTONIC, &t_now);
+#if QSB_GATE_AUTOTUNE && QSB_GATE_FMA_RT
+            {
+                const double gt_now = (t_now.tv_sec - t0.tv_sec) + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
+                if (!g_stop_signal && gate_tune.due(gt_now)) {
+                    // The just-launched slot s is newer than s^1. Drain in
+                    // publication order before changing the module constant.
+                    if (sp_drain(s ^ 1) || sp_drain(s)) return 1;
+                    clock_gettime(CLOCK_MONOTONIC, &t_now);
+                    const double gt_end = (t_now.tv_sec - t0.tv_sec) + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
+                    const unsigned gm = gate_tune.boundary(gt_end, total_searched);
+                    const cudaError_t ge = QSB_TO_SYMBOL(QSB_GATE_FMA_C, &gm, sizeof(gm));
+                    if (ge != cudaSuccess) { fprintf(stderr, "ERROR: gate selection upload failed: %s\n", cudaGetErrorString(ge)); return 1; }
+                    printf("  GATE_AUTOTUNE: stage %d, mode %u, at %.3f s; A %.3f M/s B %.3f M/s%s\n",
+                           gate_tune.stage, gm, gt_end,
+                           gate_tune.seconds[1] > 0 ? gate_tune.candidates[1] / gate_tune.seconds[1] / 1e6 : 0,
+                           gate_tune.seconds[0] > 0 ? gate_tune.candidates[0] / gate_tune.seconds[0] / 1e6 : 0,
+                           gate_tune.done ? " (selected)" : "");
+                    fflush(stdout);
+                }
+            }
+#endif
 #if QSB_QMIX_RT || QSB_GATE_FMA_RT
             if (!qrt_done || !qfa_done) {   /* rt-monitor: QSB_QMIX_RT's and QSB_GATE_FMA_RT's one write each (tree.cu switch block) */
                 const double tn = (t_now.tv_sec - t0.tv_sec) + (t_now.tv_nsec - t0.tv_nsec) / 1e9;
