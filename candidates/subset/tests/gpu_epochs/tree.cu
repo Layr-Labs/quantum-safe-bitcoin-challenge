@@ -903,7 +903,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_S3_NM_SEED 1
 #endif
 #ifndef QSB_TREE_UNROLL
-#define QSB_TREE_UNROLL 0
+#define QSB_TREE_UNROLL 1
 #endif
 /* QSB_PARK128 1 (kernel_digest): candidate A's twelve parked words (and B's scalar, parked in rows 8..11 across A's
  * front) as six 16-byte rows, so each park and reload is one STS.128/LDS.128 per word pair instead of two 64-bit
