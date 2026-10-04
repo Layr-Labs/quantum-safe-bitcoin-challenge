@@ -650,6 +650,7 @@ struct ctl_t {
     uint64_t last_cpu;
     double win_t0, settle_until;
     int win_skip, strikes, profits, verdict_budget;
+    int stable_net_rounds; /* bounded backoff only for measured positive, saturated budgets */
     int verbose;
 };
 static ctl_t g_ctl;
@@ -895,6 +896,19 @@ static void net_begin_window(ctl_t &C, double now) {
     C.win_skip = 1;                       /* drop the boundary completion too */
 }
 
+/* Positive saturated budgets need fewer disruptive CPU-off comparisons. No
+ * backoff for losses, ambiguous measurements, parked trials or pending ramps.
+ * The maximum 240 s wait is finite; all original ABBA accounting is retained. */
+static double net_recheck_delay(ctl_t &C, int good, int bad) {
+    if (good && !bad && !C.ab_trial && C.wmax > 0 &&
+        (!QSB_CG_RECOVER || C.wmax >= C.whw)) {
+        if (C.stable_net_rounds < 2) ++C.stable_net_rounds;
+        return C.stable_net_rounds == 1 ? 120.0 : 240.0;
+    }
+    C.stable_net_rounds = 0;
+    return bad ? 2.0 : good && QSB_CG_RECOVER && C.wmax < C.whw ? 10.0 : 60.0;
+}
+
 /* Called by the GPU host loop after every drained GPU batch of gpu_batch candidates.
  * gpu_batch is the retained actual work for that completed slot, including
  * partial sequence tails; no enqueued or nominal batch work is credited. */
@@ -960,7 +974,7 @@ static void tick(double now, double gpu_batch) {
         if (C.ab_ec != S->ec_mode.load() || C.ab_sha != S->sha_mode.load() ||
             C.ab_het != S->het_on.load()) {
             /* Backend calibration is not a worker-value comparison. */
-            set_allowed(C.ab_restore); C.strikes = C.profits = 0;
+            set_allowed(C.ab_restore); C.strikes = C.profits = 0; C.stable_net_rounds = 0;
             C.phase = 2; C.next_ab = now + 5.0;
             if (C.verbose) printf("  [CPU] NET abort: backend changed\n");
             return;
@@ -1000,26 +1014,29 @@ static void tick(double now, double gpu_batch) {
                               C.ab_budget, C.ab_trial, C.ab_reverse ? "BAAB" : "ABBA",
                               (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
         if (C.verdict_budget != C.ab_budget) {
-            C.strikes = C.profits = 0; C.verdict_budget = C.ab_budget;
+            C.strikes = C.profits = 0; C.stable_net_rounds = 0; C.verdict_budget = C.ab_budget;
         }
         set_allowed(C.ab_restore);
         const int bad = delta < -noise, good = delta > noise;
         C.strikes = bad ? C.strikes + 1 : 0;
         C.profits = good ? C.profits + 1 : 0;
         if (bad && C.strikes >= 2 && !C.ab_trial) {
+            C.stable_net_rounds = 0;
             C.wmax -= (C.wmax + 3) / 4;   /* a measured loss has no worker floor */
             set_allowed(C.wmax); C.strikes = C.profits = 0;
             printf("  CPU co-grind: combined rate %+.3f%% with workers; using %d\n", 100 * delta, C.wmax);
             C.next_ab = now + (C.wmax ? 5.0 : 60.0);
         } else if (good && C.profits >= 2 && QSB_CG_RECOVER && C.wmax < C.whw) {
+            C.stable_net_rounds = 0;
             C.wmax++; set_allowed(C.wmax); C.strikes = C.profits = 0;
             C.next_ab = now + 10.0;
             if (C.verbose) printf("  [CPU] net-positive worker ramp -> %d (cap %d, hw %d)\n", C.wmax, C.wcap, C.whw);
         } else if (C.ab_trial) {
             /* Trial workers are parked between comparisons. A negative or
              * ambiguous one-worker trial waits before trying again. */
+            C.stable_net_rounds = 0;
             C.next_ab = now + (good ? 10.0 : 60.0);
-        } else C.next_ab = now + (bad ? 2.0 : good && QSB_CG_RECOVER && C.wmax < C.whw ? 10.0 : 60.0);
+        } else C.next_ab = now + net_recheck_delay(C, good, bad);
         C.ab_reverse ^= 1;
         C.phase = 2;
         return;
