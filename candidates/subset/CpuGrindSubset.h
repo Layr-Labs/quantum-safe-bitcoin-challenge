@@ -578,6 +578,12 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #ifndef QSB_CPU_FOLD_PAR
 #define QSB_CPU_FOLD_PAR 1
 #endif
+/* QSB_CPU_PIN_WORKERS: bind each co-grinder worker to one logical CPU from
+ * the worker mask. Order one CPU per physical core first, then SMT siblings.
+ * Host-only: no carrier knob and no candidate/search-order change. */
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1
+#endif
 /* QSB_CPU_TOUCH_FUSE (default 0 = the full first touch): a 9- or 10-window table keeps the sampled first touch (1 region in
  * 32) as its huge-page gate and skips the full pass, so the build's own writes fault the rest of the table in while other
  * threads run additions; the huge-page fraction is measured again over the whole table after the build and printed (and used
@@ -1341,8 +1347,29 @@ Q8T static inline QCPU_AIF void fe8_from64(fe8 &r, __m512i a0, __m512i a1, __m51
     r.l[4] = _mm512_srli_epi64(a3, 16);
 }
 #endif
+/* Independent host-only point-column load; 0 restores the original transpose. */
+#ifndef QSB_CPU_PT_GATHER
+#define QSB_CPU_PT_GATHER 1
+#endif
 /* Load 8 table points (one 64 B row each: x0..x3 y0..y3) and transpose to SoA. */
 Q8TX static inline QCPU_AIF void pt8_load(fe8 &x, fe8 &y, const pt *const *rows) {
+#if QSB_CPU_PT_GATHER
+    static_assert(sizeof(pt) == 64 && sizeof(void *) == 8, "point gather layout");
+    const char *base = (const char *)rows[0];
+    /* Integer address differences avoid C++ subtraction between distinct row objects. */
+    const __m512i off = _mm512_sub_epi64(_mm512_loadu_si512((const void *)rows),
+                                       _mm512_set1_epi64((long long)(uintptr_t)rows[0]));
+    const __m512i x0 = _mm512_i64gather_epi64(off, base +  0, 1),
+                  x1 = _mm512_i64gather_epi64(off, base +  8, 1),
+                  x2 = _mm512_i64gather_epi64(off, base + 16, 1),
+                  x3 = _mm512_i64gather_epi64(off, base + 24, 1);
+    fe8_from64(x, x0, x1, x2, x3);
+    const __m512i y0 = _mm512_i64gather_epi64(off, base + 32, 1),
+                  y1 = _mm512_i64gather_epi64(off, base + 40, 1),
+                  y2 = _mm512_i64gather_epi64(off, base + 48, 1),
+                  y3 = _mm512_i64gather_epi64(off, base + 56, 1);
+    fe8_from64(y, y0, y1, y2, y3);
+#else
     const __m512i r0 = _mm512_loadu_si512(rows[0]), r1 = _mm512_loadu_si512(rows[1]),
                   r2 = _mm512_loadu_si512(rows[2]), r3 = _mm512_loadu_si512(rows[3]),
                   r4 = _mm512_loadu_si512(rows[4]), r5 = _mm512_loadu_si512(rows[5]),
@@ -1362,6 +1389,7 @@ Q8TX static inline QCPU_AIF void pt8_load(fe8 &x, fe8 &y, const pt *const *rows)
                   c3 = _mm512_shuffle_i64x2(b3, b7, 0x44), c7 = _mm512_shuffle_i64x2(b3, b7, 0xEE);
     fe8_from64(x, c0, c1, c2, c3);
     fe8_from64(y, c4, c5, c6, c7);
+#endif
 }
 /* lane -> canonical 4x64 */
 static inline void fe8_lane_canon(fe &r, const uint64_t l[5]) {
@@ -2678,6 +2706,7 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+    std::vector<int> pin_cpus;      /* QSB_CPU_PIN_WORKERS: one logical CPU per worker */
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3335,6 +3364,13 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -4078,6 +4114,45 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
