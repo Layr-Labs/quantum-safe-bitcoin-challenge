@@ -79,7 +79,70 @@ static QI_INL void fmul(vfe *r, const vfe *A, const vfe *B) {
     d4 += d3 >> 52; d3 &= M;
     r->n[0] = d0; r->n[1] = d1; r->n[2] = d2; r->n[3] = d3; r->n[4] = d4;
 }
-static QI_INL void fsqr(vfe *r, const vfe *a) { fmul(r, a, a); }
+/* Symmetric square: 15 unordered products, each split into low/high IFMA
+ * halves, instead of the generic multiply's 25 ordered products. Off-diagonal
+ * halves are doubled after extraction (never double a 52-bit IFMA input).
+ * Column values are exactly those of fmul(a,a), so its bounds and reduction
+ * apply unchanged; load every input before writing r to preserve aliasing. */
+#ifndef QCG_IFMA_SYMMETRIC_SQR
+#define QCG_IFMA_SYMMETRIC_SQR 1
+#endif
+static QI_INL void fsqr(vfe *r, const vfe *a) {
+#if !QCG_IFMA_SYMMETRIC_SQR
+    fmul(r, a, a);
+#else
+    const V a0=a->n[0], a1=a->n[1], a2=a->n[2], a3=a->n[3], a4=a->n[4];
+    const V z=vs1(0), M=vs1(QI_M52), R=vs1(QI_R), C=vs1(QI_C);
+    const V p00l=QI_LO(z,a0,a0), p00h=QI_HI(z,a0,a0);
+    const V p01l=QI_LO(z,a0,a1), p01h=QI_HI(z,a0,a1);
+    const V p02l=QI_LO(z,a0,a2), p02h=QI_HI(z,a0,a2);
+    const V p03l=QI_LO(z,a0,a3), p03h=QI_HI(z,a0,a3);
+    const V p04l=QI_LO(z,a0,a4), p04h=QI_HI(z,a0,a4);
+    const V p11l=QI_LO(z,a1,a1), p11h=QI_HI(z,a1,a1);
+    const V p12l=QI_LO(z,a1,a2), p12h=QI_HI(z,a1,a2);
+    const V p13l=QI_LO(z,a1,a3), p13h=QI_HI(z,a1,a3);
+    const V p14l=QI_LO(z,a1,a4), p14h=QI_HI(z,a1,a4);
+    const V p22l=QI_LO(z,a2,a2), p22h=QI_HI(z,a2,a2);
+    const V p23l=QI_LO(z,a2,a3), p23h=QI_HI(z,a2,a3);
+    const V p24l=QI_LO(z,a2,a4), p24h=QI_HI(z,a2,a4);
+    const V p33l=QI_LO(z,a3,a3), p33h=QI_HI(z,a3,a3);
+    const V p34l=QI_LO(z,a3,a4), p34h=QI_HI(z,a3,a4);
+    const V p44l=QI_LO(z,a4,a4), p44h=QI_HI(z,a4,a4);
+    V c0 = p00l;
+    V c1 = p00h + p01l * vs1(2);
+    V c2 = p01h * vs1(2) + p02l * vs1(2) + p11l;
+    V c3 = p02h * vs1(2) + p03l * vs1(2) + p11h + p12l * vs1(2);
+    V c4 = p03h * vs1(2) + p04l * vs1(2) + p12h * vs1(2) + p13l * vs1(2) + p22l;
+    V c5 = p04h * vs1(2) + p13h * vs1(2) + p14l * vs1(2) + p22h + p23l * vs1(2);
+    V c6 = p14h * vs1(2) + p23h * vs1(2) + p24l * vs1(2) + p33l;
+    V c7 = p24h * vs1(2) + p33h + p34l * vs1(2);
+    V c8 = p34h * vs1(2) + p44l;
+    V c9 = p44h;
+    /* high columns to 52-bit limbs (c9 stays < 2^52) */
+    c6 += c5 >> 52; c5 &= M;
+    c7 += c6 >> 52; c6 &= M;
+    c8 += c7 >> 52; c7 &= M;
+    c9 += c8 >> 52; c8 &= M;
+    /* fold 2^(52k) = 2^(52(k-5)) 2^260, 2^260 = R mod p: lo(c_k R) -> column k-5, hi -> k-4 */
+    V d0 = QI_LO(c0, c5, R);
+    V d1 = QI_LO(QI_HI(c1, c5, R), c6, R);
+    V d2 = QI_LO(QI_HI(c2, c6, R), c7, R);
+    V d3 = QI_LO(QI_HI(c3, c7, R), c8, R);
+    V d4 = QI_LO(QI_HI(c4, c8, R), c9, R);
+    const V e5 = QI_HI(z, c9, R);                              /* weight 2^260, < 2^32 */
+    d4 += d3 >> 52; d3 &= M;
+    const V top = (d4 >> 48) + (e5 << 4);                      /* weight 2^256, < 2^37 */
+    d4 &= vs1(QI_M48);
+    d0 = QI_LO(d0, top, C);
+    d1 = QI_HI(d1, top, C);
+    d1 += d0 >> 52; d0 &= M;
+    d2 += d1 >> 52; d1 &= M;
+    d3 += d2 >> 52; d2 &= M;
+    d4 += d3 >> 52; d3 &= M;
+    r->n[0] = d0; r->n[1] = d1; r->n[2] = d2; r->n[3] = d3; r->n[4] = d4;
+#endif
+}
+
 
 /* any limbs < 2^62 -> W form (libsecp256k1 fe_normalize_weak, radix 2^52) */
 static QI_INL void fwk(vfe *r) {
