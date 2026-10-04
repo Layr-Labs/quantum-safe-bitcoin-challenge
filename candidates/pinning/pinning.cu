@@ -4033,7 +4033,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #define QSB_PK_WDIV 2
 #endif
 #ifndef QSB_PK_WMAX
-#define QSB_PK_WMAX 12
+#define QSB_PK_WMAX 16
 #endif
 #if QSB_HOST_PKSHA && QSB_SUBPIPE && QSB_SLOTPIPE && QSB_REFILL_BEFORE_GATE && QSB_SHA_OPT && \
     QSB_SPARSE_D && QSB_ZEROS_N <= 32
