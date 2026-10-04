@@ -209,7 +209,7 @@
 #define QSB_CPU_TRY11 1
 #endif
 #ifndef QSB_CPU_TRY10
-#define QSB_CPU_TRY10 1
+#define QSB_CPU_TRY10 0
 #endif
 /* QSB_CPU_TRY9: 9 windows (114,688 MiB; 8 additions per candidate instead of 9) when the 10-window rule holds and that
  * table fits in QSB_CPU_TAB9_FRAC of the memory left after QSB_CPU_TAB_RESERVE_MB (i.e. avail >= ~236 GiB), with the same
