@@ -903,7 +903,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_S3_NM_SEED 1
 #endif
 #ifndef QSB_TREE_UNROLL
-#define QSB_TREE_UNROLL 0
+#define QSB_TREE_UNROLL 1
 #endif
 /* QSB_PARK128 1 (kernel_digest): candidate A's twelve parked words (and B's scalar, parked in rows 8..11 across A's
  * front) as six 16-byte rows, so each park and reload is one STS.128/LDS.128 per word pair instead of two 64-bit
@@ -923,7 +923,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * across both tails. The front keeps its ABI (its chain loop is not re-allocated by this). Same __constant__
  * words, same field operations, in the same order: bit-identical. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1
 #endif
 #if QSB_R_CBANK_TAILS < 0 || QSB_R_CBANK_TAILS > 1
 #error "QSB_R_CBANK_TAILS must be 0 or 1"
@@ -1008,7 +1008,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_CONST_CALLEE 1
 #endif
 #ifndef QSB_SHA_WROLL_PIPE
-#define QSB_SHA_WROLL_PIPE 0
+#define QSB_SHA_WROLL_PIPE 1
 #endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
@@ -1069,6 +1069,20 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #endif
 #ifndef QSB_SHA_UEXIT
 #define QSB_SHA_UEXIT 0
+#endif
+/* QSB_CC_GLUE (window_schedule_shared.cuh): the QSB_CONST_CALLEE callee's block loop rolled (the K+W row offset runs on
+ * across the four blocks) with each block's rounds 0..15 peeled: they read the saved state words and write the working
+ * registers, so the 16 per-block working-state copies and the per-block loop resets go, and the remaining 48 rounds run
+ * as three 16-round trips (half the loop control per round). Same words, rounds and order: bit-identical. 0 = the base
+ * callee byte for byte (the knob joins QSB_CARRIER_KNOBS only when nonzero). */
+#ifndef QSB_CC_GLUE
+#define QSB_CC_GLUE 1
+#endif
+#if QSB_CC_GLUE < 0 || QSB_CC_GLUE > 3
+#error "QSB_CC_GLUE is 0 to 3"
+#endif
+#if QSB_CC_GLUE && (!QSB_CONST_CALLEE || QSB_SHA_UEXIT || QSB_SHA_W0FOLD)
+#error "QSB_CC_GLUE reshapes the QSB_CONST_CALLEE callee: needs QSB_CONST_CALLEE 1, QSB_SHA_UEXIT 0 and QSB_SHA_W0FOLD 0"
 #endif
 #if (QSB_SHA_W0FOLD != 0 && QSB_SHA_W0FOLD != 1) || QSB_SHA_UEXIT < 0 || QSB_SHA_UEXIT > 4
 #error "QSB_SHA_W0FOLD is 0 or 1; QSB_SHA_UEXIT is 0 to 4"
@@ -5902,6 +5916,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * a knob that is not defined in this configuration stringifies to its own name. */
 #if QSB_SHA_W0FOLD || QSB_SHA_UEXIT   /* lane SHA knobs appear only when set, so the default string is unchanged */
 #define QSB_XSHA_KNOBS QSB_CARRIER_KV(QSB_SHA_W0FOLD) QSB_CARRIER_KV(QSB_SHA_UEXIT)
+#elif QSB_CC_GLUE   /* QSB_CC_GLUE: likewise only when set */
+#define QSB_XSHA_KNOBS QSB_CARRIER_KV(QSB_CC_GLUE)
 #else
 #define QSB_XSHA_KNOBS
 #endif
