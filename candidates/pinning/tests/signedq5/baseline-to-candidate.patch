@@ -1,0 +1,50 @@
+--- a/pinning.cu
++++ b/pinning.cu
+@@ -269,7 +269,7 @@
+  * Slots 4 and 5 hold the same codes in both decoders (segments 4 and 5), segment 7's field
+  * ends at bit 72 like segment 3's (same top-aligned window), and segment 6 starts at bit 18
+  * like segment 1: only the shift and offset constants of seed 1 and slot 3 depend on the block.
+- * Slot 2 (segment 2) is still written and never read by such a block. */
++ * Slot 2 (segment 2) is written only by the six-term decoder. */
+ #ifndef QSB_QMIX5
+ #define QSB_QMIX5 8
+ #endif
+@@ -279,7 +279,22 @@
+ #if QSB_QMIX5 && (!QSB_GLV11 || QSB_QGLV5 || !QSB_PDEC_Z)
+ #error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
+ #endif
++/* Private signed-QMIX endpoint: keep the signed P decoder, fixed Q/P slots and
++ * rare P6 route, and select the existing five-term Q decoder in every block. */
++#ifndef QSB_SIGNED_Q5_ENDPOINT
++#define QSB_SIGNED_Q5_ENDPOINT 1
++#endif
++#if QSB_SIGNED_Q5_ENDPOINT != 0 && QSB_SIGNED_Q5_ENDPOINT != 1
++#error "QSB_SIGNED_Q5_ENDPOINT must be 0 or 1"
++#endif
++#if QSB_SIGNED_Q5_ENDPOINT && !QSB_QMIX5
++#error "QSB_SIGNED_Q5_ENDPOINT requires the signed QSB_QMIX5 helper"
++#endif
++#if QSB_SIGNED_Q5_ENDPOINT
++#define QSB_QMIX5_SEL() true
++#else
+ #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
++#endif
+ #ifndef QSB_BATCH
+ #define QSB_BATCH 4194304    /* candidates per pipeline launch */
+ #endif
+@@ -1291,13 +1306,13 @@
+ /* Q's decode (qsb_decode_glv_side_z<1> with the register seed glue), five-term in a QMIX5
+  * block (q5): terms 0, 1 in the seed registers, term t >= 2 in slot t+1 (segments 7, 4, 5 in
+  * slots 3, 4, 5), so the block's chain starts at term 1. Slots 4 and 5 are the same codes in
+- * both decoders; slot 2 (segment 2) is written as before and only the six-term chain reads it. */
++ * both decoders; slot 2 (segment 2) is written only when the six-term chain reads it. */
+ __device__ __forceinline__ void qsb_decode_q_qmix5(const uint64_t w[2],uint32_t top,uint32_t m32,
+         volatile uint32_t *codes,uint32_t *seed0,uint32_t *seed1,uint32_t *msk0,uint32_t *msk1,
+         bool q5) {
+     q9_bigtbl_seed_z(w,m32,0,seed0,msk0);
+     qsb_qmix5_seed1(w,q5,seed1,msk1);
+-    codes[(size_t)2*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,2);
++    if(!q5) codes[(size_t)2*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,2);
+     codes[(size_t)3*QSB_TREE_N+threadIdx.x]=qsb_qmix5_code3(w,q5);
+     codes[(size_t)4*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,4);
+     codes[(size_t)5*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,5);
