@@ -972,7 +972,9 @@ static void tick(double now, double gpu_batch) {
         const int on = net_window_on(C);
         C.ab_gpu[k] += gpu_batch;
         C.ab_seconds[k] += dt;
-        if (on) C.ab_cpu[k] += (double)cpu_delta;
+        /* Workers park between batches, so an off window may still receive
+         * real tail completions. Compare both windows' actual total work. */
+        C.ab_cpu[k] += (double)cpu_delta;
         C.ab_n[k]++;
         if (C.ab_n[k] < 3 || now - C.win_t0 < 1.0) return;
         if (C.verbose) printf("  [CPU] NET window order=%s index=%d on=%d workers=%d gpu=%.0f cpu=%.0f seconds=%.9f n=%d\n",
@@ -987,16 +989,17 @@ static void tick(double now, double gpu_batch) {
         const double gpu_on = (C.ab_gpu[a] + C.ab_gpu[b]) / on_seconds;
         const double gpu_off = (C.ab_gpu[c] + C.ab_gpu[d]) / off_seconds;
         const double cpu_on = (C.ab_cpu[a] + C.ab_cpu[b]) / on_seconds;
-        const double delta = (gpu_on + cpu_on) / gpu_off - 1.0;
+        const double cpu_off = (C.ab_cpu[c] + C.ab_cpu[d]) / off_seconds;
+        const double delta = (gpu_on + cpu_on) / (gpu_off + cpu_off) - 1.0;
         const double va = (C.ab_gpu[a] + C.ab_cpu[a]) / C.ab_seconds[a];
         const double vb = (C.ab_gpu[b] + C.ab_cpu[b]) / C.ab_seconds[b];
-        const double vc = C.ab_gpu[c] / C.ab_seconds[c];
-        const double vd = C.ab_gpu[d] / C.ab_seconds[d];
+        const double vc = (C.ab_gpu[c] + C.ab_cpu[c]) / C.ab_seconds[c];
+        const double vd = (C.ab_gpu[d] + C.ab_cpu[d]) / C.ab_seconds[d];
         /* Half the repeat spread is an observed hysteresis band, not a
          * confidence interval or a promotion/local-margin requirement. */
         const double noise = fmax(1e-12, fmax(fabs(va - vb) / (va + vb), fabs(vc - vd) / (vc + vd)));
-        if (C.verbose) printf("  [CPU] NET gpu_on=%.0f gpu_off=%.0f cpu_on=%.0f delta=%+.4f%% band=%.4f%% workers=%d trial=%d order=%s hits=%llu/%llu exact\n",
-                              gpu_on, gpu_off, cpu_on, 100 * delta, 100 * noise,
+        if (C.verbose) printf("  [CPU] NET gpu_on=%.0f gpu_off=%.0f cpu_on=%.0f cpu_off=%.0f delta=%+.4f%% band=%.4f%% workers=%d trial=%d order=%s hits=%llu/%llu exact\n",
+                              gpu_on, gpu_off, cpu_on, cpu_off, 100 * delta, 100 * noise,
                               C.ab_budget, C.ab_trial, C.ab_reverse ? "BAAB" : "ABBA",
                               (unsigned long long)S->hits.load(), (unsigned long long)S->tentative.load());
         if (C.verdict_budget != C.ab_budget) {
