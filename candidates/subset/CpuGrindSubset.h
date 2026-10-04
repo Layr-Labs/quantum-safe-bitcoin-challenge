@@ -788,6 +788,12 @@ static void recode_scalar(const Geo &g, const uint32_t *zb, uint32_t *ds, int B)
  * every multiplication input must be normalized. Outputs of fe8_mul/fe8_sub/fe8_add are normalized. */
 struct fe8 { __m512i l[5]; };
 #define F8_M52 _mm512_set1_epi64(0xFFFFFFFFFFFFFULL)
+/* Independent full-normalizer extension of the lazy-carry scheduling study.
+ * All callers' non-negative columns are below 2^57. Headroom64 in every
+ * middle limb makes independent carries exact; boundary lanes stay serial. */
+#ifndef QSB_CPU_NORM_PAR_CARRY
+#define QSB_CPU_NORM_PAR_CARRY 1
+#endif
 static inline __attribute__((QCPU_AI target("avx512f,avx512ifma")))
 void fe8_carry(fe8 &r) {
     /* fold bits >= 256 first (limb 4 bit 48 and up; 2^256 = 0x1000003D1 mod p), then one carry chain:
@@ -796,6 +802,20 @@ void fe8_carry(fe8 &r) {
     __m512i c;
     c = _mm512_srli_epi64(r.l[4], 48); r.l[4] = _mm512_and_si512(r.l[4], M48);
     r.l[0] = _mm512_madd52lo_epu64(r.l[0], c, K);             /* c*K < 2^52 */
+#if QSB_CPU_NORM_PAR_CARRY
+    const __m512i mid = _mm512_and_si512(
+        _mm512_or_si512(_mm512_or_si512(r.l[1], r.l[2]), r.l[3]), M);
+    if (_mm512_cmp_epu64_mask(mid, _mm512_set1_epi64(0xFFFFFFFFFFFFFULL - 64), _MM_CMPINT_NLE) == 0) {
+        const __m512i c0 = _mm512_srli_epi64(r.l[0], 52), c1 = _mm512_srli_epi64(r.l[1], 52),
+                      c2 = _mm512_srli_epi64(r.l[2], 52), c3 = _mm512_srli_epi64(r.l[3], 52);
+        r.l[0] = _mm512_and_si512(r.l[0], M);
+        r.l[1] = _mm512_and_si512(_mm512_add_epi64(r.l[1], c0), M);
+        r.l[2] = _mm512_and_si512(_mm512_add_epi64(r.l[2], c1), M);
+        r.l[3] = _mm512_and_si512(_mm512_add_epi64(r.l[3], c2), M);
+        r.l[4] = _mm512_add_epi64(r.l[4], c3);
+        return;
+    }
+#endif
     c = _mm512_srli_epi64(r.l[0], 52); r.l[0] = _mm512_and_si512(r.l[0], M); r.l[1] = _mm512_add_epi64(r.l[1], c);
     c = _mm512_srli_epi64(r.l[1], 52); r.l[1] = _mm512_and_si512(r.l[1], M); r.l[2] = _mm512_add_epi64(r.l[2], c);
     c = _mm512_srli_epi64(r.l[2], 52); r.l[2] = _mm512_and_si512(r.l[2], M); r.l[3] = _mm512_add_epi64(r.l[3], c);

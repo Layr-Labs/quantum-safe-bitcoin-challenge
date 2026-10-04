@@ -1135,8 +1135,16 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_GATE_FMA_RT_AFTER_S
 #define QSB_GATE_FMA_RT_AFTER_S 120
 #endif
+/* Independent host-only rate-policy experiment; both gate forms remain in the existing image. */
+#ifndef QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RELEASE95 1
+#endif
 #ifndef QSB_GATE_FMA_RT_RATIO_PCT
+#if QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RATIO_PCT 95
+#else
 #define QSB_GATE_FMA_RT_RATIO_PCT 90
+#endif
 #endif
 #ifndef QSB_GATE_FMA_RT_FORCE_S
 #define QSB_GATE_FMA_RT_FORCE_S 0
@@ -6838,6 +6846,14 @@ int main(int argc, char **argv) {
     }
 
     struct timespec t0, t1, t_last_report;
+    /* Host-only native Ada resource experiment. Prefer the 64-KiB shared
+     * partition (more L1, fewer resident CTAs) only when the queried kernel
+     * fits it with Ada's 1-KiB per-CTA reservation. This is a driver hint,
+     * not a cache-hit or occupancy measurement. 0 = the original max-shared
+     * native preference; the deferred compute_52 hook stays unchanged. */
+#ifndef QSB_RT_CARVEOUT64
+#define QSB_RT_CARVEOUT64 1
+#endif
     /* Two 48-KiB-shared, 128-register CTAs can fit per Ada SM only when the
      * shared-memory partition permits at least 96 KiB.  This is a CUDA
      * performance preference; a driver may ignore it and the search is exact
@@ -6858,8 +6874,47 @@ int main(int argc, char **argv) {
     if (!g_qsb_carrier.on) g_qsb_jit_hook();
     cudaError_t qsb_carveout_rc = cudaSuccess;
     if (qsb_carrier_has(QK_DIG)) {   /* the same hint on the native image's digest kernel */
+#if QSB_RT_CARVEOUT64
+        int qsb_carveout_percent = cudaSharedmemCarveoutMaxShared;
+        bool qsb_carveout_attr_ok = false;
+        cudaDeviceProp qsb_carveout_prop = {};
+        cudaFuncAttributes qsb_carveout_attr = {};
+        const cudaError_t qsb_carveout_prop_rc =
+            cudaGetDeviceProperties(&qsb_carveout_prop, gpu_index);
+        if (qsb_carveout_prop_rc == cudaSuccess &&
+            qsb_carveout_prop.major == 8 && qsb_carveout_prop.minor == 9) {
+            const cudaError_t qsb_carveout_attr_rc = cudaFuncGetAttributes(
+                &qsb_carveout_attr, (const void *)g_qsb_carrier.k[QK_DIG]);
+            qsb_carveout_attr_ok = qsb_carveout_attr_rc == cudaSuccess;
+            /* All digest launch sites request zero dynamic shared memory.
+             * >32 KiB selects a one-CTA shared partition (the old partition
+             * may admit two CTAs, depending on actual kernel resources);
+             * <=63 KiB leaves the documented 1-KiB block reservation. */
+            if (qsb_carveout_attr_rc == cudaSuccess &&
+                qsb_carveout_attr.sharedSizeBytes > 32u * 1024u &&
+                qsb_carveout_attr.sharedSizeBytes <= 63u * 1024u &&
+                qsb_carveout_attr.maxThreadsPerBlock >= QSB_SE_BLOCK)
+                qsb_carveout_percent = 64;
+            else if (qsb_carveout_attr_rc != cudaSuccess)
+                (void)cudaGetLastError();
+        } else if (qsb_carveout_prop_rc != cudaSuccess) {
+            (void)cudaGetLastError();
+        }
+        qsb_carveout_rc = cudaFuncSetAttribute((const void *)g_qsb_carrier.k[QK_DIG],
+            cudaFuncAttributePreferredSharedMemoryCarveout, qsb_carveout_percent);
+        if (qsb_carveout_rc != cudaSuccess && qsb_carveout_percent == 64) {
+            (void)cudaGetLastError();
+            qsb_carveout_percent = cudaSharedmemCarveoutMaxShared;
+            qsb_carveout_rc = cudaFuncSetAttribute((const void *)g_qsb_carrier.k[QK_DIG],
+                cudaFuncAttributePreferredSharedMemoryCarveout, qsb_carveout_percent);
+        }
+        printf("  Native digest carveout preference: %d%% (attributes %s; static shared %zu B, local %zu B, registers %d)\n",
+               qsb_carveout_percent, qsb_carveout_attr_ok ? "queried" : "unavailable", qsb_carveout_attr.sharedSizeBytes,
+               qsb_carveout_attr.localSizeBytes, qsb_carveout_attr.numRegs);
+#else
         qsb_carveout_rc = cudaFuncSetAttribute((const void *)g_qsb_carrier.k[QK_DIG],
             cudaFuncAttributePreferredSharedMemoryCarveout, cudaSharedmemCarveoutMaxShared);
+#endif
         if (qsb_carveout_rc != cudaSuccess) {
             fprintf(stderr, "WARN: carrier digest shared-memory carveout hint unavailable: %s\n",
                     cudaGetErrorString(qsb_carveout_rc));
