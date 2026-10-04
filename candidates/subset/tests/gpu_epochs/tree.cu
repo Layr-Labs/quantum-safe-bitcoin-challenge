@@ -1160,7 +1160,7 @@ __device__ __constant__ unsigned QSB_GATE_FMA_C = 1u;
 #define QSB_GATE_FMA_RT_HEAD 1
 #endif
 #ifndef QSB_OUTER_FMA_RT
-#define QSB_OUTER_FMA_RT 0
+#define QSB_OUTER_FMA_RT 1
 #endif
 #if QSB_GATE_FMA_RT_HEAD != 0 && QSB_GATE_FMA_RT_HEAD != 1
 #error "QSB_GATE_FMA_RT_HEAD is 0 or 1"
