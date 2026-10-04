@@ -1,3 +1,9 @@
+#ifndef QSB_HOST_PK_DISABLE
+#define QSB_HOST_PK_DISABLE 1
+#endif
+#if QSB_HOST_PK_DISABLE != 0 && QSB_HOST_PK_DISABLE != 1
+#error "QSB_HOST_PK_DISABLE must be 0 or 1"
+#endif
 #define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
@@ -5775,9 +5781,10 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+#ifndef QSB_HOST_RECID_DIGEST_REUSE
+#define QSB_HOST_RECID_DIGEST_REUSE 1
+#endif
+static int qsb_host_digest(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, uint8_t d2[32]) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5813,9 +5820,13 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
 
+    return 1;
+}
+static int qsb_host_exact_hit_digest(const uint8_t d2[32], int recid,
+                                    EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                    const BIGNUM *nri, const EC_POINT *Ru2) {
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
     EC_POINT *P = EC_POINT_new(grp);
@@ -5849,18 +5860,70 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT_free(Q);
     EC_POINT_free(R);
     return ok;
+ }
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return 0;
+    return qsb_host_exact_hit_digest(d2, recid, grp, ctx, order, nri, Ru2);
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
  * The GPU returns after the first tentative recid, so a false recid-0
  * nomination must not hide a real recid-1 hit. */
+/* Publication-thread workspace: owned by the search invocation, not a global
+ * cache keyed by reused OpenSSL addresses. Device/worker threads never access it. */
+struct QsbPublicationWorkspace {
+    BIGNUM *z, *u1, *qx, *qy;
+    EC_POINT *P, *Q, *minus_R;
+    bool ready;
+    QsbPublicationWorkspace(EC_GROUP *grp, BN_CTX *ctx, const EC_POINT *R)
+        : z(BN_new()), u1(BN_new()), qx(BN_new()), qy(BN_new()),
+          P(EC_POINT_new(grp)), Q(EC_POINT_new(grp)), minus_R(EC_POINT_dup(R, grp)), ready(false) {
+        ready = z && u1 && qx && qy && P && Q && minus_R &&
+                EC_POINT_invert(grp, minus_R, ctx);
+    }
+    ~QsbPublicationWorkspace() {
+        BN_free(z); BN_free(u1); BN_free(qx); BN_free(qy);
+        EC_POINT_free(P); EC_POINT_free(Q); EC_POINT_free(minus_R);
+    }
+    QsbPublicationWorkspace(const QsbPublicationWorkspace&) = delete;
+    QsbPublicationWorkspace& operator=(const QsbPublicationWorkspace&) = delete;
+};
+/* Both recids share z and u1*G. ±R is immutable for this problem. The first
+ * recid retains priority; the alternate still receives full affine/hash checks. */
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                           const BIGNUM *nri, const EC_POINT *Ru2) {
-    if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
-    if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+                           const BIGNUM *nri, const EC_POINT *Ru2,
+                           QsbPublicationWorkspace *ws) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return -1;
+    if (!ws || !ws->ready) {
+        if (qsb_host_exact_hit_digest(d2, ri, grp, ctx, order, nri, Ru2)) return ri;
+        if (qsb_host_exact_hit_digest(d2, 1-ri, grp, ctx, order, nri, Ru2)) return 1-ri;
+        return -1;
+    }
+    if (!BN_bin2bn(d2, 32, ws->z) ||
+        !BN_mod_mul(ws->u1, ws->z, nri, order, ctx) ||
+        !EC_POINT_mul(grp, ws->P, ws->u1, NULL, NULL, ctx)) return -1;
+    for (int attempt=0; attempt<2; ++attempt) {
+        const int recid=attempt ? 1-ri : ri;
+        const EC_POINT *R=recid ? ws->minus_R : Ru2;
+        if (!EC_POINT_add(grp, ws->Q, ws->P, R, ctx) ||
+            !EC_POINT_get_affine_coordinates_GFp(grp, ws->Q, ws->qx, ws->qy, ctx)) continue;
+        uint8_t pub[33], xb[32], hh[32];
+        memset(xb, 0, sizeof xb);
+        int nbytes=BN_num_bytes(ws->qx);
+        if (nbytes>0 && nbytes<=32) BN_bn2bin(ws->qx, xb+(32-nbytes));
+        pub[0]=(uint8_t)(0x02+(BN_is_odd(ws->qy)?1:0));
+        memcpy(pub+1, xb, 32);
+        SHA256(pub, 33, hh);
+        if (qsb_host_zeros(hh)>=QSB_ZEROS_N) return recid;
+    }
     return -1;
 }
+
 #endif
 
 /* QSB_CPU_GRIND (kill switch, host only): 1 = idle host cores grind sequences counting down
@@ -6104,6 +6167,9 @@ static int startup_fallback(const char *why) {
     return 0;
 }
 static int start(size_t batch) {
+#if QSB_HOST_PK_DISABLE
+    return 0; /* All pubkeys use the existing GPU hash path; no CPU workers or budget reservation. */
+#endif
     const char *off = getenv("QSB_HOST_PKSHA_OFF");
     if (off && atoi(off)) return 0;
     const size_t recs = batch / QSB_PK_LANES / QSB_HOST_PKSHA + 1;
@@ -7031,6 +7097,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
         return 1;
     }
+    QsbPublicationWorkspace gate_workspace(gate_grp, gate_ctx, gate_R);
+    if (!gate_workspace.ready)
+        fprintf(stderr, "Publication workspace unavailable; using exact allocation-based gate\n");
 #endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
     const bool can_cogrind=!easy && effective_total==1 && !seq_start_override && single_hash;
@@ -7125,7 +7194,7 @@ int main(int argc, char **argv) {
                     (void)hc;
 #if QSB_HOST_GATE
                     ri = qsb_gate_accept(&pp, hs, lt, ri,
-                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R, &gate_workspace);
                     if (ri < 0) continue;
 #endif
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
@@ -7521,7 +7590,7 @@ int main(int argc, char **argv) {
 #if QSB_HOST_GATE
                         (void)hc;
                         ri = qsb_gate_accept(&pp, seq, lt, ri,
-                                             gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+                                             gate_grp, gate_ctx, gate_order, gate_nri, gate_R, &gate_workspace);
                         if (ri < 0) continue;
                         fprintf(f, "sequence=%u locktime=%u recid=%d\n", seq, lt, ri);
 #else
