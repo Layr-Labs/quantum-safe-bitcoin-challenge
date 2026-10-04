@@ -328,7 +328,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 /* QSB_FIN_CAP_IMAD: ptxas spends the 72-register headroom of a 7-block bound on the new schedule
  * (70 to 72 registers, which drops the finish kernel from 8 to 7 resident blocks per SM). A bound
  * of 8 keeps it at the record's 64 registers, so residency is unchanged. */
-#define QSB_S2_BLOCKS 8
+#define QSB_S2_BLOCKS 9
 #else
 #define QSB_S2_BLOCKS 7 /* Weighted finish register headroom. */
 #endif
@@ -5967,6 +5967,18 @@ static inline void message(uint32_t w[16], const uint64_t *x, uint32_t prefix) {
     for (int i = 9; i < 15; i++) w[i] = 0;
     w[15] = 0x108u;
 }
+/* The AVX2 H0 compressor consumes only rows 0..8; it folds the seven
+ * fixed padding/length words itself. Build its column directly, avoiding
+ * two temporary padded messages and seven unused matrix rows per key.
+ * SHA-NI and scalar compressors continue to receive complete messages. */
+static inline void message_live_column(uint32_t w[16][8], int t,
+                                       const uint64_t *x, uint32_t prefix) {
+    uint32_t s[8];
+    for (int i = 0; i < 4; i++) { s[2 * i] = (uint32_t)x[i]; s[2 * i + 1] = (uint32_t)(x[i] >> 32); }
+    w[0][t] = (prefix << 24) | (s[7] >> 8);
+    for (int i = 1; i < 8; i++) w[i][t] = (s[8 - i] << 24) | (s[7 - i] >> 8);
+    w[8][t] = (s[0] << 24) | 0x800000u;
+}
 static inline uint32_t prefix_of(uint32_t yp, int ri) {
 #if QSB_FIN_BAL2 & 2
     return (yp >> (8 * ri)) & 0xFFu;
@@ -6006,6 +6018,77 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
+
+/* Fixed 33-byte message preparation only. The original SHA-NI compression
+ * rounds and message schedule below are unchanged. Read each valid key's
+ * two limb-pair planes directly into vectors rather than scalar word arrays. */
+template<int RI>
+static __attribute__((target("sha,sse4.1"), always_inline)) inline
+void message_record_vectors_ni(const uint8_t *rec,int l,uint32_t prefix,
+                              __m128i &m0,__m128i &m1,__m128i &m2,__m128i &m3) {
+    const uint8_t *p=rec+(size_t)(2*RI)*16u*QSB_PK_LANES+(size_t)l*16u;
+    const __m128i lo=_mm_shuffle_epi32(_mm_loadu_si128((const __m128i *)p),0x1b);
+    const __m128i hi=_mm_shuffle_epi32(_mm_loadu_si128((const __m128i *)(p+16u*QSB_PK_LANES)),0x1b);
+    m0=_mm_or_si128(_mm_srli_epi32(hi,8),_mm_slli_epi32(_mm_slli_si128(hi,4),24));
+    m0=_mm_or_si128(m0,_mm_cvtsi32_si128((int)(prefix<<24)));
+    m1=_mm_or_si128(_mm_srli_epi32(lo,8),_mm_slli_epi32(_mm_alignr_epi8(lo,hi,12),24));
+    m2=_mm_or_si128(_mm_slli_epi32(_mm_srli_si128(lo,12),24),_mm_setr_epi32(0x800000,0,0,0));
+    m3=_mm_setr_epi32(0,0,0,264);
+}
+__attribute__((target("sha,sse4.1"), noinline))
+static void hash2_record_vectors_ni(const uint8_t *rec,int l,uint32_t y,
+                                   uint32_t *h0,uint32_t *h1) {
+    using namespace qcg_sha;
+    uint32_t stA[8],stB[8];
+    memcpy(stA,IV256,32);memcpy(stB,IV256,32);
+
+    __m128i A0, A1, B0, B1;
+    shani_load_state(stA, A0, A1); shani_load_state(stB, B0, B1);
+    const __m128i A0s = A0, A1s = A1, B0s = B0, B1s = B1;
+    __m128i MA0, MA1, MA2, MA3, MB0, MB1, MB2, MB3, mA, mB, K;
+    message_record_vectors_ni<0>(rec,l,prefix_of(y,0),MA0,MA1,MA2,MA3);
+    message_record_vectors_ni<1>(rec,l,prefix_of(y,1),MB0,MB1,MB2,MB3);
+    /* group g: rounds 4g..4g+3 on message vector Mc; Mn = next (msg2 target), Mp = previous
+       (alignr source), Mq = the vector msg1 updates */
+#define SHANI2_ROUNDS(g, McA, McB)                                                     \
+    K = _mm_loadu_si128((const __m128i *)(K256 + 4 * (g)));                            \
+    mA = _mm_add_epi32(McA, K); mB = _mm_add_epi32(McB, K);                            \
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+#define SHANI2_TAIL()                                                                  \
+    mA = _mm_shuffle_epi32(mA, 0x0E); mB = _mm_shuffle_epi32(mB, 0x0E);                \
+    A0 = _mm_sha256rnds2_epu32(A0, A1, mA); B0 = _mm_sha256rnds2_epu32(B0, B1, mB);
+#define SHANI2_MSG2(McA, McB, MpA, MpB, MnA, MnB)                                      \
+    MnA = _mm_sha256msg2_epu32(_mm_add_epi32(MnA, _mm_alignr_epi8(McA, MpA, 4)), McA);  \
+    MnB = _mm_sha256msg2_epu32(_mm_add_epi32(MnB, _mm_alignr_epi8(McB, MpB, 4)), McB);
+#define SHANI2_MSG1(MqA, MqB, McA, McB)                                                \
+    MqA = _mm_sha256msg1_epu32(MqA, McA); MqB = _mm_sha256msg1_epu32(MqB, McB);
+    /* g = 0 */  SHANI2_ROUNDS(0, MA0, MB0) SHANI2_TAIL()
+    /* g = 1 */  SHANI2_ROUNDS(1, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 2 */  SHANI2_ROUNDS(2, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 3 */  SHANI2_ROUNDS(3, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 4 */  SHANI2_ROUNDS(4, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 5 */  SHANI2_ROUNDS(5, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 6 */  SHANI2_ROUNDS(6, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 7 */  SHANI2_ROUNDS(7, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 8 */  SHANI2_ROUNDS(8, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 9 */  SHANI2_ROUNDS(9, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 10 */ SHANI2_ROUNDS(10, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 11 */ SHANI2_ROUNDS(11, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 12 */ SHANI2_ROUNDS(12, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 13 */ SHANI2_ROUNDS(13, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL()
+    /* g = 14 */ SHANI2_ROUNDS(14, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL()
+    /* g = 15 */ SHANI2_ROUNDS(15, MA3, MB3) SHANI2_TAIL()
+#undef SHANI2_ROUNDS
+#undef SHANI2_TAIL
+#undef SHANI2_MSG2
+#undef SHANI2_MSG1
+    A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
+    B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
+    shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
+
+    *h0=stA[0];*h1=stB[0];
+}
+
 static void hash_record(Job &J, uint32_t j) {
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
@@ -6018,24 +6101,30 @@ static void hash_record(Job &J, uint32_t j) {
             const uint32_t y = yp[l];
             h0[t] = h1[t] = ~0u;
             if (y != 0u && base + (uint32_t)l < J.batch_sz) {
-                uint64_t x0[4], x1[4];
-                lane_keys(rec, l, x0, x1);
-                message(m0, x0, prefix_of(y, 0));
-                message(m1, x1, prefix_of(y, 1));
                 live |= 1u << t;
                 if (mode == 2) {
-                    hash2_ni(m0, m1, &h0[t], &h1[t]);
-                } else if (mode == 0) {
-                    uint32_t s0[8], s1[8];
-                    memcpy(s0, qcg_sha::IV256, 32); memcpy(s1, qcg_sha::IV256, 32);
-                    qcg_sha::sha_compress_ref(s0, m0); qcg_sha::sha_compress_ref(s1, m1);
-                    h0[t] = s0[0]; h1[t] = s1[0];
+                    hash2_record_vectors_ni(rec,l,y,&h0[t],&h1[t]);
+                } else {
+                    uint64_t x0[4], x1[4];
+                    lane_keys(rec, l, x0, x1);
+                    if (mode == 1) {
+                        message_live_column(w0, t, x0, prefix_of(y, 0));
+                        message_live_column(w1, t, x1, prefix_of(y, 1));
+                    } else {
+                        message(m0, x0, prefix_of(y, 0));
+                        message(m1, x1, prefix_of(y, 1));
+                    }
+                    if (mode == 0) {
+                        uint32_t s0[8], s1[8];
+                        memcpy(s0, qcg_sha::IV256, 32); memcpy(s1, qcg_sha::IV256, 32);
+                        qcg_sha::sha_compress_ref(s0, m0); qcg_sha::sha_compress_ref(s1, m1);
+                        h0[t] = s0[0]; h1[t] = s1[0];
+                    }
                 }
             } else {
-                memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+                if (mode == 1)
+                    for (int k = 0; k < 9; k++) { w0[k][t] = 0; w1[k][t] = 0; }
             }
-            if (mode == 1)
-                for (int k = 0; k < 16; k++) { w0[k][t] = m0[k]; w1[k][t] = m1[k]; }
         }
         if (!live) continue;
         if (mode == 1) hash8_avx2(w0, w1, h0, h1);
