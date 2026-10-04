@@ -801,6 +801,13 @@ void fe8_carry(fe8 &r) {
     c = _mm512_srli_epi64(r.l[2], 52); r.l[2] = _mm512_and_si512(r.l[2], M); r.l[3] = _mm512_add_epi64(r.l[3], c);
     c = _mm512_srli_epi64(r.l[3], 52); r.l[3] = _mm512_and_si512(r.l[3], M); r.l[4] = _mm512_add_epi64(r.l[4], c);
 }
+/* Independent host-only guarded parallel lazy-carry experiment.
+ * The existing callers supply non-negative columns below2^57. After the top
+ * fold every carry is at most32; headroom64 proves simultaneous carries equal
+ * the original serial chain. Boundary lanes keep the exact original path. */
+#ifndef QSB_CPU_LZ_PAR_CARRY
+#define QSB_CPU_LZ_PAR_CARRY 1
+#endif
 /* Lazy normalization for elements that only ever feed IFMA multiplications ("mul-only": the chain
  * products, PRE, dinv, lam, the y differences and D): the carries are propagated exactly as in
  * fe8_carry, but limbs 0..3 keep the bits they carried out (bits 52 and up). IFMA reads only bits 51:0
@@ -813,6 +820,22 @@ void fe8_carry_lz(fe8 &r) {
     __m512i c;
     c = _mm512_srli_epi64(r.l[4], 48); r.l[4] = _mm512_and_si512(r.l[4], M48);
     r.l[0] = _mm512_madd52lo_epu64(r.l[0], c, K);
+#if QSB_CPU_LZ_PAR_CARRY
+    /* Each masked middle limb is <= their masked OR. No carry crosses a
+     * radix boundary when this OR has64 units of headroom, so all four
+     * incoming shifts can issue independently. Lazy high bits are retained. */
+    const __m512i mid = _mm512_and_si512(
+        _mm512_or_si512(_mm512_or_si512(r.l[1], r.l[2]), r.l[3]), F8_M52);
+    if (_mm512_cmp_epu64_mask(mid, _mm512_set1_epi64(0xFFFFFFFFFFFFFULL - 64), _MM_CMPINT_NLE) == 0) {
+        const __m512i c0 = _mm512_srli_epi64(r.l[0], 52), c1 = _mm512_srli_epi64(r.l[1], 52),
+                      c2 = _mm512_srli_epi64(r.l[2], 52), c3 = _mm512_srli_epi64(r.l[3], 52);
+        r.l[1] = _mm512_add_epi64(r.l[1], c0);
+        r.l[2] = _mm512_add_epi64(r.l[2], c1);
+        r.l[3] = _mm512_add_epi64(r.l[3], c2);
+        r.l[4] = _mm512_add_epi64(r.l[4], c3);
+        return;
+    }
+#endif
     c = _mm512_srli_epi64(r.l[0], 52); r.l[1] = _mm512_add_epi64(r.l[1], c);
     c = _mm512_srli_epi64(r.l[1], 52); r.l[2] = _mm512_add_epi64(r.l[2], c);
     c = _mm512_srli_epi64(r.l[2], 52); r.l[3] = _mm512_add_epi64(r.l[3], c);

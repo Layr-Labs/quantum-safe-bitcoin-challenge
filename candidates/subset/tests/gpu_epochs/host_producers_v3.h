@@ -69,6 +69,13 @@
 #include <sys/mman.h>
 #endif
 
+/* Host-only dead-descriptor pipeline experiment. Caller enables this only
+ * when the paired SHA/tag-only digest has no descriptor reader. Batch-0
+ * self-check still produces and compares complete descriptors. */
+#ifndef QSB_HP_FIRST_ONLY_RING
+#define QSB_HP_FIRST_ONLY_RING 1
+#endif
+
 namespace qhp {
 
 enum { MAXK = 8, NCLS = 16, CHUNK = 16384, NSLOT = 4 };
@@ -294,6 +301,11 @@ QHP_SHA static void sha_pre4_var(const uint32_t (*st)[8], const uint32_t *const 
         }
     }
 }
+/* Independent message-pair load experiment in the existing class SHA helper.
+ * SHA256RNDS2 consumes only the low two 32-bit message words. */
+#ifndef QSB_HP_CLASS_PAIR128
+#define QSB_HP_CLASS_PAIR128 1
+#endif
 /* One state, 8 rows: out[c] <- compress(st, rows[c]) for c < 8 (the first-block class states of one epoch). */
 QHP_SHA static void sha_pre8_same(const uint32_t st[8], const uint32_t *const *rows, uint32_t *out) {
     __m128i t = _mm_loadu_si128((const __m128i *)&st[0]);
@@ -309,8 +321,14 @@ QHP_SHA static void sha_pre8_same(const uint32_t st[8], const uint32_t *const *r
         for (int r = 0; r < 16; r++) {
 #pragma GCC unroll 4
             for (int l = 0; l < 4; l++) {
+#if QSB_HP_CLASS_PAIR128
+                const __m128i WK = _mm_loadu_si128((const __m128i *)(w[l] + 4 * r));
+                S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], WK);
+                S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_srli_si128(WK, 8));
+#else
                 S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
                 S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
+#endif
             }
         }
 #pragma GCC unroll 4
@@ -393,11 +411,11 @@ struct Lane { SCtx c; int o6, o5; uint32_t idx; uint8_t early[MAXK]; };
 /* Hash the suffix P[o6+1..cut-1] of nl (<=4) lanes in lockstep, then their first-block states.
  * The suffix is contiguous in `rows`: only each lane's first block is assembled, the others are
  * read in place. */
-static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out);
+static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out, bool write_ep);
 /* SHA-NI path: every compression uses a precomputed schedule (tail_rows / first_rows / class cache);
  * an epoch whose first suffix block is not in first_rows (an omission inside the buffered bytes, or
  * o6 near the start) gets that one block expanded here. */
-QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
+QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out, bool write_ep) {
     alignas(64) uint32_t scratch[4][64];
     const uint32_t *rows[Params::TAILMAX * 4];                /* rows[b * 4 + l] */
     const uint8_t *rem8[4];
@@ -427,14 +445,16 @@ QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, u
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
         const uint32_t w0 = be32(rem8[l]), w1 = be32(rem8[l] + 4);
-        uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
-        alignas(16) uint8_t rec[64];
-        memcpy(rec, F[l], 32);
-        memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
-        memset(rec + 40, 0, 24);
-        memcpy(rec + 40, L.early, MAXK);
-        memset(rec + 40 + P.K, 0, MAXK - P.K);
-        for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+        if (write_ep) {
+            uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
+            alignas(16) uint8_t rec[64];
+            memcpy(rec, F[l], 32);
+            memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
+            memset(rec + 40, 0, 24);
+            memcpy(rec + 40, L.early, MAXK);
+            memset(rec + 40 + P.K, 0, MAXK - P.K);
+            for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+        }
         uint32_t *fo = fi_out + (size_t)L.idx * P.ncls * 8;
         const uint32_t *cr = cls_rows(P, cc, w0, w1);
         if (P.ncls == 8) {
@@ -453,7 +473,7 @@ QHP_SHA static void flush_pre(const Params &P, ClsCache &cc, Lane *Ls, int nl, u
         }
     }
 }
-static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
+static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out, bool write_ep) {
     alignas(16) uint8_t fb[4][64];
     alignas(16) static const uint8_t dummy[64] = {0};
     const uint8_t *tail[4], *rem8[4];
@@ -483,25 +503,27 @@ static void flush_sw(const Params &P, Lane *Ls, int nl, uint8_t *ep_out, uint32_
     for (int l = 0; l < nl; l++) {
         const Lane &L = Ls[l];
         const uint32_t w0 = be32(rem8[l]), w1 = be32(rem8[l] + 4);
-        uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
-        alignas(16) uint8_t rec[64];
-        memcpy(rec, F[l], 32);
-        memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
-        memset(rec + 40, 0, 24);
-        memcpy(rec + 40, L.early, MAXK);
-        memset(rec + 40 + P.K, 0, MAXK - P.K);
-        /* write-once output read by DMA: non-temporal stores (no read-for-ownership; +40% here) */
-        for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+        if (write_ep) {
+            uint8_t *d = ep_out + (size_t)L.idx * 64;           /* epoch_desc_t: mid[8] remW[2] early[K] pad */
+            alignas(16) uint8_t rec[64];
+            memcpy(rec, F[l], 32);
+            memcpy(rec + 32, &w0, 4); memcpy(rec + 36, &w1, 4);
+            memset(rec + 40, 0, 24);
+            memcpy(rec + 40, L.early, MAXK);
+            memset(rec + 40 + P.K, 0, MAXK - P.K);
+            /* write-once output read by DMA: non-temporal stores (no read-for-ownership; +40% here) */
+            for (int q = 0; q < 4; q++) _mm_stream_si128((__m128i *)(d + 16 * q), _mm_load_si128((const __m128i *)(rec + 16 * q)));
+        }
         uint32_t *fo = fi_out + (size_t)L.idx * P.ncls * 8;
         first_sw(P, F[l], rem8[l], fo);
     }
 }
-static inline void flush(const Params &P, ClsCache &cc, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out) {
-    if (g_shani) flush_pre(P, cc, Ls, nl, ep_out, fi_out); else flush_sw(P, Ls, nl, ep_out, fi_out);
+static inline void flush(const Params &P, ClsCache &cc, Lane *Ls, int nl, uint8_t *ep_out, uint32_t *fi_out, bool write_ep) {
+    if (g_shani) flush_pre(P, cc, Ls, nl, ep_out, fi_out, write_ep); else flush_sw(P, Ls, nl, ep_out, fi_out, write_ep);
 }
 
 /* Epochs [e0, e1) of the batch starting at `base`, written at index e - base. */
-static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, uint8_t *ep_out, uint32_t *fi_out) {
+static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, uint8_t *ep_out, uint32_t *fi_out, bool write_ep = true) {
     const int K = P.K, N = P.cut;
     uint8_t o[MAXK] = {0};
     qsb_host_unrank(e0, N, K, o);
@@ -518,7 +540,7 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
         memcpy(x.c.st, ctx[K].st, 32); x.c.len = ctx[K].len; memcpy(x.c.buf, ctx[K].buf, 64);
         x.o6 = o[K - 1]; x.o5 = o[K - 2]; x.idx = (uint32_t)(e - base);
         memcpy(x.early, o, MAXK);
-        if (nl == 4) { flush(P, cc, L, 4, ep_out, fi_out); nl = 0; }
+        if (nl == 4) { flush(P, cc, L, 4, ep_out, fi_out, write_ep); nl = 0; }
         if (e + 1 == e1) break;
         int i = K - 1;
         while (i >= 0 && o[i] == N - K + i) i--;
@@ -527,7 +549,7 @@ static void produce(const Params &P, uint64_t base, uint64_t e0, uint64_t e1, ui
         o[i]++;
         for (int j = i + 1; j < K; j++) { o[j] = o[j - 1] + 1; ctx[j + 1] = ctx[j]; }
     }
-    if (nl) flush(P, cc, L, nl, ep_out, fi_out);
+    if (nl) flush(P, cc, L, nl, ep_out, fi_out, write_ep);
     _mm_sfence();                                            /* order the streamed stores before "chunk done" */
 }
 
@@ -564,6 +586,7 @@ struct Hp {
     double tg = 0, t_last_acq = 0, tchunk = 0;
     /* stats / watchdog */
     uint64_t n_host = 0, n_fb = 0, ahead_sum = 0, ahead_n = 0; int consec_fb = 0, max_fb = 16, wait_ms = 40, ahead_min = 99;
+    bool first_only = false;   /* immutable after start; self-check always writes descriptors */
     bool active = false, dead = false;
     int nthreads = 3, dev = 0, corrupt = 0;
     /* placement: thread 0 pinned to the main core's sibling(s), thread 1 the floating helper */
@@ -784,7 +807,7 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
         const uint64_t e1 = (uint64_t)(ch + 1) * CHUNK < n ? base + (uint64_t)(ch + 1) * CHUNK : base + n;
         const int p = (int)(((uint64_t)ch * CHUNK) / h->pe);           /* chunks never straddle pieces */
         const double t0 = now_s();
-        produce(h->P, base + (uint64_t)p * h->pe, e0, e1, w->ep[p], w->fi[p]);
+        produce(h->P, base + (uint64_t)p * h->pe, e0, e1, w->ep[p], w->fi[p], !h->first_only);
         const double dt = now_s() - t0;
         lk.lock();
         h->tchunk = 0.8 * h->tchunk + 0.2 * dt;
@@ -816,9 +839,10 @@ static void cpu_core_siblings(int cpu, cpu_set_t *out) {
 
 /* Start the host producers (main thread, once the problem, window schedule and first classes are known).
  * Workers begin at once on the self-check copy of batch 0; the pinned ring waits for the search loop. */
-static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t n_epochs, uint64_t cap) {
+static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t n_epochs, uint64_t cap, bool first_only = false) {
     if (getenv("QSB_HP_DISABLE") && atoi(getenv("QSB_HP_DISABLE"))) { printf("  Host producers: off (QSB_HP_DISABLE)\n"); return; }
     Hp *h = new Hp;
+    h->first_only = first_only;
     Params &P = h->P;
     P.cut = cut; P.K = K; P.ncls = ncls; P.n_epochs = n_epochs; P.cap = cap; P.rows = dp->dummy_sigs;
     const int stream_len = (int)dp->prefix_remainder_len + SIG_PUSH_SIZE * (cut - K);
@@ -959,7 +983,8 @@ static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, 
         const int64_t lo = (int64_t)p * (int64_t)h->pe;
         if (lo >= n) break;
         const size_t np = (size_t)((int64_t)n - lo < (int64_t)h->pe ? (int64_t)n - lo : (int64_t)h->pe);
-        e = cudaMemcpyAsync((uint8_t *)d_ep + (size_t)lo * 64, s->ep[p], np * 64, cudaMemcpyHostToDevice, st);
+        if (!h->first_only)
+            e = cudaMemcpyAsync((uint8_t *)d_ep + (size_t)lo * 64, s->ep[p], np * 64, cudaMemcpyHostToDevice, st);
         if (e == cudaSuccess)
             e = cudaMemcpy2DAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, fi_pitch, s->fi[p], w, w, np, cudaMemcpyHostToDevice, st);
     }

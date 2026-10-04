@@ -1135,8 +1135,16 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_GATE_FMA_RT_AFTER_S
 #define QSB_GATE_FMA_RT_AFTER_S 120
 #endif
+/* Independent host-only rate-policy experiment; both gate forms remain in the existing image. */
+#ifndef QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RELEASE95 1
+#endif
 #ifndef QSB_GATE_FMA_RT_RATIO_PCT
+#if QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RATIO_PCT 95
+#else
 #define QSB_GATE_FMA_RT_RATIO_PCT 90
+#endif
 #endif
 #ifndef QSB_GATE_FMA_RT_FORCE_S
 #define QSB_GATE_FMA_RT_FORCE_S 0
@@ -6665,7 +6673,14 @@ int main(int argc, char **argv) {
 #endif
 #ifdef QSB_HP_ON
         qhp::start(&dp, window_start, s_early, qsb_first_class_count, n_epochs,
-                   (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL);
+                   (uint64_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL
+#if QSB_HP_V3
+                   /* Only this digest consumes cached first states and emits tags
+                    * without reading epoch descriptors. v1/other modes keep both. */
+                   , (QSB_HP_FIRST_ONLY_RING && QSB_PAIR_SHARED && ZLAB_K2S3M &&
+                      ZLAB_DUAL_EPOCH_SHA && QSB_HIT_NO_COMBO && QSB_HOST_VERIFY)
+#endif
+                   );
 #endif
         cudaMalloc(&d_epochs, (size_t)QSB_SE_LAUNCH_BLOCKS * QSB_PAIR_MUL * sizeof(epoch_desc_t));
         if (!d_epochs) { fprintf(stderr, "OOM: epoch descriptors\n"); return 1; }
