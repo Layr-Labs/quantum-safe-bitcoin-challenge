@@ -5,7 +5,16 @@
 #ifndef QSB_950_PACK
 #define QSB_950_PACK 1
 #endif
-#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+/* The fixed 128-window selector has at most eight first-six-kept prefix
+ * patterns. Pack the same class states without the eight unused epoch slots.
+ * Actual class count is still checked before any class table is uploaded. */
+#ifndef QSB_FIRST_PACKED
+#define QSB_FIRST_PACKED 1
+#endif
+#if QSB_FIRST_PACKED != 0 && QSB_FIRST_PACKED != 1
+#error "QSB_FIRST_PACKED must be 0 or 1"
+#endif
+#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:(QSB_FIRST_PACKED?8:16))
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
