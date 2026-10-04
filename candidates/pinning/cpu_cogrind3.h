@@ -24,7 +24,7 @@
  *
  * Contention safety (unchanged from the v1 co-grinder): SCHED_IDLE workers (fallback nice 19);
  * worker count min(affinity CPUs, cgroup quota) minus a reserve; a share check after the start
- * and periodic aligned on/off comparisons that shed on measured combined-rate loss. QSB_COGRIND=0 removes
+ * and a periodic GPU on/off A/B that sheds workers on a measured GPU loss. QSB_COGRIND=0 removes
  * all of it.
  */
 #ifndef QSB_CPU_COGRIND3_H
@@ -41,6 +41,9 @@
 #include "cg_fe4.h"
 #include "cg_sha.h"
 #include "cg_v26asm.h"
+#ifndef QSB_CG_V29          /* see cg_sha.h (defined there first): 1 = V3 runs b62c41b8's radix-2^29 AVX2 co-grinder */
+#define QSB_CG_V29 1
+#endif
 
 namespace qcg {
 #ifndef QSB_FEED_BLOCK
@@ -188,8 +191,10 @@ struct worker_t {
     uint32_t seq, lt0;
     uint64_t cur_seq_tag;
     uint32_t mid1[8];                     /* state after suffix block 0 for cur seq */
+#if QSB_CG_V29
     qcg_sha::s8_plan tplan;               /* suffix block 1 compression plan for cur seq (AVX2 SHA) */
     int tfast;                            /* 1: the locktime bytes sit in block-1 words 0 and 1 (plan usable) */
+#endif
     alignas(64) uint64_t zq[4][QSB_CG_BMAX + 8];          /* z of the batch, word-major: zq[k][i] = word k (LE) of candidate i */
     alignas(64) uint32_t dig[QSB_CG_MAXWIN][QSB_CG_BMAX + 32];
     uint8_t zf[QSB_CG_MAXWIN][QSB_CG_BMAX / 4 + 8];
@@ -336,10 +341,12 @@ static void seq_midstate(worker_t *w, uint32_t seq) {
     for (int i = 0; i < 16; i++) wv[i] = (uint32_t)m[4 * i] << 24 | (uint32_t)m[4 * i + 1] << 16 | (uint32_t)m[4 * i + 2] << 8 | m[4 * i + 3];
     memcpy(w->mid1, pp->midstate, 32);
     qcg_sha::sha_compress_ref(w->mid1, wv);
+#if QSB_CG_V29
     /* block 1: words 0 and 1 vary with the locktime, words 2..15 are problem constants */
     w->tfast = 1;
     for (int b = 0; b < 4; b++) if (S->lt_word[b] < 0 || S->lt_word[b] > 1) w->tfast = 0;
     w->tplan = qcg_sha::s8_make_plan(S->w1_tmpl, 0x3u, w->mid1);
+#endif
 }
 
 /* generic (any layout) scalar z for one candidate */
@@ -379,9 +386,20 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
         W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
     }
     v8u st[8];
+#if QSB_CG_V29
     if (w->tfast) s8_compress_plan<0x3u, 0>(st, W, w->tplan);      /* block 1 from the sequence midstate */
     else s8_compress_mid(st, W, w->mid1);
     s8_compress_plan<0xFFu, 0>(st, st, S8_PLAN_DIGEST);           /* SHA256 of the 32-byte digest */
+#else
+    for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)w->mid1[k]);
+    s8_compress_full(st, W);
+    for (int k = 0; k < 8; k++) W[k] = st[k];
+    W[8] = _mm256_set1_epi32((int)0x80000000u);
+    for (int k = 9; k < 15; k++) W[k] = _mm256_setzero_si256();
+    W[15] = _mm256_set1_epi32(256);
+    for (int k = 0; k < 8; k++) st[k] = _mm256_set1_epi32((int)IV256[k]);
+    s8_compress_full(st, W);
+#endif
     /* zq[k] for lanes: word k (LE 64-bit) = Z[7-2k-1] << 32 | Z[7-2k] (Z0 most significant) */
     for (int k = 0; k < 4; k++) {
         const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
@@ -462,7 +480,11 @@ static int fill_batch(worker_t *w) {
 
 /* ---------------- AVX2 EC back end ---------------- */
 #if defined(__x86_64__) && !defined(QSB_CG_NO_SIMD)
+#if QSB_CG_V29
+#include "cpu_cogrind3_vec29.h"
+#else
 #include "cpu_cogrind3_vec.h"
+#endif
 #include "cpu_cogrind3_ifma.h"
 #define QSB_CG_HAVE_SIMD 1
 #else
@@ -870,7 +892,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
      * that the same code reaches on 32-CPU hosts. Record the real hardware
      * ceiling so the A/B controller can climb toward it instead of treating
      * the guess as a maximum. Climbing only ever happens on a measured-clean
-     * window, and the net-value shedding rule still backs off on real loss. */
+     * window, and the existing shedding rule still backs off on real loss. */
     g_ctl.whw = S->nworkers;
     g_ctl.verbose = g_ctl_verbose = getenv("QSB_COGRIND_VERBOSE") != NULL;
     return S->nworkers;
