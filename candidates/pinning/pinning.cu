@@ -5882,7 +5882,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * host and cgroup report >= 32 GiB available, and builds tables in 65,536-entry segments of 4,096-point
  * rows. Every CPU nomination still passes the exact host gate. 0 = the base co-grinder byte for byte. */
 #ifndef QSB_CG_HIGHFOLD
-#define QSB_CG_HIGHFOLD 1
+#define QSB_CG_HIGHFOLD 0
 #endif
 /* QSB_CG_HETERO (host only; CG5, 27 Sep): 1 = when the V3 co-grinder runs its AVX2 EC stage on a host
  * without IFMA, pin each worker to one CPU and, after all workers run, time the SMT split (AVX2 on each
