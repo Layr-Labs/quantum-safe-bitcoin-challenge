@@ -4026,7 +4026,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
  * stalling the GPU feed when the host is slower than its fixed share. 0 restores the blocking
  * collect. */
 #ifndef QSB_PK_YIELD
-#define QSB_PK_YIELD 1
+#define QSB_PK_YIELD 0          /* was 1: blocking collect; feeder helps finish the older host SHA job instead of yielding the plane */
 #endif
 /* Host SHA workers: ncpu / QSB_PK_WDIV, clamped to [2, QSB_PK_WMAX] (parent: 4, 8). */
 #ifndef QSB_PK_WDIV
