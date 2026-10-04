@@ -8,4 +8,10 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* SHA adds on the ALU pipe (tree.cu, QSB_SHA_ALU_RT 2): the window block, the four constant blocks and the outer block's
+ * schedule take a constant-bank zero third operand, so ptxas keeps them as IADD3 instead of IMAD.IADD, in every phase;
+ * the gate's plain form (after main() clears QSB_GATE_FMA_C) does the same. Same words, same hits. */
+#ifndef QSB_SHA_ALU_RT
+#define QSB_SHA_ALU_RT 2
+#endif
 #include "tests/gpu_epochs/tree.cu"

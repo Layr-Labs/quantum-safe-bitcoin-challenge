@@ -242,7 +242,46 @@ struct QsbPairS18 { uint32_t w[18]; };
 #else
 #define QSB_CC_RET QsbPairS16
 #endif
+#if QSB_SHA_ALU_RT
+/* QSB_SHA_ALU_RT (tree.cu): QSB_LEA_RLM with T = ((h + kw + Ch) + Maj + 0) + ROR6(S1'), the zero from the constant bank,
+ * so the round's one two-input add becomes an IADD3 instead of an IMAD.IADD. Same T, d' and h' as QSB_LEA_RLM. */
+#define QSB_LEA_RLMZ(a, b, c, d, e, f, g, h, kw) { \
+    QSB_LEA_RLM_H(a, b, c, e, f, g) \
+    const uint32_t qt_ = qsb_add3z((h) + (kw) + qch_, qmj_) + QSB_LEA_ROR(qy_, 6); \
+    h = qt_ + QSB_LEA_ROR(qz_, 2); \
+    QSB_LEA_RLM_D(d, qt_, qmj_) }
+#define S2RoundZ(a, b, c, d, e, f, g, h, w) QSB_LEA_RLMZ(a, b, c, d, e, f, g, h, (w))
+/* The heat-limit loop body of qsb_pair_const4: the record's block loop, words and order, with S2RoundZ rounds. */
+__device__ __forceinline__ void qsb_pair_const4_alu(QsbPairS16 &s) {
+    uint32_t a0,b0,c0,d0,e0,f0,g0,h0,a1,b1,c1,d1,e1,f1,g1,h1;
+    const uint4 *K=reinterpret_cast<const uint4*>(&QSB_CONST_SCHEDULE[0][0]);
+    #pragma unroll
+    for(int block=0;block<4;block++){
+        a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
+        a1=s.w[8];b1=s.w[9];c1=s.w[10];d1=s.w[11];e1=s.w[12];f1=s.w[13];g1=s.w[14];h1=s.w[15];
+        #pragma unroll 1
+        for(int q=0;q<16;q+=2){
+            const uint4 ka=K[block*16+q], kb=K[block*16+q+1];
+            {const uint32_t w=ka.x;S2RoundZ(a0,b0,c0,d0,e0,f0,g0,h0,w);S2RoundZ(a1,b1,c1,d1,e1,f1,g1,h1,w);}
+            {const uint32_t w=ka.y;S2RoundZ(h0,a0,b0,c0,d0,e0,f0,g0,w);S2RoundZ(h1,a1,b1,c1,d1,e1,f1,g1,w);}
+            {const uint32_t w=ka.z;S2RoundZ(g0,h0,a0,b0,c0,d0,e0,f0,w);S2RoundZ(g1,h1,a1,b1,c1,d1,e1,f1,w);}
+            {const uint32_t w=ka.w;S2RoundZ(f0,g0,h0,a0,b0,c0,d0,e0,w);S2RoundZ(f1,g1,h1,a1,b1,c1,d1,e1,w);}
+            {const uint32_t w=kb.x;S2RoundZ(e0,f0,g0,h0,a0,b0,c0,d0,w);S2RoundZ(e1,f1,g1,h1,a1,b1,c1,d1,w);}
+            {const uint32_t w=kb.y;S2RoundZ(d0,e0,f0,g0,h0,a0,b0,c0,w);S2RoundZ(d1,e1,f1,g1,h1,a1,b1,c1,w);}
+            {const uint32_t w=kb.z;S2RoundZ(c0,d0,e0,f0,g0,h0,a0,b0,w);S2RoundZ(c1,d1,e1,f1,g1,h1,a1,b1,w);}
+            {const uint32_t w=kb.w;S2RoundZ(b0,c0,d0,e0,f0,g0,h0,a0,w);S2RoundZ(b1,c1,d1,e1,f1,g1,h1,a1,w);}
+        }
+        s.w[0]+=a0;s.w[1]+=b0;s.w[2]+=c0;s.w[3]+=d0;s.w[4]+=e0;s.w[5]+=f0;s.w[6]+=g0;s.w[7]+=h0;
+        s.w[8]+=a1;s.w[9]+=b1;s.w[10]+=c1;s.w[11]+=d1;s.w[12]+=e1;s.w[13]+=f1;s.w[14]+=g1;s.w[15]+=h1;
+    }
+}
+#endif
 __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
+#if QSB_SHA_ALU_RT == 2
+    qsb_pair_const4_alu(s); return s;                          /* QSB_SHA_ALU_RT 2: the zero-addend form in every phase */
+#elif QSB_SHA_ALU_RT
+    if(!QSB_GATE_FMA_C){ qsb_pair_const4_alu(s); return s; }   /* QSB_SHA_ALU_RT: the heat-limit form after the clear */
+#endif
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0,a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #if QSB_SHA_W0FOLD
     uint32_t fa0=0,fa1=0;
@@ -314,6 +353,12 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
     return s;
 #endif
 }
+#endif
+/* QSB_SHA_ALU_RT 2 (tree.cu): the window block's rounds take the zero addend too (S2RoundZ); otherwise the record's. */
+#if QSB_SHA_ALU_RT == 2
+#define QSB_WIN_ROUND(a, b, c, d, e, f, g, h, k, w) S2RoundZ(a, b, c, d, e, f, g, h, (k) + (w))
+#else
+#define QSB_WIN_ROUND S2Round
 #endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
  * second block and constant suffix) in both epochs.  Load each schedule word
@@ -413,14 +458,14 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
 #if QSB_SHA_SCHED_V4
         /* QSB_SHA_SCHED_V4: two 16 B loads carry the 8 rounds' W+K words; the same words in the same order */
         const uint4 wa=QSB_WSEC_V4(r,slot), wb=QSB_WSEC_V4(r+4,slot);
-        {const uint32_t w=wa.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
-        {const uint32_t w=wa.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
-        {const uint32_t w=wa.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
-        {const uint32_t w=wa.w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
-        {const uint32_t w=wb.x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
-        {const uint32_t w=wb.y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
-        {const uint32_t w=wb.z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
-        {const uint32_t w=wb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+        {const uint32_t w=wa.x;QSB_WIN_ROUND(a0,b0,c0,d0,e0,f0,g0,h0,0,w);QSB_WIN_ROUND(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+        {const uint32_t w=wa.y;QSB_WIN_ROUND(h0,a0,b0,c0,d0,e0,f0,g0,0,w);QSB_WIN_ROUND(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+        {const uint32_t w=wa.z;QSB_WIN_ROUND(g0,h0,a0,b0,c0,d0,e0,f0,0,w);QSB_WIN_ROUND(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+        {const uint32_t w=wa.w;QSB_WIN_ROUND(f0,g0,h0,a0,b0,c0,d0,e0,0,w);QSB_WIN_ROUND(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+        {const uint32_t w=wb.x;QSB_WIN_ROUND(e0,f0,g0,h0,a0,b0,c0,d0,0,w);QSB_WIN_ROUND(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+        {const uint32_t w=wb.y;QSB_WIN_ROUND(d0,e0,f0,g0,h0,a0,b0,c0,0,w);QSB_WIN_ROUND(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+        {const uint32_t w=wb.z;QSB_WIN_ROUND(c0,d0,e0,f0,g0,h0,a0,b0,0,w);QSB_WIN_ROUND(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+        {const uint32_t w=wb.w;QSB_WIN_ROUND(b0,c0,d0,e0,f0,g0,h0,a0,0,w);QSB_WIN_ROUND(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
 #else
         {const uint32_t w=QSB_WINDOW_SECOND[r][slot];S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
         {const uint32_t w=QSB_WINDOW_SECOND[r+1][slot];S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}

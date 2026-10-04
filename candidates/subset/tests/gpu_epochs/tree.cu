@@ -1176,6 +1176,33 @@ __device__ __constant__ unsigned QSB_GATE_FMA_C = 1u;
 #else
 #define QSB_SYS_KNOBS
 #endif
+/* QSB_SHA_ALU_RT: a heat-limit form for the SHA adds that run after main() clears QSB_GATE_FMA_C. Once the card is
+ * in SW thermal slowdown at its voltage floor, the rate is the heat budget over the energy per candidate and the cycle
+ * count no longer sets it. ptxas still puts one two-input add per SHA round (and per 4-term schedule word) on the
+ * FMA-heavy pipe as IMAD.IADD to relieve the ALU pipe. Here those adds take the constant-bank zero qsb_yp_zero as a
+ * third operand, which only IADD3 can encode, so they stay on the ALU: the same instruction count, no IMAD.
+ *   - qsb_pair_const4 (window_schedule_shared.cuh): the four constant blocks run a second loop body whose round makes
+ *     the Maj add three-input when QSB_GATE_FMA_C is 0; while it is 1 the callee runs the record's loop unchanged.
+ *   - _SHA256Pubkey33H0 (sha_gate_fma.cuh), the gate's plain form, which runs only after the clear: its two-input and
+ *     four-term schedule sums take the zero.
+ * x + y + 0 = x + y mod 2^32 and qsb_yp_zero is a __constant__ 0 that no host upload writes: every digest word is the
+ * record's, bit for bit. Needs QSB_GATE_FMA_RT 1 (the flag), QSB_CONST_CALLEE 1, QSB_SHA_LEA 1 and QSB_YP_MAC 2 (the
+ * zero). In the knob string only when non-zero. 0 = the record image byte for byte.
+ * 2 = the same ALU forms in every phase, not only after the clear: the constant blocks run only the zero-addend loop,
+ *   the window block's rounds and the outer SHA256d block's schedule sums take the zero too, and the gate keeps 1's
+ *   behaviour (its FMA form until the clear, then the zero-addend plain form). */
+#ifndef QSB_SHA_ALU_RT
+#define QSB_SHA_ALU_RT 0
+#endif
+#if QSB_SHA_ALU_RT < 0 || QSB_SHA_ALU_RT > 2
+#error "QSB_SHA_ALU_RT is 0, 1 or 2"
+#endif
+#if QSB_SHA_ALU_RT && !(QSB_GATE_FMA_RT && QSB_CONST_CALLEE && QSB_SHA_LEA)
+#error "QSB_SHA_ALU_RT switches on QSB_GATE_FMA_C and reshapes the QSB_CONST_CALLEE callee's QSB_SHA_LEA rounds"
+#endif
+#if QSB_SHA_ALU_RT && (QSB_SHA_W0FOLD || QSB_SHA_UEXIT || QSB_SHA_ALU_ADD)
+#error "QSB_SHA_ALU_RT is written for the base callee loop (QSB_SHA_W0FOLD 0, QSB_SHA_UEXIT 0, QSB_SHA_ALU_ADD 0)"
+#endif
 #if QSB_QMIX_RT
 /* QSB_QMIX_RT: the runtime Q-layout mask (warp index & mask == 0 decodes Q with the GLV12 terms). Uploaded once
  * by main() (QSB_TO_SYMBOL, so it reaches the carrier image); build_carrier.sh requires it in an RT image. */
@@ -1551,6 +1578,18 @@ __device__ __forceinline__ void qsb_complete_last_add(
 #error "QSB_YOFF_S is written for hit_filter_field_sc.cuh's QSB_Y_PAIR point add"
 #endif
 #include "filter_tail_sc.cuh"
+#if QSB_SHA_ALU_RT
+#if QSB_YP_MAC != 2
+#error "QSB_SHA_ALU_RT takes its zero addend from qsb_yp_zero (QSB_YP_MAC 2)"
+#endif
+/* QSB_SHA_ALU_RT: x + y as one three-input add with the constant-bank zero, so ptxas cannot lower it to IMAD.IADD. */
+__device__ __forceinline__ uint32_t qsb_add3z(uint32_t x, uint32_t y) {
+    uint32_t r;
+    asm("{\n\t.reg .u32 zc;\n\tld.const.u32 zc, [qsb_yp_zero];\n\tadd.u32 %0, %1, %2;\n\tadd.u32 %0, %0, zc;\n\t}"
+        : "=r"(r) : "r"(x), "r"(y));
+    return r;
+}
+#endif
 // Speculative final point step: retain the packed PTX body, then resolve Y.
 // The complete/exact chains and output checker do not call this helper.
 // Filter-only resolve from fkiene 2cf35a3 public explanation.
@@ -5987,7 +6026,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#if QSB_SHA_ALU_RT   /* only when non-zero, so QSB_SHA_ALU_RT 0 builds the record image byte for byte */
+#define QSB_K16_SHA_ALU_RT QSB_CARRIER_KV(QSB_SHA_ALU_RT)
+#else
+#define QSB_K16_SHA_ALU_RT
+#endif
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL QSB_K16_SHA_ALU_RT
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
