@@ -550,6 +550,11 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #undef QSB_Z
 #define QSB_Z 0u
 #endif
+/* Interleave specialized W16..W31 with compression. Each W consumes only
+ * schedule words, never state words: exact, with shorter live ranges. */
+#ifndef QSB_FIN_EARLY_INTERLEAVE
+#define QSB_FIN_EARLY_INTERLEAVE 1
+#endif
 __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 {
     uint32_t t1;
@@ -589,12 +594,33 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     {
         const uint32_t one = pin_one_mul;
         w[0] = qsb_fadd(w[0], one, QSB_s0M(w[1]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(a,b,c,d,e,f,g,h, QSB_KWF(qsb_klit(16), w[0]));
+#endif
         w[1] = qsb_fadd(qsb_fadd(w[1], one, s1(0x108u)), one, QSB_s0M(w[2]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(h,a,b,c,d,e,f,g, QSB_KWF(qsb_klit(17), w[1]));
+#endif
         w[2] = qsb_fadd(qsb_fadd(w[2], one, QSB_s1M(w[0])), one, QSB_s0M(w[3]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(g,h,a,b,c,d,e,f, QSB_KWF(qsb_klit(18), w[2]));
+#endif
         w[3] = qsb_fadd(qsb_fadd(w[3], one, QSB_s1M(w[1])), one, QSB_s0M(w[4]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(f,g,h,a,b,c,d,e, QSB_KWF(qsb_klit(19), w[3]));
+#endif
         w[4] = qsb_fadd(qsb_fadd(w[4], one, QSB_s1M(w[2])), one, QSB_s0M(w[5]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(e,f,g,h,a,b,c,d, QSB_KWF(qsb_klit(20), w[4]));
+#endif
         w[5] = qsb_fadd(qsb_fadd(w[5], one, QSB_s1M(w[3])), one, QSB_s0M(w[6]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(d,e,f,g,h,a,b,c, QSB_KWF(qsb_klit(21), w[5]));
+#endif
         w[6] = qsb_fadd(qsb_fadd(qsb_fadd(w[6], one, QSB_s1M(w[4])), one, 0x108u), one, QSB_s0M(w[7]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(c,d,e,f,g,h,a,b, QSB_KWF(qsb_klit(22), w[6]));
+#endif
 #if QSB_FIN_W8S0
         {   /* s0 is linear over GF(2): s0(W8) = s0(b<<24) ^ s0(0x800000)
              * = (b<<6) ^ (b<<17) ^ (b<<21) ^ 0x110020, and (b<<17) ^ (b<<21) ^ 0x100000
@@ -612,14 +638,41 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 #else
         w[7] = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]), one, QSB_s0M(w[8]));
 #endif
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(b,c,d,e,f,g,h,a, QSB_KWF(qsb_klit(23), w[7]));
+#endif
         w[8] = qsb_fadd(qsb_fadd(w[8], one, QSB_s1M(w[6])), one, w[1]);
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(a,b,c,d,e,f,g,h, QSB_KWF(qsb_klit(24), w[8]));
+#endif
         w[9] = qsb_fadd(QSB_s1M(w[7]), one, w[2]);
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(h,a,b,c,d,e,f,g, QSB_KWF(qsb_klit(25), w[9]));
+#endif
         w[10] = qsb_fadd(QSB_s1M(w[8]), one, w[3]);
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(g,h,a,b,c,d,e,f, QSB_KWF(qsb_klit(26), w[10]));
+#endif
         w[11] = qsb_fadd(QSB_s1M(w[9]), one, w[4]);
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(f,g,h,a,b,c,d,e, QSB_KWF(qsb_klit(27), w[11]));
+#endif
         w[12] = qsb_fadd(QSB_s1M(w[10]), one, w[5]);
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(e,f,g,h,a,b,c,d, QSB_KWF(qsb_klit(28), w[12]));
+#endif
         w[13] = qsb_fadd(QSB_s1M(w[11]), one, w[6]);
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(d,e,f,g,h,a,b,c, QSB_KWF(qsb_klit(29), w[13]));
+#endif
         w[14] = qsb_fadd(qsb_fadd(QSB_s1M(w[12]), one, w[7]), one, s0(0x108u));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(c,d,e,f,g,h,a,b, QSB_KWF(qsb_klit(30), w[14]));
+#endif
         w[15] = qsb_fadd(qsb_fadd(qsb_fadd(0x108u, one, QSB_s1M(w[13])), one, w[8]), one, QSB_s0M(w[0]));
+#if QSB_FIN_EARLY_INTERLEAVE
+        QSB_RL_F(b,c,d,e,f,g,h,a, QSB_KWF(qsb_klit(31), w[15]));
+#endif
     }
 #else
     QSB_IV_ROUNDS01(w[0], w[1]);
@@ -664,7 +717,9 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 #if QSB_SHA_FMA_ADD
     {
         const uint32_t one = pin_one_mul;
+#if !(QSB_SHA_FMA_EARLY && QSB_FIN_EARLY_INTERLEAVE)
         QSB_RND16L_F(16);
+#endif
         QSB_INTERLEAVED16L_F(32);
         QSB_INTERLEAVED15L_F(48);
         w[15] = qsb_fadd(w[15], one, s1(w[13]));
