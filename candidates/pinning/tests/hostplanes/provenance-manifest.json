@@ -1,0 +1,137 @@
+{
+  "baselineCommit": "b59a947d5c4d0ac61d2b1136ffdd7b3362010434",
+  "candidateProductionFiles": {
+    "cg_sha.h": "1529e50eff47f96e183f87ff474ae464b46354357ff85b2844e098f60d91c45b",
+    "pinning.cu": "2254e1ee3d5f274abe50da15d071eb9ca96af1e07b52c170076a0c9287d4666a",
+    "pksha_host_h0.h": "a74cf486c2ee4a668d449a19dad2798cd08f4551f41bfb83607e2ddd632409d3"
+  },
+  "files": {
+    "A-record.inc": {
+      "bytes": 5765,
+      "sha256": "7cd0f20cab9be506b5d9c8d447b341bdf9a350f3567d4680f5b0e9689ee6f7d3"
+    },
+    "C-record.inc": {
+      "bytes": 9323,
+      "sha256": "d9245c2530f2ad02633f093d4bd573a2635e7221ed5ebbf836ef57569386cb94"
+    },
+    "README.md": {
+      "bytes": 2752,
+      "sha256": "59a33c065b87e89ae78947c34c78a63c9dd0161ec41595add8fc3f69d67cd196"
+    },
+    "baseline-pksha_host_h0.h": {
+      "bytes": 8260,
+      "sha256": "5e1e2b655e118b42821a4e4dfc3500bb9e832cde95370aae98523a1475dc9650"
+    },
+    "cpu-runner/run_fixture.py": {
+      "bytes": 12055,
+      "sha256": "f31a890f2dd4da4f97284288705f309e23164b64bb590c9c24bcb450200f94c9"
+    },
+    "cpu-runner/service_bench.cpp": {
+      "bytes": 1301,
+      "sha256": "b0d9c9d0ad17b29dc90be07c21f0daa4ced12ce3d476cea4e7d3b2816ad879d3"
+    },
+    "host-oracle-fixtures.json": {
+      "bytes": 105067,
+      "sha256": "10495f67004cc4306eb7cbe3fa8c3be665dc1825f9166b5096fd7245173e8884"
+    },
+    "host_fixture.cpp": {
+      "bytes": 3608,
+      "sha256": "bc6aeae62ba74c7dcfc6442be36653752ed607d9d8a37af74da4ff46d2304212"
+    }
+  },
+  "manifestSelfExcluded": true,
+  "provenance": {
+    "A-record.inc": {
+      "bytes": 5765,
+      "changes": [
+        {
+          "original": "#include \"../sources/A/pksha_host_h0.h\"",
+          "public": "#include \"baseline-pksha_host_h0.h\""
+        }
+      ],
+      "originalSHA256": "bcc4d5bff611ea49b592f59331935c7132aff302ee9f21d216614e8a327ed56c",
+      "publicSHA256": "7cd0f20cab9be506b5d9c8d447b341bdf9a350f3567d4680f5b0e9689ee6f7d3",
+      "recordExtraction": {
+        "appendedNamespaceClosingOnly": true,
+        "endLineExclusive": 6051,
+        "literalSliceSHA256": "88880510abcf6a79e32cb2d8912cd831cc7bf04af8664bec023de0433f6f4f19",
+        "productionPath": "pinning.cu",
+        "productionSHA256": "79de54fc3977e50bea2242a5cb4e96a5bdd45c34409d836b6d871c502ddbd7d1",
+        "startLine": 5917
+      }
+    },
+    "C-record.inc": {
+      "bytes": 9323,
+      "changes": [
+        {
+          "original": "#include \"../sources/C/pksha_host_h0.h\"",
+          "public": "#include \"../../pksha_host_h0.h\""
+        }
+      ],
+      "originalSHA256": "d13eee29ed2dc225b350eec7254096a55b19bb8fa1d2b8f1d7d814bf0c5b8a7e",
+      "publicSHA256": "d9245c2530f2ad02633f093d4bd573a2635e7221ed5ebbf836ef57569386cb94",
+      "recordExtraction": {
+        "appendedNamespaceClosingOnly": true,
+        "endLineExclusive": 6109,
+        "literalSliceSHA256": "001bec2b8534b4923cfcfd5c510069acc8a8fe3775e2b5cb83001722b14c93fb",
+        "productionPath": "pinning.cu",
+        "productionSHA256": "2254e1ee3d5f274abe50da15d071eb9ca96af1e07b52c170076a0c9287d4666a",
+        "startLine": 5917
+      }
+    },
+    "baseline-pksha_host_h0.h": {
+      "bytes": 8260,
+      "changes": [
+        {
+          "original": "#include \"cg_sha.h\"",
+          "public": "#include \"../../cg_sha.h\""
+        }
+      ],
+      "literalGit": {
+        "commit": "b59a947d5c4d0ac61d2b1136ffdd7b3362010434",
+        "path": "candidates/pinning/pksha_host_h0.h"
+      },
+      "originalSHA256": "57c84412493cde6dbb888e550ac20661b856d79a9784ad8f957a6ef5f1adb0a8",
+      "publicSHA256": "5e1e2b655e118b42821a4e4dfc3500bb9e832cde95370aae98523a1475dc9650"
+    },
+    "cpu-runner/run_fixture.py": {
+      "bytes": 12055,
+      "changes": [],
+      "originalSHA256": "f31a890f2dd4da4f97284288705f309e23164b64bb590c9c24bcb450200f94c9",
+      "publicSHA256": "f31a890f2dd4da4f97284288705f309e23164b64bb590c9c24bcb450200f94c9"
+    },
+    "cpu-runner/service_bench.cpp": {
+      "bytes": 1301,
+      "changes": [],
+      "originalSHA256": "b0d9c9d0ad17b29dc90be07c21f0daa4ced12ce3d476cea4e7d3b2816ad879d3",
+      "publicSHA256": "b0d9c9d0ad17b29dc90be07c21f0daa4ced12ce3d476cea4e7d3b2816ad879d3"
+    },
+    "host-oracle-fixtures.json": {
+      "bytes": 105067,
+      "changes": [],
+      "originalSHA256": "10495f67004cc4306eb7cbe3fa8c3be665dc1825f9166b5096fd7245173e8884",
+      "publicSHA256": "10495f67004cc4306eb7cbe3fa8c3be665dc1825f9166b5096fd7245173e8884"
+    },
+    "host_fixture.cpp": {
+      "bytes": 3608,
+      "changes": [
+        {
+          "original": "#include \"../sources/A/cg_sha.h\"",
+          "public": "#include \"../../cg_sha.h\""
+        },
+        {
+          "original": "#include \"A-host-prefix.inc\"",
+          "public": "#include \"A-record.inc\""
+        },
+        {
+          "original": "#include \"C-host-prefix.inc\"",
+          "public": "#include \"C-record.inc\""
+        }
+      ],
+      "originalSHA256": "1bce212065bba6b8012b051e9f4648b4b3e649297c38ff659e3369268badb8d8",
+      "publicSHA256": "bc6aeae62ba74c7dcfc6442be36653752ed607d9d8a37af74da4ff46d2304212"
+    }
+  },
+  "schema": "qsb-hostplanes-public-fixture-v1",
+  "scope": "CPU words/H0/full-record hit publication; no CUDA or whole-program result"
+}

@@ -5,7 +5,7 @@
  * Active input words0..8 vary; words9..14=0,word15=264. Inactive caller lanes
  * are masked before hit publication and their hash values are immaterial.
  * All64 SHA rounds contribute to A64; round0 is exactly folded from the IV. */
-#include "cg_sha.h"
+#include "../../cg_sha.h"
 namespace qsb_pksha_h0 {
 using namespace qcg_sha;
 static constexpr uint32_t H0_K[64]={
@@ -120,70 +120,4 @@ static QSB_SHA_AVX2 v8u pubkey_h0(const uint32_t words[16][8]) {
     s8_compress_plan<0x1FFu>(out,w,S8_PLAN_PUBKEY);
     return out[0];
 }
-
-#ifndef QSB_PK_AVX2_PLANES
-#define QSB_PK_AVX2_PLANES 1
-#endif
-#if QSB_PK_AVX2_PLANES
-/* Four words per physical candidate, eight candidates per group. AVX2 unpacks
- * within each 128-bit half, so the columns retain order 0,2,4,6,1,3,5,7.
- * A null load_mask denotes eight live candidates. Otherwise each mask covers
- * four words of each of two candidates, avoiding reads of unwritten X lanes. */
-static QSB_SHA_AVX2 void plane_four_columns(const uint8_t *p, const v8u *load_mask,
-                                           v8u &s0, v8u &s1, v8u &s2, v8u &s3) {
-    v8u r0, r1, r2, r3;
-    if (load_mask) {
-        r0 = _mm256_maskload_epi32((const int *)(p + 0), load_mask[0]);
-        r1 = _mm256_maskload_epi32((const int *)(p + 32), load_mask[1]);
-        r2 = _mm256_maskload_epi32((const int *)(p + 64), load_mask[2]);
-        r3 = _mm256_maskload_epi32((const int *)(p + 96), load_mask[3]);
-    } else {
-        r0 = _mm256_loadu_si256((const __m256i *)(p + 0));
-        r1 = _mm256_loadu_si256((const __m256i *)(p + 32));
-        r2 = _mm256_loadu_si256((const __m256i *)(p + 64));
-        r3 = _mm256_loadu_si256((const __m256i *)(p + 96));
-    }
-    const v8u t0 = _mm256_unpacklo_epi32(r0, r1), t1 = _mm256_unpackhi_epi32(r0, r1);
-    const v8u t2 = _mm256_unpacklo_epi32(r2, r3), t3 = _mm256_unpackhi_epi32(r2, r3);
-    s0 = _mm256_unpacklo_epi64(t0, t2); s1 = _mm256_unpackhi_epi64(t0, t2);
-    s2 = _mm256_unpacklo_epi64(t1, t3); s3 = _mm256_unpackhi_epi64(t1, t3);
-}
-
-/* PREFIX_BYTES selects the existing FIN_BAL2 bit-1 layout. No SHA round or
- * schedule changes: only the nine variable message words are constructed. */
-template<int RI, bool PREFIX_BYTES>
-static QSB_SHA_AVX2 void pubkey_words_planes(v8u w[9], const uint8_t *rec,
-                                            int lanes, int l0, v8u y_even_first,
-                                            const v8u *load_mask) {
-    static_assert(RI == 0 || RI == 1, "the two recids");
-    v8u s[8];
-    const uint8_t *p = rec + ((size_t)(2 * RI) * lanes + (unsigned)l0) * 16u;
-    plane_four_columns(p, load_mask, s[0], s[1], s[2], s[3]);
-    plane_four_columns(p + 16u * lanes, load_mask, s[4], s[5], s[6], s[7]);
-    v8u prefix_high;
-    if (PREFIX_BYTES) {
-        prefix_high = RI == 0 ? _mm256_slli_epi32(y_even_first, 24)
-            : _mm256_and_si256(_mm256_slli_epi32(y_even_first, 16),
-                               _mm256_set1_epi32((int)0xff000000u));
-    } else {
-        const v8u parity = _mm256_and_si256(_mm256_srli_epi32(y_even_first, RI),
-                                           _mm256_set1_epi32(1));
-        prefix_high = _mm256_slli_epi32(_mm256_add_epi32(parity, _mm256_set1_epi32(2)), 24);
-    }
-    w[0] = _mm256_or_si256(prefix_high, _mm256_srli_epi32(s[7], 8));
-    for (int k = 1; k < 8; k++)
-        w[k] = _mm256_or_si256(_mm256_slli_epi32(s[8 - k], 24),
-                              _mm256_srli_epi32(s[7 - k], 8));
-    w[8] = _mm256_or_si256(_mm256_slli_epi32(s[0], 24), _mm256_set1_epi32(0x800000));
-}
-
-template<int RI, bool PREFIX_BYTES>
-static QSB_SHA_AVX2 v8u pubkey_h0_planes(const uint8_t *rec, int lanes, int l0,
-                                       v8u y_even_first, const v8u *load_mask) {
-    v8u w[9], out[1];
-    pubkey_words_planes<RI, PREFIX_BYTES>(w, rec, lanes, l0, y_even_first, load_mask);
-    s8_compress_plan<0x1FFu>(out, w, S8_PLAN_PUBKEY);
-    return out[0];
-}
-#endif
 } // namespace qsb_pksha_h0

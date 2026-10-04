@@ -6006,7 +6006,65 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
+#if QSB_PK_AVX2_PLANES
+__attribute__((target("avx2"), noinline))
+static void hash_record_avx2_planes(Job &J, uint32_t j) {
+    static_assert(QSB_PK_LANES % 8 == 0, "complete AVX2 groups in the allocated record");
+    const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
+    const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
+    const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
+    const qcg_sha::v8u even_first = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
+    const qcg_sha::v8u original_order = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
+    for (int l0 = 0; l0 < QSB_PK_LANES; l0 += 8) {
+        const uint32_t first = base + (uint32_t)l0;
+        const uint32_t remaining = first < J.batch_sz ? std::min(8u, J.batch_sz - first) : 0u;
+        if (!remaining) continue;
+        /* Batch-tail Y was not written by the GPU. Mask it before its first read. */
+        qcg_sha::v8u y;
+        if (remaining == 8) y = _mm256_loadu_si256((const __m256i *)(yp + l0));
+        else {
+            const qcg_sha::v8u tail_mask = _mm256_cmpgt_epi32(_mm256_set1_epi32((int)remaining),
+                                                            _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+            y = _mm256_maskload_epi32((const int *)(yp + l0), tail_mask);
+        }
+        uint32_t live = (~(uint32_t)_mm256_movemask_ps(_mm256_castsi256_ps(
+            _mm256_cmpeq_epi32(y, _mm256_setzero_si256())))) & 255u;
+        live &= remaining == 8 ? 255u : ((1u << remaining) - 1u);
+        if (!live) continue;
+        qcg_sha::v8u load_masks[4];
+        const qcg_sha::v8u *masked_loads = nullptr;
+        if (live != 255u) {
+            /* Expand original-lane liveness into four-word-per-candidate masks.
+             * Dead active lanes have Y==0 and may also have unwritten X bytes. */
+            const qcg_sha::v8u bits = _mm256_setr_epi32(1, 2, 4, 8, 16, 32, 64, 128);
+            const qcg_sha::v8u lane_live = _mm256_cmpeq_epi32(
+                _mm256_and_si256(_mm256_set1_epi32((int)live), bits), bits);
+            load_masks[0] = _mm256_permutevar8x32_epi32(lane_live, _mm256_setr_epi32(0, 0, 0, 0, 1, 1, 1, 1));
+            load_masks[1] = _mm256_permutevar8x32_epi32(lane_live, _mm256_setr_epi32(2, 2, 2, 2, 3, 3, 3, 3));
+            load_masks[2] = _mm256_permutevar8x32_epi32(lane_live, _mm256_setr_epi32(4, 4, 4, 4, 5, 5, 5, 5));
+            load_masks[3] = _mm256_permutevar8x32_epi32(lane_live, _mm256_setr_epi32(6, 6, 6, 6, 7, 7, 7, 7));
+            masked_loads = load_masks;
+        }
+        const qcg_sha::v8u y_even = _mm256_permutevar8x32_epi32(y, even_first);
+        uint32_t h0[8], h1[8];
+        _mm256_storeu_si256((__m256i *)h0, _mm256_permutevar8x32_epi32(
+            qsb_pksha_h0::pubkey_h0_planes<0, ((QSB_FIN_BAL2 & 2) != 0)>(rec, QSB_PK_LANES, l0, y_even, masked_loads), original_order));
+        _mm256_storeu_si256((__m256i *)h1, _mm256_permutevar8x32_epi32(
+            qsb_pksha_h0::pubkey_h0_planes<1, ((QSB_FIN_BAL2 & 2) != 0)>(rec, QSB_PK_LANES, l0, y_even, masked_loads), original_order));
+        for (int t = 0; t < 8; t++) {
+            if (!((live >> t) & 1u)) continue;
+            const uint32_t idx = base + (uint32_t)(l0 + t);
+            /* Preserve original-lane order and recid 0 priority. */
+            if (h0_hit(h0[t])) record_hit(J, idx);
+            else if (h0_hit(h1[t])) record_hit(J, idx | (1u << 30));
+        }
+    }
+}
+#endif
 static void hash_record(Job &J, uint32_t j) {
+#if QSB_PK_AVX2_PLANES
+    if (mode == 1) { hash_record_avx2_planes(J, j); return; }
+#endif
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
     const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
