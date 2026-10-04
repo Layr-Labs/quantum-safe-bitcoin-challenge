@@ -47,7 +47,7 @@ namespace qcg {
 #define QSB_FEED_BLOCK 0
 #endif
 #ifndef QSB_CG_QUOTA_CAP
-#define QSB_CG_QUOTA_CAP 1   /* HY28: 1 = under a cgroup quota, never ramp workers past the quota guess */
+#define QSB_CG_QUOTA_CAP 0   /* was 1: HY28 host-only — allow RECOVER ramp past cgroup quota guess */
 #endif
 static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 
