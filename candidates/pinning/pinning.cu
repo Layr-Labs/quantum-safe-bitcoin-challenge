@@ -4030,7 +4030,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #endif
 /* Host SHA workers: ncpu / QSB_PK_WDIV, clamped to [2, QSB_PK_WMAX] (parent: 4, 8). */
 #ifndef QSB_PK_WDIV
-#define QSB_PK_WDIV 2
+#define QSB_PK_WDIV 1
 #endif
 #ifndef QSB_PK_WMAX
 #define QSB_PK_WMAX 12
