@@ -4738,7 +4738,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
         sA[2+i] = (cudaStream_t)t;
     }
 #ifndef QSB_GREEN_S2_LEAST
-#define QSB_GREEN_S2_LEAST 0   /* 1: finish streams at the least priority (the root kernel then outranks them) */
+#define QSB_GREEN_S2_LEAST 1   /* was 0: finish streams at least priority so the root kernel outranks them on the shared SMs */
 #endif
     for (int i = 0; i < 2; i++) {
         if (qsb_cuGreenCtxStreamCreate(&t, gB, CU_STREAM_NON_BLOCKING, QSB_GREEN_S2_LEAST ? least : greatest) != CUDA_SUCCESS) return 0;
