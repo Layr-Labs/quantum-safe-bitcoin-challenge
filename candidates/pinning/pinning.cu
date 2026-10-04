@@ -1534,6 +1534,28 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #error "QSB_TBL_L2POL takes the hot/cold split from the QSB_FOUR_HOT bank order"
 #endif
 #define QSB_HOT_RECS 786432u   /* q9_bigtbl_offset(4): segments 0..3, 48 MiB */
+/* QSB_HOT_DENSE32: retain normal priority for the 32 MiB comprising bank 0
+ * and banks 2/3; classify the lower-density 16 MiB bank 1 as evict_first.
+ * The mask folds address bit 19 ONLY in the policy comparison. Table addresses,
+ * sign extraction, arithmetic and candidate enumeration are unchanged.
+ * Bank 0 receives two decoder accesses per candidate; banks 1/2/3 receive
+ * the same Q6 share, while banks 2/3 are each half the size of bank 1. */
+#ifndef QSB_HOT_DENSE32
+#define QSB_HOT_DENSE32 1
+#endif
+#if QSB_HOT_DENSE32 != 0 && QSB_HOT_DENSE32 != 1
+#error "QSB_HOT_DENSE32 must be 0 or 1"
+#endif
+#if QSB_HOT_DENSE32 && !(QSB_BIGTBL && QSB_FOUR_HOT && QSB_GLV11)
+#error "QSB_HOT_DENSE32 requires the current GLV11 four-hot bank layout"
+#endif
+#if QSB_HOT_DENSE32
+#define QSB_TBL_POLICY_MASK 0x7ff7ffffu
+#define QSB_TBL_POLICY_BOUND 262144u
+#else
+#define QSB_TBL_POLICY_MASK 0x7fffffffu
+#define QSB_TBL_POLICY_BOUND QSB_HOT_RECS
+#endif
 #ifndef QSB_TBL_POL_PRED
 #define QSB_TBL_POL_PRED 1
 #endif
@@ -1547,7 +1569,7 @@ __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
 #else
     asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
 #endif
-    return (code&0x7fffffffu)>=QSB_HOT_RECS ? cold : hot;
+    return (code&QSB_TBL_POLICY_MASK)>=QSB_TBL_POLICY_BOUND ? cold : hot;
 }
 /* QSB_TBL_POL_PRED (default 1): the piped gathers issue each 16 B load twice under a
  * complementary predicate (record >= QSB_HOT_RECS), one carrying the cold policy and one the
@@ -1610,7 +1632,7 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
         : "=l"(y0.x), "=l"(y0.y), "=l"(y1.x), "=l"(y1.y)
-        : "l"(ty), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+        : "l"(ty), "l"(pc), "l"(ph), "r"(code&QSB_TBL_POLICY_MASK), "r"(QSB_TBL_POLICY_BOUND));
 #elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 y1;
@@ -1654,7 +1676,7 @@ __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
         : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y)
-        : "l"(tx), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+        : "l"(tx), "l"(pc), "l"(ph), "r"(code&QSB_TBL_POLICY_MASK), "r"(QSB_TBL_POLICY_BOUND));
 #elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 x0,x1;
