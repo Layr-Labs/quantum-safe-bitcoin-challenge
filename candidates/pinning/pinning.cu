@@ -4014,7 +4014,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
  * the same 33-byte message and H0 gate, mirroring the GPU's recid-0-first early exit, and publish
  * through the same exact OpenSSL gate. A null plane (runtime fallback) hashes on the GPU as before. */
 #ifndef QSB_HOST_PKSHA
-#define QSB_HOST_PKSHA 4
+#define QSB_HOST_PKSHA 2
 #endif
 /* QSB_PK_YIELD (kill switch, default 1): when a batch's plane still holds an unfinished host job
  * (the host workers are behind), the feeder no longer waits for, or helps with, that job: the
