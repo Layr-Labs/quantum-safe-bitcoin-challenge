@@ -253,7 +253,7 @@ static QV_INL void entries4(const tentry **e, const tentry *Tj, const uint32_t *
     e[0] = Tj + (d4[0] & QCG_IDXM); e[1] = Tj + (d4[1] & QCG_IDXM); e[2] = Tj + (d4[2] & QCG_IDXM); e[3] = Tj + (d4[3] & QCG_IDXM);
 }
 static QV_INL void prefetch4(const tentry *Tj, const uint32_t *d4) {
-    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), _MM_HINT_T0);
+    for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(Tj + (d4[l] & QCG_IDXM)), QCG_PF_HINT);
 }
 
 /* per-block temporaries of one addition step (memory operands of the out-of-line multiplies) */
@@ -325,9 +325,13 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
     {
         const uint32_t *dg = w->dig[0];
         const tentry *T0 = T + L.off[0];
+#if QSB_CG_PF_PROLOGUE
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++)
+            for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * p + l]), QCG_PF_HINT);
+#endif
         for (int b = 0; b < nb; b++) {
             const tentry *e[4] = {T0 + dg[4 * b], T0 + dg[4 * b + 1], T0 + dg[4 * b + 2], T0 + dg[4 * b + 3]};
-            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), _MM_HINT_T0);
+            if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) _mm_prefetch((const char *)(T0 + dg[4 * (b + QSB_CG_PF) + l]), QCG_PF_HINT);
             gather_x(&px[b], e); gather_y(&py[b], e);
         }
     }
@@ -336,6 +340,9 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
         const uint32_t *dg = w->dig[1];
         const uint8_t *zf = w->zf[1];
         const tentry *Tj = T + L.off[1];
+#if QSB_CG_PF_PROLOGUE
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++) prefetch4(Tj, dg + 4 * p);
+#endif
         for (int b = 0; b < nb; b++) {
             if (b + QSB_CG_PF < nb) prefetch4(Tj, dg + 4 * (b + QSB_CG_PF));
             const tentry *e[4]; entries4(e, Tj, dg + 4 * b);
@@ -349,8 +356,16 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
     vfe xD, yD; v29_set_w(&xD, S->dx_w); v29_set_w(&yD, S->dy_w);
     int asc = 1;
     for (int s = 1; s < nw; s++) {
+#if QSB_CG_PF_PROLOGUE
+        /* Issue the first current/next-window lines before the scalar batch inverse. */
+        for (int p = 0; p < nb && p < QSB_CG_PF; p++) {
+            const int pb = asc ? nb - 1 - p : p;
+            prefetch4(T + L.off[s], w->dig[s] + 4 * pb);
+            if (s + 1 < nw) prefetch4(T + L.off[s + 1], w->dig[s + 1] + 4 * pb);
+        }
+#endif
         vinv(&inv, &acc);
-        vfe ubuf[2]; ubuf[0] = inv; int ui = 0;
+        vfe u = inv; /* MUL captures all lhs limbs before output stores; rhs stays disjoint. */
         const vfe *accp = &one;
         const uint32_t *dg = w->dig[s];
         const uint8_t *zf = w->zf[s];
@@ -368,15 +383,16 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
             bst &c = vs->tmp;
             bk_pre(c, Tj, dg + 4 * b, zf[b], px[b], py[b], one);
             const vfe *ikp;
-            if (it + 1 < nb) { v29_mul_o(&c.ik, &ubuf[ui], &cc[bp]); v29_mul_o(&ubuf[ui ^ 1], &ubuf[ui], &c.dx); ui ^= 1; ikp = &c.ik; }
-            else ikp = &ubuf[ui];
+            if (it + 1 < nb) { v29_mul_o(&c.ik, &u, &cc[bp]); v29_mul_o(&u, &u, &c.dx); ikp = &c.ik; }
+            else ikp = &u;
             v29_mul_o(&c.lam, &c.dy, ikp);
             v29_sqr_o(&c.l2, &c.lam);
             bk_x3(c, px[b], dg + 4 * b, zf[b]);
-            v29_mul_o(&c.y3, &c.lam, &c.t);
-            bk_y3(c, py[b], dg + 4 * b, zf[b]);
+            /* Next X gather is independent of current Y; start it before the Y product. */
             if (!last) fw_next(c, Tn, dgn + 4 * b, zfn[b], px[b], one);
             else v29_subm(&c.dxn, &xD, &px[b], 2);
+            v29_mul_o(&c.y3, &c.lam, &c.t);
+            bk_y3(c, py[b], dg + 4 * b, zf[b]);
             v29_mul_o(&cc[b], accp, &c.dxn);
             accp = &cc[b];
         }
@@ -385,7 +401,7 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
     }
     vinv(&inv, &acc);
     {
-        vfe ubuf[2]; ubuf[0] = inv; int ui = 0;
+        vfe u = inv; /* MUL captures all lhs limbs before output stores; rhs stays disjoint. */
         const int step = asc ? -1 : 1;
         int b = asc ? nb - 1 : 0;
         for (int it = 0; it < nb; it++, b += step) {
@@ -393,8 +409,8 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
             vfe dx, dy, ik, lam, l2, xm, t, ym;
             v29_subm(&dx, &xD, &px[b], 2);
             const vfe *ikp;
-            if (it + 1 < nb) { v29_mul_o(&ik, &ubuf[ui], &cc[bp]); v29_mul_o(&ubuf[ui ^ 1], &ubuf[ui], &dx); ui ^= 1; ikp = &ik; }
-            else ikp = &ubuf[ui];
+            if (it + 1 < nb) { v29_mul_o(&ik, &u, &cc[bp]); v29_mul_o(&u, &u, &dx); ikp = &ik; }
+            else ikp = &u;
             v29_subm(&dy, &yD, &py[b], 2);
             v29_mul_o(&lam, &dy, ikp);
             v29_sqr_o(&l2, &lam);
