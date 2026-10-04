@@ -157,7 +157,7 @@
 #endif
 
 #ifndef QSB_CPU_RESERVE
-#define QSB_CPU_RESERVE 2          /* logical CPUs left for the GPU host thread and driver */
+#define QSB_CPU_RESERVE 1          /* was 2: one more logical CPU for co-grind workers; host/driver keep one */
 #endif
 #ifndef QSB_CPU_FOLD2
 #define QSB_CPU_FOLD2 1            /* fe8_fold: split the high columns (low 52 bits + rest) instead of a serial carry chain */
