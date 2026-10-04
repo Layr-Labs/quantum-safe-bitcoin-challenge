@@ -63,7 +63,7 @@
 #include <cpuid.h>
 #include <openssl/sha.h>
 #ifndef QSB_HP_RING_THP
-#define QSB_HP_RING_THP 0   /* see the ring notes below g_hp */
+#define QSB_HP_RING_THP 1   /* see the ring notes below g_hp */
 #endif
 #if QSB_HP_RING_THP
 #include <sys/mman.h>
