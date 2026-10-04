@@ -62,7 +62,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
 #ifndef QSB_CG_RECOVER
-#define QSB_CG_RECOVER 1                  /* 1: a clean A/B window restores one shed worker */
+#define QSB_CG_RECOVER 0                  /* was 1: disable clean-window worker restore / ramp */
 #endif
 #ifndef QSB_CG_HETERO
 #define QSB_CG_HETERO 0                   /* 1: full-load calibration of the AVX2 / MULX SMT split (CG5) */
