@@ -205,10 +205,10 @@ __shared__ uint64_t qsb_sc_products[4][512];
 #else
 #define QSB_RC_ACTIVE 0
 #endif
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
 /*. LUT_ISSUED (QSB_ROOT_LUT_SMEM): 1 = the caller already issued qsb_root_lut_issue (kernel_digest
  * does it at kernel start), 0 = the tree issues it here. Idle (QSB_PRE3_ROOT): work that warps 1..n/32-1 run
- * on the wave-top branch while warp 0 runs the root, before the down-sweep barrier they wait at anyway. */
+ * on the wave-top branch while the selected root warp runs the root, before the down-sweep barrier they wait at anyway. */
 #if QSB_ROOT_FILL
 struct QsbTreeNoIdle{__device__ __forceinline__ void operator()()const{} __device__ __forceinline__ void waves_done()const{}
                      __device__ __forceinline__ void after_down32()const{} __device__ __forceinline__ void root_done()const{}};
@@ -275,7 +275,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     for(int count=n;count>(QSB_TREE_WAVE_TOP?16:2);count>>=1){
         int half=count>>1;
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
         const int ut=(RW && half<=32)?tid-32*RW:tid;   /*: levels with <= 32 writers on warp RW */
         if(RW?(unsigned)ut<(unsigned)half:tid<half){
 #else
@@ -345,7 +345,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // QSB_TREE_WAVE_TOP (tree.cu): the base root block above is compiled out; offset == 2n-32, the
     // sixteen L16 nodes x[j]. P8, P4, P2 go to their base columns (the base's up levels 16, 8, 4);
     // c, d and E16 stay in the registers of lanes 0..15.
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
     if(__all_sync(0xffffffffu,RW?(unsigned)(tid-32*RW)<32u:tid<32)){
         const int lt=RW?tid-32*RW:tid;   /*: lane index inside the root warp RW */
 #else
@@ -540,7 +540,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     for(int count=QSB_TREE_WAVE_TOP?32:4;count<n;count<<=1){
         int half=count>>1;
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
         const int ut=(RW && count<=32)?tid-32*RW:tid;   /*: down level 32 on warp RW (it reads RW's inverses) */
         if(RW?(unsigned)ut<(unsigned)count:tid<count){
 #else
@@ -590,7 +590,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
 #if QSB_ROOT_LUT_SMEM || QSB_ROOT_FILL
 #undef inverses
 #endif
@@ -599,8 +599,8 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 }
 #endif
 #endif
-#if (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT) && ZLAB_TREE != 2
-#error "QSB_ROOT_LUT_SMEM and QSB_PRE3_ROOT (tree.cu) are written for the level-packed tree (ZLAB_TREE 2)"
+#if (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_WARP) && ZLAB_TREE != 2
+#error "QSB_ROOT_LUT_SMEM, QSB_PRE3_ROOT and QSB_ROOT_WARP (tree.cu) require the level-packed tree (ZLAB_TREE 2)"
 #endif
 #if QSB_ROOT_LUT_SMEM && !(HM43_WARP_ROOT && QSB_INVERSE_LIMBS)
 #error "QSB_ROOT_LUT_SMEM (tree.cu) is written for the warp-0 limbs root (HM43_WARP_ROOT, QSB_INVERSE_LIMBS)"

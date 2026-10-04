@@ -754,16 +754,16 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * the two earliest arrivals, so the same contention no longer sets the barrier. Only which warp's lanes
  * compute the top levels changes: each node is the same product of the same operands and each inverse the
  * same value, so the tree's output is bit-identical. With QSB_PRE3_ROOT the root warp is the one that keeps
- * pre3 in its fronts. Needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT); other
+ * pre3 in its fronts. Needs the wave top; this switch enables the templated tree independently of LUT/pre3. Other
  * callers of the tree (tree_audit) keep warp 0. 0 = the base byte for byte. */
 #ifndef QSB_ROOT_WARP
-#define QSB_ROOT_WARP 0
+#define QSB_ROOT_WARP 2   /* exact tree ownership relocation; standalone, no LUT/pre3 change */
 #endif
 #if QSB_ROOT_WARP < 0 || QSB_ROOT_WARP > 7
 #error "QSB_ROOT_WARP must be a warp of the 256-thread block (0..7)"
 #endif
-#if QSB_ROOT_WARP && !(QSB_TREE_WAVE_TOP && (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT))
-#error "QSB_ROOT_WARP needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT)"
+#if QSB_ROOT_WARP && !QSB_TREE_WAVE_TOP
+#error "QSB_ROOT_WARP needs the wave top"
 #endif
 #if QSB_ROOT_WARP && QSB_PRE3_ROOT == 2
 #error "QSB_ROOT_WARP is written for QSB_PRE3_ROOT 0 or 1"
@@ -3701,6 +3701,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
         __syncthreads();                      /* every leaf read of the product and inverse rows is done */
         if(tid>=32)qsb_rf_store_own(qsb_rf_st,tid);
     }
+#elif QSB_ROOT_WARP
+    qsb_block_inverse_tree_x<0,QsbTreeNoIdle,QSB_ROOT_WARP>(leaf,QsbTreeNoIdle());   /* same tree; sole root warp relocated */
 #else
     qsb_block_inverse_tree(leaf);             /* 1/(WA*WB) for this lane */
 #endif
@@ -5906,7 +5908,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #define QSB_XSHA_KNOBS
 #endif
 #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
-    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
+    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(QSB_FIRST_PACKED) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
     QSB_CARRIER_KV(QSB_CHAIN_UNROLL) QSB_CARRIER_KV(QSB_DIGIT_SHIFT) QSB_CARRIER_KV(QSB_EPOCH_FAST) \

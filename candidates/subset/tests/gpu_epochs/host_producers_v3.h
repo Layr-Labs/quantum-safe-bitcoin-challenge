@@ -899,8 +899,11 @@ static void start(const digest_params_t *dp, int cut, int K, int ncls, uint64_t 
 static void enqueue_check_copy(cudaStream_t st, const void *d_ep, const uint32_t *d_fi, size_t fi_pitch) {
     Hp *h = g_hp; if (!h) return;
     const size_t n = (size_t)batch_len(h, 0), w = (size_t)h->P.ncls * 32;
-    cudaError_t e = cudaMemcpyAsync(h->d_scr_ep, d_ep, n * 64, cudaMemcpyDeviceToDevice, st);
-    if (e == cudaSuccess) e = cudaMemcpy2DAsync(h->d_scr_fi, w, d_fi, fi_pitch, w, n, cudaMemcpyDeviceToDevice, st);
+    cudaError_t e = w > fi_pitch ? cudaErrorInvalidValue :
+        cudaMemcpyAsync(h->d_scr_ep, d_ep, n * 64, cudaMemcpyDeviceToDevice, st);
+    if (e == cudaSuccess) e = w == fi_pitch ?
+        cudaMemcpyAsync(h->d_scr_fi, d_fi, n * w, cudaMemcpyDeviceToDevice, st) :
+        cudaMemcpy2DAsync(h->d_scr_fi, w, d_fi, fi_pitch, w, n, cudaMemcpyDeviceToDevice, st);
     if (e == cudaSuccess) e = cudaEventRecord(h->chk_evt, st);
     std::lock_guard<std::mutex> g(h->m);
     if (e != cudaSuccess) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check copy failed"); return; }
@@ -954,14 +957,16 @@ static Slot *acquire(int64_t k) {
 static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, size_t fi_pitch, int n) {
     Hp *h = g_hp;
     const size_t w = (size_t)h->P.ncls * 32;
-    cudaError_t e = cudaSuccess;
+    cudaError_t e = w > fi_pitch ? cudaErrorInvalidValue : cudaSuccess;
     for (int p = 0; p < NPIECE && e == cudaSuccess; p++) {
         const int64_t lo = (int64_t)p * (int64_t)h->pe;
         if (lo >= n) break;
         const size_t np = (size_t)((int64_t)n - lo < (int64_t)h->pe ? (int64_t)n - lo : (int64_t)h->pe);
         e = cudaMemcpyAsync((uint8_t *)d_ep + (size_t)lo * 64, s->ep[p], np * 64, cudaMemcpyHostToDevice, st);
         if (e == cudaSuccess)
-            e = cudaMemcpy2DAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, fi_pitch, s->fi[p], w, w, np, cudaMemcpyHostToDevice, st);
+            e = w == fi_pitch ?
+                cudaMemcpyAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, s->fi[p], np * w, cudaMemcpyHostToDevice, st) :
+                cudaMemcpy2DAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, fi_pitch, s->fi[p], w, w, np, cudaMemcpyHostToDevice, st);
     }
     if (e == cudaSuccess) e = cudaEventRecord(s->copied, st);
     /* Only now may the slot be released on its event (a stale event would read as complete). On an
