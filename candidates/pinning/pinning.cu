@@ -3,6 +3,9 @@
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
 #endif
+#ifndef QSB_SHA_ALU_PREP
+#define QSB_SHA_ALU_PREP 1 /* prepare-kernel SHA adds left as IMAD.IADD take the constant-bank zero (IADD3, exact); 0 = off */
+#endif
 #ifndef QSB_FIN_LEA
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
@@ -2927,6 +2930,9 @@ __device__ __forceinline__ void _SHA256TransformFastTail11U(
  * words; only where W16..W63 come from differs. The words are the U transform's own sums (mod 2^32,
  * so the association does not change a bit). */
 #define QSB_AB_SW_OFF 6144   /* byte offset of the schedule in the digit arena: above the GLV codes */
+#if QSB_SHA_ALU_PREP && !QSB_SHA_LEA
+#error "QSB_SHA_ALU_PREP's tail rounds are the QSB_SHA_LEA round form (QSB_RLMZ)"
+#endif
 #if !(QSB_TREE_GFILL && (QSB_POST_GLUE & 1)) || QSB_TREE_N != 128
 #error "QSB_ASICBOOST keeps the schedule in the 16-byte aligned 14 x 128-word digit arena"
 #endif
@@ -2944,13 +2950,26 @@ __device__ __forceinline__ void qsb_ab_schedule_store(
 #pragma unroll
     for (int i = 3; i < 15; i++) w[i] = 0;
     w[15] = L;
+#if QSB_SHA_ALU_PREP
+    w[0] = qsb_add3z(lane, QSB_UB(u0 + s0(w[1])));
+#else
     w[0] = lane + QSB_UB(u0 + s0(w[1]));   /* W16 = W0 + s0(W1) */
+#endif
     w[1] += v5;
     w[2] += s1(w[0]);
     w[3]  = s1(w[1]);
     w[4]  = s1(w[2]);
     w[5]  = s1(w[3]);
     w[6]  = s1(w[4]) + L;
+#if QSB_SHA_ALU_PREP
+    w[7]  = qsb_add3z(s1(w[5]), w[0]);
+    w[8]  = qsb_add3z(s1(w[6]), w[1]);
+    w[9]  = qsb_add3z(s1(w[7]), w[2]);
+    w[10] = qsb_add3z(s1(w[8]), w[3]);
+    w[11] = qsb_add3z(s1(w[9]), w[4]);
+    w[12] = qsb_add3z(s1(w[10]), w[5]);
+    w[13] = qsb_add3z(s1(w[11]), w[6]);
+#else
     w[7]  = s1(w[5]) + w[0];
     w[8]  = s1(w[6]) + w[1];
     w[9]  = s1(w[7]) + w[2];
@@ -2958,6 +2977,7 @@ __device__ __forceinline__ void qsb_ab_schedule_store(
     w[11] = s1(w[9]) + w[4];
     w[12] = s1(w[10]) + w[5];
     w[13] = s1(w[11]) + w[6];
+#endif
     w[14] = s1(w[12]) + w[7] + s0(L);
     w[15] += s1(w[13]) + w[8] + s0(w[0]);
 #pragma unroll
@@ -2989,6 +3009,17 @@ __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     uint32_t g;
     uint32_t h;
 
+#if QSB_SHA_ALU_PREP
+    h = qsb_add3z(lane, QSB_UB(tp.v[0] + u0));
+    d = qsb_add3z(lane, QSB_UB(tp.v[1] + u0));
+    t1 = S1(d) + ((d & e) | (~d & f)) + QSB_UB(qsb_add3z(tp.v2y, w1));
+    t2 = S0(h) + (h & tp.mx);
+    c = qsb_add3z(tp.c2y, t1);
+    g = t1 + t2;
+    t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b = qsb_add3z(b, t1); f = t1 + t2;
+    t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a = qsb_add3z(a, t1); e = t1 + t2;
+#define QSB_AB_RLL QSB_RLMZ
+#else
     /* round 0: v0 + W0, v1 + W0 */
     h = lane + QSB_UB(tp.v[0] + u0);
     d = lane + QSB_UB(tp.v[1] + u0);
@@ -3001,18 +3032,20 @@ __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
     t1 = tp.v[4] + S1(b) + Ch(b,c,d);      t2 = S0(f) + Maj(f,g,h); a += t1; e = t1 + t2;
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(5));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(6));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(7));
-    QSB_RL(a, b, c, d, e, f, g, h, qsb_klit(8));
-    QSB_RL(h, a, b, c, d, e, f, g, qsb_klit(9));
-    QSB_RL(g, h, a, b, c, d, e, f, qsb_klit(10));
-    QSB_RL(f, g, h, a, b, c, d, e, qsb_klit(11));
-    QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(12));
-    QSB_RL(d, e, f, g, h, a, b, c, qsb_klit(13));
-    QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
-    QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
+#define QSB_AB_RLL QSB_RL
+#endif
+    QSB_AB_RLL(e, f, g, h, a, b, c, d, qsb_klit(4));
+    QSB_AB_RLL(d, e, f, g, h, a, b, c, qsb_klit(5));
+    QSB_AB_RLL(c, d, e, f, g, h, a, b, qsb_klit(6));
+    QSB_AB_RLL(b, c, d, e, f, g, h, a, qsb_klit(7));
+    QSB_AB_RLL(a, b, c, d, e, f, g, h, qsb_klit(8));
+    QSB_AB_RLL(h, a, b, c, d, e, f, g, qsb_klit(9));
+    QSB_AB_RLL(g, h, a, b, c, d, e, f, qsb_klit(10));
+    QSB_AB_RLL(f, g, h, a, b, c, d, e, qsb_klit(11));
+    QSB_AB_RLL(e, f, g, h, a, b, c, d, qsb_klit(12));
+    QSB_AB_RLL(d, e, f, g, h, a, b, c, qsb_klit(13));
+    QSB_AB_RLL(c, d, e, f, g, h, a, b, qsb_klit(14));
+    QSB_AB_RLL(b, c, d, e, f, g, h, a, qsb_klit(15) + L);
     uint32_t w[16];
 #define QSB_AB_LOAD(blk) { \
     _Pragma("unroll") for (int q = 0; q < 4; q++) { \
@@ -3025,13 +3058,23 @@ __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     QSB_AB_LOAD(2);
     QSB_RND15L(48);
 #undef QSB_AB_LOAD
+#undef QSB_AB_RLL
     QSB_R63_FF04(tp.km63 + w[15], tp.d4, state[0], state[4]);
+#if QSB_SHA_ALU_PREP
+    state[1] = qsb_add3z(tp.mid[1], b);
+    state[2] = qsb_add3z(tp.mid[2], c);
+    state[3] = qsb_add3z(tp.mid[3], d);
+    state[5] = qsb_add3z(tp.mid[5], f);
+    state[6] = qsb_add3z(tp.mid[6], g);
+    state[7] = qsb_add3z(tp.mid[7], h);
+#else
     state[1] = tp.mid[1] + b;
     state[2] = tp.mid[2] + c;
     state[3] = tp.mid[3] + d;
     state[5] = tp.mid[5] + f;
     state[6] = tp.mid[6] + g;
     state[7] = tp.mid[7] + h;
+#endif
 }
 #endif
 #endif
@@ -6248,6 +6291,27 @@ static uint64_t completed_candidates() {
 #endif
 
 
+/* Host-only bounded query-before-block policy. Keep the original completion
+ * synchronization on every non-error exit and preserve recorded-event ownership.
+ * The query count cap also bounds the loop if the monotonic clock stalls. */
+static cudaError_t qsb_wait_slot_completion(cudaEvent_t done) {
+#if QSB_FEED_BLOCK
+    struct timespec begin, now;
+    if (clock_gettime(CLOCK_MONOTONIC, &begin) == 0) {
+        for (int poll = 0; poll < 64; ++poll) {
+            const cudaError_t q = cudaEventQuery(done);
+            if (q == cudaSuccess) return cudaEventSynchronize(done);
+            if (q != cudaErrorNotReady) return q;
+            if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) break;
+            const int64_t ns = (int64_t)(now.tv_sec - begin.tv_sec) * 1000000000LL +
+                               (int64_t)now.tv_nsec - (int64_t)begin.tv_nsec;
+            if (ns < 0 || ns >= 50000LL) break;
+        }
+    }
+#endif
+    return cudaEventSynchronize(done);
+}
+
 int main(int argc, char **argv) {
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
     uint32_t tail_w0 = 0;   /* W0 of the static tail block with a zero low byte (QSB_TAIL_TAB) */
@@ -7070,7 +7134,7 @@ int main(int argc, char **argv) {
 #else
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = qsb_wait_slot_completion(slot_done[s]);
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         slot_busy[s] = 0;
         err = cudaGetLastError();
@@ -7142,7 +7206,7 @@ int main(int argc, char **argv) {
     auto collect_slot = [&](int s, uint32_t &count, uint32_t *hits) -> int {
         count = 0;
         if (!slot_busy[s]) return 0;
-        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = qsb_wait_slot_completion(slot_done[s]);
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
