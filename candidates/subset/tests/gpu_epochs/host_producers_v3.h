@@ -714,8 +714,25 @@ static void worker(Hp *h, int id, cpu_set_t mask, bool use_mask) {
             if (q == cudaSuccess) { h->chk_running = true; lk.unlock(); run_check(h); lk.lock(); continue; }
             if (q != cudaErrorNotReady) { (void)cudaGetLastError(); h->check = -1; kill_locked(h, "self-check event failed"); break; }
         }
+        /* Prefer already assignable producer work over pinning another ring piece.
+         * This only defers allocation; slot readiness and upload ownership stay unchanged. */
+#ifndef QSB_HP_WORK_BEFORE_PIN
+#define QSB_HP_WORK_BEFORE_PIN 1
+#endif
+        bool pin_may_proceed = true;
+#if QSB_HP_WORK_BEFORE_PIN
+        if (id == 0 && h->check == 1) {
+            for (int s = 0; s < NSLOT; s++) {
+                const Slot &x = h->slot[s];
+                if (x.state == S_PROD && x.next_chunk < x.nchunks) {
+                    pin_may_proceed = false;
+                    break;
+                }
+            }
+        }
+#endif
         /* 2. worker 0 pins the ring, one piece per pass, once the search loop runs */
-        if (id == 0 && h->loop_started) {
+        if (id == 0 && h->loop_started && pin_may_proceed) {
             Slot *a = nullptr;
             for (int s = 0; s < NSLOT && !a; s++) if (h->slot[s].npieces_ok < NPIECE) a = &h->slot[s];
             if (a) {
