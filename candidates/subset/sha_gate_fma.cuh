@@ -498,6 +498,69 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     QSB_RL(c, d, e, f, g, h, a, b, qsb_klit(14));
     QSB_RL(b, c, d, e, f, g, h, a, qsb_klit(15) + 0x108u);
 
+#if defined(QSB_SHA_ALU_RT) && QSB_SHA_ALU_RT && !QSB_SHA_FMA_ADD
+    /* QSB_SHA_ALU_RT (tree.cu): this plain form runs only after main() clears QSB_GATE_FMA_C. Every schedule sum
+     * with two or four terms takes the constant-bank zero (qsb_add3z), so none is left for IMAD.IADD; the sums are
+     * the ones below in the same order. */
+    w[0] = qsb_add3z(w[0], s0(w[1]));
+    w[1] += s1(0x108u) + s0(w[2]);
+    w[2] += s1(w[0]) + s0(w[3]);
+    w[3] += s1(w[1]) + s0(w[4]);
+    w[4] += s1(w[2]) + s0(w[5]);
+    w[5] += s1(w[3]) + s0(w[6]);
+    w[6] = qsb_add3z(w[6] + s1(w[4]) + 0x108u, s0(w[7]));
+    w[7] = qsb_add3z(w[7] + s1(w[5]) + w[0], s0(w[8]));
+    w[8] += s1(w[6]) + w[1];
+    w[9]  = qsb_add3z(s1(w[7]), w[2]);
+    w[10] = qsb_add3z(s1(w[8]), w[3]);
+    w[11] = qsb_add3z(s1(w[9]), w[4]);
+    w[12] = qsb_add3z(s1(w[10]), w[5]);
+    w[13] = qsb_add3z(s1(w[11]), w[6]);
+    w[14] = s1(w[12]) + w[7] + s0(0x108u);
+    w[15] = qsb_add3z(0x108u + s1(w[13]) + w[8], s0(w[0]));
+#define QSB_STEPLZ(j, a,b,c,d,e,f,g,h, base) do { \
+    w[j] = qsb_add3z(w[j] + s1(w[((j)+14)&15]) + w[((j)+9)&15], s0(w[((j)+1)&15])); \
+    QSB_RL(a,b,c,d,e,f,g,h,qsb_klit((base)+(j)) + w[j]); \
+} while (0)
+    QSB_RND16L(16);
+    QSB_STEPLZ(0,a,b,c,d,e,f,g,h,32);  QSB_STEPLZ(1,h,a,b,c,d,e,f,g,32);
+    QSB_STEPLZ(2,g,h,a,b,c,d,e,f,32);  QSB_STEPLZ(3,f,g,h,a,b,c,d,e,32);
+    QSB_STEPLZ(4,e,f,g,h,a,b,c,d,32);  QSB_STEPLZ(5,d,e,f,g,h,a,b,c,32);
+    QSB_STEPLZ(6,c,d,e,f,g,h,a,b,32);  QSB_STEPLZ(7,b,c,d,e,f,g,h,a,32);
+    QSB_STEPLZ(8,a,b,c,d,e,f,g,h,32);  QSB_STEPLZ(9,h,a,b,c,d,e,f,g,32);
+    QSB_STEPLZ(10,g,h,a,b,c,d,e,f,32); QSB_STEPLZ(11,f,g,h,a,b,c,d,e,32);
+    QSB_STEPLZ(12,e,f,g,h,a,b,c,d,32); QSB_STEPLZ(13,d,e,f,g,h,a,b,c,32);
+    QSB_STEPLZ(14,c,d,e,f,g,h,a,b,32); QSB_STEPLZ(15,b,c,d,e,f,g,h,a,32);
+    QSB_STEPLZ(0,a,b,c,d,e,f,g,h,48);  QSB_STEPLZ(1,h,a,b,c,d,e,f,g,48);
+    QSB_STEPLZ(2,g,h,a,b,c,d,e,f,48);  QSB_STEPLZ(3,f,g,h,a,b,c,d,e,48);
+    QSB_STEPLZ(4,e,f,g,h,a,b,c,d,48);  QSB_STEPLZ(5,d,e,f,g,h,a,b,c,48);
+    QSB_STEPLZ(6,c,d,e,f,g,h,a,b,48);  QSB_STEPLZ(7,b,c,d,e,f,g,h,a,48);
+    QSB_STEPLZ(8,a,b,c,d,e,f,g,h,48);  QSB_STEPLZ(9,h,a,b,c,d,e,f,g,48);
+    QSB_STEPLZ(10,g,h,a,b,c,d,e,f,48); QSB_STEPLZ(11,f,g,h,a,b,c,d,e,48);
+    QSB_STEPLZ(12,e,f,g,h,a,b,c,d,48); QSB_STEPLZ(13,d,e,f,g,h,a,b,c,48);
+    QSB_STEPLZ(14,c,d,e,f,g,h,a,b,48);
+#undef QSB_STEPLZ
+    w[15] = qsb_add3z(w[15] + s1(w[13]) + w[8], s0(w[0]));
+#if QSB_SHA_LEA && (QSB_LEA_PARTS & 2)
+    {   /* round 63, a-output only, as in the record's plain form below */
+        const uint32_t qx_ = a + w[15] + (qsb_klit(63) + QSB_IV0), qch_ = Ch(f,g,h), qmj_ = Maj(b,c,d);
+        const uint32_t qy_ = QSB_LEA_S1PA(f), qz_ = QSB_LEA_S0PA(b);
+        uint32_t r_;
+        asm("{\n\t.reg .u32 x2, t, r, s;\n\t"
+            "add.u32 x2, %1, %2;\n\t"
+            "add.u32 x2, x2, %3;\n\t"
+            "shf.r.wrap.b32 r, %4, %4, 6;\n\t"
+            "add.u32 t, x2, r;\n\t"
+            "shf.r.wrap.b32 s, %5, %5, 2;\n\t"
+            "add.u32 %0, t, s;\n\t}"
+            : "=r"(r_) : "r"(qx_), "r"(qch_), "r"(qmj_), "r"(qy_), "r"(qz_));
+        return r_;
+    }
+#else
+#error "QSB_SHA_ALU_RT's gate form is written for QSB_SHA_LEA with QSB_LEA_PARTS bit 1"
+#endif
+#else
+
     {
 #if QSB_SHA_FMA_ADD
         const uint32_t one = pin_one_mul;
@@ -562,6 +625,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     return a + S1(f) + Ch(f,g,h) + w[15] + (qsb_klit(63) + QSB_IV0) + S0(b) + Maj(b,c,d);
 #endif
 #endif
+#endif   /* QSB_SHA_ALU_RT */
 }
 
 #if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT

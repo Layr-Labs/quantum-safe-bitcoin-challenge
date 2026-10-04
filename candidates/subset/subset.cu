@@ -8,4 +8,10 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+/* Heat-limit SHA adds (tree.cu, QSB_SHA_ALU_RT): after main() clears QSB_GATE_FMA_C, the four constant blocks and the
+ * gate's plain form keep every add on the ALU pipe (a constant-bank zero third operand) instead of IMAD.IADD. Same
+ * words, same hits; the code that runs before the clear is the record's. */
+#ifndef QSB_SHA_ALU_RT
+#define QSB_SHA_ALU_RT 1
+#endif
 #include "tests/gpu_epochs/tree.cu"
