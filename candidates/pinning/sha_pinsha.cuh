@@ -434,7 +434,7 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
  * (T1 + S0) + Maj). bit 1: Ch is added to T1 before S1 (measured slower; kept for reference).
  * Sums mod 2^32 are order-independent, so every word is unchanged. */
 #ifndef QSB_FIN_RASSOC
-#define QSB_FIN_RASSOC 0
+#define QSB_FIN_RASSOC 2
 #endif
 #if QSB_FIN_RASSOC & 1
 #define QSB_RL_T1(h, e, f, g, kw) \
