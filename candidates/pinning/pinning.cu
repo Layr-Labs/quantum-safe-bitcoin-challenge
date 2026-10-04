@@ -477,7 +477,7 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 5           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 6           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
