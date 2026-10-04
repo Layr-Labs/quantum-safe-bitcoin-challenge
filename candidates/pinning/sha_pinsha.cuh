@@ -117,6 +117,27 @@ __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by t
 #error "QSB_PO_ALU reads pin_zero_add, which exists only with QSB_SHA_ALU_ADD=1"
 #endif
 
+/* QSB_SHA_ALU_PREP: the two-input SHA adds that ptxas still lowers to IMAD.IADD in the prepare
+ * kernel (AsicBoost tail block: rounds 0-3, the literal rounds 4-15 and the feed-forward; warp 0's
+ * W16..W63 expansion; the outer digest's schedule) take pin_zero_add as a third addend. Only IADD3
+ * encodes a three-input add, so they stay on the ALU pipe beside the IMAD-bound chain, as
+ * QSB_SHA_ALU_ADD intended for the pre-LEA rounds. Same instruction count, same words.
+ * 0 = the record's PTX. */
+#ifndef QSB_SHA_ALU_PREP
+#define QSB_SHA_ALU_PREP 0
+#endif
+#if QSB_SHA_ALU_PREP
+#if !QSB_SHA_ALU_ADD
+#error "QSB_SHA_ALU_PREP reads pin_zero_add, which exists only with QSB_SHA_ALU_ADD=1"
+#endif
+__device__ __forceinline__ uint32_t qsb_add3z(uint32_t x, uint32_t y) {
+    uint32_t r;
+    asm("{\n\t.reg .u32 zc;\n\tld.const.u32 zc, [pin_zero_add];\n\tadd.u32 %0, %1, %2;\n\tadd.u32 %0, %0, zc;\n\t}"
+        : "=r"(r) : "r"(x), "r"(y));
+    return r;
+}
+#endif
+
 /* One round; kw = K_i + W_i (a literal when W_i is constant). */
 #define QSB_RL_BASE(a, b, c, d, e, f, g, h, kw) \
     t1 = h + S1(e) + Ch(e,f,g) + (kw); \
@@ -175,6 +196,16 @@ __device__ __constant__ uint32_t pin_zero_add = 0;   /* 0; also re-uploaded by t
     const uint32_t qt_ = (h) + (kw) + qch_ + qmj_ + ROR(qy_, 6); \
     d = qt_ - qmj_ + d; \
     h = qt_ + ROR(qz_, 2); }
+#if QSB_SHA_ALU_PREP
+/* QSB_RLM with TM = ((h + kw + Ch) + Maj + 0) + ROR6(S1'): the same TM, d' and h'. */
+#define QSB_RLMZ(a, b, c, d, e, f, g, h, kw) { \
+    const uint32_t qy_ = QSB_S1P(e), qz_ = QSB_S0P(a); \
+    const uint32_t qch_ = Ch(e,f,g), qmj_ = Maj(a,b,c); \
+    const uint32_t qt_ = qsb_add3z((h) + (kw) + qch_, qmj_) + ROR(qy_, 6); \
+    h = qt_ + ROR(qz_, 2); \
+    asm("{\n\t.reg .u32 r;\n\tsub.u32 r, %1, %2;\n\tadd.u32 %0, r, %0;\n\t}" \
+        : "+r"(d) : "r"(qt_), "r"(qmj_)); }
+#endif
 #define QSB_RL(a, b, c, d, e, f, g, h, kw) QSB_RLA(a, b, c, d, e, f, g, h, kw)
 #else
 #define QSB_RL(a, b, c, d, e, f, g, h, kw) QSB_RL_BASE(a, b, c, d, e, f, g, h, kw)
@@ -317,7 +348,11 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     QSB_RLK(b, c, d, e, f, g, h, a, qsb_klit(15) + 256u);
 
     {
+#if QSB_SHA_ALU_PREP
+        w[0] = qsb_add3z(w[0], s0(w[1]));
+#else
         w[0] += s0(w[1]);
+#endif
         w[1] += s1(256u) + s0(w[2]);
         w[2] += s1(w[0]) + s0(w[3]);
         w[3] += s1(w[1]) + s0(w[4]);
@@ -326,11 +361,19 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
         w[6] += s1(w[4]) + 256u + s0(w[7]);
         w[7] += s1(w[5]) + w[0] + s0(0x80000000u);
         w[8]  = 0x80000000u + s1(w[6]) + w[1] + QSB_Z;
+#if QSB_SHA_ALU_PREP
+        w[9]  = qsb_add3z(s1(w[7]), w[2]);
+        w[10] = qsb_add3z(s1(w[8]), w[3]);
+        w[11] = qsb_add3z(s1(w[9]), w[4]);
+        w[12] = qsb_add3z(s1(w[10]), w[5]);
+        w[13] = qsb_add3z(s1(w[11]), w[6]);
+#else
         w[9]  = s1(w[7]) + w[2];
         w[10] = s1(w[8]) + w[3];
         w[11] = s1(w[9]) + w[4];
         w[12] = s1(w[10]) + w[5];
         w[13] = s1(w[11]) + w[6];
+#endif
         w[14] = s1(w[12]) + w[7] + s0(256u);
         w[15] = 256u + s1(w[13]) + w[8] + s0(w[0]);
     }
