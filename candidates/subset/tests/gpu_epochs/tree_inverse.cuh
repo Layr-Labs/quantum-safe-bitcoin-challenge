@@ -215,7 +215,7 @@ struct QsbTreeNoIdle{__device__ __forceinline__ void operator()()const{} __devic
 #else
 struct QsbTreeNoIdle{__device__ __forceinline__ void operator()()const{}};
 #endif
-#if QSB_ROOT_LUT_SMEM
+#if QSB_ROOT_LUT_SMEM && !QSB_TREE_ROW128
 #define inverses qsb_tree_inverses_smem   /* file-scope rows (zinv32.cuh): the divstep LUT rides in them */
 #endif
 #if QSB_ROOT_FILL
@@ -234,7 +234,11 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
 #if QSB_TREE_ROW128
     ulonglong2 (&products2)[2][512] = qsb_sc_products2;
+#if QSB_ROOT_LUT_SMEM
+    ulonglong2 (&inverses2)[2][256] = qsb_tree_inverses2_smem;
+#else
     __shared__ __align__(16) ulonglong2 inverses2[2][256];
+#endif
 #else
 #if QSB_SC_PARK
     uint64_t (&products)[4][512] = qsb_sc_products;
@@ -258,9 +262,10 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     for(int k=0;k<4;k++)products[k][tid]=value[k];
 #endif
 #if QSB_ROOT_LUT_SMEM
-    /* The table words land in the dead inverses rows (flat word i < 832 at ((uint64_t*)inverses)[i]);
-     * this barrier publishes them to warp 0. The first tree write into these rows is the root section's
-     * inverses[k][offset-n+tid], after the root's last lookup, by the same warp. */
+    /* The table occupies the first 6,656 bytes of the dead inverse arena (8 KiB).
+     * This barrier publishes it to the root warp. ROW128 names that same arena
+     * as inverses2, and first overwrites columns 224..239 only after the last
+     * root lookup and full-warp broadcast; scalar rows retain their old layout. */
     if(!LUT_ISSUED)qsb_root_lut_issue(tid,n);
     qsb_root_lut_wait();
 #endif

@@ -656,8 +656,8 @@ __device__ uint64_t BINOM_C[151][10];
 #if QSB_TREE_ROW128 != 0 && QSB_TREE_ROW128 != 1
 #error "QSB_TREE_ROW128 must be 0 or 1"
 #endif
-#if QSB_TREE_ROW128 && !(QSB_TREE_WAVE_TOP && !QSB_ROOT_LUT_SMEM && !QSB_PRE3_ROOT && !QSB_ROOT_COMBINE)
-#error "QSB_TREE_ROW128 is written for the wave top without the shared-memory divstep table, pre3 or root combining"
+#if QSB_TREE_ROW128 && !(QSB_TREE_WAVE_TOP && !QSB_PRE3_ROOT && !QSB_ROOT_COMBINE)
+#error "QSB_TREE_ROW128 is written for the wave top without pre3 or root combining"
 #endif
 /* QSB_ROOT_FILL (kernel_digest, tree_inverse.cuh, window_schedule_shared.cuh; host: the kernel_digest grid): persistent
  * digest blocks that fill the root window with the next unit's hashing. A unit is one block's 512 candidates (the work
@@ -697,7 +697,8 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * root inverse is read from shared memory instead of constant bank 3. In the base, four of the five table
  * lookups of every 30-step batch sit on the root's serial decision chain and wait 63 to 66 cycles each (the
  * 6,656 B table does not fit the 2 KiB constant L1; Nsight Compute); an LDS.64
- * broadcast is about 30. The table lives in the tree's inverses rows (4 x 256 words, dead from kernel start
+ * broadcast is about 30. The table lives in the tree's inverses rows (4 x 256 words, or the identical
+ * 8 KiB as 2 x 256 ulonglong2 pairs under QSB_TREE_ROW128), dead from kernel start
  * until the root section writes its first inverse, which follows the root's last lookup), so static shared
  * memory stays at 49,152 B per block and 2 blocks per SM still fit. kernel_digest fills those rows with
  * 16-byte cp.async copies from a __device__ mirror of the table at kernel start (no register is held and no
@@ -710,7 +711,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * tree_audit.cu's direct-root kernels (audit_warp_roots, audit_bounded_status) fill the table themselves.
  * 0 = the base byte for byte (the constant-bank lookups). */
 #ifndef QSB_ROOT_LUT_SMEM
-#define QSB_ROOT_LUT_SMEM 0
+#define QSB_ROOT_LUT_SMEM 1
 #endif
 #if QSB_ROOT_LUT_SMEM != 0 && QSB_ROOT_LUT_SMEM != 1
 #error "QSB_ROOT_LUT_SMEM must be 0 or 1"
