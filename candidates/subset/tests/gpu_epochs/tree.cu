@@ -1135,8 +1135,16 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_GATE_FMA_RT_AFTER_S
 #define QSB_GATE_FMA_RT_AFTER_S 120
 #endif
+/* Independent host-only rate-policy experiment; both gate forms remain in the existing image. */
+#ifndef QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RELEASE95 1
+#endif
 #ifndef QSB_GATE_FMA_RT_RATIO_PCT
+#if QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RATIO_PCT 95
+#else
 #define QSB_GATE_FMA_RT_RATIO_PCT 90
+#endif
 #endif
 #ifndef QSB_GATE_FMA_RT_FORCE_S
 #define QSB_GATE_FMA_RT_FORCE_S 0
@@ -7262,6 +7270,59 @@ int main(int argc, char **argv) {
             fflush(stdout);
         }
 #endif
+#ifndef QSB_PROBE_TOTAL_WORK
+#define QSB_PROBE_TOTAL_WORK 1
+#endif
+#ifndef QSB_GATE_BALANCED_PROBE
+#define QSB_GATE_BALANCED_PROBE 1
+#endif
+#if QSB_GATE_BALANCED_PROBE && QSB_GATE_FMA_RT && QSB_GATE_FMA_RT_FORCE_S == 0
+        /* Host-only trial of the image's two existing gate forms. Keep the original
+         * policy for >=300 s, hold the existing Q layout during the trial, then baseline,
+         * alternative, alternative, baseline for >=30 s each. No hit/seed inputs. */
+        int bp_phase = -1; unsigned bp_base = 1, bp_mode = 1;
+        double bp_t = 0.0, bp_secs[2] = {0.0, 0.0};
+        uint64_t bp_s = 0, bp_count[2] = {0, 0}; bool bp_route = false;
+        auto bp_now = [&]() -> double {
+            struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+            return (t.tv_sec - t0.tv_sec) + (t.tv_nsec - t0.tv_nsec) / 1e9;
+        };
+#if QSB_PROBE_TOTAL_WORK
+        /* Same unit: completed subset preimages, each with both recovery ids.
+         * CPU cand advances only after its batch's unchanged gate/publication.
+         * This is a processing proxy, never the official hit-derived score. */
+        auto bp_mark = [&](double &secs, uint64_t &work) -> bool {
+            work = total_searched;
+#if QSB_CPU_GRIND
+            const uint64_t cw = qcpu::candidates();
+            if (cw > ~uint64_t(0) - work) return false;
+            work += cw;
+#endif
+            secs = bp_now();
+            return true;
+        };
+#endif
+        auto bp_read = [&](unsigned &v) -> cudaError_t {
+            /* Verify the actual active image, not the loader's silent missing-global
+             * success or a read that can fall back to the other image. */
+            if (g_qsb_carrier.on) {
+                void *d = nullptr; size_t n = 0;
+                cudaError_t e = cudaLibraryGetGlobal(&d, &n, g_qsb_carrier.lib, "QSB_GATE_FMA_C");
+                if (e != cudaSuccess) return e;
+                if (n != sizeof(v)) return cudaErrorInvalidValue;
+                return cudaMemcpy(&v, d, sizeof(v), cudaMemcpyDeviceToHost);
+            }
+            return cudaMemcpyFromSymbol(&v, QSB_GATE_FMA_C, sizeof(v));
+        };
+        auto bp_write = [&](unsigned v) -> cudaError_t {
+            cudaError_t e = QSB_TO_SYMBOL(QSB_GATE_FMA_C, &v, sizeof(v));
+            unsigned got = 2u;
+            if (e == cudaSuccess) e = bp_read(got);
+            if (e == cudaSuccess && got != v) e = cudaErrorInvalidValue;
+            if (e == cudaSuccess) bp_mode = v;
+            return e;
+        };
+#endif
 #if QSB_QMIX_RT || QSB_GATE_FMA_RT
         /* rt-monitor state (QSB_QMIX_RT, QSB_GATE_FMA_RT): a ring of (seconds since t0, GPU candidates) at each batch
          * boundary, the first full minute's rate, and one done flag per switch. */
@@ -7383,6 +7444,11 @@ int main(int argc, char **argv) {
                                       r60 <= qrt_r1 * (QSB_GATE_FMA_RT_RATIO_PCT / 100.0);
 #endif
                     if (fire) {
+#if QSB_GATE_BALANCED_PROBE && QSB_GATE_FMA_RT && QSB_GATE_FMA_RT_FORCE_S == 0
+                        /* A host batch boundary can leave both non-blocking streams
+                         * busy. Fence every inherited constant change as well. */
+                        if (sp_drain(s ^ 1) || sp_drain(s)) return 1;
+#endif
                         const unsigned fz = 0u;
                         const cudaError_t fe = QSB_TO_SYMBOL(QSB_GATE_FMA_C, &fz, sizeof(fz));
                         printf("  GATE_FMA_RT: plain gate hash from %.1f s after batch %llu: 60 s GPU rate %.1f M/s, "
@@ -7404,6 +7470,11 @@ int main(int argc, char **argv) {
                                       r60 <= qrt_r1 * (QSB_QMIX_RT_RATIO_PCT / 100.0);
 #endif
                     if (fire) {
+#if QSB_GATE_BALANCED_PROBE && QSB_GATE_FMA_RT && QSB_GATE_FMA_RT_FORCE_S == 0
+                        /* A host batch boundary can leave both non-blocking streams
+                         * busy. Fence every inherited constant change as well. */
+                        if (sp_drain(s ^ 1) || sp_drain(s)) return 1;
+#endif
                         const unsigned qm = (unsigned)QSB_QMIX_RT_TARGET - 1u;
                         const cudaError_t qe = QSB_TO_SYMBOL(QSB_QMIX_MASK_C, &qm, sizeof(qm));
                         printf("  QMIX_RT: mask %u (Q_MIX %d) written at %.1f s after batch %llu: 60 s GPU rate %.1f M/s, "
@@ -7415,6 +7486,73 @@ int main(int argc, char **argv) {
                     }
                 }
 #endif
+            }
+#endif
+#if QSB_GATE_BALANCED_PROBE && QSB_GATE_FMA_RT && QSB_GATE_FMA_RT_FORCE_S == 0
+            /* This point follows launch s. The other slot is older; drain it first.
+             * Clearing busy via sp_collect prevents crediting/publishing twice. */
+            if (!g_stop_signal && bp_phase < 4 &&
+                ((bp_phase < 0 && bp_now() >= 300.0 && qrt_done) ||
+                 (bp_phase >= 0 && (bp_now() - bp_t >= 30.0 ||
+                                   (bool)g_qsb_carrier.on != bp_route)))) {
+                if (sp_drain(s ^ 1) || sp_drain(s)) return 1;
+                if (!g_stop_signal) {
+                    cudaError_t be = cudaSuccess;
+#if QSB_PROBE_TOTAL_WORK
+                    double bn; uint64_t bs;
+                    if (!bp_mark(bn, bs)) { fprintf(stderr, "PROBE_TOTAL_WORK: counter overflow\n"); return 1; }
+#else
+                    const double bn = bp_now(); const uint64_t bs = total_searched;
+#endif
+                    if (bp_phase < 0) {
+                        be = bp_read(bp_base);
+                        if (be == cudaSuccess && bp_base > 1u) be = cudaErrorInvalidValue;
+                        if (be == cudaSuccess) {
+                            bp_mode = bp_base; bp_route = (bool)g_qsb_carrier.on;
+                            qfa_done = true;  /* the original gate policy governed the warm-up */
+#if QSB_PROBE_TOTAL_WORK
+                            bp_phase = 0;
+                            if (!bp_mark(bp_t, bp_s)) { fprintf(stderr, "PROBE_TOTAL_WORK: counter overflow\n"); return 1; }
+#else
+                            bp_phase = 0; bp_t = bp_now(); bp_s = bs;
+#endif
+                            printf("  GATE_BALANCED_PROBE: start at %.1f s, baseline %u, native %d\n",
+                                   bn, bp_base, (int)bp_route);
+                        }
+                    } else if ((bool)g_qsb_carrier.on != bp_route || bs < bp_s || bn <= bp_t) {
+                        be = bp_write(bp_base); bp_phase = 4;
+                        printf("  GATE_BALANCED_PROBE: aborted; baseline restored (route/counter/time changed)\n");
+                    } else {
+                        const int side = bp_phase == 0 || bp_phase == 3 ? 0 : 1;
+                        bp_count[side] += bs - bp_s; bp_secs[side] += bn - bp_t;
+                        ++bp_phase;
+                        unsigned next = bp_phase == 1 || bp_phase == 2 ? (bp_base ^ 1u) : bp_base;
+                        if (bp_phase == 4) {
+                            const double r0 = bp_secs[0] > 0.0 ? (double)bp_count[0] / bp_secs[0] : 0.0;
+                            const double r1 = bp_secs[1] > 0.0 ? (double)bp_count[1] / bp_secs[1] : 0.0;
+                            if (r0 > 0.0 && r1 > r0 * 1.01) next = bp_base ^ 1u;
+                            printf("  GATE_BALANCED_PROBE: base %.3f M/s, alternative %.3f M/s; select %u\n",
+                                   r0 / 1e6, r1 / 1e6, next);
+                        }
+                        if (next != bp_mode) be = bp_write(next);
+                        if (be == cudaSuccess && (bool)g_qsb_carrier.on != bp_route) {
+                            be = bp_write(bp_base); bp_phase = 4;
+                            printf("  GATE_BALANCED_PROBE: upload changed route; trial aborted, baseline restored\n");
+                        }
+                        /* Exclude boundary publication/write time from the next window;
+                         * the official full-program wall clock still includes its cost. */
+#if QSB_PROBE_TOTAL_WORK
+                        if (!bp_mark(bp_t, bp_s)) { fprintf(stderr, "PROBE_TOTAL_WORK: counter overflow\n"); return 1; }
+#else
+                        bp_t = bp_now(); bp_s = total_searched;
+#endif
+                    }
+                    if (be != cudaSuccess) {
+                        fprintf(stderr, "GATE_BALANCED_PROBE: active-image read/write failed: %s\n", cudaGetErrorString(be));
+                        return 1;
+                    }
+                    fflush(stdout);
+                }
             }
 #endif
             double secs_since = (t_now.tv_sec - t_last_se.tv_sec)
