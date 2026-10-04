@@ -249,7 +249,7 @@
 #define QSB_CPU_PFD1 8             /* prefetch distance of the first window's loop (window 0 loads), in groups */
 #endif
 #ifndef QSB_CPU_PFD
-#define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
+#define QSB_CPU_PFD 4              /* was 3: one more L1 group of lead on the ILP2 forward pass */
 #endif
 #ifndef QSB_CPU_HPF
 #define QSB_CPU_HPF 2              /* 8-lane path: rows of windows 0 (and 1 with 2) prefetched from the hashing phase as each z is computed */
