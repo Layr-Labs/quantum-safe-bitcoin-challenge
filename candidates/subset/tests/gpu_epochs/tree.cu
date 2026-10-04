@@ -651,7 +651,7 @@ __device__ uint64_t BINOM_C[151][10];
  * 128-bit shared accesses instead of four 64-bit ones (the pinning record's QSB_POST_GLUE bit 1 layout). Same words,
  * same nodes, same products in the same order: bit-identical. Same 24 KiB of shared memory. 0 = the base byte for byte. */
 #ifndef QSB_TREE_ROW128
-#define QSB_TREE_ROW128 1
+#define QSB_TREE_ROW128 0
 #endif
 #if QSB_TREE_ROW128 != 0 && QSB_TREE_ROW128 != 1
 #error "QSB_TREE_ROW128 must be 0 or 1"
@@ -710,7 +710,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * tree_audit.cu's direct-root kernels (audit_warp_roots, audit_bounded_status) fill the table themselves.
  * 0 = the base byte for byte (the constant-bank lookups). */
 #ifndef QSB_ROOT_LUT_SMEM
-#define QSB_ROOT_LUT_SMEM 0
+#define QSB_ROOT_LUT_SMEM 1
 #endif
 #if QSB_ROOT_LUT_SMEM != 0 && QSB_ROOT_LUT_SMEM != 1
 #error "QSB_ROOT_LUT_SMEM must be 0 or 1"
