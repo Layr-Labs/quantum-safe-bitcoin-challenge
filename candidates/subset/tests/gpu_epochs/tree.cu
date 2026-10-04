@@ -1065,7 +1065,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * QSB_SHA_UEXIT (window_schedule_shared.cuh): probe forms of the callee's 8-round loop; 4 = fully unrolled callee
  * (K+W as literal constant-bank operands, no loop control, no per-block copies), the code-size rig arm. */
 #ifndef QSB_SHA_W0FOLD
-#define QSB_SHA_W0FOLD 0
+#define QSB_SHA_W0FOLD 1
 #endif
 #ifndef QSB_SHA_UEXIT
 #define QSB_SHA_UEXIT 0
