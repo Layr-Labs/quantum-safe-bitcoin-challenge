@@ -4312,7 +4312,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
 #if QSB_PK_ON
-        if(pk_rec)((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=0u;
+        if(pk_rec)__stcs((uint32_t *)(pk_rec+64u*QSB_PK_LANES)+threadIdx.x,0u);
 #endif
         return;
     }
@@ -4365,12 +4365,14 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 
 #if QSB_PK_ON
     if(pk_rec){   /* host hashes this block: park x(P+R), x(P-R) and the parity word */
+        /* These output records have no GPU reuse. Cache streaming limits their
+         * L2 pollution; the existing completion/DMA events publish identical bytes. */
         ulonglong2 *px=(ulonglong2 *)pk_rec+threadIdx.x;
-        px[0]=make_ulonglong2(q1x[0],q1x[1]);
-        px[QSB_PK_LANES]=make_ulonglong2(q1x[2],q1x[3]);
-        px[2*QSB_PK_LANES]=make_ulonglong2(q2x[0],q2x[1]);
-        px[3*QSB_PK_LANES]=make_ulonglong2(q2x[2],q2x[3]);
-        ((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=y_parities|0x80000000u;
+        __stcs(px,make_ulonglong2(q1x[0],q1x[1]));
+        __stcs(px+QSB_PK_LANES,make_ulonglong2(q1x[2],q1x[3]));
+        __stcs(px+2*QSB_PK_LANES,make_ulonglong2(q2x[0],q2x[1]));
+        __stcs(px+3*QSB_PK_LANES,make_ulonglong2(q2x[2],q2x[3]));
+        __stcs((uint32_t *)(pk_rec+64u*QSB_PK_LANES)+threadIdx.x,y_parities|0x80000000u);
         return;
     }
 #endif
@@ -5967,6 +5969,18 @@ static inline void message(uint32_t w[16], const uint64_t *x, uint32_t prefix) {
     for (int i = 9; i < 15; i++) w[i] = 0;
     w[15] = 0x108u;
 }
+/* The AVX2 H0 compressor consumes only rows 0..8; it folds the seven
+ * fixed padding/length words itself. Build its column directly, avoiding
+ * two temporary padded messages and seven unused matrix rows per key.
+ * SHA-NI and scalar compressors continue to receive complete messages. */
+static inline void message_live_column(uint32_t w[16][8], int t,
+                                       const uint64_t *x, uint32_t prefix) {
+    uint32_t s[8];
+    for (int i = 0; i < 4; i++) { s[2 * i] = (uint32_t)x[i]; s[2 * i + 1] = (uint32_t)(x[i] >> 32); }
+    w[0][t] = (prefix << 24) | (s[7] >> 8);
+    for (int i = 1; i < 8; i++) w[i][t] = (s[8 - i] << 24) | (s[7 - i] >> 8);
+    w[8][t] = (s[0] << 24) | 0x800000u;
+}
 static inline uint32_t prefix_of(uint32_t yp, int ri) {
 #if QSB_FIN_BAL2 & 2
     return (yp >> (8 * ri)) & 0xFFu;
@@ -6020,9 +6034,14 @@ static void hash_record(Job &J, uint32_t j) {
             if (y != 0u && base + (uint32_t)l < J.batch_sz) {
                 uint64_t x0[4], x1[4];
                 lane_keys(rec, l, x0, x1);
-                message(m0, x0, prefix_of(y, 0));
-                message(m1, x1, prefix_of(y, 1));
                 live |= 1u << t;
+                if (mode == 1) {
+                    message_live_column(w0, t, x0, prefix_of(y, 0));
+                    message_live_column(w1, t, x1, prefix_of(y, 1));
+                } else {
+                    message(m0, x0, prefix_of(y, 0));
+                    message(m1, x1, prefix_of(y, 1));
+                }
                 if (mode == 2) {
                     hash2_ni(m0, m1, &h0[t], &h1[t]);
                 } else if (mode == 0) {
@@ -6032,10 +6051,9 @@ static void hash_record(Job &J, uint32_t j) {
                     h0[t] = s0[0]; h1[t] = s1[0];
                 }
             } else {
-                memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+                if (mode == 1)
+                    for (int k = 0; k < 9; k++) { w0[k][t] = 0; w1[k][t] = 0; }
             }
-            if (mode == 1)
-                for (int k = 0; k < 16; k++) { w0[k][t] = m0[k]; w1[k][t] = m1[k]; }
         }
         if (!live) continue;
         if (mode == 1) hash8_avx2(w0, w1, h0, h1);
