@@ -520,7 +520,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #ifndef QSB_CPU_FENCE   /* normally defined by tests/gpu_epochs/qsb_host_verify.h (included first); this fallback keeps older host
                           * harnesses compiling at the default. With -DQSB_CPU_FENCE=1 and an old qsb_host_verify.h the build still
                           * fails loudly (no qsb_pub_once). */
-#define QSB_CPU_FENCE 0
+#define QSB_CPU_FENCE 1
 #endif
 #ifndef QSB_CPU_FENCE_R
 #define QSB_CPU_FENCE_R 800000000ull   /* QSB_CPU_FENCE: epochs reserved above the fence (1.3 x the runner co-grinder's 1,200 s need) */
@@ -577,6 +577,12 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 #ifndef QSB_CPU_FOLD_PAR
 #define QSB_CPU_FOLD_PAR 1
+#endif
+/* QSB_CPU_PIN_WORKERS: bind each co-grinder worker to one logical CPU from
+ * the worker mask. Order one CPU per physical core first, then SMT siblings.
+ * Host-only: no carrier knob and no candidate/search-order change. */
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1   /* N-r3hs ship default on (N-r3h, the N-th2 port on N-dc1uq2r, default off): terrapinelf's switch (his CpuGrindSubset.h blob f09f0a0a, default 1 there); 0 = N-dc1uq2r's host code */
 #endif
 /* QSB_CPU_TOUCH_FUSE (default 0 = the full first touch): a 9- or 10-window table keeps the sampled first touch (1 region in
  * 32) as its huge-page gate and skips the full pass, so the build's own writes fault the rest of the table in while other
@@ -2678,7 +2684,7 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
-    int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
+    int batch = QSB_CPU_BATCH;     /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
     uint64_t dev_limit = 0;         /* dev only (never in a ranked build): each worker stops once this many candidates are done */
@@ -2702,6 +2708,11 @@ struct Ctx {
 #endif
 #if QSB_CPU_DIAG_V4
     uint8_t diag4[256] = {0};       /* QSB_CPU_DIAG_V4: worker t starts diag4[t] x 2^20 epochs into its range (set before spawn) */
+#endif
+#if QSB_CPU_PIN_WORKERS
+    /* QSB_CPU_PIN_WORKERS: one logical CPU per worker. N-r3h keeps it last and only at 1 (terrapinelf's blob has it after
+     * nthreads), so every other member keeps its offset and the hot functions compile to the same code at 0 and at 1. */
+    std::vector<int> pin_cpus;
 #endif
 };
 
@@ -3335,6 +3346,13 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -4078,6 +4096,45 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
