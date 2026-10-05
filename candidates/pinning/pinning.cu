@@ -281,7 +281,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
 #ifndef QSB_BATCH
-#define QSB_BATCH 4194304    /* candidates per pipeline launch */
+#define QSB_BATCH 8388608    /* candidates per pipeline launch */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -4033,7 +4033,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #define QSB_PK_WDIV 2
 #endif
 #ifndef QSB_PK_WMAX
-#define QSB_PK_WMAX 12
+#define QSB_PK_WMAX 8
 #endif
 #if QSB_HOST_PKSHA && QSB_SUBPIPE && QSB_SLOTPIPE && QSB_REFILL_BEFORE_GATE && QSB_SHA_OPT && \
     QSB_SPARSE_D && QSB_ZEROS_N <= 32
@@ -5906,6 +5906,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #endif
 #if QSB_PK_ON
 #include <atomic>
+#include <cstddef>
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
@@ -5919,14 +5920,18 @@ static const int NB = 2 * QSB_SLOTS;
 static const uint32_t CH = 2;   /* records per claim */
 struct alignas(64) Job {
     std::atomic<uint64_t> ctl{0};
-    std::atomic<uint32_t> done{0};
+    alignas(64) std::atomic<uint32_t> done{0};
     std::atomic<uint32_t> done_candidates{0};
     std::atomic<uint32_t> nhit{0};
-    const uint8_t *plane = nullptr;
+    alignas(64) const uint8_t *plane = nullptr;
     std::atomic<uint32_t> nrec{0};
     uint32_t batch_sz = 0, seq = 0, lt = 0;
     uint32_t hits[64];
 };
+/* Physical separation only: tagged ownership and release/acquire operations stay intact. */
+static_assert(offsetof(Job, done) - offsetof(Job, ctl) >= 64, "claim and completion cache lines");
+static_assert(offsetof(Job, plane) - offsetof(Job, done) >= 64, "completion and immutable descriptor cache lines");
+static_assert(alignof(Job) >= 64 && sizeof(Job) % 64 == 0, "whole Job array separation");
 static Job jobs[NB];
 static uint8_t *planes[NB];
 /* One GPU slot can recycle this device output once its D2H/slot_done completes;
@@ -6860,19 +6865,31 @@ int main(int argc, char **argv) {
 #endif
 #endif
 
-    int BATCH = QSB_BATCH; /* default 4M; keep whole tree-aligned batches */
+    int BATCH = QSB_BATCH; /* default 8M; keep whole tree-aligned batches */
 #if QSB_SLOTPIPE
-    /* The GLV11 table takes 21.1 GiB. Choose a smaller batch before the four
-     * slot allocations when less VRAM is free than their state plus a reserve
-     * for roots, checkpoints, hit buffers and CUDA runtime bookkeeping. The
-     * kernel reads BATCH as a parameter; the scalar, points and hit rules stay
-     * unchanged. Every fallback size remains divisible by QSB_TREE_N. */
+    /* Subpipe rings have already been allocated. Their successful route uses
+     * four 256-byte placeholders per slot, plus optional PK device staging;
+     * only the monolithic route allocates a full batch state for every slot.
+     * Budget the selected route before allocating, retaining the same reserve
+     * and tree-aligned halving on insufficient free device memory. */
     size_t adaptive_free = 0, adaptive_total = 0;
     if (cudaMemGetInfo(&adaptive_free, &adaptive_total) == cudaSuccess) {
         const size_t reserve = 192ull << 20;
+        auto selected_device_bytes = [&](size_t batch) -> size_t {
+#if QSB_SUBPIPE
+            if (g_qsb_sub_ok) {
+                size_t bytes = (size_t)QSB_SLOTS * 4u * 256u;
+#if QSB_PK_ON && QSB_PK_DMA
+                const size_t stage_recs = ((batch + QSB_PK_LANES - 1u) / QSB_PK_LANES) / QSB_HOST_PKSHA;
+                bytes += (size_t)QSB_SLOTS * stage_recs * QSB_PK_REC;
+#endif
+                return bytes;
+            }
+#endif
+            return (size_t)QSB_SLOTS * batch * QSB_STATE_PLANES * sizeof(ulonglong2);
+        };
         while (BATCH > (1 << 20) &&
-               adaptive_free < (size_t)QSB_SLOTS * (size_t)BATCH *
-                               QSB_STATE_PLANES * sizeof(ulonglong2) + reserve)
+               adaptive_free < selected_device_bytes((size_t)BATCH) + reserve)
             BATCH >>= 1;
         printf("  Adaptive batch: %d candidates (free %zu MiB)\n",
                BATCH, adaptive_free >> 20);
