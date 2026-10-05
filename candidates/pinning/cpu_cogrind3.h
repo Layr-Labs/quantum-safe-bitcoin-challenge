@@ -59,6 +59,13 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #ifndef QSB_CG_PF
 #define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
 #endif
+#ifndef QSB_CG_PF_L2
+#define QSB_CG_PF_L2 1
+#endif
+#define QCG_PF_HINT (QSB_CG_PF_L2 ? _MM_HINT_T1 : _MM_HINT_T0)
+#ifndef QSB_CG_PF_PROLOGUE
+#define QSB_CG_PF_PROLOGUE 1              /* warm pass edges before their first demand load */
+#endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
 #ifndef QSB_CG_RECOVER
@@ -193,6 +200,7 @@ struct worker_t {
     alignas(64) uint64_t zq[4][QSB_CG_BMAX + 8];          /* z of the batch, word-major: zq[k][i] = word k (LE) of candidate i */
     alignas(64) uint32_t dig[QSB_CG_MAXWIN][QSB_CG_BMAX + 32];
     uint8_t zf[QSB_CG_MAXWIN][QSB_CG_BMAX / 4 + 8];
+    unsigned zf_dirty_mask;               /* private to the worker: rows not known entirely zero */
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order, *nri, *rx, *ry; EC_POINT *Ru2;
 };
 
@@ -230,6 +238,9 @@ static rwin g_rw[QSB_CG_MAXWIN];
 static inline unsigned recode(worker_t *w, int i, const uint64_t *q) {
     const layout_t &L = g_cg->lay;
     unsigned zmask = 0;
+#if QSB_CG_HIGHFOLD
+    if (L.pos[0] == 0)  /* highfold publishes the top index after the signed carry chain */
+#endif
     w->dig[0][i] = (uint32_t)(q[0] & g_rw[0].mask);
     uint64_t carry = 0;
     const int k = L.nwin - 1;
@@ -284,8 +295,14 @@ static unsigned recode_avx2(worker_t *w, int np) {
     for (int i = 0; i < np; i += 4) {
         const __m256i q[4] = {_mm256_load_si256((const __m256i *)&w->zq[0][i]), _mm256_load_si256((const __m256i *)&w->zq[1][i]),
                               _mm256_load_si256((const __m256i *)&w->zq[2][i]), _mm256_load_si256((const __m256i *)&w->zq[3][i])};
+#if QSB_CG_HIGHFOLD
+        if (L.pos[0] == 0) {  /* the highfold top-index store below owns dig[0] */
+#endif
         const __m256i d0 = _mm256_and_si256(q[0], _mm256_set1_epi64x((long long)g_rw[0].mask));
         _mm_storeu_si128((__m128i *)&w->dig[0][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(d0, idx)));
+#if QSB_CG_HIGHFOLD
+        }
+#endif
         __m256i carry = _mm256_setzero_si256();
         for (int j = 1; j <= k; j++) {
             const rwin &r = g_rw[j];
@@ -424,13 +441,18 @@ static void finish_digits(worker_t *w, int np, unsigned zmask) {
     for (int j = 0; j < S->lay.nwin; j++) for (int i = np; i < np + 32; i++) w->dig[j][i] = w->dig[j][np - 1];
     const int nb = np / 4;
     for (int j = 1; j < S->lay.nwin; j++) {
-        if (!(zmask >> j & 1)) { memset(w->zf[j], 0, (size_t)nb + 8); continue; }
+        const unsigned bit = 1u << j;
+        if (!(zmask & bit)) {
+            if (w->zf_dirty_mask & bit) memset(w->zf[j], 0, sizeof w->zf[j]);
+            continue;
+        }
         for (int b = 0; b < nb + 8; b++) {
             uint8_t f = 0;
             if (b < nb) for (int l = 0; l < 4; l++) f |= (uint8_t)QCG_ZERO(w->dig[j][4 * b + l]);
             w->zf[j][b] = f;
         }
     }
+    w->zf_dirty_mask = zmask;              /* dirty->clean clears the whole row, including old long tails */
 }
 
 /* Fill the batch with one chunk: z and digits per candidate. Returns n (0 when exhausted). */
@@ -490,12 +512,13 @@ static void run_ec(worker_t *w, int mode, void *vs, void *ss, void *vi) {
 static void *worker_main(void *arg) {
     shared_t *S = g_cg;
     const int id = (int)(intptr_t)arg;
+    const int measure_tsc = getenv("QSB_COGRIND_VERBOSE") != NULL;
     if (S->het_ok) { cpu_set_t one; CPU_ZERO(&one); CPU_SET(S->wcpu[id], &one); pthread_setaffinity_np(pthread_self(), sizeof one, &one); }
     else if (g_worker_set_on) pthread_setaffinity_np(pthread_self(), sizeof g_worker_set, &g_worker_set);
     set_idle_priority();
     worker_t *w = (worker_t *)aligned_alloc(64, (sizeof(worker_t) + 63) & ~(size_t)63);
     if (!w) return NULL;
-    w->id = id; w->cur_seq_tag = 0;
+    w->id = id; w->cur_seq_tag = 0; w->zf_dirty_mask = ~0u;
     w->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     w->ctx = BN_CTX_new(); w->order = BN_new(); w->nri = BN_new(); w->rx = BN_new(); w->ry = BN_new();
     w->Ru2 = w->grp ? EC_POINT_new(w->grp) : NULL;
@@ -574,12 +597,14 @@ static void *worker_main(void *arg) {
         if (id >= S->allowed.load(std::memory_order_relaxed)) { usleep(5000); continue; }
         S->running.fetch_add(1);
         const uint64_t c0 = thread_cpu_ns();
-        const uint64_t r0 = __rdtsc();
+        const uint64_t r0 = measure_tsc ? __rdtsc() : 0;
         int n = fill_batch(w);
-        const uint64_t r1 = __rdtsc();
+        const uint64_t r1 = measure_tsc ? __rdtsc() : 0;
         if (n) run_ec(w, (S->wsec[id] && S->het_on.load(std::memory_order_relaxed)) ? 1 : ecm, vs, ss, vi);
-        const uint64_t r2 = __rdtsc();
-        S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
+        const uint64_t r2 = measure_tsc ? __rdtsc() : 0;
+        if (measure_tsc) {
+            S->sha_cyc.fetch_add(r1 - r0, std::memory_order_relaxed); S->ec_cyc.fetch_add(r2 - r1, std::memory_order_relaxed);
+        }
         S->busy_ns[id].fetch_add(thread_cpu_ns() - c0, std::memory_order_relaxed);
         S->running.fetch_sub(1);
         if (!n) break;
