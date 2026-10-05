@@ -1882,7 +1882,19 @@ __device__ __constant__ uint32_t pin_yoff_zero = 0;
 /* qsb_pointadd_pair<true> with the swap written as two XORs (QSB_YRAW_CARRY): the next
  * record's Y half is gathered into a local Yn, and on return Yoff = Y2 ^ z (this trip's Y2)
  * and Y2 = Yn (the gathered ordinate), which is what the tail swap leaves in (y0, y1). Every
- * other statement is qsb_pointadd_pair's, in its order. */
+ * arithmetic call is qsb_pointadd_pair's; QSB_CHAIN_PFIRST below selects its order. */
+/* QSB_CHAIN_PFIRST: schedule the independent U2/P denominator prefix
+ * before the slope MAC in the raw pair chain. All arithmetic calls and argument
+ * order are unchanged. X1 is read by P before its later X3 write; ZZ1/ZZZ1
+ * remain unchanged until the existing tail updates. Gather placement is kept.
+ * 0 restores the exact promoted order; 1 selects the denominator-prefix order.
+ */
+#ifndef QSB_CHAIN_PFIRST
+#define QSB_CHAIN_PFIRST 1
+#endif
+#if QSB_CHAIN_PFIRST != 0 && QSB_CHAIN_PFIRST != 1
+#error "QSB_CHAIN_PFIRST must be 0 or 1"
+#endif
 __device__ __forceinline__ void qsb_pointadd_pair_raw(
     uint64_t *X1,uint64_t *Qy,uint64_t *Ry,uint64_t *ZZ1,uint64_t *ZZZ1,
     uint64_t *X2,uint64_t *Y2,uint64_t *Yoff,const uint64_t z,
@@ -1891,14 +1903,22 @@ __device__ __forceinline__ void qsb_pointadd_pair_raw(
     _ModAddLazyOff(S2,Y2,Yoff);
     qsb_load_glv_y_code(table,next_code,Yn);
     asm volatile("" ::: "memory");
+#if QSB_CHAIN_PFIRST
+    _ModMult(U2,X2,ZZ1);
+    QSB_SUB_CHAIN_P(P,U2,X1);
+#endif
 #if QSB_MAC_DROW
     qsb_mul2add(Ry,S2,ZZZ1,Ry,Qy);
 #else
     qsb_mul2add(Ry,S2,ZZZ1,Qy,Ry);
 #endif
+#if !QSB_CHAIN_PFIRST
     _ModMult(U2,X2,ZZ1);
+#endif
     qsb_load_glv_x_code(table,next_code,X2);
+#if !QSB_CHAIN_PFIRST
     QSB_SUB_CHAIN_P(P,U2,X1);
+#endif
     _ModSqr(PP,P);
     _ModMult(PPP,PP,P);
     _ModMult(Q,U2,PP);
