@@ -174,8 +174,12 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     uint64_t mid,top;
     qsb_parity_window_words(mid,top,a,b);
     const uint32_t x7=(uint32_t)mid;
-    // Only bit 32 and bits 0..31 of q are used. u64 overflow is harmless.
-    const uint64_t q=top+977ULL*(top>>32)+x7+(beta[3]>>32);
+    // The low word is unchanged from adding x7 alone, so both original
+    // guards still select exactly the same inputs. The high word folds
+    // mid's parity into q: bit32(base+mid) = bit32(base+x7)^bit32(mid).
+    // Higher bits of mid are irrelevant, including FIN_BAL2's unmasked
+    // high-word accumulator. Unsigned 64-bit overflow is harmless.
+    const uint64_t q=top+977ULL*(top>>32)+mid+(beta[3]>>32);
 #if QSB_PARITY_WINDOW_NARROW
     // B=2^32 and Dk=sum(a_i*b_j, i+j=k). Omitting D5 changes
     // floor((D6+floor(D5/B))/B) by at most 6; omitting D12 changes
@@ -192,11 +196,10 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u) {
 #endif
 #if QSB_FIN_BAL2 & 1
-        /* QSB_FIN_BAL2 bit 1: mid >> 32 already holds a0*b0 + mid1, whose bit 0 is a0&b0 ^ mid1,
-         * so the a[0]&b[0] term is gone and two LOP3 (XOR3, then mask) finish the same bit 0. */
-        return ((uint32_t)(mid>>32)^(uint32_t)beta[0]^(uint32_t)(q>>32)^neg)&1u;
+        /* mid's high-word parity, including a0*b0, is folded into q. */
+        return ((uint32_t)beta[0]^(uint32_t)(q>>32)^neg)&1u;
 #else
-        return (uint32_t)(((a[0]&b[0])^(mid>>32)^beta[0]^(q>>32)^neg)&1u);
+        return (uint32_t)(((a[0]&b[0])^beta[0]^(q>>32)^neg)&1u);
 #endif
     }
     uint64_t raw[4];
