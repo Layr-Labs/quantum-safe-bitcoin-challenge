@@ -2203,6 +2203,13 @@ static bool qsha_supported() {
  * K additions) and the chaining state stays in the ABEF/CDGH layout across the nblk blocks. Used
  * for the tail blocks that do not depend on the epoch: every one of them is one of a few fixed
  * contents per problem, scheduled once in start(). */
+/* Host-only scheduling experiment: issue the first two-round operation in each of
+ * four independent lanes before issuing their second operation. The per-lane order,
+ * immutable schedule words, feed-forward and shared-row branch are unchanged.
+ * 0 restores the exact prior nonshared loop. No device-image knob. */
+#ifndef QSB_CPU_X4P_INTERLEAVE
+#define QSB_CPU_X4P_INTERLEAVE 1
+#endif
 QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows, int nblk, uint32_t *out = nullptr, int ostride = 8,
                           const uint32_t *const *in = nullptr
 #if QCPU_PFQ
@@ -2243,11 +2250,20 @@ QSHA static void qsha_x4p(uint32_t (*st)[8], const uint32_t *const *const *rows,
         } else {
 #pragma GCC unroll 16
         for (int r = 0; r < 16; r++) {
+#if QSB_CPU_X4P_INTERLEAVE
+#pragma GCC unroll 4
+            for (int l = 0; l < 4; l++)
+                S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
+#pragma GCC unroll 4
+            for (int l = 0; l < 4; l++)
+                S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
+#else
 #pragma GCC unroll 4
             for (int l = 0; l < 4; l++) {
                 S1[l] = _mm_sha256rnds2_epu32(S1[l], S0[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r)));
                 S0[l] = _mm_sha256rnds2_epu32(S0[l], S1[l], _mm_loadl_epi64((const __m128i *)(w[l] + 4 * r + 2)));
             }
+#endif
         }
         }
 #pragma GCC unroll 4
