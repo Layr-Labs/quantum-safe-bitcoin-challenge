@@ -294,6 +294,14 @@
  * (a multiple of 32, 32..8192). 0: the fixed QSB_CPU_BATCH as before. Every batch is a multiple of 32: the 8-lane window steps and
  * final steps run over G = B / 8 groups four at a time (G % 4 == 0), recode16 takes 16 candidates at a time, the 16-lane key hashes
  * and hpf_rows8 8, the 4-lane hashing groups 4. */
+/* . QSB_CPU_BATCH_ODD: when non-zero, the odd-numbered workers use this batch instead of the one chosen below; the even ones
+ * keep it. Each worker owns its batch buffers and walks its own contiguous range, so only the batch size per worker changes,
+ * and the two sizes can be told apart in one run from each worker's last hit. 0: every worker as before. */
+#ifndef QSB_CPU_BATCH_ODD
+#define QSB_CPU_BATCH_ODD 0
+#endif
+static_assert(QSB_CPU_BATCH_ODD == 0 || (QSB_CPU_BATCH_ODD % 32 == 0 && QSB_CPU_BATCH_ODD >= 32 && QSB_CPU_BATCH_ODD <= 8192),
+              "QSB_CPU_BATCH_ODD: 0 or a multiple of 32, 32..8192");
 #ifndef QSB_CPU_BATCH_AUTO
 #define QSB_CPU_BATCH_AUTO 1
 #endif
@@ -3339,8 +3347,9 @@ static void worker(Ctx *c, int tid) {
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
-    const int B = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;   /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
+    const int B0 = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;  /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
                                                                      * run-time value as in 86c643ae; 0: the compile-time constant as before */
+    const int B = (QSB_CPU_BATCH_ODD && (tid & 1)) ? QSB_CPU_BATCH_ODD : B0;   /* QSB_CPU_BATCH_ODD: odd workers' batch */
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
