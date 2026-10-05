@@ -656,8 +656,8 @@ __device__ uint64_t BINOM_C[151][10];
 #if QSB_TREE_ROW128 != 0 && QSB_TREE_ROW128 != 1
 #error "QSB_TREE_ROW128 must be 0 or 1"
 #endif
-#if QSB_TREE_ROW128 && !(QSB_TREE_WAVE_TOP && !QSB_ROOT_LUT_SMEM && !QSB_PRE3_ROOT && !QSB_ROOT_COMBINE)
-#error "QSB_TREE_ROW128 is written for the wave top without the shared-memory divstep table, pre3 or root combining"
+#if QSB_TREE_ROW128 && !(QSB_TREE_WAVE_TOP && !QSB_PRE3_ROOT && !QSB_ROOT_COMBINE)
+#error "QSB_TREE_ROW128 is written for the wave top without pre3 or root combining"
 #endif
 /* QSB_ROOT_FILL (kernel_digest, tree_inverse.cuh, window_schedule_shared.cuh; host: the kernel_digest grid): persistent
  * digest blocks that fill the root window with the next unit's hashing. A unit is one block's 512 candidates (the work
@@ -697,7 +697,8 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * root inverse is read from shared memory instead of constant bank 3. In the base, four of the five table
  * lookups of every 30-step batch sit on the root's serial decision chain and wait 63 to 66 cycles each (the
  * 6,656 B table does not fit the 2 KiB constant L1; Nsight Compute); an LDS.64
- * broadcast is about 30. The table lives in the tree's inverses rows (4 x 256 words, dead from kernel start
+ * broadcast is about 30. The table lives in the tree's inverses rows (4 x 256 words, or the identical
+ * 8 KiB as 2 x 256 ulonglong2 pairs under QSB_TREE_ROW128), dead from kernel start
  * until the root section writes its first inverse, which follows the root's last lookup), so static shared
  * memory stays at 49,152 B per block and 2 blocks per SM still fit. kernel_digest fills those rows with
  * 16-byte cp.async copies from a __device__ mirror of the table at kernel start (no register is held and no
@@ -710,7 +711,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * tree_audit.cu's direct-root kernels (audit_warp_roots, audit_bounded_status) fill the table themselves.
  * 0 = the base byte for byte (the constant-bank lookups). */
 #ifndef QSB_ROOT_LUT_SMEM
-#define QSB_ROOT_LUT_SMEM 0
+#define QSB_ROOT_LUT_SMEM 1
 #endif
 #if QSB_ROOT_LUT_SMEM != 0 && QSB_ROOT_LUT_SMEM != 1
 #error "QSB_ROOT_LUT_SMEM must be 0 or 1"
@@ -757,7 +758,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * pre3 in its fronts. Needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT); other
  * callers of the tree (tree_audit) keep warp 0. 0 = the base byte for byte. */
 #ifndef QSB_ROOT_WARP
-#define QSB_ROOT_WARP 0
+#define QSB_ROOT_WARP 2
 #endif
 #if QSB_ROOT_WARP < 0 || QSB_ROOT_WARP > 7
 #error "QSB_ROOT_WARP must be a warp of the 256-thread block (0..7)"
@@ -903,7 +904,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_S3_NM_SEED 1
 #endif
 #ifndef QSB_TREE_UNROLL
-#define QSB_TREE_UNROLL 0
+#define QSB_TREE_UNROLL 1
 #endif
 /* QSB_PARK128 1 (kernel_digest): candidate A's twelve parked words (and B's scalar, parked in rows 8..11 across A's
  * front) as six 16-byte rows, so each park and reload is one STS.128/LDS.128 per word pair instead of two 64-bit
@@ -923,7 +924,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * across both tails. The front keeps its ABI (its chain loop is not re-allocated by this). Same __constant__
  * words, same field operations, in the same order: bit-identical. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1
 #endif
 #if QSB_R_CBANK_TAILS < 0 || QSB_R_CBANK_TAILS > 1
 #error "QSB_R_CBANK_TAILS must be 0 or 1"
@@ -1008,7 +1009,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_CONST_CALLEE 1
 #endif
 #ifndef QSB_SHA_WROLL_PIPE
-#define QSB_SHA_WROLL_PIPE 0
+#define QSB_SHA_WROLL_PIPE 1
 #endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
@@ -1069,6 +1070,20 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #endif
 #ifndef QSB_SHA_UEXIT
 #define QSB_SHA_UEXIT 0
+#endif
+/* QSB_CC_GLUE (window_schedule_shared.cuh): the QSB_CONST_CALLEE callee's block loop rolled (the K+W row offset runs on
+ * across the four blocks) with each block's rounds 0..15 peeled: they read the saved state words and write the working
+ * registers, so the 16 per-block working-state copies and the per-block loop resets go, and the remaining 48 rounds run
+ * as three 16-round trips (half the loop control per round). Same words, rounds and order: bit-identical. 0 = the base
+ * callee byte for byte (the knob joins QSB_CARRIER_KNOBS only when nonzero). */
+#ifndef QSB_CC_GLUE
+#define QSB_CC_GLUE 1
+#endif
+#if QSB_CC_GLUE < 0 || QSB_CC_GLUE > 3
+#error "QSB_CC_GLUE is 0 to 3"
+#endif
+#if QSB_CC_GLUE && (!QSB_CONST_CALLEE || QSB_SHA_UEXIT || QSB_SHA_W0FOLD)
+#error "QSB_CC_GLUE reshapes the QSB_CONST_CALLEE callee: needs QSB_CONST_CALLEE 1, QSB_SHA_UEXIT 0 and QSB_SHA_W0FOLD 0"
 #endif
 #if (QSB_SHA_W0FOLD != 0 && QSB_SHA_W0FOLD != 1) || QSB_SHA_UEXIT < 0 || QSB_SHA_UEXIT > 4
 #error "QSB_SHA_W0FOLD is 0 or 1; QSB_SHA_UEXIT is 0 to 4"
@@ -5902,11 +5917,13 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * a knob that is not defined in this configuration stringifies to its own name. */
 #if QSB_SHA_W0FOLD || QSB_SHA_UEXIT   /* lane SHA knobs appear only when set, so the default string is unchanged */
 #define QSB_XSHA_KNOBS QSB_CARRIER_KV(QSB_SHA_W0FOLD) QSB_CARRIER_KV(QSB_SHA_UEXIT)
+#elif QSB_CC_GLUE   /* QSB_CC_GLUE: likewise only when set */
+#define QSB_XSHA_KNOBS QSB_CARRIER_KV(QSB_CC_GLUE)
 #else
 #define QSB_XSHA_KNOBS
 #endif
 #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
-    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
+    QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(QSB_FIRST_PACKED) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
     QSB_CARRIER_KV(QSB_CHAIN_ANCHOR_UPDATE) QSB_CARRIER_KV(QSB_CHAIN_MUL_LEAN) \
     QSB_CARRIER_KV(QSB_CHAIN_UNROLL) QSB_CARRIER_KV(QSB_DIGIT_SHIFT) QSB_CARRIER_KV(QSB_EPOCH_FAST) \

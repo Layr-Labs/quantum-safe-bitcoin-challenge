@@ -205,22 +205,38 @@ ZI_CONST uint64_t ZI_BY_LUT[832]=ZI_BY_LUT_INIT;
  * only its own (host) copy of the divstep code keeps reading ZI_BY_LUT. */
 #if defined(QSB_ROOT_LUT_SMEM) && QSB_ROOT_LUT_SMEM
 __device__ __align__(16) const uint64_t ZI_BY_LUT_G[832]=ZI_BY_LUT_INIT;   /* global mirror, cp.async source */
+#if QSB_TREE_ROW128
+/* One arena, not an extra table: 416 table pairs fit in 512 inverse-row pairs.
+ * Inverse stores start only after the root's final lookup and warp broadcast. */
+__shared__ __align__(16) ulonglong2 qsb_tree_inverses2_smem[2][256];
+#else
 __shared__ __align__(16) uint64_t qsb_tree_inverses_smem[4][256];         /* the tree's inverses rows */
+#endif
 /* Issue this thread's share of the 416 16-byte chunks (flat word 2i..2i+1 of the table to flat word
  * 2i..2i+1 of the rows) and commit them as one group. No register holds table data. cp.async needs sm_80:
  * the ranked build's own PTX (nvcc's default target, JIT fallback only; the native sm_89 image is the
  * carrier) and the host pass copy synchronously instead (same words; the tree's leaf barrier publishes). */
 __device__ __forceinline__ void qsb_root_lut_issue(int tid,int n){
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if QSB_TREE_ROW128
+    const uint32_t dst=(uint32_t)__cvta_generic_to_shared(&qsb_tree_inverses2_smem[0][0]);
+#else
     const uint32_t dst=(uint32_t)__cvta_generic_to_shared(&qsb_tree_inverses_smem[0][0]);
+#endif
     #pragma unroll 1
     for(int i=tid;i<416;i+=n)
         asm volatile("cp.async.cg.shared.global [%0], [%1], 16;" :: "r"(dst+16u*(uint32_t)i),"l"(ZI_BY_LUT_G+2*i) : "memory");
     asm volatile("cp.async.commit_group;" ::: "memory");
 #else
+#if QSB_TREE_ROW128
+    #pragma unroll 1
+    for(int i=tid;i<416;i+=n)
+        qsb_tree_inverses2_smem[i>>8][i&255]=make_ulonglong2(ZI_BY_LUT_G[2*i],ZI_BY_LUT_G[2*i+1]);
+#else
     uint64_t *flat=&qsb_tree_inverses_smem[0][0];
     #pragma unroll 1
     for(int i=tid;i<832;i+=n)flat[i]=ZI_BY_LUT_G[i];
+#endif
 #endif
 }
 /* This thread's copies have landed; a block barrier after it publishes the whole table. */
@@ -230,7 +246,20 @@ __device__ __forceinline__ void qsb_root_lut_wait(){
 #endif
 }
 #ifdef __CUDA_ARCH__
+#if QSB_TREE_ROW128
+/* Address-level load preserves the scalar table access without dereferencing a
+ * uint64_t alias of the typed ulonglong2 inverse rows. cp.async uses this same
+ * shared address, and the caller's wait plus block barrier precede all reads. */
+__device__ __forceinline__ uint64_t qsb_root_lut_read(uint32_t i){
+    const uint32_t src=(uint32_t)__cvta_generic_to_shared(&qsb_tree_inverses2_smem[0][0])+8u*i;
+    uint64_t out;
+    asm volatile("ld.shared.u64 %0, [%1];" : "=l"(out) : "r"(src) : "memory");
+    return out;
+}
+#define ZI_LUT(i) qsb_root_lut_read((uint32_t)(i))
+#else
 #define ZI_LUT(i) (((const uint64_t*)qsb_tree_inverses_smem)[(i)])
+#endif
 #else
 #define ZI_LUT(i) ZI_BY_LUT[(i)]
 #endif

@@ -5,7 +5,16 @@
 #ifndef QSB_950_PACK
 #define QSB_950_PACK 1
 #endif
-#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+/* The fixed 128-window selector has at most eight first-six-kept prefix
+ * patterns. Pack the same class states without the eight unused epoch slots.
+ * Actual class count is still checked before any class table is uploaded. */
+#ifndef QSB_FIRST_PACKED
+#define QSB_FIRST_PACKED 1
+#endif
+#if QSB_FIRST_PACKED != 0 && QSB_FIRST_PACKED != 1
+#error "QSB_FIRST_PACKED must be 0 or 1"
+#endif
+#define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:(QSB_FIRST_PACKED?8:16))
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
@@ -248,6 +257,60 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
     uint32_t fa0=0,fa1=0;
 #endif
     const uint4 *K=reinterpret_cast<const uint4*>(&QSB_CONST_SCHEDULE[0][0]);
+#if QSB_CC_GLUE
+    /* QSB_CC_GLUE (tree.cu): the four blocks in one rolled loop; each block's first rounds are peeled and read the saved
+     * state s.w directly, so the working registers start from those rounds' results (no working-state copies, no
+     * per-block loop resets); the inner loop runs the remaining rounds. Same words, rounds and order as the base. */
+#define QSB_CCG_R8(KA,KB) do{ const uint4 ka=(KA), kb=(KB); \
+    {const uint32_t w=(ka).x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);} \
+    {const uint32_t w=(ka).y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);} \
+    {const uint32_t w=(ka).z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);} \
+    {const uint32_t w=(ka).w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);} \
+    {const uint32_t w=(kb).x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);} \
+    {const uint32_t w=(kb).y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);} \
+    {const uint32_t w=(kb).z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);} \
+    {const uint32_t w=(kb).w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);} \
+}while(0)
+    const uint4 *kr=K;   /* the row pointer is the only address induction: it runs on across the four blocks */
+    #pragma unroll 1
+    for(int block=0;block<4;block++){
+        a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
+        a1=s.w[8];b1=s.w[9];c1=s.w[10];d1=s.w[11];e1=s.w[12];f1=s.w[13];g1=s.w[14];h1=s.w[15];
+#if QSB_CC_GLUE == 1
+        /* rounds 0..15 peeled, rounds 16..63 as three 16-round trips */
+        QSB_CCG_R8(kr[0],kr[1]);
+        QSB_CCG_R8(kr[2],kr[3]);
+        kr+=4;
+        #pragma unroll 1
+        for(int q=4;q<16;q+=4){
+            QSB_CCG_R8(kr[0],kr[1]);
+            QSB_CCG_R8(kr[2],kr[3]);
+            kr+=4;
+        }
+#elif QSB_CC_GLUE == 2
+        /* rounds 0..7 peeled, rounds 8..63 as seven 8-round trips */
+        QSB_CCG_R8(kr[0],kr[1]);
+        kr+=2;
+        #pragma unroll 1
+        for(int q=2;q<16;q+=2){
+            QSB_CCG_R8(kr[0],kr[1]);
+            kr+=2;
+        }
+#else
+        /* no peel: four 16-round trips (the working-state copies stay) */
+        #pragma unroll 1
+        for(int q=0;q<16;q+=4){
+            QSB_CCG_R8(kr[0],kr[1]);
+            QSB_CCG_R8(kr[2],kr[3]);
+            kr+=4;
+        }
+#endif
+        s.w[0]+=a0;s.w[1]+=b0;s.w[2]+=c0;s.w[3]+=d0;s.w[4]+=e0;s.w[5]+=f0;s.w[6]+=g0;s.w[7]+=h0;
+        s.w[8]+=a1;s.w[9]+=b1;s.w[10]+=c1;s.w[11]+=d1;s.w[12]+=e1;s.w[13]+=f1;s.w[14]+=g1;s.w[15]+=h1;
+    }
+#undef QSB_CCG_R8
+    return s;
+#else
     #pragma unroll
     for(int block=0;block<4;block++){
         a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
@@ -313,6 +376,7 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
 #else
     return s;
 #endif
+#endif   /* QSB_CC_GLUE */
 }
 #endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
