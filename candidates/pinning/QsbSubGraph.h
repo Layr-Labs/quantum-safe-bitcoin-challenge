@@ -12,7 +12,8 @@
  * green CUcontext. The older kernel-node updater can drop the green context.
  * The fixed harness link line needs no -lcuda: resolve through the runtime.
  *
- * Port (ST4, 27 Sep; after h0ng95 f4ef0994): default 0 until priced; the root node is the
+ * Port (ST4, 27 Sep; after h0ng95 f4ef0994); enabled for the documented activation experiment.
+ * The root node is the
  * selected root kernel (qsb_root_register when the register trees passed their startup check,
  * else qsb_root_fused), and every stream of a role (both prepare lanes, both root queues, both
  * finish streams) must share one execution context, or the graphs stay off.
@@ -23,7 +24,7 @@
 #include <utility>
 
 #ifndef QSB_SUBGRAPH
-#define QSB_SUBGRAPH 0
+#define QSB_SUBGRAPH 1
 #endif
 #if QSB_SUBGRAPH != 0 && QSB_SUBGRAPH != 1
 #error "QSB_SUBGRAPH must be 0 or 1"
