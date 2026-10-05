@@ -757,13 +757,13 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * pre3 in its fronts. Needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT); other
  * callers of the tree (tree_audit) keep warp 0. 0 = the base byte for byte. */
 #ifndef QSB_ROOT_WARP
-#define QSB_ROOT_WARP 2
+#define QSB_ROOT_WARP 0
 #endif
 #if QSB_ROOT_WARP < 0 || QSB_ROOT_WARP > 7
 #error "QSB_ROOT_WARP must be a warp of the 256-thread block (0..7)"
 #endif
-#if QSB_ROOT_WARP && !QSB_TREE_WAVE_TOP   /* without QSB_ROOT_LUT_SMEM / QSB_PRE3_ROOT the templated tree runs with LUT_ISSUED 0 */
-#error "QSB_ROOT_WARP needs the wave top (QSB_TREE_WAVE_TOP 1)"
+#if QSB_ROOT_WARP && !(QSB_TREE_WAVE_TOP && (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT))
+#error "QSB_ROOT_WARP needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT)"
 #endif
 #if QSB_ROOT_WARP && QSB_PRE3_ROOT == 2
 #error "QSB_ROOT_WARP is written for QSB_PRE3_ROOT 0 or 1"
@@ -3827,8 +3827,6 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     qsb_block_inverse_tree_x<QSB_ROOT_LUT_SMEM,QsbPre3Idle,QSB_ROOT_WARP>(leaf,QsbPre3Idle{nB,parkA,tid});   /* 1/(WA*WB); pre3 in the root window */
 #elif QSB_ROOT_LUT_SMEM
     qsb_block_inverse_tree_x<1,QsbTreeNoIdle,QSB_ROOT_WARP>(leaf,QsbTreeNoIdle());   /* 1/(WA*WB) for this lane; table issued at kernel start */
-#elif QSB_ROOT_WARP
-    qsb_block_inverse_tree_x<0,QsbTreeNoIdle,QSB_ROOT_WARP>(leaf,QsbTreeNoIdle());   /* 1/(WA*WB); QSB_ROOT_WARP alone: the top of the tree on warp QSB_ROOT_WARP */
 #elif QSB_ROOT_FILL
     /* formed here, not at the top of the unit, so nothing new is live across the two front calls */
     const unsigned qsb_rf_next=qsb_rf_unit+gridDim.x;
