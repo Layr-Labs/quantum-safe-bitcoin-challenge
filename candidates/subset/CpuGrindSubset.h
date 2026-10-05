@@ -252,7 +252,7 @@
 #define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
 #endif
 #ifndef QSB_CPU_HPF
-#define QSB_CPU_HPF 2              /* 8-lane path: rows of windows 0 (and 1 with 2) prefetched from the hashing phase as each z is computed */
+#define QSB_CPU_HPF 1              /* 8-lane path: only window 0 rows prefetched from hashing; window 1 back in ec8_first (QSB_CPU_F1N) (was 2) */
 #endif
 #ifndef QSB_CPU_NOTX
 #define QSB_CPU_NOTX 1             /* window step without the table x array: D normalized, x3 = lam^2 - D - 2X */
