@@ -546,6 +546,24 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #endif
 #if QSB_SHA_FMA_ADD
 /* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
+#ifndef QSB_FIN_IVLEA
+#define QSB_FIN_IVLEA 1
+#endif
+#if QSB_FIN_IVLEA != 0 && QSB_FIN_IVLEA != 1
+#error "QSB_FIN_IVLEA must be 0 or 1"
+#endif
+#if QSB_FIN_IVLEA && QSB_FIN_LEA
+/* The folded-IV rounds 2/3 bypass QSB_RL_F. Apply its rotate-add identity
+ * here too: S1(e)=ROR6(QSB_S1P(e)), S0(a)=ROR2(QSB_S0P(a)). Moving Ch
+ * before S1 is exact modulo 2^32 and permits the same LEA.HI fusion. */
+#define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
+    t1 = qsb_fadd((W), one, (KH)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = QSB_FADD_S1(t1, e); \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = QSB_FADD_S0(t1, a); \
+    h  = qsb_fadd(t2, one, Maj(a,b,c));
+#else
 #define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
     t1 = qsb_fadd((W), one, (KH)); \
     t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
@@ -553,6 +571,7 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
     d  = qsb_fadd(d, one, t1); \
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
 #endif
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
