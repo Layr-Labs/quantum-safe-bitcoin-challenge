@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* retained PR3313 shared-core batch; resource and throughput effects need official measurement */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -590,6 +590,10 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
+#endif
+
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1  /* i34-9 PR3143: physical-core-first worker placement */
 #endif
 
 namespace qcpu {
@@ -1531,7 +1535,64 @@ static inline void update_de_62(s62 *d, s62 *e, const trans2x2 *t) {
     e->v[4] = (int64_t)ce;
 }
 /* (f, g) = t * (f, g) / 2^62 over the low len limbs */
+#ifndef QSB_CPU_INV_FG_STATIC_LEN
+#define QSB_CPU_INV_FG_STATIC_LEN 1
+#endif
+#if QSB_CPU_INV_FG_STATIC_LEN
+/* Fixed 1..5-limb schedules for the existing 62-bit integer update. No cap,
+ * matrix, coefficient, zero test, normalization or inverse contract changes.
+ * Dispatch/code footprint and compiler scheduling need official measurement. */
+template <int LEN>
+static inline void update_fg_62_fixed(s62 *f, s62 *g, const trans2x2 *t) {
+    const uint64_t M62 = ~0ULL >> 2;
+    const int64_t u = t->u, v = t->v, q = t->q, r = t->r;
+    int64_t fi = f->v[0], gi = g->v[0];
+    __int128 cf = (__int128)u * fi + (__int128)v * gi;
+    __int128 cg = (__int128)q * fi + (__int128)r * gi;
+    cf >>= 62; cg >>= 62;
+    if (LEN > 1) {
+        fi = f->v[1]; gi = g->v[1];
+        cf += (__int128)u * fi + (__int128)v * gi;
+        cg += (__int128)q * fi + (__int128)r * gi;
+        f->v[0] = (int64_t)((uint64_t)(int64_t)cf & M62); cf >>= 62;
+        g->v[0] = (int64_t)((uint64_t)(int64_t)cg & M62); cg >>= 62;
+    }
+    if (LEN > 2) {
+        fi = f->v[2]; gi = g->v[2];
+        cf += (__int128)u * fi + (__int128)v * gi;
+        cg += (__int128)q * fi + (__int128)r * gi;
+        f->v[1] = (int64_t)((uint64_t)(int64_t)cf & M62); cf >>= 62;
+        g->v[1] = (int64_t)((uint64_t)(int64_t)cg & M62); cg >>= 62;
+    }
+    if (LEN > 3) {
+        fi = f->v[3]; gi = g->v[3];
+        cf += (__int128)u * fi + (__int128)v * gi;
+        cg += (__int128)q * fi + (__int128)r * gi;
+        f->v[2] = (int64_t)((uint64_t)(int64_t)cf & M62); cf >>= 62;
+        g->v[2] = (int64_t)((uint64_t)(int64_t)cg & M62); cg >>= 62;
+    }
+    if (LEN > 4) {
+        fi = f->v[4]; gi = g->v[4];
+        cf += (__int128)u * fi + (__int128)v * gi;
+        cg += (__int128)q * fi + (__int128)r * gi;
+        f->v[3] = (int64_t)((uint64_t)(int64_t)cf & M62); cf >>= 62;
+        g->v[3] = (int64_t)((uint64_t)(int64_t)cg & M62); cg >>= 62;
+    }
+    f->v[LEN - 1] = (int64_t)cf;
+    g->v[LEN - 1] = (int64_t)cg;
+}
+#endif
 static inline void update_fg_62_var(int len, s62 *f, s62 *g, const trans2x2 *t) {
+#if QSB_CPU_INV_FG_STATIC_LEN
+    switch (len) {
+    case 1: update_fg_62_fixed<1>(f, g, t); return;
+    case 2: update_fg_62_fixed<2>(f, g, t); return;
+    case 3: update_fg_62_fixed<3>(f, g, t); return;
+    case 4: update_fg_62_fixed<4>(f, g, t); return;
+    case 5: update_fg_62_fixed<5>(f, g, t); return;
+    default: break;
+    }
+#endif
     const uint64_t M62 = ~0ULL >> 2;
     const int64_t u = t->u, v = t->v, q = t->q, r = t->r;
     int64_t fi = f->v[0], gi = g->v[0];
@@ -2678,6 +2739,9 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    std::vector<int> pin_cpus;      /* one logical CPU per worker */
+#endif
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3335,6 +3399,13 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -4078,6 +4149,45 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();

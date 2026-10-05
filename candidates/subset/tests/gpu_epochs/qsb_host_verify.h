@@ -19,6 +19,14 @@
 #ifndef QSB_HV_JOINT
 #define QSB_HV_JOINT 1
 #endif
+#ifndef QSB_HV_SKIP_UNUSED_POINT
+#define QSB_HV_SKIP_UNUSED_POINT 1
+#endif
+/* Cache the fixed recovery point's signs once per exact-gate context.
+ * Allocation/inversion failure falls back to the original per-hit copy path. */
+#ifndef QSB_HV_CACHE_RECOVERY_POINT
+#define QSB_HV_CACHE_RECOVERY_POINT 1
+#endif
 /* QSB_CPU_FENCE (host only, not an image knob): the co-grinder
  * grinds the GPU's own 128 window patterns on the epochs [F, C(137,6)) above a static, batch-aligned fence F, and the GPU
  * walks [0, F) and idles at F until the stop signal (tree.cu, CpuGrindSubset.h). It is defined here, the first header both
@@ -59,6 +67,9 @@ static bool qsb_pub_once(const uint8_t skip[9], int recid) {
 #endif
 typedef struct {
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order; BIGNUM *nri; EC_POINT *Ru2;
+#if QSB_HV_CACHE_RECOVERY_POINT
+    EC_POINT *Ru2_neg;
+#endif
     const digest_params_t *dp;
     uint8_t win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
     int window_start, s_early;
@@ -78,6 +89,14 @@ static int qsb_hv_init(qsb_hv_t *h, const digest_params_t *dp, const uint8_t win
     h->Ru2 = EC_POINT_new(h->grp);
     int ok = x && y && h->Ru2 && EC_POINT_set_affine_coordinates(h->grp, h->Ru2, x, y, h->ctx);
     BN_free(x); BN_free(y);
+#if QSB_HV_CACHE_RECOVERY_POINT
+    if (ok) {
+        h->Ru2_neg = EC_POINT_dup(h->Ru2, h->grp);
+        if (h->Ru2_neg && !EC_POINT_invert(h->grp, h->Ru2_neg, h->ctx)) {
+            EC_POINT_free(h->Ru2_neg); h->Ru2_neg = NULL;
+        }
+    }
+#endif
     return ok;
 }
 
@@ -113,10 +132,27 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
     for (int i = 0; i < 8; i++) { d1[4*i] = (uint8_t)(sc.h[i] >> 24); d1[4*i+1] = (uint8_t)(sc.h[i] >> 16); d1[4*i+2] = (uint8_t)(sc.h[i] >> 8); d1[4*i+3] = (uint8_t)sc.h[i]; }
     SHA256(d1, 32, d2);
     BIGNUM *z = BN_bin2bn(d2, 32, NULL), *u1 = BN_new(), *qx = BN_new(), *qy = BN_new();
-    EC_POINT *P = EC_POINT_new(h->grp), *Q = EC_POINT_new(h->grp), *R = EC_POINT_dup(h->Ru2, h->grp);
+#if QSB_HV_SKIP_UNUSED_POINT && QSB_HV_JOINT
+    EC_POINT *P = NULL;
+#else
+    EC_POINT *P = EC_POINT_new(h->grp);
+#endif
+#if QSB_HV_CACHE_RECOVERY_POINT
+    /* Cached inputs are immutable. Only Q/P are output points; each publisher
+     * uses its own context, and CPU gate calls retain the existing io lock. */
+    EC_POINT *Q = EC_POINT_new(h->grp);
+    EC_POINT *owned_R = h->Ru2_neg ? NULL : EC_POINT_dup(h->Ru2, h->grp);
+    const EC_POINT *R = h->Ru2_neg ? (recid ? h->Ru2_neg : h->Ru2) : owned_R;
+#else
+    EC_POINT *Q = EC_POINT_new(h->grp), *R = EC_POINT_dup(h->Ru2, h->grp);
+#endif
     int ok = 0;
-    if (z && u1 && qx && qy && P && Q && R && BN_mod_mul(u1, z, h->nri, h->order, h->ctx)) {
+    if (z && u1 && qx && qy && (P || (QSB_HV_SKIP_UNUSED_POINT && QSB_HV_JOINT)) && Q && R && BN_mod_mul(u1, z, h->nri, h->order, h->ctx)) {
+#if QSB_HV_CACHE_RECOVERY_POINT
+        if (recid && owned_R) EC_POINT_invert(h->grp, owned_R, h->ctx);
+#else
         if (recid) EC_POINT_invert(h->grp, R, h->ctx);
+#endif
 #if QSB_HV_JOINT
         /* Q = u1*G + 1*(+-R) in one interleaved wNAF pass instead of a constant-time ladder for u1*G
          * followed by an add: the same group element, about half the host field work per check. */
@@ -135,7 +171,12 @@ static int qsb_hv_check(const qsb_hv_t *h, const uint8_t skip[9], int recid) {
         }
     }
     BN_free(z); BN_free(u1); BN_free(qx); BN_free(qy);
-    EC_POINT_free(P); EC_POINT_free(Q); EC_POINT_free(R);
+    EC_POINT_free(P); EC_POINT_free(Q);
+#if QSB_HV_CACHE_RECOVERY_POINT
+    EC_POINT_free(owned_R);
+#else
+    EC_POINT_free(R);
+#endif
     return ok;
 }
 
