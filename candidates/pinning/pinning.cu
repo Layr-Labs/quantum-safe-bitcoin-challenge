@@ -11,7 +11,7 @@
 #define QSB_SUB_FINE 1
 #endif
 #if QSB_SUB_FINE
-#define QSB_SUBPIPE 65536
+#define QSB_SUBPIPE 32768
 #else
 #define QSB_SUBPIPE 131072
 #endif
