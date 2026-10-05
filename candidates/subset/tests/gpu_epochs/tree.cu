@@ -923,7 +923,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * across both tails. The front keeps its ABI (its chain loop is not re-allocated by this). Same __constant__
  * words, same field operations, in the same order: bit-identical. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1
 #endif
 #if QSB_R_CBANK_TAILS < 0 || QSB_R_CBANK_TAILS > 1
 #error "QSB_R_CBANK_TAILS must be 0 or 1"
@@ -1008,7 +1008,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_CONST_CALLEE 1
 #endif
 #ifndef QSB_SHA_WROLL_PIPE
-#define QSB_SHA_WROLL_PIPE 0
+#define QSB_SHA_WROLL_PIPE 1
 #endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
@@ -1135,8 +1135,16 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_GATE_FMA_RT_AFTER_S
 #define QSB_GATE_FMA_RT_AFTER_S 120
 #endif
+/* Independent host-only rate-policy experiment; both gate forms remain in the existing image. */
+#ifndef QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RELEASE95 1
+#endif
 #ifndef QSB_GATE_FMA_RT_RATIO_PCT
+#if QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RATIO_PCT 95
+#else
 #define QSB_GATE_FMA_RT_RATIO_PCT 90
+#endif
 #endif
 #ifndef QSB_GATE_FMA_RT_FORCE_S
 #define QSB_GATE_FMA_RT_FORCE_S 0

@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* retained PR3313 shared-core batch; resource and throughput effects need official measurement */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -590,6 +590,10 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
+#endif
+
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1  /* i34-9 PR3143: physical-core-first worker placement */
 #endif
 
 namespace qcpu {
@@ -1663,6 +1667,9 @@ static inline QCPU_AIF void qcpu_pf_rows(const pt *const *pr, int j0, int j1) {
  * prefetched by the previous pass. With nxt, the backward pass computes the next window's rows into rpn/ngn
  * and prefetches them (next group 0 first), so the table misses spread over the long backward pass instead
  * of bunching in the short forward pass; the forward pass only pulls its rows QSB_CPU_PFD groups ahead. */
+#ifndef QSB_CPU_PAIR_ROW_CONSUME
+#define QSB_CPU_PAIR_ROW_CONSUME 1 /* host-only paired forward row lifetime experiment; unmeasured */
+#endif
 template <class RowFn>
 Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, int G, const pt *const *rp, const __mmask8 *ng,
                            const pt **rpn, __mmask8 *ngn, const RowFn *nxt) {
@@ -1677,10 +1684,20 @@ Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, 
             const int hA = g + c, hB = hA + 1;
             if (hA + PF < G) { const pt *const *pr = rp + (size_t)(hA + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
             if (hB + PF < G) { const pt *const *pr = rp + (size_t)(hB + PF) * 8; for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+#if QSB_CPU_PAIR_ROW_CONSUME
+            /* Consume each loaded row pair before loading the other group.
+             * The two PRE/run multiply pairs below stay interleaved. */
+            fe8 tA, tB;
+            { fe8 tx, ty; pt8_load(tx, ty, rp + (size_t)hA * 8);
+              fe8_sub_d(D[hA], tx, X[hA]); fe8_sub_sgn_nf(tA, ty, Y[hA], ng[hA]); }
+            { fe8 tx, ty; pt8_load(tx, ty, rp + (size_t)hB * 8);
+              fe8_sub_d(D[hB], tx, X[hB]); fe8_sub_sgn_nf(tB, ty, Y[hB], ng[hB]); }
+#else
             fe8 txA, tyA, tA, txB, tyB, tB;
             pt8_load(txA, tyA, rp + (size_t)hA * 8); pt8_load(txB, tyB, rp + (size_t)hB * 8);
             fe8_sub_d(D[hA], txA, X[hA]); fe8_sub_d(D[hB], txB, X[hB]);
             fe8_sub_sgn_nf(tA, tyA, Y[hA], ng[hA]); fe8_sub_sgn_nf(tB, tyB, Y[hB], ng[hB]);
+#endif
             if (QSB_CPU_JL_INV_FIRST && g == 0) {    /* QSB_CPU_JL_INV_FIRST (jacklightChen b1c5e58e): each chain starts at one; the copies stay mul-only IFMA inputs */
                 fe8_cp(PRE[hA], tA); fe8_cp(PRE[hB], tB);
                 fe8_cp(run[c], D[hA]); fe8_cp(run[c + 1], D[hB]);
@@ -2678,6 +2695,9 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    std::vector<int> pin_cpus;      /* one logical CPU per worker */
+#endif
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3335,6 +3355,13 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -4078,6 +4105,45 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
