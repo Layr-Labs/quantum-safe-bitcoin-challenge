@@ -462,7 +462,11 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "addc.cc.u32 z5, z5, w4;\n"
   "addc.cc.u32 z6, z6, w5;\n"
   "addc.cc.u32 z7, z7, w6;\n"
+#if QSB_TRIP_IMAD_ALU
+  "addc.u32 z8, " QSB_PO_Z ", w7;\n"
+#else
   "addc.u32 z8, 0, w7;\n"
+#endif
   QSB_FA_K
   "mad.wide.u32 sft, z8, 977, kx;\n"
   "mov.b64 sfa, {z0, z1};\n"

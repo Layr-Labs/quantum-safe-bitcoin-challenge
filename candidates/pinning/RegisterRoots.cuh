@@ -4,8 +4,8 @@
 #include "WarpInverse.cuh"
 #include "CyclicField.cuh"
 #include "PrefixCyclicField.cuh"
-static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE==131072,
-              "register roots require promoted 128-lane / 1024-root shape");
+static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE<=131072 && QSB_SUBPIPE%QSB_TREE_N==0,
+              "register roots take at most 1024 roots per sub-batch (128-lane shape)");
 __device__ __forceinline__ bool qbw_root_load(
     uint64_t x[5],const uint64_t *roots,unsigned i,unsigned count) {
     x[0]=1;x[1]=x[2]=x[3]=x[4]=0;
@@ -33,11 +33,13 @@ __device__ __forceinline__ void qbw_root_store(
         pin_u2ry_words[2],pin_u2ry_words[3],0
 #endif
     };
+#if QSB_WROOT_DBL
+    _ModAdd256(b,b,b);
+#endif
     uint64_t weighted[5];qsb_field_mul(weighted,x,b);
     #pragma unroll
     for(int k=0;k<4;++k)roots[((size_t)count+i)*4u+k]=weighted[k];
 }
-
 
 __device__ __forceinline__ void qbw_scratch_put(
     uint64_t *roots,unsigned count,unsigned row,const uint64_t v[5]) {
@@ -65,6 +67,16 @@ __device__ __forceinline__ void qbw_scratch_get(
 #define QSB_RROOT_WIDE 0
 #endif
 #define QSB_RROOT_LANES (QSB_RROOT_WIDE ? 256 : 128)
+
+#ifndef QSB_RROOT_ONEQ
+#define QSB_RROOT_ONEQ 1
+#endif
+#define QSB_RROOT_ONEQ_ON (QSB_RROOT_ONEQ && !QSB_RROOT_WIDE && QSB_SUBPIPE/QSB_TREE_N<=512)
+#define QSB_RROOT_CAP (QSB_RROOT_ONEQ_ON ? 512 : 1024)
+
+#ifndef QSB_QWR_RAW_ROOT
+#define QSB_QWR_RAW_ROOT 1
+#endif
 template<int N>
 __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     static_assert(N==128 || N==256,"four- or eight-warp shape");
@@ -107,7 +119,10 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
         const uint32_t hi=__shfl_sync(0xffffffffu,u1,2*k+1);
         root[k]=(uint64_t)lo|((uint64_t)hi<<32);
     }
-    root[4]=0;qsb_field_normalize(root);
+    root[4]=0;
+#if !QSB_QWR_RAW_ROOT
+    qsb_field_normalize(root);
+#endif
     qsb_warp_research::qwr_inverse_scaled(root,lane);
     uint32_t inverse_word=0;
     #pragma unroll
@@ -217,16 +232,117 @@ __global__ void __launch_bounds__(256,1) qsb_root_register(uint64_t *roots,int c
         qbw_root_store(roots,n,j+256u,ib,nb);
     }
 }
+#elif QSB_RROOT_ONEQ_ON
+
+__global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int count) {
+    if (count<=0 || count>QSB_RROOT_CAP) return;
+    const unsigned n=(unsigned)count;
+    const unsigned lane=threadIdx.x;
+    uint64_t total[5];
+    {
+        uint64_t p01[5],p23[5],a[5],b[5];
+        qbw_root_load(a,roots,lane,n);
+        qbw_root_load(b,roots,lane+128u,n);
+        qsb_field_mul(p01,a,b);p01[4]=0;
+        qbw_root_load(a,roots,lane+256u,n);
+        qbw_root_load(b,roots,lane+384u,n);
+        qsb_field_mul(p23,a,b);p23[4]=0;
+        qbw_scratch_put(roots,n,lane+256u,p01);
+        qbw_scratch_put(roots,n,lane+384u,p23);
+        qsb_field_mul(total,p01,p23);total[4]=0;
+    }
+    qsb_block_inverse_register_n<128>(total);
+    uint64_t p01[5],p23[5],ip01[5],ip23[5];
+    qbw_scratch_get(p01,roots,n,lane+256u);
+    qbw_scratch_get(p23,roots,n,lane+384u);
+    qsb_field_mul(ip01,total,p23);ip01[4]=0;
+    qsb_field_mul(ip23,total,p01);ip23[4]=0;
+    #pragma unroll
+    for(unsigned pair=0;pair<2;++pair) {
+        unsigned j=lane+pair*256u;
+        uint64_t a[5],b[5],ia[5],ib[5];
+        bool na=qbw_root_load(a,roots,j,n);
+        bool nb=qbw_root_load(b,roots,j+128u,n);
+        uint64_t *pinv=pair?ip23:ip01;
+        qsb_field_mul(ia,pinv,b);ia[4]=0;
+        qsb_field_mul(ib,pinv,a);ib[4]=0;
+        qbw_root_store(roots,n,j,ia,na);
+        qbw_root_store(roots,n,j+128u,ib,nb);
+    }
+}
 #else
 __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int count) {
+
+    const bool wave=count<0;
+    if(wave)count=-count;
     if (count<=0 || count>1024) return; // uniform, before any block barrier
     const unsigned n=(unsigned)count;
     const unsigned lane=threadIdx.x;
+#if QSB_ROOT_WAVE == 2
+
+    if(wave && n>512u){
+        #pragma unroll 1
+        for(unsigned quartet=0;quartet<2;++quartet){
+            if(lane==0u){
+                volatile unsigned *ctr=(volatile unsigned *)(roots+(size_t)(QSB_SUBPIPE/QSB_TREE_N)*8u);
+                const unsigned need=quartet?(n-512u):512u;
+                while(ctr[quartet]<need)
+                    asm volatile("nanosleep.u32 256;" ::: "memory");
+            }
+            __syncthreads();
+            __threadfence();
+            uint64_t q[5];
+            {
+                uint64_t p01[5],p23[5],a[5],b[5];
+                unsigned i=lane+quartet*512u;
+                qbw_root_load(a,roots,i,n);
+                qbw_root_load(b,roots,i+128u,n);
+                qsb_field_mul(p01,a,b);p01[4]=0;
+                qbw_root_load(a,roots,i+256u,n);
+                qbw_root_load(b,roots,i+384u,n);
+                qsb_field_mul(p23,a,b);p23[4]=0;
+                qbw_scratch_put(roots,n,lane+(2u+2u*quartet)*128u,p01);
+                qbw_scratch_put(roots,n,lane+(3u+2u*quartet)*128u,p23);
+                qsb_field_mul(q,p01,p23);q[4]=0;
+            }
+            qsb_block_inverse_register_n<128>(q);
+            uint64_t p01[5],p23[5],ip01[5],ip23[5];
+            qbw_scratch_get(p01,roots,n,lane+(2u+2u*quartet)*128u);
+            qbw_scratch_get(p23,roots,n,lane+(3u+2u*quartet)*128u);
+            qsb_field_mul(ip01,q,p23);ip01[4]=0;
+            qsb_field_mul(ip23,q,p01);ip23[4]=0;
+            #pragma unroll
+            for(unsigned pair=0;pair<2;++pair){
+                unsigned j=lane+quartet*512u+pair*256u;
+                uint64_t a[5],b[5],ia[5],ib[5];
+                bool na=qbw_root_load(a,roots,j,n);
+                bool nb=qbw_root_load(b,roots,j+128u,n);
+                uint64_t *pinv=pair?ip23:ip01;
+                qsb_field_mul(ia,pinv,b);ia[4]=0;
+                qsb_field_mul(ib,pinv,a);ib[4]=0;
+                qbw_root_store(roots,n,j,ia,na);
+                qbw_root_store(roots,n,j+128u,ib,nb);
+            }
+        }
+        return;
+    }
+#endif
     uint64_t total[5];
     {
         uint64_t q[2][5];
         #pragma unroll 1
         for(unsigned quartet=0;quartet<2;++quartet) {
+#if QSB_ROOT_WAVE
+            if(wave && n>512u){
+                if(lane==0u){
+                    volatile unsigned *ctr=(volatile unsigned *)(roots+(size_t)(QSB_SUBPIPE/QSB_TREE_N)*8u);
+                    const unsigned need=quartet?(n-512u):512u;
+                    while(ctr[quartet]<need)
+                        asm volatile("nanosleep.u32 256;" ::: "memory");
+                }
+                __syncthreads();
+            }
+#endif
             uint64_t p01[5],p23[5],a[5],b[5];
             unsigned i=lane+quartet*512u;
             qbw_root_load(a,roots,i,n);

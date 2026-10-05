@@ -96,9 +96,21 @@
 #if QSB_QGLV5 && !(QSB_GLV11 && QSB_GLV_ZDEC && QSB_SEED_GLUE && QSB_DIGIT_LEAN)
 #error QSB_QGLV5 is written for the GLV11 table with the ZDEC decode and register seed glue
 #endif
+
+#ifndef QSB_HOT40
+#define QSB_HOT40 1
+#endif
+#if QSB_HOT40 != 0 && QSB_HOT40 != 1
+#error QSB_HOT40 must be 0 or 1
+#endif
+#define QSB_H40 (QSB_HOT40 && QSB_GLV11 && QSB_BIGTBL && QSB_FOUR_HOT)
+#define QSB_GT_W1 (QSB_H40?18u:19u)
+#define QSB_GT_W4 (QSB_H40?28u:27u)
+#define QSB_GT_W6 27u
+#define QSB_GT_W7 (QSB_H40?27u:28u)
 #if QSB_BIGTBL && QSB_FOUR_HOT
 #if QSB_GLV11
-#define QSB_GT_TOTAL 354501773u
+#define QSB_GT_TOTAL (QSB_H40?354370701u:354501773u)
 #define QSB_GT_SEGMENTS 8
 #else
 #define QSB_GT_TOTAL 153175181u
@@ -129,9 +141,10 @@
  * These portable helpers are also compiled verbatim by check_bigtable.py. */
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 #if QSB_GLV11
-    if(c>=6) return c==6?67108864u:134217728u;
+    if(c>=6) return c==6?67108864u:(QSB_H40?67108864u:134217728u);
 #endif
 #if QSB_FOUR_HOT
+    if(QSB_H40) return c==0?262144u:c<4?131072u:c==4?134217728u:85279885u;
     return c<2?262144u:c<4?131072u:c==4?67108864u:85279885u;
 #else
     return c<3 ? 262144u : (c<5 ? 8388608u : 5329993u);
@@ -139,9 +152,11 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_entries(int c) {
 }
 __host__ __device__ __forceinline__ unsigned q9_bigtbl_offset(int c) {
 #if QSB_GLV11
-    if(c>=6) return c==6?153175181u:220284045u;
+    if(c>=6) return QSB_H40?(c==6?220152973u:287261837u):(c==6?153175181u:220284045u);
 #endif
 #if QSB_FOUR_HOT
+    if(QSB_H40) return c==0?0u:c==1?262144u:c==2?393216u:
+                       c==3?524288u:c==4?655360u:134873088u;
     return c==0?0u:c==1?262144u:c==2?524288u:
            c==3?655360u:c==4?786432u:67895296u;
 #else
@@ -154,6 +169,7 @@ __host__ __device__ __forceinline__ unsigned q9_bigtbl_shift(int c) {
     if(c>=6) return c==6?18u:45u;
 #endif
 #if QSB_FOUR_HOT
+    if(QSB_H40) return c==0?0u:c==1?18u:c==2?36u:c==3?54u:c==4?72u:100u;
     return c==0?0u:c==1?18u:c==2?37u:c==3?55u:c==4?73u:100u;
 #else
     return c==0?0u:c==1?18u:c==2?37u:c==3?56u:c==4?80u:104u;
@@ -177,7 +193,7 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
         idx=(ad-1u)>>1;
     } else {
 #if QSB_FOUR_HOT
-        const unsigned bits=c==1?19u:c<4?18u:27u;
+        const unsigned bits=c==1?QSB_GT_W1:c<4?18u:QSB_GT_W4;
 #else
         const unsigned bits=c<3?19u:24u;
 #endif
@@ -188,16 +204,13 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code(
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
 #if QSB_GLV11
-/* P's five terms t=0..4 read segments 0,6,7,4,5. Shifts 0,18,45,73,100 keep the
- * signed chain 18->45->73->100 contiguous, so the digit biases telescope to the
- * same segment-0 bias K as GLV12 and the five digits sum exactly to the
- * magnitude. Segments 6 and 7 are plain signed fields of 27 and 28 bits. */
+
 __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
     const uint64_t mag[2],unsigned sign,int t) {
     if(t==0) return q9_bigtbl_code(mag,sign,0);
     if(t>=3) return q9_bigtbl_code(mag,sign,t+1);
     const int c=t+5;
-    const unsigned shift=q9_bigtbl_shift(c),bits=t==1?27u:28u;
+    const unsigned shift=q9_bigtbl_shift(c),bits=t==1?QSB_GT_W6:QSB_GT_W7;
     const uint64_t wide=(mag[0]>>shift)|(mag[1]<<(64u-shift));
     const uint32_t f=(uint32_t)wide&((1u<<bits)-1u);
     const uint32_t neg_digit=1u-(f>>(bits-1u));
@@ -256,7 +269,7 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code_lean(
         return q9_bigtbl_offset(c)+(h^s)+((h^s31)&0x80000000u);
     }
 #if QSB_FOUR_HOT
-    const unsigned bits=c==1?19u:c<4?18u:27u;
+    const unsigned bits=c==1?QSB_GT_W1:c<4?18u:QSB_GT_W4;
 #else
     const unsigned bits=c<3?19u:24u;
 #endif
@@ -312,7 +325,7 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code_z(
         return q9_bigtbl_offset(c)+(h^s)+((h^m32)&0x80000000u);
 #endif
     }
-    const unsigned bits=c==1?19u:c<4?18u:27u;
+    const unsigned bits=c==1?QSB_GT_W1:c<4?18u:QSB_GT_W4;
     const unsigned r=q9_bigtbl_shift(c)+bits-32u,q=r>>5,rs=r&31u;
     const uint32_t off=q9_bigtbl_offset(c)-(1u<<(bits-1u));
 #ifdef __CUDA_ARCH__
@@ -336,12 +349,7 @@ __host__ __device__ __forceinline__ uint32_t q9_bigtbl_code_z(
 #endif
 #endif
 #if QSB_GLV11 && QSB_GLV_ZDEC && QSB_DIGIT_LEAN && QSB_FOUR_HOT
-/* q11_bigtbl_code_z(w,top,m32,t) == q11_bigtbl_code(mag,sign,t) with mag = w ^ -s
- * and sign = s = m32 & 1. Terms 0, 3, 4 are GLV12 chunks 0, 4, 5, so they are
- * q9_bigtbl_code_z. Terms 1 and 2 are segments 6 and 7: the radix step of
- * q9_bigtbl_code_z at 27 bits / shift 18 and 28 bits / shift 45. That step's
- * index and code sign are functions of the field bits of w alone, for any
- * signed radix width, so they do not need mag. */
+
 __host__ __device__ __forceinline__ uint32_t q11_radix_code_z(
     const uint32_t ws[4], unsigned shift, unsigned bits, uint32_t offset) {
     const unsigned r=shift+bits-32u,q=r>>5,rs=r&31u;
@@ -370,7 +378,7 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code_z(
     if(t>=3) return q9_bigtbl_code_z(w,top,m32,t+1);
     const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
     const int c=t+5;
-    const unsigned bits=t==1?27u:28u;
+    const unsigned bits=t==1?QSB_GT_W6:QSB_GT_W7;
     (void)top;
     return q11_radix_code_z(ws,q9_bigtbl_shift(c),bits,q9_bigtbl_offset(c));
 }
@@ -392,12 +400,11 @@ __host__ __device__ __forceinline__ void q9_bigtbl_seed_z(const uint64_t w[2],ui
         *msk=m32;
         return;
     }
-    /* chunk 1: Q's segment 1 (19 bits at shift 18), or under QSB_QGLV5 segment 6 (27 bits at
-     * the same shift 18). The window algebra above holds for any signed radix field. */
+
 #if QSB_QGLV5
-    const unsigned bits=27u,seg=6;
+    const unsigned bits=QSB_GT_W6,seg=6;
 #else
-    const unsigned bits=19u,seg=1;
+    const unsigned bits=QSB_GT_W1,seg=1;
 #endif
     const unsigned r=q9_bigtbl_shift(seg)+bits-32u,q=r>>5,rs=r&31u;
     const uint32_t off=q9_bigtbl_offset(seg)-(1u<<(bits-1u));
