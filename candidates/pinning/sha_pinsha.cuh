@@ -665,24 +665,20 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
     {
         const uint32_t one = pin_one_mul;
         QSB_RND16L_F(16);
-        QSB_INTERLEAVED16L_F(32);
-        QSB_INTERLEAVED15L_F(48);
-        w[15] = qsb_fadd(w[15], one, s1(w[13]));
-        w[15] = qsb_fadd(w[15], one, w[8]);
-        w[15] = qsb_fadd(w[15], one, s0(w[0]));
-#if QSB_FIN_R63_SUM
-        const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
-        const uint32_t r1 = r0 + S1(f) + Ch(f,g,h);
-        return r1 + S0(b) + Maj(b,c,d);
-#else
-        uint32_t r = qsb_fadd(a, one, w[15]);
-        r = qsb_fadd(r, one, qsb_klit(63) + QSB_IV0);
-        r = QSB_FADD_S1(r, f);
-        r = qsb_fadd(r, one, Ch(f,g,h));
-        r = QSB_FADD_S0(r, b);
-        r = qsb_fadd(r, one, Maj(b,c,d));
-        return r;
-#endif
+#pragma push_macro("QSB_STEPL_F")
+#undef QSB_STEPL_F
+#define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
+    w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
+    w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
+    w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
+    QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(K[(base)+(j)], w[j])); \
+} while (0)
+        #pragma unroll 1
+        for(int base=32;base<64;base+=16){
+            QSB_INTERLEAVED16L_F(base);
+        }
+#pragma pop_macro("QSB_STEPL_F")
+        return a + QSB_IV0;
     }
 #else
     QSB_RND16L(16);
