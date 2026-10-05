@@ -52,6 +52,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <cuda_runtime.h>
+#include "SlotInputCache.h"
 #include "RecoveryConstant.h"
 
 #ifndef QSB_HOST_GATE
@@ -6989,6 +6990,7 @@ int main(int argc, char **argv) {
     cudaEvent_t  slot_done[QSB_SLOTS];
     uint32_t *d_hit_cnt_s[QSB_SLOTS], *d_hit_idx_s[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
     uint32_t *h_mid=NULL;
+    qsb::SlotInputCache slot_input[QSB_SLOTS];
 #if QSB_ASICBOOST
     /* per slot: the host batch's QSB_AB_K sequence precomputes (the kernel's d_midstate) */
 #if QSB_AB_B0CONST
@@ -7031,6 +7033,8 @@ int main(int argc, char **argv) {
 #endif
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], mid_words*sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
+            if (se==cudaSuccess) se = slot_input[s].init(
+                d_mid_slot[s], h_mid + (size_t)s*mid_words, mid_words*sizeof(uint32_t));
         }
         if (se != cudaSuccess) {
             fprintf(stderr, "Slot pipeline setup failed: %s\n", cudaGetErrorString(se));
@@ -7524,18 +7528,12 @@ int main(int argc, char **argv) {
 
 #if QSB_ASICBOOST
 #if QSB_AB_B0CONST
-            memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = slot_input[s].enqueue(grp_slot, sizeof(grp_slot), st);
 #else
-            memcpy(h_mid + (size_t)s*mid_words, grp_tp, sizeof(grp_tp));
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_tp), cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = slot_input[s].enqueue(grp_tp, sizeof(grp_tp), st);
 #endif
 #elif !QSB_TAIL_PRE || !QSB_SKIP_UNUSED_MIDSTATE
-            memcpy(h_mid + (size_t)s*mid_words, cur_mid, 32);
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, 32, cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = slot_input[s].enqueue(cur_mid, 32, st);
 #else
             cudaError_t slot_error = cudaSuccess;
 #endif
