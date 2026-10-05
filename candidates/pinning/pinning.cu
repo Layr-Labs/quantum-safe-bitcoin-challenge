@@ -2631,6 +2631,26 @@ static_assert(sizeof(qsb_ab_slot_t) == 96, "QSB_AB_SLOT_V4: six 16-byte quads pe
 struct qsb_ab_slot_t { qsb_tail_pre tp; qsb_tail_tab_t r01; };
 #endif
 
+/* Codex GPT-6.1 Sol: immutable per-sequence-group AB inputs. Only the
+ * nongraph subpipe uses them; all original private-slot fallback inputs stay. */
+#ifndef QSB_AB_INPUT_TABLE
+#define QSB_AB_INPUT_TABLE (QSB_SLOTPIPE && QSB_ASICBOOST && QSB_AB_B0CONST && QSB_SUBPIPE)
+#endif
+#if QSB_AB_INPUT_TABLE && !(QSB_SLOTPIPE && QSB_ASICBOOST && QSB_AB_B0CONST && QSB_SUBPIPE)
+#error "QSB_AB_INPUT_TABLE requires the slotted AB_B0CONST subpipe"
+#endif
+#if QSB_AB_INPUT_TABLE
+static void qsb_make_ab_input_table(qsb_ab_slot_t *rows,
+                                    const qsb_tail_pre *tp, uint32_t tail0) {
+    memset(rows, 0, 256u * QSB_AB_K * sizeof(qsb_ab_slot_t));
+    for (uint32_t bb = 0; bb < 256u; bb++)
+        for (int k = 0; k < QSB_AB_K; k++) {
+            rows[(size_t)bb * QSB_AB_K + k].tp = tp[k];
+            rows[(size_t)bb * QSB_AB_K + k].r01 = qsb_tail_r01(tp[k], tail0 | bb);
+        }
+}
+#endif
+
 /* Sparse-schedule SHA-256 for the SHA256d second compression (delta D,
  * preludebrace bc77eb42): 32-byte message = first digest as eight words,
  * fixed pad W[8]=0x80000000, W[9..14]=0, W[15]=256, from the SHA-256 IV.
@@ -7295,6 +7315,57 @@ int main(int argc, char **argv) {
     int slot_busy[QSB_SLOTS];
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
+#if QSB_AB_INPUT_TABLE
+    /* Setup follows the original adaptive batch decision and startup barrier.
+     * No table pointer is selected until both versions are fully allocated. */
+    qsb_ab_slot_t *h_ab_table[2] = {nullptr, nullptr};
+    uint32_t *d_ab_table[2] = {nullptr, nullptr};
+    cudaEvent_t ab_table_done[2] = {nullptr, nullptr};
+    const size_t ab_table_bytes = 256u * QSB_AB_K * sizeof(qsb_ab_slot_t);
+    bool ab_table_ready = false, ab_table_uploaded[2] = {false, false};
+    unsigned long long ab_table_generation = 0;
+    int ab_table_refs[2] = {0, 0}, slot_ab_version[QSB_SLOTS];
+    for (int s = 0; s < QSB_SLOTS; s++) slot_ab_version[s] = -1;
+    if (g_qsb_sub_ok && !qsb_sg::enabled) {
+        cudaError_t ae = cudaSuccess;
+        for (int v = 0; v < 2 && ae == cudaSuccess; v++) {
+            ae = cudaHostAlloc((void **)&h_ab_table[v], ab_table_bytes, cudaHostAllocDefault);
+            if (ae == cudaSuccess) ae = cudaMalloc(&d_ab_table[v], ab_table_bytes);
+            if (ae == cudaSuccess) ae = cudaEventCreateWithFlags(&ab_table_done[v], cudaEventDisableTiming);
+        }
+        if (ae == cudaSuccess) ab_table_ready = true;
+        else {
+            /* Only clean resource exhaustion falls back. Preserve a driver,
+             * stale asynchronous or cleanup error as a checked terminal error. */
+            const cudaError_t pending = cudaGetLastError();
+            cudaError_t cleanup = cudaSuccess;
+            for (int v = 0; v < 2; v++) {
+                cudaError_t ce = cudaSuccess;
+                if (ab_table_done[v]) ce = cudaEventDestroy(ab_table_done[v]);
+                if (cleanup == cudaSuccess && ce != cudaSuccess) cleanup = ce;
+                if (d_ab_table[v]) ce = cudaFree(d_ab_table[v]); else ce = cudaSuccess;
+                if (cleanup == cudaSuccess && ce != cudaSuccess) cleanup = ce;
+                if (h_ab_table[v]) ce = cudaFreeHost(h_ab_table[v]); else ce = cudaSuccess;
+                if (cleanup == cudaSuccess && ce != cudaSuccess) cleanup = ce;
+                ab_table_done[v] = nullptr; d_ab_table[v] = nullptr; h_ab_table[v] = nullptr;
+            }
+            if (ae != cudaErrorMemoryAllocation || cleanup != cudaSuccess ||
+                (pending != cudaSuccess && pending != ae)) {
+                fprintf(stderr, "AB input table setup failed: %s (pending %s, cleanup %s)\n",
+                        cudaGetErrorString(ae), cudaGetErrorString(pending), cudaGetErrorString(cleanup));
+                return 1;
+            }
+            fprintf(stderr, "AB input table unavailable: using private slot inputs\n");
+        }
+    }
+    auto retire_ab_slot = [&](int s) {
+        const int v = slot_ab_version[s];
+        if (v >= 0) {
+            if (ab_table_refs[v] <= 0) { fprintf(stderr, "AB input table reference underflow\n"); abort(); }
+            --ab_table_refs[v]; slot_ab_version[s] = -1;
+        }
+    };
+#endif
     uint64_t batch_no = 0;
 #if QSB_REFILL_BEFORE_GATE
     auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
@@ -7307,6 +7378,9 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_AB_INPUT_TABLE
+        retire_ab_slot(s);
+#endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
 #if QSB_PK_ON
         qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
@@ -7410,6 +7484,9 @@ int main(int argc, char **argv) {
 #endif
 #endif
         slot_busy[s] = 0;
+#if QSB_AB_INPUT_TABLE
+        retire_ab_slot(s);
+#endif
         return 0;
     };
     auto drain_slot = [&](int s) -> int {
@@ -7491,7 +7568,38 @@ int main(int argc, char **argv) {
 #endif
         qsb_ab_slot_t grp_slot[QSB_SEQ_GROUP];
         memset(grp_slot, 0, sizeof(grp_slot));
+#if QSB_AB_INPUT_TABLE
+        const bool ab_table_group = ab_table_ready && g_qsb_sub_ok && !qsb_sg::enabled;
+        int ab_version = -1;
+        bool ab_slot_seen[QSB_SLOTS] = {false};
+        if (ab_table_group) {
+            ab_version = (int)(ab_table_generation & 1ull);
+            /* Retire all readers through the original checked slot drain before
+             * either the pinned mirror or device version is replaced. With the
+             * selected geometry the intervening group has already retired them. */
+            for (int s = 0; s < QSB_SLOTS; s++)
+                if (slot_ab_version[s] == ab_version && drain_slot(s)) return 1;
+            if (ab_table_refs[ab_version] != 0) {
+                fprintf(stderr, "AB input table has unretired readers\n"); return 1;
+            }
+            cudaError_t ae = cudaSuccess;
+            /* Also cover a group with zero launches: no reader then proves that
+             * its pinned upload completed, so synchronize its upload event. */
+            if (ab_table_uploaded[ab_version]) ae = cudaEventSynchronize(ab_table_done[ab_version]);
+            if (ae != cudaSuccess) { fprintf(stderr, "AB input table retirement failed: %s\n", cudaGetErrorString(ae)); return 1; }
+            qsb_make_ab_input_table(h_ab_table[ab_version], grp_tp, tail_w0);
+            ae = cudaMemcpyAsync(d_ab_table[ab_version], h_ab_table[ab_version],
+                                 ab_table_bytes, cudaMemcpyHostToDevice, slot_stream[0]);
+            if (ae == cudaSuccess) ae = cudaEventRecord(ab_table_done[ab_version], slot_stream[0]);
+            if (ae != cudaSuccess) { fprintf(stderr, "AB input table upload failed: %s\n", cudaGetErrorString(ae)); return 1; }
+            ab_table_uploaded[ab_version] = true;
+            ++ab_table_generation;
+        }
+#endif
         for (uint32_t ab_b0 = 0; ab_b0 < 256u; ab_b0++) {
+#if QSB_AB_INPUT_TABLE
+        if (!ab_table_group)
+#endif
         for (int k = 0; k < QSB_SEQ_GROUP; k++) {
             grp_slot[k].tp = grp_tp[k];
             grp_slot[k].r01 = qsb_tail_r01(grp_tp[k], tail_w0 | ab_b0);
@@ -7522,11 +7630,24 @@ int main(int argc, char **argv) {
             const int pk_have = qsb_pk::collect(batch_no - 1, pk_seq, pk_lt, pk_count, pk_hits);
 #endif
 
+            const uint32_t *slot_mid_input = d_mid_slot[s];
 #if QSB_ASICBOOST
 #if QSB_AB_B0CONST
-            memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = cudaSuccess;
+#if QSB_AB_INPUT_TABLE
+            if (ab_table_group) {
+                slot_mid_input = d_ab_table[ab_version] + (size_t)ab_b0 * mid_words;
+                if (!ab_slot_seen[s]) {
+                    slot_error = cudaStreamWaitEvent(st, ab_table_done[ab_version], 0);
+                    if (slot_error == cudaSuccess) ab_slot_seen[s] = true;
+                }
+            } else
+#endif
+            {
+                memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
+                slot_error = cudaMemcpyAsync(
+                    d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+            }
 #else
             memcpy(h_mid + (size_t)s*mid_words, grp_tp, sizeof(grp_tp));
             cudaError_t slot_error = cudaMemcpyAsync(
@@ -7549,7 +7670,7 @@ int main(int argc, char **argv) {
 #if QSB_SUBPIPE
             if (g_qsb_sub_ok)
             qsb_subpipe_launch(
-                d_mid_slot[s], d_suffix, gpu_suffix_len,
+                slot_mid_input, d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
                 pp.total_preimage_len,
                 seq, batch_lt,
@@ -7596,6 +7717,12 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Slot completion enqueue failed: %s\n", cudaGetErrorString(slot_error));
                 return 1;
             }
+#if QSB_AB_INPUT_TABLE
+            if (ab_table_group) {
+                if (slot_ab_version[s] != -1) { fprintf(stderr, "AB input table slot still owned\n"); abort(); }
+                slot_ab_version[s] = ab_version; ++ab_table_refs[ab_version];
+            }
+#endif
             slot_busy[s] = 1;
 #if QSB_REFILL_BEFORE_GATE
             /* All replacement kernels and readback are queued before the CPU
