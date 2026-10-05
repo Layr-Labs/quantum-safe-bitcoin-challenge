@@ -251,6 +251,13 @@
 #ifndef QSB_CPU_PFD
 #define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
 #endif
+/* . QSB_CPU_PFD_ODD: when non-zero, the odd-numbered workers use this forward-pass row-prefetch distance (ec8_window) instead of
+ * QSB_CPU_PFD; the even ones and every other caller keep QSB_CPU_PFD. Prefetches only: same rows, same arithmetic, same hits. */
+#ifndef QSB_CPU_PFD_ODD
+#define QSB_CPU_PFD_ODD 0
+#endif
+static_assert(QSB_CPU_PFD_ODD >= 0 && QSB_CPU_PFD_ODD <= 64, "QSB_CPU_PFD_ODD: 0..64");
+static thread_local int qcpu_pfd = QSB_CPU_PFD;   /* ec8_window's forward-pass prefetch distance for this thread */
 #ifndef QSB_CPU_HPF
 #define QSB_CPU_HPF 2              /* 8-lane path: rows of windows 0 (and 1 with 2) prefetched from the hashing phase as each z is computed */
 #endif
@@ -294,6 +301,22 @@
  * (a multiple of 32, 32..8192). 0: the fixed QSB_CPU_BATCH as before. Every batch is a multiple of 32: the 8-lane window steps and
  * final steps run over G = B / 8 groups four at a time (G % 4 == 0), recode16 takes 16 candidates at a time, the 16-lane key hashes
  * and hpf_rows8 8, the 4-lane hashing groups 4. */
+/* . QSB_CPU_BATCH_ODD: when non-zero, the odd-numbered workers use this batch instead of the one chosen below; the even ones
+ * keep it. Each worker owns its batch buffers and walks its own contiguous range, so only the batch size per worker changes,
+ * and the two sizes can be told apart in one run from each worker's last hit. 0: every worker as before. */
+#ifndef QSB_CPU_BATCH_ODD
+#define QSB_CPU_BATCH_ODD 0
+#endif
+static_assert(QSB_CPU_BATCH_ODD == 0 || (QSB_CPU_BATCH_ODD % 32 == 0 && QSB_CPU_BATCH_ODD >= 32 && QSB_CPU_BATCH_ODD <= 8192),
+              "QSB_CPU_BATCH_ODD: 0 or a multiple of 32, 32..8192");
+/* . QSB_CPU_CORE_SPLIT: with QSB_CPU_BATCH_ODD, split the workers by physical core instead of by worker number. Worker t is pinned
+ * to SMT sibling t % 2 of core t / 2 (cores in the order core_groups lists them from the inherited CPU set), and the workers of
+ * every odd-numbered core use QSB_CPU_BATCH_ODD, so both threads of one core always run the same batch. When the CPU set is not
+ * made of enough two-thread cores, nothing is pinned and the split stays by worker number. Affinity and batch only: the same
+ * ranges, the same candidates and the same hits. */
+#ifndef QSB_CPU_CORE_SPLIT
+#define QSB_CPU_CORE_SPLIT 0
+#endif
 #ifndef QSB_CPU_BATCH_AUTO
 #define QSB_CPU_BATCH_AUTO 1
 #endif
@@ -1666,7 +1689,7 @@ static inline QCPU_AIF void qcpu_pf_rows(const pt *const *pr, int j0, int j1) {
 template <class RowFn>
 Q8TX static void ec8_window(fe8 *X, fe8 *Y, fe8 *D, fe8 *PRE, fe8 *TX, fe8 *TY, int G, const pt *const *rp, const __mmask8 *ng,
                            const pt **rpn, __mmask8 *ngn, const RowFn *nxt) {
-    const int PF = QSB_CPU_PFD;
+    const int PF = qcpu_pfd;   /* QSB_CPU_PFD, or QSB_CPU_PFD_ODD on odd workers */
     const int NC = QSB_CPU_NCH;                      /* R2-D: interleaved chains of the batch inversion (4: the code before) */
     fe8 run[4]; for (int c = 0; c < NC; c++) fe8_set1(run[c]);
 #if QSB_CPU_ILP2 & 2
@@ -3333,14 +3356,33 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 }
 #endif
 
+#if QSB_CPU_CORE_SPLIT && QSB_CPU_BATCH_AUTO && defined(CPU_COUNT)
+static void core_groups(const cpu_set_t &m, std::vector<std::vector<int> > &cores, bool *all_read);   /* below (QSB_CPU_BATCH_AUTO) */
+#endif
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
-    const int B = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;   /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
+    const int B0 = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;  /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
                                                                      * run-time value as in 86c643ae; 0: the compile-time constant as before */
+    int arm = tid & 1;                                              /* QSB_CPU_BATCH_ODD: odd workers' batch */
+#if QSB_CPU_CORE_SPLIT && QSB_CPU_BATCH_AUTO && defined(CPU_COUNT)
+    if (QSB_CPU_BATCH_ODD) {   /* QSB_CPU_CORE_SPLIT: pin to sibling tid % 2 of core tid / 2; the core's parity picks the batch */
+        cpu_set_t m; CPU_ZERO(&m);
+        if (sched_getaffinity(0, sizeof m, &m) == 0) {
+            std::vector<std::vector<int> > cores; bool all = true; core_groups(m, cores, &all);
+            const int k = tid / 2;
+            if (all && k < (int)cores.size() && cores[k].size() == 2) {
+                cpu_set_t one; CPU_ZERO(&one); CPU_SET(cores[k][tid % 2], &one);
+                if (sched_setaffinity(0, sizeof one, &one) == 0) arm = k & 1;
+            }
+        }
+    }
+#endif
+    const int B = (QSB_CPU_BATCH_ODD && arm) ? QSB_CPU_BATCH_ODD : B0;
+    if (QSB_CPU_PFD_ODD && arm) qcpu_pfd = QSB_CPU_PFD_ODD;   /* QSB_CPU_PFD_ODD: the odd arm's prefetch distance */
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
