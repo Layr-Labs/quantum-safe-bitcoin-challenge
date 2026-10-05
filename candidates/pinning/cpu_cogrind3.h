@@ -374,7 +374,9 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
     shared_t *S = g_cg;
     v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)(w->lt0 + (uint32_t)i0)), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
     v8u W[16];
-    for (int k = 0; k < 16; k++) W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]);
+    /* Structured VM=3 reads only words 0/1; generic midstate fallback needs all 16. */
+    const int nw = w->tfast ? 2 : 16;
+    for (int k = 0; k < nw; k++) W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]);
     for (int b = 0; b < 4; b++) {
         v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
         W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
@@ -403,9 +405,10 @@ static void z_avx2_9(worker_t *w, int i0) {
     shared_t *S = g_cg;
     const uint32_t lt0 = w->lt0 + (uint32_t)i0;
     v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)lt0), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
-    v8u W[16];
-    uint32_t SW[16];
-    for (int k = 0; k < 16; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
+    /* fill_batch admits this path only with tfast: both plans consume VM=3. */
+    v8u W[2];
+    uint32_t SW[2];
+    for (int k = 0; k < 2; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
     const uint32_t l9 = lt0 + 8u;
     for (int b = 0; b < 4; b++) {
         v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
