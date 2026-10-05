@@ -3678,6 +3678,10 @@ __global__ void __launch_bounds__(256,1) qsb_invert_super_roots(
 }
 
 __device__ __constant__ uint64_t pin_u2ry_words[4];
+#ifndef QSB_ANCHOR_FOLD
+#define QSB_ANCHOR_FOLD 1
+#endif
+__device__ __constant__ uint64_t pin_anchor_bias[4];
 __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
     uint64_t *roots, int count, const uint64_t *super_roots,
     const uint64_t *root_checkpoint
@@ -4414,11 +4418,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     bool usable;
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch(),ya,rq);
     /*PO_BEGIN*/
+#if !(QSB_ANCHOR_FOLD && QSB_STATE_LNUM && QSB_YOFF)
     qsb_yoff_to_y(ya);
+#endif
 #if QSB_STATE_LNUM
     {
         const uint64_t w[4]={
-#if QSB_ISO_XR
+#if QSB_ANCHOR_FOLD && QSB_YOFF
+            pin_anchor_bias[0],pin_anchor_bias[1],pin_anchor_bias[2],pin_anchor_bias[3]
+#elif QSB_ISO_XR
             pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],pin_iso_u2ry_words[2],pin_iso_u2ry_words[3]
 #else
             pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3]
@@ -6755,6 +6763,21 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_u2ry, pp.u2r_y, 32, cudaMemcpyHostToDevice);
     QSB_TO_SYMBOL(pin_u2rx_words, pp.u2r_x, sizeof(pp.u2r_x));
     QSB_TO_SYMBOL(pin_u2ry_words, pp.u2r_y, sizeof(pp.u2r_y));
+#if QSB_ANCHOR_FOLD && QSB_STATE_LNUM && QSB_YOFF
+    {
+        uint64_t bias[4];
+#if QSB_ISO_XR
+        const uint8_t *by=(const uint8_t *)(iso.u2r_iso+4);
+#else
+        const uint8_t *by=pp.u2r_y;
+#endif
+        if(!qsb_make_anchor_bias(bias,by) ||
+           QSB_TO_SYMBOL(pin_anchor_bias,bias,sizeof(bias))!=cudaSuccess){
+            fprintf(stderr,"Failed to prepare the folded anchor ordinate\n");
+            return 1;
+        }
+    }
+#endif
 #if QSB_ISO_XR
     if(QSB_TO_SYMBOL(pin_iso_invu_words,iso.invu,sizeof(iso.invu))!=cudaSuccess ||
        QSB_TO_SYMBOL(pin_iso_u2ry_words,iso.u2r_iso+4,4*sizeof(uint64_t))!=cudaSuccess ||

@@ -50,3 +50,25 @@ static int qsb_make_chord_constant(uint64_t out[4],const uint8_t ax[32],
     BN_CTX_end(ctx); BN_CTX_free(ctx);
     return ok;
 }
+
+// Fold the table ordinate offset c=(K-1)/2 into the immutable recovery
+// ordinate b. A signed table load returns ya=y+c; ya+(b-c)=y+b mod p.
+// This is computed once per problem, not per candidate. All limbs/carries
+// are retained by OpenSSL; output is canonical.
+static int qsb_make_anchor_bias(uint64_t out[4],const uint8_t by[32]) {
+    BN_CTX *ctx=BN_CTX_new();
+    if(!ctx)return 0;
+    BN_CTX_start(ctx);
+    BIGNUM *p=BN_CTX_get(ctx),*b=BN_CTX_get(ctx),*c=BN_CTX_get(ctx);
+    uint8_t encoded[32];
+    int ok=c && BN_set_word(p,1) && BN_lshift(p,p,256) &&
+        BN_sub_word(p,0x1000003D1UL) && BN_lebin2bn(by,32,b) &&
+        BN_set_word(c,0x800001E8UL) && BN_mod_sub(b,b,c,p,ctx) &&
+        BN_bn2lebinpad(b,encoded,32)==32;
+    if(ok)for(int i=0;i<4;i++){
+        out[i]=0;
+        for(int j=0;j<8;j++)out[i]|=(uint64_t)encoded[8*i+j]<<(8*j);
+    }
+    BN_CTX_end(ctx);BN_CTX_free(ctx);
+    return ok;
+}
