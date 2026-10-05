@@ -58,59 +58,80 @@ static constexpr uint32_t S8_W_PUBKEY[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 static constexpr s8_plan S8_PLAN_PUBKEY = s8_make_plan(S8_W_PUBKEY, 0x1FFu, H0_IV);     /* SHA256 of a 33-byte message */
 
 /* varying words Wv[j] (j with bit j of VM set; word 0 must vary); out: 8 state words, or only out[0]
- * (= H0) with H0ONLY. Compact form: the message schedule and the per-round K + W go to a stack array
- * first, then the 63 remaining rounds run as a rolled 8-round loop (small code: the co-grinder runs
- * two or three of these back to back, and the unrolled forms overflow the decoded-op cache). */
+ * (= H0) with H0ONLY. Raw words use a 16-vector ring: fold constant terms in W16..31
+ * only after the old slots have been consumed, then expand each next group. K+W is formed on consumption,
+ * never stored over a live raw word. The original round0 fold and all64 rounds remain. */
 template <uint32_t VM>
 static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_plan &P) {
     static_assert(VM & 1, "round 0 folding needs a varying word 0");
     constexpr uint64_t V = s8_varmask(VM);
     static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
+    v8u W[16];
     for (int j = 0; j < 16; j++) if ((V >> j) & 1) W[j] = Wv[j];
     /* W16..W31 with the constant terms folded (compile-time structure) */
 #define S8P_W(t) do {                                                                                     \
         v8u acc_; int has_ = 0;                                                                           \
-        if ((V >> ((t) - 2)) & 1) { acc_ = s8_s1(W[(t) - 2]); has_ = 1; }                               \
-        if ((V >> ((t) - 7)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 7]) : W[(t) - 7]; has_ = 1; }    \
-        if ((V >> ((t) - 15)) & 1) { const v8u s_ = s8_s0(W[(t) - 15]); acc_ = has_ ? s8_add(acc_, s_) : s_; has_ = 1; } \
-        if ((V >> ((t) - 16)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 16]) : W[(t) - 16]; has_ = 1; } \
+        if ((V >> ((t) - 2)) & 1) { acc_ = s8_s1(W[((t) - 2) & 15]); has_ = 1; }                               \
+        if ((V >> ((t) - 7)) & 1) { acc_ = has_ ? s8_add(acc_, W[((t) - 7) & 15]) : W[((t) - 7) & 15]; has_ = 1; }    \
+        if ((V >> ((t) - 15)) & 1) { const v8u s_ = s8_s0(W[((t) - 15) & 15]); acc_ = has_ ? s8_add(acc_, s_) : s_; has_ = 1; } \
+        if ((V >> ((t) - 16)) & 1) { acc_ = has_ ? s8_add(acc_, W[((t) - 16) & 15]) : W[((t) - 16) & 15]; has_ = 1; } \
         if (!((((V >> ((t) - 2)) & (V >> ((t) - 7)) & (V >> ((t) - 15)) & (V >> ((t) - 16))) & 1))) acc_ = s8_add(acc_, s8_set1(P.kc[t])); \
-        W[t] = acc_; } while (0)
-    S8P_W(16); S8P_W(17); S8P_W(18); S8P_W(19); S8P_W(20); S8P_W(21); S8P_W(22); S8P_W(23);
-    S8P_W(24); S8P_W(25); S8P_W(26); S8P_W(27); S8P_W(28); S8P_W(29); S8P_W(30); S8P_W(31);
-#undef S8P_W
-    for (int t = 32; t < 64; t++) W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
-    /* K + W per round; message-independent words come precomputed */
-#define S8P_KW(t) KW[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(H0_K[t]), W[t]) : s8_set1(P.kw[t]);
-    S8P_KW(1) S8P_KW(2) S8P_KW(3) S8P_KW(4) S8P_KW(5) S8P_KW(6) S8P_KW(7) S8P_KW(8)
-    S8P_KW(9) S8P_KW(10) S8P_KW(11) S8P_KW(12) S8P_KW(13) S8P_KW(14) S8P_KW(15)
-#undef S8P_KW
-    for (int t = 16; t < 64; t++) KW[t] = s8_add(s8_set1(H0_K[t]), W[t]);
+        W[(t) & 15] = acc_; } while (0)
+    /* Raw schedule words occupy a 16-vector ring. Expand the next eight
+     * words only after the preceding rounds have consumed their slots.
+     * K+W is formed at consumption; raw W remains available to the recurrence. */
+#define S8R_KW(t) (((t) < 16 && !((V >> (t)) & 1)) ? s8_set1(P.kw[t]) : s8_add(s8_set1(H0_K[t]), W[(t) & 15]))
+#define S8R_EXPAND8(t) do { \
+    for (int j_ = (t); j_ < (t) + 8; j_++) \
+        W[j_ & 15] = s8_add(s8_add(s8_s1(W[(j_ - 2) & 15]), W[(j_ - 7) & 15]), \
+                           s8_add(s8_s0(W[(j_ - 15) & 15]), W[(j_ - 16) & 15])); \
+    } while (0)
+    /* CPU-only recurrence adaptation: fold old D before Sigma1; recover
+     * T1 with an exact lane-wise modular subtraction. Generic SHA unchanged. */
+#define S8H_ROUND(a,b,c,d,e,f,g,h,kw,bc) do { \
+    const v8u oldd_ = (d); \
+    const v8u base_ = s8_add((h), (kw)); \
+    const v8u ch_ = s8_xor((g), s8_and((e), s8_xor((f), (g)))); \
+    const v8u ab_ = s8_xor((a), (b)); \
+    (d) = s8_add(s8_add(s8_add(base_, oldd_), ch_), s8_S1((e))); \
+    const v8u t1_ = _mm256_sub_epi32((d), oldd_); \
+    (h) = s8_add(s8_add(t1_, s8_xor(s8_and(ab_, (bc)), (b))), s8_S0((a))); \
+    (bc) = ab_; \
+} while (0)
     /* round 0 from the scalar state: the new a is kept in h, the new e in d (S8_ROUND's naming) */
     v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]), d = s8_add(W[0], s8_set1(P.e1c));
     v8u e = s8_set1(P.st0[4]), f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
     v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
-    S8_ROUND(h, a, b, c, d, e, f, g, KW[1], bc); S8_ROUND(g, h, a, b, c, d, e, f, KW[2], bc);
-    S8_ROUND(f, g, h, a, b, c, d, e, KW[3], bc); S8_ROUND(e, f, g, h, a, b, c, d, KW[4], bc);
-    S8_ROUND(d, e, f, g, h, a, b, c, KW[5], bc); S8_ROUND(c, d, e, f, g, h, a, b, KW[6], bc);
-    S8_ROUND(b, c, d, e, f, g, h, a, KW[7], bc);
+    S8H_ROUND(h, a, b, c, d, e, f, g, S8R_KW(1), bc); S8H_ROUND(g, h, a, b, c, d, e, f, S8R_KW(2), bc);
+    S8H_ROUND(f, g, h, a, b, c, d, e, S8R_KW(3), bc); S8H_ROUND(e, f, g, h, a, b, c, d, S8R_KW(4), bc);
+    S8H_ROUND(d, e, f, g, h, a, b, c, S8R_KW(5), bc); S8H_ROUND(c, d, e, f, g, h, a, b, S8R_KW(6), bc);
+    S8H_ROUND(b, c, d, e, f, g, h, a, S8R_KW(7), bc);
     for (int t = 8; t < 56; t += 8) {
-        S8_ROUND(a, b, c, d, e, f, g, h, KW[t + 0], bc); S8_ROUND(h, a, b, c, d, e, f, g, KW[t + 1], bc);
-        S8_ROUND(g, h, a, b, c, d, e, f, KW[t + 2], bc); S8_ROUND(f, g, h, a, b, c, d, e, KW[t + 3], bc);
-        S8_ROUND(e, f, g, h, a, b, c, d, KW[t + 4], bc); S8_ROUND(d, e, f, g, h, a, b, c, KW[t + 5], bc);
-        S8_ROUND(c, d, e, f, g, h, a, b, KW[t + 6], bc); S8_ROUND(b, c, d, e, f, g, h, a, KW[t + 7], bc);
+        if (t == 16) {
+            S8P_W(16); S8P_W(17); S8P_W(18); S8P_W(19); S8P_W(20); S8P_W(21); S8P_W(22); S8P_W(23);
+        } else if (t == 24) {
+            S8P_W(24); S8P_W(25); S8P_W(26); S8P_W(27); S8P_W(28); S8P_W(29); S8P_W(30); S8P_W(31);
+        } else if (t >= 32) S8R_EXPAND8(t);
+        S8H_ROUND(a, b, c, d, e, f, g, h, S8R_KW(t + 0), bc); S8H_ROUND(h, a, b, c, d, e, f, g, S8R_KW(t + 1), bc);
+        S8H_ROUND(g, h, a, b, c, d, e, f, S8R_KW(t + 2), bc); S8H_ROUND(f, g, h, a, b, c, d, e, S8R_KW(t + 3), bc);
+        S8H_ROUND(e, f, g, h, a, b, c, d, S8R_KW(t + 4), bc); S8H_ROUND(d, e, f, g, h, a, b, c, S8R_KW(t + 5), bc);
+        S8H_ROUND(c, d, e, f, g, h, a, b, S8R_KW(t + 6), bc); S8H_ROUND(b, c, d, e, f, g, h, a, S8R_KW(t + 7), bc);
     }
-    S8_ROUND(a, b, c, d, e, f, g, h, KW[56], bc); S8_ROUND(h, a, b, c, d, e, f, g, KW[57], bc);
-    S8_ROUND(g, h, a, b, c, d, e, f, KW[58], bc); S8_ROUND(f, g, h, a, b, c, d, e, KW[59], bc);
-    S8_ROUND(e, f, g, h, a, b, c, d, KW[60], bc); S8_ROUND(d, e, f, g, h, a, b, c, KW[61], bc);
-    S8_ROUND(c, d, e, f, g, h, a, b, KW[62], bc);
+    S8R_EXPAND8(56);
+    S8H_ROUND(a, b, c, d, e, f, g, h, S8R_KW(56), bc); S8H_ROUND(h, a, b, c, d, e, f, g, S8R_KW(57), bc);
+    S8H_ROUND(g, h, a, b, c, d, e, f, S8R_KW(58), bc); S8H_ROUND(f, g, h, a, b, c, d, e, S8R_KW(59), bc);
+    S8H_ROUND(e, f, g, h, a, b, c, d, S8R_KW(60), bc); S8H_ROUND(d, e, f, g, h, a, b, c, S8R_KW(61), bc);
+    S8H_ROUND(c, d, e, f, g, h, a, b, S8R_KW(62), bc);
     /* Round63 still computes its exact new A. Its new E and other digest words
      * are unused by the <=32-bit H0 gate, so omit only that dead assignment. */
-    const v8u last_t1=s8_add(s8_add(a,s8_S1(f)),s8_add(s8_xor(h,s8_and(f,s8_xor(g,h))),KW[63]));
+    const v8u last_t1=s8_add(s8_add(a,s8_S1(f)),s8_add(s8_xor(h,s8_and(f,s8_xor(g,h))),S8R_KW(63)));
     const v8u last_t2=s8_add(s8_S0(b),s8_xor(s8_and(s8_xor(b,c),bc),c));
     a=s8_add(last_t1,last_t2);
     out[0] = s8_add(s8_set1(P.st0[0]), a);
+#undef S8H_ROUND
+#undef S8P_W
+#undef S8R_EXPAND8
+#undef S8R_KW
 }
 
 
@@ -119,5 +140,46 @@ static QSB_SHA_AVX2 v8u pubkey_h0(const uint32_t words[16][8]) {
     for(int k=0;k<9;k++)w[k]=_mm256_loadu_si256((const __m256i*)words[k]);
     s8_compress_plan<0x1FFu>(out,w,S8_PLAN_PUBKEY);
     return out[0];
+}
+/* Read two-candidate 16-byte coordinate lanes, transpose four loads into
+ * word columns [0,2,4,6,1,3,5,7]. Dead/tail lanes are masked BEFORE reading. */
+static QSB_SHA_AVX2 void plane_columns(v8u out[4], const uint8_t *plane, int lane,
+                                      unsigned live) {
+    __m256i v[4];
+    for (int k = 0; k < 4; k++) {
+        const __m256i *p = (const __m256i *)(plane + (size_t)(lane + 2*k)*16u);
+        if (live == 255u) v[k] = _mm256_loadu_si256(p);
+        else {
+            const int a = -int((live >> (2*k)) & 1u), b = -int((live >> (2*k+1)) & 1u);
+            const __m256i mask = _mm256_setr_epi32(a,a,a,a,b,b,b,b);
+            v[k] = _mm256_maskload_epi32((const int *)p, mask);
+        }
+    }
+    const __m256i a = _mm256_unpacklo_epi32(v[0],v[1]);
+    const __m256i b = _mm256_unpackhi_epi32(v[0],v[1]);
+    const __m256i c = _mm256_unpacklo_epi32(v[2],v[3]);
+    const __m256i d = _mm256_unpackhi_epi32(v[2],v[3]);
+    out[0] = _mm256_unpacklo_epi64(a,c); out[1] = _mm256_unpackhi_epi64(a,c);
+    out[2] = _mm256_unpacklo_epi64(b,d); out[3] = _mm256_unpackhi_epi64(b,d);
+}
+static QSB_SHA_AVX2 v8u plane_pubkey_h0(const uint8_t *rec, int lanes, int lane,
+                                        int ri, v8u y, unsigned live) {
+    v8u x[8], w[9], out[1];
+    plane_columns(x, rec + (size_t)(2*ri)*lanes*16u, lane, live);
+    plane_columns(x+4, rec + (size_t)(2*ri+1)*lanes*16u, lane, live);
+    const __m256i order = _mm256_setr_epi32(0,2,4,6,1,3,5,7);
+    y = _mm256_permutevar8x32_epi32(y, order);
+#if QSB_FIN_BAL2 & 2
+    const v8u prefix = _mm256_and_si256(ri ? _mm256_srli_epi32(y,8) : y, _mm256_set1_epi32(255));
+#else
+    const v8u prefix = _mm256_add_epi32(_mm256_set1_epi32(2),
+        _mm256_and_si256(ri ? _mm256_srli_epi32(y,1) : y, _mm256_set1_epi32(1)));
+#endif
+    w[0] = _mm256_or_si256(_mm256_slli_epi32(prefix,24), _mm256_srli_epi32(x[7],8));
+    for (int j=1;j<8;j++) w[j] = _mm256_or_si256(_mm256_slli_epi32(x[8-j],24), _mm256_srli_epi32(x[7-j],8));
+    w[8] = _mm256_or_si256(_mm256_slli_epi32(x[0],24),_mm256_set1_epi32(0x00800000));
+    s8_compress_plan<0x1FFu>(out,w,S8_PLAN_PUBKEY);
+    /* Restore physical lane order before the original publication predicate. */
+    return _mm256_permutevar8x32_epi32(out[0],_mm256_setr_epi32(0,4,1,5,2,6,3,7));
 }
 } // namespace qsb_pksha_h0

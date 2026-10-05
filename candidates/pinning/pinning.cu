@@ -281,7 +281,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
 #ifndef QSB_BATCH
-#define QSB_BATCH 4194304    /* candidates per pipeline launch */
+#define QSB_BATCH 6291456    /* independently test6M host batch; fixed full subpipe and all geometry checks */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
@@ -470,14 +470,14 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 // Root-priority scheduling: 0 baseline, 1 priority roots, 2 priority tail,
 // 3 same-priority split control. No change to device arithmetic.
 #ifndef QSB_COMPLETION_MODE
-#define QSB_COMPLETION_MODE 1
+#define QSB_COMPLETION_MODE 2
 #endif
 static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion mode");
 #if QSB_COMPLETION_MODE && !QSB_SLOTPIPE
 #error "completion streams require the slotted pipeline"
 #endif
 #ifndef QSB_SLOTS
-#define QSB_SLOTS 5           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
+#define QSB_SLOTS 6           /* in-flight batches when QSB_SLOTPIPE=1; state memory scales with it.
                                * 3 x 4M (4 x 4M before; 4 x 4M holds the 2 x 8M state bytes): each sequence's final drain and
                                * each batch's serial super-root inversion are overlapped by up to three
                                * other batches instead of one. Host orchestration only. */
@@ -1534,6 +1534,28 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #error "QSB_TBL_L2POL takes the hot/cold split from the QSB_FOUR_HOT bank order"
 #endif
 #define QSB_HOT_RECS 786432u   /* q9_bigtbl_offset(4): segments 0..3, 48 MiB */
+/* QSB_HOT_DENSE32: retain normal priority for the 32 MiB comprising bank 0
+ * and banks 2/3; classify the lower-density 16 MiB bank 1 as evict_first.
+ * The mask folds address bit 19 ONLY in the policy comparison. Table addresses,
+ * sign extraction, arithmetic and candidate enumeration are unchanged.
+ * Bank 0 receives two decoder accesses per candidate; banks 1/2/3 receive
+ * the same Q6 share, while banks 2/3 are each half the size of bank 1. */
+#ifndef QSB_HOT_DENSE32
+#define QSB_HOT_DENSE32 1
+#endif
+#if QSB_HOT_DENSE32 != 0 && QSB_HOT_DENSE32 != 1
+#error "QSB_HOT_DENSE32 must be 0 or 1"
+#endif
+#if QSB_HOT_DENSE32 && !(QSB_BIGTBL && QSB_FOUR_HOT && QSB_GLV11)
+#error "QSB_HOT_DENSE32 requires the current GLV11 four-hot bank layout"
+#endif
+#if QSB_HOT_DENSE32
+#define QSB_TBL_POLICY_MASK 0x7ff7ffffu
+#define QSB_TBL_POLICY_BOUND 262144u
+#else
+#define QSB_TBL_POLICY_MASK 0x7fffffffu
+#define QSB_TBL_POLICY_BOUND QSB_HOT_RECS
+#endif
 #ifndef QSB_TBL_POL_PRED
 #define QSB_TBL_POL_PRED 1
 #endif
@@ -1547,7 +1569,7 @@ __device__ __forceinline__ uint64_t qsb_tbl_policy(uint32_t code) {
 #else
     asm("createpolicy.fractional.L2::evict_normal.b64 %0, 1.0;" : "=l"(hot));
 #endif
-    return (code&0x7fffffffu)>=QSB_HOT_RECS ? cold : hot;
+    return (code&QSB_TBL_POLICY_MASK)>=QSB_TBL_POLICY_BOUND ? cold : hot;
 }
 /* QSB_TBL_POL_PRED (default 1): the piped gathers issue each 16 B load twice under a
  * complementary predicate (record >= QSB_HOT_RECS), one carrying the cold policy and one the
@@ -1610,7 +1632,7 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
         : "=l"(y0.x), "=l"(y0.y), "=l"(y1.x), "=l"(y1.y)
-        : "l"(ty), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+        : "l"(ty), "l"(pc), "l"(ph), "r"(code&QSB_TBL_POLICY_MASK), "r"(QSB_TBL_POLICY_BOUND));
 #elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 y1;
@@ -1654,7 +1676,7 @@ __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
         : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y)
-        : "l"(tx), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
+        : "l"(tx), "l"(pc), "l"(ph), "r"(code&QSB_TBL_POLICY_MASK), "r"(QSB_TBL_POLICY_BOUND));
 #elif QSB_TBL_L2POL_ON
     const uint64_t pol=qsb_tbl_policy(code);
     ulonglong2 x0,x1;
@@ -4033,7 +4055,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #define QSB_PK_WDIV 2
 #endif
 #ifndef QSB_PK_WMAX
-#define QSB_PK_WMAX 12
+#define QSB_PK_WMAX 16
 #endif
 #if QSB_HOST_PKSHA && QSB_SUBPIPE && QSB_SLOTPIPE && QSB_REFILL_BEFORE_GATE && QSB_SHA_OPT && \
     QSB_SPARSE_D && QSB_ZEROS_N <= 32
@@ -4731,14 +4753,14 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
         sA[i] = (cudaStream_t)t;
     }
 #ifndef QSB_GREEN_RT_B
-#define QSB_GREEN_RT_B 0   /* 1: the root kernel runs on the finish partition */
+#define QSB_GREEN_RT_B 0   /* restore measured account-best root partition; dependencies remain */
 #endif
     for (int i = 0; i < 2; i++) {
         if (qsb_cuGreenCtxStreamCreate(&t, QSB_GREEN_RT_B ? gB : gA, CU_STREAM_NON_BLOCKING, greatest) != CUDA_SUCCESS) return 0;
         sA[2+i] = (cudaStream_t)t;
     }
 #ifndef QSB_GREEN_S2_LEAST
-#define QSB_GREEN_S2_LEAST 0   /* 1: finish streams at the least priority (the root kernel then outranks them) */
+#define QSB_GREEN_S2_LEAST 0   /* preserve account-best finish priority on the colocated root partition */
 #endif
     for (int i = 0; i < 2; i++) {
         if (qsb_cuGreenCtxStreamCreate(&t, gB, CU_STREAM_NON_BLOCKING, QSB_GREEN_S2_LEAST ? least : greatest) != CUDA_SUCCESS) return 0;
@@ -5775,9 +5797,10 @@ static int qsb_host_zeros(const uint8_t *h) {
  * SHA256(compress(Q)), leading zeros. Suffix hashing continues from the
  * 155-block midstate with SHA-256 padding, the same two-block path the
  * GPU uses for suffix_len=75. */
-static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
-                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+#ifndef QSB_HOST_RECID_DIGEST_REUSE
+#define QSB_HOST_RECID_DIGEST_REUSE 1
+#endif
+static int qsb_host_digest(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, uint8_t d2[32]) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -5813,20 +5836,22 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
         d1[i * 4 + 2] = (uint8_t)(sc.h[i] >> 8);
         d1[i * 4 + 3] = (uint8_t)sc.h[i];
     }
-    uint8_t d2[32];
     SHA256(d1, 32, d2);
 
+    return 1;
+}
+static int qsb_host_exact_hit_digest(const uint8_t d2[32], int recid,
+                                    EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                                    const BIGNUM *nri, const EC_POINT *Ru2) {
     BIGNUM *z = BN_bin2bn(d2, 32, NULL);
     BIGNUM *u1 = BN_new();
-    EC_POINT *P = EC_POINT_new(grp);
     EC_POINT *Q = EC_POINT_new(grp);
     EC_POINT *R = EC_POINT_dup(Ru2, grp);
     int ok = 0;
-    if (z && u1 && P && Q && R &&
-        BN_mod_mul(u1, z, nri, order, ctx) &&
-        EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
-        if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
+    if (z && u1 && Q && R &&
+        BN_mod_mul(u1, z, nri, order, ctx)) {
+        if ((!recid || EC_POINT_invert(grp, R, ctx)) &&
+            EC_POINT_mul(grp, Q, u1, R, BN_value_one(), ctx)) {
             BIGNUM *qx = BN_new(), *qy = BN_new();
             if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
                 uint8_t pub[33], xb[32];
@@ -5845,10 +5870,16 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     }
     BN_free(z);
     BN_free(u1);
-    EC_POINT_free(P);
     EC_POINT_free(Q);
     EC_POINT_free(R);
     return ok;
+ }
+static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
+                              EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
+                              const BIGNUM *nri, const EC_POINT *Ru2) {
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return 0;
+    return qsb_host_exact_hit_digest(d2, recid, grp, ctx, order, nri, Ru2);
 }
 
 /* Return the recid to publish, or -1 if neither recid is an exact hit.
@@ -5857,8 +5888,15 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
                            const BIGNUM *nri, const EC_POINT *Ru2) {
+#if QSB_HOST_RECID_DIGEST_REUSE
+    uint8_t d2[32];
+    if (!qsb_host_digest(pp, seq, lt, d2)) return -1;
+    if (qsb_host_exact_hit_digest(d2, ri, grp, ctx, order, nri, Ru2)) return ri;
+    if (qsb_host_exact_hit_digest(d2, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#else
     if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
     if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+#endif
     return -1;
 }
 #endif
@@ -5916,11 +5954,13 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * so a worker that lags behind a re-posted plane can never claim from the wrong job. */
 namespace qsb_pk {
 static const int NB = 2 * QSB_SLOTS;
-static const uint32_t CH = 2;   /* records per claim */
+static const uint32_t CH = 16;  /* self-research: amortize tagged CAS/release across sixteen bounded records */
 struct alignas(64) Job {
     std::atomic<uint64_t> ctl{0};
-    std::atomic<uint32_t> done{0};
-    std::atomic<uint32_t> done_candidates{0};
+    /* One release publishes both completion dimensions. Each accepted record
+     * contributes <=128 candidates and total candidates <=uint32 batch_sz;
+     * the low half therefore never carries into the record count. */
+    std::atomic<uint64_t> completion{0};
     std::atomic<uint32_t> nhit{0};
     const uint8_t *plane = nullptr;
     std::atomic<uint32_t> nrec{0};
@@ -5967,6 +6007,14 @@ static inline void message(uint32_t w[16], const uint64_t *x, uint32_t prefix) {
     for (int i = 9; i < 15; i++) w[i] = 0;
     w[15] = 0x108u;
 }
+/* Only rows 0..8 are consumed by pubkey_h0; fill the AVX2 column directly. */
+static inline void message_column(uint32_t w[16][8], int lane, const uint64_t *x, uint32_t prefix) {
+    uint32_t s[8];
+    for (int i = 0; i < 4; i++) { s[2 * i] = (uint32_t)x[i]; s[2 * i + 1] = (uint32_t)(x[i] >> 32); }
+    w[0][lane] = (prefix << 24) | (s[7] >> 8);
+    for (int i = 1; i < 8; i++) w[i][lane] = (s[8 - i] << 24) | (s[7 - i] >> 8);
+    w[8][lane] = (s[0] << 24) | 0x800000u;
+}
 static inline uint32_t prefix_of(uint32_t yp, int ri) {
 #if QSB_FIN_BAL2 & 2
     return (yp >> (8 * ri)) & 0xFFu;
@@ -6006,7 +6054,76 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
-static void hash_record(Job &J, uint32_t j) {
+/* Feed the unchanged two SHA-NI chains directly from the original coordinate planes.
+ * Caller guards active lanes before any coordinate load; no scalar W[16] round trip. */
+__attribute__((target("sha,sse4.1"), always_inline)) inline
+static void ni_plane_words(const uint8_t *rec, int lane, int ri, uint32_t prefix,
+                           __m128i &w0, __m128i &w1, __m128i &w2, __m128i &w3) {
+    const uint8_t *p=rec+(size_t)(2*ri)*QSB_PK_LANES*16u+(size_t)lane*16u;
+    const __m128i lo=_mm_loadu_si128((const __m128i *)p);
+    const __m128i hi=_mm_loadu_si128((const __m128i *)(p+(size_t)QSB_PK_LANES*16u));
+    const __m128i hr=_mm_shuffle_epi32(hi,0x1B), lr=_mm_shuffle_epi32(lo,0x1B);
+    w0=_mm_or_si128(_mm_srli_epi32(hr,8),_mm_slli_epi32(_mm_slli_si128(hr,4),24));
+    w0=_mm_or_si128(w0,_mm_cvtsi32_si128((int)(prefix<<24)));
+    w1=_mm_or_si128(_mm_srli_epi32(lr,8),_mm_slli_epi32(_mm_alignr_epi8(lr,hr,12),24));
+    w2=_mm_setr_epi32((int)(((uint32_t)_mm_cvtsi128_si32(lo)<<24)|0x00800000u),0,0,0);
+    w3=_mm_setr_epi32(0,0,0,264);
+}
+__attribute__((target("sha,sse4.1"), noinline))
+static void hash2_plane_ni(const uint8_t *rec, int lane, uint32_t y, uint32_t *h0, uint32_t *h1) {
+    __m128i a0,a1,a2,a3,b0,b1,b2,b3;
+    ni_plane_words(rec,lane,0,prefix_of(y,0),a0,a1,a2,a3);
+    ni_plane_words(rec,lane,1,prefix_of(y,1),b0,b1,b2,b3);
+    qcg_sha::shani_compress2_vec<true>(h0,h1,a0,a1,a2,a3,b0,b1,b2,b3);
+}
+#ifndef QSB_PK_AVX2_PLANES
+#define QSB_PK_AVX2_PLANES 1
+#endif
+/* All SHA rounds are unchanged. Convert the original H0 predicate to one
+ * vector bit mask; only successful lanes leave registers for hit publication. */
+__attribute__((target("avx2"), always_inline)) inline
+static unsigned plane_h0_hits(__m256i h0) {
+#if QSB_ZEROS_N >= 32
+    const __m256i top=h0;
+#else
+    const __m256i top=_mm256_srli_epi32(h0,32-QSB_ZEROS_N);
+#endif
+    return (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(
+        _mm256_cmpeq_epi32(top,_mm256_setzero_si256())));
+}
+__attribute__((target("avx2"), noinline))
+static void hash_record_planes(Job &J, uint32_t j) {
+    const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
+    const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
+    const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
+    for (int l0=0;l0<QSB_PK_LANES;l0+=8) {
+        if (base + (uint32_t)l0 >= J.batch_sz) break;
+        const unsigned valid = std::min(8u,J.batch_sz-base-(uint32_t)l0);
+        __m256i y;
+        if (valid == 8) y = _mm256_loadu_si256((const __m256i *)(yp+l0));
+        else {
+            const __m256i index = _mm256_setr_epi32(0,1,2,3,4,5,6,7);
+            y = _mm256_maskload_epi32((const int *)(yp+l0),
+                _mm256_cmpgt_epi32(_mm256_set1_epi32((int)valid),index));
+        }
+        const unsigned live = 255u ^ (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(
+            _mm256_cmpeq_epi32(y,_mm256_setzero_si256())));
+        if (!live) continue;
+        const __m256i h0=qsb_pksha_h0::plane_pubkey_h0(rec,QSB_PK_LANES,l0,0,y,live);
+        const __m256i h1=qsb_pksha_h0::plane_pubkey_h0(rec,QSB_PK_LANES,l0,1,y,live);
+        const unsigned first=plane_h0_hits(h0)&live;
+        const unsigned second=plane_h0_hits(h1)&live&~first;
+        unsigned hit=first|second;
+        while(hit) {
+            const unsigned t=(unsigned)__builtin_ctz(hit);
+            hit&=hit-1u;
+            const uint32_t idx=base+(uint32_t)l0+t;
+            record_hit(J,idx|((second&(1u<<t))?(1u<<30):0u));
+        }
+    }
+}
+__attribute__((noinline))
+static void hash_record_fallback(Job &J, uint32_t j) {
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
     const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
@@ -6019,12 +6136,17 @@ static void hash_record(Job &J, uint32_t j) {
             h0[t] = h1[t] = ~0u;
             if (y != 0u && base + (uint32_t)l < J.batch_sz) {
                 uint64_t x0[4], x1[4];
-                lane_keys(rec, l, x0, x1);
-                message(m0, x0, prefix_of(y, 0));
-                message(m1, x1, prefix_of(y, 1));
+                if (mode != 2) lane_keys(rec, l, x0, x1);
+                if (mode == 1) {
+                    message_column(w0, t, x0, prefix_of(y, 0));
+                    message_column(w1, t, x1, prefix_of(y, 1));
+                } else if (mode == 0) {
+                    message(m0, x0, prefix_of(y, 0));
+                    message(m1, x1, prefix_of(y, 1));
+                }
                 live |= 1u << t;
                 if (mode == 2) {
-                    hash2_ni(m0, m1, &h0[t], &h1[t]);
+                    hash2_plane_ni(rec, l, y, &h0[t], &h1[t]);
                 } else if (mode == 0) {
                     uint32_t s0[8], s1[8];
                     memcpy(s0, qcg_sha::IV256, 32); memcpy(s1, qcg_sha::IV256, 32);
@@ -6032,10 +6154,12 @@ static void hash_record(Job &J, uint32_t j) {
                     h0[t] = s0[0]; h1[t] = s1[0];
                 }
             } else {
-                memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+                if (mode == 1) {
+                    for (int k = 0; k < 9; k++) { w0[k][t] = 0; w1[k][t] = 0; }
+                } else {
+                    memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
+                }
             }
-            if (mode == 1)
-                for (int k = 0; k < 16; k++) { w0[k][t] = m0[k]; w1[k][t] = m1[k]; }
         }
         if (!live) continue;
         if (mode == 1) hash8_avx2(w0, w1, h0, h1);
@@ -6048,8 +6172,14 @@ static void hash_record(Job &J, uint32_t j) {
         }
     }
 }
+static void hash_record(Job &J, uint32_t j) {
+#if QSB_PK_AVX2_PLANES
+    if (mode == 1) { hash_record_planes(J,j); return; }
+#endif
+    hash_record_fallback(J,j);
+}
 /* claim and hash records of plane b; returns 1 if it hashed anything */
-static int help(int b) {
+static int help(int b, unsigned claim_budget = 0) {
     Job &J = jobs[b];
     int any = 0;
     for (;;) {
@@ -6062,23 +6192,40 @@ static int help(int b) {
             if (J.ctl.compare_exchange_weak(c, c + CH, std::memory_order_acq_rel, std::memory_order_acquire)) break;
         }
         e = i + CH < nr ? i + CH : nr;
-        uint32_t finished=0;
         for(uint32_t k=i;k<e;k++) {
+            if(k+1u<e) {
+                const uint8_t *next=J.plane+(size_t)(k+1u)*QSB_PK_REC;
+                __builtin_prefetch(next+64u*QSB_PK_LANES,0,1);
+                for(int p=0;p<4;p++)
+                    __builtin_prefetch(next+(size_t)p*QSB_PK_LANES*16u,0,1);
+            }
             hash_record(J,k);
-            const uint32_t base=(k*(uint32_t)QSB_HOST_PKSHA+(uint32_t)QSB_HOST_PKSHA-1u)*(uint32_t)QSB_PK_LANES;
-            finished+=base<J.batch_sz?std::min((uint32_t)QSB_PK_LANES,J.batch_sz-base):0u;
         }
-        J.done_candidates.fetch_add(finished,std::memory_order_release);
-        J.done.fetch_add(e - i, std::memory_order_release);
+        /* Every selected record before the final selected record is full.
+         * Clip only this claim's last record, exactly as the per-record meter. */
+        const uint32_t last_base=(e*(uint32_t)QSB_HOST_PKSHA-1u)*(uint32_t)QSB_PK_LANES;
+        const uint32_t tail=last_base<J.batch_sz?std::min((uint32_t)QSB_PK_LANES,J.batch_sz-last_base):0u;
+        const uint32_t finished=(e-i-1u)*(uint32_t)QSB_PK_LANES+tail;
+        J.completion.fetch_add(((uint64_t)(e-i)<<32)|finished,std::memory_order_release);
         any = 1;
+        /* Background workers service multiple owners; synchronous collection
+         * keeps the original unlimited help() default. */
+        if (claim_budget && --claim_budget == 0) return any;
     }
 }
 static void *worker(void *) {
+    static std::atomic<unsigned> worker_seed{0};
+    unsigned cursor = worker_seed.fetch_add(1, std::memory_order_relaxed) % (unsigned)NB;
     unsigned idle = 0;
     for (;;) {
         if(workers_parked.load(std::memory_order_acquire)) {usleep(10000);continue;}
         int any = 0;
-        for (int b = 0; b < NB; b++) any |= help(b);
+        for (int k = 0; k < NB; k++) {
+            any |= help((int)cursor, 2);
+            if (++cursor == (unsigned)NB) cursor = 0;
+        }
+        /* Rotate the first owner even when every inspected job was empty. */
+        if (++cursor == (unsigned)NB) cursor = 0;
         if (any) { idle = 0; continue; }
         if (++idle < 256) { __builtin_ia32_pause(); continue; }
         struct timespec ts = {0, 20000};
@@ -6197,8 +6344,7 @@ static void post(uint64_t bno, uint32_t batch_sz, uint32_t seq, uint32_t lt) {
     J.plane = planes[b];
     J.nrec.store(((batch_sz + QSB_PK_LANES - 1) / QSB_PK_LANES) / QSB_HOST_PKSHA, std::memory_order_release);
     J.batch_sz = batch_sz; J.seq = seq; J.lt = lt;
-    J.done.store(0, std::memory_order_relaxed);
-    J.done_candidates.store(0,std::memory_order_relaxed);
+    J.completion.store(0,std::memory_order_relaxed);
     J.nhit.store(0, std::memory_order_relaxed);
     J.ctl.store((uint64_t)(uint32_t)bno << 32, std::memory_order_release);
     owner[b] = bno + 1;
@@ -6212,9 +6358,9 @@ static int collect(uint64_t bno, uint32_t &seq, uint32_t &lt, uint32_t &count, u
     if (!ok || !owner[b]) return 0;
     Job &J = jobs[b];
 #if QSB_PK_YIELD
-    if (J.done.load(std::memory_order_acquire) < J.nrec) { given[b] = 0; return 0; }
+    if ((uint32_t)(J.completion.load(std::memory_order_acquire)>>32) < J.nrec) { given[b] = 0; return 0; }
 #else
-    while (J.done.load(std::memory_order_acquire) < J.nrec)
+    while ((uint32_t)(J.completion.load(std::memory_order_acquire)>>32) < J.nrec)
         if (!help(b)) __builtin_ia32_pause();
 #endif
     owner[b] = 0;
@@ -6234,7 +6380,7 @@ static uint64_t pending_candidates() {
         const uint32_t last_base=nr?(nr*(uint32_t)QSB_HOST_PKSHA-1u)*(uint32_t)QSB_PK_LANES:0u;
         const uint32_t tail=nr&&last_base<J.batch_sz?std::min((uint32_t)QSB_PK_LANES,J.batch_sz-last_base):0u;
         const uint64_t offered=nr?((uint64_t)nr-1u)*(uint32_t)QSB_PK_LANES+tail:0u;
-        const uint32_t done=J.done_candidates.load(std::memory_order_acquire);
+        const uint32_t done=(uint32_t)J.completion.load(std::memory_order_acquire);
         if(done>offered){fprintf(stderr,"Host SHA completion meter overflow\n");abort();}
         pending+=offered-done;
     }return pending;
@@ -6247,6 +6393,27 @@ static uint64_t completed_candidates() {
 } /* namespace qsb_pk */
 #endif
 
+
+/* Host-only bounded query-before-block policy. Keep the original completion
+ * synchronization on every non-error exit and preserve recorded-event ownership.
+ * The query count cap also bounds the loop if the monotonic clock stalls. */
+static cudaError_t qsb_wait_slot_completion(cudaEvent_t done) {
+#if QSB_FEED_BLOCK
+    struct timespec begin, now;
+    if (clock_gettime(CLOCK_MONOTONIC, &begin) == 0) {
+        for (int poll = 0; poll < 64; ++poll) {
+            const cudaError_t q = cudaEventQuery(done);
+            if (q == cudaSuccess) return cudaEventSynchronize(done);
+            if (q != cudaErrorNotReady) return q;
+            if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) break;
+            const int64_t ns = (int64_t)(now.tv_sec - begin.tv_sec) * 1000000000LL +
+                               (int64_t)now.tv_nsec - (int64_t)begin.tv_nsec;
+            if (ns < 0 || ns >= 50000LL) break;
+        }
+    }
+#endif
+    return cudaEventSynchronize(done);
+}
 
 int main(int argc, char **argv) {
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
@@ -6860,7 +7027,7 @@ int main(int argc, char **argv) {
 #endif
 #endif
 
-    int BATCH = QSB_BATCH; /* default 4M; keep whole tree-aligned batches */
+    int BATCH = QSB_BATCH; /* default6M; keep original aligned memory fallback */
 #if QSB_SLOTPIPE
     /* The GLV11 table takes 21.1 GiB. Choose a smaller batch before the four
      * slot allocations when less VRAM is free than their state plus a reserve
@@ -7031,6 +7198,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
         return 1;
     }
+    /* Optional immutable generator cache on this owned exact-gate group.
+     * A refused/failed precompute leaves the ordinary exact joint gate in use. */
+    const int gate_precompute_ok=EC_GROUP_precompute_mult(gate_grp,gate_ctx);
+    printf("Host exact-gate group precompute: attempted=1 result=%d active=%d\n",
+           gate_precompute_ok,EC_GROUP_have_precompute_mult(gate_grp));
 #endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
     const bool can_cogrind=!easy && effective_total==1 && !seq_start_override && single_hash;
@@ -7070,7 +7242,7 @@ int main(int argc, char **argv) {
 #else
     auto drain_slot = [&](int s) -> int {
         if (!slot_busy[s]) return 0;
-        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = qsb_wait_slot_completion(slot_done[s]);
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         slot_busy[s] = 0;
         err = cudaGetLastError();
@@ -7142,7 +7314,7 @@ int main(int argc, char **argv) {
     auto collect_slot = [&](int s, uint32_t &count, uint32_t *hits) -> int {
         count = 0;
         if (!slot_busy[s]) return 0;
-        cudaError_t err = cudaEventSynchronize(slot_done[s]);
+        cudaError_t err = qsb_wait_slot_completion(slot_done[s]);
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
@@ -7187,7 +7359,7 @@ int main(int argc, char **argv) {
             if(!qsb_pk::owner[b])continue;
             qsb_pk::Job &J=qsb_pk::jobs[b];
             const uint32_t nr=J.nrec.load(std::memory_order_acquire);
-            while(J.done.load(std::memory_order_acquire)<nr) {
+            while((uint32_t)(J.completion.load(std::memory_order_acquire)>>32)<nr) {
                 struct timespec pause={0,20000};nanosleep(&pause,nullptr);
             }
             const uint32_t nh=J.nhit.load(std::memory_order_relaxed);
@@ -7312,6 +7484,12 @@ int main(int argc, char **argv) {
                 batch_sz, easy, single_hash,
                 d_pipeline_state[s],d_pipeline_roots[s],d_pipeline_tree[s],
                 d_super_roots[s],d_root_checkpoint[s], cur_tp, st, &slot_flow[s]);
+            /* The green/graph launch joins its finish lanes onto the incoming slot
+             * stream. Only the monolithic launcher traverses CompletionLane; its
+             * auxiliary stream must never bypass the green output dependency. */
+#if QSB_SUBPIPE
+            if (!g_qsb_sub_ok)
+#endif
             st = slot_flow[s].completion_stream();
 #if QSB_PK_ON && QSB_PK_DMA
             slot_error=qsb_pk::enqueue_dma(slot_bno[s],slot_bsz[s],st);
