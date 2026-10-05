@@ -997,6 +997,12 @@ __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint3
 #endif
 
 #if QSB_GLV_EO
+#ifndef QSB_GLV_PRODUCT_BOUNDS
+#define QSB_GLV_PRODUCT_BOUNDS 1
+#endif
+#if QSB_GLV_PRODUCT_BOUNDS != 0 && QSB_GLV_PRODUCT_BOUNDS != 1
+#error QSB_GLV_PRODUCT_BOUNDS must be 0 or 1
+#endif
 /* x*d mod 2^129 from column-pair accumulators: E0 = x0d0 (words 0-1), O0 = x0d1+x1d0
  * (words 1-2, carry cc3 into word 3), E1 = x0d2+x1d1+x2d0 (words 2-3, carries cc4 into
  * word 4), O1 = x0d3+x1d2+x2d1+x3d0 mod 2^64 (words 3-4). Word 4 only matters for its
@@ -1006,6 +1012,46 @@ __device__ __forceinline__ q9_u129 q9_product129(const uint64_t x[2],const uint3
 __device__ __forceinline__ q9_u129 q9_product129_rx(const uint64_t x[2],const uint32_t d[4],uint32_t X) {
     uint32_t w0,w1,w2,w3,top;
 #if QSB_DECODE_CUT & 2
+#if QSB_GLV_PRODUCT_BOUNDS
+    /* If d0+d1 <= 2^32, both O0 and the reordered first pair of E1
+     * are at most (2^32-1)*(d0+d1), hence strictly below 2^64.
+     * For b1, d0+d1+d2 also fits: E1 has no overflow at all.
+     * For a2, only the third add keeps its carry into word 4.
+     * a1 does not satisfy the pair bound and keeps the original path.
+     * These bounds hold for EVERY x, not just hashed/rounded inputs. */
+    if ((uint64_t)d[0]+d[1] <= 0x100000000ULL) {
+        const uint32_t x0=(uint32_t)x[0],x1=(uint32_t)(x[0]>>32);
+        const uint32_t x2=(uint32_t)x[1],x3=(uint32_t)(x[1]>>32);
+        const uint64_t E0=q9_mulw(x0,d[0]);
+        const uint64_t O0=q9_madw(x1,d[0],q9_mulw(x0,d[1]));
+        uint64_t E1=q9_madw(x2,d[0],q9_mulw(x1,d[1]));
+        uint64_t O1=q9_madw(x3,d[0],q9_madw(x2,d[1],
+                    q9_madw(x1,d[2],q9_mulw(x0,d[3]))));
+        if ((uint64_t)d[0]+d[1]+d[2] <= 0x100000000ULL) {
+            E1=q9_madw(x0,d[2],E1);
+        } else {
+            const uint64_t third=q9_mulw(x0,d[2]);
+            /* E1 overflow contributes 2^128: increment O1's high word.
+             * O1 itself is modulo 2^64 as in the original implementation. */
+            asm("{\n\t.reg .u32 lo,hi;\n\t"
+                "mov.b64 {lo,hi},%1;\n\t"
+                "add.cc.u64 %0,%0,%2;addc.u32 hi,hi,0;\n\t"
+                "mov.b64 %1,{lo,hi};\n\t}"
+                : "+l"(E1),"+l"(O1) : "l"(third));
+        }
+        asm("{\n\t.reg .u32 a,b,c,e;\n\t"
+            "mov.b64 {%0,a},%5;mov.b64 {b,c},%6;\n\t"
+            "add.cc.u32 %1,a,b;\n\t"
+            "mov.b64 {a,b},%7;addc.cc.u32 %2,a,c;\n\t"
+            "mov.b64 {c,e},%8;addc.cc.u32 %3,b,c;\n\t"
+            "addc.u32 %4,e,%9;\n\t}"
+            : "=r"(w0),"=r"(w1),"=r"(w2),"=r"(w3),"=r"(top)
+            : "l"(E0),"l"(O0),"l"(E1),"l"(O1),"r"(X));
+        const q9_u129 r={(uint64_t)w0|((uint64_t)w1<<32),
+                        (uint64_t)w2|((uint64_t)w3<<32),top};
+        return r;
+    }
+#endif
     /* O1 first; cc3 (bit 0 of O1) and the two cc4 carries (bit 32 of O1) are added into it
      * straight off the carry flag. O1 is kept mod 2^64: word 4 only matters for bit 0. */
     asm("{\n\t"
