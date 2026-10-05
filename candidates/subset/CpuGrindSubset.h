@@ -3165,7 +3165,7 @@ static void hash_plan(Ctx &c) {
 }
 
 #ifndef QSB_CPU_PREFIX100
-#define QSB_CPU_PREFIX100 1
+#define QSB_CPU_PREFIX100 0 /* dukemawex: walk all 158 co-grinder window patterns (was 1 = first 100) */
 #endif
 /* b67487a1 (after 4a197f06's family selection), taken as written: keep the 20 block-0 groups of exactly 5 patterns (100 patterns)
  * when the plan has the 158/77 shape, so each block-0 compression serves 5 candidates; any other shape keeps every pattern.
