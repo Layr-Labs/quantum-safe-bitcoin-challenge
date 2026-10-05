@@ -748,6 +748,22 @@ __device__ __forceinline__ uint32_t q9_mulhi32(uint32_t a,uint32_t b) {
 #endif
 }
 
+#ifndef QSB_GLV_HIGHGROUPS
+#define QSB_GLV_HIGHGROUPS 1
+#endif
+#if QSB_GLV_HIGHGROUPS != 0 && QSB_GLV_HIGHGROUPS != 1
+#error "QSB_GLV_HIGHGROUPS must be 0 or 1"
+#endif
+/* Each call below has a separately proven u32 group sum. This is the
+ * sum of individually truncated high products, not hi(sum(products)). */
+__device__ __forceinline__ uint32_t q9_madhi_group(uint32_t a,uint32_t b,uint32_t c) {
+#ifdef __CUDA_ARCH__
+    uint32_t r;asm("mad.hi.u32 %0,%1,%2,%3;":"=r"(r):"r"(a),"r"(b),"r"(c));return r;
+#else
+    return q9_mulhi32(a,b)+c;
+#endif
+}
+
 #ifndef QSB_GLV_ROUND_CC
 #define QSB_GLV_ROUND_CC 1
 #endif
@@ -779,7 +795,25 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
 #if QSB_GLV_HIGH10_HI
     // b7+b6 < 2^32 for both production reciprocals: the first sum fits u32.
     const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
+#if QSB_GLV_HIGHGROUPS
+    if (WHICH==1 && (uint64_t)b4+b3<=0x100000000ULL) {
+        /* g1: b4+b3=0xd02f7529; first and tail are each u32.
+         * The middle high product alone remains a separate u32 addend. */
+        const uint32_t tail=q9_madhi_group(a7,b3,q9_mulhi32(a6,b4));
+        carry=(uint64_t)first+q9_mulhi32(a5,b5)+tail;
+    } else if (WHICH==2 && (uint64_t)b6+b5+b4+b3<=0x100000000ULL) {
+        /* g2: b6+b5+b4+b3=0x9d34f541. All four individually
+         * truncated terms fit u32, including every intermediate sum. */
+        uint32_t tail=q9_mulhi32(a4,b6);
+        tail=q9_madhi_group(a5,b5,tail);
+        tail=q9_madhi_group(a6,b4,tail);
+        tail=q9_madhi_group(a7,b3,tail);
+        carry=(uint64_t)q9_mulhi32(a3,b7)+tail;
+    } else
+#endif
+    {
     carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+    }
     w10=0;
 #else
     q9_high15_begin(&acc,&overflow,carry,q9_mulw(a3,b7),q9_mulw(a4,b6));
