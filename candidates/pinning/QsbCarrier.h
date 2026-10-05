@@ -40,6 +40,9 @@
 #ifndef QSB_NOJIT
 #define QSB_NOJIT 1
 #endif
+#ifndef QSB_NATIVE10_NOJIT
+#define QSB_NATIVE10_NOJIT 1
+#endif
 
 enum QsbCarrierKernel {
     QK_S0 = 0,   /* kernel_pinning_pipeline<true,0>  (prepare) */
@@ -151,6 +154,18 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
+#if QSB_NATIVE10_NOJIT
+    /* Current bound image has ten functions and two deliberately unused roles. */
+    bool native10 = QK_LC == 10 && QK_CE == 11 && QK_N == 12 && n_gen == QK_N;
+    if (native10)
+        native10 = qsb_carrier_kernel_names[QK_LC] &&
+                   !qsb_carrier_kernel_names[QK_LC][0] &&
+                   qsb_carrier_kernel_names[QK_CE] &&
+                   !qsb_carrier_kernel_names[QK_CE][0];
+    for (int i = 0; native10 && i < QK_LC; ++i)
+        native10 = g_qsb_carrier.k[i] != nullptr;
+    if (QSB_NOJIT && native10) g_qsb_carrier.nojit = 1;
+#endif
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
            len, qsb_carrier_cubin_sha256, g_qsb_carrier.nojit ? "no compute_52 JIT" : "root kernels partly compute_52");
 }
