@@ -22,7 +22,7 @@
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #ifndef QSB_GREEN
-#define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
+#define QSB_GREEN 22 /* dukemawex: finish green partition 20 -> 22 SMs on tip 12233735 (HOST_PKSHA=0, GREEN_SHARED=10); host only */
 #endif
 #define QSB_GREEN_SHARED 10
 #ifndef QSB_CODEX_DRAW_20260924_C
