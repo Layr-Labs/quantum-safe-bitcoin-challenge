@@ -1,3 +1,4 @@
+#define QSB_DRAW_TAG_ERC 0x5d7e358du /* inert draw tag; unreferenced */
 #define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
