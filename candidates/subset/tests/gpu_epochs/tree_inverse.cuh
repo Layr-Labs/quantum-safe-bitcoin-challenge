@@ -364,6 +364,57 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #else
 #define QSB_TLM(cond)
 #endif
+#if QSB_WAVE_ROLL
+#if !QSB_TREE_LANEMASK
+#error "QSB_WAVE_ROLL requires the existing wave lane masks"
+#endif
+        /* Exactly the four existing waves, in their existing operand order.
+         * A/B load the first operand; C/D keep the preceding lane product.
+         * The shared products and warp barriers retain their original owners. */
+        #pragma unroll 1
+        for(int stage=0;stage<4;stage++){
+            const int half=8>>stage;
+            const int limit=stage==0?8:16+half;
+            if(lt<limit){
+                int ib;
+                if(stage==0)ib=offset+8+(lt&7);
+                else{
+                    const int prev=offset+32-(32>>stage);
+                    ib=cof?prev+((lt&(2*half-1))^half):prev+half+(lt&(half-1));
+                }
+                if(stage<2){
+                    const int ia=stage==0?offset+(lt&7):cof?offset+(lt^8):l8+(lt&3);
+#if QSB_TREE_ROW128
+                    QTR_LD4(products2,ia,a);
+#else
+                    #pragma unroll
+                    for(int k=0;k<4;k++)a[k]=products[k][ia];
+#endif
+                }else{
+                    #pragma unroll
+                    for(int k=0;k<4;k++)a[k]=r[k];
+                }
+#if QSB_TREE_ROW128
+                QTR_LD4(products2,ib,b);
+#else
+                #pragma unroll
+                for(int k=0;k<4;k++)b[k]=products[k][ib];
+#endif
+                a[4]=b[4]=0;QSB_TREE_MUL(r,a,b);
+                const bool writer=stage==0?lt<8:(unsigned)(lt-16)<(unsigned)half;
+                if(stage<3 && writer){
+                    const int dst=offset+32-(16>>stage)+(lt&(half-1));
+#if QSB_TREE_ROW128
+                    QTR_ST4(products2,dst,r);
+#else
+                    #pragma unroll
+                    for(int k=0;k<4;k++)products[k][dst]=r[k];
+#endif
+                }
+            }
+            if(stage<3)__syncwarp();
+        }
+#else
         // Wave A: P8[j] = x[j]*x[j+8] on lanes j < 8 (lanes 8..31 repeat them, unstored).
         QSB_TLM(lt<8){
 #if QSB_TREE_ROW128
@@ -436,6 +487,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
             b[4]=0;QSB_TREE_MUL(r,r,b);
         }
+#endif /* QSB_WAVE_ROLL */
 #if QSB_ROOT_FILL
         idle.waves_done();   /* QSB_ROOT_FILL: product columns 480..511 are dead from here on (bar.arrive) */
 #endif
