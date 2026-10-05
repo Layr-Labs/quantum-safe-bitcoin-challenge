@@ -5906,6 +5906,7 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #endif
 #if QSB_PK_ON
 #include <atomic>
+#include <cstddef>
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
@@ -5919,14 +5920,18 @@ static const int NB = 2 * QSB_SLOTS;
 static const uint32_t CH = 2;   /* records per claim */
 struct alignas(64) Job {
     std::atomic<uint64_t> ctl{0};
-    std::atomic<uint32_t> done{0};
+    alignas(64) std::atomic<uint32_t> done{0};
     std::atomic<uint32_t> done_candidates{0};
     std::atomic<uint32_t> nhit{0};
-    const uint8_t *plane = nullptr;
+    alignas(64) const uint8_t *plane = nullptr;
     std::atomic<uint32_t> nrec{0};
     uint32_t batch_sz = 0, seq = 0, lt = 0;
     uint32_t hits[64];
 };
+/* Physical separation only: tagged ownership and release/acquire operations stay intact. */
+static_assert(offsetof(Job, done) - offsetof(Job, ctl) >= 64, "claim and completion cache lines");
+static_assert(offsetof(Job, plane) - offsetof(Job, done) >= 64, "completion and immutable descriptor cache lines");
+static_assert(alignof(Job) >= 64 && sizeof(Job) % 64 == 0, "whole Job array separation");
 static Job jobs[NB];
 static uint8_t *planes[NB];
 /* One GPU slot can recycle this device output once its D2H/slot_done completes;
@@ -5938,7 +5943,7 @@ static int ok = 0, mode = 0; /* mode: 2 = SHA-NI, 1 = AVX2, 0 = scalar */
 #define QSB_PK_DMA 1
 #endif
 #ifndef QSB_PK_AUTOTUNE
-#define QSB_PK_AUTOTUNE 1
+#define QSB_PK_AUTOTUNE 0
 #endif
 static int admit_enabled=1, calibrating=0, ec_env_added=0;
 static std::atomic<int> workers_parked{0};
@@ -6006,6 +6011,28 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
+/* Feed the unchanged two SHA-NI chains directly from the original coordinate planes.
+ * Caller guards active lanes before any coordinate load; no scalar W[16] round trip. */
+__attribute__((target("sha,sse4.1"), always_inline)) inline
+static void ni_plane_words(const uint8_t *rec, int lane, int ri, uint32_t prefix,
+                           __m128i &w0, __m128i &w1, __m128i &w2, __m128i &w3) {
+    const uint8_t *p=rec+(size_t)(2*ri)*QSB_PK_LANES*16u+(size_t)lane*16u;
+    const __m128i lo=_mm_loadu_si128((const __m128i *)p);
+    const __m128i hi=_mm_loadu_si128((const __m128i *)(p+(size_t)QSB_PK_LANES*16u));
+    const __m128i hr=_mm_shuffle_epi32(hi,0x1B), lr=_mm_shuffle_epi32(lo,0x1B);
+    w0=_mm_or_si128(_mm_srli_epi32(hr,8),_mm_slli_epi32(_mm_slli_si128(hr,4),24));
+    w0=_mm_or_si128(w0,_mm_cvtsi32_si128((int)(prefix<<24)));
+    w1=_mm_or_si128(_mm_srli_epi32(lr,8),_mm_slli_epi32(_mm_alignr_epi8(lr,hr,12),24));
+    w2=_mm_setr_epi32((int)(((uint32_t)_mm_cvtsi128_si32(lo)<<24)|0x00800000u),0,0,0);
+    w3=_mm_setr_epi32(0,0,0,264);
+}
+__attribute__((target("sha,sse4.1"), noinline))
+static void hash2_plane_ni(const uint8_t *rec, int lane, uint32_t y, uint32_t *h0, uint32_t *h1) {
+    __m128i a0,a1,a2,a3,b0,b1,b2,b3;
+    ni_plane_words(rec,lane,0,prefix_of(y,0),a0,a1,a2,a3);
+    ni_plane_words(rec,lane,1,prefix_of(y,1),b0,b1,b2,b3);
+    qcg_sha::shani_compress2_vec<true>(h0,h1,a0,a1,a2,a3,b0,b1,b2,b3);
+}
 static void hash_record(Job &J, uint32_t j) {
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
@@ -6018,18 +6045,20 @@ static void hash_record(Job &J, uint32_t j) {
             const uint32_t y = yp[l];
             h0[t] = h1[t] = ~0u;
             if (y != 0u && base + (uint32_t)l < J.batch_sz) {
-                uint64_t x0[4], x1[4];
-                lane_keys(rec, l, x0, x1);
-                message(m0, x0, prefix_of(y, 0));
-                message(m1, x1, prefix_of(y, 1));
                 live |= 1u << t;
                 if (mode == 2) {
-                    hash2_ni(m0, m1, &h0[t], &h1[t]);
-                } else if (mode == 0) {
-                    uint32_t s0[8], s1[8];
-                    memcpy(s0, qcg_sha::IV256, 32); memcpy(s1, qcg_sha::IV256, 32);
-                    qcg_sha::sha_compress_ref(s0, m0); qcg_sha::sha_compress_ref(s1, m1);
-                    h0[t] = s0[0]; h1[t] = s1[0];
+                    hash2_plane_ni(rec, l, y, &h0[t], &h1[t]);
+                } else {
+                    uint64_t x0[4], x1[4];
+                    lane_keys(rec, l, x0, x1);
+                    message(m0, x0, prefix_of(y, 0));
+                    message(m1, x1, prefix_of(y, 1));
+                    if (mode == 0) {
+                        uint32_t s0[8], s1[8];
+                        memcpy(s0, qcg_sha::IV256, 32); memcpy(s1, qcg_sha::IV256, 32);
+                        qcg_sha::sha_compress_ref(s0, m0); qcg_sha::sha_compress_ref(s1, m1);
+                        h0[t] = s0[0]; h1[t] = s1[0];
+                    }
                 }
             } else {
                 memset(m0, 0, sizeof m0); memset(m1, 0, sizeof m1);
@@ -6055,11 +6084,14 @@ static int help(int b) {
     for (;;) {
         uint64_t c = J.ctl.load(std::memory_order_acquire);
         uint32_t i, e, nr;
+        unsigned contention = 0;
         for (;;) {
             i = (uint32_t)c;
             nr = J.nrec.load(std::memory_order_acquire);
             if (i >= nr) return any;
             if (J.ctl.compare_exchange_weak(c, c + CH, std::memory_order_acq_rel, std::memory_order_acquire)) break;
+            /* Bound the failed-claim burst without skipping any tagged reload. */
+            if (++contention == 4) { __builtin_ia32_pause(); contention = 0; }
         }
         e = i + CH < nr ? i + CH : nr;
         uint32_t finished=0;
