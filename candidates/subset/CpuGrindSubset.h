@@ -186,6 +186,25 @@
 #if QSB_CPU_FOLD4 && !QSB_CPU_FOLD3
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
+/* Independent host-only batch profile, motivated by cefika's ended PR3502.
+ * Mixed worker batches amortize steady inversions at the cost of larger live
+ * buffers. Worker parity is not a physical-core/sibling assignment. 0 restores
+ * the original default and worker selection. Explicit valid run-time overrides
+ * continue to select the same batch for every worker. */
+#ifndef QSB_CPU_MIXED_BATCH
+#define QSB_CPU_MIXED_BATCH 1
+#endif
+#if QSB_CPU_MIXED_BATCH
+#ifndef QSB_CPU_BATCH
+#define QSB_CPU_BATCH 2048
+#endif
+#ifndef QSB_CPU_BATCH_ODD
+#define QSB_CPU_BATCH_ODD 4096
+#endif
+static_assert(QSB_CPU_BATCH_ODD == 0 || (QSB_CPU_BATCH_ODD % 32 == 0 &&
+              QSB_CPU_BATCH_ODD >= 32 && QSB_CPU_BATCH_ODD <= 8192),
+              "QSB_CPU_BATCH_ODD: 0 or a multiple of 32, 32..8192");
+#endif
 #ifndef QSB_CPU_BATCH
 #define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
 #endif
@@ -3339,8 +3358,14 @@ static void worker(Ctx *c, int tid) {
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
+#if QSB_CPU_MIXED_BATCH
+    const int B0 = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;
+    const bool batch_rt = QSB_CPU_BATCH_AUTO && strcmp(c->batch_why, "QSB_CPU_BATCH_RT") == 0;
+    const int B = (QSB_CPU_BATCH_ODD && (tid & 1) && !batch_rt) ? QSB_CPU_BATCH_ODD : B0;
+#else
     const int B = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;   /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
                                                                      * run-time value as in 86c643ae; 0: the compile-time constant as before */
+#endif
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
