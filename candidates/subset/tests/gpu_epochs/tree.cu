@@ -1135,8 +1135,16 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_GATE_FMA_RT_AFTER_S
 #define QSB_GATE_FMA_RT_AFTER_S 120
 #endif
+/* Independent host-only rate-policy experiment; both gate forms remain in the existing image. */
+#ifndef QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RELEASE95 1
+#endif
 #ifndef QSB_GATE_FMA_RT_RATIO_PCT
+#if QSB_GATE_FMA_RT_RELEASE95
+#define QSB_GATE_FMA_RT_RATIO_PCT 95
+#else
 #define QSB_GATE_FMA_RT_RATIO_PCT 90
+#endif
 #endif
 #ifndef QSB_GATE_FMA_RT_FORCE_S
 #define QSB_GATE_FMA_RT_FORCE_S 0
