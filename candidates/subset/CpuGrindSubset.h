@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 1536         /* 10-05: 1536 (rank-0 siblings) with QSB_CPU_BATCH_SIB 2048 (rank-1): 0.375 + 0.5 MB of EC state per 1 MB L2; was 1024 */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -246,7 +246,7 @@
 #define QSB_CPU_CFOLD 1            /* 8-lane path: C folded into the top window's table; the final step is one addition (-2C) */
 #endif
 #ifndef QSB_CPU_PFD1
-#define QSB_CPU_PFD1 8             /* prefetch distance of the first window's loop (window 0 loads), in groups */
+#define QSB_CPU_PFD1 3             /* prefetch distance of the first window's loop (window 0 loads), in groups */
 #endif
 #ifndef QSB_CPU_PFD
 #define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
@@ -297,6 +297,17 @@
 #ifndef QSB_CPU_BATCH_AUTO
 #define QSB_CPU_BATCH_AUTO 1
 #endif
+/* QSB_CPU_BATCH_SIB (10-05; cefika's QSB_CPU_BATCH_ODD idea, e6825eb2, ported to QSB_CPU_PIN_WORKERS): when the shared-core
+ * batch (QSB_CPU_BATCH) is in use and the workers are pinned one CPU per physical core first, the workers on each core's second
+ * SMT sibling (pin rank >= 1, i.e. tid mod |pin_cpus| >= number of cores) use this batch; the rank-0 workers keep the shared-core
+ * batch, so one core holds 0.25 + 0.5 MB of EC state in its 1 MB L2. Unpinned lanes: odd workers, as in e6825eb2. Each worker
+ * owns its batch buffers and walks its own contiguous range in order, so only the grouping of its own candidates changes: same
+ * candidates, same order, same records. 0: every worker uses the chosen batch, as before. */
+#ifndef QSB_CPU_BATCH_SIB
+#define QSB_CPU_BATCH_SIB 2048
+#endif
+static_assert(QSB_CPU_BATCH_SIB == 0 || (QSB_CPU_BATCH_SIB % 32 == 0 && QSB_CPU_BATCH_SIB >= 32 && QSB_CPU_BATCH_SIB <= 8192),
+              "QSB_CPU_BATCH_SIB: 0 or a multiple of 32, 32..8192");
 #ifndef QSB_CPU_BATCH_SOLO
 #define QSB_CPU_BATCH_SOLO 4096
 #endif
@@ -578,6 +589,12 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #ifndef QSB_CPU_FOLD_PAR
 #define QSB_CPU_FOLD_PAR 1
 #endif
+/* QSB_CPU_PIN_WORKERS: bind each co-grinder worker to one logical CPU from
+ * the worker mask. Order one CPU per physical core first, then SMT siblings.
+ * Host-only: no carrier knob and no candidate/search-order change. */
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1
+#endif
 /* QSB_CPU_TOUCH_FUSE (default 0 = the full first touch): a 9- or 10-window table keeps the sampled first touch (1 region in
  * 32) as its huge-page gate and skips the full pass, so the build's own writes fault the rest of the table in while other
  * threads run additions; the huge-page fraction is measured again over the whole table after the build and printed (and used
@@ -586,7 +603,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  * ownership of freshly faulted lines), each build thread ending with a store fence. Same table entries; table_check and the
  * fixed-work hit set are the gates. Both are host-only start-up items, priced by the start-up timeline job. */
 #ifndef QSB_CPU_TOUCH_FUSE
-#define QSB_CPU_TOUCH_FUSE 0
+#define QSB_CPU_TOUCH_FUSE 1   /* 10-05: on, as in dukemawex's ranked lane 01f716b5 (crown lane + this switch) */
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
@@ -2678,6 +2695,8 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+    std::vector<int> pin_cpus;      /* QSB_CPU_PIN_WORKERS: one logical CPU per worker */
+    int pin_ncores = 0;             /* QSB_CPU_BATCH_SIB: number of physical cores in pin_cpus (rank-0 entries come first) */
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3335,12 +3354,22 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
-    const int B = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;   /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
+    const int B0 = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;  /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
                                                                      * run-time value as in 86c643ae; 0: the compile-time constant as before */
+    const bool sib = !c->pin_cpus.empty() ? ((int)((size_t)tid % c->pin_cpus.size()) >= c->pin_ncores && c->pin_ncores > 0)
+                                          : (tid & 1) != 0;     /* QSB_CPU_BATCH_SIB: second SMT sibling of a pinned core (odd tid unpinned) */
+    const int B = (QSB_CPU_BATCH_SIB && B0 == QSB_CPU_BATCH && sib) ? QSB_CPU_BATCH_SIB : B0;
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
@@ -4078,6 +4107,46 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+                c->pin_ncores = (int)cores.size();
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
