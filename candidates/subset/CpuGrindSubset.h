@@ -136,6 +136,10 @@
 #include <stdlib.h>
 #include <math.h>
 #include <new>
+#include "CoreWorkers.h"
+#ifndef QSB_CPU_CORE_ONLY
+#define QSB_CPU_CORE_ONLY 1
+#endif
 #ifndef QSB_CPU_VEC
 #define QSB_CPU_VEC 1              /* 8-lane AVX-512 IFMA field arithmetic when the host CPU has it */
 #endif
@@ -3933,6 +3937,36 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
         if (rsv_core_mask(c->vec && !getenv("QSB_CPU_NOPIN"), &m)) { work_cpus = m; work_mask = true; }
     }
 #endif
+    // Build the table with the original parallelism and mask. The smaller
+    // physical-core plan applies only after table construction completes.
+    const int build_nth = nth;
+    std::vector<int> core_workers;
+#if defined(CPU_COUNT) && QSB_CPU_CORE_ONLY
+    if (c->vec && !getenv("QSB_CPU_NOPIN")) {
+        cpu_set_t allowed; CPU_ZERO(&allowed);
+        if (work_mask) allowed = work_cpus;
+        else if (sched_getaffinity(0, sizeof allowed, &allowed) != 0) CPU_ZERO(&allowed);
+        std::vector<int> ids; std::vector<std::string> lists; bool ok = true;
+        for (int cpu=0; cpu<CPU_SETSIZE; cpu++) if (CPU_ISSET(cpu,&allowed)) {
+            char path[128], list[8192];
+            snprintf(path,sizeof path,"/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list",cpu);
+            FILE *f=fopen(path,"r");
+            if (!f) {ok=false;break;}
+            const bool read=fgets(list,sizeof list,f)!=nullptr;
+            const bool complete=read && (strchr(list,'\n')!=nullptr || feof(f));
+            fclose(f);
+            if (!complete) {ok=false;break;}
+            ids.push_back(cpu);lists.emplace_back(list);
+        }
+        std::vector<int> selected;
+        if (ok && qsb_core::plan(ids,lists,CPU_SETSIZE,selected) && selected.size()<ids.size()) {
+            if ((int)selected.size()>nth) selected.resize((size_t)nth);
+            core_workers=std::move(selected);
+            nth=(int)core_workers.size();c->nthreads=nth;
+            printf("  CPU core plan: %d physical representatives, %d original workers; table builders unchanged\n",nth,build_nth);
+        }
+    }
+#endif
 #ifdef QSB_CPU_DEVBENCH
     if (const char *e = getenv("QSB_CPU_DEVCAND")) c->dev_limit = strtoull(e, nullptr, 10);
     c->dev_live = nth;
@@ -3944,6 +3978,9 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #ifdef CPU_COUNT
         cpu_set_t wcs; CPU_ZERO(&wcs);
         if (work_mask) wcs = work_cpus; else if (sched_getaffinity(0, sizeof wcs, &wcs) != 0) CPU_ZERO(&wcs);
+        if (!core_workers.empty()) {
+            CPU_ZERO(&wcs); for (int cpu:core_workers) CPU_SET(cpu,&wcs);
+        }
         shared = core_sharing(wcs, c->nthreads);
 #endif
         c->batch = batch_choose(c->nthreads, shared, c->batch_why, sizeof c->batch_why);
@@ -3987,17 +4024,17 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
     fe_from_le32(c->cx, dp->u2r_x); fe_from_le32(c->cy, dp->u2r_y);
     EC_POINT_free(A); BN_free(nri); BN_free(ax); BN_free(ay); BN_CTX_free(bctx); EC_GROUP_free(grp);
 #ifdef CPU_COUNT
-    std::thread([c, fax, fay, nth, work_mask, work_cpus, ncpu, nwin]() {
+    std::thread([c, fax, fay, nth, build_nth, core_workers, work_mask, work_cpus, ncpu, nwin]() mutable {
         if (work_mask) sched_setaffinity(0, sizeof work_cpus, &work_cpus);   /* table build + workers inherit */
 #else
-    std::thread([c, fax, fay, nth, ncpu, nwin]() {
+    std::thread([c, fax, fay, nth, build_nth, core_workers, ncpu, nwin]() mutable {
 #endif
 #ifdef SCHED_IDLE
         struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
         struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
         double hp; char note[160];
-        if (!table_setup(*c, nth, hp, note, sizeof note)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+        if (!table_setup(*c, build_nth, hp, note, sizeof note)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         char hps[16]; if (hp < 0) snprintf(hps, sizeof hps, "n/a"); else snprintf(hps, sizeof hps, "%.1f%%", 100.0 * hp);
 #if QSB_CPU_FENCE
@@ -4012,24 +4049,24 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
                c->g.nw, c->g.sgn ? "signed" : "unsigned", c->g.wid[c->g.nw - 1], c->g.wid[0], c->g.total * sizeof(pt) / 1048576.0,
                hps, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec), note);
         fflush(stdout);
-        build_table(*c, fax, fay, nth);
+        build_table(*c, fax, fay, build_nth);
         bool tab_ok = table_check(*c);
         if (!tab_ok && c->g.nw == 9 && !getenv("QSB_CPU_NW")) {    /* 9-window table failed its check: 10 (or more) */
             table_free(*c);
-            if (!table_setup(*c, nth, hp, note, sizeof note, 10)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+            if (!table_setup(*c, build_nth, hp, note, sizeof note, 10)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
             printf("  CPU co-grind: 9-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
                    c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
             fflush(stdout);
-            build_table(*c, fax, fay, nth);
+            build_table(*c, fax, fay, build_nth);
             tab_ok = table_check(*c);
         }
         if (!tab_ok && c->g.nw == 10 && !getenv("QSB_CPU_NW")) {   /* 10-window table failed its check: 11 (or 12) */
             table_free(*c);
-            if (!table_setup(*c, nth, hp, note, sizeof note, 11)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
+            if (!table_setup(*c, build_nth, hp, note, sizeof note, 11)) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table memory)\n"); fflush(stdout); return; }
             printf("  CPU co-grind: 10-window table check failed; table %d windows, %.0f MiB, huge pages %.1f%%%s\n",
                    c->g.nw, c->g.total * sizeof(pt) / 1048576.0, 100.0 * hp, note);
             fflush(stdout);
-            build_table(*c, fax, fay, nth);
+            build_table(*c, fax, fay, build_nth);
             tab_ok = table_check(*c);
         }
         if (!tab_ok) { QCPU_FENCE_OFF(); printf("  CPU co-grind: off (table check failed)\n"); fflush(stdout); table_free(*c); return; }
@@ -4079,8 +4116,29 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
 #endif
+#ifdef CPU_COUNT
+        if (!core_workers.empty()) {
+            cpu_set_t steady; CPU_ZERO(&steady);
+            for (int cpu:core_workers) CPU_SET(cpu,&steady);
+            if (sched_setaffinity(0,sizeof steady,&steady)!=0) {
+                // No no-SMT assumption after a failed mask installation.
+                core_workers.clear();c->batch=QSB_CPU_BATCH;
+                snprintf(c->batch_why,sizeof c->batch_why,"core mask failed; conservative batch");
+                fprintf(stderr,"WARN: CPU core mask unavailable; original mask, batch %d\n",c->batch);
+            }
+        }
+#endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
-        for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
+        for (int t = 0; t < nth; t++) std::thread([c,t,core_workers] {
+#ifdef CPU_COUNT
+            if (!core_workers.empty()) {
+                cpu_set_t one;CPU_ZERO(&one);CPU_SET(core_workers[(size_t)t],&one);
+                if (sched_setaffinity(0,sizeof one,&one)!=0)
+                    fprintf(stderr,"WARN: CPU worker %d keeps inherited physical-core mask\n",t);
+            }
+#endif
+            worker(c,t);
+        }).detach();
     }).detach();
     g_ctx = c;
 #ifdef QSB_CPU_DEVBENCH
