@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+/* Fixed-IV SHA256 H0 of TWO independent 33-byte compressed public keys.
+ * Derived from the literal qcg_sha::shani_compress2 schedule in DMA/source.
+ * Inputs are register-packed host-order SHA words, W0..8 vary, W9..14=0,W15=264.
+ * This is one SHA256, not SHA256d. All64 rounds remain; six zero schedule operations are omitted.
+ * Call only after sha + sse4.1 + ssse3 runtime ISA checks. No global ISA flags.
+ */
+#include "cg_sha.h"
+namespace qsb_pksha_direct {
+using qcg_sha::IV256;
+using qcg_sha::K256;
+struct message_registers { __m128i m0, m1, m2; };
+#ifndef QSB_PK_NI_BYTEPACK
+#define QSB_PK_NI_BYTEPACK 1
+#endif
+#if QSB_PK_NI_BYTEPACK != 0 && QSB_PK_NI_BYTEPACK != 1
+#error "QSB_PK_NI_BYTEPACK must be zero or one"
+#endif
+static QSB_SHA_NI message_registers pack(const uint8_t *low, const uint8_t *high, uint32_t prefix) {
+#if QSB_PK_NI_BYTEPACK
+    /* Plane bytes are little endian. Each four-byte SHA word below is host
+     * order, matching literal W0..8. Reads occur only after the existing
+     * valid-Y and batch-tail guard in hash_record_shani_direct. */
+    const __m128i H = _mm_loadu_si128((const __m128i *)high);
+    const __m128i L = _mm_loadu_si128((const __m128i *)low);
+    const __m128i mask = _mm_setr_epi8(13,14,15,-128,9,10,11,12,5,6,7,8,1,2,3,4);
+    const __m128i tail = _mm_setr_epi8(-128,-128,-128,0,-128,-128,-128,-128,-128,-128,-128,-128,-128,-128,-128,-128);
+    const int boundary = _mm_extract_epi8(H, 0);
+    message_registers r;
+    r.m0 = _mm_insert_epi8(_mm_shuffle_epi8(H, mask), (int)prefix, 3);
+    r.m1 = _mm_insert_epi8(_mm_shuffle_epi8(L, mask), boundary, 3);
+    r.m2 = _mm_or_si128(_mm_shuffle_epi8(L, tail), _mm_set_epi32(0,0,0,0x00800000));
+    return r;
+#else
+    const __m128i H = _mm_shuffle_epi32(_mm_loadu_si128((const __m128i *)high), 0x1b);
+    const __m128i L = _mm_shuffle_epi32(_mm_loadu_si128((const __m128i *)low), 0x1b);
+    message_registers r;
+    r.m0 = _mm_or_si128(_mm_srli_epi32(H, 8), _mm_slli_epi32(_mm_slli_si128(H, 4), 24));
+    r.m0 = _mm_insert_epi8(r.m0, (int)prefix, 3);
+    r.m1 = _mm_or_si128(_mm_srli_epi32(L, 8), _mm_slli_epi32(_mm_alignr_epi8(L, H, 12), 24));
+    r.m2 = _mm_or_si128(_mm_slli_epi32(_mm_srli_si128(L, 12), 24), _mm_set_epi32(0, 0, 0, 0x00800000));
+    return r;
+#endif
+}
+static QSB_SHA_NI void pubkey_h0_pair(__m128i MA0, __m128i MA1, __m128i MA2,
+    __m128i MB0, __m128i MB1, __m128i MB2, uint32_t *hA, uint32_t *hB) {
+    // Low-to-high lanes are F,E,B,A and H,G,D,C, exactly shani_load_state(IV).
+    __m128i A0 = _mm_set_epi32((int)IV256[0], (int)IV256[1], (int)IV256[4], (int)IV256[5]);
+    __m128i A1 = _mm_set_epi32((int)IV256[2], (int)IV256[3], (int)IV256[6], (int)IV256[7]);
+    __m128i B0 = A0, B1 = A1;
+    __m128i MA3, MB3, mA, mB, K;
+    MA3 = MB3 = _mm_set_epi32(264, 0, 0, 0);
+    /* group g: rounds 4g..4g+3 on message vector Mc; Mn = next (msg2 target), Mp = previous
+       (alignr source), Mq = the vector msg1 updates */
+#define SHANI2_ROUNDS(g, McA, McB)                                                     \
+    K = _mm_loadu_si128((const __m128i *)(K256 + 4 * (g)));                            \
+    mA = _mm_add_epi32(McA, K); mB = _mm_add_epi32(McB, K);                            \
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+#define SHANI2_TAIL()                                                                  \
+    mA = _mm_shuffle_epi32(mA, 0x0E); mB = _mm_shuffle_epi32(mB, 0x0E);                \
+    A0 = _mm_sha256rnds2_epu32(A0, A1, mA); B0 = _mm_sha256rnds2_epu32(B0, B1, mB);
+#define SHANI2_MSG2(McA, McB, MpA, MpB, MnA, MnB)                                      \
+    MnA = _mm_sha256msg2_epu32(_mm_add_epi32(MnA, _mm_alignr_epi8(McA, MpA, 4)), McA);  \
+    MnB = _mm_sha256msg2_epu32(_mm_add_epi32(MnB, _mm_alignr_epi8(McB, MpB, 4)), McB);
+#define SHANI2_MSG1(MqA, MqB, McA, McB)                                                \
+    MqA = _mm_sha256msg1_epu32(MqA, McA); MqB = _mm_sha256msg1_epu32(MqB, McB);
+    /* g = 0 */  SHANI2_ROUNDS(0, MA0, MB0) SHANI2_TAIL()
+    /* g = 1 */  SHANI2_ROUNDS(1, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 2 */  SHANI2_ROUNDS(2, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 3: W12..15 are identical constants for both keys. */
+    mA = mB = _mm_set_epi32((int)(K256[15] + 264u), (int)K256[14], (int)K256[13], (int)K256[12]);
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+    /* W9..W12 are zero: ALIGNR(M3,M2,4)=0; MSG1(M2,M3) is identity.
+     * Retain both MSG2 and the original round-tail ordering. */
+    MA0 = _mm_sha256msg2_epu32(MA0, MA3);
+    MB0 = _mm_sha256msg2_epu32(MB0, MB3);
+    SHANI2_TAIL()
+    /* g = 4 */  SHANI2_ROUNDS(4, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 5 */  SHANI2_ROUNDS(5, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 6 */  SHANI2_ROUNDS(6, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 7 */  SHANI2_ROUNDS(7, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 8 */  SHANI2_ROUNDS(8, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 9 */  SHANI2_ROUNDS(9, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 10 */ SHANI2_ROUNDS(10, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 11 */ SHANI2_ROUNDS(11, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 12 */ SHANI2_ROUNDS(12, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 13 */ SHANI2_ROUNDS(13, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL()
+    /* g = 14 */ SHANI2_ROUNDS(14, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL()
+    /* g = 15 */ SHANI2_ROUNDS(15, MA3, MB3) SHANI2_TAIL()
+#undef SHANI2_ROUNDS
+#undef SHANI2_TAIL
+#undef SHANI2_MSG2
+#undef SHANI2_MSG1
+    // After all64 rounds, high lane3 of A0/B0 is A64. Only H0 is consumed.
+    *hA = (uint32_t)_mm_extract_epi32(A0, 3) + IV256[0];
+    *hB = (uint32_t)_mm_extract_epi32(B0, 3) + IV256[0];
+}
+} // namespace qsb_pksha_direct

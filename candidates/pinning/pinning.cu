@@ -6,6 +6,21 @@
 #ifndef QSB_FIN_LEA
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
+#ifndef QSB_FIN_FK_LEA
+#define QSB_FIN_FK_LEA 1 /* pinF: the QSB_FIN_LEA rotate-add also in the IV-folded pubkey rounds 2-3 (QSB_RL_FK, sha_pinsha.cuh; exact); 0 = off */
+#endif
+#ifndef QSB_FIN_R63_LEA
+#define QSB_FIN_R63_LEA 1 /* pinF: round-63 Sigma rotations as LEA.HI rotate-adds in the pubkey H0 (sha_pinsha.cuh; exact); 0 = off */
+#endif
+#ifndef QSB_FIN_EXIT1
+#define QSB_FIN_EXIT1 1 /* pinF: finish prologue with one exit test (idx >= batch_size) and the launch block size 128 as a literal (exact); 0 = off */
+#endif
+#ifndef QSB_FIN_PK_LAZY
+#define QSB_FIN_PK_LAZY 1 /* pinF: finish forms the host-offload record address only inside its two store branches (exact); 0 = off */
+#endif
+#ifndef QSB_FIN_GRIDROW
+#define QSB_FIN_GRIDROW 1 /* pinF: finish weighted-root row = gridDim.x + blockIdx.x (= ceil(batch/128) + block at every launch site; exact); 0 = off */
+#endif
 /* l2state variant fkF20c8 + split retry */
 #define QSB_SUBPIPE 131072
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
@@ -4074,10 +4089,28 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
      * threads, so blockIdx.x*128 < batch_size holds for every launched block and the exit
      * never fired. With that bound, idx < batch_size <=> threadIdx.x < batch_size-128*blockIdx.x
      * (no wrap: 0 < batch_size-128*blockIdx.x <= batch_size). */
+#if QSB_FIN_EXIT1
+    /* QSB_FIN_EXIT1 (finish only; prepare keeps the lines below): one exit test. Every finish
+     * launch has blockDim.x == QSB_S2_THREADS (all launch sites pass dim3(QSB_S2_THREADS); the
+     * block-major state address blockIdx.x*4*QSB_TREE_N + threadIdx.x and the per-block roots
+     * already rely on it), so idx is the same value. The block test blockIdx.x*blockDim.x >=
+     * batch_size implies idx >= batch_size (idx = that product + threadIdx.x, no wrap: idx <
+     * 2^31), so the exit set {idx >= batch_size} is unchanged and every surviving lane is active. */
+    int idx, active;
+    if (STAGE != 0) {
+        idx = (int)(blockIdx.x * (uint32_t)QSB_S2_THREADS + threadIdx.x);
+        if (idx >= batch_size) return;
+        active = 1;
+    } else {
+        idx = blockIdx.x * blockDim.x + threadIdx.x;
+        active = threadIdx.x < (uint32_t)batch_size - blockIdx.x * (uint32_t)QSB_S0_THREADS;
+    }
+#else
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (STAGE != 0 && blockIdx.x * blockDim.x >= batch_size) return;
     int active = STAGE != 0 ? idx < batch_size
                             : threadIdx.x < (uint32_t)batch_size - blockIdx.x * (uint32_t)QSB_S0_THREADS;
+#endif
 #else
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (blockIdx.x * blockDim.x >= batch_size) return;
@@ -4281,7 +4314,13 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     } else {
 
     if(!active)return;
-#if QSB_PK_ON
+#if QSB_PK_ON && QSB_FIN_PK_LAZY
+    /* QSB_FIN_PK_LAZY: the block-uniform offload test is kept as a flag; the record address is
+     * formed only inside the two branches that store to it (QSB_PK_REC_AT), so lanes of the
+     * other blocks no longer carry it through the recovery. The same pointer, the same tests. */
+    const bool pk_blk=FAST_TAIL && d_gt && (blockIdx.x&(QSB_HOST_PKSHA-1u))==QSB_HOST_PKSHA-1u;
+#define QSB_PK_REC_AT (d_gt+(size_t)((QSB_HIT_BASE/QSB_PK_LANES+blockIdx.x)/QSB_HOST_PKSHA)*QSB_PK_REC)
+#elif QSB_PK_ON
     uint8_t *const pk_rec=(FAST_TAIL && d_gt &&
                            (blockIdx.x&(QSB_HOST_PKSHA-1u))==QSB_HOST_PKSHA-1u)
         ? d_gt+(size_t)((QSB_HIT_BASE/QSB_PK_LANES+blockIdx.x)/QSB_HOST_PKSHA)*QSB_PK_REC : nullptr;
@@ -4311,7 +4350,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
-#if QSB_PK_ON
+#if QSB_PK_ON && QSB_FIN_PK_LAZY
+        if(pk_blk)((uint32_t *)(QSB_PK_REC_AT+64u*QSB_PK_LANES))[threadIdx.x]=0u;
+#elif QSB_PK_ON
         if(pk_rec)((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=0u;
 #endif
         return;
@@ -4327,7 +4368,15 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
          * batch_size+QSB_TREE_N-1 < 2^32 and root_count+blockIdx.x < 2^24+2^31: the 32-bit sums
          * equal the size_t ones, and the record address is one IMAD.WIDE.U32 in place of the
          * 64-bit add, shift, add and LEA pair on the ALU pipe. */
+#if QSB_FIN_GRIDROW
+        /* QSB_FIN_GRIDROW: every finish launch has gridDim.x = ceil(batch_size/QSB_S2_THREADS)
+         * blocks (launch sites: blocks2 in launch_pinning_pipeline, blocks = ceil(n/QSB_TREE_N) in the
+         * sub-batch pipeline and its graph update) and QSB_S2_THREADS == QSB_TREE_N (static_assert),
+         * so the root count (batch_size+QSB_TREE_N-1)/QSB_TREE_N is gridDim.x: the same row. */
+        const uint32_t root_row=gridDim.x+blockIdx.x;
+#else
         const uint32_t root_row=((uint32_t)batch_size+QSB_TREE_N-1u)/QSB_TREE_N+blockIdx.x;
+#endif
         (void)root_count;
         ulonglong2 b01=r2[2ull*root_row],b23=r2[2ull*root_row+1];
 #else
@@ -4364,7 +4413,12 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
 
 #if QSB_PK_ON
+#if QSB_FIN_PK_LAZY
+    if(pk_blk){   /* host hashes this block: park x(P+R), x(P-R) and the parity word */
+        uint8_t *const pk_rec=QSB_PK_REC_AT;
+#else
     if(pk_rec){   /* host hashes this block: park x(P+R), x(P-R) and the parity word */
+#endif
         ulonglong2 *px=(ulonglong2 *)pk_rec+threadIdx.x;
         px[0]=make_ulonglong2(q1x[0],q1x[1]);
         px[QSB_PK_LANES]=make_ulonglong2(q1x[2],q1x[3]);
@@ -5823,10 +5877,9 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT *R = EC_POINT_dup(Ru2, grp);
     int ok = 0;
     if (z && u1 && P && Q && R &&
-        BN_mod_mul(u1, z, nri, order, ctx) &&
-        EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
+        BN_mod_mul(u1, z, nri, order, ctx)) {
         if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
+        if (EC_POINT_mul(grp, Q, u1, R, BN_value_one(), ctx)) {
             BIGNUM *qx = BN_new(), *qy = BN_new();
             if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
                 uint8_t pub[33], xb[32];
@@ -6006,7 +6059,50 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
+/* Private CPU-only fixed-message NI screen; zero retains literal b59 record service. */
+#ifndef QSB_PK_SHANI_DIRECT
+#define QSB_PK_SHANI_DIRECT 1
+#endif
+#if QSB_PK_SHANI_DIRECT != 0 && QSB_PK_SHANI_DIRECT != 1
+#error "QSB_PK_SHANI_DIRECT must be zero or one"
+#endif
+#if QSB_PK_SHANI_DIRECT
+#include "pksha_shani_direct.h"
+static bool shani_direct_isa = false;
+__attribute__((target("sha,ssse3,sse4.1"), noinline))
+static void hash_record_shani_direct(Job &J, uint32_t j) {
+    const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
+    const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
+    const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
+    for (int l0 = 0; l0 < QSB_PK_LANES; l0 += 8) {
+        uint32_t h0[8], h1[8], live = 0;
+        for (int t = 0; t < 8; t++) {
+            const int l = l0 + t;
+            const uint32_t y = yp[l];
+            h0[t] = h1[t] = ~0u;
+            if (y != 0u && base + (uint32_t)l < J.batch_sz) {
+                const uint8_t *lane = rec + 16u * (uint32_t)l;
+                const auto a = qsb_pksha_direct::pack(lane, lane + 16u * QSB_PK_LANES, prefix_of(y, 0));
+                const auto b = qsb_pksha_direct::pack(lane + 32u * QSB_PK_LANES, lane + 48u * QSB_PK_LANES, prefix_of(y, 1));
+                live |= 1u << t;
+                qsb_pksha_direct::pubkey_h0_pair(a.m0, a.m1, a.m2, b.m0, b.m1, b.m2, &h0[t], &h1[t]);
+            }
+        }
+        if (!live) continue;
+        for (int t = 0; t < 8; t++) {
+            if (!((live >> t) & 1u)) continue;
+            const uint32_t idx = base + (uint32_t)(l0 + t);
+            /* the GPU tests recid 0 first and stops at its hit */
+            if (h0_hit(h0[t])) record_hit(J, idx);
+            else if (h0_hit(h1[t])) record_hit(J, idx | (1u << 30));
+        }
+    }
+}
+#endif
 static void hash_record(Job &J, uint32_t j) {
+#if QSB_PK_SHANI_DIRECT
+    if (mode == 2 && shani_direct_isa) { hash_record_shani_direct(J, j); return; }
+#endif
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
     const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
@@ -6130,6 +6226,9 @@ static int start(size_t batch) {
 #endif
     mode = (__builtin_cpu_supports("sha") && __builtin_cpu_supports("sse4.1")) ? 2
          : __builtin_cpu_supports("avx2") ? 1 : 0;
+#if QSB_PK_SHANI_DIRECT
+    shani_direct_isa = __builtin_cpu_supports("sha") && __builtin_cpu_supports("ssse3") && __builtin_cpu_supports("sse4.1");
+#endif
     int ncpu = 0;
     { cpu_set_t cs; CPU_ZERO(&cs); if (sched_getaffinity(0, sizeof cs, &cs) == 0) ncpu = CPU_COUNT(&cs); }
     int nw = ncpu / QSB_PK_WDIV;
@@ -7029,6 +7128,11 @@ int main(int argc, char **argv) {
         !BN_lebin2bn(pp.u2r_y, 32, gate_ry) ||
         !EC_POINT_set_affine_coordinates_GFp(gate_grp, gate_R, gate_rx, gate_ry, gate_ctx)) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
+        return 1;
+    }
+    /* The joint generator-plus-point call uses this problem-invariant table. */
+    if (EC_GROUP_precompute_mult(gate_grp, gate_ctx) != 1) {
+        fprintf(stderr, "Failed to precompute the exact host publication gate\n");
         return 1;
     }
 #endif

@@ -532,7 +532,37 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #ifndef QSB_FIN_W8S0
 #define QSB_FIN_W8S0 1
 #endif
-#if QSB_SHA_FMA_ADD
+/* QSB_FIN_R63_LEA (default 0 = unchanged; needs QSB_FIN_R63_SUM): the a-output of round 63 as
+ * r0 = a + W63 + (K63 + IV0), r1 = r0 + ROR6(QSB_S1P(f)), r2 = Ch + ROR2(QSB_S0P(b)), r1 + r2 + Maj:
+ * the two Sigmas' outer rotations ride in two LEA.HI rotate-adds (QSB_FIN_LEA's qsb_add_ror6 /
+ * qsb_add_ror2) instead of two SHF; four adds instead of three IADD3 plus two SHF (one ALU-pipe
+ * instruction fewer per hash). Exact: S1(f) = ROR6(QSB_S1P(f)), S0(b) = ROR2(QSB_S0P(b)) for
+ * every word, and the same seven addends are summed mod 2^32, so H0 is bit-identical. */
+#ifndef QSB_FIN_R63_LEA
+#define QSB_FIN_R63_LEA 0
+#endif
+/* QSB_FIN_FK_LEA (default 0 = unchanged): the QSB_FIN_LEA rotate-add also in the two IV-folded
+ * rounds 2 and 3 (QSB_RL_FK), which QSB_FIN_LEA did not reach: t1 + S1(e) and t1 + S0(a) become
+ * qsb_add_ror6(t1, QSB_S1P(e)) and qsb_add_ror2(t1, QSB_S0P(a)), one LEA.HI each in place of the
+ * Sigma's outer SHF plus a multiply-pipe IMAD, with the term order of QSB_RL_T1 under QSB_FIN_LEA
+ * (W + KH, + Ch, + S1). Exact: S1(e) = ROR6(QSB_S1P(e)) and S0(a) = ROR2(QSB_S0P(a)) for every
+ * word (the QSB_SHA_LEA identities), and the sums are the same addends mod 2^32. */
+#ifndef QSB_FIN_FK_LEA
+#define QSB_FIN_FK_LEA 0
+#endif
+#if QSB_FIN_FK_LEA && !QSB_FIN_LEA
+#error "QSB_FIN_FK_LEA needs QSB_FIN_LEA (qsb_add_ror6/qsb_add_ror2 forms of QSB_FADD_S1/S0)"
+#endif
+#if QSB_SHA_FMA_ADD && QSB_FIN_FK_LEA
+/* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h (rotate-add Sigmas). */
+#define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
+    t1 = qsb_fadd((W), one, (KH)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = QSB_FADD_S1(t1, e); \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = QSB_FADD_S0(t1, a); \
+    h  = qsb_fadd(t2, one, Maj(a,b,c));
+#elif QSB_SHA_FMA_ADD
 /* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
 #define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
     t1 = qsb_fadd((W), one, (KH)); \
@@ -670,7 +700,14 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[15] = qsb_fadd(w[15], one, s1(w[13]));
         w[15] = qsb_fadd(w[15], one, w[8]);
         w[15] = qsb_fadd(w[15], one, s0(w[0]));
-#if QSB_FIN_R63_SUM
+#if QSB_FIN_R63_SUM && QSB_FIN_R63_LEA
+        /* QSB_FIN_R63_LEA: S1(f) and S0(b) through their outer rotations fused into two adds
+         * (qsb_add_ror6 / qsb_add_ror2 = one LEA.HI each); the same seven addends mod 2^32. */
+        const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
+        const uint32_t r1 = qsb_add_ror6(r0, QSB_S1P(f));
+        const uint32_t r2 = qsb_add_ror2(Ch(f,g,h), QSB_S0P(b));
+        return r1 + r2 + Maj(b,c,d);
+#elif QSB_FIN_R63_SUM
         const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
         const uint32_t r1 = r0 + S1(f) + Ch(f,g,h);
         return r1 + S0(b) + Maj(b,c,d);
