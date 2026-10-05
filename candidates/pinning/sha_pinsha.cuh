@@ -452,7 +452,22 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
     t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
     t1 = qsb_fadd(t1, one, Ch(e,f,g));
 #endif
-#if QSB_FIN_RASSOC & 2
+/* Conditional recurrence experiment. With unsigned 32-bit sums, e' = d + T1
+ * and T1 = e' - old_d exactly. Moving d before S1 and Maj before S0 preserves
+ * all round state and keeps the two pubkey hashes sequential. It adds one
+ * subtraction in each of the 59 ordinary rounds; performance is unmeasured. */
+#ifndef QSB_FIN_RECURRENCE
+#define QSB_FIN_RECURRENCE 1
+#endif
+#if QSB_FIN_RECURRENCE && QSB_FIN_LEA
+#define QSB_RL_F(a, b, c, d, e, f, g, h, kw) { \
+    const uint32_t qold_d_ = (d); \
+    const uint32_t qbase_ = qsb_fadd((h), one, (kw)); \
+    const uint32_t qepre_ = qsb_fadd(qsb_fadd(qbase_, one, qold_d_), one, Ch(e,f,g)); \
+    d = QSB_FADD_S1(qepre_, e); \
+    t1 = (d) - qold_d_; \
+    h = QSB_FADD_S0(qsb_fadd(t1, one, Maj(a,b,c)), a); }
+#elif QSB_FIN_RASSOC & 2
 #define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
     QSB_RL_T1(h, e, f, g, kw) \
     d  = qsb_fadd(d, one, t1); \
