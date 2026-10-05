@@ -269,15 +269,18 @@ static QSB_SHA_NI void shani_store_state(uint32_t *st, __m128i S0, __m128i S1) {
     _mm_storeu_si128((__m128i *)&st[0], S0);
     _mm_storeu_si128((__m128i *)&st[4], S1);
 }
-static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+template<bool H0_ONLY=false>
+static QSB_SHA_NI void shani_compress2_vec(uint32_t *stA, uint32_t *stB,
+    __m128i MA0, __m128i MA1, __m128i MA2, __m128i MA3,
+    __m128i MB0, __m128i MB1, __m128i MB2, __m128i MB3) {
     __m128i A0, A1, B0, B1;
-    shani_load_state(stA, A0, A1); shani_load_state(stB, B0, B1);
+    if (H0_ONLY) {
+        shani_load_state(IV256, A0, A1); shani_load_state(IV256, B0, B1);
+    } else {
+        shani_load_state(stA, A0, A1); shani_load_state(stB, B0, B1);
+    }
     const __m128i A0s = A0, A1s = A1, B0s = B0, B1s = B1;
-    __m128i MA0, MA1, MA2, MA3, MB0, MB1, MB2, MB3, mA, mB, K;
-    MA0 = _mm_loadu_si128((const __m128i *)(wA + 0));  MB0 = _mm_loadu_si128((const __m128i *)(wB + 0));
-    MA1 = _mm_loadu_si128((const __m128i *)(wA + 4));  MB1 = _mm_loadu_si128((const __m128i *)(wB + 4));
-    MA2 = _mm_loadu_si128((const __m128i *)(wA + 8));  MB2 = _mm_loadu_si128((const __m128i *)(wB + 8));
-    MA3 = _mm_loadu_si128((const __m128i *)(wA + 12)); MB3 = _mm_loadu_si128((const __m128i *)(wB + 12));
+    __m128i mA, mB, K;
     /* group g: rounds 4g..4g+3 on message vector Mc; Mn = next (msg2 target), Mp = previous
        (alignr source), Mq = the vector msg1 updates */
 #define SHANI2_ROUNDS(g, McA, McB)                                                     \
@@ -312,9 +315,24 @@ static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32
 #undef SHANI2_TAIL
 #undef SHANI2_MSG2
 #undef SHANI2_MSG1
-    A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
-    B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
-    shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
+    if (H0_ONLY) {
+        /* SHA-NI ABEF packs final A in 32-bit lane 3. Retain IV feed-forward;
+         * this fixed33 caller consumes only the original H0 leading-zero gate. */
+        *stA = (uint32_t)_mm_extract_epi32(A0, 3) + IV256[0];
+        *stB = (uint32_t)_mm_extract_epi32(B0, 3) + IV256[0];
+    } else {
+        A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
+        B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
+        shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
+    }
+}
+/* Generic callers keep their original message-word interface and exact body. */
+static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32_t *stB, const uint32_t *wB) {
+    shani_compress2_vec(stA, stB,
+        _mm_loadu_si128((const __m128i *)(wA+0)), _mm_loadu_si128((const __m128i *)(wA+4)),
+        _mm_loadu_si128((const __m128i *)(wA+8)), _mm_loadu_si128((const __m128i *)(wA+12)),
+        _mm_loadu_si128((const __m128i *)(wB+0)), _mm_loadu_si128((const __m128i *)(wB+4)),
+        _mm_loadu_si128((const __m128i *)(wB+8)), _mm_loadu_si128((const __m128i *)(wB+12)));
 }
 /* single compression (tests only) */
 static QSB_SHA_NI void shani_compress1(uint32_t *st, const uint32_t *w) {

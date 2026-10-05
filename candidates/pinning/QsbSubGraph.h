@@ -23,7 +23,7 @@
 #include <utility>
 
 #ifndef QSB_SUBGRAPH
-#define QSB_SUBGRAPH 0
+#define QSB_SUBGRAPH 1
 #endif
 #if QSB_SUBGRAPH != 0 && QSB_SUBGRAPH != 1
 #error "QSB_SUBGRAPH must be 0 or 1"
@@ -66,6 +66,11 @@ static bool entry(const char *name, void **ptr, unsigned version) {
 }
 static bool init(const cudaStream_t prepare[2], const cudaStream_t root[2], const cudaStream_t finish[2],
                  bool register_roots) {
+    const char *serial = getenv("QSB_ROOT_SERIAL");
+    if (serial && atoi(serial) != 0) {
+        printf("  Subgraph: root-serial diagnostic; using stream pipeline\n");
+        return false;
+    }
     if (!QSB_SUBGRAPH || getenv("QSB_SUBGRAPH_OFF") || !qsb_carrier_has(QK_S0) || !qsb_carrier_has(QK_S2) ||
         !qsb_carrier_has(register_roots ? QK_RR : QK_RF))
         return false;
