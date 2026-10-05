@@ -52,6 +52,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <cuda_runtime.h>
+#include "SharedInputPool.h"
 #include "RecoveryConstant.h"
 
 #ifndef QSB_HOST_GATE
@@ -6989,6 +6990,7 @@ int main(int argc, char **argv) {
     cudaEvent_t  slot_done[QSB_SLOTS];
     uint32_t *d_hit_cnt_s[QSB_SLOTS], *d_hit_idx_s[QSB_SLOTS], *d_mid_slot[QSB_SLOTS];
     uint32_t *h_mid=NULL;
+    qsb::SharedInputPool<QSB_SLOTS> shared_input;
 #if QSB_ASICBOOST
     /* per slot: the host batch's QSB_AB_K sequence precomputes (the kernel's d_midstate) */
 #if QSB_AB_B0CONST
@@ -7031,6 +7033,8 @@ int main(int argc, char **argv) {
 #endif
             if (se==cudaSuccess) se = cudaMalloc(&d_mid_slot[s], mid_words*sizeof(uint32_t));
             if (se==cudaSuccess) se = cudaMemcpy(d_mid_slot[s], pp.midstate, 32, cudaMemcpyHostToDevice);
+            if (se==cudaSuccess) se = shared_input.init(
+                s, d_mid_slot[s], h_mid + (size_t)s*mid_words, mid_words*sizeof(uint32_t));
         }
         if (se != cudaSuccess) {
             fprintf(stderr, "Slot pipeline setup failed: %s\n", cudaGetErrorString(se));
@@ -7522,20 +7526,15 @@ int main(int argc, char **argv) {
             const int pk_have = qsb_pk::collect(batch_no - 1, pk_seq, pk_lt, pk_count, pk_hits);
 #endif
 
+            const void* slot_input_ptr = d_mid_slot[s];
 #if QSB_ASICBOOST
 #if QSB_AB_B0CONST
-            memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = shared_input.enqueue(s, grp_slot, sizeof(grp_slot), st, &slot_input_ptr);
 #else
-            memcpy(h_mid + (size_t)s*mid_words, grp_tp, sizeof(grp_tp));
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_tp), cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = shared_input.enqueue(s, grp_tp, sizeof(grp_tp), st, &slot_input_ptr);
 #endif
 #elif !QSB_TAIL_PRE || !QSB_SKIP_UNUSED_MIDSTATE
-            memcpy(h_mid + (size_t)s*mid_words, cur_mid, 32);
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, 32, cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = shared_input.enqueue(s, cur_mid, 32, st, &slot_input_ptr);
 #else
             cudaError_t slot_error = cudaSuccess;
 #endif
@@ -7549,7 +7548,7 @@ int main(int argc, char **argv) {
 #if QSB_SUBPIPE
             if (g_qsb_sub_ok)
             qsb_subpipe_launch(
-                d_mid_slot[s], d_suffix, gpu_suffix_len,
+                static_cast<const uint32_t*>(slot_input_ptr), d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
                 pp.total_preimage_len,
                 seq, batch_lt,
@@ -7564,7 +7563,7 @@ int main(int argc, char **argv) {
             else
 #endif
             launch_pinning_pipeline<true>(
-                d_mid_slot[s], d_suffix, gpu_suffix_len,
+                static_cast<const uint32_t*>(slot_input_ptr), d_suffix, gpu_suffix_len,
                 pp.seq_offset, pp.lt_offset,
                 pp.total_preimage_len,
                 seq, batch_lt,
