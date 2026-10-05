@@ -1,5 +1,5 @@
-#define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
-#define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
+#define QSB_DRAW_TAG 0x14f83982u /* inert draw tag */
+#define QSB_DRAW_TAG 0x14f83982u /* inert draw tag */
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
 #endif
@@ -307,7 +307,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 
 #ifndef QSB_QMIX5_N
-#define QSB_QMIX5_N 4
+#define QSB_QMIX5_N 6
 #endif
 #if QSB_QMIX5 && (QSB_QMIX5_N < 1 || QSB_QMIX5_N >= QSB_QMIX5)
 #error "QSB_QMIX5_N must satisfy 1 <= N < QSB_QMIX5"
