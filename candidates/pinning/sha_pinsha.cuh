@@ -465,32 +465,42 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
     t2 = QSB_FADD_S0(t1, a); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
 #endif
+/* Codex current continuation: exact variable h+W+K fusion in the finish.
+ * One three-input unsigned sum replaces KWF then h-add; retains Ch/FMA,
+ * both LEA Sigmas and state forks. Every sum is modulo2^32; pipe trade unknown. */
+#define QSB_RL_FHWK(a, b, c, d, e, f, g, h, K, W) \
+    t1 = (h) + (K) + (W); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = QSB_FADD_S1(t1, e); \
+    d = qsb_fadd(d, one, t1); \
+    t2 = QSB_FADD_S0(t1, a); \
+    h = qsb_fadd(t2, one, Maj(a,b,c));
 #define QSB_RND15L_F(k) {\
-QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(k), w[0]));\
-QSB_RL_F(h, a, b, c, d, e, f, g, QSB_KWF(qsb_klit(k + 1), w[1]));\
-QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(k + 2), w[2]));\
-QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(k + 3), w[3]));\
-QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(k + 4), w[4]));\
-QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(k + 5), w[5]));\
-QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 6), w[6]));\
-QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 7), w[7]));\
-QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(k + 8), w[8]));\
-QSB_RL_F(h, a, b, c, d, e, f, g, QSB_KWF(qsb_klit(k + 9), w[9]));\
-QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(k + 10), w[10]));\
-QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(k + 11), w[11]));\
-QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(k + 12), w[12]));\
-QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(k + 13), w[13]));\
-QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 14), w[14]));\
+QSB_RL_FHWK(a, b, c, d, e, f, g, h, qsb_klit(k), w[0]);\
+QSB_RL_FHWK(h, a, b, c, d, e, f, g, qsb_klit(k + 1), w[1]);\
+QSB_RL_FHWK(g, h, a, b, c, d, e, f, qsb_klit(k + 2), w[2]);\
+QSB_RL_FHWK(f, g, h, a, b, c, d, e, qsb_klit(k + 3), w[3]);\
+QSB_RL_FHWK(e, f, g, h, a, b, c, d, qsb_klit(k + 4), w[4]);\
+QSB_RL_FHWK(d, e, f, g, h, a, b, c, qsb_klit(k + 5), w[5]);\
+QSB_RL_FHWK(c, d, e, f, g, h, a, b, qsb_klit(k + 6), w[6]);\
+QSB_RL_FHWK(b, c, d, e, f, g, h, a, qsb_klit(k + 7), w[7]);\
+QSB_RL_FHWK(a, b, c, d, e, f, g, h, qsb_klit(k + 8), w[8]);\
+QSB_RL_FHWK(h, a, b, c, d, e, f, g, qsb_klit(k + 9), w[9]);\
+QSB_RL_FHWK(g, h, a, b, c, d, e, f, qsb_klit(k + 10), w[10]);\
+QSB_RL_FHWK(f, g, h, a, b, c, d, e, qsb_klit(k + 11), w[11]);\
+QSB_RL_FHWK(e, f, g, h, a, b, c, d, qsb_klit(k + 12), w[12]);\
+QSB_RL_FHWK(d, e, f, g, h, a, b, c, qsb_klit(k + 13), w[13]);\
+QSB_RL_FHWK(c, d, e, f, g, h, a, b, qsb_klit(k + 14), w[14]);\
 }
 #define QSB_RND16L_F(k) {\
 QSB_RND15L_F(k);\
-QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
+QSB_RL_FHWK(b, c, d, e, f, g, h, a, qsb_klit(k + 15), w[15]);\
 }
 #define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
     w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
     w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
     w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
-    QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
+    QSB_RL_FHWK(a, b, c, d, e, f, g, h, qsb_klit((base)+(j)), w[j]); \
 } while (0)
 #define QSB_INTERLEAVED15L_F(base) do { \
     QSB_STEPL_F(0,a,b,c,d,e,f,g,h,base); \
@@ -570,14 +580,14 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         QSB_RL_FK(g, h, a, b, c, d, e, f, w[2], qsb_klit(2) + QSB_IV5);
         QSB_RL_FK(f, g, h, a, b, c, d, e, w[3], qsb_klit(3) + QSB_IV4);
 #else
-        QSB_RL_F(g, h, a, b, c, d, e, f, QSB_KWF(qsb_klit(2), w[2]));
-        QSB_RL_F(f, g, h, a, b, c, d, e, QSB_KWF(qsb_klit(3), w[3]));
+        QSB_RL_FHWK(g, h, a, b, c, d, e, f, qsb_klit(2), w[2]);
+        QSB_RL_FHWK(f, g, h, a, b, c, d, e, qsb_klit(3), w[3]);
 #endif
-        QSB_RL_F(e, f, g, h, a, b, c, d, QSB_KWF(qsb_klit(4), w[4]));
-        QSB_RL_F(d, e, f, g, h, a, b, c, QSB_KWF(qsb_klit(5), w[5]));
-        QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(6), w[6]));
-        QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(7), w[7]));
-        QSB_RL_F(a, b, c, d, e, f, g, h, QSB_KWF(qsb_klit(8), w[8]));
+        QSB_RL_FHWK(e, f, g, h, a, b, c, d, qsb_klit(4), w[4]);
+        QSB_RL_FHWK(d, e, f, g, h, a, b, c, qsb_klit(5), w[5]);
+        QSB_RL_FHWK(c, d, e, f, g, h, a, b, qsb_klit(6), w[6]);
+        QSB_RL_FHWK(b, c, d, e, f, g, h, a, qsb_klit(7), w[7]);
+        QSB_RL_FHWK(a, b, c, d, e, f, g, h, qsb_klit(8), w[8]);
         QSB_RL_F(h, a, b, c, d, e, f, g, qsb_klit(9));
         QSB_RL_F(g, h, a, b, c, d, e, f, qsb_klit(10));
         QSB_RL_F(f, g, h, a, b, c, d, e, qsb_klit(11));
