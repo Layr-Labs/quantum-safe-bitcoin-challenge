@@ -5938,7 +5938,7 @@ static int ok = 0, mode = 0; /* mode: 2 = SHA-NI, 1 = AVX2, 0 = scalar */
 #define QSB_PK_DMA 1
 #endif
 #ifndef QSB_PK_AUTOTUNE
-#define QSB_PK_AUTOTUNE 1
+#define QSB_PK_AUTOTUNE 0 /* skip the startup host-SHA A/B calibration; keep admission enabled from the first accepted batch */
 #endif
 static int admit_enabled=1, calibrating=0, ec_env_added=0;
 static std::atomic<int> workers_parked{0};
