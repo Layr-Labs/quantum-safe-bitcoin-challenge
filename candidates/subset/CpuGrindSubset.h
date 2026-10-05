@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* retained PR3313 shared-core batch; resource and throughput effects need official measurement */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -590,6 +590,10 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
+#endif
+
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1  /* i34-9 PR3143: physical-core-first worker placement */
 #endif
 
 namespace qcpu {
@@ -1564,7 +1568,55 @@ static inline void normalize_62(s62 *r, int64_t sign) {
     r->v[0] = r0; r->v[1] = r1; r->v[2] = r2; r->v[3] = r3; r->v[4] = r4;
 }
 /* x = x^-1 mod p for x in [0, p) (0 -> 0); false if the divstep loop did not settle within 24 batches. */
+#ifndef QSB_CPU_INV_TERMINAL_D_ONLY
+#define QSB_CPU_INV_TERMINAL_D_ONLY 1
+#endif
+#if QSB_CPU_INV_TERMINAL_D_ONLY
+/* The full g-zero branch consumes d alone. E remains live on every nonterminal batch. */
+static inline void update_d_62_terminal(s62 *d, const s62 *e, const trans2x2 *t) {
+    const uint64_t M62 = ~0ULL >> 2;
+    const int64_t d0 = d->v[0], d1 = d->v[1], d2 = d->v[2], d3 = d->v[3], d4 = d->v[4];
+    const int64_t e0 = e->v[0], e1 = e->v[1], e2 = e->v[2], e3 = e->v[3], e4 = e->v[4];
+    const int64_t u = t->u, v = t->v;
+    int64_t md, sd, se; __int128 cd;
+    sd = d4 >> 63; se = e4 >> 63;
+    md = (u & sd) + (v & se);
+    cd = (__int128)u * d0 + (__int128)v * e0;
+    md -= (int64_t)((S62_PINV * (uint64_t)cd + (uint64_t)md) & M62);
+    cd += (__int128)S62_P.v[0] * md;
+    cd >>= 62;                             /* the low 62 bits are zero by construction */
+    cd += (__int128)u * d1 + (__int128)v * e1;
+    d->v[0] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    cd += (__int128)u * d2 + (__int128)v * e2;
+    d->v[1] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    cd += (__int128)u * d3 + (__int128)v * e3;
+    d->v[2] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    cd += (__int128)u * d4 + (__int128)v * e4;
+    cd += (__int128)S62_P.v[4] * md;                  /* p's limbs 1..3 are zero */
+    d->v[3] = (int64_t)((uint64_t)(int64_t)cd & M62); cd >>= 62;
+    d->v[4] = (int64_t)cd;
+}
+#endif
 static bool modinv_var(s62 *x) {
+#if QSB_CPU_INV_TERMINAL_D_ONLY
+    s62 d = {{0, 0, 0, 0, 0}}, e = {{1, 0, 0, 0, 0}}, f = S62_P, g = *x;
+    int len = 5; int64_t eta = -1;
+    for (int it = 0; it < 24; it++) {
+        trans2x2 t;
+        eta = divsteps_62_var(eta, (uint64_t)f.v[0], (uint64_t)g.v[0], &t);
+        update_fg_62_var(len, &f, &g, &t);
+        if (g.v[0] == 0) {
+            int64_t cond = 0; for (int j = 1; j < len; ++j) cond |= g.v[j];
+            if (cond == 0) { update_d_62_terminal(&d, &e, &t); normalize_62(&d, f.v[len - 1]); *x = d; return true; }
+        }
+        update_de_62(&d, &e, &t);
+        const int64_t fn = f.v[len - 1], gn = g.v[len - 1];
+        int64_t cond = ((int64_t)len - 2) >> 63; cond |= fn ^ (fn >> 63); cond |= gn ^ (gn >> 63);
+        if (cond == 0) { f.v[len - 2] |= (int64_t)((uint64_t)fn << 62); g.v[len - 2] |= (int64_t)((uint64_t)gn << 62); --len; }
+    }
+    return false;
+
+#else
     s62 d = {{0, 0, 0, 0, 0}}, e = {{1, 0, 0, 0, 0}}, f = S62_P, g = *x;
     int len = 5; int64_t eta = -1;
     for (int it = 0; it < 24; it++) {
@@ -1581,6 +1633,8 @@ static bool modinv_var(s62 *x) {
         if (cond == 0) { f.v[len - 2] |= (int64_t)((uint64_t)fn << 62); g.v[len - 2] |= (int64_t)((uint64_t)gn << 62); --len; }
     }
     return false;
+
+#endif
 }
 /* r = a^-1 (canonical a; 0 -> 0), canonical. Falls back to the Fermat inversion if the loop did not settle. */
 static void fe_inv_var(fe &r, const fe &a) {
@@ -2678,6 +2732,9 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    std::vector<int> pin_cpus;      /* one logical CPU per worker */
+#endif
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3335,6 +3392,13 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -4078,6 +4142,45 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
