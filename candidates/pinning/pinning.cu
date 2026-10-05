@@ -4111,8 +4111,21 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
     uint64_t d[4];
     uint64_t mask=0ULL-(uint64_t)pin_iso_xneg;
     d[0]=U[0]^mask;d[1]=U[1]^mask;d[2]=U[2]^mask;d[3]=U[3]^mask;
-    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&mask;
-    UADDO1(d[0],c0);UADDC1(d[1],mask);UADDC1(d[2],mask);UADD1(d[3],mask);
+    // (U xor mask) + ((p+1) & mask) mod 2^256 equals
+    // (U xor mask) - ((K-1) & mask), K=2^32+977.  Unlike
+    // sign branching, this remains uniform and needs only a low-word
+    // masked immediate plus one masked high bit; the upper subtrahends
+    // are zero. It preserves the exact predecessor representative,
+    // including the wrap for U>p; no inverse-scale gauge change.
+    const uint32_t sm=(uint32_t)mask;
+    asm volatile("{ .reg .u32 kl,kh; .reg .u64 k;\n\t"
+                 "and.b32 kl,%4,976; and.b32 kh,%4,1;\n\t"
+                 "mov.b64 k,{kl,kh};\n\t"
+                 "sub.cc.u64 %0,%0,k;\n\t"
+                 "subc.cc.u64 %1,%1,0;\n\t"
+                 "subc.cc.u64 %2,%2,0;\n\t"
+                 "subc.u64 %3,%3,0; }"
+        : "+l"(d[0]),"+l"(d[1]),"+l"(d[2]),"+l"(d[3]) : "r"(sm));
     QSB_SUB_P(d,d,X);
     uint64_t rw[5];
     if(SW) qsb_field_mul_sc(rw,d,V); else qsb_field_mul_sc(rw,V,d);
