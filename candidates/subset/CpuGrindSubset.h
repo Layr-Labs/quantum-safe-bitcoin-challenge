@@ -322,7 +322,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #error "QSB_CPU_EPOCH_CONTIG must be 0 or 1"
 #endif
 #ifndef QSB_CPU_GWK_CACHE
-#define QSB_CPU_GWK_CACHE 1
+#define QSB_CPU_GWK_CACHE 0
 #endif
 #if QSB_CPU_GWK_CACHE != 0 && QSB_CPU_GWK_CACHE != 1
 #error "QSB_CPU_GWK_CACHE must be 0 or 1"
