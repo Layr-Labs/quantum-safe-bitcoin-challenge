@@ -1,3 +1,48 @@
+# Subset: kshitij-hash's promoted record `faf5422a` with `QSB_Q_MIX` 1 (every warp on the GLV12 terms)
+
+This submission is the current subset record, kshitij-hash's `faf5422a` (the tree of `candidates/subset` at commit
+`efef868a`), with one device switch changed: `QSB_Q_MIX` is 1 instead of the record's 2. The switch is the record's own
+(documented in `tests/gpu_epochs/tree.cu`): the warp whose global index is 0 mod `QSB_Q_MIX` decodes Q with the six GLV12
+terms (segments 0-3 hot, 4 and 5 cold) and every other warp with the five P18 terms (segment 0 hot, 6, 7, 4 and 5 cold).
+At 1, every warp takes the GLV12 terms instead of one in two, so per candidate the chain reads fewer cold table
+records and does more field additions. Both layouts sum Q to the same point (the same segment-0 bias and the same top
+digit), so every candidate's z*A and verdict are meant to be the same as the record's.
+
+Prepared with Claude Opus 5.5 in Claude Code.
+
+## Files changed against the record
+
+| file | change |
+|---|---|
+| `subset.cu` | line 2: `#define QSB_Q_MIX 1` |
+| `qsb_carrier_sm89.h` | the native sm_89 image regenerated from this tree by the record's own `build_carrier.sh 24` with CUDA 12.8.93: cubin sha256 `ebd009e77daf9d99...` (474,336 bytes); `kernel_digest` at 128 registers, no stack frame, no spills |
+| `REDRAW.txt` | the inert redraw marker line |
+
+Every other file is the record's byte for byte. The ranked build line builds the tree unchanged, and the start-up log shows
+`Native sm_89 carrier: on` with the image's knob string, which includes `QSB_Q_MIX`.
+
+## Exactness
+
+The layout choice is warp-uniform and every mask sums Q to the same point, so no lane diverges; the start-up self-check
+(`qsb_s3_selfcheck`) runs the half walker over both descriptor lists as in the record. In a fixed-work comparison against
+the record's layout on the same problem, this tree reported 9,039 of the 9,040 GPU hits in the common range and no hit
+outside the record's set: one hit was not reported. Every reported hit is still re-derived by the harness's exact
+verification, so a missed hit can only lower the count, never add an invalid one. We have not traced which path dropped
+that hit; with every warp on the GLV12 terms, the GLV12 decode's rare loss classes apply to every candidate instead of
+half of them.
+
+## Base and credits
+
+All of the code is kshitij-hash's record `faf5422a` and the work its note credits (reproduced below), among them cefika's
+`fb6f5a8f`, jacklightChen, i34-9, fkiene, terrapinelf and our own `QSB_CODE_ROLL` and `QSB_Q_MIX` items. The `QSB_Q_MIX` axis
+was first ours; this submission only moves its value.
+
+## The package's own description
+
+The rest of this note is the record's submission note for `faf5422a`, unchanged.
+
+---
+
 # Subset: rotate-add SHA-256 rounds, pinning's chain items, a two-form gate, fused carry captures, jacklightChen's co-grinder cuts, Q_MIX 2 and the rolled gate on fb6f5a8f
 
 This package builds on our subset submission `e6715658` and carries the contiguous co-grinder walk that the current record
