@@ -187,7 +187,7 @@
 #error "QSB_CPU_FOLD4 extends QSB_CPU_FOLD3 (column 9's upper fold term pre-added to column 5)"
 #endif
 #ifndef QSB_CPU_BATCH
-#define QSB_CPU_BATCH 1024         /* candidates per batch: both SMT threads' EC state (2 x 0.25 MB) and prefetched rows stay in the 1 MB L2 */
+#define QSB_CPU_BATCH 2048         /* retained PR3313 shared-core batch; resource and throughput effects need official measurement */
 #endif
 /* Fixed-base table geometry, chosen at run time (Geo, table_setup): signed digits, the fewest windows whose table fits in
  * QSB_CPU_TAB_FRAC of the memory this process may still use (MemAvailable and the cgroup limits), capped at
@@ -590,6 +590,10 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
+#endif
+
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1  /* i34-9 PR3143: physical-core-first worker placement */
 #endif
 
 namespace qcpu {
@@ -1465,6 +1469,15 @@ struct s62 { int64_t v[5]; };                         /* signed, 62-bit limbs (t
 struct trans2x2 { int64_t u, v, q, r; };
 static const s62 S62_P = {{-0x1000003D1LL, 0, 0, 0, 256}};   /* p = 2^256 - 0x1000003D1 */
 static const uint64_t S62_PINV = 0x27C7F6E22DDACACFULL;      /* p^-1 mod 2^62 */
+/* Independent host divstep experiment: inverse of the 32 odd residues modulo64.
+ * This replaces only the negative-eta low6 correction polynomial. Runtime
+ * CPU features, the full matrix, modular updates, cap and fallback stay intact. */
+#ifndef QSB_CPU_DIVSTEP_INV64_TABLE
+#define QSB_CPU_DIVSTEP_INV64_TABLE 1
+#endif
+#if QSB_CPU_DIVSTEP_INV64_TABLE
+static const uint8_t QSB_CPU_INV64_ODD[32] = {1, 43, 13, 55, 57, 35, 5, 47, 49, 27, 61, 39, 41, 19, 53, 31, 33, 11, 45, 23, 25, 3, 37, 15, 17, 59, 29, 7, 9, 51, 21, 63};
+#endif
 /* 62 divsteps on the low limbs (f0, g0) of (f, g); the transition matrix t and the new eta. */
 static inline int64_t divsteps_62_var(int64_t eta, uint64_t f0, uint64_t g0, trans2x2 *t) {
     uint64_t u = 1, v = 0, q = 0, r = 1, f = f0, g = g0, m; uint32_t w; int i = 62, limit, zeros;
@@ -1480,7 +1493,11 @@ static inline int64_t divsteps_62_var(int64_t eta, uint64_t f0, uint64_t g0, tra
             tmp = v; v = r; r = -tmp;
             limit = ((int)eta + 1) > i ? i : ((int)eta + 1);
             m = (~0ULL >> (64 - limit)) & 63U;
+#if QSB_CPU_DIVSTEP_INV64_TABLE
+            w = (uint32_t)((-(uint64_t)g * (uint64_t)QSB_CPU_INV64_ODD[(f >> 1) & 31U]) & m);
+#else
             w = (uint32_t)((f * g * (f * f - 2)) & m);   /* -g/f mod 2^6 (f odd: f*(2-f^2) = f^-1 mod 64) */
+#endif
         } else {
             limit = ((int)eta + 1) > i ? i : ((int)eta + 1);
             m = (~0ULL >> (64 - limit)) & 15U;
@@ -2678,6 +2695,9 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    std::vector<int> pin_cpus;      /* one logical CPU per worker */
+#endif
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3335,6 +3355,13 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
@@ -4078,6 +4105,45 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
