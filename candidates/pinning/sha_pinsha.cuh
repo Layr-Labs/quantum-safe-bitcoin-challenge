@@ -51,6 +51,22 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
     uint32_t r; asm("mad.lo.u32 %0, %1, %2, %3;" : "=r"(r) : "r"(a), "r"(one), "r"(b)); return r;
 }
 
+/* Fuse only the first three addends of the rolling pubkey schedule.
+ * The final s0 add still uses the multiply pipe. No word is written
+ * until all four original addends have been read, and their sum is mod 2^32. */
+#ifndef QSB_FIN_ROLL3
+#define QSB_FIN_ROLL3 1
+#endif
+#if QSB_FIN_ROLL3 != 0 && QSB_FIN_ROLL3 != 1
+#error "QSB_FIN_ROLL3 must be 0 or 1"
+#endif
+__device__ __forceinline__ uint32_t qsb_fin_roll3(uint32_t a,uint32_t b,uint32_t c) {
+    uint32_t r;
+    asm("{\n\t.reg .u32 t;\n\tadd.u32 t,%1,%2;\n\tadd.u32 %0,t,%3;\n\t}"
+        : "=r"(r) : "r"(a), "r"(b), "r"(c));
+    return r;
+}
+
 #ifndef QSB_SHA_FMA_EARLY
 #define QSB_SHA_FMA_EARLY 1 /* Exact FMA-add schedule for early pubkey rounds. */
 #endif
@@ -486,12 +502,22 @@ QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 14), w[14]));\
 QSB_RND15L_F(k);\
 QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 }
+#if QSB_FIN_ROLL3
+#define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
+    const uint32_t qs1_=QSB_s1M(w[((j)+14)&15]); \
+    const uint32_t qs0_=QSB_s0M(w[((j)+1)&15]); \
+    const uint32_t qsum_=qsb_fin_roll3(w[j],qs1_,w[((j)+9)&15]); \
+    w[j] = qsb_fadd(qsum_,one,qs0_); \
+    QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
+} while (0)
+#else
 #define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
     w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
     w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
     w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
     QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
 } while (0)
+#endif
 #define QSB_INTERLEAVED15L_F(base) do { \
     QSB_STEPL_F(0,a,b,c,d,e,f,g,h,base); \
     QSB_STEPL_F(1,h,a,b,c,d,e,f,g,base); \
