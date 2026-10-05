@@ -362,7 +362,10 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  *   retirement until a walker returns (C1: +6.9 ns per candidate in a hashing phase that reads no row); at most a few in flight
  *   instead of 16 lets each walk finish under the SHA rounds. Prefetches only. */
 #ifndef QSB_CPU_ILP2
-#define QSB_CPU_ILP2 3
+#define QSB_CPU_ILP2 1 /* dukemawex: backward-pass pair interleave only; forward pass one group at a time (was 3) */
+#endif
+#if !(QSB_CPU_ILP2 & 2) && !defined(QSB_CPU_JL_INV_FIRST)
+#define QSB_CPU_JL_INV_FIRST 2 /* dukemawex: keep the first-group identity elision in ec8_window's one-group forward pass */
 #endif
 /* Lane H1 (2026-10-01; host only, none an image knob; every switch 0 = N-pkg17r's co-grinder, which is N-pkg16c's, byte for byte
  * in behaviour). jacklightChen's seven co-grinder cuts from his public subset submission b1c5e58e (PR #2842 "Validate submission
