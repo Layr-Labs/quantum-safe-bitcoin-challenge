@@ -279,7 +279,17 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_QMIX5 && (!QSB_GLV11 || QSB_QGLV5 || !QSB_PDEC_Z)
 #error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
 #endif
+/* Block-uniform Q5 selection, still one block of every K. XOR the block's
+ * low index with the following index bits to rotate the selected residue
+ * between groups of K blocks. No lane changes its own decoder mid-chain. */
+#ifndef QSB_QMIX5_BALANCED
+#define QSB_QMIX5_BALANCED 1
+#endif
+#if QSB_QMIX5_BALANCED
+#define QSB_QMIX5_SEL() (((blockIdx.x^(blockIdx.x/QSB_QMIX5))&(QSB_QMIX5-1u))==0u)
+#else
 #define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
+#endif
 #ifndef QSB_BATCH
 #define QSB_BATCH 4194304    /* candidates per pipeline launch */
 #endif
