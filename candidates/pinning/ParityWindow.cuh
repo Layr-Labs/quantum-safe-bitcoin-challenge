@@ -17,10 +17,10 @@
  * emits the first capture as IMAD.X (multiply pipe) instead of SEL. */
 #if QSB_FIN_BAL2 & 1
 #define QSB_PW_TOP0 "ld.const.u32 top,[pin_zero_add];\n"
-/* Bit 1 also adds a0*b0 into mid1 (bit 0 of a0*b0 is a0 & b0 & 1, and bit 0 of a sum is the XOR
- * of the addends' bit 0) and leaves mid1 unmasked: the only reader of mid >> 32 is the fast-path
- * return in qsb_parity_product_window, which keeps bit 0 alone. */
-#define QSB_PW_MID1_TAIL "mad.lo.u32 mid1,a0,b0,mid1;\n"
+/* Fold a0*b0 parity into mid1 with the same bit0 as the original add.
+ * Upper bits are unobserved: only the fast-path return reads mid >> 32
+ * and then keeps bit0. x7 and the guarded carry sum read mid0 alone. */
+#define QSB_PW_MID1_TAIL "lop3.b32 mid1,mid1,a0,b0,0x78;\n"
 #else
 #define QSB_PW_TOP0 "mov.u32 top,0;\n"
 #define QSB_PW_MID1_TAIL "and.b32 mid1,mid1,1;\n"
@@ -107,17 +107,17 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "add.u64 mid,mid,t;\n"
         "mov.b64 {mid0,mid1},mid;\n"
 #if QSB_FIN_CAP_IMAD
-        /* QSB_FIN_CAP_IMAD: only bit 0 of mid1 survives the final mask, and bit 0 of a sum is
-         * the XOR of the addends' bit 0 (no carry reaches bit 0), while bit 0 of a_i*b_j is
-         * a_i & b_j & 1. So mid1 + sum(a_i*b_j) has the same bit 0 as the XOR chain below,
-         * and the seven steps run as IMAD on the multiply pipe instead of LOP3. */
-        "mad.lo.u32 mid1,a1,b7,mid1;\n"
-        "mad.lo.u32 mid1,a2,b6,mid1;\n"
-        "mad.lo.u32 mid1,a3,b5,mid1;\n"
-        "mad.lo.u32 mid1,a4,b4,mid1;\n"
-        "mad.lo.u32 mid1,a5,b3,mid1;\n"
-        "mad.lo.u32 mid1,a6,b2,mid1;\n"
-        "mad.lo.u32 mid1,a7,b1,mid1;\n"
+        /* Only bit0 of mid1 survives. lop3 LUT 0x78 with operands
+         * (acc,a,b) is acc^(a&b), exactly the bit0 of acc+a*b.
+         * Unlike separate AND/XOR this is one ternary ALU instruction
+         * per term, leaving the field-product multiply pipe untouched. */
+        "lop3.b32 mid1,mid1,a1,b7,0x78;\n"
+        "lop3.b32 mid1,mid1,a2,b6,0x78;\n"
+        "lop3.b32 mid1,mid1,a3,b5,0x78;\n"
+        "lop3.b32 mid1,mid1,a4,b4,0x78;\n"
+        "lop3.b32 mid1,mid1,a5,b3,0x78;\n"
+        "lop3.b32 mid1,mid1,a6,b2,0x78;\n"
+        "lop3.b32 mid1,mid1,a7,b1,0x78;\n"
 #else
         "and.b32 bit,a1,b7;\n"
         "xor.b32 mid1,mid1,bit;\n"
