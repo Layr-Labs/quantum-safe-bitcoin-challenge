@@ -16,8 +16,6 @@ static const char *const qsb_carrier_kernel_names[] = {
     "_Z14qsb_root_fusedILi4EEvPmi", /* QK_RF */
     "_Z17qsb_root_registerPmi", /* QK_RR */
     "_Z29qsb_prefix_field_check_kernelPj", /* QK_PFC */
-    "", /* QK_LC */
-    "", /* QK_CE */
 };
 static const unsigned qsb_carrier_b64_lines = 5287;
 static const char *const qsb_carrier_b64[] = {
