@@ -1002,7 +1002,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  *   (sm_70+): the JIT/ranked sm_52 path runs the solo inversion. PROTOTYPE, default off: it has no in-run
  *   counters yet and its slot census wants QSB_SC_OPS 52, not 48. */
 #ifndef QSB_QMIX_RT
-#define QSB_QMIX_RT 0
+#define QSB_QMIX_RT 1
 #endif
 #ifndef QSB_CONST_CALLEE
 #define QSB_CONST_CALLEE 1
