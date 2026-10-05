@@ -8,7 +8,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* dukemawex: sub-batch 65536 -> 131072 on tip 12233735 (SUBPIPE 32768 lost; test the coarse side with HOST_PKSHA 0) */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
