@@ -5961,7 +5961,7 @@ static int qsb_host_zeros(const uint8_t *h) {
  * GPU uses for suffix_len=75. */
 static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int recid,
                               EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                              const BIGNUM *nri, const EC_POINT *Ru2) {
+                              const BIGNUM *nri, const EC_POINT *Ru2, bool joint_ready = false) {
     uint32_t sl = pp->suffix_len;
     uint32_t so = pp->seq_offset;
     uint32_t lo = pp->lt_offset;
@@ -6007,10 +6007,18 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
     EC_POINT *R = EC_POINT_dup(Ru2, grp);
     int ok = 0;
     if (z && u1 && P && Q && R &&
-        BN_mod_mul(u1, z, nri, order, ctx) &&
-        EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
-        if (recid) EC_POINT_invert(grp, R, ctx);
-        if (EC_POINT_add(grp, Q, P, R, ctx)) {
+        BN_mod_mul(u1, z, nri, order, ctx)) {
+        int recovered = 0;
+        if (joint_ready) {
+            /* Main-owned cached group only; retain the fixed-point copy and
+             * reject inversion/multiply errors before affine/public-key use. */
+            const int signed_ok = !recid || EC_POINT_invert(grp, R, ctx);
+            recovered = signed_ok && EC_POINT_mul(grp, Q, u1, R, BN_value_one(), ctx);
+        } else if (EC_POINT_mul(grp, P, u1, NULL, NULL, ctx)) {
+            if (recid) EC_POINT_invert(grp, R, ctx);
+            recovered = EC_POINT_add(grp, Q, P, R, ctx);
+        }
+        if (recovered) {
             BIGNUM *qx = BN_new(), *qy = BN_new();
             if (qx && qy && EC_POINT_get_affine_coordinates_GFp(grp, Q, qx, qy, ctx)) {
                 uint8_t pub[33], xb[32];
@@ -6040,9 +6048,9 @@ static int qsb_host_exact_hit(const pinning2_params_t *pp, uint32_t seq, uint32_
  * nomination must not hide a real recid-1 hit. */
 static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t lt, int ri,
                            EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *order,
-                           const BIGNUM *nri, const EC_POINT *Ru2) {
-    if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2)) return ri;
-    if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2)) return 1 - ri;
+                           const BIGNUM *nri, const EC_POINT *Ru2, bool joint_ready = false) {
+    if (qsb_host_exact_hit(pp, seq, lt, ri, grp, ctx, order, nri, Ru2, joint_ready)) return ri;
+    if (qsb_host_exact_hit(pp, seq, lt, 1 - ri, grp, ctx, order, nri, Ru2, joint_ready)) return 1 - ri;
     return -1;
 }
 #endif
@@ -7263,6 +7271,13 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to set up the exact host publication gate\n");
         return 1;
     }
+    /* Optional table on this main-owned group; co-grinder groups keep the
+     * default two-call gate. A refused cache leaves the original route active. */
+    const int gate_precompute_result = EC_GROUP_precompute_mult(gate_grp, gate_ctx);
+    const int gate_precompute_present = EC_GROUP_have_precompute_mult(gate_grp);
+    const bool gate_joint_ready = gate_precompute_result == 1 && gate_precompute_present == 1;
+    printf("Host exact-gate joint: precompute=%d cache=%d enabled=%d\n",
+           gate_precompute_result, gate_precompute_present, (int)gate_joint_ready);
 #endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
     const bool can_cogrind=!easy && effective_total==1 && !seq_start_override && single_hash;
@@ -7293,6 +7308,7 @@ int main(int argc, char **argv) {
     uint64_t slot_bno[QSB_SLOTS]={0}; uint32_t slot_bsz[QSB_SLOTS]={0};
 #endif
     int slot_busy[QSB_SLOTS];
+    uint32_t slot_domain_count[QSB_SLOTS] = {};
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
@@ -7308,11 +7324,7 @@ int main(int argc, char **argv) {
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 #if QSB_CPU_GRIND && QSB_HOST_GATE
-#if QSB_PK_ON
-        qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
-#else
-        qcg::tick(qcg::mono_s(),(double)BATCH);
-#endif
+        qcg::tick(qcg::mono_s(),(double)slot_domain_count[s]);
 #endif
 #if QSB_COMPACT_READBACK
         const uint32_t h_hit = slot_readback[s].count();
@@ -7343,7 +7355,9 @@ int main(int argc, char **argv) {
                      * base_seq + warp*effective_total, lane hi&31 */
 #if QSB_AB_B0CONST
 
-                    const uint32_t lt = base_lt + ((((hi >> 7) << 5) + (hi & 31u)) << 8);
+                    const uint64_t wide_lt = (uint64_t)base_lt + ((uint64_t)(((hi >> 7) << 5) + (hi & 31u)) << 8);
+                    if (wide_lt < LT_MIN || wide_lt >= LT_MAX) continue;
+                    const uint32_t lt = (uint32_t)wide_lt;
 #else
                     const uint32_t lt = base_lt + ((hi >> 7) << 5) + (hi & 31u);
 #endif
@@ -7362,7 +7376,7 @@ int main(int argc, char **argv) {
                     (void)hc;
 #if QSB_HOST_GATE
                     ri = qsb_gate_accept(&pp, hs, lt, ri,
-                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+                                         gate_grp, gate_ctx, gate_order, gate_nri, gate_R, gate_joint_ready);
                     if (ri < 0) continue;
 #endif
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
@@ -7406,7 +7420,7 @@ int main(int argc, char **argv) {
         qcg::tick(qcg::mono_s(),(double)(complete-last_completed_credit));
         last_completed_credit=complete;
 #else
-        qcg::tick(qcg::mono_s(),(double)BATCH);
+        qcg::tick(qcg::mono_s(),(double)slot_domain_count[s]);
 #endif
 #endif
         slot_busy[s] = 0;
@@ -7485,24 +7499,28 @@ int main(int argc, char **argv) {
         const uint32_t batch_lts = (uint32_t)BATCH / QSB_SEQ_GROUP;
 #if QSB_AB_B0CONST
 
-        uint32_t ab_hn = (lt_range / 256u) & ~31u;
-#if QSB_AB_WHOLE_BATCH
-        if (ab_hn >= batch_lts) ab_hn -= ab_hn % batch_lts;
-#endif
+        /* Retain native 32-row mapping while covering the complete domain.
+         * The final row tile may include padding; publication rejects it and
+         * progress/collector credit count only valid locktimes. */
+        const uint32_t ab_hn = (uint32_t)(((uint64_t)lt_range + 8191u) / 8192u) * 32u;
         qsb_ab_slot_t grp_slot[QSB_SEQ_GROUP];
         memset(grp_slot, 0, sizeof(grp_slot));
         for (uint32_t ab_b0 = 0; ab_b0 < 256u; ab_b0++) {
+        const uint32_t domain_high = lt_range > ab_b0 ? ((lt_range - 1u - ab_b0) >> 8) + 1u : 0u;
         for (int k = 0; k < QSB_SEQ_GROUP; k++) {
             grp_slot[k].tp = grp_tp[k];
             grp_slot[k].r01 = qsb_tail_r01(grp_tp[k], tail_w0 | ab_b0);
         }
         for (uint32_t lt_off = 0; lt_off < ab_hn; lt_off += batch_lts) {
+            if (lt_off >= domain_high) continue;
             uint32_t batch_lt = LT_MIN + (lt_off << 8) + ab_b0;
             int batch_sz = QSB_SEQ_GROUP * (int)((lt_off + batch_lts <= ab_hn) ? batch_lts : (ab_hn - lt_off));
+            const uint32_t batch_domain_sz = QSB_SEQ_GROUP * std::min((uint32_t)batch_sz / QSB_SEQ_GROUP, domain_high - lt_off);
 #else
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += batch_lts) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = QSB_SEQ_GROUP * (int)((lt_off + batch_lts <= lt_range) ? batch_lts : (lt_range - lt_off));
+            const uint32_t batch_domain_sz = (uint32_t)batch_sz;
 #endif
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
@@ -7515,6 +7533,7 @@ int main(int argc, char **argv) {
 #endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
+            slot_domain_count[s] = batch_domain_sz;
 #if QSB_PK_ON
             /* this batch's plane last held batch batch_no-1-2*QSB_SLOTS: finish and keep its hits */
             slot_bno[s] = batch_no - 1; slot_bsz[s] = (uint32_t)batch_sz;
@@ -7606,7 +7625,7 @@ int main(int argc, char **argv) {
 #endif
 #endif
 
-            total_searched += batch_sz;
+            total_searched += batch_domain_sz;
 #if QSB_PK_ON
             if(qsb_pk::calibrating) {
                 struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
@@ -7796,7 +7815,7 @@ int main(int argc, char **argv) {
 #if QSB_HOST_GATE
                         (void)hc;
                         ri = qsb_gate_accept(&pp, seq, lt, ri,
-                                             gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
+                                             gate_grp, gate_ctx, gate_order, gate_nri, gate_R, gate_joint_ready);
                         if (ri < 0) continue;
                         fprintf(f, "sequence=%u locktime=%u recid=%d\n", seq, lt, ri);
 #else
