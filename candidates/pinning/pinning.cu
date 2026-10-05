@@ -5938,7 +5938,7 @@ static int ok = 0, mode = 0; /* mode: 2 = SHA-NI, 1 = AVX2, 0 = scalar */
 #define QSB_PK_DMA 1
 #endif
 #ifndef QSB_PK_AUTOTUNE
-#define QSB_PK_AUTOTUNE 1
+#define QSB_PK_AUTOTUNE 0
 #endif
 static int admit_enabled=1, calibrating=0, ec_env_added=0;
 static std::atomic<int> workers_parked{0};
@@ -6055,11 +6055,14 @@ static int help(int b) {
     for (;;) {
         uint64_t c = J.ctl.load(std::memory_order_acquire);
         uint32_t i, e, nr;
+        unsigned contention = 0;
         for (;;) {
             i = (uint32_t)c;
             nr = J.nrec.load(std::memory_order_acquire);
             if (i >= nr) return any;
             if (J.ctl.compare_exchange_weak(c, c + CH, std::memory_order_acq_rel, std::memory_order_acquire)) break;
+            /* Bound the failed-claim burst without skipping any tagged reload. */
+            if (++contention == 4) { __builtin_ia32_pause(); contention = 0; }
         }
         e = i + CH < nr ? i + CH : nr;
         uint32_t finished=0;
