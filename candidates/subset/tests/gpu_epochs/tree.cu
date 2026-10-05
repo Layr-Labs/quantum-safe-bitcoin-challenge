@@ -8211,3 +8211,5 @@ int main(int argc, char **argv) {
     return 0;
 #endif
 }
+
+/* control run: comment-only change, device and host code identical to efef868 (baseline variance measurement) */
