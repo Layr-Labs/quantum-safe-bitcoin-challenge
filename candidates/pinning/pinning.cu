@@ -219,7 +219,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
  * value, and a lane's digit-arena slots are indexed by its own threadIdx.x, so the codes
  * written and the trips taken always agree. 0: blockIdx.x mod K == 0, block-uniform. */
 #ifndef QSB_PMIX12_WARP
-#define QSB_PMIX12_WARP 0
+#define QSB_PMIX12_WARP 1
 #endif
 /* QSB_PMIX12_N (1 <= N < K, default 2): N of every K consecutive global warps decode P with
  * GLV12, spread evenly: warp g is chosen when (g*N) mod K < N. For N = 1 that is g mod K == 0,
@@ -4033,7 +4033,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
 #define QSB_PK_WDIV 2
 #endif
 #ifndef QSB_PK_WMAX
-#define QSB_PK_WMAX 12
+#define QSB_PK_WMAX 8
 #endif
 #if QSB_HOST_PKSHA && QSB_SUBPIPE && QSB_SLOTPIPE && QSB_REFILL_BEFORE_GATE && QSB_SHA_OPT && \
     QSB_SPARSE_D && QSB_ZEROS_N <= 32
