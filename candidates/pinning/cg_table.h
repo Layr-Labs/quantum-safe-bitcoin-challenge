@@ -101,28 +101,29 @@ template <class F>
 static int build_kg(int j, const uint64_t *gx, const uint64_t *gy) {
     /* kg[k] = (k+1) G, k = 0..TB_R-1, by doubling the known prefix: P[s+k] = P[k] + P[s] */
     fe4_t *X = (fe4_t *)malloc(sizeof(fe4_t) * TB_R), *Y = (fe4_t *)malloc(sizeof(fe4_t) * TB_R);
-    fe4_t *tmp = (fe4_t *)malloc(sizeof(fe4_t) * 3 * TB_R), *qx = (fe4_t *)malloc(sizeof(fe4_t) * TB_R), *qy = (fe4_t *)malloc(sizeof(fe4_t) * TB_R);
+    fe4_t *tmp = (fe4_t *)malloc(sizeof(fe4_t) * 3 * TB_R);
 #if QSB_CG_HIGHFOLD
-    if (!X || !Y || !tmp || !qx || !qy) { free(X); free(Y); free(tmp); free(qx); free(qy); return -1; }
+    if (!X || !Y || !tmp) { free(X); free(Y); free(tmp); return -1; }
 #endif
     int rc = 0;
     memcpy(X[0], gx, 32); memcpy(Y[0], gy, 32);
     for (int s = 1; s < TB_R && rc == 0; s *= 2) {
         const int cnt = (2 * s <= TB_R) ? s : TB_R - s;
         /* (s + k + 1) G = (k + 1) G + s G, k = 0..cnt-1; s G = X[s-1] */
-        rc = batch_add<F>(qx, qy, X, Y, &X[s - 1], &Y[s - 1], 1, cnt, tmp);
-        for (int k = 0; k < cnt && rc == 0; k++) { memcpy(X[s + k], qx[k], 32); memcpy(Y[s + k], qy[k], 32); }
+        /* Prefix inputs end before s; fixed Q is prefix[s-1]. The output suffix
+         * is disjoint, so canonical rows can be written to their final locations. */
+        rc = batch_add<F>(X + s, Y + s, X, Y, &X[s - 1], &Y[s - 1], 1, cnt, tmp);
     }
 #if QSB_CG_HIGHFOLD
-    if (rc) { free(X); free(Y); free(tmp); free(qx); free(qy); return rc; }
+    if (rc) { free(X); free(Y); free(tmp); return rc; }
 #endif
     fe4_t *kg = (fe4_t *)malloc(sizeof(fe4_t) * 2 * TB_R);
 #if QSB_CG_HIGHFOLD
-    if (!kg) { free(X); free(Y); free(tmp); free(qx); free(qy); return -1; }
+    if (!kg) { free(X); free(Y); free(tmp); return -1; }
 #endif
     for (int k = 0; k < TB_R; k++) { memcpy(kg[2 * k], X[k], 32); memcpy(kg[2 * k + 1], Y[k], 32); }
     g_tb.kg[j] = kg;
-    free(X); free(Y); free(tmp); free(qx); free(qy);
+    free(X); free(Y); free(tmp);
     return rc;
 }
 
@@ -172,7 +173,10 @@ static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const 
         if (done >= ne) break;
         /* next row: + TB_R G_j = kg[TB_R-1] */
         if (batch_add<F>(nx, ny, rowx, rowy, &kx[TB_R - 1], &ky[TB_R - 1], 1, TB_R, tmp)) return -1;
-        memcpy(rowx, nx, sizeof(fe4_t) * TB_R); memcpy(rowy, ny, sizeof(fe4_t) * TB_R);
+        /* The next affine row is already in private nx/ny. Exchange only the
+         * local handles; caller allocations, kg inputs and batch_add scratch stay fixed. */
+        fe4_t *swapx = rowx; rowx = nx; nx = swapx;
+        fe4_t *swapy = rowy; rowy = ny; ny = swapy;
     }
     return 0;
 }
