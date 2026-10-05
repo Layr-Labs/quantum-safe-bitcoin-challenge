@@ -1,3 +1,54 @@
+#ifndef QSB_INVERSE_FINAL_CARRY
+#define QSB_INVERSE_FINAL_CARRY 1
+#endif
+#if QSB_INVERSE_FINAL_CARRY != 0 && QSB_INVERSE_FINAL_CARRY != 1
+#error "QSB_INVERSE_FINAL_CARRY must be 0 or 1"
+#endif
+/* Selected root endpoint only. Preserve the complete signed nine-word
+ * condneg/canon transformation, including canon's retained ninth word.
+ * Carry flags remain inside this single asm block. No input bound, field
+ * representative, divstep, scale, cap or fallback is changed. */
+__device__ __forceinline__ void zi_inverse_final_carry(uint32_t *X,uint32_t neg){
+#if defined(__CUDA_ARCH__) && QSB_INVERSE_FINAL_CARRY
+    uint32_t x0=X[0],x1=X[1],x2=X[2],x3=X[3],x4=X[4],x5=X[5],x6=X[6],x7=X[7],x8=X[8];
+    asm("{\n\t"
+        " .reg .u32 m,p0,p1,k0,k1,n,a0,a1,t0,t1,t2,t3,t4,t5,t6,t7,t8;\n\t"
+        " .reg .s64 prod,wide,hwide;\n\t"
+        " sub.u32 m,0,%9;\n\t"
+        " xor.b32 %0,%0,m; xor.b32 %1,%1,m; xor.b32 %2,%2,m; xor.b32 %3,%3,m;\n\t"
+        " xor.b32 %4,%4,m; xor.b32 %5,%5,m; xor.b32 %6,%6,m; xor.b32 %7,%7,m; xor.b32 %8,%8,m;\n\t"
+        " add.cc.u32 %0,%0,%9;\n\t"
+        " addc.cc.u32 %1,%1,0; addc.cc.u32 %2,%2,0; addc.cc.u32 %3,%3,0;\n\t"
+        " addc.cc.u32 %4,%4,0; addc.cc.u32 %5,%5,0; addc.cc.u32 %6,%6,0;\n\t"
+        " addc.cc.u32 %7,%7,0; addc.u32 %8,%8,0;\n\t"
+        " mul.wide.s32 prod,%8,977; mov.b64 {p0,p1},prod;\n\t"
+        " cvt.s64.s32 wide,p1; cvt.s64.s32 hwide,%8; add.s64 wide,wide,hwide;\n\t"
+        " mov.b64 {k0,k1},wide;\n\t"
+        " add.cc.u32 %0,%0,p0; addc.cc.u32 %1,%1,k0;\n\t"
+        " addc.cc.u32 %2,%2,k1; addc.cc.u32 %3,%3,k1; addc.cc.u32 %4,%4,k1;\n\t"
+        " addc.cc.u32 %5,%5,k1; addc.cc.u32 %6,%6,k1; addc.cc.u32 %7,%7,k1;\n\t"
+        " addc.u32 %8,k1,0;\n\t"
+        " shr.s32 n,%8,31; and.b32 a0,n,0xfffffc2f; and.b32 a1,n,0xfffffffe;\n\t"
+        " add.cc.u32 %0,%0,a0; addc.cc.u32 %1,%1,a1;\n\t"
+        " addc.cc.u32 %2,%2,n; addc.cc.u32 %3,%3,n; addc.cc.u32 %4,%4,n;\n\t"
+        " addc.cc.u32 %5,%5,n; addc.cc.u32 %6,%6,n; addc.cc.u32 %7,%7,n;\n\t"
+        " addc.u32 %8,%8,0;\n\t"
+        " sub.cc.u32 t0,%0,0xfffffc2f; subc.cc.u32 t1,%1,0xfffffffe;\n\t"
+        " subc.cc.u32 t2,%2,0xffffffff; subc.cc.u32 t3,%3,0xffffffff;\n\t"
+        " subc.cc.u32 t4,%4,0xffffffff; subc.cc.u32 t5,%5,0xffffffff;\n\t"
+        " subc.cc.u32 t6,%6,0xffffffff; subc.cc.u32 t7,%7,0xffffffff; subc.u32 t8,%8,0;\n\t"
+        " slct.b32.s32 %0,t0,%0,t8; slct.b32.s32 %1,t1,%1,t8;\n\t"
+        " slct.b32.s32 %2,t2,%2,t8; slct.b32.s32 %3,t3,%3,t8;\n\t"
+        " slct.b32.s32 %4,t4,%4,t8; slct.b32.s32 %5,t5,%5,t8;\n\t"
+        " slct.b32.s32 %6,t6,%6,t8; slct.b32.s32 %7,t7,%7,t8;\n\t"
+        "}\n"
+        : "+&r"(x0),"+&r"(x1),"+&r"(x2),"+&r"(x3),"+&r"(x4),"+&r"(x5),"+&r"(x6),"+&r"(x7),"+&r"(x8)
+        : "r"(neg));
+    X[0]=x0;X[1]=x1;X[2]=x2;X[3]=x3;X[4]=x4;X[5]=x5;X[6]=x6;X[7]=x7;X[8]=x8;
+#else
+    zi_condneg(X,neg); zi_canon(X);
+#endif
+}
 #pragma once
 #ifndef QSB_INVERSE_CORRECTION
 #define QSB_INVERSE_CORRECTION 1
@@ -136,8 +187,7 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
     for(int i=0;i<8;i++)out[i]=__shfl_sync(mask,x,16+i);
     out[8]=(uint32_t)__shfl_sync(mask,xt,16);
     const uint32_t neg=(uint32_t)(__shfl_sync(mask,xt,0)<0);
-    zi_condneg(out,neg);
-    zi_canon(out);
+    zi_inverse_final_carry(out,neg);
     #pragma unroll
     for(int i=0;i<4;i++)R[i]=(uint64_t)out[2*i]|((uint64_t)out[2*i+1]<<32);
     R[4]=0;
